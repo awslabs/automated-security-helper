@@ -80,7 +80,7 @@ from automated_security_helper.utils.finding_diff import (
     check_same_project,
     match_findings,
 )
-from automated_security_helper.utils.frame_text import unwire, wire
+from automated_security_helper.utils.frame_text import ranks, unwire, wire
 from automated_security_helper.utils.scan_history import (
     read_history_counted,
     run_record_body,
@@ -439,16 +439,7 @@ def build_trend(runs: Sequence[TrendRun]) -> Trend:
 
     # The matcher's iteration order is no part of the contract: sorted, so two
     # runs over one series list the same changes in the same order.
-    changes.sort(
-        key=lambda change: (
-            change["run"],
-            change["kind"],
-            change["scanner"] or "",
-            change["rule_id"] or "",
-            change["file_path"] or "",
-            change["finding_id"] or "",
-        )
-    )
+    changes = _sorted_changes(changes)
     series = _series(series_rows)
     streaks, suppressed_streaks = _streaks(runs, rows, track_of)
     return Trend(
@@ -459,6 +450,43 @@ def build_trend(runs: Sequence[TrendRun]) -> Trend:
         suppressed_streaks=suppressed_streaks,
         changes=changes,
     )
+
+
+def _sorted_changes(changes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """*changes* by run, kind, scanner, rule, path and finding id, ties in given order.
+
+    A missing text sorts as the empty one. The position is the last key, so
+    changes that tie on every key stay in the order they were found.
+    """
+    frame = pl.DataFrame(
+        [
+            (
+                position,
+                change["run"],
+                wire(change["kind"]),
+                wire(change["scanner"] or ""),
+                wire(change["rule_id"] or ""),
+                wire(change["file_path"] or ""),
+                wire(change["finding_id"] or ""),
+            )
+            for position, change in enumerate(changes)
+        ],
+        schema={
+            "position": pl.Int64,
+            "run": pl.Int64,
+            "kind": pl.String,
+            "scanner": pl.String,
+            "rule": pl.String,
+            "file": pl.String,
+            "id": pl.String,
+        },
+        orient="row",
+    )
+    order = frame.sort(
+        ["run", "kind", "scanner", "rule", "file", "id", "position"],
+        maintain_order=True,
+    )["position"]
+    return [changes[position] for position in order]
 
 
 def _change(
@@ -530,6 +558,79 @@ def _series(
     ]
 
 
+def status_totals(series: Sequence[dict[str, Any]]) -> dict[tuple[int, str], int]:
+    """How many findings each status holds at each run, over a series' entries.
+
+    Keyed by ``(run, status)``; a pair the series does not hold is absent.
+    """
+    frame = pl.DataFrame(
+        [(entry["run"], wire(entry["status"]), entry["count"]) for entry in series],
+        schema={"run": pl.Int64, "status": pl.String, "count": pl.Int64},
+        orient="row",
+    )
+    totals = frame.group_by(["run", "status"]).agg(pl.col("count").sum())
+    return {(run, unwire(status)): count for run, status, count in totals.iter_rows()}
+
+
+def cell_counts(
+    series: Sequence[dict[str, Any]],
+) -> list[tuple[int, str | None, str, dict[str, int]]]:
+    """One row per (run, scanner, severity) cell of a series, with a count per status.
+
+    Rows are ``(run, scanner, severity, counts)``, ``counts`` holding every
+    status of :data:`STATUSES` (0 for one the cell has none of), ordered by run,
+    scanner (a missing one sorting as the empty text) and severity. Cells that
+    tie, a missing scanner and an empty one, stay in the order the series first
+    holds them.
+    """
+    frame = pl.DataFrame(
+        [
+            (
+                entry["run"],
+                wire(entry["scanner"]),
+                wire(entry["severity"]),
+                wire(entry["status"]),
+                entry["count"],
+            )
+            for entry in series
+        ],
+        schema={
+            "run": pl.Int64,
+            "scanner": pl.String,
+            "severity": pl.String,
+            "status": pl.String,
+            "count": pl.Int64,
+        },
+        orient="row",
+    )
+    cells = (
+        frame.group_by(["run", "scanner", "severity"], maintain_order=True)
+        .agg(
+            [
+                pl.col("count")
+                .filter(pl.col("status") == wire(status))
+                .sum()
+                .fill_null(0)
+                .alias(status)
+                for status in STATUSES
+            ]
+        )
+        .with_columns(pl.col("scanner").fill_null("").alias("scanner_key"))
+        .sort(["run", "scanner_key", "severity"], maintain_order=True)
+    )
+    return [
+        (
+            run,
+            unwire(scanner) if scanner is not None else None,
+            unwire(severity),
+            dict(zip(STATUSES, counts)),
+        )
+        for run, scanner, severity, *counts in cells.select(
+            ["run", "scanner", "severity", *STATUSES]
+        ).iter_rows()
+    ]
+
+
 def _streaks(
     runs: list[TrendRun], rows: list[list[_Row]], track_of: list[dict[int, int]]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -553,14 +654,82 @@ def _streaks(
     )
     last = len(runs) - 1
     open_now = spans.filter((pl.col("last") == last) & (pl.col("runs") > 1))
-    by_track = {track: (n, first) for track, n, first, _ in open_now.iter_rows()}
-    evaluated = [set(run.record["coverage"]["evaluated_scanners"]) for run in runs]
+    # A missing line reads as -1, as it always sorted; the lines enter the frame
+    # as ranks, so one past 2**63 stays a line.
+    line_keys = [-1 if row.line_start is None else row.line_start for row in rows[last]]
+    line_rank = ranks(line_keys)
+    candidates = pl.DataFrame(
+        [
+            (
+                position,
+                track_of[last][row.index],
+                wire(row.scanner),
+                wire(row.scanner or ""),
+                wire(row.rule_id or ""),
+                wire(row.file_path or ""),
+                line_rank[line_key],
+                wire(row.id or ""),
+            )
+            for position, (row, line_key) in enumerate(zip(rows[last], line_keys))
+        ],
+        schema={
+            "position": pl.Int64,
+            "track": pl.Int64,
+            "scanner": pl.String,
+            "scanner_key": pl.String,
+            "rule_key": pl.String,
+            "file_key": pl.String,
+            "line_key": pl.Int64,
+            "id_key": pl.String,
+        },
+        orient="row",
+    )
+    evaluated = pl.DataFrame(
+        [
+            (k, wire(name), True)
+            for k, run in enumerate(runs)
+            for name in set(run.record["coverage"]["evaluated_scanners"])
+        ],
+        schema={"run": pl.Int64, "scanner": pl.String, "evaluated": pl.Boolean},
+        orient="row",
+    )
+    # A streak is censored when it starts at the first run, or when the run
+    # before it did not evaluate its scanner (a finding with no scanner has none
+    # to miss). The join leaves ``evaluated`` null where that run did not.
+    found = (
+        open_now.join(candidates, on="track", how="inner")
+        .with_columns((pl.col("first") - 1).alias("before"))
+        .join(
+            evaluated,
+            left_on=["before", "scanner"],
+            right_on=["run", "scanner"],
+            how="left",
+        )
+        .with_columns(
+            (
+                (pl.col("first") == 0)
+                | (pl.col("scanner").is_not_null() & pl.col("evaluated").is_null())
+            ).alias("censored")
+        )
+        .sort(
+            [
+                "runs",
+                "scanner_key",
+                "rule_key",
+                "file_key",
+                "line_key",
+                "id_key",
+                "position",
+            ],
+            descending=[True, False, False, False, False, False, False],
+            maintain_order=True,
+        )
+    )
     out: list[dict[str, Any]] = []
-    for row in rows[last]:
-        found = by_track.get(track_of[last][row.index])
-        if found is None:
-            continue
-        length, first = found
+    for position, length, first, censored in found.select(
+        ["position", "runs", "first", "censored"]
+    ).iter_rows():
+        row = rows[last][position]
         out.append(
             {
                 "finding_id": row.id,
@@ -573,22 +742,9 @@ def _streaks(
                 "streak_runs": length,
                 "open_since_run": first,
                 "open_since": runs[first].label,
-                "left_censored": first == 0
-                or (
-                    row.scanner is not None and row.scanner not in evaluated[first - 1]
-                ),
+                "left_censored": censored,
             }
         )
-    out.sort(
-        key=lambda s: (
-            -s["streak_runs"],
-            s["scanner"] or "",
-            s["rule_id"] or "",
-            s["file_path"] or "",
-            s["line_start"] if s["line_start"] is not None else -1,
-            s["finding_id"] or "",
-        )
-    )
     return (
         [streak for streak in out if not streak["is_suppressed"]],
         [streak for streak in out if streak["is_suppressed"]],
