@@ -85,10 +85,7 @@ def test_a_root_with_a_newline_in_its_name_is_named_on_one_line(tmp_path):
     its config all name the root."""
     root = tmp_path / "a\nroot"
     workspace = _workspace(root)
-    (root / "api" / ".ash").mkdir()
-    (root / "api" / ".ash" / ".ash.yaml").write_text(
-        "project_name: api\n", encoding="utf-8"
-    )
+    (root / "api" / ".ash.yaml").write_text("project_name: api\n", encoding="utf-8")
     (root / "ash-workspace.yaml").write_text(
         "workspace:\n  max_severity_threshold: HIGH\n", encoding="utf-8"
     )

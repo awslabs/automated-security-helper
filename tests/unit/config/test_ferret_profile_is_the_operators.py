@@ -47,11 +47,11 @@ def _no_uv_probe():
 
 
 def _repo(tmp_path: Path, options: Dict[str, Any]) -> Path:
-    """A checkout whose own .ash/.ash.yaml sets ferret-scan's ``options``."""
+    """A checkout whose own .ash.yaml sets ferret-scan's ``options``."""
     repo = tmp_path / "repo"
-    (repo / ".ash").mkdir(parents=True)
+    repo.mkdir(parents=True)
     (repo / ".git").mkdir()
-    (repo / ".ash" / ".ash.yaml").write_text(
+    (repo / ".ash.yaml").write_text(
         yaml.safe_dump({"scanners": {"ferret-scan": {"options": options}}}),
         encoding="utf-8",
     )

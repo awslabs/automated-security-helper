@@ -70,7 +70,7 @@ def _read(text: str) -> Dict[str, Any]:
 
 def _config_file(tmp_path: Path, project_name: str, rest: str = "") -> Path:
     """A config file holding ``project_name`` on one line, as JSON quotes it."""
-    path = tmp_path / ".ash" / ".ash.yaml"
+    path = tmp_path / ".ash.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"project_name: {json.dumps(project_name)}\n{rest}", "utf-8")
     assert _command_lines(path.read_text(encoding="utf-8")) == []

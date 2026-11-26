@@ -41,8 +41,8 @@ def no_scan(monkeypatch):
 
 def _layout(tmp_path):
     root = tmp_path / "work"
-    (root / "api" / ".ash").mkdir(parents=True)
-    (root / "api" / ".ash" / "ash.yaml").write_text(
+    (root / "api").mkdir(parents=True)
+    (root / "api" / ".ash.yaml").write_text(
         yaml.safe_dump({"global_settings": {"severity_threshold": "LOW"}}),
         encoding="utf-8",
     )

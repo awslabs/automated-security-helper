@@ -141,8 +141,7 @@ def test_a_repository_config_cannot_import_a_module_installed_in_another_checkou
     _package(site, "acme_scan_of_a_tree_in_a_site_ash_plugins")
     monkeypatch.syspath_prepend(str(other))
     monkeypatch.syspath_prepend(str(site))
-    config_file = repo / ".ash" / ".ash.yaml"
-    config_file.parent.mkdir(parents=True)
+    config_file = repo / ".ash.yaml"
     config_file.write_text(
         "project_name: x\nash_plugin_modules:\n"
         "  - acme_scan_of_a_tree_in_a_checkout_ash_plugins\n"

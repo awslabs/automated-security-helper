@@ -171,8 +171,7 @@ def test_a_respelled_section_takes_the_pin_and_no_second_section_is_made(
 def _checkout(tmp_path: Path, repo_text: str) -> Path:
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    (checkout / ".ash").mkdir()
-    (checkout / ".ash" / ".ash.yaml").write_text(repo_text, encoding="utf-8")
+    (checkout / ".ash.yaml").write_text(repo_text, encoding="utf-8")
     return checkout
 
 

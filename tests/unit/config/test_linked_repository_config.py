@@ -55,7 +55,7 @@ def test_a_linked_repository_config_grants_no_read_paths(tmp_path: Path) -> None
         {"project_name": "linked", "sandbox": {"extra_read_paths": ["/data"]}},
     )
     repo = _repo(tmp_path)
-    _symlink(repo / ".ash" / ".ash.yaml", host)
+    _symlink(repo / ".ash.yaml", host)
 
     config = resolve_config(source_dir=repo)
 
@@ -66,6 +66,8 @@ def test_a_linked_repository_config_grants_no_read_paths(tmp_path: Path) -> None
 def test_a_linked_repository_config_directory_grants_no_read_paths(
     tmp_path: Path,
 ) -> None:
+    """Legacy location: this test's subject is the deprecated .ash/.ash.yaml path
+    reached through a linked .ash directory."""
     host = _host_file(
         tmp_path,
         {"project_name": "linked", "sandbox": {"extra_read_paths": ["/data"]}},
@@ -102,7 +104,7 @@ def test_a_callers_gate_refuses_a_discovered_link_out(tmp_path: Path) -> None:
 
     host = _host_file(tmp_path, {"project_name": "linked"})
     repo = _repo(tmp_path)
-    _symlink(repo / ".ash" / ".ash.yaml", host)
+    _symlink(repo / ".ash.yaml", host)
     outside_host = host.parent.resolve()
 
     def permit(path: Path) -> bool:
@@ -111,7 +113,7 @@ def test_a_callers_gate_refuses_a_discovered_link_out(tmp_path: Path) -> None:
     with pytest.raises(ASHConfigInputNotPermittedError) as refused:
         resolve_config(source_dir=repo, permit_base=permit)
 
-    assert (repo / ".ash" / ".ash.yaml").as_posix() in str(refused.value)
+    assert (repo / ".ash.yaml").as_posix() in str(refused.value)
     assert str(outside_host) not in str(refused.value)
     # Positive control: without a gate the link is followed, as on the CLI.
     assert resolve_config(source_dir=repo).project_name == "linked"
@@ -127,7 +129,7 @@ def test_an_operator_overlay_does_not_make_a_refused_link_acceptable(
 
     host = _host_file(tmp_path, {"project_name": "linked"})
     repo = _repo(tmp_path)
-    _symlink(repo / ".ash" / ".ash.yaml", host)
+    _symlink(repo / ".ash.yaml", host)
     outside_host = host.parent.resolve()
     overlay = tmp_path / "operator" / "ash.yaml"
     overlay.parent.mkdir()
@@ -141,8 +143,8 @@ def test_an_operator_overlay_does_not_make_a_refused_link_acceptable(
 
     assert str(outside_host) not in str(refused.value)
     # Positive control: the overlay applies over a config the gate permits.
-    (repo / ".ash" / ".ash.yaml").unlink()
-    (repo / ".ash" / ".ash.yaml").write_text(
+    (repo / ".ash.yaml").unlink()
+    (repo / ".ash.yaml").write_text(
         yaml.safe_dump({"project_name": "in-tree"}), encoding="utf-8"
     )
     config = resolve_config(

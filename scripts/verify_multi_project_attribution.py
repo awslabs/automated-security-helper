@@ -2255,8 +2255,7 @@ def write_fixture(workspace_root: Path) -> Path:
         marker_file.parent.mkdir(parents=True, exist_ok=True)
         marker_file.write_text(MARKER_SOURCES[project.marker_rule], encoding="utf-8")
 
-        config_dir = project_dir / ".ash"
-        config_dir.mkdir(parents=True, exist_ok=True)
+        config_dir = project_dir
         if project.suppress_rule:
             content = CONFIG_WITH_SUPPRESSION_TEMPLATE.format(
                 name=project.key,
@@ -2268,11 +2267,9 @@ def write_fixture(workspace_root: Path) -> Path:
             content = CONFIG_TEMPLATE.format(
                 name=project.key, threshold=project.threshold
             )
-        (config_dir / "ash.yaml").write_text(content, encoding="utf-8")
+        (config_dir / ".ash.yaml").write_text(content, encoding="utf-8")
 
-    root_config = workspace_root / ".ash"
-    root_config.mkdir(parents=True, exist_ok=True)
-    (root_config / "ash.yaml").write_text(WORKSPACE_ROOT_CONFIG, encoding="utf-8")
+    (workspace_root / ".ash.yaml").write_text(WORKSPACE_ROOT_CONFIG, encoding="utf-8")
 
     definition = workspace_root / WORKSPACE_FILENAME
     definition.write_text(

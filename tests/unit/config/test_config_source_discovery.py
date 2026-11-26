@@ -209,7 +209,11 @@ class TestAshrcFiles:
 
 
 class TestPrecedenceMatrix:
-    """Each row: the sources present, and the one whose project_name wins."""
+    """Each row: the sources present, and the one whose project_name wins.
+
+    Legacy location: the rows naming ``.ash/.ash.yaml`` exercise the deprecated
+    .ash/.ash.yaml path against the other discovered sources.
+    """
 
     @pytest.mark.parametrize(
         "present, winner",
@@ -238,7 +242,7 @@ class TestPrecedenceMatrix:
         assert resolve_config(source_dir=tmp_path).project_name == expected
 
     def test_explicit_path_beats_every_discovered_source(self, tmp_path, ash_log):
-        _source_file(tmp_path / ".ash", ".ash.yaml", "legacy")
+        _source_file(tmp_path, ".ash.yaml", "canonical")
         _source_file(tmp_path, "ashrc.yaml", "ashrc")
         _pyproject(tmp_path, 'project_name = "pyproject"\n')
         explicit = _source_file(tmp_path / "configs", "ci.yaml", "explicit")
@@ -248,7 +252,7 @@ class TestPrecedenceMatrix:
 
     def test_sources_are_never_merged(self, tmp_path):
         # The ignored ashrc sets a field the winning file leaves at its default.
-        _source_file(tmp_path / ".ash", ".ash.yaml", "legacy")
+        _source_file(tmp_path, ".ash.yaml", "canonical")
         _write(
             tmp_path / "ashrc.yaml", "project_name: ashrc\nfail_on_findings: false\n"
         )
@@ -256,7 +260,7 @@ class TestPrecedenceMatrix:
             tmp_path, 'project_name = "p"\nfail_on_incomplete_scanners = false\n'
         )
         config = resolve_config(source_dir=tmp_path)
-        assert config.project_name == "legacy"
+        assert config.project_name == "canonical"
         assert config.fail_on_findings is True
         assert config.fail_on_incomplete_scanners is True
 

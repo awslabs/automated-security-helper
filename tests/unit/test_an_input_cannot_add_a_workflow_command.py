@@ -675,7 +675,7 @@ class TestTheCheckGivesTheSameAnswerInEveryLocale:
         for locale_name in LOCALES:
             sandbox = ga.StepSandbox(tmp_path / locale_name)
             _git("init", "-q", ".", cwd=sandbox.workspace)
-            values = {name: "x" + chr(0x3000) + "y", "config": ".ash/.ash.yaml"}
+            values = {name: "x" + chr(0x3000) + "y", "config": ".ash.yaml"}
             run = ga.run_step(
                 sandbox,
                 workflow,
@@ -717,7 +717,7 @@ class TestConfigRefIsNotReadAsAnOption:
         _git("remote", "add", "origin", str(origin), cwd=sandbox.workspace)
         marker = tmp_path / "upload-pack-ran"
         value = config_ref.format(marker=marker)
-        context = _scan_context(**{"config-ref": value, "config": ".ash/.ash.yaml"})
+        context = _scan_context(**{"config-ref": value, "config": ".ash.yaml"})
         run = ga.run_step(
             sandbox,
             workflow,
@@ -745,8 +745,7 @@ class TestConfigRefIsNotReadAsAnOption:
         seed.mkdir()
         _git("init", "-q", "--bare", str(origin), cwd=tmp_path)
         _git("init", "-q", ".", cwd=seed)
-        (seed / ".ash").mkdir()
-        (seed / ".ash" / ".ash.yaml").write_text("reporters: {}\n", encoding="utf-8")
+        (seed / ".ash.yaml").write_text("reporters: {}\n", encoding="utf-8")
         _git("add", "-A", cwd=seed)
         _git("commit", "-q", "-m", "config", cwd=seed)
         _git("push", "-q", str(origin), "HEAD:refs/heads/main", cwd=seed)
@@ -754,7 +753,7 @@ class TestConfigRefIsNotReadAsAnOption:
         workflow, job = _scan_workflow()
         fetched = {}
         for label, value in (("plain", "main"), ("block scalar", "main\n")):
-            with_values = {"config-ref": value, "config": ".ash/.ash.yaml"}
+            with_values = {"config-ref": value, "config": ".ash.yaml"}
             check, outputs = _check_inputs(tmp_path / label, **with_values)
             assert_clean(check)
             sandbox = ga.StepSandbox(tmp_path / label / "runner")

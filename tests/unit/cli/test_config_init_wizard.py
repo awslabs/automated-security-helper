@@ -36,7 +36,7 @@ def root(tmp_path, monkeypatch):
 
 @pytest.fixture
 def config_path(tmp_path):
-    return tmp_path / ".ash" / ".ash.yaml"
+    return tmp_path / ".ash.yaml"
 
 
 def _unfolded(output: str) -> str:
@@ -382,7 +382,7 @@ class TestWizardCommand:
         """The count survives a space in the path: the comparison unfolds the
         searched path as it unfolds the output, so a name whitespace sits in
         is still found in both panels rather than counted 0."""
-        config_path = tmp_path / "has space" / ".ash" / ".ash.yaml"
+        config_path = tmp_path / "has space" / ".ash.yaml"
         config_path.parent.mkdir(parents=True)
         config_path.write_text(yaml.dump({"project_name": "seed-project"}))
 

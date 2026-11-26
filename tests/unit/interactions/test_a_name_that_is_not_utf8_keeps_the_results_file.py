@@ -248,23 +248,24 @@ def test_a_file_named_so_keeps_the_results_file_and_both_files_findings(tmp_path
     assert _rules_for(findings, _ODD_RECORDED) == plain_rules, findings
 
 
+# The JSON form is the root .ash.json, the JSON name discovery reads at the root.
 _CONFIG_SHAPES = {
     "yaml-ignore-path": (
-        b".ash/.ash.yaml",
+        b".ash.yaml",
         (
             b'global_settings:\n  ignore_paths:\n    - path: "secr\\udce9t.py"\n'
             b'      reason: "x"\n'
         ),
     ),
     "json-ignore-path": (
-        b".ash/.ash.json",
+        b".ash.json",
         (
             b'{"global_settings": {"ignore_paths": '
             b'[{"path": "secr\\udce9t.py", "reason": "x"}]}}\n'
         ),
     ),
     "yaml-suppression-reason": (
-        b".ash/.ash.yaml",
+        b".ash.yaml",
         (
             b'global_settings:\n  suppressions:\n    - path: "other.py"\n'
             b'      rule_id: "SECRET-SECRET-KEYWORD"\n      reason: "caf\\udce9"\n'
@@ -332,7 +333,7 @@ def test_use_existing_applies_the_ignore_path_the_scan_applied(tmp_path):
 def test_a_project_name_spelling_such_a_name_is_refused(tmp_path):
     source = _tree(
         tmp_path / "named",
-        {_PLAIN: _SECRET, b".ash/.ash.yaml": b'project_name: "caf\\udce9"\n'},
+        {_PLAIN: _SECRET, b".ash.yaml": b'project_name: "caf\\udce9"\n'},
     )
 
     code, said, output, started = _scan(tmp_path, source)

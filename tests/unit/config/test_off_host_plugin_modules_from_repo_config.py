@@ -71,8 +71,8 @@ def _module_warnings(records: List[logging.LogRecord]) -> List[str]:
 
 def _tree(tmp_path: Path, modules: List[str]) -> Path:
     source = tmp_path / "repo"
-    (source / ".ash").mkdir(parents=True)
-    (source / ".ash" / ".ash.yaml").write_text(
+    source.mkdir(parents=True)
+    (source / ".ash.yaml").write_text(
         yaml.safe_dump({"project_name": "scanned", "ash_plugin_modules": modules})
     )
     return source
@@ -141,7 +141,7 @@ def test_a_config_an_mcp_client_delivered_cannot_add_them(
 
     An upload named as ``config_path`` is resolved with ``untrusted_config`` when
     ``config_is_client_supplied`` says a client delivered it; a delivered tree's
-    own ``.ash/.ash.yaml`` is found inside the scanned tree.
+    own ``.ash.yaml`` is found inside the scanned tree.
     """
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
 
@@ -156,8 +156,8 @@ def test_a_config_an_mcp_client_delivered_cannot_add_them(
     if delivered == "upload":
         config_path = root / "session-a" / "upload-staging" / "ash.yaml"
     else:
-        config_path = source / ".ash" / ".ash.yaml"
-    config_path.parent.mkdir(parents=True)
+        config_path = source / ".ash.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(document)
     assert config_is_client_supplied(config_path)
 
@@ -198,7 +198,7 @@ def test_an_operator_default_config_replaced_by_the_tree_can(
     operator.write_text(yaml.safe_dump({"ash_plugin_modules": [package]}))
 
     config = resolve_config(
-        config_path=source / ".ash" / ".ash.yaml",
+        config_path=source / ".ash.yaml",
         source_dir=source,
         trusted_config_path=operator,
     )

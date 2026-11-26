@@ -32,7 +32,7 @@ def layout(tmp_path, monkeypatch):
     granted = tmp_path / "granted"
     (granted / "inside").mkdir(parents=True)
     outside = tmp_path / "outside"
-    (outside / ".ash").mkdir(parents=True)
+    outside.mkdir(parents=True)
     workspace = tmp_path / "dev.code-workspace"
     workspace.write_text(
         json.dumps({"folders": [{"path": "granted/inside"}, {"path": "outside"}]}),
@@ -40,7 +40,7 @@ def layout(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(granted))
     monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
-    return {"workspace": workspace, "outside_config": outside / ".ash" / ".ash.yaml"}
+    return {"workspace": workspace, "outside_config": outside / ".ash.yaml"}
 
 
 @pytest.mark.parametrize(

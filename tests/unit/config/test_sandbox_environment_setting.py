@@ -145,7 +145,7 @@ def _confine(resolved: AshConfig, trusted: AshConfig) -> None:
     confine_sandbox_grants(
         resolved.sandbox,
         trusted.sandbox,
-        [Path("/zz-repository/.ash/.ash.yaml")],
+        [Path("/zz-repository/.ash.yaml")],
         frozenset(),
         checkout_membership=True,
         mixed_membership=False,

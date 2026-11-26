@@ -122,6 +122,8 @@ def _discovered(relative: str, content: str | bytes) -> Setup:
 
 
 def _discovered_dangling_link(root: Path) -> Tuple[List[str], Dict[str, str]]:
+    """Legacy location: the dangling link sits at the deprecated .ash/.ash.yaml
+    path, which discovery still selects."""
     _dangling_link(root / "src" / ".ash" / ".ash.yaml")
     return [], {}
 
@@ -135,6 +137,8 @@ REFUSED = [
     pytest.param(_empty_config_argument, id="config_option_empty_string"),
     pytest.param(_variable("nope.yaml", None), id="ash_config_variable_missing_file"),
     pytest.param(_variable("env.yaml", BAD_YAML), id="ash_config_variable_yaml_syntax"),
+    # Legacy location: the two ``.ash/.ash.yaml`` cases below keep the deprecated
+    # path, which discovery still selects, beside the canonical root file.
     pytest.param(_discovered(".ash/.ash.yaml", BAD_YAML), id="discovered_dot_ash_dir"),
     pytest.param(_discovered(".ash.yaml", BAD_YAML), id="discovered_root_yaml"),
     pytest.param(_discovered(".ash.json", BAD_JSON), id="discovered_root_json"),
@@ -249,7 +253,7 @@ class TestRunAshScanApi:
     def test_discovered_config_that_cannot_be_parsed_exits_three(
         self, tmp_path, scan_started
     ):
-        _write(tmp_path / "src" / ".ash" / ".ash.yaml", BAD_YAML)
+        _write(tmp_path / "src" / ".ash.yaml", BAD_YAML)
 
         status = _api_scan(tmp_path, None)
 

@@ -65,9 +65,8 @@ def _tree(tmp_path: Path, monkeypatch, modules: List[str]) -> Path:
     package = source / STANDIN
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("STANDIN_LOADED = True\n")
-    (source / ".ash").mkdir()
     listed = "".join(f"  - {name}\n" for name in modules)
-    (source / ".ash" / ".ash.yaml").write_text(
+    (source / ".ash.yaml").write_text(
         f"project_name: scanned\nash_plugin_modules:\n{listed}"
     )
     monkeypatch.syspath_prepend(str(source))
@@ -165,8 +164,8 @@ def test_a_workspace_project_cannot_add_a_module_from_elsewhere_in_the_workspace
 
     workspace = tmp_path / "ws"
     project = workspace / "app"
-    (project / ".ash").mkdir(parents=True)
-    (project / ".ash" / ".ash.yaml").write_text(
+    project.mkdir(parents=True)
+    (project / ".ash.yaml").write_text(
         f"project_name: app\nash_plugin_modules:\n  - {STANDIN}\n"
     )
     shared = workspace / "shared"

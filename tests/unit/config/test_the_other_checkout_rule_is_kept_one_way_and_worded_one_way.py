@@ -80,7 +80,7 @@ def _resolve(route: str, monkeypatch: pytest.MonkeyPatch, file: Path, repository
 def _repository(tmp_path: Path, config: str = "project_name: repo\n") -> Path:
     repository = tmp_path / "repo"
     mark_git_checkout(repository)
-    _write(repository / ".ash" / ".ash.yaml", config)
+    _write(repository / ".ash.yaml", config)
     return repository
 
 
@@ -196,7 +196,7 @@ def test_the_warning_names_only_the_file_that_writes_the_key(
     """The project's config extends a base; only the base writes the key. The
     warning names the base, not the file that writes ``project_name``."""
     repository = _repository(tmp_path, "project_name: repo\nextends:\n  - lower.yaml\n")
-    _write(repository / ".ash" / "lower.yaml", "honor_ignore_files: false\n")
+    _write(repository / "lower.yaml", "honor_ignore_files: false\n")
 
     with caplog.at_level(logging.WARNING):
         config = resolve_config(source_dir=repository)
@@ -250,9 +250,7 @@ def test_confine_to_trusted_base_passes_the_network_limit_on(tmp_path: Path) -> 
     trusted = AshConfig()
     trusted.sandbox.network_limit = ["semgrep"]
 
-    confine_to_trusted_base(
-        config, trusted, [], repository, [repository / ".ash" / ".ash.yaml"]
-    )
+    confine_to_trusted_base(config, trusted, [], repository, [repository / ".ash.yaml"])
 
     assert config.sandbox.network_limit == ["semgrep"]
     assert config.sandbox.network_scanners is None

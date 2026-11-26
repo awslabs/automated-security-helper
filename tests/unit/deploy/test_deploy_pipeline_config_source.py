@@ -123,8 +123,8 @@ def _checkout(root: pathlib.Path) -> pathlib.Path:
     generated per run, and its markers are split in this source, so no key-shaped
     text is committed.
     """
-    (root / ".ash").mkdir(parents=True)
-    (root / ".ash" / ".ash.yaml").write_text(IN_TREE_CONFIG, encoding="utf-8")
+    root.mkdir(parents=True)
+    (root / ".ash.yaml").write_text(IN_TREE_CONFIG, encoding="utf-8")
     (root / "app.py").write_text('print("scanned")\n', encoding="utf-8")
     body = base64.b64encode(os.urandom(600)).decode()
     marker = "RSA PRIVATE " + "KEY-----"

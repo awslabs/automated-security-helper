@@ -147,14 +147,12 @@ def test_an_operator_chain_outside_the_source_still_runs(layout, commands):
 
 def test_a_config_inside_the_source_extending_a_base_there_still_runs(layout, commands):
     """Control: the chain is read through /src and nothing else is mounted."""
-    (layout["source"] / ".ash" / "base.yaml").write_text(
-        "project_name: p\n", encoding="utf-8"
-    )
-    config = layout["source"] / ".ash" / "ash.yaml"
+    (layout["source"] / "base.yaml").write_text("project_name: p\n", encoding="utf-8")
+    config = layout["source"] / ".ash.yaml"
     config.write_text("extends: base.yaml\n", encoding="utf-8")
 
     result = _run(config, build=False)
 
     assert result.returncode == 0, result.stderr
     run = commands[0]
-    assert run[run.index("--config") + 1] == "/src/.ash/ash.yaml"
+    assert run[run.index("--config") + 1] == "/src/.ash.yaml"

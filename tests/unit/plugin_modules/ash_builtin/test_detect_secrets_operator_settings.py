@@ -3,7 +3,7 @@
 Three cases the first round of the verification rule got wrong:
 
 * The operator names a baseline outside the scanned tree through
-  ``--config-overrides`` while the scanned repository has its own ``.ash/.ash.yaml``.
+  ``--config-overrides`` while the scanned repository has its own ``.ash.yaml``.
   The override is the operator's, so the baseline it names is too, and the filter in
   it verifies (``test_operator_override_naming_an_outside_baseline_verifies``).
 * The operator's config names the verification filter in ``scan_settings`` without
@@ -139,7 +139,7 @@ def test_operator_override_naming_an_outside_baseline_verifies(
         tmp_path / "shared" / "verifying.baseline",
         [{"path": VERIFICATION_FILTER, "min_level": 2}],
     )
-    _config(repo / ".ash" / ".ash.yaml", {})
+    _config(repo / ".ash.yaml", {})
 
     _scan(
         repo,
@@ -171,7 +171,7 @@ def test_operator_override_naming_a_baseline_relative_to_the_working_directory_v
         tmp_path / "shared" / "verifying.baseline",
         [{"path": VERIFICATION_FILTER, "min_level": 2}],
     )
-    _config(repo / ".ash" / ".ash.yaml", {})
+    _config(repo / ".ash.yaml", {})
     deeper = tmp_path / "a" / "b"
     deeper.mkdir(parents=True)
     monkeypatch.chdir(deeper)
@@ -254,7 +254,7 @@ def test_control_repository_override_of_baseline_file_still_does_not_verify(
         tmp_path / "shared" / "verifying.baseline",
         [{"path": VERIFICATION_FILTER, "min_level": 2}],
     )
-    _config(repo / ".ash" / ".ash.yaml", {"baseline_file": outside.as_posix()})
+    _config(repo / ".ash.yaml", {"baseline_file": outside.as_posix()})
 
     results = _scan(repo, tmp_path / "out")
 
@@ -318,7 +318,7 @@ def test_repository_settings_import_no_file(
         entries = {"filters_used": entries["filters_used"]}
     if source == "repository config":
         _config(
-            repo / ".ash" / ".ash.yaml",
+            repo / ".ash.yaml",
             {"scan_settings": {"version": "1.5.0", **entries}},
         )
     else:

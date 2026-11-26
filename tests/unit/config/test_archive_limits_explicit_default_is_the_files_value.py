@@ -52,7 +52,7 @@ def ash_warnings():
 def layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """A scanned tree whose operator lowered ``max_total_bytes`` in ``ASH_CONFIG``."""
     tree = tmp_path / "repo"
-    (tree / ".ash").mkdir(parents=True)
+    tree.mkdir(parents=True)
     operator = tmp_path / "operator" / "ash.yaml"
     operator.parent.mkdir()
     write_options(operator, max_total_bytes=LOWERED)
@@ -73,7 +73,7 @@ def warnings_naming_the_option(records) -> List[str]:
 
 
 def test_a_file_that_writes_the_default_is_named_as_setting_it(layout, ash_warnings):
-    write_options(layout / ".ash" / ".ash.yaml", max_total_bytes=DEFAULT)
+    write_options(layout / ".ash.yaml", max_total_bytes=DEFAULT)
 
     config = resolve_config(source_dir=layout)
 
@@ -86,7 +86,7 @@ def test_a_file_that_writes_the_default_is_named_as_setting_it(layout, ash_warni
 def test_positive_control_a_file_that_leaves_the_option_out_is_named_as_doing_so(
     layout, ash_warnings
 ):
-    write_options(layout / ".ash" / ".ash.yaml", max_members=10)
+    write_options(layout / ".ash.yaml", max_members=10)
 
     config = resolve_config(source_dir=layout)
 
@@ -99,7 +99,7 @@ def test_positive_control_a_file_that_leaves_the_option_out_is_named_as_doing_so
 def test_positive_control_a_file_that_raises_the_option_is_named_as_setting_it(
     layout, ash_warnings
 ):
-    write_options(layout / ".ash" / ".ash.yaml", max_total_bytes=DEFAULT * 4)
+    write_options(layout / ".ash.yaml", max_total_bytes=DEFAULT * 4)
 
     config = resolve_config(source_dir=layout)
 

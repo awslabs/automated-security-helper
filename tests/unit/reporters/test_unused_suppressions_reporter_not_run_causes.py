@@ -106,10 +106,10 @@ def _report(tmp_path: Path, **scanners) -> dict:
 
 
 def _config_with_report(tmp_path: Path, report: dict) -> Path:
-    """The linter's layout: the config in ``.ash`` and the report under
-    ``ash_output/reports`` beside it, the report as the reporter wrote it."""
-    config_path = tmp_path / ".ash" / ".ash.yaml"
-    config_path.parent.mkdir(parents=True)
+    """The linter's layout: the config at the project root and the report under
+    ``.ash/ash_output/reports``, the report as the reporter wrote it."""
+    config_path = tmp_path / ".ash.yaml"
+    tmp_path.mkdir(parents=True, exist_ok=True)
     config_path.write_bytes(CONFIG.encode("utf-8"))
     reports = tmp_path / ".ash" / "ash_output" / "reports"
     reports.mkdir(parents=True)

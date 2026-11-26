@@ -720,7 +720,7 @@ class TestTheOperatorsBase:
     def test_the_same_rules_as_a_config_file_inside_the_scanned_tree(self, harness):
         """What merge keeps of a recorded config is what a scan keeps of an in-tree file.
 
-        Compared against ``resolve_config`` for a scan whose ``.ash/.ash.yaml``
+        Compared against ``resolve_config`` for a scan whose ``.ash.yaml``
         holds the same document and whose operator config is the one passed to
         ``ash merge``, so a rule added to the shared tables applies to both. The
         document stays inside what both treat alike: the merge is stricter about a
@@ -740,7 +740,7 @@ class TestTheOperatorsBase:
         )
         repo = harness.tmp_path / "repo"
         (repo / ".git").mkdir(parents=True)
-        _write_yaml(repo / ".ash" / ".ash.yaml", SHARD_CONFIG)
+        _write_yaml(repo / ".ash.yaml", SHARD_CONFIG)
         scanned = resolve_config(source_dir=repo, trusted_config_path=operator)
         scan_ignored = harness.ignored_keys()
         harness.warnings.clear()

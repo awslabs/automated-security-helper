@@ -9,6 +9,9 @@ config init` and `ash config wizard` create `<cwd>/.ash.yaml`, and so does `ash
 inspect findings` when it writes a suppression and finds no config, never
 `.ash/.ash.yaml` or an `ashrc` name. Existing files at the legacy locations keep
 loading.
+
+Legacy location: this module's subject is the migration away from the deprecated
+`.ash/.ash.yaml` path, so its fixtures name that path on purpose.
 """
 
 from __future__ import annotations

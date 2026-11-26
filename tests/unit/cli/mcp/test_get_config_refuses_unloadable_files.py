@@ -42,8 +42,7 @@ def test_a_named_file_that_does_not_parse(tmp_path):
 
 
 def test_a_discovered_file_that_does_not_parse(tmp_path):
-    (tmp_path / ".ash").mkdir()
-    (tmp_path / ".ash" / ".ash.yaml").write_text(BAD_YAML, encoding="utf-8")
+    (tmp_path / ".ash.yaml").write_text(BAD_YAML, encoding="utf-8")
 
     _assert_error_response(mcp_get_config(search_dir=str(tmp_path)), ".ash.yaml")
 
@@ -63,8 +62,7 @@ def test_discovery_that_cannot_read_the_only_source(tmp_path, raw):
 
 @pytest.mark.parametrize("raw", [False, True], ids=["resolved", "raw"])
 def test_a_discovered_dangling_link_is_reported_as_not_found(tmp_path, raw):
-    (tmp_path / ".ash").mkdir()
-    (tmp_path / ".ash" / ".ash.yaml").symlink_to(tmp_path / "not-checked-out.yaml")
+    (tmp_path / ".ash.yaml").symlink_to(tmp_path / "not-checked-out.yaml")
 
     result = mcp_get_config(search_dir=str(tmp_path), raw=raw)
 

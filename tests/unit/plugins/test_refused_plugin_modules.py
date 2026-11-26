@@ -401,8 +401,7 @@ class TestARefusedModuleRefusesTheScan:
 
     def test_a_config_file_inside_the_scanned_tree(self, tmp_path):
         run = _Run(tmp_path)
-        (run.tree / ".ash").mkdir()
-        (run.tree / ".ash" / ".ash.yaml").write_text(
+        (run.tree / ".ash.yaml").write_text(
             f"project_name: tree\nash_plugin_modules:\n  - {REFUSED}\n",
             encoding="utf-8",
         )
@@ -459,9 +458,9 @@ class TestARefusedModuleRefusesTheScan:
         run = _Run(tmp_path)
         workspace = tmp_path / "ws"
         for key in ("api", "web"):
-            (workspace / key / ".ash").mkdir(parents=True)
+            (workspace / key).mkdir(parents=True)
             (workspace / key / "app.py").write_text("x = 1\n", encoding="utf-8")
-            (workspace / key / ".ash" / ".ash.yaml").write_text(
+            (workspace / key / ".ash.yaml").write_text(
                 f"project_name: {key}\nash_plugin_modules:\n  - {REFUSED}\n",
                 encoding="utf-8",
             )
@@ -589,9 +588,9 @@ class TestEveryEntryPointSplitsCommaJoinedNames:
         run = _Run(tmp_path)
         workspace = tmp_path / "ws"
         for key in ("api", "web"):
-            (workspace / key / ".ash").mkdir(parents=True)
+            (workspace / key).mkdir(parents=True)
             (workspace / key / "app.py").write_text("x = 1\n", encoding="utf-8")
-            (workspace / key / ".ash" / ".ash.yaml").write_text(
+            (workspace / key / ".ash.yaml").write_text(
                 f"project_name: {key}\n", encoding="utf-8"
             )
         workspace_file = workspace / "dev.code-workspace"
@@ -679,9 +678,9 @@ class TestANamedModuleThatDoesNotImportRefusesTheScan:
         run = _Run(tmp_path)
         workspace = tmp_path / "ws"
         for key in ("api", "web"):
-            (workspace / key / ".ash").mkdir(parents=True)
+            (workspace / key).mkdir(parents=True)
             (workspace / key / "app.py").write_text("x = 1\n", encoding="utf-8")
-            (workspace / key / ".ash" / ".ash.yaml").write_text(
+            (workspace / key / ".ash.yaml").write_text(
                 f"project_name: {key}\n", encoding="utf-8"
             )
         workspace_file = workspace / "dev.code-workspace"

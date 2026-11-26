@@ -8,8 +8,8 @@ The other messages this layer builds about a config path
 with ``as_posix()``, so a client reads one spelling on every host. ``_refusal``
 formatted its ``path`` argument with ``str``, which prints a ``Path`` with the
 host separator: on Windows the same refusal named
-``C:\\roots\\client-1\\source\\.ash\\.ash.yaml`` while the rest of the layer wrote
-``C:/roots/client-1/source/.ash/.ash.yaml``.
+``C:\\roots\\client-1\\source\\.ash.yaml`` while the rest of the layer wrote
+``C:/roots/client-1/source/.ash.yaml``.
 
 A ``str`` argument is the caller's own spelling (the scan target exactly as the
 client gave it) and is printed as given. The ``context`` fields are read by
@@ -33,12 +33,12 @@ REMEDY = "Grant the directory."
 
 
 def test_a_path_in_a_refusal_is_spelled_with_forward_slashes() -> None:
-    config = PureWindowsPath(r"C:\roots\client-1\source\.ash\.ash.yaml")
+    config = PureWindowsPath(r"C:\roots\client-1\source\.ash.yaml")
 
     refusal = sandbox._refusal("Config input", config, Path("/x"), REMEDY)
 
     message = str(refusal)
-    assert "C:/roots/client-1/source/.ash/.ash.yaml" in message
+    assert "C:/roots/client-1/source/.ash.yaml" in message
     assert "\\" not in message
 
 
@@ -49,7 +49,7 @@ def test_a_string_in_a_refusal_is_printed_as_the_caller_gave_it() -> None:
 
 
 def test_a_refusal_context_keeps_the_native_spelling_of_the_path() -> None:
-    config = PureWindowsPath(r"C:\roots\client-1\source\.ash\.ash.yaml")
+    config = PureWindowsPath(r"C:\roots\client-1\source\.ash.yaml")
 
     refusal = sandbox._refusal("Config input", config, Path("/x"), REMEDY)
 

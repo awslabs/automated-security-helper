@@ -5,7 +5,7 @@
 
 Why this exists
 ---------------
-.ash/.ash.yaml and .ash/.ash_alpha_plugins.yaml were migrated from
+.ash.yaml and .ash/.ash_alpha_plugins.yaml were migrated from
 line-pinned suppressions to symbol- and resource-scoped ones, recorded in
 tests/test_data/suppression_symbol_migration.yaml. A wrong symbol pick is the
 quiet failure of such a migration: an entry naming a NEIGHBORING definition
@@ -475,7 +475,7 @@ def test_no_symbol_scope_is_wider_than_the_budget_without_an_allowance():
 def test_a_gone_symbol_on_a_real_migrated_entry_fails_closed(caplog):
     """Design row T7-3, on this migration's own config shape.
 
-    The first symbol-scoped entry of .ash/.ash.yaml, with its symbol replaced
+    The first symbol-scoped entry of .ash.yaml, with its symbol replaced
     by a name the file does not define, matches nothing: the finding it used to
     cover stays visible, which is what makes a stale symbol loud (the entry is
     then also reported unused; see TestApplyToSarif in

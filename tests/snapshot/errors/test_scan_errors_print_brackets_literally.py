@@ -32,7 +32,7 @@ def _source(root: Path, config: str | None = None) -> Path:
     source = root / "src"
     _write(source / "app.py", "print('hello')\n")
     if config is not None:
-        _write(source / ".ash" / ".ash.yaml", config)
+        _write(source / ".ash.yaml", config)
     return source
 
 
