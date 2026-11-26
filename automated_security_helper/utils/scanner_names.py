@@ -150,6 +150,7 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
     "mcp-config": ScannerToolType.SAST.value,
     "npm-audit": ScannerToolType.SCA.value,
     "opengrep": ScannerToolType.SAST.value,
+    "osv-scanner": ScannerToolType.SCA.value,
     "polaris": ScannerToolType.IAC.value,
     "secretlint": ScannerToolType.SECRETS.value,
     "semgrep": ScannerToolType.SAST.value,

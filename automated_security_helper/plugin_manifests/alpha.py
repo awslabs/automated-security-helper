@@ -218,6 +218,14 @@ MANIFESTS = (
         owned=(f"{_DOCS}/kingfisher-plugin.md", f"{_FIXTURES}/kingfisher"),
     ),
     _alpha(
+        "osv-scanner",
+        "ash_osv_scanner_plugins",
+        "osv_scanner_scanner",
+        "OsvScannerScanner",
+        "OsvScannerScannerConfigOptions",
+        owned=(f"{_DOCS}/osv-scanner-plugin.md", f"{_FIXTURES}/osv-scanner"),
+    ),
+    _alpha(
         "polaris",
         "ash_polaris_plugins",
         "polaris_scanner",

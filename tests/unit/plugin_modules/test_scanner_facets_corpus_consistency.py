@@ -229,6 +229,9 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
     "mcp-config": CorpusSpec("mcp_config", sarif=("captured/*.sarif",)),
     "npm-audit": CorpusSpec("npmaudit", prep="npm-audit"),
     "opengrep": CorpusSpec("opengrep", sarif=("captured/*.sarif",)),
+    # The committed SARIF is what a REAL OSV-Scanner v2.7.1 run wrote, unedited
+    # (captured/README.md says how it was taken).
+    "osv-scanner": CorpusSpec("osv-scanner", sarif=("captured/*.sarif",)),
     # The committed SARIF is the converter's output for a REAL captured Polaris
     # v10.2.6 run (captured/positive.json); a regeneration test keeps it honest.
     "polaris": CorpusSpec("polaris", sarif=("captured/*.sarif",)),

@@ -1136,6 +1136,8 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "openssl-1.1 commit": "e04bd3433fd84e1861bf258ea37928d9845e6a86",  # pragma: allowlist secret
     "openssl-1.1/LICENSE": "c32913b33252e71190af2066f08115c69bc9fddadf3bf29296e20c835389841c",  # pragma: allowlist secret
     "openssl/LICENSE.txt": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",  # pragma: allowlist secret
+    "osv-scanner commit": "02f96a40691c2d155fdda799af436e111231e365",  # pragma: allowlist secret
+    "osv-scanner/LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",  # pragma: allowlist secret
     "pcre commit": "c8dd39955982faaf63176bedc456746e5cf43e2f",  # pragma: allowlist secret
     "pcre/LICENCE": "f998c0f52eb704eff28f503580cfca3f2547280aa212994f6cf2d8e317587c1c",  # pragma: allowlist secret
     "polaris commit": "6e76dd36aea6a5d8dd380ddf3e9199a83d252c55",  # pragma: allowlist secret
@@ -1531,6 +1533,24 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             "libcrypto-*.so.1.1",
             rb"OpenSSL (1\.1\.1[a-z]?) ",
             "",
+        ),
+    ),
+    # The alpha OSV-Scanner scanner's tool. Pinned and installed by its own module
+    # (``ash_osv_scanner_plugins/osv_scanner_install.py``), not by
+    # install-pinned-tool, so its license is staged from the repository at the
+    # pinned commit on the --licenses-only line. The release publishes bare
+    # executables, so there is no archive copy to compare. ``osv-scanner --version``
+    # prints "osv-scanner version: 2.7.1" and the commit below (read 2026-11-26).
+    "osv-scanner": ThirdPartyLicense(
+        tool="osv-scanner",
+        version="v2.7.1",
+        license="Apache-2.0",
+        repository="https://github.com/google/osv-scanner",
+        commit=_THIRD_PARTY_HASHES["osv-scanner commit"],
+        files=(
+            _from_source(
+                "osv-scanner", "https://github.com/google/osv-scanner", "LICENSE"
+            ),
         ),
     ),
     # Bundled in the pygit2 wheel (pygit2.libs/libpcre-*.so) for libgit2's regex
