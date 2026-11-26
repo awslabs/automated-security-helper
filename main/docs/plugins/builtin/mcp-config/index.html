@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1033,6 +1035,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../../../how-to/track-findings-over-time/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Track findings over time
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../how-to/deduplicate-findings/" class="md-nav__link">
         
   
@@ -1273,10 +1303,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_18" >
         
           
-          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_18" id="__nav_4_18_label" tabindex="0">
             
   
   
@@ -1294,8 +1324,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_17">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_18_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_18">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -3912,10 +3942,22 @@ SOFTWARE.
 </span></code></pre></div>
 <p>With this, a remote server must live under <code>https://mcp.example.com/</code> and be reached over https, and a local server must be started from one of the two directories.</p>
 <h2 id="what-the-converter-writes">What the converter writes<a class="headerlink" href="#what-the-converter-writes" title="Permanent link">&para;</a></h2>
-<p>For each entry that declares a command the converter writes one script and one sidecar into its work directory, under a directory named for the config file (<code>.cursor/mcp.json</code> becomes <code>cursor__mcp.json</code>):</p>
-<div class="language-sh highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="ch">#!/bin/sh</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># ash-mcp-span: {&quot;source&quot;:&quot;.mcp.json&quot;,&quot;pointer&quot;:&quot;/mcpServers/elevated&quot;,&quot;line&quot;:3,&quot;col&quot;:17}</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nb">exec</span><span class="w"> </span><span class="s1">&#39;sudo&#39;</span><span class="w"> </span><span class="s1">&#39;/usr/local/bin/mcp-files&#39;</span><span class="w"> </span><span class="s1">&#39;--root&#39;</span><span class="w"> </span><span class="s1">&#39;/srv/data&#39;</span>
+<p>For each entry that declares a command the converter writes one script and one sidecar into its work directory, under a directory named for the config file (<code>.cursor/mcp.json</code> becomes <code>cursor__mcp.json</code>). This <code>.mcp.json</code> starts one server through <code>sudo</code>:</p>
+<!-- doctest: config kind=mcp-client save-as=.mcp.json -->
+<div class="language-json highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">&quot;mcpServers&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">&quot;elevated&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">      </span><span class="nt">&quot;command&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sudo&quot;</span><span class="p">,</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">      </span><span class="nt">&quot;args&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;/usr/local/bin/mcp-files&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;--root&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;/srv/data&quot;</span><span class="p">]</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="p">}</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="p">}</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>The converter writes this script for it:</p>
+<!-- doctest: illustrative reason="the script the converter writes for the entry above; running it would run sudo" -->
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="ch">#!/bin/sh</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># ash-mcp-span: {&quot;source&quot;:&quot;.mcp.json&quot;,&quot;pointer&quot;:&quot;/mcpServers/elevated&quot;,&quot;line&quot;:3,&quot;col&quot;:17}</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nb">exec</span><span class="w"> </span><span class="s1">&#39;sudo&#39;</span><span class="w"> </span><span class="s1">&#39;/usr/local/bin/mcp-files&#39;</span><span class="w"> </span><span class="s1">&#39;--root&#39;</span><span class="w"> </span><span class="s1">&#39;/srv/data&#39;</span>
 </span></code></pre></div>
 <ul>
 <li>The command line is one logical line: the <code>env</code> assignments, then <code>exec</code>, then the command and each argument. Every value is single-quoted, and an embedded single quote is written with the <code>'"'"'</code> idiom. A newline or other control character is written as an ANSI-C <code>$'...'</code> word, so one config token is always one script token.</li>
@@ -3935,9 +3977,13 @@ SOFTWARE.
 <li>A server entry whose command is built at run time (<code>"$CMD"</code>) is seen as written. The checks look at what the file says, not at what a shell would make of it.</li>
 </ul>
 <h2 id="running-it">Running it<a class="headerlink" href="#running-it" title="Permanent link">&para;</a></h2>
-<div class="language-sh highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>mcp-config,semgrep<span class="w"> </span>--output-dir<span class="w"> </span>ash_output
+<!-- doctest: run expect-exit=2 -->
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>mcp-config<span class="w"> </span>--output-dir<span class="w"> </span>ash_output
 </span></code></pre></div>
-<p>The policy findings come from <code>mcp-config</code> alone. To have the generated scripts scanned as well, run semgrep or opengrep in the same scan, as above.</p>
+<p>The policy findings come from <code>mcp-config</code> alone. On the <code>.mcp.json</code> above it reports <code>MCP-PRIVILEGE-ESCALATION</code> (HIGH) at the server's <code>command</code>, so the scan exits 2. To have the generated scripts scanned as well, run semgrep or opengrep in the same scan:</p>
+<!-- doctest: illustrative reason="runs semgrep, whose default ruleset p/ci is fetched from the Semgrep registry over the network" -->
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>mcp-config,semgrep<span class="w"> </span>--output-dir<span class="w"> </span>ash_output
+</span></code></pre></div>
 
 
 

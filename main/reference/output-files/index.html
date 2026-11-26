@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1033,6 +1035,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/track-findings-over-time/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Track findings over time
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/deduplicate-findings/" class="md-nav__link">
         
   
@@ -1273,10 +1303,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_18" >
         
           
-          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_18" id="__nav_4_18_label" tabindex="0">
             
   
   
@@ -1294,8 +1324,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_17">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_18_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_18">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -3886,6 +3916,11 @@ with every built-in scanner installed:</p>
 <td><code>archive/</code> holds a directory per <code>.zip</code>, <code>.tar</code>, or <code>.gz</code> file with the members ASH extracted; <code>jupyter/</code> holds each notebook converted to a script, named after the notebook's path and ending in <code>-converted.py</code> for a Python notebook (see <a href="../coverage/#converted-files">Converted files</a>). Empty when there was nothing to convert.</td>
 </tr>
 <tr>
+<td><code>history/</code></td>
+<td>the scan engine, <code>ash results merge</code></td>
+<td>One compact record per recorded run, named <code>&lt;report ID&gt;.json</code>, written while <code>global_settings.history.enabled</code> is on. The first record creates the directory, and each new record prunes it to the newest <code>global_settings.history.keep_runs</code>. No scan clears it, so it stays, with its records, after the setting is turned off. Read by <code>ash results trend --history</code>; see <a href="../../how-to/track-findings-over-time/">Track findings over time</a>. Not shown in the layout above.</td>
+</tr>
+<tr>
 <td><code>reports/</code></td>
 <td>the reporters</td>
 <td>One file per enabled reporter, named <code>ash.&lt;extension&gt;</code>. See <a href="#reports">below</a>.</td>
@@ -3909,7 +3944,7 @@ are in each project's <code>reports/</code>. See
 <p>Before a scan writes anything, ASH removes and recreates <code>analysis/</code>, <code>reports/</code>,
 <code>scanners/</code>, and <code>converted/</code>, and deletes <code>ash_aggregated_results.json</code>,
 <code>ash-ignore-report.txt</code>, and <code>ash-scan-set-files-list.txt</code>. <code>ash.log</code> is truncated
-when the logger opens it.</p>
+when the logger opens it. None of this touches <code>history/</code>.</p>
 <p>So a scan that fails leaves only what it wrote before it failed: gate CI on ASH's exit
 code, not on whether <code>reports/</code> exists. Container mode and Nix mode delete the same
 entries before they start the scan.</p>
@@ -3956,7 +3991,9 @@ these:</p>
   <code>ash-ignore-report.txt</code>, <code>ash-scan-set-files-list.txt</code>, <code>ash.log</code>, and
   <code>ash.log.jsonl</code>;</li>
 <li>in workspace mode, <code>projects</code> and <code>.workspace-spool</code> in the workspace's output
-  directory, and each project's <code>projects/&lt;project&gt;</code> directory.</li>
+  directory, and each project's <code>projects/&lt;project&gt;</code> directory;</li>
+<li><code>history</code> in the output directory, and the record a run writes in it, which are checked
+  when the record is written rather than before the run starts (see below).</li>
 </ul>
 <p>It also refuses an output directory below the source directory whose real path, with
 every link resolved, is outside the source directory.</p>
@@ -3984,6 +4021,13 @@ run stops with exit 1:</p>
 and to <code>ash merge</code>. <code>ash merge</code> prints the same text after <code>Refusing to write reports:</code>.
 <code>ash report</code> prints its report instead of writing it, and refuses a link only at a file
 the reporter writes beside it.</p>
+<p>The run history is checked when a record is written, not before the run starts, so a link
+there does not stop the run. With <code>global_settings.history.enabled</code> on, ASH writes no
+record through a link at <code>history</code> or at the record's own name, and pruning neither
+removes a link nor reaches through one. It logs a warning that starts <code>Could not record
+this scan in the history:</code> and names the link, and the scan or merge finishes and exits as
+it would have. <code>ash results trend --history</code> reads no records through a linked <code>history</code>,
+and refuses as it does for an empty one.</p>
 <h2 id="aggregated-results"><code>ash_aggregated_results.json</code><a class="headerlink" href="#aggregated-results" title="Permanent link">&para;</a></h2>
 <p>The scan engine writes this file, not a reporter, and every reporter and <code>ash report</code>
 reads it. Its JSON schema is
@@ -4199,8 +4243,11 @@ results, not as an access control. See
 SARIF 2.1.0 run, written two ways. The member writes every field of every result,
 defaults included, so its results show <code>"ruleIndex": -1</code>, and <code>"rule": null</code> unless the
 scanner gave one. <code>reports/ash.sarif</code> leaves out the fields ASH did not set, <code>ruleIndex</code>
-among them, and the empty ones, and adds each result's <code>rule</code> reference (below). After a
-scan of the sample project:</p>
+among them, and the empty ones, and adds each result's <code>rule</code> reference (below). It also
+writes a result's cross-scanner correlation id, where the result has one, into the
+result's <code>properties</code> as <code>ash/correlationId</code>
+(<a href="../../how-to/export-reports/#correlation">Correlate one observation across scanners</a>),
+which the member does not hold. After a scan of the sample project:</p>
 <!-- doctest: run expect-exit=2 -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>ash<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--no-progress
 </span></code></pre></div>

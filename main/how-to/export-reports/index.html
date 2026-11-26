@@ -16,7 +16,7 @@
         <link rel="prev" href="../read-results/">
       
       
-        <link rel="next" href="../deduplicate-findings/">
+        <link rel="next" href="../track-findings-over-time/">
       
       
         
@@ -764,6 +764,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1181,6 +1183,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../track-findings-over-time/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Track findings over time
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../deduplicate-findings/" class="md-nav__link">
         
   
@@ -1421,10 +1451,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_18" >
         
           
-          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_18" id="__nav_4_18_label" tabindex="0">
             
   
   
@@ -1442,8 +1472,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_17">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_18_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_18">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -3910,7 +3940,8 @@ moves to a different line, with no stable fingerprint from the scanner, is liste
 <code>moved</code> when ASH can pair it unambiguously, and as both new and absent when it cannot.
 The command
 exits 0 after a successful comparison even if findings changed, and 1 when it cannot
-read or compare the results. It is not a CI findings gate.</p>
+read or compare the results. It is not a CI findings gate. To follow findings over more
+than two scans, see <a href="../track-findings-over-time/">Track findings over time</a>.</p>
 <h2 id="github">GitHub code scanning<a class="headerlink" href="#github" title="Permanent link">&para;</a></h2>
 <p>Upload <code>ash.ghas.sarif</code>. It is SARIF 2.1.0 in which every rule a scanner declares gets a
 <code>security-severity</code>, the scanner's own or one from its most severe finding (see
@@ -4073,8 +4104,8 @@ matching stay keyed by the per-scanner finding id.</p>
     </a>
     
     
-    <a class="ash-pagination__next" href="../deduplicate-findings/" rel="next">
-      <span><span class="ash-pagination__direction">NEXT</span>Deduplicate findings</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M220.24,132.24l-72,72a6,6,0,0,1-8.48-8.48L201.51,134H40a6,6,0,0,1,0-12H201.51L139.76,60.24a6,6,0,0,1,8.48-8.48l72,72A6,6,0,0,1,220.24,132.24Z"/></svg></span>
+    <a class="ash-pagination__next" href="../track-findings-over-time/" rel="next">
+      <span><span class="ash-pagination__direction">NEXT</span>Track findings over time</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M220.24,132.24l-72,72a6,6,0,0,1-8.48-8.48L201.51,134H40a6,6,0,0,1,0-12H201.51L139.76,60.24a6,6,0,0,1,8.48-8.48l72,72A6,6,0,0,1,220.24,132.24Z"/></svg></span>
     </a>
     
   </div>

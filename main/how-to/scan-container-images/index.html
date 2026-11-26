@@ -764,6 +764,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1015,6 +1017,34 @@ SOFTWARE.
     
   
     Export reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../track-findings-over-time/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Track findings over time
   
 
     
@@ -1416,10 +1446,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_18" >
         
           
-          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_18" id="__nav_4_18_label" tabindex="0">
             
   
   
@@ -1437,8 +1467,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_17">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_18_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_18">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -3769,6 +3799,7 @@ daemon socket handed to ASH.</p>
 <h2 id="the-three-submission-shapes">The three submission shapes<a class="headerlink" href="#the-three-submission-shapes" title="Permanent link">&para;</a></h2>
 <p>One scan has one subject. Name the image in exactly one of three ways, each exclusive
 with <code>--source-dir</code> and with the others:</p>
+<!-- doctest: illustrative reason="needs a container runtime, network access and a registry that holds the image, and grype, syft and trivy installed on the host" -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># An indirect reference: resolved by an engine or the tools&#39; own registry clients.</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>ash<span class="w"> </span>scan<span class="w"> </span>--image<span class="w"> </span>registry.example.com/team/app:1.2.3
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
@@ -3778,6 +3809,11 @@ with <code>--source-dir</code> and with the others:</p>
 </span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1"># An OCI image-layout directory (the directory holding the oci-layout marker file).</span>
 </span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>ash<span class="w"> </span>scan<span class="w"> </span>--image-layout<span class="w"> </span>./app-layout/
+</span></code></pre></div>
+<p>Naming two of them in one call is refused before anything runs, with exit code 5 (a
+usage error):</p>
+<!-- doctest: run expect-exit=5 -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ash<span class="w"> </span>scan<span class="w"> </span>--image<span class="w"> </span>registry.example.com/team/app:1.2.3<span class="w"> </span>--image-archive<span class="w"> </span>app.tar
 </span></code></pre></div>
 <p>Prefer a digest-pinned reference (<code>repo@sha256:...</code>): two scans of the same pinned
 image then agree across machines. A tag-only reference is accepted and handed to the
@@ -3805,8 +3841,9 @@ scan and scans the whole image.</p>
 <p><strong>One subject per scan, several scans per call.</strong> A scan reports on one asset, and each
 image keeps its own report, its own identity scope and its own exit code. To scan several
 images in one call, repeat <code>--image</code> or give a comma-separated list (the two forms mix):</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ash<span class="w"> </span>scan<span class="w"> </span>--image<span class="w"> </span>registry.example.com/team/app:1.2.3<span class="w"> </span>--image<span class="w"> </span>registry.example.com/team/db:4.5
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>ash<span class="w"> </span>scan<span class="w"> </span>--image<span class="w"> </span>registry.example.com/team/app:1.2.3,registry.example.com/team/db:4.5
+<!-- doctest: illustrative reason="scans two images from a registry, which needs network access and grype, syft and trivy installed on the host" -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ash<span class="w"> </span>scan<span class="w"> </span>--image<span class="w"> </span>registry.example.com/team/app:1.2.3<span class="w"> </span>--image<span class="w"> </span>registry.example.com/team/db:4.5
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>ash<span class="w"> </span>scan<span class="w"> </span>--image<span class="w"> </span>registry.example.com/team/app:1.2.3,registry.example.com/team/db:4.5
 </span></code></pre></div>
 <p>ASH then runs one single-image scan per reference, in the order given, each in its own
 report directory under <code>--output-dir</code> named <code>&lt;NN&gt;-&lt;name&gt;-&lt;8 hex of the reference's hash&gt;</code>
@@ -3926,12 +3963,12 @@ the same path. The layer digest is not part of the id: a rebuilt layer that stil
 carries the same vulnerable file at the same path is the same finding.</p>
 <p>To scope a suppression to one image, add <code>image</code>, a case-insensitive glob matched
 against the submitted reference and the resolved digest:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">global_settings</span><span class="p">:</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">suppressions</span><span class="p">:</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/usr/lib/**</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">      </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CVE-2024-*</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">registry.example.com/team/app:*</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Base image CVE, fixed in the next rebuild</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">global_settings</span><span class="p">:</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">suppressions</span><span class="p">:</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/usr/lib/**</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">      </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CVE-2024-*</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">registry.example.com/team/app:*</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Base image CVE, fixed in the next rebuild</span>
 </span></code></pre></div>
 <p>A suppression without <code>image</code> applies to any finding, image or filesystem, as before.
 One with <code>image</code> never applies to a filesystem finding.</p>

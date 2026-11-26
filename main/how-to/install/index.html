@@ -764,6 +764,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1292,6 +1294,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../track-findings-over-time/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Track findings over time
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../deduplicate-findings/" class="md-nav__link">
         
   
@@ -1532,10 +1562,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_18" >
         
           
-          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_18" id="__nav_4_18_label" tabindex="0">
             
   
   
@@ -1553,8 +1583,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_17">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_18_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_18">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -4318,7 +4348,9 @@ install reports installed is what the next scan can import.</p>
 <p><code>--binary-path scanner=/absolute/path</code> forces one binary for one scanner and skips that
 scanner's install commands. Repeat it for each scanner. The path must be absolute, name a
 regular executable file rather than a symlink, and sit outside the directory being
-scanned. ASH reads and hashes the file, records the path and its SHA-256 in its install
+scanned. On Windows, which keeps no execute permission, an executable file is one whose
+name ends in <code>.exe</code>, <code>.com</code>, <code>.bat</code> or <code>.cmd</code>, the files Windows starts as programs.
+ASH reads and hashes the file, records the path and its SHA-256 in its install
 records under <code>~/.ash</code>, and never runs it. The record is read back: the scanners'
 dependency validation and later <code>ash dependencies install</code> runs resolve the scanner to
 the forced path before any PATH or uv lookup, re-checking the file and its SHA-256 each

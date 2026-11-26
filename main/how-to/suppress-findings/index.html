@@ -764,6 +764,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1237,6 +1239,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../track-findings-over-time/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Track findings over time
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../deduplicate-findings/" class="md-nav__link">
         
   
@@ -1477,10 +1507,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_18" >
         
           
-          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_18" id="__nav_4_18_label" tabindex="0">
             
   
   
@@ -1498,8 +1528,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_17">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_18_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_18">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -4028,11 +4058,13 @@ same GHSA id, each with the evidence in its reason.</p>
 </ul>
 <p>The whole file is hashed, not the definition, so reformatting a definition and editing it are treated alike. The file is read as bytes, so a checkout that rewrites line endings changes the hash; refresh the lock on that checkout.</p>
 <p>Create the suppression and its lock entry together with <code>ash suppress add</code>:</p>
+<!-- doctest: illustrative reason="names src/deploy.py and its Deployer.run_hook method, which the docs runner's sample project does not have" -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>ash<span class="w"> </span>suppress<span class="w"> </span>add<span class="w"> </span>B602<span class="w"> </span>--symbol<span class="w"> </span>Deployer.run_hook<span class="w"> </span>--file<span class="w"> </span>src/deploy.py<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span>--reason<span class="w"> </span><span class="s2">&quot;run_hook only runs commands from the deploy manifest&quot;</span>
 </span></code></pre></div>
 <p>This writes the suppression to the config a scan of the current directory uses (<code>--config</code> names another YAML file) and the hash to <code>.ash.lock</code>. A suppression already in the config for the same rule, file, and symbol is not written twice, which is how you bring an existing symbol suppression under the lock. Pass <code>--source-dir</code> to run it from another directory.</p>
 <p>After you change a locked file, read the change, confirm the suppressions still hold, and record the review:</p>
+<!-- doctest: illustrative reason="re-hashes src/deploy.py, a locked file the docs runner's sample project does not have" -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>ash<span class="w"> </span>suppress<span class="w"> </span>refresh<span class="w"> </span>src/deploy.py<span class="w">   </span><span class="c1"># or --all, after reviewing every change</span>
 </span></code></pre></div>
 <p>A refresh re-approves each changed file it touches, so the whole-lock run is asked for explicitly with <code>--all</code>, never by leaving the paths off. A locked file that no longer exists cannot be re-hashed; <code>refresh</code> reports it and exits 1, and <code>ash suppress refresh --drop-missing &lt;file&gt;</code> removes the dead entry (then remove its suppressions from the config).</p>

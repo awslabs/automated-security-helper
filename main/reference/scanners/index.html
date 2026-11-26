@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1033,6 +1035,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/track-findings-over-time/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Track findings over time
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/deduplicate-findings/" class="md-nav__link">
         
   
@@ -1273,10 +1303,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_18" >
         
           
-          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_18" id="__nav_4_18_label" tabindex="0">
             
   
   
@@ -1294,8 +1324,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_17">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_18_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_18">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -4723,7 +4753,7 @@ SOFTWARE.
 <li>Enabled by default: yes</li>
 <li>Tool type: IAC</li>
 <li>Command: <code>checkov</code></li>
-<li>Install: <code>uv tool install</code> on first use (<code>checkov&gt;=3.2.0,&lt;4.0.0</code>)</li>
+<li>Install: <code>uv tool install</code> on first use (<code>checkov&gt;=3.2.0,&lt;4.0.0</code> with Python <code>&gt;=3.10,&lt;3.15</code>)</li>
 <li>Offline strategy: <code>cache_flags</code></li>
 <li>Network in the sandbox, by default: no</li>
 <li>Environment passed into the sandbox: <code>CHECKOV_*</code>, <code>CKV_*</code></li>
@@ -4775,7 +4805,7 @@ SOFTWARE.
 <td><a id="scanners.checkov.options.additional_formats"></a><code>additional_formats</code></td>
 <td>list of one of <code>cli</code>, <code>csv</code>, <code>cyclonedx</code>, <code>cyclonedx_json</code>, <code>json</code>, <code>junitxml</code>, <code>github_failed_only</code>, <code>gitlab_sast</code>, <code>sarif</code>, <code>spdx</code></td>
 <td><code>["cyclonedx_json"]</code></td>
-<td>List of additional formats to output. Defaults to including CycloneDX JSON. checkov's JSON report is written whatever this lists: ASH reads the resource of each finding from it.</td>
+<td>List of additional formats to output. Defaults to including CycloneDX JSON. checkov's JSON report is written whatever this lists: ASH reads the resource of each finding from it, and rewrites its paths to the source-relative form the SARIF uses.</td>
 </tr>
 <tr>
 <td><a id="scanners.checkov.options.frameworks"></a><code>frameworks</code></td>

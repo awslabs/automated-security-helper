@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1033,6 +1035,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/track-findings-over-time/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Track findings over time
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/deduplicate-findings/" class="md-nav__link">
         
   
@@ -1273,10 +1303,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_18" >
         
           
-          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_18" id="__nav_4_18_label" tabindex="0">
             
   
   
@@ -1294,8 +1324,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_17">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_18_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_18">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -6655,7 +6685,9 @@ operational declarations (zero unconfirmed), the live-tool cell on every declare
 platform, pinned provisioning, and docs generated from the manifest. A row that cannot
 be evaluated here reads not-run, which is not a pass.</p>
 <p>Exit status: 0 when every named plugin passes, 1 when any row is red, 3 when none is red
-but some row was not run, 2 for a usage error (an unknown plugin, no transcript root).</p>
+but some row was not run, 2 for a usage error (an unknown plugin, no transcript root, a
+plugin that cannot be loaded). A red row outranks a load error: a run that found both
+exits 1, so a red verdict is never masked by an unrelated plugin's import failure.</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-30-1"><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>ash plugin verify [OPTIONS] [names]...
 </span></code></pre></div>
 <!-- doctest: options of=cli.plugin.verify -->
@@ -7888,7 +7920,8 @@ how an existing suppression is brought under the lock.</p>
 <p>Record a new review: re-hash locked files whose bytes changed.</p>
 <p>Run it after reading what changed in a file and confirming its suppressions
 still hold. It prints each file whose hash changed. A locked file that no
-longer exists is reported and left as it was; exit code 1 then.</p>
+longer exists is reported and left as it was (exit code 1), unless
+--drop-missing removes its dead entry.</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-44-1"><a id="__codelineno-44-1" name="__codelineno-44-1" href="#__codelineno-44-1"></a>ash suppress refresh [OPTIONS] [paths]...
 </span></code></pre></div>
 <!-- doctest: options of=cli.suppress.refresh -->
@@ -7908,7 +7941,7 @@ longer exists is reported and left as it was; exit code 1 then.</p>
 <td>text, any number</td>
 <td>not set</td>
 <td></td>
-<td>Locked files to re-hash. Every locked file when none is named.</td>
+<td>Locked files to re-hash. Pass --all for every locked file.</td>
 </tr>
 </tbody>
 </table>
@@ -7925,6 +7958,20 @@ longer exists is reported and left as it was; exit code 1 then.</p>
 </thead>
 <tbody>
 <tr>
+<td><a id="suppress-refresh--all"></a><code>--all</code></td>
+<td>flag</td>
+<td>off</td>
+<td></td>
+<td>Re-hash every locked file. A refresh re-approves each changed file it touches, so the whole-lock run is asked for explicitly.</td>
+</tr>
+<tr>
+<td><a id="suppress-refresh--drop-missing"></a><code>--drop-missing</code></td>
+<td>flag</td>
+<td>off</td>
+<td></td>
+<td>Remove the entry of a named file that no longer exists, instead of leaving it and exiting 1.</td>
+</tr>
+<tr>
 <td><a id="suppress-refresh--source-dir"></a><code>--source-dir</code></td>
 <td>text</td>
 <td>not set</td>
@@ -7936,8 +7983,12 @@ longer exists is reported and left as it was; exit code 1 then.</p>
 <h3 id="ash-suppress-verify"><a id="suppress-verify"></a><code>ash suppress verify</code><a class="headerlink" href="#ash-suppress-verify" title="Permanent link">&para;</a></h3>
 <p>Check the lock against the tree. Exits 1 when anything is out of date.</p>
 <p>Lists every locked file whose bytes changed or that is gone, and every
-symbol suppression in the named configs whose file has no lock entry. Exit
-code 0 means a scan applies every symbol suppression.</p>
+symbol suppression in the checked configs that the lock does not record
+(no entry for its file, or no recorded (rule_id, symbol) scope). It checks
+the named --config files, or the one config file a scan of the source
+directory discovers, and prints which; suppressions an <code>extends</code> base
+contributes are not read, so exit code 0 covers the checked files, not
+every config a scan could merge.</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-45-1"><a id="__codelineno-45-1" name="__codelineno-45-1" href="#__codelineno-45-1"></a>ash suppress verify [OPTIONS]
 </span></code></pre></div>
 <!-- doctest: options of=cli.suppress.verify -->

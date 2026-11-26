@@ -764,6 +764,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1015,6 +1017,34 @@ SOFTWARE.
     
   
     Export reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../track-findings-over-time/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Track findings over time
   
 
     
@@ -1399,10 +1429,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_18" >
         
           
-          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_18" id="__nav_4_18_label" tabindex="0">
             
   
   
@@ -1420,8 +1450,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_17">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_18_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_18">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -3747,7 +3777,9 @@ there is no express mode: <code>ash express start</code> refuses with a clear me
 and runs cold, and every scan without the flag runs cold silently, exactly as before.</p>
 <h2 id="use">Use it<a class="headerlink" href="#use" title="Permanent link">&para;</a></h2>
 <p>Nothing is required. When the daemon is running, every <code>ash scan</code> (and bare <code>ash</code>) uses it
-automatically; when it is not, or anything about it is off, the scan silently runs cold.
+automatically; when it is not, or anything about it is off, the scan silently runs cold
+(an internal error in express itself is the one exception; see
+<a href="#fallback">When it falls back cold</a>).
 Up to the moment the daemon accepts a scan, express can only make it faster or leave it as
 it was: every pre-acceptance failure is the cold run. Once a scan is running on the daemon
 there is no silent fallback either way -- a daemon killed mid-scan is reported on stderr
@@ -3846,12 +3878,15 @@ scan</em>: no socket, a stale daemon, a daemon already running as many scans as 
 CPUs, a protocol hiccup, an unsupported platform. Every one of those is a scan at the
 old speed, never a failed or wrong one. With <code>--express</code> on the command line the
 fallback additionally prints one line to stderr saying why, since that invocation asked
-for the daemon explicitly. After acceptance the scan is running against your terminal,
-so there is deliberately no fallback left: a daemon lost mid-scan (killed, machine
-shutdown) is reported on stderr and the command exits 1 -- rerunning it silently could
-double a scan's side effects. A Ctrl-C or termination signal that lands during the
-handshake itself ends the command with the usual interrupt code instead of starting a
-cold scan you just asked to stop.</p>
+for the daemon explicitly. The one fallback that is never silent is a defect in ASH's own
+express code: an internal error (an <code>AttributeError</code>, <code>TypeError</code>, <code>NameError</code> or
+<code>AssertionError</code>) prints one line on stderr naming it as a bug in ASH express mode on
+every run, with or without <code>--express</code>, and the scan still runs cold. After acceptance
+the scan is running against your terminal, so there is deliberately no fallback left:
+a daemon lost mid-scan (killed, machine shutdown) is reported on stderr and the command
+exits 1 -- rerunning it silently could double a scan's side effects. A Ctrl-C or
+termination signal that lands during the handshake itself ends the command with the
+usual interrupt code instead of starting a cold scan you just asked to stop.</p>
 <p>Some invocations never use the daemon: anything that is not a scan (<code>ash report</code>,
 <code>ash inspect</code>, shell tab-completion, ...), any scan with <code>--no-express</code>, and scans the
 MCP server hosts in-process. The console script <code>ash</code> gets the full saving; running the
