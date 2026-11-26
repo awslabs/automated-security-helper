@@ -216,7 +216,7 @@ Options, under `scanners.cfn-nag.options`. An option not listed here refuses the
 - Enabled by default: yes
 - Tool type: IAC
 - Command: `checkov`
-- Install: `uv tool install` on first use (`checkov>=3.2.0,<4.0.0`)
+- Install: `uv tool install` on first use (`checkov>=3.2.0,<4.0.0` with Python `>=3.10,<3.15`)
 - Offline strategy: `cache_flags`
 - Network in the sandbox, by default: no
 - Environment passed into the sandbox: `CHECKOV_*`, `CKV_*`

@@ -353,7 +353,7 @@ Record a container image reference as this session's scan subject.
 |-------|------|-------|
 | `image_ref` | string | The image reference. For an archive you hold the bytes of, use set_source_image_archive_chunk/-finalize instead, which needs no engine and no network. |
 
-On failure, `error_type` is one of `invalid_session_id`, `session_identity_required` and `source_delivery_busy`, or the class name of an exception.
+On failure, `error_type` is one of `invalid_session_id`, `session_identity_required`, `session_workspace_unavailable` and `source_delivery_busy`, or the class name of an exception.
 
 ## set_source_image_archive_chunk
 
