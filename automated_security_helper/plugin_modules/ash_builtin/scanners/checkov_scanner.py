@@ -40,6 +40,7 @@ from automated_security_helper.base.options import (
 )
 from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.base.uv_tool_mixin import _tool_name
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
@@ -1349,7 +1350,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             # call of the mixin does: without it a scanner offline by its
             # options probed PyPI online while its run and install were offline.
             resolved = get_uv_tool_command(
-                self._tool_command(),
+                _tool_name(self),
                 from_spec=self._uv_probe_from_spec(),
                 offline=self._is_offline_mode(),
             )
@@ -1389,7 +1390,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # scan went through uv, whose install had just failed. And a dependency
         # declared satisfied is recorded as such, as the branches above record it.
         resolved = get_uv_tool_command(
-            self._tool_command(),
+            _tool_name(self),
             from_spec=self._uv_probe_from_spec(),
             offline=self._is_offline_mode(),
         )
@@ -1419,7 +1420,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         executable = resolved[0]
         checked = verify_pre_installed_tool(
             executable,
-            self._tool_command(),
+            _tool_name(self),
             None,
             self._get_tool_version_constraint(),
             uv_executable=None,
