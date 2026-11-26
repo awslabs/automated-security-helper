@@ -948,6 +948,67 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#choose-how-scanner-tools-are-installed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choose how scanner tools are installed
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Choose how scanner tools are installed">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#providers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Providers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#system-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        System tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#virtualenvs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Virtualenvs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#forcing-a-binary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Forcing a binary
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#choose-a-version-to-pin" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3728,6 +3789,67 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#choose-how-scanner-tools-are-installed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choose how scanner tools are installed
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Choose how scanner tools are installed">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#providers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Providers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#system-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        System tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#virtualenvs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Virtualenvs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#forcing-a-binary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Forcing a binary
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#choose-a-version-to-pin" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4065,6 +4187,151 @@ them, so installing the extra with ASH is simpler.</p>
 <p>The <code>symbols</code> extra is in <code>main</code> and not in releases up to 3.7.x. Its tree-sitter
 packages publish no wheels for Linux on arm64 with musl (Alpine), so on that platform
 the install needs a C compiler.</p>
+<h2 id="choose-how-scanner-tools-are-installed">Choose how scanner tools are installed<a class="headerlink" href="#choose-how-scanner-tools-are-installed" title="Permanent link">&para;</a></h2>
+<p><code>ash dependencies install</code> installs each scanner's tool the way its plugin declares
+it: Python tools with <code>uv tool install</code>, native tools from pinned, digest-verified
+release downloads, and a few through <code>gem</code> or the system package manager. Five options
+change where tools come from. They are options of the command only; no configuration
+file or environment variable sets them, so a repository you scan cannot steer the
+installer. Each is listed in the <a href="../../reference/cli/#dependencies-install"><code>ash dependencies install</code> reference</a>.</p>
+<h3 id="providers">Providers<a class="headerlink" href="#providers" title="Permanent link">&para;</a></h3>
+<p><code>--providers uv,pipx,brew</code> names the install providers this run may use, in order of
+preference. The list is both a permission boundary and an order: only the listed
+providers may install anything, and for each tool the first listed provider that can
+install it wins. A provider that cannot serve a tool is skipped, with its reason
+printed. When none of them can, the tool is refused with every reason, nothing runs for
+it, and the run exits 1. ASH never substitutes a provider you did not list.</p>
+<p>Without <code>--providers</code> every provider is permitted and each tool is installed the way
+its plugin declares, which is what the command did before the option existed.</p>
+<table>
+<thead>
+<tr>
+<th>Provider</th>
+<th>What it installs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>uv</code></td>
+<td>Python tools in <code>uv tool</code> environments, packages into a Python environment, and <code>uv venv</code> virtualenvs</td>
+</tr>
+<tr>
+<td><code>pipx</code></td>
+<td>Python tools in pipx environments. It cannot install into a named virtualenv, and <code>pipx install --python</code> takes an executable, a version, or a path, so a version-range request such as <code>&gt;=3.10,&lt;3.14</code> is refused</td>
+</tr>
+<tr>
+<td><code>pip</code></td>
+<td>Packages into one interpreter, or into the virtualenv named by <code>--virtualenv-path</code>; <code>python -m venv</code> creates it</td>
+</tr>
+<tr>
+<td><code>release-download</code></td>
+<td>ASH's pinned release downloads for the tools that have one</td>
+</tr>
+<tr>
+<td><code>nix</code></td>
+<td>The toolchain the repository flake pins, by realizing the dev shell that <code>--mode nix</code> runs. One realization serves every tool in the run, and it takes no interpreter request or exact version pin. The realized tools live in the Nix store and are not placed on <code>PATH</code> or in the bin directory, so the post-install verdict can read a nix-only tool as missing; a <code>--mode nix</code> scan finds them</td>
+</tr>
+<tr>
+<td><code>apt</code>, <code>dnf</code>, <code>yum</code>, <code>zypper</code>, <code>brew</code>, <code>npm</code>, <code>pnpm</code>, <code>conda</code>, <code>choco</code>, <code>gem</code></td>
+<td>One generic system-package shape: the install command of that manager for the package that provides the tool</td>
+</tr>
+<tr>
+<td><code>go</code>, <code>cargo</code></td>
+<td>Declared and not implemented; they refuse with "not implemented"</td>
+</tr>
+<tr>
+<td><code>custom</code></td>
+<td>A plugin's own shell or download command, run as declared</td>
+</tr>
+</tbody>
+</table>
+<p>A package manager installs a tool from the name the install-package facet declares for
+it. A tool with no declared name for that manager is refused naming the missing row, and
+a package manager installs the version it carries, not the range the plugin declares;
+the command's output says so. <code>apt</code>, <code>dnf</code>, <code>yum</code> and <code>zypper</code> are declared as root-only,
+and ASH does not add <code>sudo</code>: run as root, or list another provider.</p>
+<h3 id="system-tools">System tools<a class="headerlink" href="#system-tools" title="Permanent link">&para;</a></h3>
+<p><code>--inherit-system-tools</code> is the default, and it is the behavior the command has always
+had: a tool already on <code>PATH</code> or in a system directory counts as present, and an
+identical copy of a pinned tool skips its download.</p>
+<p><code>--no-inherit-system-tools</code> ignores those copies. A global <code>checkov</code> on <code>PATH</code> does not
+stop the install, and the result counts only what was installed into a location ASH or
+its provider manages: uv's tool listing, the virtualenv you named, ASH's own environment,
+and the ASH bin directory. A system copy that was set aside is named in the output. Programs
+ASH never installs, such as Node.js for cdk-nag, are still found on <code>PATH</code>. The option
+affects the install and its report only; a scan finds tools exactly as before.</p>
+<h3 id="virtualenvs">Virtualenvs<a class="headerlink" href="#virtualenvs" title="Permanent link">&para;</a></h3>
+<p><code>--virtualenv-path &lt;dir&gt;</code> installs Python tools into one virtualenv, through the provider,
+instead of into a separate environment per tool.</p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Create flag</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>none</td>
+<td>none</td>
+<td>Per-tool environments, as before</td>
+</tr>
+<tr>
+<td>none</td>
+<td>either flag typed</td>
+<td>Refused (exit 2): the flag does nothing without a path</td>
+</tr>
+<tr>
+<td>exists, a virtualenv</td>
+<td><code>--no-create-virtualenv</code> (default)</td>
+<td>Tools install into it. Each tool's interpreter request is checked against the Python version in its <code>pyvenv.cfg</code>, and a tool whose request it fails is refused</td>
+</tr>
+<tr>
+<td>missing</td>
+<td><code>--no-create-virtualenv</code> (default)</td>
+<td>Refused (exit 3)</td>
+</tr>
+<tr>
+<td>missing</td>
+<td><code>--create-virtualenv</code></td>
+<td>ASH creates it first, with one interpreter request that satisfies every tool's, then installs into it</td>
+</tr>
+<tr>
+<td>exists, not a virtualenv</td>
+<td>either</td>
+<td>Refused (exit 3); ASH never overwrites or deletes it</td>
+</tr>
+</tbody>
+</table>
+<p>Use <code>--no-create-virtualenv</code> with a virtualenv your own setup step prepared, and
+<code>--create-virtualenv</code> to have ASH vend one. Native tools and system packages are not
+installed into a virtualenv, so the options do not change them.</p>
+<p>The virtualenv must sit outside the directory being scanned, existing or created: the
+install commands built around it execute its interpreter (<code>uv pip install --python
+&lt;venv python&gt;</code>, <code>&lt;venv python&gt; -m pip</code>), so a virtualenv the scanned tree supplies is
+refused (exit 3), with the same opt-in as a forced binary (<code>ASH_ALLOW_IN_TREE_TOOLS=1</code>).
+Python-environment installs -- packages ASH's own process imports, such as cdk-nag's CDK
+libraries -- stay in the environment running ASH rather than the virtualenv, so what the
+install reports installed is what the next scan can import.</p>
+<h3 id="forcing-a-binary">Forcing a binary<a class="headerlink" href="#forcing-a-binary" title="Permanent link">&para;</a></h3>
+<p><code>--binary-path scanner=/absolute/path</code> forces one binary for one scanner and skips that
+scanner's install commands. Repeat it for each scanner. The path must be absolute, name a
+regular executable file rather than a symlink, and sit outside the directory being
+scanned. ASH reads and hashes the file, records the path and its SHA-256 in its install
+records under <code>~/.ash</code>, and never runs it. The record is read back: the scanners'
+dependency validation and later <code>ash dependencies install</code> runs resolve the scanner to
+the forced path before any PATH or uv lookup, re-checking the file and its SHA-256 each
+time, and a record whose file moved or changed is named and set aside rather than
+trusted by its path. <code>--binary-path scanner=</code> with an empty path removes the record.</p>
+<p>The record answers one question for every scanner, whichever way its dependency check
+probes: where the scanner's own binary is. A scanner's other requirements still hold
+and are checked first, so the force never turns them off: npm-audit and snyk-code
+still refuse to run offline, trivy still needs its offline vulnerability database,
+cfn-guard its rules files, and actionlint its configured integrations. Three scanners
+run Python libraries rather than one binary and never consult the record: cdk-nag
+(aws-cdk-lib and cdk-nag plus Node.js), detect-secrets, and mcp-config -- forcing a
+path for them records it but satisfies nothing.</p>
 <h2 id="choose-a-version-to-pin">Choose a version to pin<a class="headerlink" href="#choose-a-version-to-pin" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

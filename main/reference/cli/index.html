@@ -4900,6 +4900,7 @@ SOFTWARE.
 <p>It takes only the options below. To scan with scan options, run <code>ash scan --mode container</code>, which builds the image the same way and accepts every scan option.</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ash build-image [OPTIONS]
 </span></code></pre></div>
+<p>This command is hidden from <code>--help</code> output.</p>
 <!-- doctest: options of=cli.build-image -->
 <table>
 <thead>
@@ -5953,6 +5954,41 @@ By default, it installs dependencies for all plugin types (converter, scanner, r
 <td>not set</td>
 <td></td>
 <td>Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2')</td>
+</tr>
+<tr>
+<td><a id="dependencies-install--inherit-system-tools"></a><code>--inherit-system-tools</code> / <code>--no-inherit-system-tools</code></td>
+<td>flag</td>
+<td>on</td>
+<td></td>
+<td>Whether a tool found on PATH or in a system directory satisfies a dependency during install. The default (--inherit-system-tools) is what the installer has always done: a tool already there is accepted as present. With --no-inherit-system-tools a global copy, for example a system checkov, is ignored: the managed install still runs and the result counts only what ASH, uv or --virtualenv-path put in place. Programs ASH never installs, such as Node.js for cdk-nag, are still found on PATH either way. Install time only; a scan finds tools as before.</td>
+</tr>
+<tr>
+<td><a id="dependencies-install--providers"></a><code>--providers</code></td>
+<td>text</td>
+<td>not set</td>
+<td></td>
+<td>The install providers this run may use, in order of preference (comma-separated). Only the listed providers may install anything, and the first one that can serve a tool wins; a provider that cannot is skipped with its reason printed, and when none can the tool is refused. Without the flag every provider is permitted and each tool is installed the way its plugin declares. Known providers: uv, pipx, pip, release-download, nix, apt, dnf, yum, zypper, brew, npm, pnpm, conda, choco, gem, go, cargo, custom.</td>
+</tr>
+<tr>
+<td><a id="dependencies-install--virtualenv-path"></a><code>--virtualenv-path</code></td>
+<td>text</td>
+<td>not set</td>
+<td></td>
+<td>Install Python tools into the virtualenv at this path through the selected provider, instead of into per-tool environments. The virtualenv must already exist (for example one a node or CI setup step prepared) unless --create-virtualenv lets ASH create it.</td>
+</tr>
+<tr>
+<td><a id="dependencies-install--create-virtualenv"></a><code>--create-virtualenv</code> / <code>--no-create-virtualenv</code></td>
+<td>flag</td>
+<td>off</td>
+<td></td>
+<td>Let ASH create the virtualenv at --virtualenv-path when it does not exist (--create-virtualenv), or refuse when it does not (--no-create-virtualenv, the default). A path that exists and is not a virtualenv is never overwritten.</td>
+</tr>
+<tr>
+<td><a id="dependencies-install--binary-path"></a><code>--binary-path</code></td>
+<td>text, repeatable</td>
+<td>not set</td>
+<td></td>
+<td>Force this binary for the named scanner (repeatable, one per scanner): its install commands are skipped, binary detection is bypassed, and the path is recorded for dependency validation -- the scanners' dependency checks and later install runs read the record, re-checking the file and its SHA-256 each time. The path must be absolute, exist, and be an executable regular file outside the scanned tree. ASH checks the file and never runs it. The record resolves the scanner's own binary only: a scanner's other requirements (npm-audit's offline refusal, trivy's offline database, cfn-guard's rules, actionlint's integrations) still apply, and cdk-nag, detect-secrets and mcp-config run Python libraries rather than one binary, so they never consult it. '&lt;scanner&gt;=' with an empty path removes the recorded entry.</td>
 </tr>
 <tr>
 <td><a id="dependencies-install--verbose"></a><code>--verbose</code>, <code>-v</code></td>
@@ -7722,10 +7758,10 @@ across different scanners and ensure fields are preserved during aggregation.</p
 </tr>
 <tr>
 <td><a id="scan--image"></a><code>--image</code></td>
-<td>text</td>
+<td>text, repeatable</td>
 <td>not set</td>
 <td></td>
-<td>Scan a container image named by reference (registry/repo[:tag]) instead of a source directory. ASH fetches nothing itself: the image is prepared by a container engine or the scanner tools' own registry clients. Exclusive with --source-dir, --image-archive and --image-layout; scanners that do not declare container_image targets are reported SKIPPED.</td>
+<td>Scan a container image named by reference (registry/repo[:tag]) instead of a source directory. ASH fetches nothing itself: the image is prepared by a container engine or the scanner tools' own registry clients. Repeat it, or give a comma list, to scan several images: each is its own scan, with its own reports under &lt;output-dir&gt;/&lt;NN&gt;-&lt;image&gt;-&lt;hash&gt;/, and the exit code is the worst of theirs. Exclusive with --source-dir, --image-archive and --image-layout; scanners that do not declare container_image targets are reported SKIPPED.</td>
 </tr>
 <tr>
 <td><a id="scan--image-archive"></a><code>--image-archive</code></td>
