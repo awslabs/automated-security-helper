@@ -194,7 +194,7 @@
           "symbol": "TestPlantedPayload.test_link_whose_target_escapes_the_artifact_is_rejected"
         }
       ],
-      "sha256": "25accaee4851d1a27f198df4b86a770f2ba6e4f4a348389ed66587c2d47ece01"
+      "sha256": "775a9e037993fb46b73de8b5c1238ff3fc19564cf475c8c4f523e2b4c131526f"
     },
     "tests/unit/test_defense_in_depth.py": {
       "created": "2026-11-25T17:03:07Z",
