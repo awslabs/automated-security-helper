@@ -202,7 +202,10 @@ class TestOtherEntryPointsDoNotWarn:
         # and its help says so, which is not the notice this control is about.
         result = CliRunner().invoke(cli_main.app, ["results", "report", "--help"])
         assert result.exit_code == 0
-        assert "deprecated" not in result.output
+        # Its --config help names the deprecated legacy config locations (the
+        # canonical file is .ash.yaml at the root, main #1112), so, as for the root
+        # help above, the notice for a deprecated COMMAND is what must be absent.
+        assert "command is deprecated" not in result.output
         assert "deprecated" not in capsys.readouterr().err
 
     def test_the_warning_is_not_registered_as_an_app_callback(self):

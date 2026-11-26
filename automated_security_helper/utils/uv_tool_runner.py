@@ -2100,7 +2100,7 @@ class UVToolRunner:
             # Installing runs the package's build code and writes uv's tool
             # directory, which a sandboxed scanner may only read. Refused rather
             # than run outside the sandbox the operator asked for.
-            from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
+            from automated_security_helper.utils.cli_name import CANONICAL_CLI_NAME
             from automated_security_helper.utils.log import ASH_LOGGER
 
             if reinstall:

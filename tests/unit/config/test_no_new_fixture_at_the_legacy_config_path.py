@@ -68,6 +68,7 @@ LEGACY_SUBJECT = {
     "unit/cli/test_config_commands_refuse_before_tracebacks.py": "init refuses a new file beside an existing legacy source",
     "unit/cli/test_config_default_file_name.py": "the move from the legacy name to .ash.yaml and legacy files still loading",
     "unit/cli/test_recorded_reference_fields.py": "covers both the legacy and the canonical location on purpose",
+    "unit/config/test_a_client_supplied_suppression_saves_and_is_found_again.py": "a dangling link at the .ash directory, through which the save must create nothing",
     "unit/config/test_config_extends.py": "a base path resolves relative to a config inside .ash/",
     "unit/config/test_config_files_that_do_not_load.py": "a linked .ash directory and every legacy discovery location",
     "unit/config/test_config_source_discovery.py": "discovery precedence and the deprecation warning",

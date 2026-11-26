@@ -145,10 +145,6 @@ def sh_subcommands(contract) -> list[str]:
     return [f'ASH_SUBCOMMANDS="{_sh_words(contract.subcommands)}"']
 
 
-def sh_dash_o_subcommands(contract) -> list[str]:
-    return [f'ASH_DASH_O_IS_THE_SUBCOMMANDS="{_sh_words(contract.dash_o_subcommands)}"']
-
-
 def sh_root_value_options(contract) -> list[str]:
     return [f'ASH_ROOT_VALUE_OPTIONS="{_sh_words(contract.root_value_options)}"']
 

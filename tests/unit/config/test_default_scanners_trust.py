@@ -836,9 +836,12 @@ class TestTheReferenceQualifiesUnknownKeys:
         section = section[: section.index("<!-- doctest: options of=default_scanners")]
         said = " ".join(section.split())
 
+        # The generated page names the command v4 installs: the reference generator
+        # spells every `ash <subcommand>` of the model's text as `ashx <subcommand>`
+        # (scripts/_reference_docs.py).
         assert (
             "A key not listed here is an error when the configuration is loaded. "
             "In a config file inside a git checkout or the scanned tree, or one an "
             "MCP client delivered, the whole section is ignored instead, an "
-            "unknown key included, and `ash config lint` warns about it."
+            "unknown key included, and `ashx config lint` warns about it."
         ) in said

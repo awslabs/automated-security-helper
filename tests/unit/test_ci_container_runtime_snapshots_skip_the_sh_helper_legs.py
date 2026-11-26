@@ -3,15 +3,18 @@
 
 """The container-runtime snapshot step does not rerun on the sh-helper legs.
 
-``utils/ash_helpers.sh`` forwards to ``./ash``. The sh-helper legs of the scan matrix
+``utils/ash_helpers.sh`` forwards to ``ashx --mode container`` (v4 removed the
+``./ash`` script and with it the ``bash`` legs). The sh-helper legs of the scan matrix
 exist to run that forwarding end to end, and the container-runtime snapshot modules
 (``tests/snapshot/container/runtime``) never source the helper, so on those legs the
-step repeats what the ``bash`` leg with the same OS and runner already compared, at
-the cost of the leg's runtime on every pull request, merge-queue run and push.
+step repeats what the ``python-container`` leg with the same OS and runner already
+compared (that leg runs the same container scan through ``ashx`` directly), at the cost
+of the leg's runtime on every pull request, merge-queue run and push.
 
 Two things are pinned: the step's condition excludes ``sh-helper``, and every
-``sh-helper`` row has a ``bash`` row with the same OS and OCI runner, so the runtime
-output the step compares is still compared for each runner the helper is used with.
+``sh-helper`` row has a ``python-container`` row with the same OS and OCI runner, so the
+runtime output the step compares is still compared for each runner the helper is used
+with.
 """
 
 from __future__ import annotations
@@ -64,10 +67,12 @@ def test_the_snapshot_step_is_not_run_by_the_sh_helper_method():
     assert "||" not in condition, condition
 
 
-def test_every_sh_helper_row_has_a_bash_row_on_the_same_os_and_runner():
+def test_every_sh_helper_row_has_a_container_row_on_the_same_os_and_runner():
     rows = _scan_matrix_rows()
-    bash = {
-        (row["os"], row.get("oci-runner")) for row in rows if row["method"] == "bash"
+    container = {
+        (row["os"], row.get("oci-runner"))
+        for row in rows
+        if row["method"] == "python-container"
     }
     sh_helper = {
         (row["os"], row.get("oci-runner"))
@@ -75,7 +80,7 @@ def test_every_sh_helper_row_has_a_bash_row_on_the_same_os_and_runner():
         if row["method"] == "sh-helper"
     }
     assert sh_helper, "the matrix has no sh-helper row; this guard has nothing to check"
-    assert sh_helper <= bash, (
-        "an sh-helper row whose OS and runner no bash row covers would lose its "
-        f"container-runtime snapshot comparison: {sorted(sh_helper - bash)}"
+    assert sh_helper <= container, (
+        "an sh-helper row whose OS and runner no python-container row covers would "
+        f"lose its container-runtime snapshot comparison: {sorted(sh_helper - container)}"
     )

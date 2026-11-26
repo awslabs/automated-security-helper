@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Hold the trivy suppressions in .ash/.ash_community_plugins.yaml to the code.
+"""Hold the trivy suppressions in .ash/.ash_alpha_plugins.yaml to the code.
 
 The self-scan reads these entries, and an entry that matches nothing produces
 no error, so a source change can leave one behind silently. Two shapes have
@@ -35,7 +35,9 @@ import yaml
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CONFIG = ".ash/.ash_community_plugins.yaml"
+# The plugin-tier config, named for the alpha tier since main renamed the community
+# tier (#1044).
+CONFIG = ".ash/.ash_alpha_plugins.yaml"
 
 # rule id -> (CloudFormation resource type, terraform resource type)
 KMS_RULES = {

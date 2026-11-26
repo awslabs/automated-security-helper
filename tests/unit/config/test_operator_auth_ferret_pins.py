@@ -3,7 +3,7 @@
 ferret-scan's keyword-assignment heuristic reports API_KEY_OR_SECRET at HIGH on
 one line of ``ash_operator/auth.py`` (the local that holds the projected service
 account token) and one line of its test (the placeholder the test writes as that
-token). ``.ash/.ash_community_plugins.yaml`` suppresses each by a one-line range.
+token). ``.ash/.ash_alpha_plugins.yaml`` suppresses each by a one-line range.
 
 A line range is only as narrow as the line it names. If an edit above the line
 moves it, the range sits on whatever moved in and hides that instead. So each
@@ -30,7 +30,9 @@ from automated_security_helper.utils.suppression_matcher import (
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CONFIG = REPO_ROOT / ".ash" / ".ash_community_plugins.yaml"
+# The plugin-tier config, named for the alpha tier since main renamed the community
+# tier (#1044).
+CONFIG = REPO_ROOT / ".ash" / ".ash_alpha_plugins.yaml"
 RULE = "API_KEY_OR_SECRET"
 
 # path -> the exact text, leading whitespace stripped, of the one line ferret

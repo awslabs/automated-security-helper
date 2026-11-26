@@ -178,7 +178,8 @@ class TestNixEntry:
 class TestSandboxParityLeg:
     def test_parity_installs_loads_and_requires_betterleaks(self):
         text = UNIFIED.read_text()
-        assert "ash dependencies install --tool betterleaks" in text
+        # The leg installs through the canonical CLI name, ashx (utils/cli_name.py).
+        assert "ashx dependencies install --tool betterleaks" in text
         assert f"betterleaks_module='  - {BETTERLEAKS_MODULE}'" in text
         # The required list names betterleaks only on the legs whose matrix row turns it on.
         assert re.search(r'required="\$required,betterleaks"', text)

@@ -100,7 +100,10 @@ updates:
   # pin python:3.12-slim and are updated separately; nothing requires them to move together,
   # and the e2e job builds both from the branch, so a bump to either is tested before merge.
   # The editor test images are visual and UI harnesses, so a base bump can move a screenshot
-  # baseline; their CI is what reviews it.
+  # baseline; their CI is what reviews it. tests/test_data/images/live-engine is the tiny
+  # image the live-engine image-scan workflow builds, pushes and scans; the workflow reads
+  # every digest it compares from the engine and the registry, so a base bump changes no
+  # expected value, and that workflow is what tests it.
   #
   # tests/test_data/snapshot_fixture/repo is left out on purpose: it is a fixture that ASH
   # scans in the snapshot tests, and its bytes are part of the expected output.
@@ -110,6 +113,7 @@ updates:
       - "/deploy/kubernetes-operator/tests/e2e"
       - "/editors/jetbrains/ui-test"
       - "/editors/vscode/test/visual"
+      - "/tests/test_data/images/live-engine"
     schedule:
       interval: "daily"
     cooldown:

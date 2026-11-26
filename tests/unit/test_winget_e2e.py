@@ -635,8 +635,9 @@ def test_the_minimum_winget_version_is_the_first_with_the_manifest_schema() -> N
 
 def test_the_ferret_suppression_covers_exactly_the_winget_digest_lines() -> None:
     # ferret-scan reads each 64-hex digest as a secret and ignores the inline
-    # detect-secrets marker, so .ash/.ash_community_plugins.yaml suppresses it by line
-    # range. A range that drifts off the digests would suppress whatever moved in.
+    # detect-secrets marker, so .ash/.ash_alpha_plugins.yaml (the community tier's
+    # config, renamed for the alpha tier on main, #1044) suppresses it by line range.
+    # A range that drifts off the digests would suppress whatever moved in.
     lines = VERIFY_PS1.read_text(encoding="utf-8").splitlines()
     digests = [
         number
@@ -645,7 +646,7 @@ def test_the_ferret_suppression_covers_exactly_the_winget_digest_lines() -> None
     ]
     assert len(digests) == 2, digests
     config = yaml.safe_load(
-        (REPO / ".ash" / ".ash_community_plugins.yaml").read_text(encoding="utf-8")
+        (REPO / ".ash" / ".ash_alpha_plugins.yaml").read_text(encoding="utf-8")
     )
     entries = [
         s

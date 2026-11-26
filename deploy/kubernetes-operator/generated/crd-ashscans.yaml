@@ -10,7 +10,7 @@ metadata:
   name: ashscans.ash.awslabs.github.io
   annotations:
     ash.awslabs.github.io/generated-by: python -m ash_operator.generate_manifests
-    ash.awslabs.github.io/ash-config-schema-sha256: 620ac5a99163b3c2
+    ash.awslabs.github.io/ash-config-schema-sha256: 915c50abb461e0db
 spec:
   group: ash.awslabs.github.io
   scope: Namespaced
@@ -357,6 +357,14 @@ spec:
                                 Separates two copies with the same name and version. Findings that do
                                 not report an install path never match.
                               nullable: true
+                            image:
+                              type: string
+                              description: (Optional) Only suppress findings inside a container image
+                                whose submitted reference or resolved digest matches this pattern (glob,
+                                case-insensitive), e.g. 'alpine:*' or 'sha256:abc*'. Omit it to match
+                                any asset; filesystem findings and image findings alike. Findings that
+                                carry no image never match an image-scoped suppression.
+                              nullable: true
                             symbol:
                               type: string
                               description: (Optional) Only suppress findings whose lines lie inside the
@@ -429,6 +437,95 @@ spec:
                           - reason
                           type: object
                         type: array
+                      exclusions:
+                        description: 'Global list of rule+path exclusions. Each entry names a rule ID
+                          (glob allowed), a path (matched like a suppression''s), an optional scanner
+                          and a required reason, and DROPS the matching results from SARIF instead of
+                          keeping them marked suppressed: for finding classes that are always benign in
+                          a known place, such as bandit B101 under tests/.'
+                        items:
+                          description: 'A rule+path exclusion: a known-benign finding class DROPPED from
+                            results.
+
+
+                            Unlike a suppression, which keeps the result in SARIF marked ``suppressed``
+
+                            (``kind: inSource``), an exclusion removes it, so a class that is always
+
+                            benign in a known place (bandit B101 under ``tests/``, say) does not pile
+                            up
+
+                            as suppressed noise in SARIF consumers and dashboards (issue #894). And
+
+                            unlike an ignore path, it drops only the named rule in the named path, so
+
+                            other rules there are still reported.
+
+
+                            ``rule_id`` and ``path`` are both required, with ``reason``; ``scanner``
+
+                            optionally bounds the exclusion to one scanner''s results. The path is read
+
+                            exactly as a suppression''s (``suppression_matcher.file_path_matches``), the
+
+                            rule id as a suppression''s rule id (exact, case-insensitive, or a glob),
+                            and
+
+                            ``expires`` as every entry''s. Applied by
+
+                            ``sarif_utils.apply_suppressions_to_sarif`` after the ignore-path check and
+
+                            before the config suppressions; an entry a client-delivered config supplied
+
+                            (``client_supplied``) marks the result as a client suppression instead of
+
+                            dropping it, so the results show what the client chose to hide. A runtime
+
+                            override of ``/global_settings/exclusions`` is denied
+
+                            (``RuntimeOverridesConfig.denied_paths``).'
+                          properties:
+                            path:
+                              description: Path or pattern to exclude
+                              type: string
+                            reason:
+                              description: Reason for exclusion
+                              type: string
+                            expires:
+                              type: string
+                              description: (Optional) Expiration date (YYYY-MM-DD). The entry stops applying
+                                on this date, by the local clock of the host running the scan. 'expiration'
+                                is accepted as a deprecated alias when a config is read; the alias is
+                                removed in ASH v4.
+                              nullable: true
+                            client_supplied:
+                              x-kubernetes-preserve-unknown-fields: true
+                              description: 'Set by ASH: True when a config or workspace policy file an
+                                MCP client delivered supplied this entry, so results show which suppressions
+                                and ignored paths came from the client. A value written in a config file
+                                is ignored.'
+                            rule_id:
+                              description: 'Rule ID whose findings the exclusion drops. Compared like
+                                a suppression''s rule_id: the finding''s exact id (case-insensitive),
+                                or a glob such as ''B1*''.'
+                              type: string
+                            scanner:
+                              type: string
+                              description: (Optional) Only drop this scanner's findings, by its registered
+                                name (case-insensitive), e.g. 'bandit'. Omit it to drop the rule from
+                                any scanner.
+                              nullable: true
+                            expiration:
+                              type: string
+                              description: (Optional) Deprecated alias of 'expires', accepted when a config
+                                is read and removed in ASH v4; the entry is written and stored as 'expires'.
+                              nullable: true
+                          required:
+                          - path
+                          - reason
+                          - rule_id
+                          type: object
+                        type: array
                       mcp:
                         description: MCP-server-specific configuration (runtime override allowlist, etc.).
                         properties:
@@ -449,19 +546,19 @@ spec:
                                 description: 'JSON-Pointer glob patterns that are never allowed (denied
                                   wins over allowed). Each entry starts with ''/''. The defaults block
                                   the fields that decide whether a scan fails, what it runs and reports,
-                                  where findings are sent, the scanner sandbox, and this policy. A list
-                                  equal to a default ASH has shipped counts as the current default list.
-                                  Any other list is added to the current defaults, unless replace_default_denied_paths
-                                  is true. When it is added, a list that holds some default entries and
-                                  leaves others out still gets them, and a warning names the ones it leaves
-                                  out. Whatever the list, and with replace_default_denied_paths too, the
-                                  entries ASH always denies (the scanner sandbox, ash_plugin_modules,
-                                  the detect-secrets verification, plugin and baseline settings, the archive
-                                  converter''s extraction limits, and the sections of the plugins that
-                                  send data off the host: the s3, aws-security-hub, cloudwatch-logs and
-                                  bedrock-summary-reporter reporters and the detect-secrets, npm-audit,
-                                  opengrep, semgrep, snyk-code, trivy, trivy-repo and zizmor scanners)
-                                  are added to it.'
+                                  where findings are sent, the scanner sandbox, the run history''s recording
+                                  and retention, and this policy. A list equal to a default ASH has shipped
+                                  counts as the current default list. Any other list is added to the current
+                                  defaults, unless replace_default_denied_paths is true. When it is added,
+                                  a list that holds some default entries and leaves others out still gets
+                                  them, and a warning names the ones it leaves out. Whatever the list,
+                                  and with replace_default_denied_paths too, the entries ASH always denies
+                                  (the scanner sandbox, ash_plugin_modules, the detect-secrets verification,
+                                  plugin and baseline settings, the archive converter''s extraction limits,
+                                  and the sections of the plugins that send data off the host: the s3,
+                                  aws-security-hub, cloudwatch-logs and bedrock-summary-reporter reporters
+                                  and the detect-secrets, npm-audit, opengrep, semgrep, snyk-code, trivy,
+                                  trivy-repo and zizmor scanners) are added to it.'
                                 items:
                                   type: string
                                 type: array
@@ -482,6 +579,45 @@ spec:
                                   denied as well as the defaults. Either way, an unset list, or one equal
                                   to a default ASH has shipped, gets the current default list.
                             type: object
+                        type: object
+                      deduplication:
+                        description: Cross-scanner duplicate annotation in the flat reports (opt-in; off
+                          by default).
+                        properties:
+                          annotate:
+                            x-kubernetes-preserve-unknown-fields: true
+                            description: 'When true, the CSV and flat-JSON reports gain three columns
+                              that name each finding''s duplicate cluster: `cluster_id`, `duplicate_of`
+                              (the primary finding''s id, on every non-primary member) and `duplicate_sources`
+                              (on the primary: the other members'' scanner, rule, id and severity). Rows
+                              and counts are unchanged. Off by default because the columns change the
+                              CSV header. CLI: `--annotate-duplicates` on `ash scan` and `ash report`.'
+                          fold:
+                            x-kubernetes-preserve-unknown-fields: true
+                            description: 'When true, the human-readable reports (HTML, Markdown, text,
+                              and the Bedrock summary) show one row per duplicate cluster (the primary
+                              finding, with a note naming the other scanners that reported it) in their
+                              findings tables, detailed findings, finding cards and hotspots, and add
+                              deduplicated counts beside, never in place of, the per-scanner counts. Findings
+                              fold when they share a CVE and package, or when overlapping lines share
+                              a CWE; line overlaps chain, so two findings can fold through a third that
+                              overlaps both. IaC resource clusters are annotated only. Finding ids, SARIF,
+                              per-scanner metrics, suppressions, baselines, the CSV, flat-JSON and JUnit
+                              reports and the exit code are unchanged. Off by default because it changes
+                              row counts. CLI: `--fold-duplicates` on `ash scan` and `ash report`.'
+                        type: object
+                      history:
+                        description: Run history recording (a compact record of each completed scan).
+                        properties:
+                          enabled:
+                            x-kubernetes-preserve-unknown-fields: true
+                            description: 'Append a compact run record to ''<output dir>/history/'' after
+                              each completed scan. Off by default: it adds files to the output directory
+                              on every scan.'
+                          keep_runs:
+                            x-kubernetes-preserve-unknown-fields: true
+                            description: How many run records to keep when history is enabled; the oldest
+                              are removed when a new one is written.
                         type: object
                     type: object
                     description: Global default settings for ASH shared across scanners. If the same setting
@@ -794,6 +930,68 @@ spec:
                                     means no staged scope; the whole tree is scanned. An empty list means
                                     something was staged and none of it is inside source_dir, so every
                                     scanner has nothing to scan.'
+                                  nullable: true
+                                asset:
+                                  description: 'The subject of one scan: its kind, and the one locator
+                                    that kind uses.'
+                                  properties:
+                                    kind:
+                                      type: string
+                                      anyOf:
+                                      - enum:
+                                        - filesystem
+                                        - container_image
+                                      - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                      description: What kind of subject a scan is about.
+                                    filesystem:
+                                      description: A local directory, exactly today's source directory.
+                                      properties:
+                                        root:
+                                          format: path
+                                          type: string
+                                      required:
+                                      - root
+                                      type: object
+                                      nullable: true
+                                    image:
+                                      description: 'Where a container image is, in exactly one of three
+                                        shapes.
+
+
+                                        The three shapes are the submission contract''s: an indirect reference
+
+                                        (``ref``, resolved by an engine or a tool''s own registry client)
+                                        and the
+
+                                        two direct-payload shapes that need no engine at all (``oci_layout``,
+
+                                        ``oci_archive``). Exactly one is set; a locator naming none would
+                                        send a
+
+                                        scanner nowhere, and one naming two would leave which subject
+                                        was meant to
+
+                                        the reader.'
+                                      properties:
+                                        ref:
+                                          type: string
+                                          nullable: true
+                                        oci_layout:
+                                          format: path
+                                          type: string
+                                          nullable: true
+                                        oci_archive:
+                                          format: path
+                                          type: string
+                                          nullable: true
+                                        resolved_digest:
+                                          type: string
+                                          nullable: true
+                                      type: object
+                                      nullable: true
+                                  required:
+                                  - kind
+                                  type: object
                                   nullable: true
                               required:
                               - source_dir
@@ -1111,6 +1309,22 @@ spec:
                             type: object
                             description: Configure Jupyter Notebook converter
                         type: object
+                      mcp_config:
+                        description: Configure the options for the McpConfigConverter
+                        properties:
+                          name:
+                            type: string
+                            anyOf:
+                            - enum:
+                              - mcp_config
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                          enabled:
+                            x-kubernetes-preserve-unknown-fields: true
+                          options:
+                            description: Configure MCP server config converter
+                            properties: {}
+                            type: object
+                        type: object
                     type: object
                     description: Converter configurations by name.
                     x-kubernetes-preserve-unknown-fields: true
@@ -1247,7 +1461,11 @@ spec:
                               confidence_level:
                                 type: string
                                 anyOf:
-                                - pattern: ^(all|low|medium|high)$
+                                - enum:
+                                  - all
+                                  - low
+                                  - medium
+                                  - high
                                 - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Confidence level for bandit scan (all, low, medium, high)
                               ignore_nosec:
@@ -1690,8 +1908,10 @@ spec:
                                   type: object
                                 type: array
                               additional_formats:
-                                description: List of additional formats to output. Defaults to including
-                                  CycloneDX JSON
+                                description: 'List of additional formats to output. Defaults to including
+                                  CycloneDX JSON. checkov''s JSON report is written whatever this lists:
+                                  ASH reads the resource of each finding from it, and rewrites its paths
+                                  to the source-relative form the SARIF uses.'
                                 items:
                                   type: string
                                   anyOf:
@@ -2069,6 +2289,86 @@ spec:
                             description: Configure Grype scanner
                         type: object
                         description: Configure the options for Grype
+                      mcp-config:
+                        properties:
+                          name:
+                            type: string
+                            anyOf:
+                            - enum:
+                              - mcp-config
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                          enabled:
+                            x-kubernetes-preserve-unknown-fields: true
+                          options:
+                            properties:
+                              severity_threshold:
+                                type: string
+                                anyOf:
+                                - enum:
+                                  - ALL
+                                  - LOW
+                                  - MEDIUM
+                                  - HIGH
+                                  - CRITICAL
+                                - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                description: Minimum severity level to consider findings as failures.
+                                  This is a scanner-level override of the default severity-level within
+                                  ASH of MEDIUM.
+                                nullable: true
+                              scan_timeout:
+                                x-kubernetes-preserve-unknown-fields: true
+                                description: Maximum time in seconds to allow this scanner's tool invocation
+                                  to run before it is killed. Set to null to leave the scanner unbounded,
+                                  which risks a scan that never completes.
+                              offline:
+                                x-kubernetes-preserve-unknown-fields: true
+                                description: Run this scanner offline even when ASH runs online. False
+                                  follows ASH's own mode; it never puts a scanner online under --offline.
+                              forbid_privilege_escalation:
+                                x-kubernetes-preserve-unknown-fields: true
+                                description: Flag sudo, doas, su and pkexec used as the command, or as
+                                  a whole argument, of a stdio MCP server entry (HIGH). The match is on
+                                  the whole word, so a name that merely contains one is not flagged.
+                              forbid_unpinned_runners:
+                                x-kubernetes-preserve-unknown-fields: true
+                                description: Flag npx, bunx, pnpm dlx, pnpx and uvx entries whose package
+                                  has no exact version, such as `npx -y pkg` or `uvx pkg` (MEDIUM). `pkg@1.2.3`
+                                  and `pkg==1.2.3` are pinned; `pkg@latest` and ranges are not.
+                              forbid_auto_approval:
+                                x-kubernetes-preserve-unknown-fields: true
+                                description: 'Flag settings that approve MCP tool calls without asking
+                                  (HIGH): gemini `trust: true`, a non-empty kiro `autoApprove` or roo
+                                  `alwaysAllow`, and codex `approval_mode` of `auto` or `full-auto`.'
+                              require_local:
+                                x-kubernetes-preserve-unknown-fields: true
+                                description: Flag every remote (url, httpUrl, serverUrl) entry whose host
+                                  is not loopback (MEDIUM). `localhost`, `127.0.0.0/8` and `::1` count
+                                  as local, whichever way the IPv6 address is spelled.
+                              remote_url_prefixes:
+                                description: When not empty, every remote URL must start with one of these
+                                  prefixes (MEDIUM), compared on URL boundaries with the scheme and host
+                                  in lower case, and a remote URL that is not loopback must be https (MEDIUM).
+                                  Empty turns the check off.
+                                items:
+                                  type: string
+                                type: array
+                              allowed_command_prefixes:
+                                description: When not empty, every stdio command must be a path that starts
+                                  with one of these prefixes (MEDIUM), compared on path boundaries after
+                                  the command is normalized. A bare command name such as `npx` does not
+                                  start with a path prefix and is flagged. Empty turns the check off.
+                                items:
+                                  type: string
+                                type: array
+                              flag_env_secrets:
+                                x-kubernetes-preserve-unknown-fields: true
+                                description: Flag an `env` entry whose name says key, token, secret or
+                                  password and whose value is a literal rather than a reference such as
+                                  `${NAME}` (LOW). The value is never written into the finding.
+                            type: object
+                            description: Configure the MCP server config policy scanner
+                        type: object
+                        description: Configure the options for the MCP server config scanner
                       npm-audit:
                         properties:
                           name:
@@ -2318,6 +2618,74 @@ spec:
                                     - syft-text
                                   - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 type: array
+                              sdist_harvest:
+                                description: Configure the cross-toolchain sdist lockfile harvest, which
+                                  completes the SBOM for compiled dependencies whose artifacts carry no
+                                  audit data. The harvest runs in the convert phase; offline mode disables
+                                  its fetches whatever these options say.
+                                properties:
+                                  enabled:
+                                    x-kubernetes-preserve-unknown-fields: true
+                                    description: Harvest embedded lockfiles from the hash-pinned sdists
+                                      of resolved dependencies whose wheels carry a platform tag (compiled
+                                      native extensions with no artifact audit data), so the SBOM covers
+                                      cross-toolchain packages such as a compiled wheel's statically linked
+                                      Rust crates. On by default in online mode; inert in offline mode,
+                                      where each skipped package is a visible informational record. The
+                                      only network it adds is a GET of bytes the project's own lockfile
+                                      already pins by sha256, verified before extraction; nothing fetched
+                                      is executed.
+                                  ecosystems:
+                                    description: 'Which embedded lockfiles are harvested from a pinned
+                                      sdist: cargo reads Cargo.lock, gomod reads go.sum, npm reads package-lock.json.
+                                      The vocabulary is the GitLab CycloneDX reporter''s existing ecosystem
+                                      mapping.'
+                                    items:
+                                      type: string
+                                      anyOf:
+                                      - enum:
+                                        - cargo
+                                        - gomod
+                                        - npm
+                                      - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                    type: array
+                                  max_sdist_mb:
+                                    x-kubernetes-preserve-unknown-fields: true
+                                    description: 'The largest sdist, in megabytes, the harvest will fetch.
+                                      Checked against the lockfile''s own recorded size before any fetch,
+                                      and enforced on the bytes actually streamed during it: a transfer
+                                      that passes the bound is aborted on the wire, so a lying size claim
+                                      cannot buy an unbounded download. Either way the package is skipped
+                                      with an informational record rather than stalling the scan.'
+                                  cache_dir:
+                                    type: string
+                                    anyOf:
+                                    - format: path
+                                    description: 'Where verified harvests are cached, keyed by each sdist''s
+                                      sha256 and with each cached file''s digest recorded and re-verified
+                                      before it is served, so an entry can never serve different bytes
+                                      than the lock pins; a warmed cache serves entries offline with no
+                                      network. Defaults to ash/sdist-harvest under the user-level cache
+                                      directory (XDG_CACHE_HOME, or ~/.cache), never a directory under
+                                      the scanned tree, whose content the scanned repository could ship.
+                                      Used only when the operator sets it, with --config-overrides or
+                                      in a config file outside every git checkout and the scanned directory:
+                                      a config file inside one, or one an MCP client delivered, does not
+                                      choose it.'
+                                    nullable: true
+                                  lockfiles:
+                                    description: 'The Python lockfiles walked for resolved packages to
+                                      flag. uv.lock only today: it pins each sdist by URL and sha256,
+                                      which is what authorizes a fetch. The list exists so other hash-and-URL-pinned
+                                      formats can be added without a schema change.'
+                                    items:
+                                      type: string
+                                      anyOf:
+                                      - enum:
+                                        - uv.lock
+                                      - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                    type: array
+                                type: object
                             type: object
                             description: Configure Syft scanner
                         type: object
@@ -3115,6 +3483,29 @@ spec:
                         description: Scanner names precommit mode runs in addition to its default set.
                           The command line's --only-scanners replaces this list too; --exclude-scanners
                           removes names from the result. Cannot be set together with only_scanners.
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                  default_scanners:
+                    description: 'The operator''s default scanners, read in every run mode: only replaces
+                      the mode''s default selection, add extends a mode whose default is a fixed set (today
+                      precommit''s) and has no effect in a mode with an unbounded default; setting both
+                      is refused. Settable only from the defaults, a config file outside every checkout
+                      or --config-overrides. The command line and the precommit keys take precedence.'
+                    properties:
+                      only:
+                        description: Run exactly these scanners instead of the mode's default selection,
+                          in every run mode. The command line's --only-scanners replaces this list; --add-scanners
+                          and the deprecated --scanners add to it; --exclude-scanners removes names from
+                          it. Cannot be set together with add.
+                        items:
+                          type: string
+                        type: array
+                      add:
+                        description: Scanner names to run in addition to a mode whose default is a fixed
+                          set, which today is precommit's. Has no effect in a mode with an unbounded default,
+                          and does not narrow one. Cannot be set together with only.
                         items:
                           type: string
                         type: array

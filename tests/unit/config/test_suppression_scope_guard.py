@@ -9,8 +9,13 @@ back.
 
 An entry counts as PINNED when its path is a literal file and it carries a
 ``symbol``, a package field (``package_name``, ``package_version``,
-``package_path``) that is not just ``*``, or a line range (``line_start`` or
-``line_end``) that leaves part of the file out. Anything else is UNPINNED: a
+``package_path``) that is not just ``*``, a ``resource_id`` (top level or under
+``scope``) that is not just ``*``, or a line range (``line_start`` or
+``line_end``) that leaves part of the file out. A resource id holds the entry to
+the findings on one resource, so a finding on any other resource in the file is
+still reported; main's resource-scoped cdk-nag entries for AshCodeCommitGate are
+that shape, each listed before a whole-file entry for the same rule and file.
+Anything else is UNPINNED: a
 whole-file entry, or a glob, which is whole-file over many files. A line range
 on a glob is still unpinned, because it applies to the same lines of every file
 the glob matches. So is a range that covers the whole file, such as
@@ -83,8 +88,11 @@ ALLOWLIST: dict[tuple[str, str | None, str], str] = {}
 FROZEN_SIZES = {
     # 426: the merge of origin/main at ae28f8411ce added six whole-file entries main
     # wrote for its express tests since 617e17c3629 (the baseline's last block).
-    "main": {".ash/.ash.yaml": 426, ".ash/.ash_community_plugins.yaml": 227},
-    "pre_guard": {".ash/.ash.yaml": 27, ".ash/.ash_community_plugins.yaml": 8},
+    # 454 and 201: the merge of origin/main at c15148192f4 dropped one and 28 keys
+    # main had pinned or removed and added 29 and 2 entries main wrote since
+    # ae28f8411ce (426 - 1 + 29 and 227 - 28 + 2), under main's config paths.
+    "main": {".ash.yaml": 454, ".ash/.ash_alpha_plugins.yaml": 201},
+    "pre_guard": {".ash.yaml": 27, ".ash/.ash_alpha_plugins.yaml": 8},
 }
 
 PACKAGE_FIELDS = ("package_name", "package_version", "package_path")
@@ -126,6 +134,14 @@ def _pins_a_package(value: Any) -> bool:
     return value is not None and not set(str(value)) <= {"*"}
 
 
+def _scopes_a_resource(entry: dict[str, Any]) -> bool:
+    # resource_id is a pattern too, and the entry-level key is sugar for
+    # scope.resource_id (the config model folds one into the other).
+    scope = entry.get("scope")
+    nested = scope.get("resource_id") if isinstance(scope, dict) else None
+    return any(_pins_a_package(value) for value in (entry.get("resource_id"), nested))
+
+
 def is_unpinned(
     entry: dict[str, Any], line_count: LineCounter = worktree_line_count
 ) -> bool:
@@ -135,6 +151,8 @@ def is_unpinned(
     if entry.get("symbol") is not None:
         return False
     if any(_pins_a_package(entry.get(field)) for field in PACKAGE_FIELDS):
+        return False
+    if _scopes_a_resource(entry):
         return False
     return _covers_whole_file(entry, line_count)
 
@@ -317,6 +335,14 @@ def test_allowlist_entries_carry_a_reason_and_match_an_entry():
             False,
         ),
         ({"rule_id": "R", "path": "package-lock.json", "package_name": "p*"}, False),
+        # A resource id holds the entry to one resource, top level or under scope;
+        # one that is only wildcards matches every resource, and a glob path is
+        # still whole-file over every file it matches.
+        ({"rule_id": "R", "path": "t.json", "resource_id": "*/Fn1A2B"}, False),
+        ({"rule_id": "R", "path": "t.json", "scope": {"resource_id": "*/Fn"}}, False),
+        ({"rule_id": "R", "path": "t.json", "resource_id": "*"}, True),
+        ({"rule_id": "R", "path": "t.json", "scope": {"resource_type": "X"}}, True),
+        ({"rule_id": "R", "path": "*.json", "resource_id": "*/Fn1A2B"}, True),
     ],
 )
 def test_classifier(entry: dict[str, Any], unpinned: bool):
@@ -331,7 +357,7 @@ def test_worktree_line_count_reads_the_file():
 
 
 def test_a_new_whole_file_entry_is_an_offender():
-    config = ".ash/.ash.yaml"
+    config = ".ash.yaml"
     entries = suppressions(config) + [
         {"rule_id": "SECRET-*", "path": "deploy/new_module.py", "reason": "x"}
     ]
@@ -357,7 +383,7 @@ def test_a_new_whole_file_entry_is_an_offender():
     ],
 )
 def test_a_range_or_package_that_covers_everything_is_an_offender(widened):
-    config = ".ash/.ash.yaml"
+    config = ".ash.yaml"
     entry = {"rule_id": "SECRET-*", "path": "pyproject.toml", "reason": "x"}
     entries = suppressions(config) + [{**entry, **widened}]
     assert offenders(config, entries) == [("SECRET-*", "pyproject.toml")]

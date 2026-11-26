@@ -129,6 +129,15 @@ EXEMPT: Dict[Tuple[str, str], str] = {
         "prose in the docs deploy script's docstring naming mike's own --push flag; it "
         "is not a command and publishes no container image"
     ),
+    (
+        ".github/workflows/ash-image-scan-live-engine.yml",
+        'docker push "$IMAGE_TAG"',
+    ): (
+        "the job pushes its fixture image to the registry container it starts on the "
+        "runner itself (IMAGE_TAG is localhost:5000/..., the registry published on "
+        "127.0.0.1 only), so that ASH can resolve the tag through a registry; the image "
+        "never leaves the runner"
+    ),
 }
 
 Hit = Tuple[str, int, str, str]

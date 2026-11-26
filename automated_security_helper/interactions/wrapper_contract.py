@@ -69,11 +69,6 @@ WRAPPER_FORWARDED_OPTIONS: tuple[str, ...] = (
     "--ignore-suppressions",
 )
 
-#: The subcommands whose own ``-o`` is not the container runtime's. ``scan`` and
-#: ``build-image`` are the container-mode commands, where the wrapper reads ``-o`` as
-#: the runner; every other command's ``-o`` is its own and is forwarded.
-CONTAINER_MODE_SUBCOMMANDS: tuple[str, ...] = ("scan", "build-image", "container")
-
 #: The subcommands that are groups handing the options typed before them to one of
 #: their commands (AshTyperGroup._options_for_subcommand), so `./ash --quiet container
 #: build` passes `--quiet` on to `build`: such a group takes what that command takes.
@@ -97,14 +92,6 @@ def _taken_options(name: str, command: Any) -> set[str]:
     return _options(command)
 
 
-def _tree_options(command: Any) -> set[str]:
-    """The options of a command and of every command nested under it."""
-    found = _options(command)
-    for sub in (getattr(command, "commands", None) or {}).values():
-        found |= _tree_options(sub)
-    return found
-
-
 @dataclass(frozen=True)
 class WrapperContract:
     """The tables the wrappers carry, as the CLI and container mode define them."""
@@ -117,8 +104,8 @@ class WrapperContract:
     root_value_options: tuple[str, ...]
     #: For each wrapper-forwarded option, the subcommands that declare it, in order.
     option_subcommands: tuple[tuple[str, tuple[str, ...]], ...]
-    #: Subcommands whose own ``-o`` is forwarded instead of read as the runner.
-    dash_o_subcommands: tuple[str, ...]
+    # No table of the subcommands whose own ``-o`` is forwarded: only the bash
+    # entrypoint rendered one, and v4 absorbed that entrypoint into the CLI.
     #: The order OCI runners are looked for when none is named.
     runner_order: tuple[str, ...]
     #: The image stages a wrapper accepts for its build-target parameter.
@@ -177,11 +164,6 @@ def contract() -> WrapperContract:
         ),
         root_value_options=tuple(value_options),
         option_subcommands=tuple(forwarded),
-        dash_o_subcommands=tuple(
-            name
-            for name, command in commands.items()
-            if name not in CONTAINER_MODE_SUBCOMMANDS and "-o" in _tree_options(command)
-        ),
         runner_order=tuple(rac._OCI_RUNNER_CANDIDATES),
         build_targets=tuple(sorted(target.value for target in BuildTarget)),
         image_name_pattern=rac._IMAGE_NAME_PATTERN.pattern,
