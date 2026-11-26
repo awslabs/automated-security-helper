@@ -2690,8 +2690,9 @@ def _validate_zip_member(name: str) -> None:
     spelled), are the source-archive rules
     (:func:`automated_security_helper.utils.source_archive.validate_member_name`),
     which ``ash scan fs --archive`` applies too. The finalize calls them through
-    this name, for the name the archive spells and for the one zipfile extracts
-    the member under when a Unicode path field gives another.
+    this name, for the name the archive spells and for the name a Unicode path
+    field gives when the field restates that name in other characters, which
+    zipfile from Python 3.12 extracts the member under.
 
     Raises:
         SourceArchiveRefused: a ``ValueError`` naming the rule and the name.
@@ -2755,9 +2756,13 @@ def set_source_zip_finalize(
             source-archive rules refuse: oversize zip, oversize extraction,
             too-many-files, a member name that is empty, absolute, traversing,
             holds a backslash, a NUL, or a ``.`` or empty component (or, on
-            Windows, a name Windows cannot hold), a Unicode path field that names
-            another file, two members extracted to one path or one under a file,
-            or a symlink member.
+            Windows, a name Windows cannot hold), a Unicode path field, in the
+            central directory or a local header, that names another file, two
+            members extracted to one path or one under a file, a symlink member,
+            or a file that holds anything besides one zip: bytes before, between
+            or after its members (two zips end to end, a tar whose last member is
+            a zip), or a local header or data descriptor that disagrees with the
+            central directory, each refused as not a zip.
         zipfile.BadZipFile: if the assembled bytes are not a zip archive. The
             checksum matching means the client sent what it meant to send, so
             this is a client-side packaging error rather than corruption.

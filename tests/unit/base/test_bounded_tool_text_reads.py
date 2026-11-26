@@ -193,6 +193,12 @@ _ALLOWED_SIZED_READS = {
     "refused over the cap, for zipfile to read from memory; extracted, never shown, "
     "and not tool output",
     (
+        "utils/source_archive.py",
+        "_read_at",
+    ): "a record of the operator's own source archive (an end record, the central "
+    "directory, a local header, a data descriptor) at the offset and length the "
+    "zip's records give; parsed and compared, never shown, and not tool output",
+    (
         "cli/mcp/source_delivery.py",
         "set_source_image_archive_finalize",
     ): "1 MiB sha chunks over the operator's own uploaded image archive; hashed, "

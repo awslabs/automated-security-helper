@@ -21,9 +21,25 @@ as a placeholder of the same length and swapped into the archive's bytes afterwa
 
 Archives zipfile cannot read are built the same way, by changing the bytes of a good
 one where the zip format puts the field: a central directory entry that needs a newer
-reader, a damaged compressed stream, a local header whose name is not the UTF-8 it
-claims, and offsets that point before the file or past what a seek can reach. Every
-one of them has to reach the caller of ``extract_source_archive`` as a refusal.
+reader, a damaged compressed stream, and a local header whose name is not the UTF-8 it
+claims. Every one of them has to reach the caller of ``extract_source_archive`` as a
+refusal.
+
+A file has to be one zip and nothing else (rule 6). zipfile reads the zip whose end
+record it finds last and lets the rest of the file pass, while a reader that starts at
+the first byte reads what is there, so the rows hand both entry points each shape that
+gives the two readers two trees: two zips end to end, a tar whose last member is a zip,
+a program before the archive, bytes after its end record, a member the central
+directory leaves out, and local headers and data descriptors that disagree with the
+central directory. Some are written byte by byte (``_Raw``), since no zip writer makes
+them. The controls hand both entry points every layout a writer does make: data
+descriptors with and without their signature, in four-byte and eight-byte sizes, zip64
+end records, an archive comment and an empty archive.
+
+The module reads the Unicode path field itself (rule 3), so its verdict cannot depend on
+whether this Python's zipfile applies the field, as it does from 3.12. The rows that
+turn on it run twice: under this zipfile, and under one made to ignore the field, as
+zipfile did before 3.12.
 """
 
 from __future__ import annotations
@@ -39,8 +55,9 @@ import tarfile
 import warnings
 import zipfile
 import zlib
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import pytest
 
@@ -82,14 +99,35 @@ def _zip_members(entries: Sequence[Tuple[str, bytes]]) -> bytes:
     return buffer.getvalue()
 
 
-def _unicode_path_field(spelled: bytes, name: str) -> bytes:
+def _unicode_path_field(
+    spelled: bytes,
+    name: Union[str, bytes],
+    *,
+    version: int = 1,
+    crc_of: Optional[bytes] = None,
+) -> bytes:
     """A Unicode path extra field (0x7075) giving ``name`` to a member spelled ``spelled``.
 
-    Version 1, the CRC-32 of the spelled name's bytes (zipfile reads the field only
-    when it matches them), then the name in UTF-8.
+    By default version 1 and the CRC-32 of the spelled name's bytes, as Info-ZIP writes
+    it, then the name in UTF-8 (or the bytes given). zipfile from 3.12 applies the field
+    only when both hold, so ``version`` and ``crc_of`` (the bytes whose CRC-32 the field
+    carries) make one it skips.
     """
-    data = struct.pack("<BL", 1, zlib.crc32(spelled)) + name.encode("utf-8")
+    crc = zlib.crc32(spelled if crc_of is None else crc_of)
+    encoded = name.encode("utf-8") if isinstance(name, str) else name
+    data = struct.pack("<BL", version, crc) + encoded
     return struct.pack("<HH", 0x7075, len(data)) + data
+
+
+def _zip_with_extra(name: str, extra: bytes, content: bytes) -> bytes:
+    """A zip of one stored member ``name`` whose local header and central entry carry
+    ``extra`` as its extra field."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        info = zipfile.ZipInfo(name)
+        info.extra = extra
+        archive.writestr(info, content)
+    return buffer.getvalue()
 
 
 def _zip_with_unicode_paths(
@@ -139,6 +177,31 @@ _NEEDS_UNICODE_PATHS = pytest.mark.skipif(
     not ZIPFILE_READS_UNICODE_PATHS,
     reason="zipfile before Python 3.12 ignores the Unicode path field",
 )
+
+
+def _as_zipfile_before_3_12(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make this Python's zipfile ignore the Unicode path field, as it did before 3.12.
+
+    zipfile applies the field in ``ZipInfo._decodeExtra`` while it reads the central
+    directory. This keeps everything else that method reads and then puts back the name
+    ``ZipInfo`` makes of the spelled one, which is the name zipfile before 3.12 kept.
+    On a zipfile that ignores the field already it changes nothing.
+    """
+    decode = getattr(zipfile.ZipInfo, "_decodeExtra")
+
+    def ignoring_unicode_paths(info: zipfile.ZipInfo, *args: object) -> None:
+        decode(info, *args)
+        info.filename = zipfile.ZipInfo(info.orig_filename).filename
+
+    monkeypatch.setattr(zipfile.ZipInfo, "_decodeExtra", ignoring_unicode_paths)
+
+
+@pytest.fixture(params=["this-zipfile", "a-zipfile-that-ignores-the-field"])
+def zipfile_reading(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch):
+    """This Python's zipfile, then one that ignores the Unicode path field."""
+    if request.param == "a-zipfile-that-ignores-the-field":
+        _as_zipfile_before_3_12(monkeypatch)
+    return request.param
 
 
 def _zip_with_modes(entries: Dict[str, Tuple[bytes, int]]) -> bytes:
@@ -287,6 +350,268 @@ def _tar(gzipped: bool) -> bytes:
         archive.addfile(info, io.BytesIO(data))
     tar = buffer.getvalue()
     return gzip.compress(tar, mtime=0) if gzipped else tar
+
+
+def _tar_ending_in_a_zip() -> Tuple[bytes, int]:
+    """A tar whose last member is a stored zip, and the byte at which that zip ends.
+
+    tarfile pads the member to its 512-byte block and closes the archive with zero
+    blocks to a 10240-byte record, so the zip's end record is followed by the tar's own
+    zeros, and the tar's headers and first member come before the zip.
+    """
+    inner = _zip({"app.py": b"EVIL = False\n"}, compression=zipfile.ZIP_STORED)
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        for name, data in (
+            ("readme.md", b"# a tar of two members\n"),
+            ("payload.zip", inner),
+        ):
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    tar = buffer.getvalue()
+    return tar, tar.index(inner) + len(inner)
+
+
+def _patched(payload: bytes, at: int, value: bytes) -> bytes:
+    """``payload`` with ``value`` written over the bytes at ``at``."""
+    return payload[:at] + value + payload[at + len(value) :]
+
+
+def _end_record_at(payload: bytes) -> int:
+    end = payload.rfind(b"PK\x05\x06")
+    assert end > 0
+    return end
+
+
+def _central_entry_at(payload: bytes, index: int) -> int:
+    """Where the central directory entry of member ``index`` starts."""
+    at = payload.find(b"PK\x01\x02")
+    for _ in range(index):
+        at = payload.find(b"PK\x01\x02", at + 4)
+    assert at > 0
+    return at
+
+
+def _with_comment_length(payload: bytes, length: int) -> bytes:
+    """``payload`` whose end record claims a comment of ``length`` bytes (at 20)."""
+    return _patched(payload, _end_record_at(payload) + 20, struct.pack("<H", length))
+
+
+def _with_end_record_counts(payload: bytes, on_this_disk: int, in_all: int) -> bytes:
+    """``payload`` whose end record counts ``on_this_disk`` members on this disk (at 8)
+    and ``in_all`` in all (at 10)."""
+    return _patched(
+        payload, _end_record_at(payload) + 8, struct.pack("<HH", on_this_disk, in_all)
+    )
+
+
+def _with_compressed_size(payload: bytes, size: int) -> bytes:
+    """``payload``, a zip of one member, whose local header (at 18) and central entry
+    (at 20) both give ``size`` for its compressed size."""
+    entry = _central_entry_at(payload, 0)
+    patched = _patched(payload, entry + 20, struct.pack("<L", size))
+    return _patched(patched, 18, struct.pack("<L", size))
+
+
+def _with_header_offset(payload: bytes, index: int, offset: int) -> bytes:
+    """``payload`` whose central directory places member ``index`` at ``offset`` (at 42
+    of its entry)."""
+    entry = _central_entry_at(payload, index)
+    return _patched(payload, entry + 42, struct.pack("<L", offset))
+
+
+def _with_entry_comment_length(payload: bytes, index: int, length: int) -> bytes:
+    """``payload`` whose central directory entry ``index`` claims a comment of
+    ``length`` bytes (at 32 of the entry) that is not there."""
+    entry = _central_entry_at(payload, index)
+    return _patched(payload, entry + 32, struct.pack("<H", length))
+
+
+def _zip_with_comment(entries: Dict[str, bytes], comment: bytes) -> bytes:
+    """A zip of ``entries`` whose end record carries ``comment``."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.comment = comment
+        for name, content in entries.items():
+            archive.writestr(name, content)
+    return buffer.getvalue()
+
+
+class _Pipe(io.RawIOBase):
+    """A stream that takes writes and cannot seek back, as a pipe zipfile writes into."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.written = bytearray()
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, data) -> int:
+        self.written += data
+        return len(data)
+
+
+def _zip_written_to_a_pipe(entries: Dict[str, bytes], *, zip64: bool = False) -> bytes:
+    """A zip of ``entries`` as zipfile writes it where it cannot seek back.
+
+    Each member's local header then gives no CRC-32 or sizes, flag bit 3 says so, and a
+    data descriptor after the data carries them: with its signature, in four-byte sizes,
+    or in eight-byte ones for a member written with ``force_zip64``.
+    """
+    pipe = _Pipe()
+    with zipfile.ZipFile(pipe, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            with archive.open(name, "w", force_zip64=zip64) as member:
+                member.write(content)
+    return bytes(pipe.written)
+
+
+@dataclass(frozen=True)
+class _Raw:
+    """One stored member, written byte by byte, with what each of its headers says.
+
+    The local header gives the member's true CRC-32 and sizes, or zeros when its flags
+    say a data descriptor follows the data, unless ``local_sizes`` gives others;
+    ``local_flags`` defaults to ``flags``. ``descriptor`` is written after the data.
+    """
+
+    name: bytes
+    data: bytes
+    flags: int = 0
+    local_flags: Optional[int] = None
+    local_sizes: Optional[Tuple[int, int, int]] = None
+    local_extra: bytes = b""
+    descriptor: bytes = b""
+
+    def local_record(self) -> bytes:
+        flags = self.flags if self.local_flags is None else self.local_flags
+        if self.local_sizes is not None:
+            crc, compressed, size = self.local_sizes
+        elif flags & 0x8:
+            crc = compressed = size = 0
+        else:
+            crc, compressed, size = (
+                zlib.crc32(self.data),
+                len(self.data),
+                len(self.data),
+            )
+        header = struct.pack(
+            "<4s5H3L2H",
+            b"PK\x03\x04",
+            20,
+            flags,
+            zipfile.ZIP_STORED,
+            0,
+            0x21,
+            crc,
+            compressed,
+            size,
+            len(self.name),
+            len(self.local_extra),
+        )
+        return header + self.name + self.local_extra + self.data + self.descriptor
+
+    def central_entry(self, offset: int) -> bytes:
+        size = len(self.data)
+        entry = struct.pack(
+            "<4s4B4HL2L5H2L",
+            b"PK\x01\x02",
+            20,
+            3,
+            20,
+            0,
+            self.flags,
+            zipfile.ZIP_STORED,
+            0,
+            0x21,
+            zlib.crc32(self.data),
+            size,
+            size,
+            len(self.name),
+            0,
+            0,
+            0,
+            0,
+            0o100644 << 16,
+            offset,
+        )
+        return entry + self.name
+
+
+def _descriptor(data: bytes, *, signature: bool = True, zip64: bool = False) -> bytes:
+    """The data descriptor of a stored member holding ``data``: with or without its
+    signature, in four-byte or eight-byte sizes."""
+    sizes = struct.pack("<QQ" if zip64 else "<LL", len(data), len(data))
+    head = b"PK\x07\x08" if signature else b""
+    return head + struct.pack("<L", zlib.crc32(data)) + sizes
+
+
+def _raw_zip(
+    members: Sequence[_Raw],
+    *,
+    before: bytes = b"",
+    listed: Optional[Sequence[int]] = None,
+    zip64_end: bool = False,
+) -> bytes:
+    """A zip of ``members`` written after ``before``, every offset counted from byte 0.
+
+    ``listed`` names, by position, the members the central directory lists; the rest are
+    written and left out of it. ``zip64_end`` writes the zip64 end record and its locator
+    before the end record, whose own fields then say to read them, as zip64 writers do.
+    """
+    out = bytearray(before)
+    offsets: List[int] = []
+    for member in members:
+        offsets.append(len(out))
+        out += member.local_record()
+    directory_at = len(out)
+    chosen = list(range(len(members))) if listed is None else list(listed)
+    for position in chosen:
+        out += members[position].central_entry(offsets[position])
+    directory_size = len(out) - directory_at
+    count = len(chosen)
+    if zip64_end:
+        record_at = len(out)
+        out += struct.pack(
+            "<4sQ2H2L4Q",
+            b"PK\x06\x06",
+            44,
+            45,
+            45,
+            0,
+            0,
+            count,
+            count,
+            directory_size,
+            directory_at,
+        )
+        out += struct.pack("<4sLQL", b"PK\x06\x07", 0, record_at, 1)
+        out += struct.pack(
+            "<4s4H2LH",
+            b"PK\x05\x06",
+            0,
+            0,
+            0xFFFF,
+            0xFFFF,
+            0xFFFFFFFF,
+            0xFFFFFFFF,
+            0,
+        )
+    else:
+        out += struct.pack(
+            "<4s4H2LH",
+            b"PK\x05\x06",
+            0,
+            0,
+            count,
+            count,
+            directory_size,
+            directory_at,
+            0,
+        )
+    return bytes(out)
 
 
 def _sparse(path: Path, size: int) -> Path:
@@ -446,6 +771,29 @@ def _forget_sessions():
 # One row per rule: (archive, or the fixture that builds it; rule; message).
 # ---------------------------------------------------------------------------
 
+#: Two stored zips, each with an app.py. Joined end to end, zipfile reads the second,
+#: whose app.py says EVIL = False, while a reader that walks the local headers from
+#: byte 0 reads the first, whose app.py says EVIL = True; Info-ZIP's unzip warns of
+#: extra bytes at the start and exits 1.
+_FIRST_OF_TWO = _zip({"app.py": b"EVIL = True\n"}, compression=zipfile.ZIP_STORED)
+_SECOND_OF_TWO = _zip(
+    {"app.py": b"EVIL = False\n", "readme.md": b"# ok\n"},
+    compression=zipfile.ZIP_STORED,
+)
+_TAR_OF_A_ZIP, _END_OF_THE_ZIP_IN_THE_TAR = _tar_ending_in_a_zip()
+#: What a self-extracting archive, or a script that carries one, puts before the zip.
+_STUB = b'#!/bin/sh\nexec unzip -o "$0"\n'
+_AFTER_THE_END = b"not part of the zip\n"
+#: A member a row writes into the file and leaves out of the central directory.
+_HIDDEN = _Raw(b"evil.py", b"EVIL = True\n")
+_STORED = b"print('stored as it is')\n"
+
+
+def _stored(content: bytes = _STORED) -> bytes:
+    """A zip of one stored member, ``a.py``, whose local header starts at byte 0."""
+    return _zip({"a.py": content}, compression=zipfile.ZIP_STORED)
+
+
 REFUSED = [
     pytest.param(
         "over_the_extracted_total",
@@ -509,7 +857,10 @@ REFUSED = [
         id="backslash-in-a-name",
     ),
     pytest.param(
-        _zip({"": b"x"}),
+        # Written byte by byte: zipfile before 3.12 cannot write a member with no
+        # name (an IndexError), so a zipfile-built row kept this module from loading
+        # on Python 3.11 at all.
+        _raw_zip([_Raw(b"", b"x")]),
         Kind.EMPTY_NAME,
         "zip entry has empty name",
         id="empty-name",
@@ -590,30 +941,6 @@ REFUSED = [
         id="a-member-under-a-file-with-a-sibling-between",
     ),
     pytest.param(
-        # zipfile extracts the second member as app.py, over the first; zipimport and
-        # every reader that ignores the field keep the first.
-        _zip_with_unicode_paths(
-            [
-                ("app.py", None, b"EVIL = True\n"),
-                ("zzz.py", "app.py", b"EVIL = False\n"),
-            ]
-        ),
-        Kind.UNICODE_PATH_MISMATCH,
-        "zip entry 'zzz.py' is extracted as 'app.py': "
-        "its Unicode path field names another file",
-        id="a-unicode-path-onto-another-member",
-        marks=_NEEDS_UNICODE_PATHS,
-    ),
-    pytest.param(
-        # Scanned as text while `import app` runs it.
-        _zip_with_unicode_paths([("app.py", "app.txt", b"EVIL = True\n")]),
-        Kind.UNICODE_PATH_MISMATCH,
-        "zip entry 'app.py' is extracted as 'app.txt': "
-        "its Unicode path field names another file",
-        id="a-unicode-path-that-renames-the-member",
-        marks=_NEEDS_UNICODE_PATHS,
-    ),
-    pytest.param(
         b"plain text, not an archive\n",
         Kind.NOT_A_ZIP,
         "File is not a zip file",
@@ -637,6 +964,414 @@ REFUSED = [
         "File is not a zip file",
         id="gzip-refused-naming-zip",
     ),
+    # Rule 6: one zip, and nothing else in the file. Red at the base: zipfile read each
+    # of these as the zip whose end record it found last, and the archive was admitted,
+    # or ended in what zipfile raised for a local header once extraction reached it.
+    pytest.param(
+        _FIRST_OF_TWO + _SECOND_OF_TWO,
+        Kind.NOT_A_ZIP,
+        f"{len(_FIRST_OF_TWO)} bytes come before the archive",
+        id="two-zips-end-to-end",
+    ),
+    pytest.param(
+        # Read by zipfile as the zip at its end, and by `ash scan image --archive` as
+        # the tar it is. The tar's zeros after the zip are what this rule meets first.
+        _TAR_OF_A_ZIP,
+        Kind.NOT_A_ZIP,
+        f"{len(_TAR_OF_A_ZIP) - _END_OF_THE_ZIP_IN_THE_TAR} bytes follow "
+        "the archive's end record",
+        id="a-tar-whose-last-member-is-a-zip",
+    ),
+    pytest.param(
+        _STUB + _zip({"app.py": b"x"}),
+        Kind.NOT_A_ZIP,
+        f"{len(_STUB)} bytes come before the archive",
+        id="a-program-before-the-archive",
+    ),
+    pytest.param(
+        # The same, written by a tool that counts the program into every offset.
+        _raw_zip([_Raw(b"app.py", b"x")], before=_STUB),
+        Kind.NOT_A_ZIP,
+        f"{len(_STUB)} bytes come before the archive's first member",
+        id="a-program-before-an-archive-whose-offsets-count-it",
+    ),
+    pytest.param(
+        # zipfile finds no zip64 end record where the locator puts it, looks just
+        # before the locator, and takes the difference for bytes before the archive.
+        b"junk" + _raw_zip([_Raw(b"app.py", b"x")], zip64_end=True),
+        Kind.NOT_A_ZIP,
+        "4 bytes come before the archive",
+        id="bytes-before-a-zip64-archive",
+    ),
+    pytest.param(
+        _raw_zip([], before=b"junk"),
+        Kind.NOT_A_ZIP,
+        "4 bytes come before the archive's central directory",
+        id="bytes-before-an-empty-archive",
+    ),
+    pytest.param(
+        _zip({"app.py": b"x"}) + _AFTER_THE_END,
+        Kind.NOT_A_ZIP,
+        f"{len(_AFTER_THE_END)} bytes follow the archive's end record",
+        id="bytes-after-the-end-record",
+    ),
+    pytest.param(
+        _with_comment_length(_zip({"app.py": b"x"}), 10),
+        Kind.NOT_A_ZIP,
+        "the archive's end record claims a 10-byte comment, and 0 bytes follow it",
+        id="a-comment-longer-than-the-file-holds",
+    ),
+    pytest.param(
+        # A reader that walks the local headers extracts evil.py; zipfile, which
+        # reads the central directory, never sees it.
+        _raw_zip(
+            [_Raw(b"a.py", b"A = 1\n"), _HIDDEN, _Raw(b"b.py", b"B = 2\n")],
+            listed=[0, 2],
+        ),
+        Kind.NOT_A_ZIP,
+        f"{len(_HIDDEN.local_record())} bytes lie between zip entries 'a.py' and "
+        "'b.py'",
+        id="a-member-the-central-directory-leaves-out",
+    ),
+    pytest.param(
+        _raw_zip([_Raw(b"a.py", b"A = 1\n"), _HIDDEN], listed=[0]),
+        Kind.NOT_A_ZIP,
+        f"{len(_HIDDEN.local_record())} bytes lie between zip entry 'a.py' and the "
+        "central directory",
+        id="a-member-left-out-before-the-central-directory",
+    ),
+    pytest.param(
+        _with_header_offset(_zip_members([("a.py", b"x"), ("b.py", b"y")]), 1, 0),
+        Kind.NOT_A_ZIP,
+        "zip entries 'a.py' and 'b.py' overlap",
+        id="two-entries-on-one-local-header",
+    ),
+    pytest.param(
+        # zipfile took the excess for bytes before the archive and placed the member
+        # 1000 bytes before the file: an OSError (EINVAL) at the base.
+        _with_central_directory_moved_on(_zip({"a.py": b"x"}), 1000),
+        Kind.NOT_A_ZIP,
+        "the archive's end record places its central directory 1000 bytes past "
+        "where it lies",
+        id="a-central-directory-offset-past-where-it-lies",
+    ),
+    pytest.param(
+        # A zip64 offset of 2**63, which no seek takes: an OverflowError or an OSError
+        # at the base.
+        _with_zip64_header_offset(_stored(b"x"), 2**63),
+        Kind.NOT_A_ZIP,
+        f"the central directory places zip entry 'a.py' at byte {2**63}, which is "
+        "not before the central directory",
+        id="a-header-offset-past-the-central-directory",
+    ),
+    pytest.param(
+        _patched(_zip({"a.py": b"x"}), 0, b"XX"),
+        Kind.NOT_A_ZIP,
+        "zip entry 'a.py' has no local header at byte 0",
+        id="a-member-without-its-local-header",
+    ),
+    pytest.param(
+        # The sizes at 18 and 22 of the local header: a reader of the local headers
+        # takes 4 bytes for the member and looks for the next header after them.
+        _patched(_stored(), 18, struct.pack("<LL", 4, 4)),
+        Kind.NOT_A_ZIP,
+        "the local header of zip entry 'a.py' gives another size than the central "
+        "directory",
+        id="a-local-header-that-gives-another-size",
+    ),
+    pytest.param(
+        _patched(_stored(), 14, struct.pack("<L", 0)),
+        Kind.NOT_A_ZIP,
+        "the local header of zip entry 'a.py' gives another CRC-32 than the central "
+        "directory",
+        id="a-local-header-that-gives-another-crc",
+    ),
+    pytest.param(
+        # The method at 8: deflated, where the central directory says stored.
+        _patched(_stored(), 8, struct.pack("<H", zipfile.ZIP_DEFLATED)),
+        Kind.NOT_A_ZIP,
+        "the local header of zip entry 'a.py' gives another compression method than "
+        "the central directory",
+        id="a-local-header-that-gives-another-method",
+    ),
+    pytest.param(
+        _raw_zip(
+            [
+                _Raw(
+                    b"a.py",
+                    _STORED,
+                    flags=0x8,
+                    local_flags=0,
+                    descriptor=_descriptor(_STORED),
+                )
+            ]
+        ),
+        Kind.NOT_A_ZIP,
+        "the local header of zip entry 'a.py' gives another data descriptor flag "
+        "than the central directory",
+        id="a-local-header-without-the-data-descriptor-flag",
+    ),
+    pytest.param(
+        _raw_zip(
+            [_Raw(b"a.py", _STORED, flags=0x8, descriptor=_descriptor(b"another"))]
+        ),
+        Kind.NOT_A_ZIP,
+        "zip entry 'a.py' is not followed by a data descriptor that restates its "
+        "CRC-32 and sizes",
+        id="a-data-descriptor-that-does-not-restate-its-member",
+    ),
+    pytest.param(
+        _raw_zip([_Raw(b"a.py", _STORED, flags=0x8)]),
+        Kind.NOT_A_ZIP,
+        "zip entry 'a.py' is not followed by a data descriptor that restates its "
+        "CRC-32 and sizes",
+        id="a-member-flagged-for-a-data-descriptor-without-one",
+    ),
+    pytest.param(
+        # A reader that counts members by the end record reads one of two, or two of
+        # one, while zipfile reads the central directory to its end.
+        _with_end_record_counts(_zip({"a.py": b"x"}), 2, 2),
+        Kind.NOT_A_ZIP,
+        "the archive's end record counts 2 members, and its central directory holds 1",
+        id="an-end-record-that-counts-another-number-of-members",
+    ),
+    pytest.param(
+        _with_end_record_counts(_zip({"a.py": b"x"}), 2, 1),
+        Kind.NOT_A_ZIP,
+        "the archive's end record counts 2 members, and its central directory holds 1",
+        id="an-end-record-that-counts-another-number-on-this-disk",
+    ),
+    pytest.param(
+        # Both headers agree on a compressed size ten bytes longer than the data,
+        # which takes the member's data into the central directory.
+        _with_compressed_size(_stored(), len(_STORED) + 10),
+        Kind.NOT_A_ZIP,
+        "zip entry 'a.py' runs into the central directory",
+        id="a-member-whose-data-runs-into-the-central-directory",
+    ),
+    pytest.param(
+        # zipfile reads the comment from what is left of the central directory,
+        # nothing; a reader of the file reads it from the end record that follows.
+        _with_entry_comment_length(_zip({"a.py": b"x"}), 0, 10),
+        Kind.NOT_A_ZIP,
+        "the central directory entry of zip entry 'a.py' runs past the central "
+        "directory",
+        id="a-central-directory-entry-that-runs-past-the-directory",
+    ),
+]
+
+#: Rule 3, run under this Python's zipfile and under one that ignores the field.
+SECOND_NAMES = [
+    pytest.param(
+        # zipfile from 3.12 extracts the second member as app.py, over the first;
+        # zipimport and every reader that ignores the field keep the first.
+        _zip_with_unicode_paths(
+            [
+                ("app.py", None, b"EVIL = True\n"),
+                ("zzz.py", "app.py", b"EVIL = False\n"),
+            ]
+        ),
+        Kind.UNICODE_PATH_MISMATCH,
+        "zip entry 'zzz.py' is named 'app.py' by its Unicode path field: the field "
+        "names another file",
+        id="a-unicode-path-onto-another-member",
+    ),
+    pytest.param(
+        # Scanned as text while `import app` runs it.
+        _zip_with_unicode_paths([("app.py", "app.txt", b"EVIL = True\n")]),
+        Kind.UNICODE_PATH_MISMATCH,
+        "zip entry 'app.py' is named 'app.txt' by its Unicode path field: the field "
+        "names another file",
+        id="a-unicode-path-that-renames-the-member",
+    ),
+    pytest.param(
+        # Python 3.11's zipfile wrote app.txt, which no Python scanner reads, and
+        # Info-ZIP's unzip extracts app.py. Red at the base under a zipfile that
+        # ignores the field: admitted.
+        _zip_with_unicode_paths([("app.txt", "app.py", b"EVIL = True\n")]),
+        Kind.UNICODE_PATH_MISMATCH,
+        "zip entry 'app.txt' is named 'app.py' by its Unicode path field: the field "
+        "names another file",
+        id="a-unicode-path-that-gives-a-text-file-a-python-name",
+    ),
+    # Whatever the field's version or CRC-32 says, since readers differ in which
+    # fields they apply. Red at the base on every Python: zipfile skips both fields,
+    # so they were admitted.
+    pytest.param(
+        _zip_with_extra(
+            "app.txt",
+            _unicode_path_field(b"app.txt", "app.py", version=2),
+            b"EVIL = True\n",
+        ),
+        Kind.UNICODE_PATH_MISMATCH,
+        "zip entry 'app.txt' is named 'app.py' by its Unicode path field: the field "
+        "names another file",
+        id="a-unicode-path-field-of-another-version",
+    ),
+    pytest.param(
+        _zip_with_extra(
+            "app.txt",
+            _unicode_path_field(b"app.txt", "app.py", crc_of=b"other.txt"),
+            b"EVIL = True\n",
+        ),
+        Kind.UNICODE_PATH_MISMATCH,
+        "zip entry 'app.txt' is named 'app.py' by its Unicode path field: the field "
+        "names another file",
+        id="a-unicode-path-field-with-another-names-crc",
+    ),
+    pytest.param(
+        # zipfile never reads a local header's extra field; a reader that walks the
+        # local headers does.
+        _raw_zip(
+            [
+                _Raw(
+                    b"app.txt",
+                    b"EVIL = True\n",
+                    local_extra=_unicode_path_field(b"app.txt", "app.py"),
+                )
+            ]
+        ),
+        Kind.UNICODE_PATH_MISMATCH,
+        "zip entry 'app.txt' is named 'app.py' by the Unicode path field of its "
+        "local header: the field names another file",
+        id="a-unicode-path-field-in-the-local-header-alone",
+    ),
+    # A field that cannot be read is refused in the central directory in the words
+    # zipfile from 3.12 uses as it opens the archive, so every Python refuses it alike.
+    # Red at the base before 3.12, where zipfile ignores the field: admitted.
+    pytest.param(
+        _zip_with_extra("app.py", struct.pack("<HH", 0x7075, 3) + b"\x01ab", b"x"),
+        Kind.NOT_A_ZIP,
+        "Corrupt unicode path extra field (0x7075)",
+        id="a-unicode-path-field-too-short-to-read",
+    ),
+    pytest.param(
+        _zip_with_extra("app.py", _unicode_path_field(b"app.py", b"\xff\xfe"), b"x"),
+        Kind.NOT_A_ZIP,
+        "Corrupt unicode path extra field (0x7075): invalid utf-8 bytes",
+        id="a-unicode-path-field-that-is-not-utf8",
+    ),
+    pytest.param(
+        _raw_zip(
+            [
+                _Raw(
+                    b"app.py",
+                    b"x",
+                    local_extra=struct.pack("<HH", 0x7075, 3) + b"\x01ab",
+                )
+            ]
+        ),
+        Kind.NOT_A_ZIP,
+        "the local header of zip entry 'app.py' holds a corrupt Unicode path field "
+        "(0x7075)",
+        id="a-local-unicode-path-field-too-short-to-read",
+    ),
+    pytest.param(
+        _raw_zip(
+            [
+                _Raw(
+                    b"app.py",
+                    b"x",
+                    local_extra=_unicode_path_field(b"app.py", b"\xff\xfe"),
+                )
+            ]
+        ),
+        Kind.NOT_A_ZIP,
+        "the local header of zip entry 'app.py' holds a corrupt Unicode path field "
+        "(0x7075): invalid utf-8 bytes",
+        id="a-local-unicode-path-field-that-is-not-utf8",
+    ),
+    pytest.param(
+        # A block that claims 40 bytes of data and holds 1.
+        _raw_zip(
+            [
+                _Raw(
+                    b"app.py",
+                    b"x",
+                    local_extra=struct.pack("<HH", 0x7075, 40) + b"\x01",
+                )
+            ]
+        ),
+        Kind.NOT_A_ZIP,
+        "the local header of zip entry 'app.py' holds a corrupt extra field",
+        id="a-corrupt-extra-field-in-a-local-header",
+    ),
+]
+
+#: Every layout a zip writer makes, which rule 6 has to admit: (archive, tree).
+_PIPED = {"app.py": b"print('written to a pipe')\n", "pkg/mod.py": b"VALUE = 1\n"}
+_PIPED_TREE = {
+    "app.py": _PIPED["app.py"],
+    "pkg": None,
+    "pkg/mod.py": _PIPED["pkg/mod.py"],
+}
+ADMITTED = [
+    pytest.param(
+        _zip_written_to_a_pipe(_PIPED),
+        _PIPED_TREE,
+        id="data-descriptors-as-zipfile-writes-them-to-a-pipe",
+    ),
+    pytest.param(
+        _zip_written_to_a_pipe(_PIPED, zip64=True),
+        _PIPED_TREE,
+        id="zip64-data-descriptors-as-zipfile-writes-them-to-a-pipe",
+    ),
+    pytest.param(
+        _raw_zip(
+            [
+                _Raw(
+                    b"a.py",
+                    _STORED,
+                    flags=0x8,
+                    descriptor=_descriptor(_STORED, signature=False),
+                )
+            ]
+        ),
+        {"a.py": _STORED},
+        id="a-data-descriptor-without-its-signature",
+    ),
+    pytest.param(
+        _raw_zip(
+            [
+                _Raw(
+                    b"a.py",
+                    _STORED,
+                    flags=0x8,
+                    descriptor=_descriptor(_STORED, signature=False, zip64=True),
+                )
+            ]
+        ),
+        {"a.py": _STORED},
+        id="a-zip64-data-descriptor-without-its-signature",
+    ),
+    pytest.param(
+        _raw_zip(
+            [
+                _Raw(
+                    b"a.py",
+                    _STORED,
+                    flags=0x8,
+                    local_sizes=(zlib.crc32(_STORED), len(_STORED), len(_STORED)),
+                    descriptor=_descriptor(_STORED),
+                )
+            ]
+        ),
+        {"a.py": _STORED},
+        id="a-data-descriptor-whose-local-header-gives-the-sizes-too",
+    ),
+    pytest.param(
+        _raw_zip(
+            [_Raw(b"a.py", b"A = 1\n"), _Raw(b"b.py", b"B = 2\n")], zip64_end=True
+        ),
+        {"a.py": b"A = 1\n", "b.py": b"B = 2\n"},
+        id="zip64-end-records",
+    ),
+    pytest.param(
+        _zip_with_comment({"app.py": b"x"}, b"an archive comment"),
+        {"app.py": b"x"},
+        id="an-archive-comment",
+    ),
+    pytest.param(_zip({}), {}, id="an-empty-archive"),
 ]
 
 
@@ -710,6 +1445,44 @@ class TestEachRuleRefusesBeforeAnythingIsWritten:
         assert _verdict(delivered.value) == _verdict(shared)
 
 
+class TestASecondNameIsRefusedWhicheverNameZipfileTakes:
+    """Rule 3 reads the Unicode path field itself, so this zipfile cannot change it.
+
+    Each row runs under this Python's zipfile and under one made to ignore the field,
+    as zipfile did before 3.12 (``zipfile_reading``), and has to reach one verdict,
+    in one set of words, from both entry points.
+    """
+
+    @pytest.mark.parametrize("source,kind,message", SECOND_NAMES)
+    def test_the_shared_function_refuses_it(
+        self, zipfile_reading, tmp_path, source, kind, message
+    ):
+        destination = tmp_path / "tree"
+        refused = _extraction_refusal(_archive_file(tmp_path, source), destination)
+
+        assert (refused.kind, str(refused)) == (kind, message)
+        assert not destination.exists(), "a refused archive made the destination"
+
+    @pytest.mark.parametrize("source,kind,message", SECOND_NAMES)
+    def test_the_finalize_refuses_it_in_the_same_words(
+        self, zipfile_reading, tmp_path, source, kind, message
+    ):
+        delivered = _verdict(_finalize_refusal(source, tmp_path / "workspace"))
+
+        assert delivered == (kind, message)
+
+    def test_the_zipfile_made_to_ignore_the_field_keeps_the_spelled_name(
+        self, monkeypatch
+    ):
+        """Control for the second run of each row: what it simulates is what zipfile
+        before 3.12 did, here as on any Python."""
+        _as_zipfile_before_3_12(monkeypatch)
+        payload = _zip_with_unicode_paths([("a.py", "b.py", b"")])
+
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            assert archive.infolist()[0].filename == "a.py"
+
+
 class TestTheBoundariesAreAdmitted:
     """Controls for the limits: each one admits the value at the limit itself."""
 
@@ -730,6 +1503,18 @@ class TestTheBoundariesAreAdmitted:
     def test_exactly_50000_members_are_admitted(self):
         with zipfile.ZipFile(io.BytesIO(_empty_members(50_000))) as archive:
             assert len(sa.admit_zip_members(archive)) == 50_000
+
+    def test_a_closed_archive_is_a_value_error_not_a_refusal(self):
+        """Rule 6 reads the file the archive was opened on, which a closed one no
+        longer holds: that is the caller's mistake, in zipfile's own words."""
+        archive = zipfile.ZipFile(io.BytesIO(_zip({"a.py": b"x"})))
+        archive.close()
+
+        with pytest.raises(ValueError) as failed:
+            sa.admit_zip_members(archive)
+
+        assert not isinstance(failed.value, sa.SourceArchiveRefused)
+        assert str(failed.value) == "Attempt to use ZIP archive that was already closed"
 
     def test_the_limits_are_the_deliverys(self):
         limits = (sa.MAX_ARCHIVE_BYTES, sa.MAX_EXTRACTED_BYTES, sa.MAX_MEMBERS)
@@ -832,12 +1617,33 @@ class TestTheTreeIsExtractedAsArchived:
         }
 
 
+class TestOneZipIsAdmittedHoweverItsWriterLaysItOut:
+    """Controls for rule 6: each layout a zip writer makes is one zip, and admitted.
+
+    A data descriptor in each of the four shapes the format allows (its signature or
+    none, four-byte or eight-byte sizes), one whose local header gives the sizes as
+    well, zip64 end records, an archive comment, and no members at all.
+    """
+
+    @pytest.mark.parametrize("payload,tree", ADMITTED)
+    def test_both_entry_points_extract_it(self, tmp_path, payload, tree):
+        extracted = sa.extract_source_archive(
+            _archive_file(tmp_path, payload), tmp_path / "tree"
+        )
+        _upload(payload, tmp_path / "workspace")
+        delivered = _finalize(payload, tmp_path / "workspace")
+
+        assert _tree(extracted) == tree
+        assert _tree(delivered) == tree
+
+
 class TestAUnicodePathField:
     """Rule 3: the name zipfile extracts a member under has to be the member's own."""
 
-    def test_one_that_restates_a_utf8_name_is_admitted(self, tmp_path):
-        """Info-ZIP's own shape for a name outside ASCII, from a UTF-8 system: the
-        member is extracted under the name zipfile reads, by both entry points."""
+    def test_one_that_restates_a_utf8_name_is_admitted(self, zipfile_reading, tmp_path):
+        """Info-ZIP's own shape for a name outside ASCII, from a UTF-8 system, with the
+        field in the local header too: the member is extracted under the name zipfile
+        reads, by both entry points, whether that zipfile applies the field or not."""
         payload = _info_zip_utf8_name("docs/café.md", b"# Notes\n")
         with zipfile.ZipFile(io.BytesIO(payload)) as archive:
             (written,) = archive.namelist()
@@ -861,22 +1667,27 @@ class TestAUnicodePathField:
         assert info.filename == "docs/café.md"
         assert info.orig_filename != info.filename
 
-    @pytest.mark.skipif(
-        ZIPFILE_READS_UNICODE_PATHS,
-        reason="this zipfile extracts under the Unicode path field",
-    )
-    def test_a_zipfile_that_ignores_the_field_extracts_the_spelled_names(
-        self, tmp_path
+    def test_where_zipfile_ignores_the_field_it_is_refused_all_the_same(
+        self, monkeypatch, tmp_path
     ):
-        """Why rule 3 refuses nothing before 3.12: the names extracted are the ones
-        the archive spells, which every reader sees."""
+        """Re-pinned from an admission. zipfile before 3.12 extracts the member under
+        the name the archive spells, app.py, and Info-ZIP's unzip under the field's,
+        app.txt: not one name that every reader sees, but two. The module reads the
+        field itself, so a zipfile that ignores it changes nothing. Red at the base
+        under such a zipfile, real on 3.11 and simulated here on any Python: admitted,
+        and written as app.py."""
+        _as_zipfile_before_3_12(monkeypatch)
         payload = _zip_with_unicode_paths([("app.py", "app.txt", b"x")])
+        destination = tmp_path / "tree"
 
-        destination = sa.extract_source_archive(
-            _archive_file(tmp_path, payload), tmp_path / "tree"
+        refused = _extraction_refusal(_archive_file(tmp_path, payload), destination)
+
+        assert refused.kind is Kind.UNICODE_PATH_MISMATCH
+        assert str(refused) == (
+            "zip entry 'app.py' is named 'app.txt' by its Unicode path field: the "
+            "field names another file"
         )
-
-        assert _tree(destination) == {"app.py": b"x"}
+        assert not destination.exists()
 
 
 #: Names Windows cannot hold as spelled, and the component that makes each so.
@@ -956,12 +1767,13 @@ class TestNamesWindowsCannotHold:
         assert delivered == shared
         assert shared[0] is Kind.RESERVED_NAME
 
-    @_NEEDS_UNICODE_PATHS
     def test_on_windows_the_name_a_unicode_path_field_gives_is_judged_too(
-        self, monkeypatch, tmp_path
+        self, zipfile_reading, monkeypatch, tmp_path
     ):
         """The field restates COM² from its UTF-8 bytes, which zipfile spells as
-        cp437 text no rule refuses; extracted, it is the device COM²."""
+        cp437 text no rule refuses; extracted under the field's name, by zipfile from
+        3.12 or by a reader that applies it, it is the device COM². Judged whether or
+        not this zipfile applies the field: red at the base under one that ignores it."""
         monkeypatch.setattr(sa, "_ON_WINDOWS", True)
         payload = _info_zip_utf8_name("COM\xb2.py", b"x")
 
@@ -1087,8 +1899,10 @@ class TestWhatZipfileCannotReadIsARefusal:
     ``extract_source_archive`` says every problem with the archive is a
     ``SourceArchiveRefused`` and an ``OSError`` is the destination's or the disk's, so
     a caller that tells them apart can show a refusal and stop. Each row is an
-    exception zipfile raises that is neither, or an ``OSError`` raised for the
-    archive's bytes alone. Red at the base: each reached the caller as it was raised.
+    exception zipfile raises that is neither. Red at the base: each reached the caller
+    as it was raised. Two shapes this class held, header offsets that point before the
+    file or past what a seek can reach, are refused by rule 6 now, before zipfile reads
+    a member, and are rows of ``REFUSED`` so the finalize is given them too.
     """
 
     def test_a_member_that_needs_a_newer_zip_reader_is_refused(self, tmp_path):
@@ -1162,31 +1976,6 @@ class TestWhatZipfileCannotReadIsARefusal:
         assert refused.kind is Kind.UNREADABLE_MEMBER
         assert str(refused).startswith("zip entry 'aa.py' cannot be read: ")
         assert "can't decode byte 0xff" in str(refused)
-
-    def test_a_header_offset_before_the_file_is_refused(self, tmp_path):
-        """An OSError (EINVAL) read from the file at the base, which the contract
-        reserves for the disk: the offset is the archive's own."""
-        payload = _with_central_directory_moved_on(_zip({"a.py": b"x"}), 1000)
-
-        refused = _extraction_refusal(
-            _archive_file(tmp_path, payload), tmp_path / "tree"
-        )
-
-        assert refused.kind is Kind.UNREADABLE_MEMBER
-        assert str(refused).startswith("zip entry 'a.py' cannot be read: ")
-
-    def test_a_header_offset_past_what_a_seek_can_reach_is_refused(self, tmp_path):
-        """A zip64 offset of 2**63, which no seek takes."""
-        payload = _with_zip64_header_offset(
-            _zip({"a.py": b"x"}, compression=zipfile.ZIP_STORED), 2**63
-        )
-
-        refused = _extraction_refusal(
-            _archive_file(tmp_path, payload), tmp_path / "tree"
-        )
-
-        assert refused.kind is Kind.UNREADABLE_MEMBER
-        assert str(refused).startswith("zip entry 'a.py' cannot be read: ")
 
 
 class TestTheRefusal:

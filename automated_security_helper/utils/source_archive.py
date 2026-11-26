@@ -12,12 +12,14 @@ anything in it is scanned, and both are held to the rules here, so the two entry
 points cannot drift apart: an archive one of them refuses, the other refuses in the
 same words. The rules are the ones the MCP delivery enforced, moved here, with
 additions that hold for both: a NUL, a ``.`` or an empty component in a member name,
-a Unicode path field that renames a member, and two members on one path (below).
+a Unicode path field that renames a member, two members on one path, and a file that
+holds anything besides one zip (below).
 
 What is refused
 ---------------
-Every rule is decided from the archive's central directory before anything is
-written, so a refused archive leaves the destination as it was.
+Every rule is decided from the archive's end records, its central directory and its
+members' local headers before anything is written, so a refused archive leaves the
+destination as it was.
 
 1. Size. At most 100 MiB of archive, 500 MiB of members once uncompressed, and
    50,000 members, directories included. The uncompressed total is the sum of the
@@ -37,14 +39,21 @@ written, so a refused archive leaves the destination as it was.
    or a space, holds a control character or one of ``"*:<>?|``, or is a device name
    such as ``CON``, ``NUL`` or ``COM1``, with or without an extension. zipfile
    rewrites the first three there, and a device name is written to the device.
-3. A second name. A member can carry a Unicode path field (extra field 0x7075), and
-   zipfile, from Python 3.12, extracts the member under the name in it rather than
-   the one the archive spells, while readers that ignore the field, ``zipimport``
-   among them, keep the spelled one. The field is admitted only when it restates the
+3. A second name. A member can carry a Unicode path field (extra field 0x7075), in its
+   central directory entry or its local header, and readers differ in whether they
+   extract the member under the name in it or the one the archive spells: Info-ZIP's
+   ``unzip`` takes the field's, and so does zipfile from Python 3.12 for a field of
+   version 1 whose CRC-32 matches the spelled name, while zipfile before 3.12 and
+   ``zipimport`` keep the spelled one. The field is admitted only when it restates the
    name: the UTF-8 reading of the bytes the archive spells the name with, which is
    what Info-ZIP writes for a name outside ASCII. One that names another file is
-   refused, so a member spelled ``app.py`` is not scanned as ``app.txt``, and the
-   name an admitted field gives is judged by rule 2 too.
+   refused whatever its version and CRC-32 say, since readers differ in which fields
+   they apply, so a member spelled ``app.txt`` is not scanned as ``app.txt`` and
+   extracted by ``unzip`` as ``app.py``. This module reads the field itself rather
+   than through zipfile, so the rule is the same on every supported Python, and the
+   name an admitted field gives is judged by rule 2 too. A field too short to hold its
+   version and CRC-32, or whose name is not UTF-8, is refused as not a zip, in the
+   central directory in the words zipfile from 3.12 refuses it with.
 4. One path for each member. Two members extracted to one path are refused,
    whatever each is (two members of one name, a file and a directory), and so is a
    member under a path the archive holds as a file. zipfile writes the later of two
@@ -55,17 +64,34 @@ written, so a refused archive leaves the destination as it was.
    before extraction races the extraction (an earlier member can make the directory
    a later link's path runs through), and a source tree needs none. The refusal
    quotes at most the first 256 bytes of the target.
+6. One zip, and nothing else. zipfile reads the zip whose end record it finds last
+   and lets the rest of the file pass: bytes before it, which it takes for data the zip
+   was appended to, bytes after its end record, and bytes between its members, which
+   its central directory does not list. A reader that starts at the first byte reads
+   what is there, so one file could give the scan one tree and that reader another:
+   two zips end to end are the second to zipfile and the first from byte 0, and a tar
+   whose last member is a zip reads as that zip. The file therefore has to be one zip
+   from its first byte to its last: the members' local records one after another from
+   byte 0, each its header, name, extra field, data and, when its flags say so, a data
+   descriptor that restates its CRC-32 and sizes; then the central directory, holding
+   as many entries as the end record counts and none that runs past it; then, for a
+   zip64 archive, its end record and locator; then the end record and its comment.
+   A local header that gives another compression method, data descriptor flag, CRC-32
+   or size than its central directory entry is refused too, since a reader of the
+   local headers would find that member's data, and the next member, elsewhere. Each
+   of these is refused as not a zip.
 
 A malformed member is refused, never repaired: an archive that has to be rewritten to
 be safe is not the tree its sender meant to send.
 
 Formats
 -------
-Zip only. A tar, a gzip file or anything else is refused as not a zip. Nothing
-sniffs the content to decide what an archive holds, because the command names it:
-``ash scan fs --archive`` reads source, and ``ash scan image --archive`` reads an
-image tarball. A tar reader would need member rules of its own (hard links, devices,
-sparse members) before it could be admitted here.
+Zip only. A tar, a gzip file or anything else is refused as not a zip, and so is a zip
+with anything before, between or after its members (rule 6), a tar whose last member
+is a zip among them. Nothing sniffs the content to decide what an archive holds,
+because the command names it: ``ash scan fs --archive`` reads source, and ``ash scan
+image --archive`` reads an image tarball. A tar reader would need member rules of its
+own (hard links, devices, sparse members) before it could be admitted here.
 
 Entry points
 ------------
@@ -101,8 +127,17 @@ Limits
 * A Unicode path field that restates its name from a legacy code page rather than
   from UTF-8 bytes (Info-ZIP under a locale that is not UTF-8, for a name outside
   ASCII) is refused as naming another file.
-* zipfile before Python 3.12 ignores the Unicode path field and extracts every member
-  under the name the archive spells, so rule 3 has nothing to refuse there.
+* So is a stale field: one a tool left behind when it renamed the member without
+  rewriting the field. Readers that check the field's CRC-32 ignore it and keep the
+  new name, but rule 3 does not rely on a reader doing so.
+* A member whose flags say a data descriptor follows its data gives no sizes in its
+  local header, so a reader of the local headers finds where that member ends from its
+  data: where its compressed stream stops, or, for a stored member, where it finds a
+  data descriptor. Rule 6 places the end by the compressed size in the central
+  directory, as zipfile does, and does not decompress the member before extraction to
+  check that its stream stops there. A deflated stream that stops early, which zipfile
+  reads without complaint, or a stored member whose data holds what reads as its own
+  descriptor, can end that member somewhere else for such a reader.
 """
 
 from __future__ import annotations
@@ -112,6 +147,7 @@ import errno
 import io
 import os
 import stat
+import struct
 import zipfile
 from dataclasses import dataclass
 from enum import Enum
@@ -139,8 +175,57 @@ _S_IFLNK_SHIFTED = 0xA000 << 16
 
 #: Bit 0 of a member's general purpose flags: its data is encrypted.
 _ENCRYPTED_FLAG = 0x1
-#: Bit 11 of a member's general purpose flags: its name is spelled in UTF-8.
-_UTF8_NAME_FLAG = 0x800
+#: Bit 3 of a member's general purpose flags: its local header leaves its CRC-32 and
+#: sizes out, and a data descriptor after its data gives them.
+_DATA_DESCRIPTOR_FLAG = 0x8
+
+# The records a zip is made of, as PKWARE's APPNOTE (section 4.3) lays them out and
+# zipfile reads them (rule 6).
+#: A member's local header: signature, version needed, flags, compression method, time,
+#: date, CRC-32, compressed size, size, name length and extra field length.
+_LOCAL_HEADER = struct.Struct("<4s5H3L2H")
+_LOCAL_HEADER_SIGNATURE = b"PK\x03\x04"
+#: A central directory entry is 46 bytes before its name, and gives the lengths of its
+#: name, extra field and comment at its 28th byte.
+_CENTRAL_ENTRY_SIZE = 46
+_CENTRAL_ENTRY_LENGTHS = struct.Struct("<3H")
+_CENTRAL_ENTRY_LENGTHS_AT = 28
+#: The end record: signature, two disk numbers, the entries on this disk and in all, the
+#: central directory's size and offset, and the comment's length.
+_END_RECORD = struct.Struct("<4s4H2LH")
+_END_RECORD_SIGNATURE = b"PK\x05\x06"
+#: How far from the end of the file zipfile looks for the end record: a comment of the
+#: longest length and the record, counted as Python 3.11 counts it (later versions look
+#: one byte less far, which finds the same record whenever they find one).
+_END_RECORD_SEARCH = (1 << 16) + _END_RECORD.size
+#: The zip64 end record locator, just before the end record: signature, disk, the zip64
+#: end record's offset, disks.
+_ZIP64_LOCATOR = struct.Struct("<4sLQL")
+_ZIP64_LOCATOR_SIGNATURE = b"PK\x06\x07"
+#: The zip64 end record: signature, its length after this field, two versions, two disk
+#: numbers, the entries on this disk and in all, the central directory's size and
+#: offset.
+_ZIP64_END_RECORD = struct.Struct("<4sQ2H2L4Q")
+_ZIP64_END_RECORD_SIGNATURE = b"PK\x06\x06"
+#: A data descriptor: its signature, which a writer may leave out, then the CRC-32 and
+#: the compressed size and size, in four bytes each or, for a zip64 member, in eight.
+_DATA_DESCRIPTOR_SIGNATURE = b"PK\x07\x08"
+_DATA_DESCRIPTOR_BODIES = (struct.Struct("<3L"), struct.Struct("<L2Q"))
+_LONGEST_DATA_DESCRIPTOR = len(_DATA_DESCRIPTOR_SIGNATURE) + max(
+    body.size for body in _DATA_DESCRIPTOR_BODIES
+)
+#: An extra field is a run of blocks, each a header ID and a data length, then the data.
+_EXTRA_BLOCK_HEAD = struct.Struct("<HH")
+#: The extra field block that gives a member's zip64 sizes and offset.
+_ZIP64_EXTRA = 0x0001
+#: A size in a local header that its zip64 block gives instead.
+_ZIP64_SIZE_MARKER = 0xFFFFFFFF
+#: The Unicode path field (rule 3): a version byte and a CRC-32 before the name.
+_UNICODE_PATH_EXTRA = 0x7075
+_UNICODE_PATH_HEAD = 5
+#: Where an extra field is, as a refusal names the place.
+_CENTRAL_DIRECTORY_ENTRY = "the central directory entry"
+_LOCAL_HEADER_ITSELF = "the local header"
 
 #: Whether names are judged by what Windows can hold as well (rule 2).
 _ON_WINDOWS = os.name == "nt"
@@ -300,8 +385,9 @@ class ZipRules:
 
     max_members: int = MAX_MEMBERS
     max_extracted_bytes: int = MAX_EXTRACTED_BYTES
-    #: Given each member's name as the archive spells it, and then the name zipfile
-    #: extracts it under when a Unicode path field gives another; raises to refuse.
+    #: Given each member's name as the archive spells it, and then, for a member whose
+    #: Unicode path field restates that name in other characters, the name the field
+    #: gives, which zipfile from 3.12 extracts it under; raises to refuse.
     validate_name: Callable[[str], None] = validate_member_name
     symlink_excerpt_bytes: int = SYMLINK_TARGET_EXCERPT_BYTES
     #: The archives the link refusal names: "symlinks are not allowed in <archives>".
@@ -317,16 +403,19 @@ def admit_zip_members(
 ) -> List[zipfile.ZipInfo]:
     """Return every member of ``archive`` when ``rules`` admit them all.
 
-    Writes nothing. Reads the central directory and, for a link, the first bytes of
-    its target. The member count is checked first; then, for each member in archive
-    order, its name, the name zipfile extracts it under when a Unicode path field
-    gives another, the uncompressed total so far, and whether it is a link; then that
-    no two members are extracted to one path. The first rule that refuses ends the
-    check.
+    Writes nothing. Reads the file ``archive`` was opened on where its records are (the
+    end records, the central directory, each member's local header and any data
+    descriptor) and, for a link, the first bytes of its target; no other member data.
+    The member count is checked first; then that the file is one zip and nothing else;
+    then, for each member in archive order, its name, its Unicode path fields and the
+    name an admitted one gives, the uncompressed total so far, and whether it is a
+    link; then that no two members are extracted to one path. The first rule that
+    refuses ends the check.
 
     Raises:
         SourceArchiveRefused: naming the rule. Whatever ``rules.validate_name`` and
             zipfile raise is raised as it is.
+        ValueError: ``archive`` is closed.
     """
     members = archive.infolist()
     if len(members) > rules.max_members:
@@ -334,12 +423,13 @@ def admit_zip_members(
             SourceArchiveRefusal.TOO_MANY_MEMBERS,
             f"too many files in zip: {len(members)} > {rules.max_members}",
         )
+    spelled_names, local_extras = _refuse_anything_but_one_zip(archive, members)
     total = 0
-    for info in members:
+    for info, spelled, local_extra in zip(members, spelled_names, local_extras):
         rules.validate_name(info.orig_filename)
-        if info.filename != info.orig_filename:
-            _refuse_a_second_name(archive, info)
-            rules.validate_name(info.filename)
+        restated = _refuse_a_second_name(info, spelled, local_extra)
+        if restated is not None and restated != info.orig_filename:
+            rules.validate_name(restated)
         total += info.file_size
         if total > rules.max_extracted_bytes:
             raise SourceArchiveRefused(
@@ -353,34 +443,389 @@ def admit_zip_members(
     return members
 
 
-def _refuse_a_second_name(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> None:
-    """Refuse ``info`` when the name zipfile extracts it under is not its own.
+def _refuse_anything_but_one_zip(
+    archive: zipfile.ZipFile, members: List[zipfile.ZipInfo]
+) -> Tuple[List[bytes], List[bytes]]:
+    """Refuse a file that holds anything besides one zip (rule 6).
 
-    The name rules refuse a NUL and a backslash, the two things zipfile rewrites in a
-    spelled name, so the names differ only by a Unicode path field. The field restates
-    the name when it is the UTF-8 reading of the bytes the archive spells the name
-    with, as Info-ZIP writes a name outside ASCII without the UTF-8 flag. zipfile
-    decoded those bytes with the flag's encoding, or the archive's metadata encoding
-    (cp437 unless the caller named one), so encoding the spelled name again gives
-    them back.
+    The end record has to end the file with its comment; the central directory has to
+    be where the end record (or the zip64 end record) says, as many entries as it
+    counts, none running past it; and the members' local records have to fill the file
+    from byte 0 to the central directory (:func:`_local_extras`). zipfile opened the
+    archive, so the records it read are there to be found the way it found them.
+
+    Returns each member's name in the bytes the central directory spells it with, and
+    the extra field of its local header, in archive order, for rule 3.
     """
-    if info.flag_bits & _UTF8_NAME_FLAG:
-        encoding = "utf-8"
-    else:
-        # getattr: zipfile keeps the argument as this attribute, which the type
-        # stubs know only as a constructor argument.
-        encoding = getattr(archive, "metadata_encoding", None) or "cp437"
+    handle = archive.fp
+    if handle is None:
+        raise ValueError("Attempt to use ZIP archive that was already closed")
+    size = handle.seek(0, io.SEEK_END)
+    end = _end_record_position(handle, size)
+    # The entries on this disk and in all, the directory's size and offset, and the
+    # comment's length: every field after the signature and the two disk numbers.
+    on_this_disk, in_all, directory_size, directory_offset, comment_length = (
+        _END_RECORD.unpack(_read_at(handle, end, _END_RECORD.size))[3:]
+    )
+    following = size - end - _END_RECORD.size
+    if following > comment_length:
+        raise _not_a_zip(
+            f"{following - comment_length} bytes follow the archive's end record"
+        )
+    if following < comment_length:
+        raise _not_a_zip(
+            f"the archive's end record claims a {comment_length}-byte comment, and "
+            f"{following} bytes follow it"
+        )
+    zip64 = _zip64_end_record(handle, end)
+    if zip64 is not None:
+        on_this_disk, in_all, directory_size, directory_offset = zip64[6:10]
+    # zipfile puts the central directory where it lies, before the end records, and
+    # takes any difference from where the end record says for bytes the zip was
+    # appended to, which it adds to every member's offset.
+    shift = archive.start_dir - directory_offset
+    if shift > 0:
+        raise _not_a_zip(f"{shift} bytes come before the archive")
+    if shift < 0:
+        raise _not_a_zip(
+            "the archive's end record places its central directory "
+            f"{-shift} bytes past where it lies"
+        )
+    held = len(members)
+    counted = in_all if in_all != held else on_this_disk
+    if counted != held:
+        raise _not_a_zip(
+            f"the archive's end record counts {counted} members, and its central "
+            f"directory holds {held}"
+        )
+    spelled = _spelled_names(handle, archive.start_dir, directory_size, members)
+    return spelled, _local_extras(handle, archive.start_dir, members)
+
+
+def _not_a_zip(message: str) -> SourceArchiveRefused:
+    return SourceArchiveRefused(SourceArchiveRefusal.NOT_A_ZIP, message)
+
+
+def _read_at(handle: IO[bytes], offset: int, length: int) -> bytes:
+    """At most ``length`` bytes of ``handle`` from ``offset``; none before its start."""
+    if offset < 0 or length <= 0:
+        return b""
+    handle.seek(offset)
+    return handle.read(length)
+
+
+def _end_record_position(handle: IO[bytes], size: int) -> int:
+    """Where the end record zipfile read starts, found the way zipfile finds it.
+
+    The last bytes, when they are an end record with no comment; otherwise the last end
+    record signature in the stretch a comment of the longest length leaves room for.
+    """
+    if size >= _END_RECORD.size:
+        last = _read_at(handle, size - _END_RECORD.size, _END_RECORD.size)
+        if last.startswith(_END_RECORD_SIGNATURE) and last.endswith(b"\x00\x00"):
+            return size - _END_RECORD.size
+    start = max(size - _END_RECORD_SEARCH, 0)
+    return start + _read_at(handle, start, size - start).rfind(_END_RECORD_SIGNATURE)
+
+
+def _zip64_end_record(handle: IO[bytes], end: int) -> Optional[Tuple[int, ...]]:
+    """The zip64 end record zipfile read, when a locator sits just before the end record.
+
+    zipfile reads the record where the locator places it, and when no record is there,
+    just before the locator, taking the difference for bytes the zip was appended to.
+    """
+    locator_at = end - _ZIP64_LOCATOR.size
+    if locator_at < 0:
+        return None
+    signature, _, record_at, _ = _ZIP64_LOCATOR.unpack(
+        _read_at(handle, locator_at, _ZIP64_LOCATOR.size)
+    )
+    if signature != _ZIP64_LOCATOR_SIGNATURE:
+        return None
+    record = _read_at(handle, record_at, _ZIP64_END_RECORD.size)
+    if not record.startswith(_ZIP64_END_RECORD_SIGNATURE):
+        record = _read_at(
+            handle, locator_at - _ZIP64_END_RECORD.size, _ZIP64_END_RECORD.size
+        )
+    return _ZIP64_END_RECORD.unpack(record)
+
+
+def _spelled_names(
+    handle: IO[bytes], start: int, length: int, members: List[zipfile.ZipInfo]
+) -> List[bytes]:
+    """Each member's name in the bytes its central directory entry spells it with.
+
+    zipfile reads the central directory's length of bytes and lets an entry's name,
+    extra field or comment run past them, reading what is left. A reader of the file
+    reads those fields from the end records after the directory instead, so an entry
+    that runs past the directory is refused.
+    """
+    directory = _read_at(handle, start, length)
+    names = []
+    at = 0
+    for info in members:
+        name_length, extra_length, comment_length = _CENTRAL_ENTRY_LENGTHS.unpack_from(
+            directory, at + _CENTRAL_ENTRY_LENGTHS_AT
+        )
+        name_at = at + _CENTRAL_ENTRY_SIZE
+        at = name_at + name_length + extra_length + comment_length
+        if at > len(directory):
+            raise _not_a_zip(
+                f"the central directory entry of zip entry {info.orig_filename!r} "
+                "runs past the central directory"
+            )
+        names.append(directory[name_at : name_at + name_length])
+    return names
+
+
+def _local_extras(
+    handle: IO[bytes], directory_start: int, members: List[zipfile.ZipInfo]
+) -> List[bytes]:
+    """Refuse bytes before, between or after the members' local records.
+
+    Taken in the order of their local headers, each record has to start where the one
+    before it ends, the first at byte 0, and the last has to end where the central
+    directory starts (:func:`_local_record_end` says where each ends). Returns each
+    member's local extra field, in archive order.
+    """
+    extras = [b""] * len(members)
+    order = sorted(range(len(members)), key=lambda at: members[at].header_offset)
+    boundaries = [members[at].header_offset for at in order[1:]] + [directory_start]
+    reached = 0
+    previous: Optional[zipfile.ZipInfo] = None
+    for position, boundary in zip(order, boundaries):
+        info = members[position]
+        if info.header_offset >= directory_start:
+            raise _not_a_zip(
+                f"the central directory places zip entry {info.orig_filename!r} at "
+                f"byte {info.header_offset}, which is not before the central directory"
+            )
+        if info.header_offset != reached:
+            raise _misplaced(previous, info, reached)
+        reached, extras[position] = _local_record_end(handle, info, boundary)
+        previous = info
+    if reached != directory_start:
+        if previous is None:
+            raise _not_a_zip(
+                f"{directory_start} bytes come before the archive's central directory"
+            )
+        if reached < directory_start:
+            raise _not_a_zip(
+                f"{directory_start - reached} bytes lie between zip entry "
+                f"{previous.orig_filename!r} and the central directory"
+            )
+        raise _not_a_zip(
+            f"zip entry {previous.orig_filename!r} runs into the central directory"
+        )
+    return extras
+
+
+def _misplaced(
+    previous: Optional[zipfile.ZipInfo], info: zipfile.ZipInfo, reached: int
+) -> SourceArchiveRefused:
+    """The refusal of a local record that does not start at ``reached``."""
+    if previous is None:
+        return _not_a_zip(
+            f"{info.header_offset} bytes come before the archive's first member"
+        )
+    if info.header_offset > reached:
+        return _not_a_zip(
+            f"{info.header_offset - reached} bytes lie between zip entries "
+            f"{previous.orig_filename!r} and {info.orig_filename!r}"
+        )
+    return _not_a_zip(
+        f"zip entries {previous.orig_filename!r} and {info.orig_filename!r} overlap"
+    )
+
+
+def _local_record_end(
+    handle: IO[bytes], info: zipfile.ZipInfo, boundary: int
+) -> Tuple[int, bytes]:
+    """Where the local record of ``info`` ends, and its local header's extra field.
+
+    The record is its header, name, extra field and data, as long as the central
+    directory says; then, when the member has a data descriptor, the bytes up to
+    ``boundary``, where the next record or the central directory starts, which have to
+    be that descriptor. The local header has to agree with the central directory on
+    what places the data and says how to read it: the method, the data descriptor flag
+    and, without a descriptor, the CRC-32 and sizes.
+    """
+    offset = info.header_offset
+    header = _read_at(handle, offset, _LOCAL_HEADER.size)
+    if len(header) < _LOCAL_HEADER.size or not header.startswith(
+        _LOCAL_HEADER_SIGNATURE
+    ):
+        raise _not_a_zip(
+            f"zip entry {info.orig_filename!r} has no local header at byte {offset}"
+        )
+    (_, _, flags, method, _, _, crc, compressed, size, name_length, extra_length) = (
+        _LOCAL_HEADER.unpack(header)
+    )
+    extra_at = offset + _LOCAL_HEADER.size + name_length
+    extra = _read_at(handle, extra_at, extra_length)
+    data_end = extra_at + extra_length + info.compress_size
+    descriptor = bool(info.flag_bits & _DATA_DESCRIPTOR_FLAG)
+    compared = [
+        ("compression method", method, info.compress_type),
+        ("data descriptor flag", bool(flags & _DATA_DESCRIPTOR_FLAG), descriptor),
+    ]
+    if not descriptor:
+        compressed, size = _local_zip64_sizes(info, extra, compressed, size)
+        compared.append(("CRC-32", crc, info.CRC))
+        compared.append(
+            ("size", (compressed, size), (info.compress_size, info.file_size))
+        )
+    for what, local, central in compared:
+        if local != central:
+            raise _not_a_zip(
+                f"the local header of zip entry {info.orig_filename!r} gives another "
+                f"{what} than the central directory"
+            )
+    if not descriptor or data_end > boundary:
+        return data_end, extra
+    between = boundary - data_end
+    if between <= _LONGEST_DATA_DESCRIPTOR and _restates(
+        _read_at(handle, data_end, between), info
+    ):
+        return boundary, extra
+    raise _not_a_zip(
+        f"zip entry {info.orig_filename!r} is not followed by a data descriptor "
+        "that restates its CRC-32 and sizes"
+    )
+
+
+def _local_zip64_sizes(
+    info: zipfile.ZipInfo, extra: bytes, compressed: int, size: int
+) -> Tuple[int, int]:
+    """A local header's compressed size and size, from its zip64 block where marked.
+
+    A local zip64 block gives the size and then the compressed size, eight bytes each,
+    for those of the two the header marks; a marker the block does not resolve stays,
+    and fails the comparison with the central directory.
+    """
+    if _ZIP64_SIZE_MARKER not in (compressed, size):
+        return compressed, size
+    for data in _extra_blocks(info, extra, _ZIP64_EXTRA, _LOCAL_HEADER_ITSELF):
+        values = [
+            value for (value,) in struct.iter_unpack("<Q", data[: len(data) // 8 * 8])
+        ]
+        if size == _ZIP64_SIZE_MARKER and values:
+            size = values.pop(0)
+        if compressed == _ZIP64_SIZE_MARKER and values:
+            compressed = values.pop(0)
+        break
+    return compressed, size
+
+
+def _restates(between: bytes, info: zipfile.ZipInfo) -> bool:
+    """Whether ``between`` is a data descriptor restating the member's CRC-32 and sizes.
+
+    With its signature or without, and in four-byte or eight-byte sizes: the bytes have
+    to be one of those four whole, with nothing before or after.
+    """
+    expected = (info.CRC, info.compress_size, info.file_size)
+    bodies = [between]
+    if between.startswith(_DATA_DESCRIPTOR_SIGNATURE):
+        bodies.append(between[len(_DATA_DESCRIPTOR_SIGNATURE) :])
+    return any(
+        len(body) == layout.size and layout.unpack(body) == expected
+        for body in bodies
+        for layout in _DATA_DESCRIPTOR_BODIES
+    )
+
+
+def _extra_blocks(
+    info: zipfile.ZipInfo, extra: bytes, header_id: int, where: str
+) -> Iterator[bytes]:
+    """The data of each block of the extra field ``extra`` with ID ``header_id``.
+
+    Fewer than four bytes left end the field, as zipfile reads it. A block that claims
+    more data than is left is refused: zipfile refuses one in a central directory entry
+    as it opens the archive, and reads no local header's extra field at all.
+    """
+    at = 0
+    while len(extra) - at >= _EXTRA_BLOCK_HEAD.size:
+        kind, length = _EXTRA_BLOCK_HEAD.unpack_from(extra, at)
+        data_at = at + _EXTRA_BLOCK_HEAD.size
+        if data_at + length > len(extra):
+            raise _not_a_zip(
+                f"{where} of zip entry {info.orig_filename!r} holds a corrupt extra "
+                "field"
+            )
+        if kind == header_id:
+            yield extra[data_at : data_at + length]
+        at = data_at + length
+
+
+def _refuse_a_second_name(
+    info: zipfile.ZipInfo, spelled: bytes, local_extra: bytes
+) -> Optional[str]:
+    """Refuse ``info`` when a Unicode path field gives it a name that is not its own.
+
+    ``spelled`` is the member's name in the bytes the archive spells it with, and
+    ``local_extra`` its local header's extra field. Every Unicode path field in the
+    central directory entry and in the local header is read, whatever its version and
+    CRC-32 say, and has to restate the name: give the UTF-8 reading of ``spelled``,
+    as Info-ZIP writes a name outside ASCII without the UTF-8 flag.
+
+    Returns that reading when the member has a field, for rule 2 to judge as well, and
+    None when it has none.
+    """
     restated: Optional[str]
     try:
-        restated = info.orig_filename.encode(encoding).decode("utf-8")
-    except UnicodeError:
+        restated = spelled.decode("utf-8")
+    except UnicodeDecodeError:
         restated = None
-    if info.filename != restated:
-        raise SourceArchiveRefused(
-            SourceArchiveRefusal.UNICODE_PATH_MISMATCH,
-            f"zip entry {info.orig_filename!r} is extracted as {info.filename!r}: "
-            "its Unicode path field names another file",
-        )
+    given = False
+    for where, extra in (
+        (_CENTRAL_DIRECTORY_ENTRY, info.extra),
+        (_LOCAL_HEADER_ITSELF, local_extra),
+    ):
+        for named in _unicode_path_names(info, extra, where):
+            given = True
+            if named != restated:
+                field = (
+                    "its Unicode path field"
+                    if where == _CENTRAL_DIRECTORY_ENTRY
+                    else "the Unicode path field of its local header"
+                )
+                raise SourceArchiveRefused(
+                    SourceArchiveRefusal.UNICODE_PATH_MISMATCH,
+                    f"zip entry {info.orig_filename!r} is named {named!r} by {field}: "
+                    "the field names another file",
+                )
+    return restated if given else None
+
+
+def _unicode_path_names(
+    info: zipfile.ZipInfo, extra: bytes, where: str
+) -> Iterator[str]:
+    """The names the Unicode path fields in the extra field ``extra`` give, in order.
+
+    A field is a version byte, a CRC-32 and the name in UTF-8. One too short for the
+    first two, or whose name is not UTF-8, is refused; in a central directory entry in
+    the words zipfile from Python 3.12 refuses it with as it opens the archive, so that
+    every Python gives one verdict for it.
+    """
+    for data in _extra_blocks(info, extra, _UNICODE_PATH_EXTRA, where):
+        if len(data) < _UNICODE_PATH_HEAD:
+            raise _corrupt_unicode_path(info, where, "")
+        try:
+            named = data[_UNICODE_PATH_HEAD:].decode("utf-8")
+        except UnicodeDecodeError:
+            raise _corrupt_unicode_path(info, where, ": invalid utf-8 bytes") from None
+        yield named
+
+
+def _corrupt_unicode_path(
+    info: zipfile.ZipInfo, where: str, detail: str
+) -> SourceArchiveRefused:
+    if where == _CENTRAL_DIRECTORY_ENTRY:
+        return _not_a_zip(f"Corrupt unicode path extra field (0x7075){detail}")
+    return _not_a_zip(
+        f"{where} of zip entry {info.orig_filename!r} holds a corrupt Unicode path "
+        f"field (0x7075){detail}"
+    )
 
 
 def _refuse_shared_paths(members: List[zipfile.ZipInfo]) -> None:
