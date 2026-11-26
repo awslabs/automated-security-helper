@@ -520,22 +520,26 @@ def rewrite_checkov_paths(
 #: The checkov frameworks whose records name the infrastructure resource a check
 #: was run on. Every checkov record has a ``resource`` field, and what it holds
 #: depends on the runner, so a framework is listed here only after its records
-#: were read (checkov 3.4.10):
+#: were read (checkov 3.4.10) and its ids were found to name one resource in a
+#: file:
 #:
-#: - terraform ``aws_db_instance.this``, terraform_plan
-#:   ``module.db.aws_db_instance.this``, terraform_json ``aws_s3_bucket.data``
-#: - cloudformation ``AWS::S3::Bucket.Bucket``
-#: - kubernetes ``Deployment.shop.web``
-#: - arm ``Microsoft.Storage/storageAccounts.stdemo``, bicep
-#:   ``Microsoft.Storage/storageAccounts.st``
+#: - terraform ``aws_db_instance.this`` (the type and name), terraform_plan
+#:   ``module.db.aws_db_instance.this`` (the resource address)
+#: - cloudformation ``AWS::S3::Bucket.Bucket`` (the type and logical id)
+#: - kubernetes ``Deployment.shop.web`` (the kind, namespace and name)
+#: - bicep ``Microsoft.Storage/storageAccounts.st`` (the type and the symbolic
+#:   name, which the parser keys a file's resources by, a nested one under its
+#:   parent's name)
+#:
+#: Even for these, a record names no resource when its file's records give its
+#: id at more than one line range: two resources then share the id
+#: (:func:`checkov_resources`).
 _RESOURCE_FRAMEWORKS = frozenset(
     {
         "terraform",
         "terraform_plan",
-        "terraform_json",
         "cloudformation",
         "kubernetes",
-        "arm",
         "bicep",
     }
 )
@@ -546,6 +550,14 @@ _RESOURCE_FRAMEWORKS = frozenset(
 #: that is in neither, so a new framework is classified by reading its records
 #: rather than taking whatever its ``resource`` field holds.
 _NO_RESOURCE_FRAMEWORKS = {
+    "terraform_json": "an id without the resource type: a Python check's record "
+    "names resource.<name>, the kind of block and the name, so two resources of "
+    "different types with one name share it, and a graph check's record names "
+    "the same resource <type>.<name>",
+    "arm": "an id that two resources can share with no line range to tell them "
+    "apart: a name built from a parameter that has no default stays the template "
+    "expression, every resource of a one-line template is at line 1, and a graph "
+    "check gives a resource lines two above its other records",
     "secrets": "a hash of the secret (a SHA-1, or commit:hash), which must not "  # pragma: allowlist secret
     "become a resource id",
     "dockerfile": "the Dockerfile path, or the path and instruction "
@@ -643,10 +655,16 @@ def checkov_resources(json_report: Any) -> dict[_RecordKey, List[Optional[str]]]
     is one of :data:`_RESOURCE_FRAMEWORKS` and None otherwise, so a key's entries
     still count every record that has it.
 
+    An entry is None as well when its file's records give its resource at more
+    than one line range. Every check on one resource gives that resource's
+    lines, so such an id is shared by two resources, and a suppression scoped to
+    it would cover the findings of both. Neither is given it; a suppression for
+    them is scoped by path and lines instead.
+
     Read before :func:`rewrite_checkov_paths` changes the report's paths: the
     keys are checkov's own spelling, which is what its SARIF URIs hold.
     """
-    return _record_values(
+    found = _record_values(
         json_report,
         lambda record, named: (
             record.get("resource")
@@ -656,6 +674,26 @@ def checkov_resources(json_report: Any) -> dict[_RecordKey, List[Optional[str]]]
             else None
         ),
     )
+    shared = _resources_at_more_than_one_place(found)
+    if not shared:
+        return found
+    return {
+        key: [None if (key[1], value) in shared else value for value in values]
+        for key, values in found.items()
+    }
+
+
+def _resources_at_more_than_one_place(
+    found: dict[_RecordKey, List[Optional[str]]],
+) -> set[Tuple[str, str]]:
+    """The ``(file, resource)`` pairs that the records give at two or more line
+    ranges, the file and the lines as a key spells them."""
+    places: dict[Tuple[str, str], set[Tuple[int, int]]] = {}
+    for (_rule, uri, start, end), resources in found.items():
+        for resource in resources:
+            if resource is not None:
+                places.setdefault((uri, resource), set()).add((start, end))
+    return {pair for pair, lines in places.items() if len(lines) > 1}
 
 
 def checkov_guidelines(json_report: Any) -> dict[_RecordKey, List[Optional[str]]]:
