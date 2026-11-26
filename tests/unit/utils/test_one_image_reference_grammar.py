@@ -56,13 +56,15 @@ REFUSED = [
     pytest.param("   ", "empty", id="whitespace-only"),
     pytest.param("-x", "option", id="leading-dash"),
     pytest.param("--insecure", "option", id="double-dash-flag"),
-    pytest.param("/etc", "path", id="absolute-path"),
-    pytest.param("/etc/passwd", "path", id="absolute-file"),
-    pytest.param("./app", "path", id="dot-relative"),
-    pytest.param("../app", "path", id="dot-dot-relative"),
-    pytest.param("~/app", "path", id="home-relative"),
-    pytest.param("~", "path", id="home"),
-    pytest.param("C:\\images\\app", "path", id="windows-path"),
+    # The grammar alone refuses these too; the word is the path reason's own,
+    # so a refusal that only names the form does not pass for it.
+    pytest.param("/etc", "filesystem path", id="absolute-path"),
+    pytest.param("/etc/passwd", "filesystem path", id="absolute-file"),
+    pytest.param("./app", "filesystem path", id="dot-relative"),
+    pytest.param("../app", "filesystem path", id="dot-dot-relative"),
+    pytest.param("~/app", "filesystem path", id="home-relative"),
+    pytest.param("~", "filesystem path", id="home"),
+    pytest.param("C:\\images\\app", "filesystem path", id="windows-path"),
     pytest.param("app/", "not an image reference", id="trailing-slash"),
     pytest.param("a//b", "not an image reference", id="double-slash"),
     pytest.param("team/../etc", "not an image reference", id="inner-dot-dot"),
@@ -82,7 +84,14 @@ REFUSED = [
     pytest.param("app@sha256:" + "A" * 64, "digest", id="uppercase-digest"),
     pytest.param("a" * 64, "image ID", id="bare-hex-id"),
     pytest.param("r/" + "a" * 256, "255", id="path-too-long"),
-    pytest.param("a" * 600, "longer than", id="far-too-long"),
+    pytest.param("a" * 600, "512", id="far-too-long"),
+    # The grammar admits this one (a long registry name, a short path and the
+    # longest tag); only the length bound refuses it.
+    pytest.param(
+        ".".join(["d" * 60] * 7) + "/team/app:" + "t" * 128,
+        "512",
+        id="long-registry-otherwise-valid",
+    ),
 ]
 
 
