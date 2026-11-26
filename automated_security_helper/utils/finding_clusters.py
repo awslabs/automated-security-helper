@@ -49,8 +49,8 @@ the first class whose required columns it carries:
     the location class knows neither the advisory nor the package). Overlap is
     not transitive, so a cluster is a connected component of the overlap
     relation; a chain A-B-C joins A and C even when they do not overlap one
-    another. The components come from a sort and sweep per file and CWE on a
-    frame, which finds every component and does not depend on input order.
+    another. The components come from a sort and sweep per file and CWE, which
+    finds every component and does not depend on input order.
     The chaining is bounded by a split guard: two rows of one scanner and
     rule id are one finding only when they overlap each other directly, so a
     cluster never folds two findings of the same scanner and rule id that are
@@ -79,7 +79,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.finding_identity import relative_path
-from automated_security_helper.utils.frame_text import ranks, wire
+from automated_security_helper.utils.frame_text import wire
 from automated_security_helper.utils.severity_ladder import SEVERITIES
 
 CLASS_PACKAGE = "package"
@@ -301,7 +301,8 @@ def _location_groups(
     Two rows are joined when they share a file and a CWE and their line ranges
     overlap, ends inclusive. Within one file and one CWE, rows sorted by start
     overlap exactly when a row starts at or before the largest end seen so far,
-    so each such run of rows (an island) is a chain, and a row carrying several
+    so each such run of rows (an island, found by a sweep on the host over
+    Python ints, which need no ranking) is a chain, and a row carrying several
     CWEs joins its chains across them. When *projects* names each row's project
     (indexed like the rows the spans' positions point into), a file of one
     project never meets the same file of another. Each component's members are
@@ -309,54 +310,24 @@ def _location_groups(
     """
     if not spans:
         return []
-    import polars as pl
-
-    # Line numbers are unbounded ints; their dense ranks keep every comparison.
-    rank = ranks(value for span in spans.values() for value in span[1:3])
-    codes: Dict[Any, int] = {}
-    columns: Dict[str, List[Any]] = {
-        name: [] for name in ("i", "project", "path", "cwe", "start", "end")
-    }
+    scopes: Dict[Tuple[Any, str, str], List[Tuple[int, int, int]]] = {}
     for index, (path, start, end, cwes) in spans.items():
-        project = (
-            0 if projects is None else codes.setdefault(projects[index], len(codes))
-        )
-        for cwe in sorted(cwes):
-            columns["i"].append(index)
-            columns["project"].append(project)
-            columns["path"].append(wire(path))
-            columns["cwe"].append(cwe)
-            columns["start"].append(rank[start])
-            columns["end"].append(rank[end])
-    frame = pl.DataFrame(
-        columns,
-        schema={
-            "i": pl.Int64,
-            "project": pl.Int64,
-            "path": pl.String,
-            "cwe": pl.String,
-            "start": pl.Int64,
-            "end": pl.Int64,
-        },
-    )
-    scope = ["project", "path", "cwe"]
-    reach = pl.col("end").cum_max().shift(1).over(scope)
-    chains = (
-        frame.lazy()
-        .sort([*scope, "start"], maintain_order=True)
-        .with_columns(
-            (pl.col("start") > reach)
-            .fill_null(True)
-            .cast(pl.Int64)
-            .cum_sum()
-            .over(scope)
-            .alias("island")
-        )
-        .group_by([*scope, "island"], maintain_order=True)
-        .agg(pl.col("i"))
-        .collect()["i"]
-        .to_list()
-    )
+        project = None if projects is None else projects[index]
+        for cwe in cwes:
+            scopes.setdefault((project, path, cwe), []).append((start, end, index))
+    chains: List[List[int]] = []
+    for scoped in scopes.values():
+        # The sort is stable, so rows with equal starts keep their first-seen order.
+        scoped.sort(key=lambda row: row[0])
+        island: List[int] = []
+        reach = 0
+        for start, end, index in scoped:
+            if island and start > reach:
+                chains.append(island)
+                island = []
+            reach = end if not island else max(reach, end)
+            island.append(index)
+        chains.append(island)
     parent = {i: i for i in spans}
 
     def find(i: int) -> int:
