@@ -13,6 +13,7 @@ files in the scanned tree maps nothing, and that a converted file with no sideca
 """
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -542,13 +543,16 @@ def test_the_scanner_executor_places_results_through_the_one_call():
 
 PLACE_CALL = "place_converted_results(raw_results"
 SUPPRESS_CALL = "apply_suppressions_to_sarif("
+#: PLACE_CALL as the formatter may lay it out: the image branch pushed the call
+#: one indent deeper, past the line length, so it can wrap after the paren.
+PLACE_CALL_PATTERN = re.compile(r"place_converted_results\(\s*raw_results")
 
 
 def _places_before_suppressing(source: str) -> bool:
     """Whether the first placement call precedes the first suppression call."""
-    placed = source.find(PLACE_CALL)
+    placed = PLACE_CALL_PATTERN.search(source)
     suppressed = source.find(SUPPRESS_CALL)
-    return 0 <= placed < suppressed
+    return placed is not None and placed.start() < suppressed
 
 
 def test_the_scanner_executor_places_before_it_applies_suppressions():
@@ -557,7 +561,7 @@ def test_the_scanner_executor_places_before_it_applies_suppressions():
 
     source = Path(scanner_executor.__file__).read_text(encoding="utf-8")
 
-    assert source.count(PLACE_CALL) == 1
+    assert len(PLACE_CALL_PATTERN.findall(source)) == 1
     assert _places_before_suppressing(source)
 
 

@@ -11021,6 +11021,23 @@
           ],
           "default": null,
           "title": "Resolved Digest"
+        },
+        "resolved_from": {
+          "anyOf": [
+            {
+              "enum": [
+                "engine",
+                "registry",
+                "payload"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved From"
         }
       },
       "title": "ImageLocator",

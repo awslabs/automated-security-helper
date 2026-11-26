@@ -34,6 +34,8 @@ import re
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
+from automated_security_helper.utils.image_reference import image_reference_problem
+
 #: Codes that end the batch: the same refusal would repeat for every image.
 STOPS_THE_BATCH = frozenset({3, 5})
 
@@ -57,7 +59,10 @@ def split_image_arguments(values: Optional[Sequence[str]]) -> List[str]:
     ``--image a --image b,c`` is ``[a, b, c]``. An empty piece (``a,,b``, a bare
     comma, an empty value) and an image named twice are refused: the first is a
     typo that would otherwise scan fewer images than the caller listed, the
-    second two scans of one subject whose reports would differ in nothing.
+    second two scans of one subject whose reports would differ in nothing. A
+    piece that is not an image reference (``utils/image_reference``: a path, an
+    option-shaped word) is refused too, before any image of the list runs: the
+    scanner tools would read it as a directory to catalog or as an option.
     """
     images: List[str] = []
     for value in values or []:
@@ -69,6 +74,9 @@ def split_image_arguments(values: Optional[Sequence[str]]) -> List[str]:
                     "empty value). Name each image once, as --image a --image b "
                     "or --image a,b."
                 )
+            problem = image_reference_problem(reference)
+            if problem is not None:
+                raise ImageListRefused(f"--image {reference!r} {problem}.")
             if reference in images:
                 raise ImageListRefused(
                     f"--image names {reference} more than once. Each image is "
