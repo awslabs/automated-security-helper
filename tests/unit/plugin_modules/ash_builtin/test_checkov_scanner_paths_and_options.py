@@ -176,10 +176,15 @@ class TestLinkSkipValues:
         source = tmp_path / "src"
         source.mkdir()
         (source / "main.tf").write_text("", encoding="utf-8")
+        # A "]" before the parenthesis is what leaves it an open group in the
+        # module finder's joined regex, wherever the value sits in the list. A
+        # bare "vendor(" no longer breaks it: the known-directory values, whose
+        # "[.]" supplied that "]" ahead of every operator value, are built per
+        # scan and now come after the operator's.
         scanner = _scanner(
             source,
             tmp_path / "out",
-            skip_path=[IgnorePathWithReason(path="vendor(", reason="broken")],
+            skip_path=[IgnorePathWithReason(path="vendor[.](", reason="broken")],
         )
         with pytest.raises(ScannerError, match="skip_path"):
             scanner._execute_scan(source, "source", [])

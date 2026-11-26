@@ -32,6 +32,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scann
     CheckovScanner,
     CheckovScannerConfig,
     CheckovScannerConfigOptions,
+    _known_directory_skip_values,
+    _skip_path_root,
 )
 
 PluginContext.model_rebuild()
@@ -98,9 +100,11 @@ def test_an_output_dir_outside_the_source_adds_nothing(tmp_path):
     output.mkdir()
     argv, _, _ = _scanner(source, output)._execute_scan(source, "source", [])
 
-    # Every default skip value is relative; an absolute one can only be an
-    # output-dir exclusion that should not have been emitted.
-    assert not any(Path(v).is_absolute() for v in _skip_values(argv))
+    # The known directories' values start with the source's own path, so they are
+    # absolute too; any other absolute value can only be an output-dir exclusion
+    # that should not have been emitted.
+    known = set(_known_directory_skip_values(_skip_path_root(source)))
+    assert not any(Path(v).is_absolute() for v in _skip_values(argv) if v not in known)
 
 
 def test_the_converted_target_is_not_excluded(tree):

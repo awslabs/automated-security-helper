@@ -2,7 +2,6 @@
 
 import pytest
 
-from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
     CheckovScanner,
@@ -40,8 +39,8 @@ def test_process_config_options_skip_path_arguments_contain_no_literal_quotes(
         arg.key for arg in scanner.args.extra_args if arg.key.startswith("--skip-path=")
     ]
     assert len(skip_path_keys) >= 2, (
-        f"Expected at least two --skip-path= tokens (KNOWN_IGNORE_PATHS + "
-        f"user entries), got {skip_path_keys!r}"
+        f"Expected at least two --skip-path= tokens (the user entries), "
+        f"got {skip_path_keys!r}"
     )
 
     offending = [key for key in skip_path_keys if '"' in key]
@@ -89,11 +88,10 @@ def test_process_config_options_skip_path_values_are_verbatim(
     )
 
     # _process_config_options is called twice during the scanner lifecycle
-    # (once at model_post_init, once explicitly above), so the count of
-    # --skip-path= tokens must be a multiple of len(KNOWN_IGNORE_PATHS) + 1.
-    per_invocation_count = len(KNOWN_IGNORE_PATHS) + 1
-    assert len(skip_path_keys) % per_invocation_count == 0, (
-        f"Expected len(skip_path_keys)={len(skip_path_keys)} to be a multiple "
-        f"of len(KNOWN_IGNORE_PATHS) + 1 = {per_invocation_count}; "
-        f"keys={skip_path_keys!r}"
+    # (once at model_post_init, once explicitly above), and each call emits the
+    # user's entry and no other token: the KNOWN_IGNORE_PATHS directories get
+    # their values per scan, from the scanned directory's path (_execute_scan).
+    assert skip_path_keys == [expected_token, expected_token], (
+        f"Expected the user's token once per call and no other --skip-path= "
+        f"token; keys={skip_path_keys!r}"
     )
