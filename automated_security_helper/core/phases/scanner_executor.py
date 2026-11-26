@@ -2250,19 +2250,25 @@ class ScannerExecutor:
                                     # list graded FAILED on were left out of the
                                     # per-target report, read as 0 by the summary,
                                     # and the row rolled up PASSED.
-                                    counted = ScannerSeverityCount()
-                                    for finding in raw_results["findings"]:
-                                        # The level the finding's severity names
-                                        # (_finding_severity_level): MEDIUM for one
-                                        # that states none, info for a name ASH
-                                        # cannot place, a CVSS score by its band.
-                                        counted.increment(
-                                            _finding_severity_level(
-                                                finding.get("severity")
-                                                if isinstance(finding, dict)
-                                                else None
-                                            )
+                                    from automated_security_helper.utils.count_frame import (
+                                        severity_frame,
+                                        tally_severities,
+                                    )
+
+                                    # The level each finding's severity names
+                                    # (_finding_severity_level): MEDIUM for one
+                                    # that states none, info for a name ASH
+                                    # cannot place, a CVSS score by its band.
+                                    # The counting is the frame's group-by.
+                                    levels = [
+                                        _finding_severity_level(
+                                            finding.get("severity")
+                                            if isinstance(finding, dict)
+                                            else None
                                         )
+                                        for finding in raw_results["findings"]
+                                    ]
+                                    counted = tally_severities(severity_frame(levels))
                                     container.severity_counts = counted
                                     container.finding_count = len(
                                         raw_results["findings"]
