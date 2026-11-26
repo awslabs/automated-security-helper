@@ -53,6 +53,9 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "verify_docs_freshness.py"
+#: A scanner name ASH does not ship, for the rows that plant one. A real tool's name
+#: stops being a plant the day ASH ships that tool, as gosec did.
+_UNSHIPPED = "no-such-scanner"
 
 
 @pytest.fixture(scope="module")
@@ -448,7 +451,10 @@ def test_scanner_check_can_fail(gate, tmp_path, monkeypatch):
 
     assert publish(names) == [], "the complete scanner table was rejected"
     assert publish(names[1:]), "a scanner missing from the table was accepted"
-    assert publish(names + ["gosec"]), "a row naming a nonexistent scanner was accepted"
+    assert _UNSHIPPED not in names, f"{_UNSHIPPED} ships now; plant another name"
+    assert publish(names + [_UNSHIPPED]), (
+        "a row naming a nonexistent scanner was accepted"
+    )
 
 
 @pytest.mark.unit
@@ -468,7 +474,10 @@ def test_scanner_facets_check_can_fail(gate, tmp_path, monkeypatch):
 
     assert publish(names) == [], "the complete facets summary table was rejected"
     assert publish(names[1:]), "a scanner missing from the table was accepted"
-    assert publish(names + ["gosec"]), "a row naming a nonexistent scanner was accepted"
+    assert _UNSHIPPED not in names, f"{_UNSHIPPED} ships now; plant another name"
+    assert publish(names + [_UNSHIPPED]), (
+        "a row naming a nonexistent scanner was accepted"
+    )
 
 
 @pytest.mark.unit
@@ -561,7 +570,9 @@ def test_plugin_data_check_can_fail(gate, tmp_path, monkeypatch):
     assert check() == [], "the staged copies of the committed files were rejected"
 
     # The partial drops a built-in scanner, or invents one.
-    invented = partial.replace('"builtin": [', '"builtin": [\n      "gosec",', 1)
+    invented = partial.replace(
+        '"builtin": [', f'"builtin": [\n      "{_UNSHIPPED}",', 1
+    )
     assert any("'builtin'" in f for f in check(partial_text=invented))
     dropped = partial.replace('"all": [\n      "actionlint",\n', '"all": [\n', 1)
     assert dropped != partial

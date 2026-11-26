@@ -1129,8 +1129,8 @@ CONFIG_DEFECTS = [
     ),
     (
         "unknown scanner",
-        f"{FENCE}yaml\nscanners:\n  gosec:\n    enabled: true\n{FENCE}\n",
-        "ships no scanner named 'gosec'",
+        f"{FENCE}yaml\nscanners:\n  no-such-scanner:\n    enabled: true\n{FENCE}\n",
+        "ships no scanner named 'no-such-scanner'",
     ),
     (
         "forbidden key",
@@ -2520,8 +2520,8 @@ OPTION_DEFECTS = [
     ),
     (
         "unknown plugin",
-        "<!-- doctest: options of=scanners.gosec -->\n| Option | Default |\n|---|---|\n| `x` | `1` |\n",
-        "ships no scanner named 'gosec'",
+        "<!-- doctest: options of=scanners.no-such-scanner -->\n| Option | Default |\n|---|---|\n| `x` | `1` |\n",
+        "ships no scanner named 'no-such-scanner'",
         1,
     ),
     (
@@ -2544,8 +2544,8 @@ OPTION_DEFECTS = [
     ),
     (
         "path into an unknown scanner",
-        "Set `scanners.gosec.enabled` to true.\n",
-        "ships no scanner named 'gosec'",
+        "Set `scanners.no-such-scanner.enabled` to true.\n",
+        "ships no scanner named 'no-such-scanner'",
         1,
     ),
 ]
