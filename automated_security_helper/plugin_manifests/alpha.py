@@ -146,6 +146,14 @@ MANIFESTS = (
         owned=(f"{_DOCS}/betterleaks-plugin.md", f"{_FIXTURES}/betterleaks"),
     ),
     _alpha(
+        "cdxgen",
+        "ash_cdxgen_plugins",
+        "cdxgen_scanner",
+        "CdxgenScanner",
+        "CdxgenScannerConfigOptions",
+        owned=(f"{_DOCS}/cdxgen-plugin.md", f"{_FIXTURES}/cdxgen"),
+    ),
+    _alpha(
         "credsweeper",
         "ash_credsweeper_plugins",
         "credsweeper_scanner",

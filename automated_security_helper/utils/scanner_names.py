@@ -130,6 +130,7 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
     "actionlint": ScannerToolType.IAC.value,
     "bandit": ScannerToolType.SAST.value,
     "cdk-nag": ScannerToolType.IAC.value,
+    "cdxgen": ScannerToolType.SBOM.value,
     "cfn-guard": ScannerToolType.IAC.value,
     "cfn-lint": ScannerToolType.IAC.value,
     "cfn-nag": ScannerToolType.IAC.value,

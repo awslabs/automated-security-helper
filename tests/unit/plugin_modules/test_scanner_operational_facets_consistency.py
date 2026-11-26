@@ -17,7 +17,7 @@ The sweep is pure construction and static reads: scanner instances are built
 with a mock context (no tool is run, no network is touched) and the fixtures
 are parsed, never scanned.
 
-Planted controls guard the enumerations: a count of 31, the exact set of
+Planted controls guard the enumerations: a count of 32, the exact set of
 scanner names against ``SCANNER_TOOL_TYPES``, and a classifier control for
 the output-format reader, because a sweep over a silently shrunken or
 mis-parsed universe would pass vacuously.
@@ -85,9 +85,9 @@ def _instances(_context) -> dict[type, ScannerPluginBase]:
 # ---------------------------------------------------------------------------
 
 
-def test_the_universe_is_the_thirty_one_shipped_scanners() -> None:
+def test_the_universe_is_the_thirty_two_shipped_scanners() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
-    assert len(SCANNER_CLASSES) == 31, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == 32, sorted(c.__name__ for c in SCANNER_CLASSES)
     names = [_ops(cls).scanner_name for cls in SCANNER_CLASSES]
     assert len(set(names)) == len(names), f"duplicate scanner_name in {names}"
     assert set(names) == set(SCANNER_TOOL_TYPES), (
@@ -213,6 +213,10 @@ def classify_output(document: object) -> opsf.OutputFormat:
 _NATIVE_FIXTURES: dict[str, tuple[str, opsf.OutputFormat]] = {
     "bandit": ("bandit/captured/bandit-1.9.4-m0.sarif", opsf.OutputFormat.SARIF),
     "betterleaks": ("betterleaks/captured/positive.sarif", opsf.OutputFormat.SARIF),
+    "cdxgen": (
+        "cdxgen/captured/cdxgen_pypi_requirements.cdx.json",
+        opsf.OutputFormat.CYCLONEDX,
+    ),
     "gitleaks": ("gitleaks/gitleaks-8.30.1.sarif", opsf.OutputFormat.SARIF),
     "cfn-lint": (
         "cfn_lint_guard/captured/cfn-lint-1.57.1-insecure.sarif",
