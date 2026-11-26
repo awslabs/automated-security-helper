@@ -40,6 +40,7 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
     DEFAULT_EXCLUDES,
+    GREP_SHARED_FACETS,
     GrepMetricsMode,
     GrepScannerBase,
     GrepSeverityWord,
@@ -328,64 +329,15 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
 
     #: The facets register row (base/scanner_facets.py). Declaration only, zero
     #: behavior change: opengrep's own SARIF is validated and passed through
-    #: without result edits, so every native field below is a field of that
-    #: SARIF. Pure code SAST: the only resource-shaped values in its output are
-    #: file paths, which are locators, never resource ids. Fingerprints are
-    #: settled by the M0 capture (tests/test_data/scanners/opengrep/captured/
-    #: opengrep-2.0.0-m0.sarif): the fork emits a real matchBasedId/v1, not the
-    #: semgrep OSS login placeholder.
+    #: without result edits, so every native field is a field of that SARIF.
+    #: The cells it shares with semgrep live in GREP_SHARED_FACETS
+    #: (_grep_scanner_base.py); the three below are this tool's own.
+    #: Fingerprints are settled by the M0 capture
+    #: (tests/test_data/scanners/opengrep/captured/opengrep-2.0.0-m0.sarif):
+    #: the fork emits a real matchBasedId/v1, not the semgrep OSS login
+    #: placeholder.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
-        rule_id=FacetDecl(state=FacetState.MAPPED, native_field="results[].ruleId"),
-        severity=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="results[].level",
-        ),
-        file_path=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="results[].locations[].physicalLocation.artifactLocation.uri",
-        ),
-        line_range=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="results[].locations[].physicalLocation.region."
-            "startLine/endLine",
-        ),
-        column=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="results[].locations[].physicalLocation.region."
-            "startColumn/endColumn",
-        ),
-        message=FacetDecl(
-            state=FacetState.MAPPED, native_field="results[].message.text"
-        ),
-        resource_id=FacetDecl(
-            state=FacetState.NA,
-            reason="pure code SAST; the only locators in its output are file "
-            "paths, which are never resource ids",
-        ),
-        resource_type=FacetDecl(
-            state=FacetState.NA,
-            reason="pure code SAST; no deployable resource exists in the output",
-        ),
-        package_name=FacetDecl(
-            state=FacetState.NA,
-            reason="code findings name a file and a rule, not a package",
-        ),
-        package_version=FacetDecl(
-            state=FacetState.NA,
-            reason="code findings name a file and a rule, not a package",
-        ),
-        package_path=FacetDecl(
-            state=FacetState.NA,
-            reason="code findings name a file and a rule, not a package",
-        ),
-        taxonomy_cve=FacetDecl(
-            state=FacetState.NA,
-            reason="code rules carry no CVE ids",
-        ),
-        taxonomy_cwe=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="tool.driver.rules[].properties.tags (CWE entries)",
-        ),
+        **GREP_SHARED_FACETS,
         fingerprints=FacetDecl(
             state=FacetState.MAPPED,
             native_field='results[].fingerprints."matchBasedId/v1"',
@@ -398,15 +350,6 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
             "fingerprints, locations, message, properties, ruleId), so there "
             "is nothing in the SARIF ASH reads to map",
         ),
-        remediation_text=FacetDecl(
-            state=FacetState.NA,
-            reason="rule help describes the rule, not a remediation; fixes are "
-            "recorded under fix_available",
-        ),
-        snippet=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="results[].locations[].physicalLocation.region.snippet.text",
-        ),
         references=FacetDecl(
             state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: the committed captures' SARIF rules carry no "
@@ -415,17 +358,6 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
             "shared rule read (FlatVulnerability.from_sarif_result); "
             "redeclare MAPPED when a capture carrying one is committed (the "
             "corpus gate lists this cell as a fixture owed until then)",
-        ),
-        tags=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="tool.driver.rules[].properties.tags, read into the "
-            "flat tags when the result carries none (they also feed the CWE "
-            "read)",
-        ),
-        extras=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="results[].properties (SARIF property bag, passed "
-            "through unmodified)",
         ),
     )
 
@@ -475,6 +407,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
                 note=(

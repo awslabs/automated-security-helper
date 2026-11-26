@@ -222,10 +222,10 @@ def build_ash_image_cli_command(
     cancel_event = CancelEvent()
     # A second Ctrl-C takes the die-now ending, which never returns to the
     # interrupt arm below, so the word on how the run ended is registered with
-    # it, built as that arm builds it: exit-codes.md pins that `ash build-image`
+    # it, built as that arm builds it: exit-codes.md pins that `ash container build`
     # prints its interrupted line and, without --no-run, the no-verdict clause,
     # and that a second Ctrl-C still exits 130.
-    interrupted_message = "ASH build-image interrupted before it finished"
+    interrupted_message = "ASH container build interrupted before it finished"
     if not no_run:
         interrupted_message += (
             ": there is no verdict, and the output directory may hold partial results"
@@ -285,7 +285,7 @@ def build_ash_image_cli_command(
             raise
         # The handler printed nothing (a signal frame must not take the logger's
         # locks), so this is the only word on how the run ended.
-        message = "ASH build-image stopped by SIGTERM before it finished"
+        message = "ASH container build stopped by SIGTERM before it finished"
         if not no_run:
             message += (
                 ": the scan did not complete, and the output directory may hold "
@@ -307,7 +307,7 @@ def build_ash_image_cli_command(
         # scan, so no outcome was owed.
         cancel_event.stop_promptly = True
         cancel_event.set()
-        message = "ASH build-image interrupted before it finished"
+        message = "ASH container build interrupted before it finished"
         if not no_run:
             message += (
                 ": there is no verdict, and the output directory may hold partial "

@@ -758,13 +758,17 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     #: locations carry ``properties.symbolic.route`` (``jobs/greet/steps/0``)
     #: and ``key.Local.verbatim_path``, a position inside one file's document
     #: and not a name with a lifecycle independent of the file. The route stays
-    #: verbatim in the property bag for anyone who later disagrees.
+    #: in the property bag for anyone who later disagrees; the
+    #: ``verbatim_path`` beside it is rewritten relative to the target by
+    #: ``_relative_logical_path``, so it does not keep an absolute checkout path.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(state=FacetState.MAPPED, native_field="results[].ruleId"),
         severity=FacetDecl(
             state=FacetState.MAPPED,
             native_field='results[].properties."zizmor/severity" and '
-            '"zizmor/confidence" (ASH rewrites them to a severity band)',
+            '"zizmor/confidence" (ASH rewrites them to a severity band, '
+            "written to properties.issue_severity, and rewrites results[].level "
+            "to agree with it; map_zizmor_severity)",
         ),
         file_path=FacetDecl(
             state=FacetState.MAPPED,
@@ -846,7 +850,8 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             state=FacetState.MAPPED,
             native_field='results[].properties ("zizmor/severity", '
             '"zizmor/confidence", "zizmor/persona"), plus the symbolic '
-            "route in logicalLocations",
+            "route in logicalLocations, and the ASH-written issue_severity "
+            "(no native property of that name)",
         ),
     )
 
@@ -900,6 +905,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 python_only=True,
                 use_uv_tool=True,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="a PyPI package run through uv; platform support is the package's and was not read here",

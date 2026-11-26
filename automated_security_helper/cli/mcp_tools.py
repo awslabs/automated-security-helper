@@ -7702,7 +7702,6 @@ def mcp_set_source_image(
         of the session runs or another change to its source is in progress.
     """
     from automated_security_helper.cli.mcp.source_delivery import (
-        SOURCE_DELIVERY_BUSY,
         SourceDeliveryBusyError,
         set_source_image,
     )
@@ -7713,7 +7712,7 @@ def mcp_set_source_image(
         return {
             "success": False,
             "error": raw_controls_on_one_line(str(e)),
-            "error_type": SOURCE_DELIVERY_BUSY,
+            "error_type": McpErrorType.SOURCE_DELIVERY_BUSY.value,
         }
     except ValueError as e:
         return {"success": False, "error": raw_controls_on_one_line(error_text(e))}
@@ -7735,11 +7734,9 @@ def mcp_set_source_image_archive_chunk(
     the bytes an image archive is the finalize that claims them.
     """
     from automated_security_helper.cli.mcp.sessions import (
-        SESSION_WORKSPACE_BUSY,
         SessionWorkspaceBusyError,
     )
     from automated_security_helper.cli.mcp.source_delivery import (
-        SESSION_WORKSPACE_UNAVAILABLE,
         SessionWorkspaceError,
         set_source_image_archive_chunk,
     )
@@ -7756,13 +7753,13 @@ def mcp_set_source_image_archive_chunk(
         return {
             "success": False,
             "error": raw_controls_on_one_line(str(e)),
-            "error_type": SESSION_WORKSPACE_BUSY,
+            "error_type": McpErrorType.SESSION_WORKSPACE_BUSY.value,
         }
     except SessionWorkspaceError as e:
         return {
             "success": False,
             "error": raw_controls_on_one_line(error_text(e)),
-            "error_type": SESSION_WORKSPACE_UNAVAILABLE,
+            "error_type": McpErrorType.SESSION_WORKSPACE_UNAVAILABLE.value,
         }
     except ValueError as e:
         return {"success": False, "error": raw_controls_on_one_line(error_text(e))}
@@ -7792,8 +7789,6 @@ def mcp_set_source_image_archive_finalize(
         when the workspace cannot take the file.
     """
     from automated_security_helper.cli.mcp.source_delivery import (
-        SESSION_WORKSPACE_UNAVAILABLE,
-        SOURCE_DELIVERY_BUSY,
         SessionWorkspaceError,
         SourceDeliveryBusyError,
         UploadNotFoundError,
@@ -7810,13 +7805,13 @@ def mcp_set_source_image_archive_finalize(
         return {
             "success": False,
             "error": raw_controls_on_one_line(str(e)),
-            "error_type": SOURCE_DELIVERY_BUSY,
+            "error_type": McpErrorType.SOURCE_DELIVERY_BUSY.value,
         }
     except SessionWorkspaceError as e:
         return {
             "success": False,
             "error": raw_controls_on_one_line(error_text(e)),
-            "error_type": SESSION_WORKSPACE_UNAVAILABLE,
+            "error_type": McpErrorType.SESSION_WORKSPACE_UNAVAILABLE.value,
         }
     except (UploadNotFoundError, ValueError) as e:
         return {"success": False, "error": raw_controls_on_one_line(error_text(e))}

@@ -53,8 +53,8 @@ global_settings:
         hold words, not a credential.
     - rule_id: API_KEY_OR_SECRET
       path: Dockerfile
-      line_start: 815
-      line_end: 817
+      line_start: 823
+      line_end: 825
       reason: >-
         False positive. The adduser command in the non-root-user block passes the
         --disabled-password flag, which the netrc_password detector in ferret-scan 2.6.1
@@ -63,8 +63,8 @@ global_settings:
         moves out of this range.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/assets/Dockerfile
-      line_start: 815
-      line_end: 817
+      line_start: 823
+      line_end: 825
       reason: >-
         False positive. This is the build-context copy of the Dockerfile entry above, with
         the same adduser --disabled-password flag that ferret-scan 2.6.1 reads as a
@@ -545,15 +545,15 @@ global_settings:
         for the trade_secret keywords, pattern text and not a value.
     - path: .ash.yaml
       rule_id: API_KEY_OR_SECRET
-      line_start: 771
-      line_end: 771
+      line_start: 774
+      line_end: 774
       reason: >-
         False positive. A suppression reason that quotes a placeholder fixture
         literal; the text explains why another finding is a false positive.
     - path: .ash.yaml
       rule_id: API_KEY_OR_SECRET
-      line_start: 1018
-      line_end: 1018
+      line_start: 1021
+      line_end: 1021
       reason: >-
         False positive. A suppression reason that quotes a placeholder fixture
         literal; the text explains why another finding is a false positive.
@@ -576,8 +576,8 @@ global_settings:
     # self-scan runs it. Each was read at the reported line and is pinned to it.
     - path: automated_security_helper/base/scanner_operational_facets.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 715
-      line_end: 715
+      line_start: 713
+      line_end: 713
       reason: >-
         False positive. An enum member whose name is a token word and whose value is a
         lowercase label of the same word; no credential is held.
@@ -600,8 +600,8 @@ global_settings:
     # look like high-entropy secrets because a SHA256 is high-entropy.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 398
-      line_end: 538
+      line_start: 388
+      line_end: 528
       reason: >-
         False positive — every string in this range is a published SHA256 release
         checksum or the SHA256 of what one of those verified archives extracts to.
@@ -626,8 +626,8 @@ global_settings:
         would silently swallow a real secret added here later.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 1012
-      line_end: 1057
+      line_start: 1002
+      line_end: 1047
       reason: >-
         False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
         the commit SHA each bundled tool's release tag points to, and the SHA256 of
@@ -1466,18 +1466,18 @@ global_settings:
       reason: "The entrypoint reads one variable by name, ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN, the secret it needs to resolve; nothing else in the environment."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-      line_start: 142
-      line_end: 142
+      line_start: 145
+      line_end: 145
       reason: "'.git-credentials' is an entry of SCANNABLE_MEMBER_NAMES, the archive member names the converter extracts so the secret scanners can read them; a name in a table, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-      line_start: 145
-      line_end: 145
+      line_start: 148
+      line_end: 148
       reason: "'.env' is an entry of SCANNABLE_MEMBER_NAMES, the archive member names the converter extracts so the secret scanners can read them; a name in a table, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-      line_start: 172
-      line_end: 172
+      line_start: 175
+      line_end: 175
       reason: "'.env' is the dotfile stem whose stage-suffixed variants (.env.local) the converter admits for scanning; a name in a table, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
@@ -1515,8 +1515,8 @@ global_settings:
       reason: "A warning message naming ~/.npmrc and ~/.yarnrc as what the audit copy keeps the package managers away from; nothing here reads the files."
     - rule_id: threat-filesystem-read
       path: scripts/generate_plugin_data_partial.py
-      line_start: 185
-      line_end: 185
+      line_start: 187
+      line_end: 187
       reason: "'.env' is the example file name a docs graphic row shows for the secrets category; display data, not a read."
     # === trivy license scanner: two expressions the approved list does not match ===
     #

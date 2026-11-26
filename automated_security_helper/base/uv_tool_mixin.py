@@ -1830,7 +1830,7 @@ class UVToolMixin:
                 remedy = (
                     "uv cannot fetch what is missing while offline. Install it "
                     f"before going offline, e.g. `uv tool install '{requirement}'`, "
-                    "or rebuild the image with `ash build-image --offline`."
+                    "or rebuild the image with `ash container build --offline`."
                 )
             cannot = (
                 "cannot be used"
@@ -2899,18 +2899,39 @@ class UVToolMixin:
     def _get_tool_python_request(self) -> Optional[str]:
         """Interpreter request for ``uv tool install/run --python``, or None.
 
-        None, the default, leaves the interpreter to uv, which is how every
-        uv-backed plugin behaved before this hook existed. Override it for a tool
-        whose dependencies publish no wheels for the newest interpreter uv may
-        pick: uv then builds those dependencies from source, which needs a C
-        toolchain and system headers, and the install fails. GuardDog is the
-        case that added this (pygit2 and yara-python have no CPython 3.14 wheels
-        at the pinned version). A version specifier such as ``">=3.10,<3.14"``
-        lets uv choose, or download, any interpreter that satisfies it.
+        Derived from the scanner's runtime-compatibility facet
+        (``operational_facets.runtime_compat``,
+        ``base/scanner_operational_facets.py``): the PIN rows that apply at the
+        scanner's effective tool version constraint, combined. None, when no
+        row applies or the class declares no register row (a third-party plugin
+        predating the register), leaves the interpreter to uv, which is how
+        every uv-backed plugin behaved before this hook existed. A tool whose
+        dependencies publish no wheels for the newest interpreter uv may pick,
+        or whose own code breaks on it, declares a row instead of overriding
+        this method: GuardDog (pygit2 and yara-python have no CPython 3.14
+        wheels) and checkov (CPython 3.15 breaks its JSON decoder) are the
+        rows. A request such as ``">=3.10,<3.14"`` lets uv choose, or
+        download, any interpreter that satisfies it.
 
-        The value must carry no whitespace; see ``_setup_uv_tool_install_commands``.
+        This is the one derivation point: the stored install command, the
+        runner calls, the version probes and ``ash dependencies install`` all
+        read it. A plugin may still override the method, and then the override
+        answers for every one of them.
+
+        The value carries no whitespace by construction (the row refuses one);
+        see ``_setup_uv_tool_install_commands``.
         """
-        return None
+        from automated_security_helper.base.scanner_operational_facets import (
+            RuntimeName,
+            declared_runtime_compat,
+        )
+
+        compat = declared_runtime_compat(type(self))
+        if compat is None:
+            return None
+        return compat.pin_request(
+            RuntimeName.PYTHON, self._get_tool_version_constraint()
+        )
 
     def _uv_python_kwargs(self) -> Dict[str, Any]:
         """``{"python_request": ...}`` for the runner calls, or ``{}`` when unset.

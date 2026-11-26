@@ -23,7 +23,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE = REPO_ROOT / "examples" / "AWSCodeBuild"
 
 #: An `ash` command that builds the image: a container-mode scan or build-image.
-_CONTAINER_COMMAND = re.compile(r"\bash\b.*(--mode[ =]container|\bbuild-image\b)")
+_CONTAINER_COMMAND = re.compile(
+    r"\bash\b.*(--mode[ =]container|\bbuild-image\b|\bcontainer\s+build\b)"
+)
 
 
 def _container_commands(path: Path) -> List[str]:

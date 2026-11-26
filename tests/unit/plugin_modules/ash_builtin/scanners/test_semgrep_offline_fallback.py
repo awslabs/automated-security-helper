@@ -72,7 +72,7 @@ def test_semgrep_offline_missing_cache_records_actionable_reason(
     msg = scanner.dependency_unavailable_reason
     assert msg is not None
     assert "SEMGREP_RULES_CACHE_DIR" in msg
-    assert "ash build-image --offline" in msg
+    assert "ash container build --offline" in msg
 
 
 def test_semgrep_offline_empty_cache_records_actionable_reason(
@@ -87,7 +87,7 @@ def test_semgrep_offline_empty_cache_records_actionable_reason(
     msg = scanner.dependency_unavailable_reason
     assert msg is not None
     assert "SEMGREP_RULES_CACHE_DIR" in msg
-    assert "ash build-image --offline" in msg
+    assert "ash container build --offline" in msg
 
 
 def test_semgrep_offline_missing_cache_guidance_is_a_command_that_seeds_it(

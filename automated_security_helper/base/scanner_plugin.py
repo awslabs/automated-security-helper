@@ -517,6 +517,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     #: class's: cfn-nag and cdk-nag set it when they passed over a candidate they could
     #: not parse, and reset it at the top of each scan(). Read before the class value.
     _nothing_scanned_reason: Optional[str] = PrivateAttr(default=None)
+    #: The ignore paths of the image scan this scanner is running, set by
+    #: ``scan_image`` (and by a scanner that overrides it) and read by the
+    #: image argv resolution (``_image_exclude_globs``). Empty for any other scan.
+    _image_ignore_paths: List[Any] = PrivateAttr(default_factory=list)
     #: What this scanner scans, as fnmatch globs over source-relative POSIX paths
     #: and base names, read only under ``--mode precommit --staged`` and only by
     #: scanners that run through the template ``scan()``. With a staged scope in
@@ -2585,11 +2589,36 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 )
         return None
 
+    def _image_exclude_globs(self) -> List[str]:
+        """The in-image exclude globs this scan's ignore paths translate to.
+
+        What a tool is handed so it leaves those paths unread
+        (``utils/image_ignore_paths``); the report filter still applies every
+        ignore path after the scan, so this is only the work the tool is saved.
+        One INFO line names how many entries only the filter applies.
+        """
+        from automated_security_helper.utils.image_ignore_paths import (
+            image_exclude_globs,
+        )
+
+        excludes = image_exclude_globs(self._image_ignore_paths)
+        if excludes.left_to_the_filter:
+            self._plugin_log(
+                f"{len(excludes.left_to_the_filter)} ignore path(s) cannot be "
+                f"given to {self.command or 'the tool'} as an exclude (a relative "
+                "path, a glob ending in '/', or more than the tool is handed) and "
+                "are applied to its findings after the scan.",
+                level=logging.INFO,
+                target_type=TargetType.IMAGE,
+            )
+        return excludes.globs
+
     def scan_image(
         self,
         image: "ImageLocator",
         config: "T | ScannerPluginConfigBase | None" = None,
         *args,
+        global_ignore_paths: "List[IgnorePathWithReason] | None" = None,
         **kwargs,
     ) -> Any | SarifReport:
         """Image template: preamble → _execute_image_scan → the scan() tail.
@@ -2604,7 +2633,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         the context's source directory, which an image scan uses as its
         working anchor, never as its subject.
         """
-        image_target_type = "image"
+        image_target_type = TargetType.IMAGE
         anchor = Path(getattr(self.context, "source_dir", None) or Path.cwd())
 
         # Per target, exactly as scan() resets them, and for the same reasons.
@@ -2616,6 +2645,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self._staged_scan_files = None
         self._staged_all_filtered = False
         self._nothing_scanned_reason = None
+        self._image_ignore_paths = list(global_ignore_paths or [])
 
         not_scanned = self._image_not_scanned_reason(image)
         if not_scanned is not None:

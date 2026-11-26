@@ -64,7 +64,6 @@ def build_segment(
         "model_config": ConfigDict(
             str_strip_whitespace=True,
             arbitrary_types_allowed=True,
-            use_enum_values=True,
             extra="allow",
         ),
         "__annotations__": {

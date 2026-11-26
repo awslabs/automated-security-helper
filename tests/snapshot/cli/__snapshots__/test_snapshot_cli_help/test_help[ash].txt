@@ -658,17 +658,13 @@
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
 │ scan             Scan code, infrastructure, secrets, and dependencies.                           │
-│ build-image      Builds the ASH container image, then scans the current directory with it unless │
-│                  --no-run is given.                                                              │
-│ report           Generate a report from ASH scan results using the specified reporter plugin.    │
-│ diff             Compare the findings in two saved ASH scans without running a scan.             │
-│ trend            Show new, carried and fixed findings over a series of saved ASH scans.          │
-│ merge            Merges the results of a sharded scan into one unified report.                   │
+│ results          Read, compare and combine the results of saved ASH scans: report, diff, trend,  │
+│                  merge and inspect. None of them runs a scan.                                    │
 │ mcp              Start the ASH MCP server (Model Context Protocol)                               │
 │ get-genai-guide  Write the ASH GenAI Integration Guide for AI assistants and LLMs to a file.     │
+│ container        Work with the ASH container image.                                              │
 │ config           ASH configuration management                                                    │
 │ dependencies     Check or install dependencies for ASH plugins                                   │
-│ inspect          Inspect and analyze ASH outputs and reports                                     │
 │ plugin           Manage ASH plugins                                                              │
 │ suppress         Create symbol suppressions and keep their content-hash lock (.ash.lock)         │
 │                  current.                                                                        │

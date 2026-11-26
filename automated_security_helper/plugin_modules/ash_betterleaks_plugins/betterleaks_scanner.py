@@ -118,8 +118,10 @@ Betterleaks' rules are compiled into the binary and ``dir`` makes no network cal
 
 Sandbox
 -------
-The strict default: no network, and no variables or paths beyond the baseline. The
-config environment variables and an operator ``config_file`` outside the tree are not
+The strict default: no network, and no variables or paths beyond the baseline, plus
+one declaration for sandbox-exec: ``HOME`` is a private empty directory for the spawn,
+because the regular-expression engine creates its compilation cache under it on macOS
+and crashes when it cannot. The config environment variables and an operator ``config_file`` outside the tree are not
 passed into a sandbox yet; grants derived from the environment or options wait for the
 sandbox's grant gates.
 """
@@ -395,7 +397,8 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
             "email, date, commitMessage)",
             reason="dir mode emits empty-string git metadata, which "
             "_post_process_sarif drops because an empty fingerprint is "
-            "identical across every result; git-mode values pass through",
+            "identical across every result; ASH runs only the dir subcommand, "
+            "so no git metadata is ever kept",
         ),
         fix_available=FacetDecl(
             state=FacetState.NA,
@@ -408,7 +411,7 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
         snippet=FacetDecl(
             state=FacetState.MAPPED,
             native_field="region.snippet.text, forced to REDACTED by "
-            "_post_process_sarif",
+            "--redact=100 and again by _post_process_sarif",
         ),
         references=FacetDecl(
             state=FacetState.NA,
@@ -467,6 +470,7 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=opsf.PLATFORMS_ALL,
                 note="asset table lists all six platform/arch pairs",
@@ -526,8 +530,16 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
     )
 
     success_exit_codes: ClassVar[Set[int]] = {0, LEAKS_EXIT_CODE}
-    # The strict default; see "Sandbox" in the module docstring.
-    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
+    # The strict default, plus one macOS declaration; see "Sandbox" in the module
+    # docstring. The regular-expression engine (go-re2 over wazero) keeps a
+    # compilation cache under os.UserCacheDir(), which on macOS is
+    # $HOME/Library/Caches and cannot be moved with XDG_CACHE_HOME. sandbox-exec
+    # denies that directory, and the engine then dereferences a nil module instead
+    # of running without a cache. HOME is a private empty directory for the spawn,
+    # so the cache can be created and is thrown away with it.
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+        sandbox_exec_cache_env=("HOME",),
+    )
 
     # With honor_tree_ignore_files on, Betterleaks' stderr can quote the scanned
     # tree's ignore file (see _mask_quoted_ignore_entries), and the scanner

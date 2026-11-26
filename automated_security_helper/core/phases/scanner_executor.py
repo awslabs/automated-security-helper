@@ -1632,6 +1632,7 @@ class ScannerExecutor:
                                             raw_results = scanner_plugin.scan_image(
                                                 image=image_locator,
                                                 config=scanner_config,
+                                                global_ignore_paths=self._global_ignore_paths,
                                             )
                                         else:
                                             raw_results = scanner_plugin.scan(

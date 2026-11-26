@@ -38,6 +38,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.report_conte
     refuse_negative_limit,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from tests.unit.models._flat_vulnerability_helpers import flat_with_severity
 
 pytestmark = pytest.mark.unit
 
@@ -57,7 +58,8 @@ def _vuln(**overrides) -> FlatVulnerability:
         "scanner_type": "SAST",
     }
     fields.update(overrides)
-    return FlatVulnerability(**fields)
+    severity = fields.pop("severity")
+    return flat_with_severity(severity, **fields)
 
 
 def _emitter(vulns) -> ReportContentEmitter:

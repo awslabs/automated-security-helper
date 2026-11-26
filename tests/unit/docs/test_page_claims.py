@@ -7656,7 +7656,7 @@ _CHILD_CTRL_C_ROW = (
     "container runtime as well, and ASH waits up to 5 seconds for it to stop, as above; "
     "without a console, ASH ends the runtime at once. A scan prints the interrupted-scan "
     "message above. `ash "
-    "build-image` prints `ASH build-image interrupted before it finished.`, and, without "
+    "container build` prints `ASH container build interrupted before it finished.`, and, without "
     "`--no-run`, adds `: there is no verdict, and the output directory may hold partial "
     "results` before the period. |"
 )
@@ -8228,9 +8228,9 @@ def test_ctrl_c_ends_a_scan_with_exit_code_130_in_every_mode(
         )
 
 
-_BUILD_ONLY_INTERRUPTED = "ASH build-image interrupted before it finished."
+_BUILD_ONLY_INTERRUPTED = "ASH container build interrupted before it finished."
 _BUILD_AND_SCAN_INTERRUPTED = (
-    "ASH build-image interrupted before it finished: there is no verdict, and the output "
+    "ASH container build interrupted before it finished: there is no verdict, and the output "
     "directory may hold partial results."
 )
 

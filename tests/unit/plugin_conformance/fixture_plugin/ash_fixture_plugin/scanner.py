@@ -98,6 +98,7 @@ class FixtureScanner:
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="installed by the user; ASH provisions nothing",

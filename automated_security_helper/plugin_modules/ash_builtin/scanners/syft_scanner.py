@@ -317,9 +317,9 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 selection=(
                     "the whole directory, cataloged into an SBOM; a "
                     "container-image asset through a stereoscope target "
-                    "(scan_image: oci-archive:/oci-dir: for a payload, "
-                    "docker:/podman:/registry: for a reference by the "
-                    "detected engine)"
+                    "(scan_image: docker-archive:/oci-archive:/oci-dir: for a "
+                    "payload, docker:/podman:/registry: for a reference by the "
+                    "detected engine), with the ignore paths as --exclude globs"
                 ),
             ),
             runtime=opsf.RuntimeFacet(
@@ -330,6 +330,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=opsf.PLATFORMS_ALL,
                 note="asset table lists all six platform/arch pairs",
@@ -803,7 +804,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                     "error(s)), so its SBOM could not be recorded"
                 )
 
-            if target_type == "converted":
+            if target_type == TargetType.CONVERTED:
                 # Components the sdist-lock-harvester materialized carry their
                 # provenance (the sdist's sha256 pin, the parent package's purl,
                 # the source URL) as CycloneDX properties, read from the harvest
@@ -878,6 +879,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         image,
         config: SyftScannerConfig | None = None,
         *args,
+        global_ignore_paths=None,
         **kwargs,
     ) -> CycloneDXReport | bool:
         """Catalog a container image into an SBOM.
@@ -900,6 +902,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         self.output = []
         self._reset_errors()
         self._nothing_scanned_reason = None
+        self._image_ignore_paths = list(global_ignore_paths or [])
 
         not_scanned = self._image_not_scanned_reason(image)
         if not_scanned is not None:
@@ -968,6 +971,13 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                         value=f"{out}={results_file.as_posix()}.{out}.{out_ext}",
                     )
                 )
+            # The ignore paths syft can be told to leave uncataloged (measured
+            # on syft 1.57.2: an absolute in-image glob is honored on an image
+            # source, the "./" form is not; utils/image_ignore_paths).
+            self.args.extra_args.extend(
+                ToolExtraArg(key="--exclude", value=glob)
+                for glob in self._image_exclude_globs()
+            )
             final_args = self._resolve_arguments(
                 target=stereoscope_target(image),
             )

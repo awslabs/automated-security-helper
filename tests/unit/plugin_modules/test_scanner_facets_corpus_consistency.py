@@ -52,11 +52,13 @@ the corpus read has its own non-vacuity controls.
 
 from __future__ import annotations
 
+import functools
 import importlib
 import json
 import pkgutil
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, Iterator, Mapping, Optional
 
 import pytest
@@ -75,14 +77,15 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
-from automated_security_helper.plugin_modules import ash_builtin
 from automated_security_helper.schemas.sarif_schema_model import Result, SarifReport
 from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
 from automated_security_helper.utils.scanner_tool_types import _class_config_name
+from tests.utils.scanner_enumeration import load_scanner_universe
 
 pytestmark = pytest.mark.unit
 
-_REMAINING_LOAD_ERRORS = ash_builtin.retry_failed_plugin_groups()
+#: The shared enumeration (tests/utils/scanner_enumeration.py).
+SCANNER_CLASSES, _REMAINING_LOAD_ERRORS = load_scanner_universe()
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "test_data" / "scanners"
 
@@ -139,26 +142,6 @@ def test_the_exclusions_are_exactly_the_facets_with_no_flat_column() -> None:
 # --------------------------------------------------------------------------
 # The corpus: registered scanners, their fixtures, the observed frame (GC-1).
 # --------------------------------------------------------------------------
-
-
-def _registered_scanner_classes() -> list[type]:
-    classes: list[type] = []
-    seen: set[type] = set()
-    modules = sorted(
-        pkgutil.iter_modules(plugin_modules.__path__), key=lambda m: m.name
-    )
-    for info in modules:
-        if not info.ispkg:
-            continue
-        package = importlib.import_module(f"{plugin_modules.__name__}.{info.name}")
-        for cls in getattr(package, "ASH_SCANNERS", []):
-            if cls not in seen:
-                seen.add(cls)
-                classes.append(cls)
-    return classes
-
-
-SCANNER_CLASSES = _registered_scanner_classes()
 
 
 def _name(cls: type) -> str:
@@ -276,8 +259,9 @@ def _prep_cfn_lint(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]
                     ),
                 )
             # normalize_report reads no instance state: it locates results,
-            # maps severities and sorts rules in place.
-            CfnLintScanner.normalize_report(None, report)  # type: ignore[arg-type]
+            # maps severities and sorts rules in place. An uninitialized
+            # instance stands in for the scanner, so the call keeps its types.
+            CfnLintScanner.__new__(CfnLintScanner).normalize_report(report)
             yield report, [r for run in report.runs or [] for r in run.results or []]
 
 
@@ -651,9 +635,13 @@ _PREPS: Mapping[
 
 
 def _results_with_runs(
-    spec: CorpusSpec,
+    spec: CorpusSpec, fixtures_root: Path = _FIXTURES
 ) -> Iterator[tuple[Any, Result]]:
-    """(run or None, result) for every result of the scanner's corpus."""
+    """(run or None, result) for every result of the scanner's corpus.
+
+    ``fixtures_root`` roots the SARIF globs only (a planted control points it at
+    a scratch directory); a registered prep always reads the committed corpus.
+    """
     if spec.prep is not None:
         for report, results in _PREPS[spec.prep](spec):
             run = report.runs[0] if report.runs else None
@@ -661,25 +649,30 @@ def _results_with_runs(
                 yield run, result
         return
     for pattern in spec.sarif:
-        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+        for path in sorted((fixtures_root / spec.directory).glob(pattern)):
             report = _load_sarif(path)
             for run in report.runs or []:
                 for result in run.results or []:
                     yield run, result
 
 
+@functools.lru_cache(maxsize=None)
 def observed_frame(
-    name: str, spec: Optional[CorpusSpec]
+    name: str, spec: Optional[CorpusSpec], fixtures_root: Path = _FIXTURES
 ) -> Optional[dict[str, tuple[int, int]]]:
     """Per facet (non_null_count, total_results) over the scanner's corpus, or
     None when the scanner has no corpus (no spec, or no readable fixture/prep).
+
+    Cached: the gate, the transcript comparison and the named-gap rows each
+    read the same corpus, and a prep converts every fixture it holds. Callers
+    read the returned mapping and never change it.
     """
     if spec is None or (not spec.sarif and spec.prep is None):
         return None
     tool_type = SCANNER_TOOL_TYPES[name]
     flats = [
         FlatVulnerability.from_sarif_result(result, name, tool_type, run)
-        for run, result in _results_with_runs(spec)
+        for run, result in _results_with_runs(spec, fixtures_root)
     ]
     return observed_counts(flats)
 
@@ -960,22 +953,82 @@ def test_planted_a_fixture_with_the_mapped_field_removed_is_flagged(
     tmp_path: Path,
 ) -> None:
     """Must-flag through the real observation path: a fixture copy with the
-    native location removed reads empty file_path/line_range, so a MAPPED
-    declaration over it fails; the intact copy passes."""
+    native location removed reads empty file_path and line_range, so a MAPPED
+    declaration over it fails; the intact copy passes.
+
+    The counts come from ``observed_frame``, which reads the columns through
+    ``FACET_COLUMNS``: a control that recomputed one column by hand would stay
+    green when the column mapping of the real gate was mis-wired.
+    """
     for with_location, expected in ((True, "ok"), (False, "FAIL")):
-        path = tmp_path / f"planted-{with_location}.sarif"
-        path.write_text(json.dumps(_planted_sarif(with_location=with_location)))
-        report = _load_sarif(path)
-        flats = [
-            FlatVulnerability.from_sarif_result(r, "bandit", "SAST", run)
-            for run in report.runs or []
-            for r in run.results or []
-        ]
-        non_null = sum(1 for f in flats if text_present(f.file_path))
-        verdict = judge(
-            "planted", "file_path", FacetState.MAPPED, (non_null, len(flats))
+        directory = tmp_path / f"planted-{with_location}"
+        directory.mkdir()
+        (directory / "planted.sarif").write_text(
+            json.dumps(_planted_sarif(with_location=with_location))
         )
-        assert verdict.outcome == expected, verdict.detail
+        spec = CorpusSpec(directory.name, sarif=("planted.sarif",))
+        frame = observed_frame("bandit", spec, fixtures_root=tmp_path)
+        assert frame is not None
+        for facet in ("file_path", "line_range"):
+            verdict = judge("planted", facet, FacetState.MAPPED, frame[facet])
+            assert verdict.outcome == expected, (facet, verdict.detail)
+
+
+def test_planted_a_result_with_only_a_rule_id_reads_empty_but_for_the_defaults(
+    tmp_path: Path,
+) -> None:
+    """A result that declares nothing but its rule id and message populates
+    exactly the facets the flat row fills by default, through the real frame.
+
+    ``severity`` is one of them (a result with no level reads MEDIUM), so a
+    MAPPED severity cell is observed as populated even when the tool wrote no
+    level: that cell is held by the fixture content, not by this column. Every
+    other facet must read empty, so a default that starts to populate one of
+    them (a fix_available=False, a placeholder path) shows up here first.
+    """
+    sarif = {
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {"driver": {"name": "planted"}},
+                "results": [
+                    {"ruleId": "PLANTED-1", "message": {"text": "a finding"}},
+                ],
+            }
+        ],
+    }
+    directory = tmp_path / "only-rule-id"
+    directory.mkdir()
+    (directory / "planted.sarif").write_text(json.dumps(sarif))
+    frame = observed_frame(
+        "bandit",
+        CorpusSpec(directory.name, sarif=("planted.sarif",)),
+        fixtures_root=tmp_path,
+    )
+    assert frame is not None
+    populated = {facet for facet, (count, _total) in frame.items() if count}
+    assert populated == {"rule_id", "severity", "message"}, populated
+    assert all(total == 1 for _count, total in frame.values())
+
+
+def test_a_text_column_of_another_type_is_unreadable_not_empty() -> None:
+    """The contamination direction must not fail open on a type change."""
+    assert text_present("a value") is True
+    assert text_present("  ") is False
+    assert text_present(None) is False
+    for value in (0, 1, False, ["a"], {"a": 1}, b"bytes"):
+        with pytest.raises(TypeError, match="not str or None"):
+            text_present(value)
+
+
+def test_judge_refuses_a_state_it_does_not_judge() -> None:
+    """The next FacetState member must be judged on purpose, never passed."""
+    for state in FacetState:
+        for observed in ((1, 2), (0, 2), None):
+            judge("planted", "tags", state, observed)  # no member is refused
+    with pytest.raises(AssertionError, match="no judgment"):
+        # an object that is not one of the four members, as a fifth would be
+        judge("planted", "tags", SimpleNamespace(value="a-new-state"), (1, 2))  # type: ignore[arg-type]
 
 
 def test_planted_a_legitimate_na_cell_over_the_real_corpus_passes() -> None:

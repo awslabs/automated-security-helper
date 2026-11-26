@@ -120,7 +120,7 @@ or that the scan will cover every input.
 
 ## The offline image {#offline-image}
 
-`ash build-image --offline` and `ash scan --mode container --offline` build the image with
+`ash container build --offline` and `ash scan --mode container --offline` build the image with
 `OFFLINE=YES`. The build needs network access: it downloads the grype database, the trivy
 database, and the semgrep rulesets named by `--offline-semgrep-rulesets` (default `p/ci`),
 copies the rulesets for opengrep, and fails if any of them is empty. The image has

@@ -58,6 +58,9 @@ from automated_security_helper.utils.log import ASH_LOGGER, MARKUP, escape_marku
 from automated_security_helper.utils.offline_tool_env import (
     with_offline_tool_environment,
 )
+from automated_security_helper.utils.runtime_compat_env import (
+    with_runtime_compat_environment,
+)
 from automated_security_helper.utils.redacted_model import (
     NO_RICH_REPR,
     carry_environment_values,
@@ -2270,6 +2273,11 @@ class PluginBase(UVToolMixin, BaseModel):
             env = with_offline_tool_environment(
                 env, scanner_offline() if callable(scanner_offline) else None
             )
+
+            # A POLYFILL row of the scanner's runtime-compat facet puts its shim
+            # directory on the child's PYTHONPATH (utils/runtime_compat_env.py);
+            # a scanner with no such row gets its environment back unchanged.
+            env = with_runtime_compat_environment(env, self)
 
             # A uv command started in the scanned tree (`uv pip ...`, `uv run ...`)
             # runs the tree's .venv python and builds its project unless told not

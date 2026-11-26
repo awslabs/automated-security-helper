@@ -624,6 +624,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     "gem closure itself comes from the committed assets/Gemfile.lock."
                 ),
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="a Ruby gem closure from assets/Gemfile.lock, not a release binary; there is no asset table",

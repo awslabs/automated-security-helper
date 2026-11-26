@@ -48,17 +48,49 @@ image presents none of), so asking for the convert phase alone is refused. The s
 records the image, not the directory it was started from, as its scan source, and does
 not walk that directory.
 
+`--changed-files-only` scopes a scan by git history, and an image has no diff base, so it
+means nothing there. It is not refused: ASH warns once that it has no meaning for an image
+scan and scans the whole image.
+
+**One subject per scan, several scans per call.** A scan reports on one asset, and each
+image keeps its own report, its own identity scope and its own exit code. To scan several
+images in one call, repeat `--image` or give a comma-separated list (the two forms mix):
+
+```bash
+ash scan --image registry.example.com/team/app:1.2.3 --image registry.example.com/team/db:4.5
+ash scan --image registry.example.com/team/app:1.2.3,registry.example.com/team/db:4.5
+```
+
+ASH then runs one single-image scan per reference, in the order given, each in its own
+report directory under `--output-dir` named `<NN>-<name>-<8 hex of the reference's hash>`
+(for example `01-registry.example.com-team-app-1.2.3-3fa9c0de`). The reports are not
+merged, so no finding of one image can be attributed to another. The call's exit code is
+the worst of the per-image codes, worst first: 5, 3, 4, 1, 2, 0. A 3 or a 5 (a refused
+configuration, a missing required scanner) does not depend on which image is scanned, so
+it ends the batch at once and the images after it are reported as not scanned. Any other
+failure is recorded and the next image still runs. `--image-archive` and `--image-layout`
+name one payload each and cannot be repeated, and a list with an empty or repeated entry is refused before anything runs.
+
+`--baseline` is refused with an image. A baseline compares findings against a stored
+scan of one scanned directory, keyed on that directory's relative path; an image has no
+such directory, and its finding ids carry the image digest, so a baseline taken against
+one build of an image would match nothing of the next and the "moved" pairing would pair
+unrelated findings. Compare two images by diffing their reports instead.
+
 ## Which scanners look at the image
 
 Capability lives in one place: a scanner's operational-facets register row. A scanner
 serves container images exactly when its row declares the `container_image` target
 kind; every other scanner -- and every third-party plugin that predates the register --
 is reported **SKIPPED** for an image scan, with a row naming the declaration, before
-its tool or dependencies are ever probed. A filesystem-only scanner whose constructor
-raises is SKIPPED the same way. A module that fails to import is still reported as an
-error, because without the class ASH cannot tell whether it would have read the image.
-An image scan's report therefore says which scanners did not look, rather than looking
-clean.
+its tool or dependencies are ever probed. A scanner that is *selected* but cannot be
+built is an **ERROR** row with the reason, on an image scan and on a directory scan
+alike: a module that fails to import, and a scanner whose constructor raises. For a
+scanner that does not serve images the row adds that this image scan lost none of its
+image coverage; a reason never hides a scanner that is missing. A scanner that was
+excluded, left out of an allowlist or disabled is still SKIPPED, because nothing
+selected it. An image scan's report therefore says which scanners did not look, rather
+than looking clean.
 
 When *nothing* scanned the image -- no selected scanner declares the kind, or
 no engine is present on an offline host -- the report carries one
@@ -80,6 +112,34 @@ is skipped as described above. The direct-payload shapes (`--image-archive`,
 which is what air-gapped hosts use.
 
 containerd is reached only through a tool's own options and is never probed by ASH.
+
+trivy reads a reference or a saved archive, not an OCI layout directory, so for
+`--image-layout` ASH re-packs the layout as a docker-archive tarball in a temporary file
+of the scan's own, in pure Python, and gives trivy that archive. The layout is only read.
+A layout whose layers are compressed any way but gzip is reported with the layer named.
+
+### Tag-only references and their digest
+
+A reference that already carries its digest (`repo@sha256:...`) needs no lookup. For a
+tag-only reference (`repo:tag`) ASH resolves the digest once at scan start, trying two
+rungs in order and stopping at the first that answers:
+
+1. **The local engine.** ASH asks the detected docker or podman daemon, over its unix
+   socket, for the image's inspect record and takes the `RepoDigests` entry of the
+   reference's own repository (Docker Hub names are normalized), else the image ID. This
+   works offline and fetches nothing, but only for an image the engine already holds.
+2. **The registry.** `crane digest <ref>`, a registry request for the manifest's digest
+   that needs no engine and fetches no layer. `crane` is a pinned tool like grype, and
+   the container image carries it. It is skipped when ASH is offline (`--offline`,
+   `ASH_OFFLINE`) or `crane` is not installed.
+
+The digest is recorded for the scan, so finding ids and the scan's identity scope key on
+it, and one log line names the rung that answered. Ids stay the same when the tag is moved
+to another name and change when the tag moves to a different image; a re-tagged image
+therefore never archives or overwrites the findings of the image it replaced. Only when
+every rung fails do the ids and the scope key on the reference text; ASH then logs one
+warning that lists why each rung failed, and the scan itself is never failed or skipped by
+it. A reference that begins with `-` is refused before any rung runs.
 
 ## Over the MCP server
 
@@ -106,8 +166,8 @@ as written. Three attribution columns say which image it came from:
 | Column | Meaning |
 |---|---|
 | `image_ref` | The image as submitted: the reference, or the archive or layout path. |
-| `image_digest` | The image's sha256 digest, when there is one: the tool's own run output (trivy records the image ID), else the digest a pinned reference (`repo@sha256:...`) states. A tag-only reference scanned by a tool that reports no digest (grype, syft) has none. |
-| `layer_digest` | The layer that introduced the finding, for a scanner that reports one. Attribution only. |
+| `image_digest` | The image's sha256 digest, when there is one: the tool's own run output (trivy records the image ID), else the digest the lookup ladder resolved for a tag-only reference (the local engine, then `crane digest`; see above), else the digest a pinned reference (`repo@sha256:...`) states. Empty only when every rung failed. |
+| `layer_digest` | The digest of the layer the finding comes from, for trivy findings. trivy's SARIF carries no layer data, so ASH runs trivy once more with JSON output, joins each result to the SARIF by finding (vulnerability: CVE and package; secret: rule, target and start line; misconfiguration: check ID and target), and writes the layer's `Digest`, else its `DiffID`. A finding two layers both report, or one the JSON pass cannot match, stays empty. If the second pass fails the scan still succeeds with the column empty. syft reports no findings and grype's output has no layer data, so their findings carry none. Attribution only. |
 
 A finding's id keys on the in-image path and the image's digest, or on the submitted
 reference when there is no digest. Pin the reference by digest when ids must survive a
@@ -130,10 +190,52 @@ global_settings:
 ```
 
 A suppression without `image` applies to any finding, image or filesystem, as before.
-One with `image` never applies to a filesystem finding. `ignore_paths` and
-`--changed-files-only` stay filesystem-only: there is no directory walk inside an image.
+One with `image` never applies to a filesystem finding.
+
+`ignore_paths` filters image findings by the in-image path, through the same matcher as a
+directory scan and after the scan, like a suppression: an entry names the path as the tool
+reports it, leading slash included (`/usr/share/doc/`), and a finding whose every location
+is under one is dropped. The directory the scan was started from only anchors it, so no
+path is read relative to it. That filter always runs. Where the tool can also be told to
+skip the path, ASH passes it as well, so the tool does less work:
+
+| Tool | What ASH passes | Notes |
+|---|---|---|
+| trivy | `trivy --skip-files <glob>` per entry | Measured on trivy 0.76.2: `trivy --skip-dirs` removed nothing from an image scan in any spelling, so it is not used. A path with no glob becomes the path and `<path>/**`. |
+| grype | `--exclude <glob>` per entry | Absolute in-image globs only; the `./` spelling matches nothing. |
+| syft | `--exclude <glob>` per entry | Same rule as grype. |
+
+Only an entry that starts with `/` or `**` is translated. A relative pattern, a glob that
+ends in `/`, a pattern that names no path, and one holding a newline, carriage return or
+NUL are left to the report filter alone, and ASH logs one line saying so; at most 200
+globs are passed to a tool. `--changed-files-only` has no meaning for an image and is
+warned about once, as above. The convert phase stays filesystem-only.
 
 ## Tests never pull
 
-ASH's own test fixtures build OCI layout directories from scratch; no third-party
-image is pulled by a test, and no engine is required for CI.
+ASH's own test fixtures build OCI layout directories and a small saved-image archive from
+scratch; no third-party image is pulled by a test, and no engine is required for CI. One
+integration test runs the real trivy over that committed archive, and over the same image
+re-packed as an OCI layout, and checks that it finds the token the image holds; further
+integration tests run the real trivy and syft over it for layer digests and ignore paths,
+and the digest ladder against a real unix-socket daemon.
+
+One CI job (`ash-image-scan-live-engine.yml`) covers the live engine and registry. It
+builds a small image, pushes it to a local registry container (both base and registry
+images pinned by digest from the public.ecr.aws gallery), scans it by tag, and requires
+the report's scope to key on the digest the registry holds: once while the engine holds
+the image (the engine rung) and once after the image is removed from the engine (the
+registry rung).
+
+## Limits that remain
+
+- Only grype, syft and trivy read images. Every other scanner is filesystem-only and is
+  reported SKIPPED for an image scan.
+- `layer_digest` is filled for trivy findings only.
+- `--baseline`, shards, `--staged` and convert-only are refused with an image, as above.
+- Ignore paths reach the tools as absolute in-image globs only; relative patterns and
+  globs ending in `/` are applied by the report filter after the scan, and trivy gets
+  `trivy --skip-files` only because `trivy --skip-dirs` has no effect on images.
+- The engine rung needs a docker or podman daemon socket; containerd is never probed.
+- The live-engine CI job exercises docker on a Linux runner; podman and other platforms
+  rely on unit tests and the unix-socket fake daemon.

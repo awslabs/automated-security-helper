@@ -183,14 +183,6 @@ from automated_security_helper.utils.process_env import snapshot_environ
 #: SARIF from ``scan``; 3.1 added ``risks``). ``options.tool_version`` overrides it.
 GUARDDOG_DEFAULT_VERSION_CONSTRAINT = "==3.2.0"
 
-#: Interpreters GuardDog 3.2.0 can be installed into from wheels alone. pygit2
-#: 1.18 and yara-python 4.5 publish no CPython 3.14 wheels, so on a host where uv
-#: would pick 3.14 the install falls back to building them from source, which
-#: needs libgit2 headers and a C toolchain, and fails. Measured with uv 0.12 on
-#: Linux x86_64: an unconstrained ``uv tool install guarddog==3.2.0`` picked
-#: 3.14 and failed on pygit2; with ``--python '>=3.10,<3.14'`` it installed.
-GUARDDOG_PYTHON_REQUEST = ">=3.10,<3.14"
-
 _COMMAND = "guarddog"
 
 GuardDogEcosystem = Literal["pypi", "npm", "go", "github_action", "rubygems", "crates"]
@@ -283,7 +275,8 @@ _SEVERITY_LEVELS = {
 #: ``options.max_hits`` changes GuardDog's per-rule hit limit" above. ``set`` gives
 #: every rule ``<limit>``; ``raise`` only raises a rule's own limit to it. A limit of
 #: 0 removes every limit (GuardDog's ``None``). Python 3.10 syntax, the oldest
-#: interpreter GuardDog is installed into (``GUARDDOG_PYTHON_REQUEST``).
+#: interpreter GuardDog is installed into (the ``runtime_compat`` row of
+#: ``GuardDogScanner.operational_facets``).
 _HIT_LIMIT_BOOTSTRAP = """\
 import sys
 
@@ -820,21 +813,27 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='"results" key (the heuristic name, e.g. '
-            "capability-network-lolbas)",
+            native_field='risks[] "threat_rule" for a correlated risk, else the '
+            '"results" key (the heuristic name, e.g. '
+            "threat-process-download-exec)",
         ),
         severity=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="(no native severity) the adapter's risk ladder over "
-            "the heuristic's category",
+            native_field='risks[] "severity" (high/medium/low), mapped one to '
+            "one by _risk_severity",
+            reason="the results that GuardDog's risk engine did not correlate "
+            "carry no native severity, so the adapter fixes them by class: "
+            "LOW for an uncorrelated threat match, MEDIUM for a metadata "
+            "rule, INFO for a capability match",
         ),
         file_path=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='match "location" file part (e.g. setup.py:16)',
+            native_field='risks[] "threat_location" or match "location" file '
+            "part (e.g. setup.py:16)",
         ),
         line_range=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='match "location" line part',
+            native_field='risks[] "threat_location" or match "location" line part',
         ),
         column=FacetDecl(
             state=FacetState.NA,
@@ -842,8 +841,9 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         ),
         message=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='match "message", assembled with the rule and match '
-            "into the result text by the adapter",
+            native_field='risks[] "threat_description" or match "message", '
+            "assembled with the rule, the location and the correlated "
+            "capability into the result text by the adapter",
         ),
         resource_id=FacetDecl(
             state=FacetState.NA,
@@ -901,7 +901,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         ),
         snippet=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='match "code" / risk "threat_code"',
+            native_field='match "code" / risks[] "threat_code"',
         ),
         references=FacetDecl(
             state=FacetState.MAPPED,
@@ -917,8 +917,11 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="extra_properties merged into the result PropertyBag "
-            "(package_name and package_version in verify mode)",
+            native_field="extra_properties merged into the result PropertyBag: "
+            "issue_severity and guarddog_ecosystem on every result, "
+            "guarddog_match on matches, guarddog_risk, guarddog_risk_severity, "
+            "guarddog_capability_rule and mitre_tactics on correlated risks, "
+            "and package_name and package_version in verify mode",
         ),
     )
 
@@ -972,6 +975,40 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                 invocation_note="one scan per package root and ecosystem",
                 python_only=True,
                 use_uv_tool=True,
+            ),
+            runtime_compat=opsf.RuntimeCompatFacet(
+                rows=(
+                    opsf.RuntimeCompatRow(
+                        runtime=opsf.RuntimeName.PYTHON,
+                        # No guarddog version is declared fixed, so the row
+                        # applies at every version, including an operator's
+                        # options.tool_version override.
+                        tool_versions="",
+                        runtime_request=">=3.10,<3.14",
+                        resolution=opsf.CompatResolution.PIN,
+                        reason=(
+                            "pygit2 1.18 and yara-python 4.5 publish no CPython "
+                            "3.14 wheels at the pinned guarddog==3.2.0, so on a "
+                            "host where uv would pick 3.14 the install builds "
+                            "them from source, which needs libgit2 headers and a "
+                            "C toolchain, and fails; measured with uv 0.12 on "
+                            "Linux x86_64: an unconstrained "
+                            "'uv tool install guarddog==3.2.0' picked 3.14 and "
+                            "failed on pygit2, and with --python '>=3.10,<3.14' "
+                            "it installed; PyPI read 2026-11-25: pygit2 "
+                            "publishes cp314 wheels from 1.19.0, while "
+                            "yara-python publishes none through 4.5.4"
+                        ),
+                        # Both bounds are proved (>=3.10 is guarddog's own
+                        # floor, <3.14 is the wheel gap at the pinned
+                        # dependency versions), so this is a closed row. A
+                        # search of the VirusTotal/yara-python issues for a
+                        # cp314 report found none (a "wheel" search returned
+                        # issues, so the search itself works); with no issue
+                        # URL to cite, the row is not declared open-ended.
+                        open_ended=False,
+                    ),
+                ),
             ),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
@@ -1095,9 +1132,6 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
             return self._opts.tool_version
         return GUARDDOG_DEFAULT_VERSION_CONSTRAINT
 
-    def _get_tool_python_request(self) -> str | None:
-        return GUARDDOG_PYTHON_REQUEST
-
     def unsupported_platform_reason(self) -> str | None:
         """Windows, at the pinned version: GuardDog cannot be installed there.
 
@@ -1215,9 +1249,10 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         nixpkgs). Both need the same remedy: install it before going offline.
         """
         requirement = f"guarddog{self._get_tool_version_constraint() or ''}"
-        install = (
-            f"uv tool install --python '{GUARDDOG_PYTHON_REQUEST}' '{requirement}'"
-        )
+        # The interpreter request is the facet row's, derived (uv_tool_mixin).
+        python_request = self._get_tool_python_request()
+        python_option = f" --python '{python_request}'" if python_request else ""
+        install = f"uv tool install{python_option} '{requirement}'"
         if self._is_offline_mode():
             reason = (
                 "guarddog is not installed, and ASH does not install tools in "

@@ -1276,8 +1276,11 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         rule_id=FacetDecl(state=FacetState.MAPPED, native_field="errors[].kind"),
         severity=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="errors[].kind (ASH severity table; a message matching "
-            "the untrusted-input pattern raises it to HIGH)",
+            native_field="errors[].kind and errors[].message (ASH severity "
+            "table, severity_for; an expression finding whose message matches "
+            "the untrusted-input pattern is raised to HIGH, and a "
+            "deprecated-commands finding whose message names set-env or "
+            "add-path is raised to MEDIUM)",
         ),
         file_path=FacetDecl(state=FacetState.MAPPED, native_field="errors[].filepath"),
         line_range=FacetDecl(state=FacetState.MAPPED, native_field="errors[].line"),
@@ -1398,6 +1401,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=opsf.PLATFORMS_ALL,
                 note="asset table lists all six platform/arch pairs",

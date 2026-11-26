@@ -1,0 +1,165 @@
+# Every rename and deletion of a served docs page across the release tags, mapped to
+# URL space: the historical URL universe scripts/validate_url_history.py validates
+# against. A URL appears once per release-tag pair that renamed (R) or deleted (D) it;
+# the validator reads the distinct old-url values and requires each to be served,
+# redirected or tombstoned (docs/url-history/url-redirect-map.json).
+#
+# Generated 2026-11-25 from this repository's git history: per consecutive-tag-pair
+# `git diff --find-renames --name-status <a> <b> -- docs/ mkdocs.yml` over all release
+# tags plus main, with pages mapped to URLs the way mkdocs serves them (docs_dir is
+# docs/content in every era, use_directory_urls default: docs/content/X.md -> X/,
+# index.md and README.md -> their directory's URL). Alias tags (v3, v3.0.0-beta) were
+# dropped, dated betas ordered before v3.0.0, pure source moves (same URL) and
+# non-page files skipped. 149 rows: 143 D, 6 R.
+#
+# Append rows when a release renames or deletes a page; never rewrite history rows.
+tag-range	kind	old-url	new-url-or-empty
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/base.converter_plugin/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/base/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/base.options/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/base.plugin_config/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/base.reporter_plugin/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/base.scanner_plugin/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/cli/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/config.ash_config/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/config.default_config/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/config/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/config.scanner_types/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/converters.ash_default.archive_converter/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/converters.ash_default.jupyter_converter/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/converters.ash_default/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/converters/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/core.constants/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/core.exceptions/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/core.execution_engine/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/core/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/core.orchestrator/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/core.plugin_registry/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/core.scanner_factory/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/models.aggregation/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/models.asharp_model/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/models.core/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/models/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/models.scan_results_container/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/models.security_vulnerability/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/reporters.ash_default.asff_reporter/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/reporters.ash_default.csv_reporter/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/reporters.ash_default.cyclonedx_reporter/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/reporters.ash_default.html_reporter/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/reporters.ash_default.json_reporter/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/reporters.ash_default.junitxml_reporter/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/reporters.ash_default/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/reporters.ash_default.sarif_reporter/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/reporters.ash_default.spdx_reporter/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/reporters.ash_default.text_reporter/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/reporters.ash_default.yaml_reporter/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/reporters/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/scanners.ash_default.bandit_scanner/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/scanners.ash_default.cdk_nag_scanner/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/scanners.ash_default.checkov_scanner/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/scanners.ash_default.custom_scanner/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/scanners.ash_default.detect_secrets_scanner/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/scanners.ash_default/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/scanners/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/schemas.cyclonedx_bom_1_6_schema/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/schemas.cyclonedx_bom_1_6_schema.spdx/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/schemas.data_interchange/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/schemas.generate_schemas/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/schemas/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/schemas.ocsf/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/schemas.sarif_schema_model/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/utils.cdk_nag_wrapper/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/utils.get_ash_version/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/utils.get_scan_set/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/utils/
+v3.0.0-beta-20250602..v3.0.0-beta-20250603	D	docs/development/api/utils.normalizers/
+v3.0.0-beta-20250604..v3.0.0-beta-20250610	D	docs/development/customization/converters/
+v3.0.0-beta-20250604..v3.0.0-beta-20250610	D	docs/development/customization/parsers/
+v3.0.0-beta-20250604..v3.0.0-beta-20250610	D	docs/development/customization/reporters/
+v3.0.0-beta-20250604..v3.0.0-beta-20250610	D	docs/development/customization/scanners/
+v3.0.0-beta-20250604..v3.0.0-beta-20250610	D	docs/development/customization/workflow/
+v3.0.0-beta-20250604..v3.0.0-beta-20250610	D	docs/prerequisites/
+v3.0.0-beta-20250604..v3.0.0-beta-20250610	D	tutorials/ashv3-quick-start-guide/
+v3.0.0-beta-20250604..v3.0.0-beta-20250610	R	tutorials/cloud9-quickstart/	tutorials/using-ash-with-pre-commit/
+v3.0.0-beta-20250610..v3.0.0-beta-20250614	D	docs/plugins/builtin/event-callbacks/
+v3.0.0-beta-20250614..v3.0.0-beta-20250708	D	docs/plugins/workflow/
+v3.7.1..v3.8.0	D	contributing/
+v3.7.1..v3.8.0	D	developer-guide/scanner-validation-system/
+v3.7.1..v3.8.0	D	developer-guide/unified-metrics/
+v3.7.1..v3.8.0	D	developer-guide/uv-tool-management/
+v3.7.1..v3.8.0	D	docs/GENAI-GUIDE-IMPLEMENTATION/
+v3.7.1..v3.8.0	D	docs/MCP-FILTER-TESTING/
+v3.7.1..v3.8.0	D	docs/MCP-FILTERING-GUIDE/
+v3.7.1..v3.8.0	D	docs/MCP-IMPROVEMENTS-SUMMARY/
+v3.7.1..v3.8.0	D	docs/MCP-SERVER-TESTING-GUIDE/
+v3.7.1..v3.8.0	D	docs/MCP-TOOLS-REFERENCE/
+v3.7.1..v3.8.0	D	docs/api-reference/
+v3.7.1..v3.8.0	D	docs/architecture/
+v3.7.1..v3.8.0	D	docs/building-your-own-image/
+v3.7.1..v3.8.0	D	docs/cli-reference-generated/
+v3.7.1..v3.8.0	D	docs/cli-reference/
+v3.7.1..v3.8.0	D	docs/concepts/
+v3.7.1..v3.8.0	D	docs/config-overrides/
+v3.7.1..v3.8.0	D	docs/configuration-guide/
+v3.7.1..v3.8.0	D	docs/glossary/
+v3.7.1..v3.8.0	D	docs/installation-guide/
+v3.7.1..v3.8.0	D	docs/mcp-performance-scalability/
+v3.7.1..v3.8.0	D	docs/mcp-server-guide/
+v3.7.1..v3.8.0	D	docs/mcp/streamable-http/
+v3.7.1..v3.8.0	D	docs/migration-guide/
+v3.7.1..v3.8.0	D	docs/output-formats/
+v3.7.1..v3.8.0	D	docs/plugins/architecture/
+v3.7.1..v3.8.0	D	docs/plugins/aws/bedrock-summary-reporter-diagrams/
+v3.7.1..v3.8.0	D	docs/plugins/aws/bedrock-summary-reporter/
+v3.7.1..v3.8.0	D	docs/plugins/aws/cloudwatch-logs-reporter-diagrams/
+v3.7.1..v3.8.0	D	docs/plugins/aws/cloudwatch-logs-reporter/
+v3.7.1..v3.8.0	D	docs/plugins/aws/
+v3.7.1..v3.8.0	D	docs/plugins/aws/s3-reporter-diagrams/
+v3.7.1..v3.8.0	D	docs/plugins/aws/s3-reporter/
+v3.7.1..v3.8.0	D	docs/plugins/aws/security-hub-reporter-diagrams/
+v3.7.1..v3.8.0	D	docs/plugins/aws/security-hub-reporter/
+v3.7.1..v3.8.0	D	docs/plugins/builtin/converters-diagrams/
+v3.7.1..v3.8.0	D	docs/plugins/builtin/converters/
+v3.7.1..v3.8.0	D	docs/plugins/builtin/event-handlers-diagrams/
+v3.7.1..v3.8.0	D	docs/plugins/builtin/event-handlers/
+v3.7.1..v3.8.0	D	docs/plugins/builtin/
+v3.7.1..v3.8.0	D	docs/plugins/builtin/reporters-diagrams/
+v3.7.1..v3.8.0	D	docs/plugins/builtin/reporters/
+v3.7.1..v3.8.0	D	docs/plugins/builtin/scanners-diagrams/
+v3.7.1..v3.8.0	D	docs/plugins/builtin/scanners/
+v3.7.1..v3.8.0	D	docs/plugins/converter-plugins-diagrams/
+v3.7.1..v3.8.0	D	docs/plugins/converter-plugins/
+v3.7.1..v3.8.0	D	docs/plugins/development-guide/
+v3.7.1..v3.8.0	D	docs/plugins/event-subscribers-diagrams/
+v3.7.1..v3.8.0	D	docs/plugins/event-subscribers/
+v3.7.1..v3.8.0	D	docs/plugins/
+v3.7.1..v3.8.0	D	docs/plugins/plugin-best-practices/
+v3.7.1..v3.8.0	D	docs/plugins/reporter-plugins-diagrams/
+v3.7.1..v3.8.0	D	docs/plugins/reporter-plugins/
+v3.7.1..v3.8.0	D	docs/plugins/scanner-plugins-diagrams/
+v3.7.1..v3.8.0	D	docs/plugins/scanner-plugins/
+v3.7.1..v3.8.0	D	docs/quick-start-guide/
+v3.7.1..v3.8.0	D	docs/support/
+v3.7.1..v3.8.0	D	docs/supported-languages/
+v3.7.1..v3.8.0	D	docs/suppressions/
+v3.7.1..v3.8.0	D	docs/testing/
+v3.7.1..v3.8.0	D	docs/testing/parallel_testing/
+v3.7.1..v3.8.0	D	docs/testing/test_organization/
+v3.7.1..v3.8.0	D	docs/testing/test_selection/
+v3.7.1..v3.8.0	D	docs/testing/test_utilities/
+v3.7.1..v3.8.0	D	docs/testing/writing_effective_tests/
+v3.7.1..v3.8.0	D	docs/troubleshooting-uv-installation/
+v3.7.1..v3.8.0	D	docs/troubleshooting/
+v3.7.1..v3.8.0	D	docs/uv-tool-installation-guide/
+v3.7.1..v3.8.0	D	tutorials/mcp-streaming-guide/
+v3.7.1..v3.8.0	D	tutorials/running-ash-in-ci/
+v3.7.1..v3.8.0	D	tutorials/running-ash-locally/
+v3.7.1..v3.8.0	D	tutorials/using-ash-with-mcp/
+v3.7.1..v3.8.0	D	tutorials/using-ash-with-pre-commit/
+v3.7.1..v3.8.0	D	user-guide/scanner-statistics/
+v3.8.0..main	R	docs/plugins/community/ferret-scan-plugin/	docs/plugins/alpha/ferret-scan-plugin/
+v3.8.0..main	R	docs/plugins/community/	docs/plugins/alpha/
+v3.8.0..main	R	docs/plugins/community/snyk-plugin-setup/	docs/plugins/alpha/snyk-plugin-setup/
+v3.8.0..main	R	docs/plugins/community/snyk-plugin/	docs/plugins/alpha/snyk-plugin/
+v3.8.0..main	R	docs/plugins/community/trivy-plugin/	docs/plugins/alpha/trivy-plugin/

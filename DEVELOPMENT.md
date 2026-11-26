@@ -337,8 +337,9 @@ uv run python scripts/generate_wrapper_tables.py
 
   `./ash` and `utils/ash_helpers.ps1` run on hosts with no Python, so each carries
   written-out lists of the CLI's subcommands, the root options that take a value, which
-  subcommands take the options the wrapper adds, and the order OCI runners are looked
-  for. Those lists sit between `BEGIN generated` and `END generated` comments and are
+  subcommands take the options the wrapper adds, the order OCI runners are looked for,
+  the CI runner variables passed into the container, the image build targets, the
+  image-name pattern and the refusal and usage-error exit codes. Those lists sit between `BEGIN generated` and `END generated` comments and are
   computed from the CLI by `automated_security_helper/interactions/wrapper_contract.py`.
   Do not edit inside the markers. The lint job and a unit test run
   `scripts/generate_wrapper_tables.py --check`, which fails and prints a diff when a block

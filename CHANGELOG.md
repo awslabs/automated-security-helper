@@ -73,10 +73,15 @@
   `utils/ash_helpers.ps1` (`Invoke-ASH`) are unchanged.
 - The subcommand and option tables that `./ash` and `utils/ash_helpers.ps1` carry
   (subcommand names, the root options that take a value, which subcommands take the
-  options a wrapper adds, the OCI runner order) are now generated from the `ash` CLI by
+  options a wrapper adds, the OCI runner order, the CI runner variables passed into the
+  container, the exit codes, and in `Invoke-ASH` the image build targets and the
+  image-name pattern) are now generated from the `ash` CLI by
   `scripts/generate_wrapper_tables.py` into marked blocks, and the lint job and a unit
-  test fail when a block is stale. The generated text is the text the wrappers already
-  held, so no option, exit code or message changes.
+  test fail when a block is stale. `./ash` reads the runner order and the CI variable
+  list from its generated blocks rather than from a second written-out copy. The
+  generated text is the text the wrappers already held, so no option, exit code or
+  message changes. The generator now writes each wrapper back with the line endings it
+  was read with.
 - Module-level string constants that spelled a wire vocabulary are replaced by enum
   members, so a caller that imported one of them by name must import the member
   instead. The `error_type` spellings of the MCP tools (`CONFIG_INPUT_NOT_PERMITTED`,
@@ -670,6 +675,17 @@ The commits below also carry breaking-change notes, listed under BREAKING CHANGE
 
 ### Breaking changes
 
+- **`ash container build` is the command that builds the ASH container image;
+  `ash build-image` is its deprecated spelling, removed in ASH v4.** Both take the
+  same options and start the same build. `ash build-image` prints one warning on
+  stderr per run, naming `ash container build`, and then runs; it is hidden from the
+  root `--help`, as the other spellings that moved in 3.9 are. The interrupted and
+  SIGTERM messages of the command read `ASH container build ...`, and the offline
+  hints in scan messages name `ash container build --offline`. `./ash` and
+  `Invoke-ASH` accept `container` as a command word and pass `--quiet`,
+  `--no-color`, `--verbose`, `--debug`, `--offline` and `--config` given before it
+  on to `build`, as they did for `build-image`. Move scripts and CI jobs to the new
+  spelling in this release; the old one stops working in v4.
 - **`expires` is the canonical spelling of a suppression's or ignore path's
   expiration date; `expiration` is a deprecated alias, removed in ASH v4.** The
   swap reverses the earlier shape, where `expiration` was the field and

@@ -30,12 +30,8 @@ Deliberate choices, said out loud:
 
 from __future__ import annotations
 
-import importlib
-import pkgutil
-
 import pytest
 
-from automated_security_helper import plugin_modules
 from automated_security_helper.base.scanner_facets import (
     SCANNER_FACETS_ATTR,
     ScannerFacets,
@@ -45,40 +41,15 @@ from automated_security_helper.base.scanner_operational_facets import (
     ScannerOperationalFacets,
 )
 from automated_security_helper.core.enums import OfflineStrategy
-from automated_security_helper.plugin_modules import ash_builtin
+from tests.utils.scanner_enumeration import load_scanner_universe
 
 pytestmark = pytest.mark.unit
 
-#: Import-order cycles can cost ash_builtin a plugin group on first import
-#: (its own docstring measures which orders); the retry recovers every such
-#: order and returns what is still lost. Anything still lost fails the
-#: enumeration-guard test below rather than silently shrinking the universe.
-_REMAINING_LOAD_ERRORS = ash_builtin.retry_failed_plugin_groups()
-
-
-def _registered_scanner_classes() -> list[type]:
-    """Every scanner class the in-repo plugin packages register.
-
-    Package order is alphabetical and classes keep each package's own order,
-    so parametrized ids are stable run to run.
-    """
-    classes: list[type] = []
-    seen: set[type] = set()
-    modules = sorted(
-        pkgutil.iter_modules(plugin_modules.__path__), key=lambda m: m.name
-    )
-    for info in modules:
-        if not info.ispkg:
-            continue
-        package = importlib.import_module(f"{plugin_modules.__name__}.{info.name}")
-        for cls in getattr(package, "ASH_SCANNERS", []):
-            if cls not in seen:
-                seen.add(cls)
-                classes.append(cls)
-    return classes
-
-
-SCANNER_CLASSES = _registered_scanner_classes()
+#: The shared enumeration (tests/utils/scanner_enumeration.py): the retry of any
+#: plugin group an import-order cycle cost, then the walk over every in-repo
+#: plugin package. Anything still lost fails the enumeration-guard test below
+#: rather than silently shrinking the universe.
+SCANNER_CLASSES, _REMAINING_LOAD_ERRORS = load_scanner_universe()
 
 
 def test_the_enumeration_sees_builtin_and_alpha_scanners() -> None:

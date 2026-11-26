@@ -28,6 +28,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters._report_fram
     graded_frame,
 )
 from automated_security_helper.utils import finding_diff
+from tests.unit.models._flat_vulnerability_helpers import flat_with_severity
 
 pytestmark = pytest.mark.unit
 
@@ -37,7 +38,7 @@ def _finding(**overrides) -> FlatVulnerability:
         "id": "f-1",
         "title": "t",
         "description": "d",
-        "severity": "High",
+        "severity": "HIGH",
         "scanner": "bandit",
         "scanner_type": "SAST",
         "rule_id": "B101",
@@ -47,7 +48,8 @@ def _finding(**overrides) -> FlatVulnerability:
         "is_suppressed": False,
     }
     fields.update(overrides)
-    return FlatVulnerability(**fields)
+    severity = fields.pop("severity")
+    return flat_with_severity(severity, **fields)
 
 
 class TestSideFrameColumnNames:

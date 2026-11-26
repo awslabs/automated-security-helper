@@ -608,7 +608,8 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             "email, date, commitMessage)",
             reason="dir mode emits empty-string git metadata, which "
             "_post_process_sarif drops because an empty fingerprint is "
-            "identical across every result; git-mode values pass through",
+            "identical across every result; ASH runs only the dir subcommand, "
+            "so no git metadata is ever kept",
         ),
         fix_available=FacetDecl(
             state=FacetState.NA,
@@ -680,6 +681,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=opsf.PLATFORMS_ALL,
                 note="asset table lists all six platform/arch pairs",

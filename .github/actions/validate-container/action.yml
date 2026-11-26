@@ -25,7 +25,7 @@ runs:
 
     # WHY A SCAN LEG EXISTS AT ALL
     #
-    # This action used to end at `ash build-image --force`. `build-image` proves the
+    # This action used to end at `ash container build --force`. `container build` proves the
     # Dockerfile still builds under a given runtime; it says nothing about whether ASH
     # can scan with the result, which is the only reason the image is built. So podman
     # and finch were the two runtimes in the matrix whose image nobody ever ran, while
@@ -52,7 +52,7 @@ runs:
 
     # WHY EVERY BUILD STEP PASSES --no-run
     #
-    # `ash build-image` defaults to building AND scanning: cli/image.py passes
+    # `ash container build` defaults to building AND scanning: cli/image.py passes
     # `run=not no_run`, and it never passes `source_dir`, so run_ash_scan.py resolves
     # the source to `Path.cwd()` -- this checkout. A build step written as a plain
     # `run:` therefore scanned ASH's own repository and exited with that scan's status,
@@ -93,9 +93,9 @@ runs:
         #
         # So the shape test is "the command is the first thing on the line, after an
         # optional `run:`", which catches both forms. Four kinds of line in this file
-        # name `ash build-image` without being an invocation of it, and all four must
+        # name `ash container build` without being an invocation of it, and all four must
         # stay excluded: the prose at the top, the two comment blocks, this check's own
-        # source, and the `echo "::error::ash build-image ..."` in the retry loop.
+        # source, and the `echo "::error::ash container build ..."` in the retry loop.
         #
         # The count is asserted too. Without it a future edit that hides an invocation
         # from the shape test would leave this passing on whatever it still sees, which
@@ -105,7 +105,7 @@ runs:
         for line in lines:
             stripped = line.strip()
             command = stripped[4:].strip() if stripped.startswith("run:") else stripped
-            if not command.startswith("ash build-image"):
+            if not command.startswith("ash container build"):
                 continue
             runtime = next((r for r in expected if f"--oci-runner {r}" in command), None)
             found.setdefault(runtime, []).append(command)
@@ -172,7 +172,7 @@ runs:
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override }}
-      run: ash build-image --oci-runner podman --build-target ci --force --no-run
+      run: ash container build --oci-runner podman --build-target ci --force --no-run
 
     # === finch ===
     - name: "finch: install (macOS)"
@@ -203,7 +203,7 @@ runs:
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-finch.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-finch.outputs.base-image-override }}
-      run: ash build-image --oci-runner finch --build-target ci --force --no-run
+      run: ash container build --oci-runner finch --build-target ci --force --no-run
 
     # === nerdctl ===
     #
@@ -274,7 +274,7 @@ runs:
     # Five of the eight failures are not this race and are excluded from both
     # halves of the ratio. On those five runs the podman and finch legs failed too,
     # in exactly the same five runs and no others, which no nerdctl-specific cause
-    # can produce; they are a branch whose `build-image` runs a full scan that
+    # can produce; they are a branch whose `container build` runs a full scan that
     # reports findings and exits 2.
     #
     # That leaves 3 failures of this shape in 144 - 5 = 139 terminal outcomes:
@@ -363,7 +363,7 @@ runs:
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-nerdctl.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-nerdctl.outputs.base-image-override }}
-        # The tag ash build-image applies for --build-target ci, which every build
+        # The tag ash container build applies for --build-target ci, which every build
         # and scan in this action passes, so this is the image the load above would
         # have created. CI variables do not choose the stage, so it is named
         # explicitly rather than left to the default (non-root).
@@ -388,7 +388,7 @@ runs:
           # reporting a build break that never happened. Flag order matches those
           # two legs on attempt 1: --oci-runner nerdctl --build-target ci --force
           # --no-run.
-          ash build-image --oci-runner nerdctl --build-target ci "${force_args[@]}" --no-run 2>&1 | tee "${log}"
+          ash container build --oci-runner nerdctl --build-target ci "${force_args[@]}" --no-run 2>&1 | tee "${log}"
           rc="${PIPESTATUS[0]}"
           set -e
 
@@ -427,7 +427,7 @@ runs:
           # wrapper rather than the race itself, and the match should survive
           # nerdctl rewording its wrapper while the upstream race is still open.
           if ! grep -qE 'parent snapshot.*does not exist' "${log}"; then
-            echo "::error::ash build-image --oci-runner nerdctl exited ${rc} for a reason other than the containerd snapshot GC race. Not retried."
+            echo "::error::ash container build --oci-runner nerdctl exited ${rc} for a reason other than the containerd snapshot GC race. Not retried."
             exit "${rc}"
           fi
 

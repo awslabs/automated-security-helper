@@ -900,6 +900,9 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             state=FacetState.MAPPED,
             native_field="results[].locations[].physicalLocation.region."
             "snippet.text (settled by the M0 capture)",
+            reason="mask_secrets_in_sarif runs over the whole report, so a "
+            "snippet holding a secret-shaped value is masked in place; the "
+            "snippet still maps, with the masked text",
         ),
         references=FacetDecl(
             state=FacetState.MAPPED,
@@ -951,6 +954,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 python_only=True,
                 use_uv_tool=True,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="a PyPI package run through uv; platform support is the package's and was not read here",

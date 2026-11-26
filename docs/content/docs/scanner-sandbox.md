@@ -383,6 +383,11 @@ class MyScanner(ScannerPluginBase[MyScannerConfig]):
         env_names=("MYTOOL_TOKEN",),
         # Set under sandbox-exec only, after the allowlist.
         sandbox_exec_env=(("MYTOOL_PACKAGE_CACHE", "disabled"),),
+        # Under sandbox-exec, these variables point at a private, empty
+        # directory per spawn. For a tool whose cache location follows a
+        # variable it offers no other way to move (Go's os.UserCacheDir reads
+        # HOME alone on macOS).
+        sandbox_exec_cache_env=("HOME",),
         # The tool unpacks itself where this variable says and runs what it
         # unpacked; sandbox-exec points it at a private directory per spawn.
         unpack_dir_env="XDG_CACHE_HOME",

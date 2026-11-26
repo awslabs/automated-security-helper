@@ -84,8 +84,13 @@ def _private_caches(
     child_env: Dict[str, str],
     overlaid: Sequence[Path] = (),
     read_only: Sequence[Path] = (),
+    names: Optional[Sequence[str]] = None,
 ) -> Tuple[List[Callable[[], None]], List[Path]]:
     """Give the tools that must write a cache a private one.
+
+    ``names`` replaces ``policy.cache_env`` as the variables to redirect; the
+    sandbox-exec backend passes ``policy.sandbox_exec_cache_env`` for the ones that
+    only it redirects.
 
     Only bwrap's throwaway overlay lets a scanner write a host cache without the
     write reaching the host. Every other backend mounts ``policy.cache`` read-only
@@ -118,7 +123,7 @@ def _private_caches(
     """
     redirected = [
         name
-        for name in policy.cache_env
+        for name in (policy.cache_env if names is None else names)
         if not _on_an_overlaid_cache(child_env.get(name), overlaid, read_only)
     ]
     if not redirected:
@@ -2141,6 +2146,15 @@ class SandboxExecBackend(SandboxBackend):
         # to install and runs it from, so the profile lets that one run programs.
         caches, private_dirs = _private_caches(policy, child_env)
         cleanup += caches
+        # A tool whose cache location follows a variable the sandbox has already
+        # set (HOME, which Go's os.UserCacheDir reads alone on macOS) gets a
+        # private directory under that name, here and nowhere else.
+        if policy.sandbox_exec_cache_env:
+            home_caches, home_dirs = _private_caches(
+                policy, child_env, names=policy.sandbox_exec_cache_env
+            )
+            cleanup += home_caches
+            private_dirs = [*private_dirs, *home_dirs]
         cleanup += _uv_lock_watch(policy)
         private_uv_cache = (
             Path(child_env["UV_CACHE_DIR"])
