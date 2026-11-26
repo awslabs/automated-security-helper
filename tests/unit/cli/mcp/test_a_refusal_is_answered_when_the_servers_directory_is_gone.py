@@ -14,6 +14,7 @@ directory on purpose elsewhere; the refusal context now does too.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,36 @@ def _the_working_directory_is_gone(monkeypatch):
         raise FileNotFoundError(2, "No such file or directory")
 
     monkeypatch.setattr(Path, "cwd", staticmethod(cwd))
+
+
+@pytest.mark.skipif(
+    os.name == "nt", reason="Windows does not remove a process's working directory"
+)
+def test_a_forbidden_target_is_refused_with_the_directory_really_removed(
+    tmp_path, monkeypatch
+):
+    """The real condition, not a stand-in for it: the process is inside a
+    directory that is then removed, so ``os.getcwd`` raises on its own."""
+    from automated_security_helper.cli.mcp.scan_target import validate_scan_target
+
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    started_in = tmp_path / "started-in"
+    started_in.mkdir()
+    monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(allowed))
+    monkeypatch.setenv("ASH_MCP_TRANSPORT", "stdio")
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp-workspaces"))
+    monkeypatch.chdir(started_in)
+    os.rmdir(started_in)
+    with pytest.raises(FileNotFoundError):
+        os.getcwd()
+
+    refusal = validate_scan_target(outside)
+
+    assert refusal is not None
+    assert refusal.context["cwd"] == "<unavailable>"
 
 
 def test_control_the_context_names_the_working_directory():
