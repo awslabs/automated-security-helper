@@ -10,8 +10,9 @@ uploads one (``set_source_zip_finalize`` in ``cli/mcp/source_delivery.py``), and
 operator names one with ``ash scan fs --archive FILE``. Either archive is read before
 anything in it is scanned, and both are held to the rules here, so the two entry
 points cannot drift apart: an archive one of them refuses, the other refuses in the
-same words. The rules are the ones the MCP delivery enforced, moved here unchanged,
-with one addition (a NUL in a member name, below).
+same words. The rules are the ones the MCP delivery enforced, moved here, with
+additions that hold for both: a NUL, a ``.`` or an empty component in a member name,
+a Unicode path field that renames a member, and two members on one path (below).
 
 What is refused
 ---------------
@@ -26,10 +27,31 @@ written, so a refused archive leaves the destination as it was.
    as zipfile rewrites them, so one spelling is judged on every platform: an empty
    name; a backslash, since ``/`` is the zip separator and a backslash name lands on
    POSIX as one flat file whose directories a scanner never sees; an absolute name;
-   a ``..`` component; and a NUL. zipfile cuts a name at its first NUL when it
+   a ``..`` component; a ``.`` component or an empty one (``./app.py``,
+   ``a/./b.py``, ``pkg//mod.py``; a directory's trailing ``/`` is not one), which
+   zipfile drops when it extracts the member, so it lands on a path the archive
+   spells another way; and a NUL. zipfile cuts a name at its first NUL when it
    extracts the member, so a member spelled ``tool<NUL>.py`` was judged under that
-   name and written as ``tool``, a file no Python scanner reads.
-3. Links. Every symbolic link is refused, wherever it points. Resolving a target
+   name and written as ``tool``, a file no Python scanner reads. On Windows a name
+   Windows cannot hold as spelled is refused as well: a component that ends in a dot
+   or a space, holds a control character or one of ``"*:<>?|``, or is a device name
+   such as ``CON``, ``NUL`` or ``COM1``, with or without an extension. zipfile
+   rewrites the first three there, and a device name is written to the device.
+3. A second name. A member can carry a Unicode path field (extra field 0x7075), and
+   zipfile, from Python 3.12, extracts the member under the name in it rather than
+   the one the archive spells, while readers that ignore the field, ``zipimport``
+   among them, keep the spelled one. The field is admitted only when it restates the
+   name: the UTF-8 reading of the bytes the archive spells the name with, which is
+   what Info-ZIP writes for a name outside ASCII. One that names another file is
+   refused, so a member spelled ``app.py`` is not scanned as ``app.txt``, and the
+   name an admitted field gives is judged by rule 2 too.
+4. One path for each member. Two members extracted to one path are refused,
+   whatever each is (two members of one name, a file and a directory), and so is a
+   member under a path the archive holds as a file. zipfile writes the later of two
+   members over the earlier, so the tree scanned would hold one of two files, while
+   a reader that looks members up by name, as ``zipimport`` and ``python app.zip``
+   do, can run the other.
+5. Links. Every symbolic link is refused, wherever it points. Resolving a target
    before extraction races the extraction (an earlier member can make the directory
    a later link's path runs through), and a source tree needs none. The refusal
    quotes at most the first 256 bytes of the target.
@@ -49,9 +71,12 @@ Entry points
 ------------
 * ``extract_source_archive(archive, destination)`` reads the zip at a path, for
   ``ash scan fs --archive``. Besides the rules above it refuses a path that is not a
-  regular file or cannot be read, an encrypted member, and a member whose data does
-  not read back whole. Every problem with the archive is a ``SourceArchiveRefused``;
-  an ``OSError`` is a problem with the destination or the disk.
+  regular file or cannot be read, an encrypted member, and a member zipfile cannot
+  read back whole: damaged data, a compression method or zip version it does not
+  implement, a method whose module this Python was built without. It reads the file
+  once, into memory, and zipfile reads that copy, so nothing zipfile raises is about
+  the disk. Every problem with the archive is a ``SourceArchiveRefused``; an
+  ``OSError`` is a problem with the destination or the disk.
 * ``extract_zip_members(archive, destination, rules)`` extracts an archive its caller
   holds open. The MCP finalize hashes an upload before extracting it, and has to
   extract the bytes it hashed, so it passes the handle it read, with its own limits
@@ -64,28 +89,34 @@ do not load it.
 
 Limits
 ------
-* Members with one name are extracted in archive order, the later over the earlier,
-  as zipfile does; names that differ only in case collide the same way on a
-  filesystem that ignores case.
+* Rule 4 compares names as the archive spells them. Names that differ only in case
+  are one file on a filesystem that ignores case, and names that differ only in
+  Unicode normalization are one on a filesystem that normalizes them. There zipfile
+  writes the later of two files over the earlier, and a file and a directory end the
+  extraction with the ``OSError`` the filesystem raises.
 * A member whose data is damaged is found when extraction reaches it, after the
   members before it were written. The caller removes the destination on any failure.
 * A damaged bzip2 stream reaches the caller as the ``OSError`` Python raises for it,
   which nothing tells apart from a disk error.
+* A Unicode path field that restates its name from a legacy code page rather than
+  from UTF-8 bytes (Info-ZIP under a locale that is not UTF-8, for a name outside
+  ASCII) is refused as naming another file.
+* zipfile before Python 3.12 ignores the Unicode path field and extracts every member
+  under the name the archive spells, so rule 3 has nothing to refuse there.
 """
 
 from __future__ import annotations
 
 import contextlib
 import errno
-import lzma
+import io
 import os
 import stat
 import zipfile
-import zlib
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import IO, Callable, Iterator, List, Tuple, Type
+from typing import IO, Callable, Iterator, List, Optional, Tuple, Type
 
 #: The largest archive admitted, in bytes on disk.
 MAX_ARCHIVE_BYTES: int = 100 * 1024 * 1024
@@ -108,17 +139,26 @@ _S_IFLNK_SHIFTED = 0xA000 << 16
 
 #: Bit 0 of a member's general purpose flags: its data is encrypted.
 _ENCRYPTED_FLAG = 0x1
+#: Bit 11 of a member's general purpose flags: its name is spelled in UTF-8.
+_UTF8_NAME_FLAG = 0x800
 
-#: What zipfile raises when a member's data cannot be read back: a bad checksum or
-#: header, data cut short, compressed data that does not decompress, or a
-#: compression method it does not implement.
-_UNREADABLE_DATA: Tuple[Type[BaseException], ...] = (
-    zipfile.BadZipFile,
-    EOFError,
-    zlib.error,
-    lzma.LZMAError,
-    NotImplementedError,
+#: Whether names are judged by what Windows can hold as well (rule 2).
+_ON_WINDOWS = os.name == "nt"
+#: The characters Windows reserves in a path component: the control characters and
+#: these seven, as Python 3.13's ``ntpath.isreserved`` reads them.
+_WINDOWS_RESERVED_CHARACTERS = frozenset(map(chr, range(32))) | frozenset('"*:<>?|')
+#: The device names Windows reserves, with or without an extension.
+_WINDOWS_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+    | {f"COM{digit}" for digit in "123456789\xb9\xb2\xb3"}
+    | {f"LPT{digit}" for digit in "123456789\xb9\xb2\xb3"}
 )
+
+#: What ``extract_source_archive`` lets pass from zipfile as it was raised. zipfile
+#: reads the archive from memory there, so every other exception it raises is about
+#: the archive. An OSError is the destination's, since extraction writes there, or a
+#: damaged bzip2 stream's (see Limits); a MemoryError is the process's.
+_NOT_THE_ARCHIVES: Tuple[Type[BaseException], ...] = (OSError, MemoryError)
 
 
 class SourceArchiveRefusal(str, Enum):
@@ -131,7 +171,12 @@ class SourceArchiveRefusal(str, Enum):
     BACKSLASH_IN_NAME = "backslash-in-name"
     ABSOLUTE_PATH = "absolute-path"
     PATH_TRAVERSAL = "path-traversal"
+    DOT_COMPONENT = "dot-component"
+    EMPTY_COMPONENT = "empty-component"
     NUL_IN_NAME = "nul-in-name"
+    RESERVED_NAME = "reserved-name"
+    UNICODE_PATH_MISMATCH = "unicode-path-mismatch"
+    PATH_COLLISION = "path-collision"
     SYMLINK_MEMBER = "symlink-member"
     NOT_A_ZIP = "not-a-zip"
     # Only extract_source_archive refuses for these four: it opens the file and
@@ -178,9 +223,11 @@ def validate_member_name(name: str) -> None:
 
     Refused, in this order: an empty name; a backslash; an absolute name (a leading
     ``/``, or one this platform reads as absolute, such as a drive on Windows); a
-    ``..`` component; a NUL. A name that breaks more than one rule is refused for the
-    first. A name whose dots are not a whole component (``..config``,
-    ``notes..txt``) is a plain name.
+    ``..`` component; a ``.`` component; an empty component (a directory's trailing
+    ``/`` is not one); a NUL; and on Windows, a component Windows cannot hold as
+    spelled (:func:`_reserved_on_windows`). A name that breaks more than one rule is
+    refused for the first. A name whose dots are not a whole component
+    (``..config``, ``notes..txt``) is a plain name.
 
     Raises:
         SourceArchiveRefused: naming the rule and the name.
@@ -198,15 +245,49 @@ def validate_member_name(name: str) -> None:
         raise SourceArchiveRefused(
             SourceArchiveRefusal.ABSOLUTE_PATH, f"absolute path in zip: {name!r}"
         )
-    if ".." in name.split("/"):
+    components = name.removesuffix("/").split("/")
+    if ".." in components:
         raise SourceArchiveRefused(
             SourceArchiveRefusal.PATH_TRAVERSAL, f"path traversal in zip: {name!r}"
         )
+    if "." in components:
+        raise SourceArchiveRefused(
+            SourceArchiveRefusal.DOT_COMPONENT,
+            f"'.' component in zip entry name: {name!r}",
+        )
+    if "" in components:
+        raise SourceArchiveRefused(
+            SourceArchiveRefusal.EMPTY_COMPONENT,
+            f"empty component in zip entry name: {name!r}",
+        )
     if "\x00" in name:
-        # Last, so a name that also breaks a rule above keeps that rule's words.
+        # After the rules on the name's shape, so a name that also breaks one of
+        # them keeps that rule's words.
         raise SourceArchiveRefused(
             SourceArchiveRefusal.NUL_IN_NAME, f"NUL in zip entry name: {name!r}"
         )
+    if _ON_WINDOWS:
+        for component in components:
+            if _reserved_on_windows(component):
+                raise SourceArchiveRefused(
+                    SourceArchiveRefusal.RESERVED_NAME,
+                    f"reserved name on Windows in zip entry name {name!r}: "
+                    f"{component!r}",
+                )
+
+
+def _reserved_on_windows(component: str) -> bool:
+    """Whether Windows cannot hold the path component ``component`` as spelled.
+
+    The rules of Python 3.13's ``ntpath.isreserved``, which the supported 3.11 and
+    3.12 lack: a trailing dot or space, a reserved character, or a device name with
+    or without an extension (``nul.txt``, ``nul .txt``).
+    """
+    if component.endswith((".", " ")):
+        return True
+    if not _WINDOWS_RESERVED_CHARACTERS.isdisjoint(component):
+        return True
+    return component.partition(".")[0].rstrip(" ").upper() in _WINDOWS_DEVICE_NAMES
 
 
 @dataclass(frozen=True)
@@ -219,7 +300,8 @@ class ZipRules:
 
     max_members: int = MAX_MEMBERS
     max_extracted_bytes: int = MAX_EXTRACTED_BYTES
-    #: Given each member's name as the archive spells it; raises to refuse it.
+    #: Given each member's name as the archive spells it, and then the name zipfile
+    #: extracts it under when a Unicode path field gives another; raises to refuse.
     validate_name: Callable[[str], None] = validate_member_name
     symlink_excerpt_bytes: int = SYMLINK_TARGET_EXCERPT_BYTES
     #: The archives the link refusal names: "symlinks are not allowed in <archives>".
@@ -237,8 +319,10 @@ def admit_zip_members(
 
     Writes nothing. Reads the central directory and, for a link, the first bytes of
     its target. The member count is checked first; then, for each member in archive
-    order, its name, the uncompressed total so far, and whether it is a link. The
-    first rule that refuses ends the check.
+    order, its name, the name zipfile extracts it under when a Unicode path field
+    gives another, the uncompressed total so far, and whether it is a link; then that
+    no two members are extracted to one path. The first rule that refuses ends the
+    check.
 
     Raises:
         SourceArchiveRefused: naming the rule. Whatever ``rules.validate_name`` and
@@ -253,6 +337,9 @@ def admit_zip_members(
     total = 0
     for info in members:
         rules.validate_name(info.orig_filename)
+        if info.filename != info.orig_filename:
+            _refuse_a_second_name(archive, info)
+            rules.validate_name(info.filename)
         total += info.file_size
         if total > rules.max_extracted_bytes:
             raise SourceArchiveRefused(
@@ -262,7 +349,67 @@ def admit_zip_members(
             )
         if is_symlink_member(info):
             raise _link_refused(archive, info, rules)
+    _refuse_shared_paths(members)
     return members
+
+
+def _refuse_a_second_name(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> None:
+    """Refuse ``info`` when the name zipfile extracts it under is not its own.
+
+    The name rules refuse a NUL and a backslash, the two things zipfile rewrites in a
+    spelled name, so the names differ only by a Unicode path field. The field restates
+    the name when it is the UTF-8 reading of the bytes the archive spells the name
+    with, as Info-ZIP writes a name outside ASCII without the UTF-8 flag. zipfile
+    decoded those bytes with the flag's encoding, or the archive's metadata encoding
+    (cp437 unless the caller named one), so encoding the spelled name again gives
+    them back.
+    """
+    if info.flag_bits & _UTF8_NAME_FLAG:
+        encoding = "utf-8"
+    else:
+        # getattr: zipfile keeps the argument as this attribute, which the type
+        # stubs know only as a constructor argument.
+        encoding = getattr(archive, "metadata_encoding", None) or "cp437"
+    restated: Optional[str]
+    try:
+        restated = info.orig_filename.encode(encoding).decode("utf-8")
+    except UnicodeError:
+        restated = None
+    if info.filename != restated:
+        raise SourceArchiveRefused(
+            SourceArchiveRefusal.UNICODE_PATH_MISMATCH,
+            f"zip entry {info.orig_filename!r} is extracted as {info.filename!r}: "
+            "its Unicode path field names another file",
+        )
+
+
+def _refuse_shared_paths(members: List[zipfile.ZipInfo]) -> None:
+    """Refuse two members extracted to one path, and a member under a file.
+
+    A member's path is the name zipfile extracts it under, less a directory's
+    trailing ``/``; the name rules leave zipfile nothing else to rewrite in it.
+    Sorted with each ``/`` read as the lowest character (an admitted name holds no
+    NUL), a path is followed at once by its duplicates and then by the paths under
+    it, so comparing each path with the next one finds every case in one pass.
+    """
+    order = sorted(
+        (info.filename.removesuffix("/").replace("/", "\x00"), position)
+        for position, info in enumerate(members)
+    )
+    for (path, earlier), (following, later) in zip(order, order[1:]):
+        if following == path:
+            raise SourceArchiveRefused(
+                SourceArchiveRefusal.PATH_COLLISION,
+                f"zip entries {members[earlier].filename!r} and "
+                f"{members[later].filename!r} are extracted to one path",
+            )
+        holder = members[earlier].filename
+        if following.startswith(path + "\x00") and not holder.endswith("/"):
+            raise SourceArchiveRefused(
+                SourceArchiveRefusal.PATH_COLLISION,
+                f"zip entry {members[later].filename!r} is under {holder!r}, "
+                "which the archive holds as a file",
+            )
 
 
 def _link_refused(
@@ -310,52 +457,87 @@ def extract_source_archive(archive: Path, destination: Path) -> Path:
     when it does. The archive is held to every rule of this module with its default
     limits, and to three more, since this function opens and extracts the file
     itself: ``archive`` must be a regular file it can read, no member may be
-    encrypted, and every member's data must read back whole.
+    encrypted, and zipfile must read every member's data back whole.
+
+    The file is read once, into memory, and zipfile reads that copy, so whatever
+    zipfile raises while it reads is the archive's: a member it cannot read (damaged
+    data, a compression method or zip version it does not implement, a method whose
+    module this Python lacks) is a ``SourceArchiveRefused`` whatever exception zipfile
+    raised for it.
 
     Every rule but the last is decided before anything is written, so a refused
     archive leaves ``destination`` as it was, not made if it did not exist. A member
-    whose data is damaged is refused when extraction reaches it, after the members
+    zipfile cannot read is refused when extraction reaches it, after the members
     before it were written, and an ``OSError`` can stop the extraction partway too.
     The caller owns ``destination`` and removes it on any failure.
 
     Raises:
         SourceArchiveRefused: the archive was refused; ``kind`` names the rule.
         OSError: ``destination`` exists and is not an empty directory, or cannot be
-            made or written.
+            made or written, or the archive could not be read from the disk.
     """
-    archive = Path(archive)
     destination = Path(destination)
+    data = _read_archive(Path(archive))
+    try:
+        opened = zipfile.ZipFile(io.BytesIO(data))
+    except (zipfile.BadZipFile, EOFError, ValueError) as error:
+        raise SourceArchiveRefused(
+            SourceArchiveRefusal.NOT_A_ZIP, str(error)
+        ) from error
+    except _NOT_THE_ARCHIVES:
+        raise
+    except Exception as error:
+        # "zip file version 6.4": a central directory entry that needs a newer
+        # reader than zipfile, which checks the version as it opens the archive.
+        raise _unreadable("the archive", error) from error
+    with opened:
+        # Before the shared rules: the link rule reads a link's data, which an
+        # encrypted member does not give up.
+        _refuse_encrypted_members(opened)
+        try:
+            members = admit_zip_members(opened)
+        except SourceArchiveRefused:
+            raise
+        except _NOT_THE_ARCHIVES:
+            raise
+        except Exception as error:
+            raise _unreadable("the archive", error) from error
+        _make_empty_directory(destination)
+        for info in members:
+            try:
+                opened.extract(info, destination)
+            except _NOT_THE_ARCHIVES:
+                raise
+            except Exception as error:
+                raise _unreadable(f"zip entry {info.filename!r}", error) from error
+    return destination
+
+
+def _unreadable(what: str, error: Exception) -> SourceArchiveRefused:
+    """The refusal of an archive zipfile could not read ``what`` of."""
+    return SourceArchiveRefused(
+        SourceArchiveRefusal.UNREADABLE_MEMBER,
+        f"{what} cannot be read: {str(error) or type(error).__name__}",
+    )
+
+
+def _read_archive(archive: Path) -> bytes:
+    """The bytes of the zip at ``archive``, refused past ``MAX_ARCHIVE_BYTES``.
+
+    Measured before the read, so an archive over the limit is refused without being
+    read, and read one byte past the limit, so a file that holds more than it
+    measured (it grew in between, or it is a file the kernel reports as empty) is
+    refused rather than read whole.
+    """
     with _opened_regular_file(archive) as handle:
         size = os.fstat(handle.fileno()).st_size
         if size > MAX_ARCHIVE_BYTES:
             raise archive_too_large(size, MAX_ARCHIVE_BYTES)
-        try:
-            opened = zipfile.ZipFile(handle)
-        except (zipfile.BadZipFile, EOFError, ValueError) as error:
-            raise SourceArchiveRefused(
-                SourceArchiveRefusal.NOT_A_ZIP, str(error)
-            ) from error
-        with opened:
-            # Before the shared rules: the link rule reads a link's data, which an
-            # encrypted member does not give up.
-            _refuse_encrypted_members(opened)
-            try:
-                members = admit_zip_members(opened)
-            except _UNREADABLE_DATA as error:
-                raise SourceArchiveRefused(
-                    SourceArchiveRefusal.UNREADABLE_MEMBER,
-                    f"the archive cannot be read: {error}",
-                ) from error
-            _make_empty_directory(destination)
-            for info in members:
-                try:
-                    opened.extract(info, destination)
-                except _UNREADABLE_DATA as error:
-                    raise SourceArchiveRefused(
-                        SourceArchiveRefusal.UNREADABLE_MEMBER,
-                        f"zip entry {info.filename!r} cannot be read: {error}",
-                    ) from error
-    return destination
+        data = handle.read(MAX_ARCHIVE_BYTES + 1)
+        if len(data) > MAX_ARCHIVE_BYTES:
+            size = max(os.fstat(handle.fileno()).st_size, len(data))
+            raise archive_too_large(size, MAX_ARCHIVE_BYTES)
+    return data
 
 
 @contextlib.contextmanager
@@ -374,20 +556,20 @@ def _opened_regular_file(archive: Path) -> Iterator[IO[bytes]]:
             f"{shown!r} is not a valid path: {error}",
         ) from error
     except OSError as error:
-        raise _unreadable(shown, error) from error
+        raise _unreadable_path(shown, error) from error
     if not stat.S_ISREG(found.st_mode):
         raise _not_a_file(shown)
     try:
         handle = open(archive, "rb")
     except OSError as error:
-        raise _unreadable(shown, error) from error
+        raise _unreadable_path(shown, error) from error
     with handle:
         if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
             raise _not_a_file(shown)
         yield handle
 
 
-def _unreadable(shown: str, error: OSError) -> SourceArchiveRefused:
+def _unreadable_path(shown: str, error: OSError) -> SourceArchiveRefused:
     return SourceArchiveRefused(
         SourceArchiveRefusal.UNREADABLE_ARCHIVE,
         f"{shown!r} cannot be read: {error.strerror or error}",

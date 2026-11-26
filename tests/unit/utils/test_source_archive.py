@@ -18,6 +18,12 @@ large uncompressed total is a deflated run of zeros (about half a megabyte), and
 member count is 50,001 empty members. Names zipfile will not write as given (a NUL,
 which it cuts at, and a backslash, which it turns into a slash on Windows) are written
 as a placeholder of the same length and swapped into the archive's bytes afterwards.
+
+Archives zipfile cannot read are built the same way, by changing the bytes of a good
+one where the zip format puts the field: a central directory entry that needs a newer
+reader, a damaged compressed stream, a local header whose name is not the UTF-8 it
+claims, and offsets that point before the file or past what a seek can reach. Every
+one of them has to reach the caller of ``extract_source_archive`` as a refusal.
 """
 
 from __future__ import annotations
@@ -28,10 +34,13 @@ import gzip
 import hashlib
 import io
 import os
+import struct
 import tarfile
+import warnings
 import zipfile
+import zlib
 from pathlib import Path
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Sequence, Tuple, Union
 
 import pytest
 
@@ -59,6 +68,77 @@ def _zip(entries: Dict[str, bytes], compression: int = zipfile.ZIP_DEFLATED) -> 
         for name, content in entries.items():
             archive.writestr(name, content)
     return buffer.getvalue()
+
+
+def _zip_members(entries: Sequence[Tuple[str, bytes]]) -> bytes:
+    """A zip holding ``entries``, name and content, in order, a repeated name included."""
+    buffer = io.BytesIO()
+    with warnings.catch_warnings():
+        # zipfile warns on a name it already wrote, and writes it again as asked.
+        warnings.simplefilter("ignore", UserWarning)
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name, content in entries:
+                archive.writestr(name, content)
+    return buffer.getvalue()
+
+
+def _unicode_path_field(spelled: bytes, name: str) -> bytes:
+    """A Unicode path extra field (0x7075) giving ``name`` to a member spelled ``spelled``.
+
+    Version 1, the CRC-32 of the spelled name's bytes (zipfile reads the field only
+    when it matches them), then the name in UTF-8.
+    """
+    data = struct.pack("<BL", 1, zlib.crc32(spelled)) + name.encode("utf-8")
+    return struct.pack("<HH", 0x7075, len(data)) + data
+
+
+def _zip_with_unicode_paths(
+    entries: Sequence[Tuple[str, Optional[str], bytes]],
+) -> bytes:
+    """A zip of ``(name, the name its Unicode path field gives or None, content)``."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, unicode_path, content in entries:
+            info = zipfile.ZipInfo(name)
+            if unicode_path is not None:
+                info.extra = _unicode_path_field(name.encode("ascii"), unicode_path)
+            archive.writestr(info, content)
+    return buffer.getvalue()
+
+
+def _info_zip_utf8_name(name: str, content: bytes) -> bytes:
+    """One stored member named ``name`` as Info-ZIP writes a name outside ASCII.
+
+    On a UTF-8 system it stores the name's UTF-8 bytes without the UTF-8 flag, so
+    zipfile reads the spelled name as cp437, and restates the name in a Unicode path
+    field. zipfile sets the flag for any name outside ASCII, so a placeholder of the
+    same length is written and the bytes are swapped in afterwards.
+    """
+    spelled = name.encode("utf-8")
+    placeholder = "X" * len(spelled)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        info = zipfile.ZipInfo(placeholder)
+        info.extra = _unicode_path_field(spelled, name)
+        archive.writestr(info, content)
+    return _renamed(buffer.getvalue(), placeholder, spelled)
+
+
+def _zipfile_reads_unicode_paths() -> bool:
+    """Whether this Python's zipfile extracts a member under its Unicode path field.
+
+    From 3.12 it does; before, the field is ignored and the spelled name is used.
+    """
+    payload = _zip_with_unicode_paths([("a.py", "b.py", b"")])
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        return archive.infolist()[0].filename == "b.py"
+
+
+ZIPFILE_READS_UNICODE_PATHS = _zipfile_reads_unicode_paths()
+_NEEDS_UNICODE_PATHS = pytest.mark.skipif(
+    not ZIPFILE_READS_UNICODE_PATHS,
+    reason="zipfile before Python 3.12 ignores the Unicode path field",
+)
 
 
 def _zip_with_modes(entries: Dict[str, Tuple[bytes, int]]) -> bytes:
@@ -111,6 +191,87 @@ def _with_damaged_data(payload: bytes, content: bytes) -> bytes:
     damaged = bytearray(payload)
     damaged[at] ^= 0xFF
     return bytes(damaged)
+
+
+def _with_version_needed(payload: bytes, version: int) -> bytes:
+    """``payload``, a zip of one member, whose central directory entry needs ``version``.
+
+    "Version needed to extract" is at offset 6 of the entry, in tenths (63 is 6.3);
+    zipfile reads it when it opens the archive and implements up to 6.3.
+    """
+    data = bytearray(payload)
+    central = data.find(b"PK\x01\x02")
+    assert central > 0
+    data[central + 6 : central + 8] = struct.pack("<H", version)
+    return bytes(data)
+
+
+def _with_first_data_byte_flipped(payload: bytes) -> bytes:
+    """``payload``, a zip of one member, with the first byte of that member's data changed.
+
+    The data starts after the 30-byte local header, the name and the extra field, whose
+    lengths are at offsets 26 and 28 of the header.
+    """
+    data = bytearray(payload)
+    assert data[:4] == b"PK\x03\x04"
+    name_length, extra_length = struct.unpack("<HH", data[26:30])
+    data[30 + name_length + extra_length] ^= 0xFF
+    return bytes(data)
+
+
+def _with_local_name_not_utf8(payload: bytes, name: str) -> bytes:
+    """``payload``, whose one member is named ``name``, with a local header that lies.
+
+    The local header's copy of the name gets a first byte that starts no UTF-8
+    sequence, and the header claims UTF-8 (flag bit 11, offset 6). The central
+    directory still spells ``name``, so the archive opens; reading the member decodes
+    the local name and fails.
+    """
+    spelled = name.encode("ascii")
+    data = bytearray(payload)
+    assert data[:4] == b"PK\x03\x04" and payload.count(spelled) == 2
+    at = data.index(spelled)
+    data[at] = 0xFF
+    (flags,) = struct.unpack("<H", data[6:8])
+    data[6:8] = struct.pack("<H", flags | 0x800)
+    return bytes(data)
+
+
+def _with_central_directory_moved_on(payload: bytes, by: int) -> bytes:
+    """``payload`` with the end record's central directory offset ``by`` bytes too far.
+
+    zipfile takes the excess as data concatenated before the archive and subtracts it
+    from every member's header offset, so the first member's comes out negative.
+    """
+    data = bytearray(payload)
+    end = data.rfind(b"PK\x05\x06")
+    (offset,) = struct.unpack("<I", data[end + 16 : end + 20])
+    data[end + 16 : end + 20] = struct.pack("<I", offset + by)
+    return bytes(data)
+
+
+def _with_zip64_header_offset(payload: bytes, offset: int) -> bytes:
+    """``payload``, a zip of one member, whose header offset is ``offset`` by zip64.
+
+    The central directory entry's offset (at 42) is set to 0xFFFFFFFF and a zip64 extra
+    field carries the real one, as zipfile writes for an archive past 4 GiB; the entry's
+    extra length (at 30) and the end record's central directory size grow to match.
+    """
+    data = bytearray(payload)
+    central = data.find(b"PK\x01\x02")
+    name_length, extra_length, comment_length = struct.unpack(
+        "<HHH", data[central + 28 : central + 34]
+    )
+    assert extra_length == 0 and comment_length == 0
+    extra = struct.pack("<HHQ", 0x0001, 8, offset)
+    data[central + 42 : central + 46] = struct.pack("<I", 0xFFFFFFFF)
+    data[central + 30 : central + 32] = struct.pack("<H", len(extra))
+    name_end = central + 46 + name_length
+    data[name_end:name_end] = extra
+    end = data.rfind(b"PK\x05\x06")
+    (size,) = struct.unpack("<I", data[end + 12 : end + 16])
+    data[end + 12 : end + 16] = struct.pack("<I", size + len(extra))
+    return bytes(data)
 
 
 def _tar(gzipped: bool) -> bytes:
@@ -353,6 +514,105 @@ REFUSED = [
         "zip entry has empty name",
         id="empty-name",
     ),
+    # zipfile drops "." and empty components when it extracts, so each of these
+    # lands on a path the archive spells another way: probe_mod.py beside
+    # ./probe_mod.py is one file on disk and two members to a reader that looks
+    # members up by name, as zipimport does. Red at the base: all three were admitted.
+    pytest.param(
+        _zip({"./app.py": b"x"}),
+        Kind.DOT_COMPONENT,
+        "'.' component in zip entry name: './app.py'",
+        id="leading-dot-component",
+    ),
+    pytest.param(
+        _zip({"a/./b.py": b"x"}),
+        Kind.DOT_COMPONENT,
+        "'.' component in zip entry name: 'a/./b.py'",
+        id="inner-dot-component",
+    ),
+    pytest.param(
+        # Red at the base as the raw ValueError("Empty filename.") of the extraction.
+        _zip({".": b"x"}),
+        Kind.DOT_COMPONENT,
+        "'.' component in zip entry name: '.'",
+        id="a-name-that-is-one-dot",
+    ),
+    pytest.param(
+        _zip({"pkg//mod.py": b"x"}),
+        Kind.EMPTY_COMPONENT,
+        "empty component in zip entry name: 'pkg//mod.py'",
+        id="empty-component",
+    ),
+    pytest.param(
+        _zip({"pkg//": b""}),
+        Kind.EMPTY_COMPONENT,
+        "empty component in zip entry name: 'pkg//'",
+        id="a-directory-with-two-trailing-slashes",
+    ),
+    # One path, one member. Red at the base: the first two were extracted the later
+    # over the earlier, and the rest ended in the OSError of the clash on disk.
+    pytest.param(
+        _zip_members([("app.py", b"EVIL = True\n"), ("app.py", b"EVIL = False\n")]),
+        Kind.PATH_COLLISION,
+        "zip entries 'app.py' and 'app.py' are extracted to one path",
+        id="two-members-of-one-name",
+    ),
+    pytest.param(
+        _zip_members([("pkg/", b""), ("pkg/", b"")]),
+        Kind.PATH_COLLISION,
+        "zip entries 'pkg/' and 'pkg/' are extracted to one path",
+        id="two-directory-members-of-one-name",
+    ),
+    pytest.param(
+        _zip_members([("pkg", b"a file"), ("pkg/", b"")]),
+        Kind.PATH_COLLISION,
+        "zip entries 'pkg' and 'pkg/' are extracted to one path",
+        id="a-file-and-a-directory-of-one-path",
+    ),
+    pytest.param(
+        _zip_members([("pkg", b"a file"), ("pkg/mod.py", b"x")]),
+        Kind.PATH_COLLISION,
+        "zip entry 'pkg/mod.py' is under 'pkg', which the archive holds as a file",
+        id="a-member-under-an-earlier-file",
+    ),
+    pytest.param(
+        _zip_members([("pkg/mod.py", b"x"), ("pkg", b"a file")]),
+        Kind.PATH_COLLISION,
+        "zip entry 'pkg/mod.py' is under 'pkg', which the archive holds as a file",
+        id="a-file-at-the-directory-of-an-earlier-member",
+    ),
+    pytest.param(
+        # "a-b" sorts between "a" and "a/c" when "/" is compared as itself; the rule
+        # has to find "a/c" under the file "a" anyway.
+        _zip_members([("a", b"a file"), ("a-b", b"x"), ("a/c", b"y")]),
+        Kind.PATH_COLLISION,
+        "zip entry 'a/c' is under 'a', which the archive holds as a file",
+        id="a-member-under-a-file-with-a-sibling-between",
+    ),
+    pytest.param(
+        # zipfile extracts the second member as app.py, over the first; zipimport and
+        # every reader that ignores the field keep the first.
+        _zip_with_unicode_paths(
+            [
+                ("app.py", None, b"EVIL = True\n"),
+                ("zzz.py", "app.py", b"EVIL = False\n"),
+            ]
+        ),
+        Kind.UNICODE_PATH_MISMATCH,
+        "zip entry 'zzz.py' is extracted as 'app.py': "
+        "its Unicode path field names another file",
+        id="a-unicode-path-onto-another-member",
+        marks=_NEEDS_UNICODE_PATHS,
+    ),
+    pytest.param(
+        # Scanned as text while `import app` runs it.
+        _zip_with_unicode_paths([("app.py", "app.txt", b"EVIL = True\n")]),
+        Kind.UNICODE_PATH_MISMATCH,
+        "zip entry 'app.py' is extracted as 'app.txt': "
+        "its Unicode path field names another file",
+        id="a-unicode-path-that-renames-the-member",
+        marks=_NEEDS_UNICODE_PATHS,
+    ),
     pytest.param(
         b"plain text, not an archive\n",
         Kind.NOT_A_ZIP,
@@ -543,6 +803,188 @@ class TestTheTreeIsExtractedAsArchived:
         assert not isinstance(refused.value, sa.SourceArchiveRefused)
         assert _tree(destination) == {"kept.txt": b"already here"}
 
+    def test_paths_that_share_a_head_but_not_a_directory_are_admitted(self, tmp_path):
+        """Control for the one-path rule: a file ``pkg`` and the members ``pkg-x/a.py``
+        and ``pkg.py`` beside it name three paths, none under another."""
+        entries = [("pkg", b"a file"), ("pkg-x/a.py", b"x"), ("pkg.py", b"y")]
+        destination = sa.extract_source_archive(
+            _archive_file(tmp_path, _zip_members(entries)), tmp_path / "tree"
+        )
+
+        assert _tree(destination) == {
+            "pkg": b"a file",
+            "pkg-x": None,
+            "pkg-x/a.py": b"x",
+            "pkg.py": b"y",
+        }
+
+    def test_a_directory_member_with_members_under_it_is_admitted(self, tmp_path):
+        """Control: a directory and the files under it are one tree, not a clash."""
+        entries = [("pkg/", b""), ("pkg/mod.py", b"x"), ("pkg/sub/", b"")]
+        destination = sa.extract_source_archive(
+            _archive_file(tmp_path, _zip_members(entries)), tmp_path / "tree"
+        )
+
+        assert _tree(destination) == {
+            "pkg": None,
+            "pkg/mod.py": b"x",
+            "pkg/sub": None,
+        }
+
+
+class TestAUnicodePathField:
+    """Rule 3: the name zipfile extracts a member under has to be the member's own."""
+
+    def test_one_that_restates_a_utf8_name_is_admitted(self, tmp_path):
+        """Info-ZIP's own shape for a name outside ASCII, from a UTF-8 system: the
+        member is extracted under the name zipfile reads, by both entry points."""
+        payload = _info_zip_utf8_name("docs/café.md", b"# Notes\n")
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            (written,) = archive.namelist()
+
+        extracted = sa.extract_source_archive(
+            _archive_file(tmp_path, payload), tmp_path / "tree"
+        )
+        _upload(payload, tmp_path / "workspace")
+        delivered = _finalize(payload, tmp_path / "workspace")
+
+        assert _tree(extracted) == {"docs": None, written: b"# Notes\n"}
+        assert _tree(delivered) == _tree(extracted)
+
+    @_NEEDS_UNICODE_PATHS
+    def test_the_restated_name_is_the_utf8_one(self):
+        """What the row above extracts, from 3.12: the field's name, not cp437 text."""
+        payload = _info_zip_utf8_name("docs/café.md", b"# Notes\n")
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            (info,) = sa.admit_zip_members(archive)
+
+        assert info.filename == "docs/café.md"
+        assert info.orig_filename != info.filename
+
+    @pytest.mark.skipif(
+        ZIPFILE_READS_UNICODE_PATHS,
+        reason="this zipfile extracts under the Unicode path field",
+    )
+    def test_a_zipfile_that_ignores_the_field_extracts_the_spelled_names(
+        self, tmp_path
+    ):
+        """Why rule 3 refuses nothing before 3.12: the names extracted are the ones
+        the archive spells, which every reader sees."""
+        payload = _zip_with_unicode_paths([("app.py", "app.txt", b"x")])
+
+        destination = sa.extract_source_archive(
+            _archive_file(tmp_path, payload), tmp_path / "tree"
+        )
+
+        assert _tree(destination) == {"app.py": b"x"}
+
+
+#: Names Windows cannot hold as spelled, and the component that makes each so.
+WINDOWS_RESERVED = [
+    pytest.param("a:b.py", "a:b.py", id="colon"),
+    pytest.param("pkg/q?.py", "q?.py", id="question-mark"),
+    pytest.param("star*.py", "star*.py", id="asterisk"),
+    pytest.param("pipe|.py", "pipe|.py", id="pipe"),
+    pytest.param('quote".py', 'quote".py', id="double-quote"),
+    pytest.param("lt<gt>.py", "lt<gt>.py", id="angle-brackets"),
+    pytest.param("tab\there.py", "tab\there.py", id="control-character"),
+    pytest.param("pkg/x.py.", "x.py.", id="trailing-dot"),
+    pytest.param("dir./x.py", "dir.", id="trailing-dot-on-a-directory"),
+    pytest.param("x.py ", "x.py ", id="trailing-space"),
+    pytest.param("nul.py", "nul.py", id="device-name-with-an-extension"),
+    pytest.param("pkg/CON", "CON", id="device-name"),
+    pytest.param("aux/x.py", "aux", id="device-name-as-a-directory"),
+    pytest.param("COM1.txt", "COM1.txt", id="numbered-device-name"),
+    pytest.param("lpt\xb9.txt", "lpt\xb9.txt", id="superscript-device-name"),
+    pytest.param("nul .txt", "nul .txt", id="device-name-and-a-space"),
+]
+
+
+class TestNamesWindowsCannotHold:
+    """Rule 2 on Windows: zipfile would rewrite these, or Windows would open a device."""
+
+    @pytest.mark.parametrize("name,component", WINDOWS_RESERVED)
+    def test_on_windows_each_is_refused(self, monkeypatch, name, component):
+        monkeypatch.setattr(sa, "_ON_WINDOWS", True)
+
+        with pytest.raises(sa.SourceArchiveRefused) as refused:
+            sa.validate_member_name(name)
+
+        assert refused.value.kind is Kind.RESERVED_NAME
+        assert str(refused.value) == (
+            f"reserved name on Windows in zip entry name {name!r}: {component!r}"
+        )
+
+    @pytest.mark.parametrize("name,component", WINDOWS_RESERVED)
+    def test_elsewhere_each_is_a_plain_name(self, monkeypatch, name, component):
+        monkeypatch.setattr(sa, "_ON_WINDOWS", False)
+
+        sa.validate_member_name(name)
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "app.py",
+            "docs/guide.md",
+            "..config/settings.toml",
+            "notes..txt",
+            "pkg/",
+            "connect.py",
+            "console.log",
+            "nul_device.md",
+            "com10.txt",
+            "lpt0",
+            "auxiliary/x.py",
+        ],
+    )
+    def test_on_windows_names_it_can_hold_are_admitted(self, monkeypatch, name):
+        monkeypatch.setattr(sa, "_ON_WINDOWS", True)
+
+        sa.validate_member_name(name)
+
+    def test_on_windows_the_finalize_refuses_one_in_the_same_words(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(sa, "_ON_WINDOWS", True)
+        payload = _zip({"a:b.py": b"x"})
+
+        shared = _verdict(
+            _extraction_refusal(_archive_file(tmp_path, payload), tmp_path / "tree")
+        )
+        delivered = _verdict(_finalize_refusal(payload, tmp_path / "workspace"))
+
+        assert delivered == shared
+        assert shared[0] is Kind.RESERVED_NAME
+
+    @_NEEDS_UNICODE_PATHS
+    def test_on_windows_the_name_a_unicode_path_field_gives_is_judged_too(
+        self, monkeypatch, tmp_path
+    ):
+        """The field restates COM² from its UTF-8 bytes, which zipfile spells as
+        cp437 text no rule refuses; extracted, it is the device COM²."""
+        monkeypatch.setattr(sa, "_ON_WINDOWS", True)
+        payload = _info_zip_utf8_name("COM\xb2.py", b"x")
+
+        refused = _extraction_refusal(
+            _archive_file(tmp_path, payload), tmp_path / "tree"
+        )
+
+        assert refused.kind is Kind.RESERVED_NAME
+        assert str(refused) == (
+            "reserved name on Windows in zip entry name 'COM\xb2.py': 'COM\xb2.py'"
+        )
+
+    @pytest.mark.skipif(os.name == "nt", reason="Windows cannot create the name")
+    def test_elsewhere_a_colon_name_is_extracted_as_spelled(self, tmp_path):
+        destination = sa.extract_source_archive(
+            _archive_file(tmp_path, _zip({"a:b.py": b"x"})), tmp_path / "tree"
+        )
+
+        assert _tree(destination) == {"a:b.py": b"x"}
+
+    def test_the_rule_follows_the_platform(self):
+        assert sa._ON_WINDOWS is (os.name == "nt")
+
 
 # ---------------------------------------------------------------------------
 # What extract_source_archive adds, since it opens and extracts the file itself.
@@ -600,6 +1042,152 @@ class TestTheFileItselfIsChecked:
         assert "'a.py'" in str(refused)
         assert "Bad CRC-32" in str(refused)
 
+    @pytest.mark.skipif(
+        not Path("/proc/self/status").is_file(), reason="needs Linux /proc"
+    )
+    def test_a_file_longer_than_it_measured_is_refused_once_read_past_the_limit(
+        self, monkeypatch, tmp_path
+    ):
+        """The size is checked before the read and again after it: a file that grew
+        in between is refused, not read whole. A /proc file is a regular file that
+        measures 0 bytes and holds more, which is the same shape."""
+        monkeypatch.setattr(sa, "MAX_ARCHIVE_BYTES", 64)
+
+        refused = _extraction_refusal(Path("/proc/self/status"), tmp_path / "tree")
+
+        assert refused.kind is Kind.ARCHIVE_TOO_LARGE
+        assert str(refused) == "zip too large: 65 > 64 bytes"
+        assert not (tmp_path / "tree").exists()
+
+    @pytest.mark.skipif(
+        os.name == "nt" or os.geteuid() == 0,
+        reason="needs POSIX permissions that bind the process",
+    )
+    def test_a_destination_that_cannot_be_written_is_an_os_error(self, tmp_path):
+        """The other half of the contract: what goes wrong writing the tree is the
+        destination's, and is not reported as the archive's."""
+        destination = tmp_path / "tree"
+        destination.mkdir()
+        destination.chmod(0o500)
+        try:
+            with pytest.raises(OSError) as failed:
+                sa.extract_source_archive(
+                    _archive_file(tmp_path, _zip({"a.py": b"x"})), destination
+                )
+        finally:
+            destination.chmod(0o700)
+
+        assert not isinstance(failed.value, sa.SourceArchiveRefused)
+        assert isinstance(failed.value, PermissionError)
+
+
+class TestWhatZipfileCannotReadIsARefusal:
+    """Every way zipfile fails on a crafted archive reaches the caller as a refusal.
+
+    ``extract_source_archive`` says every problem with the archive is a
+    ``SourceArchiveRefused`` and an ``OSError`` is the destination's or the disk's, so
+    a caller that tells them apart can show a refusal and stop. Each row is an
+    exception zipfile raises that is neither, or an ``OSError`` raised for the
+    archive's bytes alone. Red at the base: each reached the caller as it was raised.
+    """
+
+    def test_a_member_that_needs_a_newer_zip_reader_is_refused(self, tmp_path):
+        """NotImplementedError from ``zipfile.ZipFile`` itself, as it opens the file."""
+        payload = _with_version_needed(_zip({"a.py": b"x"}), 64)
+        destination = tmp_path / "tree"
+
+        refused = _extraction_refusal(_archive_file(tmp_path, payload), destination)
+
+        assert refused.kind is Kind.UNREADABLE_MEMBER
+        assert str(refused) == "the archive cannot be read: zip file version 6.4"
+        assert not destination.exists()
+
+    def test_control_the_newest_version_zipfile_reads_is_admitted(self, tmp_path):
+        payload = _with_version_needed(_zip({"a.py": b"x"}), 63)
+
+        destination = sa.extract_source_archive(
+            _archive_file(tmp_path, payload), tmp_path / "tree"
+        )
+
+        assert _tree(destination) == {"a.py": b"x"}
+
+    @pytest.mark.skipif(
+        getattr(zipfile, "zstd", None) is None,
+        reason="this zipfile has no Zstandard support (Python 3.14 adds it)",
+    )
+    def test_a_damaged_zstandard_member_is_refused(self, tmp_path):
+        """compression.zstd.ZstdError, neither a ValueError nor an OSError."""
+        content = b"print('a source line')\n" * 50
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("a.py", content, compress_type=zipfile.ZIP_ZSTANDARD)
+        payload = _with_first_data_byte_flipped(buffer.getvalue())
+
+        refused = _extraction_refusal(
+            _archive_file(tmp_path, payload), tmp_path / "tree"
+        )
+
+        assert refused.kind is Kind.UNREADABLE_MEMBER
+        assert str(refused).startswith("zip entry 'a.py' cannot be read: ")
+
+    def test_a_method_whose_module_this_python_lacks_is_refused(
+        self, monkeypatch, tmp_path
+    ):
+        """RuntimeError, which zipfile raises for an LZMA member when the lzma module
+        is missing: a Python built without it reads the archive this way."""
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_LZMA) as archive:
+            archive.writestr("a.py", b"print(1)\n")
+        archive_path = _archive_file(tmp_path, buffer.getvalue())
+        monkeypatch.setattr(zipfile, "lzma", None)
+
+        refused = _extraction_refusal(archive_path, tmp_path / "tree")
+
+        assert refused.kind is Kind.UNREADABLE_MEMBER
+        assert str(refused) == (
+            "zip entry 'a.py' cannot be read: "
+            "Compression requires the (missing) lzma module"
+        )
+
+    def test_a_local_header_whose_name_is_not_the_utf8_it_claims_is_refused(
+        self, tmp_path
+    ):
+        """UnicodeDecodeError: a ValueError, but not a refusal."""
+        payload = _with_local_name_not_utf8(_zip({"aa.py": b"x"}), "aa.py")
+
+        refused = _extraction_refusal(
+            _archive_file(tmp_path, payload), tmp_path / "tree"
+        )
+
+        assert refused.kind is Kind.UNREADABLE_MEMBER
+        assert str(refused).startswith("zip entry 'aa.py' cannot be read: ")
+        assert "can't decode byte 0xff" in str(refused)
+
+    def test_a_header_offset_before_the_file_is_refused(self, tmp_path):
+        """An OSError (EINVAL) read from the file at the base, which the contract
+        reserves for the disk: the offset is the archive's own."""
+        payload = _with_central_directory_moved_on(_zip({"a.py": b"x"}), 1000)
+
+        refused = _extraction_refusal(
+            _archive_file(tmp_path, payload), tmp_path / "tree"
+        )
+
+        assert refused.kind is Kind.UNREADABLE_MEMBER
+        assert str(refused).startswith("zip entry 'a.py' cannot be read: ")
+
+    def test_a_header_offset_past_what_a_seek_can_reach_is_refused(self, tmp_path):
+        """A zip64 offset of 2**63, which no seek takes."""
+        payload = _with_zip64_header_offset(
+            _zip({"a.py": b"x"}, compression=zipfile.ZIP_STORED), 2**63
+        )
+
+        refused = _extraction_refusal(
+            _archive_file(tmp_path, payload), tmp_path / "tree"
+        )
+
+        assert refused.kind is Kind.UNREADABLE_MEMBER
+        assert str(refused).startswith("zip entry 'a.py' cannot be read: ")
+
 
 class TestTheRefusal:
     def test_it_is_a_value_error_whose_kind_and_words_survive_a_copy(self):
@@ -620,7 +1208,12 @@ class TestTheRefusal:
             "backslash-in-name",
             "absolute-path",
             "path-traversal",
+            "dot-component",
+            "empty-component",
             "nul-in-name",
+            "reserved-name",
+            "unicode-path-mismatch",
+            "path-collision",
             "symlink-member",
             "not-a-zip",
             "not-a-file",
