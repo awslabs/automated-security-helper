@@ -199,6 +199,10 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
         "cfn_nag", sarif=("captured/cfn_nag-0.8.10-*.sarif",), prep="cfn-nag"
     ),
     "checkov": CorpusSpec("checkov", sarif=("captured/*.sarif",), prep="checkov"),
+    # The committed SARIF is a REAL captured Conftest 0.62.0 run; the prep passes it
+    # through the adapter (_post_process_sarif), which drops the non-finding results
+    # and writes the tags and issue_severity the register declares MAPPED.
+    "conftest": CorpusSpec("conftest", sarif=("captured/*.sarif",), prep="conftest"),
     "credsweeper": CorpusSpec(
         "credsweeper",
         missing="the committed captures are CredSweeper's native JSON "
@@ -301,6 +305,22 @@ def _prep_cfn_lint(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]
             # maps severities and sorts rules in place. An uninitialized
             # instance stands in for the scanner, so the call keeps its types.
             CfnLintScanner.__new__(CfnLintScanner).normalize_report(report)
+            yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_conftest(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    from automated_security_helper.plugin_modules.ash_conftest_plugins.conftest_scanner import (
+        ConftestScanner,
+    )
+
+    for pattern in spec.sarif:
+        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+            # _post_process_sarif reads no instance state: it drops the non-finding
+            # results and rates the rest in place. An uninitialized instance stands
+            # in for the scanner, so the call keeps its types.
+            report = ConftestScanner.__new__(ConftestScanner)._post_process_sarif(
+                _load_sarif(path), [], path.parent
+            )
             yield report, [r for run in report.runs or [] for r in run.results or []]
 
 
@@ -662,6 +682,7 @@ _PREPS: Mapping[
     "cfn-lint": _prep_cfn_lint,
     "cfn-nag": _prep_cfn_nag,
     "checkov": _prep_checkov,
+    "conftest": _prep_conftest,
     "detect-secrets": _prep_detect_secrets,
     "ferret-scan": _prep_ferret_scan,
     "gitleaks": _prep_gitleaks,
@@ -763,7 +784,7 @@ def test_the_gate_carries_no_waiver_but_the_register() -> None:
 def test_the_registry_and_the_corpus_table_agree() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
     names = {_name(cls) for cls in SCANNER_CLASSES}
-    assert len(SCANNER_CLASSES) == 30, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == 32, sorted(c.__name__ for c in SCANNER_CLASSES)
     assert names == set(CORPORA) == set(SCANNER_TOOL_TYPES), (
         f"registry {sorted(names)} / corpus table {sorted(CORPORA)}: a scanner "
         "needs a CORPORA row (a corpus, or None with the fixture to author)"

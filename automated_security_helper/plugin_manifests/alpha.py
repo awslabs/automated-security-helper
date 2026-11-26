@@ -146,6 +146,14 @@ MANIFESTS = (
         owned=(f"{_DOCS}/betterleaks-plugin.md", f"{_FIXTURES}/betterleaks"),
     ),
     _alpha(
+        "conftest",
+        "ash_conftest_plugins",
+        "conftest_scanner",
+        "ConftestScanner",
+        "ConftestScannerConfigOptions",
+        owned=(f"{_DOCS}/conftest-plugin.md", f"{_FIXTURES}/conftest"),
+    ),
+    _alpha(
         "credsweeper",
         "ash_credsweeper_plugins",
         "credsweeper_scanner",

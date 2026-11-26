@@ -234,6 +234,12 @@ _CHECKOV = Provisioning(
     )
 )
 
+# The alpha policy-test scanner. Its release names every asset with the version
+# (conftest_0.62.0_Linux_x86_64.tar.gz), so the filename check covers a bump; the
+# archive digests are the ones the release's own checksums.txt publishes,
+# re-verified by download.
+_CONFTEST = Provisioning(tool_pins=(ToolPin("conftest", "v0.62.0"),))
+
 _GITLEAKS = Provisioning(tool_pins=(ToolPin("gitleaks", "v8.30.1"),))
 
 # The alpha Go SAST scanner. Its register already declares the pinned shape
@@ -509,6 +515,7 @@ PROVISIONING: Mapping[str, Provisioning] = MappingProxyType(
         "betterleaks": _BETTERLEAKS,
         "cfn-guard": _CFN_GUARD,
         "checkov": _CHECKOV,
+        "conftest": _CONFTEST,
         "gitleaks": _GITLEAKS,
         "gosec": _GOSEC,
         "grype": _GRYPE,

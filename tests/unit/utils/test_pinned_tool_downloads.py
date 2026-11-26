@@ -1177,6 +1177,7 @@ class TestAssetResolution:
             "actionlint",
             "betterleaks",
             "cfn-guard",
+            "conftest",
             "crane",
             "gitleaks",
             "grype",

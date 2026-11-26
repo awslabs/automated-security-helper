@@ -443,6 +443,21 @@ def _prep_checkov(
     yield report, [r for run in report.runs or [] for r in run.results or []]
 
 
+def _prep_conftest(
+    transcript: ToolTranscript, base: Path, file: Path
+) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The SARIF through the scanner's own post-processing: the results that are not
+    findings (``main/success`` at level ``none``) dropped and the rest rated."""
+    cls = resolve_ref(
+        "automated_security_helper.plugin_modules.ash_conftest_plugins."
+        "conftest_scanner:ConftestScanner"
+    )
+    # _post_process_sarif reads no instance state, so an uninitialized instance
+    # stands in for the scanner.
+    report = cls.__new__(cls)._post_process_sarif(_load_sarif(file), [], file.parent)
+    yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
 def _prep_detect_secrets(
     transcript: ToolTranscript, base: Path, file: Path
 ) -> Iterator[tuple[SarifReport, list[Result]]]:
@@ -663,6 +678,7 @@ PREPS: Mapping[str, Prep] = {
     "cfn-lint": _prep_cfn_lint,
     "cfn-nag": _prep_cfn_nag,
     "checkov": _prep_checkov,
+    "conftest": _prep_conftest,
     "detect-secrets": _prep_detect_secrets,
     "ferret-scan": _prep_ferret_scan,
     "gitleaks": _prep_gitleaks,

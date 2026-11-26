@@ -218,6 +218,18 @@ _CFN_GUARD_ASSETS: dict[PlatformArch, str] = {
     ("windows", "arm64"): "cfn-guard-v3-aarch64-windows-latest.tar.gz",
 }
 
+# conftest (the alpha policy-test scanner's tool). The v0.62.0 release also publishes
+# linux ppc64le and s390x archives and .deb/.rpm packages; ASH's platform vocabulary
+# has no such arch and ASH installs no system package, so they are not listed.
+_CONFTEST_ASSETS: dict[PlatformArch, str] = {
+    ("linux", "amd64"): "conftest_0.62.0_Linux_x86_64.tar.gz",
+    ("linux", "arm64"): "conftest_0.62.0_Linux_arm64.tar.gz",
+    ("darwin", "amd64"): "conftest_0.62.0_Darwin_x86_64.tar.gz",
+    ("darwin", "arm64"): "conftest_0.62.0_Darwin_arm64.tar.gz",
+    ("windows", "amd64"): "conftest_0.62.0_Windows_x86_64.zip",
+    ("windows", "arm64"): "conftest_0.62.0_Windows_arm64.zip",
+}
+
 _GITLEAKS_ASSETS: dict[PlatformArch, str] = {
     ("linux", "amd64"): "gitleaks_8.30.1_linux_x64.tar.gz",
     ("linux", "arm64"): "gitleaks_8.30.1_linux_arm64.tar.gz",
@@ -385,6 +397,15 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # reports "kingfisher 2.19.1". The first real install re-checks every value: a wrong
 # entry fails that install rather than sitting here unnoticed.
 #
+# conftest's six archive digests are transcribed from the release's own checksums.txt
+# (https://github.com/open-policy-agent/conftest/releases/download/v0.62.0/checksums.txt)
+# and were re-verified on 2026-11-26 by downloading every asset and hashing it (all six
+# agreed, and each equals the digest GitHub reports for the asset). Its executable
+# digests were taken from those checked archives the same day; GNU tar and unzip piped
+# to sha256sum, and Python's tarfile/zipfile with the installer's exactly-one-basename
+# rule, agreed on every entry. The extracted linux/amd64 binary was run; it reports
+# "Conftest: 0.62.0".
+#
 # Every line carries `# pragma: allowlist secret`, which is detect-secrets' own
 # inline marker. It is needed and it is honest: a 64-character hex string is exactly
 # what a high-entropy-string detector is built to find, and ASH scanning itself
@@ -459,6 +480,13 @@ _DIGESTS: dict[str, str] = {
     "cfn-guard-v3-aarch64-windows-latest.tar.gz": "1c76d8ddc0de2beb7d37a25babe3cddf7e72b3930a9df6908c119c5b9b3aa35c",  # pragma: allowlist secret
     # aws-guard-rules-registry 1.0.2 (a rules bundle, not a binary; see RULES_BUNDLES)
     "ruleset-build-v1.0.2.zip": "dc21aaad601c673843c299191d864cd9b9db32475b1937d930d6069ddde73296",  # pragma: allowlist secret
+    # conftest v0.62.0 (from the release's checksums.txt, re-verified)
+    "conftest_0.62.0_Linux_x86_64.tar.gz": "284231908e4cf66d156e5577c3eee2f67d9f2edf2521fa2309e0df1969f871e5",  # pragma: allowlist secret
+    "conftest_0.62.0_Linux_arm64.tar.gz": "2129f630711b8b0fd8d0cee9092c8015c577c3035a2e393d3b340bb1e4e9b59f",  # pragma: allowlist secret
+    "conftest_0.62.0_Darwin_x86_64.tar.gz": "2f72025d990a75a5a117644723560a8c2b995489b46886ebddc7412955f1d3af",  # pragma: allowlist secret
+    "conftest_0.62.0_Darwin_arm64.tar.gz": "559b11b5d7f3879b19e4b87801a72e014c28556c1c799864073524022e50ea2d",  # pragma: allowlist secret
+    "conftest_0.62.0_Windows_x86_64.zip": "2e0e997d46a7607eacd94527c768af719d206066ac0c27edf31cc0337c806c94",  # pragma: allowlist secret
+    "conftest_0.62.0_Windows_arm64.zip": "be4c383393151f903ec46069225b9bcb9701013730f0ca5dd7b819b7c975dc80",  # pragma: allowlist secret
     # crane v0.22.1 (go-containerregistry)
     "go-containerregistry_Linux_x86_64.tar.gz": "0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0",  # pragma: allowlist secret
     "go-containerregistry_Linux_arm64.tar.gz": "898c0cff975f898a33e8c4580bdafb0e7c02c7faa33374e946762f97c4ab7110",  # pragma: allowlist secret
@@ -545,6 +573,13 @@ _EXECUTABLE_DIGESTS: dict[str, str] = {
     "cfn-guard-v3-aarch64-macos-latest.tar.gz": "d6d254eb422edd329658e9da6ec51751efb8038774346a6c28294b73bd203d2b",  # pragma: allowlist secret
     "cfn-guard-v3-x86_64-windows-latest.tar.gz": "1454eb1f5b0d7946fdc732c1776cc1219b24d66d3c7847595415d2debb14f90c",  # pragma: allowlist secret
     "cfn-guard-v3-aarch64-windows-latest.tar.gz": "1385d021ecda3e29fc74ab4003a096c1f5e886d75ec63f888cea1c9c15fbb95a",  # pragma: allowlist secret
+    # conftest v0.62.0
+    "conftest_0.62.0_Linux_x86_64.tar.gz": "662883d33542df02efbf6505de08f307a3e9d15fb40d189a853b76e38d8d31f2",  # pragma: allowlist secret
+    "conftest_0.62.0_Linux_arm64.tar.gz": "5006e3f65db1521e1698a025d8e1af5c188269336cf4c33c812b39d43df4afd8",  # pragma: allowlist secret
+    "conftest_0.62.0_Darwin_x86_64.tar.gz": "e77b0d44b6119b30d84c006afaac507a455f9f73c4610612eaac41616ac0ee1d",  # pragma: allowlist secret
+    "conftest_0.62.0_Darwin_arm64.tar.gz": "9ed51d5baf5c845ab5ca015663630c838e49ff91161a2a688ff024355010f727",  # pragma: allowlist secret
+    "conftest_0.62.0_Windows_x86_64.zip": "2856aa849f652df66b482b3aa6823469c8ee2508951a6725b4113f0b6130c3ac",  # pragma: allowlist secret
+    "conftest_0.62.0_Windows_arm64.zip": "cf9498a2eff5ea237f843c67e056e4ff1f9a351800ce441d9d3013c2bf4574a7",  # pragma: allowlist secret
     # crane v0.22.1 (go-containerregistry)
     "go-containerregistry_Linux_x86_64.tar.gz": "8e75c326adb43b053cfd78b9b987663f8f4fe4557f4d3915905643f25c730992",  # pragma: allowlist secret
     "go-containerregistry_Linux_arm64.tar.gz": "1799f559c299f068951822a5efe6689ebab6974f2054d5562e60798fa9db6a55",  # pragma: allowlist secret
@@ -649,6 +684,7 @@ _RELEASE_BASE_URLS: dict[str, str] = {
     "actionlint": "https://github.com/rhysd/actionlint/releases/download",
     "betterleaks": "https://github.com/betterleaks/betterleaks/releases/download",
     "cfn-guard": "https://github.com/aws-cloudformation/cloudformation-guard/releases/download",
+    "conftest": "https://github.com/open-policy-agent/conftest/releases/download",
     "crane": "https://github.com/google/go-containerregistry/releases/download",
     "gitleaks": "https://github.com/gitleaks/gitleaks/releases/download",
     "gosec": "https://github.com/securego/gosec/releases/download",
@@ -665,6 +701,7 @@ _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
     "actionlint": _ACTIONLINT_ASSETS,
     "betterleaks": _BETTERLEAKS_ASSETS,
     "cfn-guard": _CFN_GUARD_ASSETS,
+    "conftest": _CONFTEST_ASSETS,
     "crane": _CRANE_ASSETS,
     "gitleaks": _GITLEAKS_ASSETS,
     "gosec": _GOSEC_ASSETS,
@@ -1113,6 +1150,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "cfn-guard commit": "db494a17fb6030b365d5a5144a397517c7746797",  # pragma: allowlist secret
     "cfn-guard/LICENSE": "28878a48de57252ed2c9119db71b2fc9766833a0c159d9f5df54cba4dea52dba",  # pragma: allowlist secret
     "cfn-guard/NOTICE": "ba249a48f79f76c72cffea8689eb7a5ce450a4a67ad6b1e44e8ff15a95b2b751",  # pragma: allowlist secret
+    "conftest commit": "ebb167d2baab1b09ea133e00213aa0d8b026ad8c",  # pragma: allowlist secret
     "crane commit": "8a72a424fdecb4caa14f2d525e5d2503331442b5",  # pragma: allowlist secret
     "ggshield commit": "4cccd600fd3890a7aba07fd0a45e483f3099fe70",  # pragma: allowlist secret
     "gitleaks commit": "83d9cd684c87d95d656c1458ef04895a7f1cbd8e",  # pragma: allowlist secret
@@ -1314,6 +1352,19 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         commit=_THIRD_PARTY_HASHES["checkov commit"],
         files=(LicenseFile("LICENSE"),),
         distribution="checkov",
+    ),
+    # The alpha conftest scanner's tool. Each of the six pinned release archives
+    # holds the executable, a README and LICENSE (the Apache License 2.0 notice,
+    # 645 bytes), byte-identical across them and to the repository's LICENSE at the
+    # pinned commit, which carries no other license or NOTICE file. It is the file
+    # the scanner's register cites.
+    "conftest": ThirdPartyLicense(
+        tool="conftest",
+        version="v0.62.0",
+        license="Apache-2.0",
+        repository="https://github.com/open-policy-agent/conftest",
+        commit=_THIRD_PARTY_HASHES["conftest commit"],
+        files=(LicenseFile("LICENSE"),),
     ),
     "crane": ThirdPartyLicense(
         tool="crane",

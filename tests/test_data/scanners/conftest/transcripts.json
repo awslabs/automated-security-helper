@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": "conftest",
+      "also_for": [],
+      "argv": [
+        "conftest",
+        "test",
+        "--output=sarif",
+        "--no-fail",
+        "--no-color",
+        "--policy=policy",
+        "--all-namespaces",
+        "--",
+        "<files>"
+      ],
+      "env_allowlist": [],
+      "exit_code": 0,
+      "fixture_tree": null,
+      "id": "conftest-0.62.0-positive",
+      "live_input": false,
+      "note": "deploy/bad.yaml violates the deny and the warn rule of policy/base.rego and deploy/good.yaml neither; under --no-fail the exit status is 0 while the report's own invocation says exitCode 1",
+      "observable": true,
+      "pin_stamp": {
+        "tool": "conftest",
+        "version": "v0.62.0"
+      },
+      "provenance": "captured",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/positive.sarif",
+          "sha256": "6b689c2513099a73bba6148dd7d0a44b9ea00a1d15a89245f6cc924e887c028f"
+        }
+      ],
+      "retention": "current",
+      "scanner": "conftest",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "conftest",
+        "version": "0.62.0"
+      }
+    },
+    {
+      "adapter_prep": "conftest",
+      "also_for": [],
+      "argv": [
+        "conftest",
+        "test",
+        "--output=sarif",
+        "--no-fail",
+        "--no-color",
+        "--policy=policy",
+        "--all-namespaces",
+        "--",
+        "<files>"
+      ],
+      "env_allowlist": [],
+      "exit_code": 0,
+      "fixture_tree": null,
+      "id": "conftest-0.62.0-negative",
+      "live_input": false,
+      "note": "deploy/good.yaml alone, which violates no rule",
+      "observable": true,
+      "pin_stamp": {
+        "tool": "conftest",
+        "version": "v0.62.0"
+      },
+      "provenance": "captured",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/negative.sarif",
+          "sha256": "01cc9da56dfa3e65a74a4b97eec077e930f3126e65da3bc8c0b9ace73a316660"
+        }
+      ],
+      "retention": "current",
+      "scanner": "conftest",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "conftest",
+        "version": "0.62.0"
+      }
+    }
+  ],
+  "unrecorded": []
+}

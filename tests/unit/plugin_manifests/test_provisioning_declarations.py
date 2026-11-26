@@ -163,6 +163,7 @@ def test_the_tool_pinned_by_every_binary_runtime_is_declared() -> None:
         "actionlint",
         "betterleaks",
         "cfn-guard",
+        "conftest",
         "gitleaks",
         "grype",
         "hadolint",
