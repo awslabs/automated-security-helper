@@ -322,6 +322,11 @@ def _parse_roots(raw: Optional[str]) -> Tuple[Path, ...]:
     (an ``OSError`` for what the file system refuses). Raised from here it would
     escape every gate that reads a grant, the refusals included, over one bad
     entry. Leaving it out narrows the grant, which is the safe side.
+
+    An empty result therefore does not mean "no grant was set". A caller that must
+    tell the two apart asks :func:`_grant_is_configured` about the same raw value:
+    a grant that is set and resolves to nothing admits nothing, which is not the
+    unconfigured install the permissive fallback exists for.
     """
 
     if not raw:
@@ -343,10 +348,32 @@ def _parse_roots(raw: Optional[str]) -> Tuple[Path, ...]:
     return tuple(roots)
 
 
+def _grant_is_configured(raw: Optional[str]) -> bool:
+    """Whether ``raw`` names at least one entry, resolvable or not.
+
+    Blank values and values made only of separators and whitespace name nothing
+    and read as unset, as :func:`_parse_roots` already treats their entries.
+    """
+
+    return bool(raw) and any(e.strip() for e in raw.split(os.pathsep))
+
+
 def operator_scan_roots() -> Tuple[Path, ...]:
-    """The directories the operator granted for scanning, possibly none."""
+    """The directories the operator granted for scanning, possibly none.
+
+    Empty when no grant is set and also when one is set and nothing in it
+    resolved; :func:`scan_grant_is_unresolved` tells the second from the first.
+    """
 
     return _parse_roots(os.environ.get(ASH_MCP_ALLOWED_ROOTS_ENV))
+
+
+def scan_grant_is_unresolved() -> bool:
+    """True when ``ASH_MCP_ALLOWED_ROOTS`` is set but none of it resolved."""
+
+    return not operator_scan_roots() and _grant_is_configured(
+        os.environ.get(ASH_MCP_ALLOWED_ROOTS_ENV)
+    )
 
 
 def operator_config_roots() -> Tuple[Path, ...]:
@@ -679,6 +706,10 @@ class SessionSandbox:
         fall_back_to_denylist: True when no grant applies and the transport is
             local, selecting the legacy "everything except a few system
             directories" net rather than deny.
+        grant_unresolved: True when the operator set ``ASH_MCP_ALLOWED_ROOTS`` and
+            no entry in it could be resolved. Such a sandbox admits nothing from
+            the grant and never takes the permissive fallback: a narrowing that
+            failed must not read as no narrowing.
         confine_config: True when a caller-named config path must fall inside
             ``config_roots``. False on a local transport, where the caller
             launched the server and can already read any file the server can, so
@@ -693,6 +724,7 @@ class SessionSandbox:
     config_roots: Tuple[Path, ...]
     fall_back_to_denylist: bool
     confine_config: bool
+    grant_unresolved: bool = False
 
     @property
     def source_dir(self) -> Path:
@@ -813,7 +845,19 @@ def session_sandbox(session_id: Optional[str] = None) -> SessionSandbox:
     # -- refusing every unconfigured local install is the more damaging failure,
     # and on stdio the caller already holds the server's own filesystem
     # privileges.
-    fall_back = not granted_scan and not remote
+    # A grant that is set but resolved to nothing is not "no grant": the
+    # operator asked to narrow the server, so it denies rather than widens.
+    grant_unresolved = not granted_scan and _grant_is_configured(
+        os.environ.get(ASH_MCP_ALLOWED_ROOTS_ENV)
+    )
+    if grant_unresolved:
+        _logger.warning(
+            "MCP sandbox: %s is set but none of its entries could be resolved, "
+            "so no directory is granted and scans outside the session sandbox "
+            "are refused",
+            ASH_MCP_ALLOWED_ROOTS_ENV,
+        )
+    fall_back = not granted_scan and not remote and not grant_unresolved
 
     config_roots: List[Path] = list(granted_config)
     # A grant that permits scanning a tree has to permit reading the config that
@@ -829,6 +873,7 @@ def session_sandbox(session_id: Optional[str] = None) -> SessionSandbox:
         config_roots=tuple(config_roots),
         fall_back_to_denylist=fall_back,
         confine_config=remote,
+        grant_unresolved=grant_unresolved,
     )
 
 
@@ -865,6 +910,7 @@ def _sandbox_for_gate(session_id: Optional[str]) -> SessionSandbox:
             config_roots=tuple(operator_config_roots()) + tuple(granted_scan),
             fall_back_to_denylist=False,
             confine_config=True,
+            grant_unresolved=scan_grant_is_unresolved(),
         )
 
 
@@ -1170,6 +1216,11 @@ def _scan_target_refusal(
         f"scan, or deliver the tree with set_source_git or "
         f"set_source_zip_finalize so it lands in this session's sandbox."
     )
+    if sandbox.grant_unresolved:
+        remedy = (
+            f"{ASH_MCP_ALLOWED_ROOTS_ENV} is set but none of its entries could be "
+            f"resolved, so it grants nothing. {remedy}"
+        )
     if _is_filesystem_root(resolved) and not sandbox.permits_scan(resolved):
         # Reached most often by omitting the directory entirely: the tool falls
         # back to the process working directory, and a server launched by an
@@ -1818,6 +1869,7 @@ __all__ = [
     "unknown_transport_override",
     "operator_config_roots",
     "operator_scan_roots",
+    "scan_grant_is_unresolved",
     "session_sandbox",
     "set_server_transport",
     "shared_workspace_root",
