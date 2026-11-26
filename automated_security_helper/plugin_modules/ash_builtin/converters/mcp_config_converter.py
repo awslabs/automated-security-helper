@@ -100,13 +100,17 @@ class McpConfigConverter(ConverterPluginBase[McpConfigConverterConfig]):
     def _skipped(self, path: str) -> bool:
         """Whether ``path`` is under an ignore path that keeps it out of conversion."""
         ignore_paths = ignore_paths_that_skip_scanning(
-            active_ignore_paths(self.context.config.global_settings.ignore_paths),
-            ignore_suppressions=self.context.ignore_suppressions,
+            active_ignore_paths(
+                self._require_ash_config().global_settings.ignore_paths
+            ),
+            ignore_suppressions=self._require_context().ignore_suppressions,
         )
         if not ignore_paths:
             return False
         try:
-            rel_path = Path(path).relative_to(self.context.source_dir).as_posix()
+            rel_path = (
+                Path(path).relative_to(self._require_context().source_dir).as_posix()
+            )
         except ValueError:
             return False
         for ignore_path in ignore_paths:
@@ -154,22 +158,23 @@ class McpConfigConverter(ConverterPluginBase[McpConfigConverterConfig]):
         Returns:
             List[Path]: The scripts written, sorted by path.
         """
+        context = self._require_context()
         ASH_LOGGER.debug(
-            f"Searching for MCP config files in the ASH scan set: {self.context.source_dir}"
+            f"Searching for MCP config files in the ASH scan set: {context.source_dir}"
         )
-        workspace_output_dir = getattr(self.context, "workspace_output_dir", None)
+        workspace_output_dir = getattr(context, "workspace_output_dir", None)
         candidates = scan_set(
-            source=self.context.source_dir,
-            output=self.context.output_dir,
-            honor_ignore_files=honors_ignore_files(self.context.config),
-            run_id=getattr(self.context, "run_id", None),
+            source=context.source_dir,
+            output=context.output_dir,
+            honor_ignore_files=honors_ignore_files(context.config),
+            run_id=getattr(context, "run_id", None),
             workspace_output_dir=(
                 None if workspace_output_dir is None else str(workspace_output_dir)
             ),
         )
         targets: Dict[str, str] = {}
         for path in candidates:
-            display = relative_display(path, self.context.source_dir)
+            display = relative_display(path, context.source_dir)
             if detect_format(display) is None:
                 continue
             try:
@@ -181,7 +186,7 @@ class McpConfigConverter(ConverterPluginBase[McpConfigConverterConfig]):
 
         results: List[Path] = []
         if not targets:
-            ASH_LOGGER.info(f"No MCP config files found in {self.context.source_dir}")
+            ASH_LOGGER.info(f"No MCP config files found in {context.source_dir}")
             return results
 
         sources: Dict[Path, str] = {}
@@ -196,7 +201,9 @@ class McpConfigConverter(ConverterPluginBase[McpConfigConverterConfig]):
             with_command = [entry for entry in entries if entry.command]
             if not with_command:
                 continue
-            directory = self.results_dir / source_slug(display, taken_directories)
+            directory = self._require_results_dir() / source_slug(
+                display, taken_directories
+            )
             taken_names: Set[str] = set()
             for entry in with_command:
                 emitted = emit_script(entry)
@@ -225,5 +232,7 @@ class McpConfigConverter(ConverterPluginBase[McpConfigConverterConfig]):
                 sources[sidecar_path] = display
 
         if sources:
-            record_converted_sources(self.results_dir, self.context.work_dir, sources)
+            record_converted_sources(
+                self._require_results_dir(), self._require_work_dir(), sources
+            )
         return sorted(results)

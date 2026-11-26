@@ -2285,8 +2285,10 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         names is hidden), and the mapping is a recorded gap.
         """
         return ignore_paths_that_skip_scanning(
-            active_ignore_paths(self.context.config.global_settings.ignore_paths),
-            ignore_suppressions=self.context.ignore_suppressions,
+            active_ignore_paths(
+                self._require_ash_config().global_settings.ignore_paths
+            ),
+            ignore_suppressions=self._require_context().ignore_suppressions,
         )
 
     def _skipped(self, path: str) -> bool:
@@ -2298,7 +2300,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         if not ignore_paths:
             return False
         try:
-            rel_path = Path(path).relative_to(self.context.source_dir).as_posix()
+            rel_path = (
+                Path(path).relative_to(self._require_context().source_dir).as_posix()
+            )
         except ValueError:
             # Not lexically under the tree (reached through a link, or spelled
             # another way): an ignore path is written relative to the tree and
@@ -2805,21 +2809,22 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         """
         extracted_whole: List[str] = []
         setattr(self.context, _EXTRACTED_WHOLE, extracted_whole)
+        context = self._require_context()
         # TODO : Convert utils/identifyipynb.sh script to python using nbconvert as lib
         ASH_LOGGER.debug(
-            f"Searching for archive files in search_path within the ASH scan set: {self.context.source_dir}"
+            f"Searching for archive files in search_path within the ASH scan set: {context.source_dir}"
         )
 
         # Find all archive files to scan from the scan set. The workspace's output
         # directory goes with the scan's own: when this run's recorded list cannot
         # be read back, the walk here leaves it out as the orchestrator's did,
         # instead of extracting archives from another project's output.
-        workspace_output_dir = getattr(self.context, "workspace_output_dir", None)
+        workspace_output_dir = getattr(context, "workspace_output_dir", None)
         archive_files = scan_set(
-            source=self.context.source_dir,
-            output=self.context.output_dir,
-            honor_ignore_files=honors_ignore_files(self.context.config),
-            run_id=getattr(self.context, "run_id", None),
+            source=context.source_dir,
+            output=context.output_dir,
+            honor_ignore_files=honors_ignore_files(context.config),
+            run_id=getattr(context, "run_id", None),
             workspace_output_dir=(
                 None if workspace_output_dir is None else str(workspace_output_dir)
             ),
@@ -2848,7 +2853,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 )
             self.record_refused_input(
                 TreeInputRefused(
-                    relative_display(path, self.context.source_dir),
+                    relative_display(path, context.source_dir),
                     _NOT_EXTRACTED,
                 )
             )
@@ -2859,11 +2864,11 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         # Add warning if no archive files found
         if not archive_files:
             ASH_LOGGER.info(
-                f"No archive files (.zip, .tar, .gz) found in {self.context.source_dir}"
+                f"No archive files (.zip, .tar, .gz) found in {context.source_dir}"
             )
             return results
 
-        self.results_dir.mkdir(parents=True, exist_ok=True)
+        self._require_results_dir().mkdir(parents=True, exist_ok=True)
         # The members are filtered by the same ignore paths as the archives
         # themselves (_skipped): a client-supplied entry and, under
         # --ignore-suppressions, every entry leaves a member in, so its findings
@@ -2896,13 +2901,14 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             # be recorded whole for whole-archive consumers.
             failed_before = len(self.failed_inputs)
             unscannable: List[str] = []
-            archive_display = relative_display(archive_file, self.context.source_dir)
+            archive_display = relative_display(archive_file, context.source_dir)
             try:
                 if self._skipped(archive_file):
                     continue
 
                 target_path = _unused_target(
-                    Path(self.results_dir), _target_name(archive_file, archive_display)
+                    self._require_results_dir(),
+                    _target_name(archive_file, archive_display),
                 )
                 ASH_LOGGER.verbose(
                     shown_on_one_line(
@@ -3242,5 +3248,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 )
 
         if sources:
-            record_converted_sources(self.results_dir, self.context.work_dir, sources)
+            record_converted_sources(
+                self._require_results_dir(), self._require_work_dir(), sources
+            )
         return results
