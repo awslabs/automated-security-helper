@@ -324,6 +324,11 @@ def test_a_scanner_without_the_declaration_gets_no_list(only_staged_checkouts):
         ["GIT_CONFIG_VALUE_0=*"],
         ["GIT_CONFIG_KEY_0"],
         ["GIT_CONFIG_COUNT"],
+        ["GIT_CONFIG_PARAMETERS='safe.directory'='*'"],
+        ["GIT_CONFIG_GLOBAL=/elsewhere/gitconfig"],
+        ["GIT_CONFIG_SYSTEM"],
+        ["GIT_CONFIG_NOSYSTEM=1"],
+        ["GIT_CONFIG=/elsewhere/gitconfig"],
     ],
 )
 def test_a_listed_git_config_entry_is_refused_naming_it(only_staged_checkouts, entries):
@@ -352,3 +357,27 @@ def test_a_listed_git_config_entry_is_still_allowed_for_other_scanners(
     )
 
     assert "GIT_CONFIG_COUNT" in policy.environment[0]
+
+
+def test_an_ambient_git_config_variable_never_reaches_the_sandboxed_child(
+    only_staged_checkouts,
+):
+    """The child's ``GIT_CONFIG_*`` block is the one ASH writes; git's other
+    config channels in the caller's environment are dropped, so no inherited
+    ``safe.directory`` or config file can reach the child beside it."""
+    repo, sub = _checkout(only_staged_checkouts)
+    policy = _policy(only_staged_checkouts, sub)
+
+    child = policy.filter_env(
+        {
+            "PATH": "/usr/bin",
+            "GIT_CONFIG_PARAMETERS": "'safe.directory'='*'",
+            "GIT_CONFIG_GLOBAL": "/elsewhere/gitconfig",
+            "GIT_CONFIG": "/elsewhere/gitconfig",
+        }
+    )
+
+    assert "GIT_CONFIG_PARAMETERS" not in child
+    assert "GIT_CONFIG_GLOBAL" not in child
+    assert "GIT_CONFIG" not in child
+    assert _named(child) == [os.path.realpath(sub), os.path.realpath(repo)]

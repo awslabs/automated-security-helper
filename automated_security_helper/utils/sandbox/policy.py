@@ -210,7 +210,10 @@ CREDENTIAL_MARKERS = (
 #: credential whatever the variable is called.
 _URL_USERINFO = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://[^/@\s]*@")
 
-_GIT_CONFIG_NAME = re.compile(r"^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$")
+#: Every ``GIT_CONFIG``-prefixed variable, and bare ``GIT_CONFIG``: the block
+#: (COUNT/KEY_n/VALUE_n), ``GIT_CONFIG_PARAMETERS`` (git's ``-c`` channel, the
+#: highest-precedence config), and ``GIT_CONFIG_GLOBAL``/``_SYSTEM``/``_NOSYSTEM``.
+_GIT_CONFIG_NAME = re.compile(r"^GIT_CONFIG(_|$)")
 
 
 def _usable_safe_directory(entry: object) -> bool:
