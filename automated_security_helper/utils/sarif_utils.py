@@ -1001,22 +1001,29 @@ def suppressions_in_effect(suppressions: Iterable[Any] | None) -> list:
     aggregation's actionable count, so a report row, a SIEM record and the exit
     code agree on whether a finding is hidden. A suppression given as a mapping,
     as a result read back from its JSON holds it, is read the same way.
+
+    SARIF itself calls the field ``status``; the model reads it as ``state``
+    (``schemas.sarif_schema_model.Suppression``), and a mapping or object that
+    still carries the standard name is read here by either. With both given, one
+    that is not in effect decides, as the model keeps it.
     """
     in_effect = []
     for suppression in suppressions or []:
         # A state that cannot be read is no known inactive state, so the
         # suppression counts; a fault in one field never drops the suppression
         # (the OCSF reporter reads a suppression's other fields on their own).
-        try:
-            if isinstance(suppression, dict):
-                state = suppression.get("state")
-            else:
-                state = getattr(suppression, "state", None)
-        except Exception:  # noqa: BLE001 -- a stand-in's field raised; see above
-            state = None
-        if state is None or (
-            str(getattr(state, "value", state)) not in _INACTIVE_SUPPRESSION_STATES
-        ):
+        states = []
+        for field in ("state", "status"):
+            try:
+                if isinstance(suppression, dict):
+                    value = suppression.get(field)
+                else:
+                    value = getattr(suppression, field, None)
+            except Exception:  # noqa: BLE001 -- a stand-in's field raised; see above
+                value = None
+            if value is not None:
+                states.append(str(getattr(value, "value", value)))
+        if not any(state in _INACTIVE_SUPPRESSION_STATES for state in states):
             in_effect.append(suppression)
     return in_effect
 

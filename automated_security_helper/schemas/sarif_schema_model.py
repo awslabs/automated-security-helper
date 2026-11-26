@@ -52,6 +52,17 @@
 # the report can be written as JSON and read back. The generator emits
 # BaseModel; tests/unit/models/test_record_models_hold_names_as_text.py walks
 # every model in this module and fails on one that does not derive from it.
+#
+# THIRD DEVIATION: Suppression reads the field name the spec uses. SARIF 2.1.0
+# calls the field that says whether a suppression has taken effect `status`
+# (accepted, underReview, rejected) and has no `state`; this model was generated
+# with `state` and forbids any other key, so a tool that wrote a spec-conforming
+# suppression lost its whole report to an extra_forbidden error. A validator
+# reads `status` as `state` before the fields are checked. When both are given
+# and differ, the one that is not `accepted` is kept, so a suppression in doubt
+# shows its finding instead of hiding it. ASH still writes `state`, so every
+# reader of a validated report is unchanged.
+# tests/unit/schemas/test_suppression_reads_the_standard_status.py pins it.
 
 from __future__ import annotations
 
@@ -85,7 +96,7 @@ from pathlib import Path, PurePath, PurePosixPath
 from typing import Any, Dict, List, Literal, Optional, Sequence, Union
 from urllib.parse import unquote
 
-from pydantic import AnyUrl, ConfigDict, Field, RootModel
+from pydantic import AnyUrl, ConfigDict, Field, RootModel, model_validator
 
 
 class Version(str, Enum):
@@ -1671,6 +1682,25 @@ class Suppression(RecordModel):
         None,
         description="Key/value pairs that provide additional information about the suppression.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_the_standard_status(cls, data: Any) -> Any:
+        """Read SARIF's ``status`` as this model's ``state`` (see the module header).
+
+        The mapping the caller passed is not changed. Both keys given and
+        different: the one that is not ``accepted`` stays.
+        """
+        if not isinstance(data, dict) or "status" not in data:
+            return data
+        data = dict(data)
+        status = data.pop("status")
+        state = data.get("state")
+        if state is None:
+            data["state"] = status
+        elif state != status and str(getattr(state, "value", state)) == "accepted":
+            data["state"] = status
+        return data
 
 
 class Graph(RecordModel):
