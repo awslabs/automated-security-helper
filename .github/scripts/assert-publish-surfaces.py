@@ -606,6 +606,17 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/workflows/ash-unified-ci.yml",
         kind=KIND_UPLOAD,
         action=_UPLOAD,
+        publishes="name=docs-feature-coverage path=test-results/docs-feature-coverage",
+        reason=(
+            "The docs feature coverage report (JSON and markdown) and the baseline "
+            "this run would write: feature ids, docs page paths and counts. No "
+            "credentials, environment or file contents."
+        ),
+    ),
+    Entry(
+        file=".github/workflows/ash-unified-ci.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
         publishes="name=sandbox-escape-report-${{ matrix.os }} path=test-results/sandbox.junit.xml",
         reason="Failure evidence only: one JUnit XML report from the sandbox escape suite.",
     ),

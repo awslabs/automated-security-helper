@@ -1,0 +1,12 @@
+# Product features that no executed docs example reaches yet.
+#
+# This file may only shrink. scripts/docs_feature_coverage.py check fails on an
+# uncovered feature that is not listed here and on a listed line that names no feature,
+# and, in a pull request, on a line the base branch's file lacks and on a line for a
+# feature an executed example now reaches: delete that line then.
+#
+# Never add a feature. A new command, option, plugin or configuration key ships with an
+# executed docs example that reaches it. A feature that is renamed or removed leaves
+# nothing to allow, so its line is deleted with it.
+#
+# One feature id per line, `<kind>:<name>`, in sorted order.

@@ -49,7 +49,9 @@ POSIX.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import json
 import os
 import shutil
 import signal
@@ -430,6 +432,108 @@ class Session:
     project: Path | None = None
 
 
+#: Set in the pytest process to switch the docs feature coverage collection on: the
+#: directory the coverage data and the runner's per-page records are written to.
+COVERAGE_DIR_VARIABLE = "ASH_DOCS_COVERAGE_DIR"
+#: Given to each block's own processes: the coverage context its lines are recorded
+#: under. Not an ``ASH_`` name, which ASH's own namespace and the scanner sandbox's
+#: environment allowlist use.
+COVERAGE_CONTEXT_VARIABLE = "DOCS_COVERAGE_CONTEXT"
+#: The version of the per-page record ``DocsCoverage.write_record`` writes.
+RECORD_SCHEMA = 1
+
+#: What every measured process reads (coverage.py starts in each Python process of a
+#: session through its ``a1_coverage.pth`` when COVERAGE_PROCESS_START names a file).
+#: ``source_pkgs`` names the package, where ``source`` would be read as a directory
+#: relative to the process's own working directory, which is the page's fixture copy.
+#: The data file is an absolute path, so a process that lost a variable cannot write
+#: to ``/data``. ``patch`` re-arms coverage in forked children and saves it at
+#: ``os._exit``, which ASH's daemon and sandbox use. ``core = sysmon`` is the cheapest
+#: line tracer; branch, concurrency and dynamic contexts would each make coverage fall
+#: back from it. The warnings are off because a measured process's stderr is the
+#: block's output, which an output sample is compared against.
+_COVERAGE_RC = """\
+[run]
+source_pkgs = automated_security_helper
+parallel = True
+data_file = {data_file}
+context = ${{{context}-unattributed}}
+core = sysmon
+patch = _exit, fork
+disable_warnings = no-data-collected, module-not-imported, module-not-measured,
+    no-sysmon, already-imported, couldnt-parse
+"""
+
+
+@dataclass(frozen=True)
+class DocsCoverage:
+    """Where a docs examples run collects coverage and its per-page records.
+
+    ``directory`` holds ``coverage.rc`` (written per run), ``data/`` (one coverage data
+    file per measured process, each line labelled with the context of the block that ran
+    it) and ``blocks/`` (one record per page of what the runner ran or saved).
+    scripts/docs_feature_coverage.py reads the last two.
+    """
+
+    directory: Path
+
+    @property
+    def rcfile(self) -> Path:
+        return self.directory / "coverage.rc"
+
+    @classmethod
+    def from_environment(cls, environ=None) -> DocsCoverage | None:
+        """The collection the environment asks for, or None when it asks for none.
+
+        A relative directory is refused: each session would resolve it in its own
+        working directory.
+        """
+        value = (os.environ if environ is None else environ).get(
+            COVERAGE_DIR_VARIABLE, ""
+        )
+        if not value.strip():
+            return None
+        directory = Path(value.strip())
+        if not directory.is_absolute():
+            raise ValueError(
+                f"{COVERAGE_DIR_VARIABLE} must be an absolute path, not {value!r}"
+            )
+        return cls(directory)
+
+    def session_environment(self) -> dict[str, str]:
+        """What a session needs to be measured: the rc file, which this writes."""
+        (self.directory / "data").mkdir(parents=True, exist_ok=True)
+        (self.directory / "blocks").mkdir(parents=True, exist_ok=True)
+        self.rcfile.write_text(
+            _COVERAGE_RC.format(
+                data_file=self.directory / "data" / ".coverage",
+                context=COVERAGE_CONTEXT_VARIABLE,
+            ),
+            encoding="utf-8",
+        )
+        return {"COVERAGE_PROCESS_START": str(self.rcfile)}
+
+    @staticmethod
+    def context(page_rel: str, line: int) -> str:
+        """The coverage context of the block whose fence is on ``line`` of a page."""
+        return f"{page_rel}::{line}"
+
+    def write_record(self, page_rel: str, blocks: list[dict]) -> Path:
+        """Write a page's record whole: to a temporary name beside it, then renamed, so
+        a reader never sees half of one. Named from the page, so parallel workers
+        running different pages never share a file."""
+        name = hashlib.sha256(page_rel.encode("utf-8")).hexdigest()[:16] + ".json"
+        target = self.directory / "blocks" / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        pending = target.with_name(f".{name}.{os.getpid()}.tmp")
+        pending.write_text(
+            json.dumps({"schema": RECORD_SCHEMA, "page": page_rel, "blocks": blocks}),
+            encoding="utf-8",
+        )
+        os.replace(pending, target)
+        return target
+
+
 _SHELL_PRELUDE = """\
 __ash_docs_state=$1
 __ash_docs_cwd=$2
@@ -455,9 +559,15 @@ class PageRunner:
         scratch: Path,
         default_timeout: float | None = None,
         docs_root: Path | None = None,
+        coverage: DocsCoverage | None = None,
     ):
         self.checks = load_docs_checks()
         self.page = page
+        #: When set, every session is measured by coverage.py, each block under its
+        #: own context, and ``run`` writes the page's record. Only the docs examples
+        #: test sets it: the twins and the runner's own failure proofs do not, so
+        #: their deliberately failing or synthetic blocks never reach the data.
+        self.coverage = coverage
         # Fixtures are docs data, so they come from the docs tree; the commands run
         # with the ASH in this interpreter's environment, whichever tree that is.
         self.docs_root = docs_root or REPO_ROOT
@@ -489,6 +599,8 @@ class PageRunner:
                 shutil.copy2(path, target)
         port, port_number = _refusing_port()
         env = self._base_env(root, port_number)
+        if self.coverage is not None:
+            env.update(self.coverage.session_environment())
         for args in (
             ["init", "-q", "-b", "main"],
             ["add", "-A"],
@@ -595,6 +707,11 @@ class PageRunner:
         timeout = float(self._marker_value(block, "timeout", self.default_timeout))
         expected = str(self._marker_value(block, "expect-exit", "0"))
         block_env = marker_env(block)
+        if self.coverage is not None:
+            # Like a marker's env=, for this block only (_carry_state drops it).
+            block_env[COVERAGE_CONTEXT_VARIABLE] = self.coverage.context(
+                self.page.rel, block.fence_line
+            )
         env = {**session.env, **block_env}
         started = time.monotonic()
 
@@ -717,18 +834,54 @@ class PageRunner:
     def run(self) -> list[BlockResult]:
         samples = compared_samples(self.page)
         results: dict[int, BlockResult] = {}
+        sample_ok: dict[int, bool] = {}
         try:
             ordered = []
             for block in session_blocks(self.page):
                 shown = samples.get(id(block))
                 if shown is not None:
-                    ordered.append(self.compare_sample(block, results[id(shown)]))
+                    compared = self.compare_sample(block, results[id(shown)])
+                    sample_ok[id(shown)] = compared.ok
+                    ordered.append(compared)
                     continue
                 results[id(block)] = self.run_block(block)
                 ordered.append(results[id(block)])
+            if self.coverage is not None:
+                self._write_record(results, sample_ok)
             return ordered
         finally:
             self.close()
+
+    def _write_record(
+        self, results: dict[int, BlockResult], sample_ok: dict[int, bool]
+    ) -> None:
+        """Record every block the page ran or saved, for the docs feature coverage gate.
+
+        A block's ``ok`` is its own verdict together with its output sample's: an
+        example whose sample no longer matches claims something it does not show.
+        ``expected`` is the exit the block's marker names, which the gate reads to
+        tell an example of ASH working from one of ASH refusing something. A run that
+        raised never gets here, so that page leaves no record and gives no evidence.
+        """
+        assert self.coverage is not None
+        sessions = {id(block): number for number, _, block in page_sessions(self.page)}
+        blocks = []
+        for block in session_blocks(self.page):
+            result = results.get(id(block))
+            if result is None:  # an output sample: compared, not run
+                continue
+            blocks.append(
+                {
+                    "line": block.fence_line,
+                    "context": self.coverage.context(self.page.rel, block.fence_line),
+                    "session": sessions[id(block)],
+                    "runs": self.checks.runner_runs(block),
+                    "save_as": block.save_as or None,
+                    "expected": result.expected,
+                    "ok": bool(result.ok and sample_ok.get(id(block), True)),
+                }
+            )
+        self.coverage.write_record(self.page.rel, blocks)
 
 
 def failure_report(results: list[BlockResult]) -> str:

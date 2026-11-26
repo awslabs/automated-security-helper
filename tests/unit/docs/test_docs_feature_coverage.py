@@ -1329,9 +1329,10 @@ def test_plugins_that_share_one_work_method_say_so(synthetic_package):
     cov = _cov()
     checks = _checks()
     package = synthetic_package({"scanners": SYNTHETIC_SCANNERS})
-    scanners = sys.modules[f"{package.__name__}.scanners"]
 
+    # plugin_features imports the package's modules; the fixture runs only its __init__.
     features = {feature.id: feature for feature in cov.plugin_features(package)}
+    scanners = sys.modules[f"{package.__name__}.scanners"]
 
     first = f"scanner:{checks._declared_plugin_name(scanners.FirstShared)}"
     second = f"scanner:{checks._declared_plugin_name(scanners.SecondShared)}"
@@ -1959,6 +1960,46 @@ def test_only_a_block_expected_to_succeed_or_to_report_findings_is_evidence(
         f'{FENCE}python\nprint("an example")\n{FENCE}\n',
     )
     run.record("page.md", _block("page.md", line, expected=expected))
+    run.hit(f"page.md::{line}", PLANTED_PATH, {11})
+    # A block expected to succeed passes too, so the measurement itself is sound.
+    run.page("other.md", ONE_BLOCK)
+    run.record("other.md", _block("other.md", 3))
+    run.hit("other.md::3", OTHER_PATH, {5})
+    planted = _planted()
+
+    assert (planted.id in _covered(run, [planted])) is counts
+
+
+@pytest.mark.parametrize(
+    ("command_line", "counts"),
+    [
+        pytest.param(
+            "ash dependencies install --tool not-a-tool",
+            False,
+            id="a-refused-tool-selection-of-dependencies-install",
+        ),
+        pytest.param(
+            "ash scan --offline",
+            True,
+            id="a-scan-whose-exit-is-the-findings-code",
+        ),
+    ],
+)
+def test_a_block_that_shows_dependencies_install_refusing_a_selection_is_no_evidence(
+    tmp_path, command_line, counts
+):
+    """The bad-selection exit of ``ash dependencies install --tool <unknown>`` is the
+    number of the scan's actionable-findings code, which counts as evidence; but that
+    command never scans, so such a block shows a refusal. The same code on a scan is
+    findings."""
+    selection = str(_checks().bad_selection_exit())
+    run = Run(tmp_path)
+    (line,) = run.page(
+        "page.md",
+        f"<!-- doctest: run expect-exit={selection} -->\n"
+        f"{FENCE}bash\n{command_line}\n{FENCE}\n",
+    )
+    run.record("page.md", _block("page.md", line, expected=selection))
     run.hit(f"page.md::{line}", PLANTED_PATH, {11})
     # A block expected to succeed passes too, so the measurement itself is sound.
     run.page("other.md", ONE_BLOCK)

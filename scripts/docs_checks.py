@@ -2213,6 +2213,122 @@ def _match_option(
     )
 
 
+@dataclass(frozen=True)
+class OptionUse:
+    """One option a command line gives, and the command that receives it."""
+
+    #: The path of the command that takes the option, ``("ash", "scan")``.
+    command: tuple[str, ...]
+    #: That command's own spellings of the option (``CliOption.names``).
+    names: tuple[str, ...]
+    #: The value given, or None for a flag.
+    value: str | None
+
+
+def _option_uses(
+    command: CliCommand, args: list[str], index: int, cli: CliCommand
+) -> list[tuple[CliCommand, CliOption, str | None]]:
+    """The options one accepted option word gives: (owner, option, value) for each.
+
+    The word was accepted by ``_match_option``, so it is an option of ``command``, one
+    that a forwarding ``command`` hands to the root, or a cluster of short options.
+    """
+    word = args[index]
+    name, has_inline, inline = word.partition("=")
+    owner = command
+    option = command.options.get(name)
+    if option is None and command.forwards_unknown:
+        owner, option = cli, cli.options.get(name)
+    if option is not None:
+        if not option.takes_value:
+            return [(owner, option, None)]
+        if has_inline:
+            return [(owner, option, inline)]
+        given = args[index + 1 : index + 1 + option.nargs]
+        return [(owner, option, " ".join(given) if given else None)]
+    uses: list[tuple[CliCommand, CliOption, str | None]] = []
+    for position, letter in enumerate(word[1:], start=1):
+        short = command.options.get(f"-{letter}")
+        if short is None:
+            break
+        if short.takes_value:
+            attached = word[position + 1 :]
+            given = args[index + 1 : index + 1 + short.nargs]
+            value = attached or (" ".join(given) if given else None)
+            uses.append((command, short, value))
+            break
+        uses.append((command, short, None))
+    return uses
+
+
+def invocation_usage(
+    args: list[str], cli: CliCommand
+) -> tuple[tuple[str, ...], list[OptionUse]]:
+    """The command one ``ash`` invocation reaches and the options it gives, in order.
+
+    The arguments are walked the way ``ash_args_problems`` judges them, so an option
+    belongs to the command it follows: options before a subcommand to the root, options
+    after it to the subcommand, an option a forwarding command does not own to the root.
+    The exception is what ASH does with a root option typed before a subcommand
+    (``AshTyperGroup._options_for_subcommand`` in cli/main.py): it passes the option on
+    to the subcommand, or to the leaf of a group, when that command takes it. Here the
+    command takes it when it has an option with a long spelling the root's option also
+    has (``CliOption`` holds no parameter name, so the name match ASH tries first is not
+    available), and the use then carries that command's own option. An option no command
+    takes at its position is given to nothing, and nothing after ``--``, a placeholder or
+    a word the shell fills in is read.
+
+    Returns the path of the last command reached and the uses.
+    """
+    command = cli
+    found: list[tuple[CliCommand, CliOption, str | None, bool]] = []
+    index = 0
+    while index < len(args):
+        word = args[index]
+        if word == "--":
+            break
+        if _is_placeholder(word) or "$" in word.partition("=")[0]:
+            index += 1
+            continue
+        if word.startswith("-") and len(word) > 1 and not word[1:].isdigit():
+            used, problem = _match_option(command, args, index, cli, False)
+            if problem:
+                # An unknown option's value is not a subcommand (ash_args_problems).
+                if (
+                    used == 1
+                    and "=" not in word
+                    and index + 1 < len(args)
+                    and not args[index + 1].startswith("-")
+                ):
+                    used = 2
+            else:
+                before_subcommand = command is cli
+                found += [
+                    (owner, option, value, before_subcommand and owner is cli)
+                    for owner, option, value in _option_uses(command, args, index, cli)
+                ]
+            index += used
+            continue
+        if command.subcommands:
+            sub = command.subcommands.get(word)
+            if sub is None:
+                break
+            command = sub
+        index += 1
+    uses = []
+    for owner, option, value, passed_on in found:
+        if passed_on and command is not cli:
+            for spelling in option.names:
+                taken = (
+                    command.options.get(spelling) if spelling.startswith("--") else None
+                )
+                if taken is not None:
+                    owner, option = command, taken
+                    break
+        uses.append(OptionUse(owner.path, option.names, value))
+    return command.path, uses
+
+
 # ---------------------------------------------------------------------------
 # Option values
 # ---------------------------------------------------------------------------

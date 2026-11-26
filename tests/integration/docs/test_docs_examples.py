@@ -106,8 +106,13 @@ def test_the_docs_have_runnable_examples(request):
 
 @pytest.mark.e2e
 def test_doc_examples_run(page, tmp_path, request):
+    # Set by the docs examples job, which then reads the coverage this run collects
+    # (scripts/docs_feature_coverage.py); unset, the page runs exactly as it always did.
     results = runner.PageRunner(
-        page, tmp_path, docs_root=docs_root_of(request.config)
+        page,
+        tmp_path,
+        docs_root=docs_root_of(request.config),
+        coverage=runner.DocsCoverage.from_environment(),
     ).run()
     assert results, f"{page.rel} was selected for a block to run or save but none did"
     if not all(result.ok for result in results):
