@@ -178,9 +178,14 @@ _ALLOWED_SIZED_READS = {
     (
         "cli/mcp/source_delivery.py",
         "_finalize_zip_upload",
-    ): "sha chunks over the operator's own uploaded archive, and the name "
-    "of a refused symlink target from it; not tool output (the work behind "
-    "set_source_zip_finalize, whose own body holds no read)",
+    ): "sha chunks over the operator's own uploaded archive; not tool output (the "
+    "work behind set_source_zip_finalize, whose own body holds no read)",
+    (
+        "utils/source_archive.py",
+        "_link_refused",
+    ): "the first SYMLINK_TARGET_EXCERPT_BYTES + 1 bytes of a refused symlink member "
+    "of the operator's own source archive, quoted as the link's target in the "
+    "refusal and marked when cut; not tool output",
     (
         "cli/mcp/source_delivery.py",
         "set_source_image_archive_finalize",
