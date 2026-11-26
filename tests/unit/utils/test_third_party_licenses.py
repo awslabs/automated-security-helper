@@ -406,6 +406,42 @@ class TestTheDockerfileInstallsEveryEntry:
             if entry.version_probe:
                 assert not entry.executables, tool
 
+    def test_probed_entries_keep_the_default_version_args(self):
+        """A probe replaces the PATH check, so version_args there would be ignored."""
+        for tool, entry in THIRD_PARTY_LICENSES.items():
+            if entry.version_probe:
+                assert entry.version_args == ("--version",), tool
+
+    def test_every_executable_is_asked_its_version_with_some_argument(self):
+        """Run with no arguments a tool does whatever it does by default, which is
+        not printing a version: crane prints its usage, other programs start work."""
+        for tool, entry in THIRD_PARTY_LICENSES.items():
+            assert entry.version_args, tool
+            assert all(isinstance(a, str) and a for a in entry.version_args), tool
+
+    def test_the_smoke_step_and_the_license_check_ask_the_same_question(self):
+        """The core stage runs each tool's version right after installing it, and the
+        license check asks the same tool again. crane's step was `RUN crane version`
+        from the start while the check ran `crane --version`, which crane refuses, so
+        every image build stopped at the check. The step knew the spelling the entry
+        did not."""
+        core = _core_stage(DOCKERFILE.read_text())
+        compared = []
+        for tool, entry in THIRD_PARTY_LICENSES.items():
+            if entry.version_probe:
+                continue
+            program = entry.executable_names[0]
+            pattern = rf"^RUN {re.escape(program)} (--version|version|-V|-v)$"
+            for argument in re.findall(pattern, core, flags=re.MULTILINE):
+                compared.append(tool)
+                assert (argument,) == entry.version_args, (
+                    f"the core stage runs `{program} {argument}` but the license "
+                    f"check runs `{program} {' '.join(entry.version_args)}`"
+                )
+        # Control for the pattern: it finds crane's step, whose spelling differs, and
+        # grype's, which takes --version, so a pattern that matched nothing fails here.
+        assert {"crane", "grype"} <= set(compared), compared
+
     def test_verification_runs_after_ash_dependencies_install(self):
         """opengrep only exists once `ash dependencies install` has run."""
         core = _core_stage(DOCKERFILE.read_text())

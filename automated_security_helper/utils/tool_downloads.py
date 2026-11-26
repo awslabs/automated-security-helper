@@ -870,9 +870,13 @@ class ThirdPartyLicense:
     ASH dependency from PyPI, at whatever version pyproject's range resolves to,
     and that copy carries its own license metadata in its dist-info.
 
+    ``version_args`` are the arguments each of those copies is run with to report
+    its version: ``--version`` unless the tool spells it another way. crane has no
+    ``--version`` flag and prints its release from a ``version`` subcommand.
+
     ``version_probe`` is for a component that is not an executable on PATH: a
     rules bundle another tool reads, or a native library inside a uv tool's
-    environment. When set, the PATH and ``--version`` checks are replaced by
+    environment. When set, the PATH and version checks are replaced by
     running this argv, whose output must report ``version``. ``{uv_tool_dir}`` in
     an argument is replaced with what ``uv tool dir`` prints.
 
@@ -889,6 +893,7 @@ class ThirdPartyLicense:
     commit: str
     files: "tuple[LicenseFile, ...]"
     executables: "tuple[str, ...]" = ()
+    version_args: "tuple[str, ...]" = ("--version",)
     version_probe: "tuple[str, ...]" = ()
     distribution: "str | None" = None
     # Appended to the "Corresponding source" section of a copyleft entry whose
@@ -1240,6 +1245,11 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         repository="https://github.com/google/go-containerregistry",
         commit=_THIRD_PARTY_HASHES["crane commit"],
         files=(LicenseFile("LICENSE"),),
+        # crane has no --version flag: asked that way it prints "Error: unknown
+        # flag: --version". Its `version` subcommand prints the release the binary
+        # was built from, without the leading v (cmd/crane/cmd/version.go and the
+        # ldflags in .goreleaser.yml, both at the commit above).
+        version_args=("version",),
     ),
     "gitleaks": ThirdPartyLicense(
         tool="gitleaks",
