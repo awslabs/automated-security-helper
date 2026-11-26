@@ -21,6 +21,9 @@ What is held to what:
   name the harvested lockfile each match a finding reported at the path
   syft gives the lockfile, so none of them reads as unused, and a finding for
   another crate or another rustls version is not suppressed (the control).
+  An entry for the provenance manifest the harvest writes beside the lockfile
+  (detect-secrets reads its sha256 digest as a secret) names the manifest,
+  not the lockfile, and is not one of the four.
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.sdist_harvest import (
     HARVEST_DIR_NAME,
+    HARVEST_MANIFEST_NAME,
     PROPERTY_PARENT_PURL,
     PROPERTY_SDIST_SHA256,
 )
@@ -108,8 +112,23 @@ def assert_linked_crate_is_listed_with_its_parent(
     return locations
 
 
+def names_the_harvest_manifest(path: str) -> bool:
+    """Whether a suppression path's last component is the provenance manifest.
+
+    That component is literal (``harvest-manifest.json``, no glob), so such an
+    entry matches only the manifest file the harvest writes beside each
+    lockfile, never a finding at ``sdist-locks/<package>/<version>/<lockfile>``.
+    """
+    return path.replace("\\", "/").rsplit("/", 1)[-1] == HARVEST_MANIFEST_NAME
+
+
 def harvest_suppressions() -> List[AshSuppression]:
-    """The repository's suppressions that name the harvested lockfile."""
+    """The repository's suppressions that name the harvested lockfile.
+
+    Every entry whose path names the harvest directory counts, except one on
+    the provenance manifest (``names_the_harvest_manifest``), which cannot
+    suppress a lockfile finding.
+    """
     document = yaml.safe_load(
         REPO_ROOT.joinpath(".ash.yaml").read_text(encoding="utf-8")
     )
@@ -117,6 +136,7 @@ def harvest_suppressions() -> List[AshSuppression]:
         AshSuppression.model_validate(raw)
         for raw in document["global_settings"]["suppressions"]
         if HARVEST_DIR_NAME in str(raw.get("path", ""))
+        and not names_the_harvest_manifest(str(raw.get("path", "")))
     ]
     assert sorted(e.rule_id or "" for e in entries) == sorted(
         EXPECTED_SUPPRESSION_RULE_IDS
