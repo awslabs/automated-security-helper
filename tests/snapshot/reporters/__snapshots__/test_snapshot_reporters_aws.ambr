@@ -405,6 +405,7 @@
             'Id': 'ash/b9370f1d36415dc01ddc7ea6de72ab32eee6ce6afe6e705458242e2c04bd392b',
             'ProductArn': 'arn:aws:securityhub:us-east-1:123456789012:product/123456789012/default',
             'ProductFields': dict({
+              'ash/correlationId': 'secret/febaf0e11ce2f3b0e97c5eee80659e09f319bf333ab709c47cdc3f58e96474cb',
               'ash/endLine': '5',
               'ash/file': 'app/app.py',
               'ash/ruleId': 'SECRET-SECRET-KEYWORD',

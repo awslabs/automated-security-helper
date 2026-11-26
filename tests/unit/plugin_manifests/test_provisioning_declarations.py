@@ -5,7 +5,7 @@
 
 ``TOOL_VERSIONS``, ``CONTENT_DATABASES`` and ``OFFLINE_TOOL_ENVIRONMENT`` used to be
 three module-level tables the engine owned. They are now derived from the
-``Provisioning`` block of each scanner's manifest (plus the one tool the engine pins
+``Provisioning`` block of each scanner's manifest (plus the tools the engine pins
 itself), so these rows hold the derivation to what the manifests say, hold the registry
 to its refusals, and hold the standard-library-only property the CI and container
 consumers depend on.
@@ -163,6 +163,7 @@ def test_the_tool_pinned_by_every_binary_runtime_is_declared() -> None:
         "actionlint",
         "betterleaks",
         "cfn-guard",
+        "crane",
         "gitleaks",
         "grype",
         "hadolint",
