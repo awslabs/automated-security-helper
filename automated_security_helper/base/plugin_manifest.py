@@ -121,6 +121,60 @@ class _Frozen(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
 
+def _refuse(self: object, *_args: object, **_kwargs: object) -> Any:
+    raise TypeError(
+        f"{type(self).__name__} is part of a frozen manifest and cannot be changed"
+    )
+
+
+class _FrozenList(list):
+    """A ``list`` that refuses every in-place change.
+
+    Still a ``list``: it compares equal to one and dumps as one, which is what a
+    delivered value is compared with. Rebuilt from its items when copied or
+    pickled (``__reduce__``), because the default rebuild appends one item at a
+    time.
+    """
+
+    __slots__ = ()
+
+    append = extend = insert = remove = pop = clear = sort = reverse = _refuse
+    __setitem__ = __delitem__ = __iadd__ = __imul__ = _refuse
+
+    def __reduce__(self):
+        return (_FrozenList, (list(self),))
+
+
+class _FrozenDict(dict):
+    """A ``dict`` that refuses every in-place change; see :class:`_FrozenList`."""
+
+    __slots__ = ()
+
+    __setitem__ = __delitem__ = __ior__ = _refuse
+    pop = popitem = setdefault = update = clear = _refuse
+
+    def __reduce__(self):
+        return (_FrozenDict, (dict(self),))
+
+
+def _freeze(value: Any) -> Any:
+    """``value`` with every dict and list in it replaced by a frozen one."""
+    if isinstance(value, dict):
+        return _FrozenDict({k: _freeze(v) for k, v in value.items()})
+    if isinstance(value, (list, tuple)):
+        return _FrozenList(_freeze(v) for v in value)
+    return value
+
+
+def thawed(value: Any) -> Any:
+    """``value`` as plain, editable ``dict`` and ``list`` objects, deeply."""
+    if isinstance(value, dict):
+        return {k: thawed(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [thawed(v) for v in value]
+    return value
+
+
 class EntryPoints(_Frozen):
     """The classes a plugin provides, as dotted ``module:Class`` strings."""
 
@@ -298,14 +352,18 @@ class ScannerManifest(_Frozen):
     def _denied_option_defaults_are_the_manifests_own(
         cls, value: dict[str, Any]
     ) -> dict[str, Any]:
-        """Deep-copied, so the values are this manifest's own objects.
+        """Deep-copied and frozen, so the values are this manifest's own and fixed.
 
         Validating a ``dict[str, Any]`` builds a new outer dict and keeps the
         value objects it was given, so a list default here would be the very list
         a module-level constant holds, and an in-place change to either would
-        change what "the default" means for the whole process.
+        change what "the default" means for the whole process. The copy cuts that
+        tie; freezing it keeps the cached manifest's own table and lists from
+        being edited either (``dict`` and ``list`` subclasses that raise
+        ``TypeError`` on every change, equal to and dumped as the plain ones).
+        A reader that needs to edit takes :func:`thawed`.
         """
-        return copy.deepcopy(value)
+        return _freeze(copy.deepcopy(value))
 
     @field_validator("name")
     @classmethod

@@ -89,6 +89,7 @@ from automated_security_helper.config.ash_config import (
     AshConfig,
     RuntimeOverridesConfig,
 )
+from automated_security_helper.base.plugin_manifest import thawed
 from automated_security_helper.plugin_manifests import scanner_manifests
 from automated_security_helper.core.enums import SandboxMode
 from automated_security_helper.utils.import_caches import invalidate_import_caches
@@ -506,7 +507,9 @@ class _OptionDefaults(Mapping[Tuple[str, str], Any]):
     """
 
     def __init__(self, rows: Mapping[Tuple[str, str], Any]) -> None:
-        self._rows = {key: copy.deepcopy(value) for key, value in rows.items()}
+        # Thawed: the manifests hand out frozen lists, and a caller of this table
+        # gets plain ones it may edit without touching the next read.
+        self._rows = {key: thawed(value) for key, value in rows.items()}
 
     def __getitem__(self, key: Tuple[str, str]) -> Any:
         return copy.deepcopy(self._rows[key])

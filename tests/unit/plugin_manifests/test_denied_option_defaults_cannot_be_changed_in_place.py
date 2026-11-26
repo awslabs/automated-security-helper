@@ -99,38 +99,111 @@ def test_editing_a_list_read_through_items_changes_no_later_read():
     ]
 
 
-def test_editing_a_manifests_list_changes_no_answer_of_the_policy():
-    """The answer the table decides: with the manifest's own list edited in place,
-    a delivered value equal to the default is still the default, and one equal to
-    the edited list is not."""
-    from automated_security_helper.config.ash_config import AshConfig
+def test_a_manifests_list_cannot_be_edited_in_place():
+    """Red at the base: the cached manifest's list was a live ``list``, and one
+    ``append`` changed what "the default" meant for the cached manifest."""
+    held = _manifest("guarddog").denied_option_defaults["ecosystems"]
+    before = list(held)
+
+    for edit in (
+        lambda: held.append("maven"),
+        lambda: held.extend(["maven"]),
+        lambda: held.insert(0, "maven"),
+        lambda: held.remove("pypi"),
+        lambda: held.pop(),
+        lambda: held.sort(),
+        lambda: held.reverse(),
+        lambda: held.clear(),
+        lambda: held.__setitem__(0, "maven"),
+        lambda: held.__delitem__(0),
+        lambda: held.__iadd__(["maven"]),
+        lambda: held.__imul__(2),
+    ):
+        with pytest.raises(TypeError):
+            edit()
+
+    assert list(held) == before
+    assert _manifest("guarddog").denied_option_defaults["ecosystems"] == before
+
+
+def test_a_manifests_table_of_defaults_cannot_be_edited_in_place():
+    held = _manifest("guarddog").denied_option_defaults
+    keys = set(held)
+
+    for edit in (
+        lambda: held.__setitem__("x", 1),
+        lambda: held.__delitem__("ecosystems"),
+        lambda: held.pop("ecosystems"),
+        lambda: held.popitem(),
+        lambda: held.setdefault("x", 1),
+        lambda: held.update({"x": 1}),
+        lambda: held.clear(),
+        lambda: held.__ior__({"x": 1}),
+    ):
+        with pytest.raises(TypeError):
+            edit()
+
+    assert set(_manifest("guarddog").denied_option_defaults) == keys
+
+
+def test_a_nested_list_is_frozen_too():
+    from automated_security_helper.base.plugin_manifest import ScannerManifest
 
     manifest = _manifest("guarddog")
-    held = manifest.denied_option_defaults["ecosystems"]
-    held.append("maven")
-    try:
+    data = manifest.model_dump()
+    data["denied_option_defaults"] = {"nested": {"inner": ["a", "b"]}}
+    rebuilt = ScannerManifest.model_validate(data)
 
-        class Denial:
-            from_patch = False
-            pointer = "/scanners/guarddog/options/ecosystems"
+    with pytest.raises(TypeError):
+        rebuilt.denied_option_defaults["nested"]["inner"].append("c")
+    with pytest.raises(TypeError):
+        rebuilt.denied_option_defaults["nested"]["x"] = 1
 
-        delivered = {
-            "scanners": {
-                "guarddog": {
-                    "options": {
-                        "ecosystems": [
-                            "pypi",
-                            "npm",
-                            "go",
-                            "github_action",
-                            "rubygems",
-                            "crates",
-                        ]
-                    }
+
+def test_a_frozen_default_dumps_validates_and_copies_as_plain_data():
+    import copy
+
+    from automated_security_helper.base.plugin_manifest import ScannerManifest
+
+    manifest = _manifest("guarddog")
+    dumped = manifest.model_dump()
+
+    assert type(dumped["denied_option_defaults"]) is dict
+    assert type(dumped["denied_option_defaults"]["ecosystems"]) is list
+    assert ScannerManifest.model_validate(dumped) == manifest
+    assert copy.deepcopy(manifest.denied_option_defaults) == (
+        manifest.denied_option_defaults
+    )
+
+
+def test_the_policy_answers_from_the_table_whatever_is_attempted_on_a_manifest():
+    """The answer the table decides: a delivered value equal to the default is
+    still the default after every attempt to edit the manifest's own list."""
+    from automated_security_helper.config.ash_config import AshConfig
+
+    held = _manifest("guarddog").denied_option_defaults["ecosystems"]
+    with pytest.raises(TypeError):
+        held.append("maven")
+
+    class Denial:
+        from_patch = False
+        pointer = "/scanners/guarddog/options/ecosystems"
+
+    delivered = {
+        "scanners": {
+            "guarddog": {
+                "options": {
+                    "ecosystems": [
+                        "pypi",
+                        "npm",
+                        "go",
+                        "github_action",
+                        "rubygems",
+                        "crates",
+                    ]
                 }
             }
         }
-        base = AshConfig(project_name="p")
-        assert _writes_plugin_default(delivered, Denial, base) is True
-    finally:
-        held.remove("maven")
+    }
+    base = AshConfig(project_name="p")
+    assert _writes_plugin_default(delivered, Denial, base) is True
