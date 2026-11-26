@@ -250,9 +250,15 @@
   finding. Two instances of one module, or two resources of a Terraform plan (every
   plan finding is on the plan file), gave findings that differed in nothing. ASH now
   reads the resource from checkov's JSON report, for Terraform, Terraform plans,
-  Terraform JSON, CloudFormation, Kubernetes, ARM and Bicep: `aws_db_instance.this`,
+  CloudFormation, Kubernetes and Bicep: `aws_db_instance.this`,
   `module.db.aws_db_instance.this`, `AWS::S3::Bucket.Bucket`, `Deployment.shop.web`,
-  `Microsoft.Storage/storageAccounts.st`.
+  `Microsoft.Storage/storageAccounts.st`. An id names one resource: when the records of
+  one file give an id at two different line ranges, two resources share it, and the
+  findings of neither carry it, so a suppression for them is scoped by path and lines.
+  Terraform JSON and ARM findings name no resource. checkov leaves the resource type out
+  of a Terraform JSON id. An ARM name built from a parameter with no default stays the
+  template expression, so resources can share an id, and an ARM template's line ranges
+  cannot always tell them apart: a template on one line puts every resource at line 1.
   It is in the `resource_id` of the flat JSON and CSV reports, and a `resource_id`
   suppression now binds to it. checkov is always asked for its JSON report for this,
   so `results_json.json` is in checkov's results directory on every run, not only when
