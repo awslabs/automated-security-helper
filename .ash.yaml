@@ -395,9 +395,6 @@ global_settings:
       path: tests/unit/base/test_a_failure_after_the_tool_ran_keeps_its_exit_code.py
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: generic-api-key
-      path: tests/unit/base/test_a_plugin_with_no_tool_or_directory_fails_closed.py
-      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
-    - rule_id: generic-api-key
       path: tests/unit/cli/inspect/test_each_value_is_shown_once.py
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: generic-api-key
@@ -3353,6 +3350,14 @@ global_settings:
         that must be redacted from runner output. The fixture exists to prove
         redaction. The reason does not repeat the assignment, so this file does not
         flag itself.
+    # === gitleaks: the made-up token in the fail-closed plugin tests ===
+    # The entry the sorted test-code section above would hold, with that section's
+    # reason; .ash/.ash_alpha_plugins.yaml holds the same entry in its own test-code
+    # section. It sits here, below the lines of this file that the alpha-plugins
+    # config pins ferret-scan entries to, because a line added above them moves them.
+    - rule_id: generic-api-key
+      path: tests/unit/base/test_a_plugin_with_no_tool_or_directory_fails_closed.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     # === PR #820: suppressions for the test files and generated fixtures this branch adds ===
     # Each entry names one rule and one file; an entry the base already carries is not repeated.
     # The bandit entries this section once carried are in the sorted test-code section above.
