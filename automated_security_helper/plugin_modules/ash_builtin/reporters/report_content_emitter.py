@@ -38,6 +38,10 @@ from automated_security_helper.utils.finding_clusters import (
     provenance_note,
 )
 from automated_security_helper.utils.policy_origin import is_policy_origin
+from automated_security_helper.utils.short_reason import (
+    SHORT_REASON_LIMIT,
+    names_a_local_path,
+)
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_COUNT_KEYS,
     SEVERITY_DISPLAY_ORDER,
@@ -1239,10 +1243,10 @@ _ASIDE = re.compile(r"\s*\([^()]*\)")
 #: Where the first sentence ends: a full stop, a colon or a semicolon before a
 #: space, or the end of the text.
 _SENTENCE_END = re.compile(r"[.:;](?:\s|\Z)|\Z")
-#: Anything that looks like a path on the machine that ran the scan.
-_LOCAL_PATH = re.compile(r"(?:\A|[\s'\"=])(?:/|~/|[A-Za-z]:[\\/]|\\\\)")
-#: The longest reason shown; a longer first sentence is not a short reason.
-SHORT_ERROR_REASON_LIMIT = 200
+#: The longest reason shown; a longer first sentence is not a short reason. The
+#: limit, and the check for a local path below, are the ones a scanner's recorded
+#: reason is held to (``utils/short_reason.py``).
+SHORT_ERROR_REASON_LIMIT = SHORT_REASON_LIMIT
 
 
 def short_error_reason(error: str) -> Optional[str]:
@@ -1274,6 +1278,6 @@ def short_error_reason(error: str) -> Optional[str]:
     sentence = body[: end.start() if end else len(body)].strip()
     if not sentence or len(sentence) > SHORT_ERROR_REASON_LIMIT:
         return None
-    if _LOCAL_PATH.search(sentence) or "(" in sentence or ")" in sentence:
+    if names_a_local_path(sentence) or "(" in sentence or ")" in sentence:
         return None
     return sentence

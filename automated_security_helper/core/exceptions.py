@@ -1,9 +1,203 @@
+from dataclasses import dataclass
+import logging
 from pathlib import Path
+import re
 from typing import Any, Iterable, Optional
+
+from automated_security_helper.utils.short_reason import is_short_reason
+
+#: The ASH logger by name: this module imports no third-party package, and the
+#: logger module that defines ``ASH_LOGGER`` imports several.
+_LOGGER = logging.getLogger("ash")
+
+#: What a reason code looks like: lower-case words joined by underscores.
+_REASON_CODE = re.compile(r"\A[a-z][a-z0-9_]{1,47}\Z")
+
+
+class ReasonCode:
+    """The codes a :class:`FailureReason` carries, as plain strings.
+
+    Not an ``Enum``: a ``(str, Enum)`` member formats as ``ReasonCode.NAME`` in an
+    f-string and in ``str()`` on newer Pythons, and a code is written into the
+    results file and compared as the string it is. A code names a kind of failure,
+    in lower case, and each has a default sentence in :data:`DEFAULT_SENTENCES`.
+    """
+
+    # What the scan phase reads from the run the scanner's base class recorded.
+    TIMED_OUT = "timed_out"
+    COULD_NOT_STOP = "could_not_stop"
+    COULD_NOT_START = "could_not_start"
+    OUTPUT_NOT_RECORDED = "output_not_recorded"
+    CANCELLED = "cancelled"
+    RESULT_REJECTED = "result_rejected"
+    DID_NOT_FINISH = "did_not_finish"
+    EXIT_CODE_REJECTED = "exit_code_rejected"
+    SCANNER_EXITED = "scanner_exited"
+    # What the scan phase finds in the result a scanner handed back.
+    NO_RESULT = "no_result"
+    RESULT_UNGRADABLE = "result_ungradable"
+    RESULTS_UNREADABLE = "results_unreadable"
+    RESULTS_NOT_MERGED = "results_not_merged"
+    NOT_EVALUATED = "not_evaluated"
+    CONTENT_DATABASE_ABSENT = "content_database_absent"
+    # What stops a scanner before its tool runs.
+    SANDBOX_UNAVAILABLE = "sandbox_unavailable"
+    SANDBOX_REFUSED = "sandbox_refused"
+    CONSTRUCTION_FAILED = "construction_failed"
+    NAME_REFUSED = "name_refused"
+    NAME_TAKEN = "name_taken"
+    CHECK_RAISED = "check_raised"
+    MODULE_IMPORT_FAILED = "module_import_failed"
+    NO_PLUGIN_CONTEXT = "no_plugin_context"
+    NO_RESULTS_DIRECTORY = "no_results_directory"
+    # What the statistics decide about a row no scanner reported on.
+    TARGETS_FAILED = "targets_failed"
+    COUNTERS_UNUSABLE = "counters_unusable"
+    STATUS_UNKNOWN = "status_unknown"
+    NO_STATUS = "no_status"
+    QUEUED_NOT_COMPLETED = "queued_not_completed"
+    #: The code a reason with no usable code of its own is recorded under.
+    RUN_FAILED = "run_failed"
+
+
+#: The sentence shown when a reason's own is not fit to show, and for a code that
+#: has no sentence of its own. Each one is a clause the failure's message already
+#: opens with, written without a path or a value, so a report reads the same
+#: whether the scanner recorded the sentence itself or only its code.
+FALLBACK_SENTENCE = "its run failed"
+
+DEFAULT_SENTENCES: dict[str, str] = {
+    ReasonCode.TIMED_OUT: "it timed out and was killed",
+    ReasonCode.COULD_NOT_STOP: "it timed out and its tool could not be stopped",
+    ReasonCode.COULD_NOT_START: "it could not start its tool",
+    ReasonCode.OUTPUT_NOT_RECORDED: "ASH could not record its output",
+    ReasonCode.CANCELLED: "its run was cancelled while its tool ran",
+    ReasonCode.RESULT_REJECTED: "it returned a result ASH rejected",
+    ReasonCode.DID_NOT_FINISH: "its tool did not finish",
+    ReasonCode.EXIT_CODE_REJECTED: (
+        "its tool exited with a code this scanner does not accept as a completed "
+        "run, so its results file is not graded"
+    ),
+    ReasonCode.SCANNER_EXITED: "it ended the scan process before it finished",
+    ReasonCode.NO_RESULT: "it returned no result",
+    ReasonCode.RESULT_UNGRADABLE: "its result could not be graded",
+    ReasonCode.RESULTS_UNREADABLE: (
+        "its results file is not SARIF ASH can read, so its findings could not be "
+        "graded"
+    ),
+    ReasonCode.RESULTS_NOT_MERGED: "its results could not be merged",
+    ReasonCode.NOT_EVALUATED: "no rule was evaluated against some of its targets",
+    ReasonCode.CONTENT_DATABASE_ABSENT: "its content database is absent",
+    ReasonCode.SANDBOX_UNAVAILABLE: "its sandbox backend is not available",
+    ReasonCode.SANDBOX_REFUSED: "its scanner sandbox was refused",
+    ReasonCode.CONSTRUCTION_FAILED: "it could not be constructed",
+    ReasonCode.NAME_REFUSED: "its configured name is refused",
+    ReasonCode.NAME_TAKEN: "another scanner already uses its name",
+    ReasonCode.CHECK_RAISED: "its enabled or Python-only check raised",
+    ReasonCode.MODULE_IMPORT_FAILED: "its plugin module failed to import",
+    ReasonCode.NO_PLUGIN_CONTEXT: "it has no plugin context",
+    ReasonCode.NO_RESULTS_DIRECTORY: "it has no results directory",
+    ReasonCode.TARGETS_FAILED: "it failed on some of its targets",
+    ReasonCode.COUNTERS_UNUSABLE: "its recorded target counts cannot be read",
+    ReasonCode.STATUS_UNKNOWN: "its recorded status is not one ASH knows",
+    ReasonCode.NO_STATUS: "no result was recorded for it",
+    ReasonCode.QUEUED_NOT_COMPLETED: (
+        "it was queued for execution but did not complete"
+    ),
+    ReasonCode.RUN_FAILED: FALLBACK_SENTENCE,
+}
+
+
+def is_reason_code(code: object) -> bool:
+    """Whether ``code`` is written the way a reason code is."""
+    return isinstance(code, str) and _REASON_CODE.fullmatch(code) is not None
+
+
+@dataclass(frozen=True)
+class FailureReason:
+    """Why a scanner failed, as a code and one sentence a report can show.
+
+    ``code`` names the kind of failure (see :class:`ReasonCode`). ``sentence`` is
+    one line of at most ``SHORT_REASON_LIMIT`` characters with no path in it, as
+    ``utils/short_reason.is_short_reason`` reads it, written so that
+    ``<scanner> (ERROR): <sentence>`` reads as a sentence. Leave it out to get the
+    code's default sentence.
+
+    Building one never raises: it is built inside the handlers that report a
+    failure, and an error raised there would hide the failure it was reporting. A
+    sentence that is not fit to show (empty, longer than a line, a control
+    character, or something that looks like a path) is replaced by the code's
+    default sentence, ``its run failed`` for a code with none, and a code that is
+    not written as a code is recorded as :attr:`ReasonCode.RUN_FAILED`. A DEBUG
+    line says that a replacement was made, and never quotes what was replaced.
+    """
+
+    code: str
+    sentence: str = ""
+
+    def __post_init__(self) -> None:
+        code = self.code
+        if not is_reason_code(code):
+            _LOGGER.debug("a failure reason's code is not a reason code; replaced")
+            code = ReasonCode.RUN_FAILED
+        sentence = self.sentence
+        if is_short_reason(sentence):
+            sentence = sentence.strip()
+        else:
+            if sentence:
+                _LOGGER.debug(
+                    "a failure reason's sentence is not a short sentence without "
+                    "a path; its code's default is shown instead"
+                )
+            sentence = DEFAULT_SENTENCES.get(code, FALLBACK_SENTENCE)
+        object.__setattr__(self, "code", code)
+        object.__setattr__(self, "sentence", sentence)
 
 
 class ScannerError(Exception):
-    """Exception raised when scanner execution fails."""
+    """Exception raised when scanner execution fails.
+
+    ``reason`` is why, as a :class:`FailureReason`, when the code that raises it
+    says. The text of the exception is unchanged and is for the log; the reason is
+    what the reports show for the scanner, so it holds no path. An error raised
+    with no reason is shown by the first sentence of its text where it has one.
+    """
+
+    reason: Optional[FailureReason]
+
+    def __init__(self, *args: object, reason: Optional[FailureReason] = None) -> None:
+        super().__init__(*args)
+        if reason is not None and not isinstance(reason, FailureReason):
+            _LOGGER.debug("a scanner error was given a reason that is not a reason")
+            reason = None
+        self.reason = reason
+
+
+def reason_of(error: Optional[BaseException]) -> Optional[FailureReason]:
+    """The first reason recorded on ``error`` or on what it was raised from.
+
+    The error itself first, then its ``__cause__``, then its ``__context__``, each
+    followed through the same way before the next, and each error looked at once.
+    A scanner's own raise sites record a reason, and the wrapper that re-raises
+    them inside its ``except`` block (``scanner_plugin``) keeps the error it
+    caught as ``__context__``, so the reason is found there without the wrapper
+    copying it. A context that ``raise ... from None`` suppressed is not followed.
+    """
+    seen: set[int] = set()
+    pending: list[Optional[BaseException]] = [error]
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        reason = getattr(current, "reason", None)
+        if isinstance(reason, FailureReason):
+            return reason
+        # The stack pops the cause before the context pushed under it.
+        if not current.__suppress_context__:
+            pending.append(current.__context__)
+        pending.append(current.__cause__)
+    return None
 
 
 class ASHValidationError(Exception):
