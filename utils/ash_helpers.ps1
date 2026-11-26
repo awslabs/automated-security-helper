@@ -2045,7 +2045,19 @@ function Invoke-ASH {
             }
             $RESOLVED_OCI_RUNNER = $null
             foreach ($runner in $runners) {
-                if ($FOUND = Get-Command $runner -ErrorAction SilentlyContinue) {
+                # A lookup that throws finds no runner, as one that returns nothing
+                # does, so the value is refused below with 3 like any runner not found.
+                # Windows PowerShell 5.1 throws "The network path was not found" for a
+                # UNC path whose server it cannot reach, which -ErrorAction
+                # SilentlyContinue does not stop; PowerShell 7 returns nothing for it.
+                $FOUND = $null
+                try {
+                    $FOUND = Get-Command $runner -ErrorAction SilentlyContinue
+                }
+                catch {
+                    $FOUND = $null
+                }
+                if ($FOUND) {
                     # A program by its full path: its Name alone ("docker") would run
                     # whichever program PATH holds under that name, or none, when the
                     # runner was named by a path outside PATH.
