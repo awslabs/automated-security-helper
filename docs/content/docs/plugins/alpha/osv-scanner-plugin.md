@@ -90,17 +90,17 @@ OSV-Scanner's stderr is not copied into the scan's errors, because it can quote 
 
 ## Suppressions
 
-ASH suppressions by rule, path and line work as for any scanner. The rule is the advisory id OSV-Scanner reports, and the path is the lockfile:
+ASH suppressions by rule and path work as for any scanner. The rule is the advisory id OSV-Scanner reports, and the path is the lockfile:
 
 ```yaml
 global_settings:
   suppressions:
     - rule_id: CVE-2022-24713
       path: Cargo.lock
-      line_start: 1
-      line_end: 1
       reason: the affected function is not reachable in this service
 ```
+
+Leave out `line_start` and `line_end`. An OSV-Scanner finding has a file and no line, and a suppression with a line range never matches a finding that has no line, so such an entry suppresses nothing.
 
 Package-scoped and symbol-scoped suppressions do not apply: the result location is the lockfile, not a package.
 

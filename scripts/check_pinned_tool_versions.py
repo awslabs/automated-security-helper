@@ -28,7 +28,10 @@ runs it weekly with ``--fail-on-outdated``.
 There is no second list of tools here. The pins come from ``TOOL_VERSIONS``,
 ``THIRD_PARTY_LICENSES``, ``RULES_BUNDLES``, ``CFN_NAG_GEM_VERSION`` and
 ``BUNDLER_VERSION``, so a tool pinned in any of them is checked without editing this
-file. A pin kept in a new module-level name would not be;
+file. An alpha plugin that installs its own tool keeps the pin in its own install
+module, a ``<plugin>/*_install.py`` under ``automated_security_helper/plugin_modules``
+holding ``<TOOL>_VERSION`` and the release's digests; the tool's license entry is read
+with that module (``PLUGIN_MODULE``). A pin kept in a new module-level name would not be;
 ``tests/unit/test_pinned_tool_version_check.py`` fails on any module global named
 like a version pin that ``PIN_SOURCES`` below does not name, and on any Dockerfile
 ``ARG <NAME>_VERSION`` that no pin owns.
@@ -192,6 +195,9 @@ PINS_FILE = "automated_security_helper/utils/tool_downloads.py"
 # TOOL_VERSIONS, which PIN_SOURCES reads, is derived from it.
 PROVISIONING_FILE = "automated_security_helper/base/plugin_provisioning.py"
 INSTALLER = PACKAGE_ROOT / "assets" / "install-pinned-tool.py"
+# The alpha plugin packages. One that pins and installs its own tool keeps the pin in a
+# ``<plugin>/*_install.py`` module here (see PLUGIN_MODULE).
+PLUGIN_MODULES = PACKAGE_ROOT / "plugin_modules"
 DOCKERFILE = REPO_ROOT / "Dockerfile"
 GEMFILE = "automated_security_helper/assets/Gemfile"
 
@@ -216,6 +222,11 @@ GEM = "gem"  # GEM_PINS: a RubyGems release
 # THIRD_PARTY_LICENSES with bundled_in: a library another pinned wheel carries, whose
 # version is that wheel's. Listed and held, never looked up (see BUNDLED below).
 BUNDLED_LIBRARY = "bundled-library"
+# THIRD_PARTY_LICENSES with none of the above, pinned by the alpha plugin that installs
+# the tool: a ``<plugin>/*_install.py`` under PLUGIN_MODULES holds ``<TOOL>_VERSION`` and
+# the digest of each release asset (OSV-Scanner's, Polaris'). Looked up on GitHub at the
+# license entry's repository.
+PLUGIN_MODULE = "plugin-module"
 # THIRD_PARTY_LICENSES with none of the above, held to one version by a Dockerfile
 # ``ARG <TOOL>_VERSION=``: a dependency of a uv tool, such as the pygit2 GuardDog needs
 DOCKERFILE_ARG = "dockerfile-arg"
@@ -225,6 +236,7 @@ PIN_KINDS = (
     RULES_BUNDLE,
     GEM,
     BUNDLED_LIBRARY,
+    PLUGIN_MODULE,
     DOCKERFILE_ARG,
 )
 
@@ -361,11 +373,120 @@ def _license_project(tool: str, entry: Any) -> str:
     )
 
 
+_SHA256_HEX = re.compile(r"[0-9a-fA-F]{64}")
+
+
+@dataclass(frozen=True)
+class _ModulePin:
+    """One tool's pin in an alpha plugin's install module, read from the module's source.
+
+    ``tables`` holds each other module-level dict literal as ``(name, its string keys,
+    its string values)``: the asset table and the digest tables a release changes.
+    """
+
+    path: Path
+    name: str
+    version: str
+    tables: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...]
+
+    @property
+    def shown(self) -> str:
+        """The module's path as a step names it, relative to the repository if it can be."""
+        if self.path.is_relative_to(REPO_ROOT):
+            return self.path.relative_to(REPO_ROOT).as_posix()
+        return self.path.as_posix()
+
+
+def _module_assignments(tree: ast.Module) -> list[tuple[str, ast.expr | None, int]]:
+    """``(name, value, line)`` for each module-level assignment to a plain name."""
+    found: list[tuple[str, ast.expr | None, int]] = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            found += [
+                (target.id, node.value, node.lineno)
+                for target in node.targets
+                if isinstance(target, ast.Name)
+            ]
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            found.append((node.target.id, node.value, node.lineno))
+    return found
+
+
+def _string_table(
+    value: ast.expr | None,
+) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    """The string keys and the string values of a dict literal; None for anything else."""
+    if not isinstance(value, ast.Dict):
+        return None
+    keys = tuple(
+        key.value
+        for key in value.keys
+        if isinstance(key, ast.Constant) and isinstance(key.value, str)
+    )
+    values = tuple(
+        item.value
+        for item in value.values
+        if isinstance(item, ast.Constant) and isinstance(item.value, str)
+    )
+    return keys, values
+
+
+def _plugin_module_pin(tool: str) -> _ModulePin | None:
+    """The pin an alpha plugin's install module holds for ``tool``, or None.
+
+    Every ``<plugin>/*_install.py`` under ``PLUGIN_MODULES`` is parsed, not imported (an
+    install module imports ASH, and this script runs on a bare interpreter), for a
+    module-level ``<TOOL>_VERSION``: the name a Dockerfile ARG for the tool would take.
+
+    Raises:
+        PinEnumerationError: when a module cannot be read, when a module assigns the
+            name more than once or to anything but one string literal, or when two
+            modules pin the tool.
+    """
+    name = f"{_arg_stem(tool)}_VERSION"
+    found: list[_ModulePin] = []
+    for path in sorted(PLUGIN_MODULES.glob("*/*_install.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError, ValueError) as exc:
+            raise PinEnumerationError(f"cannot read {path} for {name}: {exc}") from exc
+        assignments = _module_assignments(tree)
+        values = [(value, line) for n, value, line in assignments if n == name]
+        if not values:
+            continue
+        value, line = values[0]
+        if (
+            len(values) > 1
+            or not isinstance(value, ast.Constant)
+            or not isinstance(value.value, str)
+        ):
+            raise PinEnumerationError(
+                f"{path}:{line} pins {tool} as {name}, but not as one string literal. "
+                "This script reads the version without importing the module, so write "
+                f'it once, as {name} = "<release tag>".'
+            )
+        tables = []
+        for other, other_value, _ in assignments:
+            table = _string_table(other_value) if other != name else None
+            if table is not None:
+                tables.append((other, *table))
+        found.append(
+            _ModulePin(path=path, name=name, version=value.value, tables=tuple(tables))
+        )
+    if len(found) > 1:
+        raise PinEnumerationError(
+            f"{tool} is pinned as {name} in {len(found)} install modules "
+            f"({', '.join(pin.shown for pin in found)}); pick one."
+        )
+    return found[0] if found else None
+
+
 def enumerate_pins(pins: Any, dockerfile: Path = DOCKERFILE) -> list[Pin]:
     """Every pin ``pins`` carries, one per tool, sorted by tool name.
 
-    A license entry that no table names is a pin only when ``dockerfile`` has an
-    ``ARG <TOOL>_VERSION=`` for it.
+    A license entry that no table names is a pin only when an alpha plugin's install
+    module under ``PLUGIN_MODULES`` holds ``<TOOL>_VERSION`` for it, or when
+    ``dockerfile`` has an ``ARG <TOOL>_VERSION=`` for it.
 
     Raises:
         PinEnumerationError: when a pin cannot be attributed to an upstream, when
@@ -454,6 +575,13 @@ def enumerate_pins(pins: Any, dockerfile: Path = DOCKERFILE) -> list[Pin]:
             continue
         elif tool in gems:
             continue
+        elif entry is not None and (module := _plugin_module_pin(tool)) is not None:
+            # The plugin's install module is where the version is set and the assets
+            # are downloaded from; the license entry has to record the same release.
+            version = module.version
+            kind = PLUGIN_MODULE
+            pinned_in.append(f"{module.shown} {module.name}")
+            project = _license_project(tool, entry)
         elif entry is not None and _dockerfile_args(tool, dockerfile):
             version = entry.version
             kind = DOCKERFILE_ARG
@@ -467,7 +595,8 @@ def enumerate_pins(pins: Any, dockerfile: Path = DOCKERFILE) -> list[Pin]:
                 f"THIRD_PARTY_LICENSES[{tool!r}] records {recorded}, but {tool} is "
                 "not in TOOL_VERSIONS or RULES_BUNDLES and has no distribution, so this "
                 "script cannot tell what a bump of it changes. Give it a kind in "
-                "PIN_KINDS, with its own steps in bump_steps, or pin it with a "
+                "PIN_KINDS, with its own steps in bump_steps, pin it in its plugin's "
+                f"install module as {_arg_stem(tool)}_VERSION, or pin it with a "
                 f"Dockerfile ARG {_arg_stem(tool)}_VERSION."
             )
 
@@ -1193,6 +1322,50 @@ def _dockerfile_arg_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
     return steps
 
 
+def _required_module_pin(pin: Pin) -> _ModulePin:
+    module = _plugin_module_pin(pin.tool)
+    if module is None:
+        raise PinEnumerationError(
+            f"{pin.tool} is a {PLUGIN_MODULE} pin, but no install module under "
+            f"{PLUGIN_MODULES} holds {_arg_stem(pin.tool)}_VERSION any more"
+        )
+    return module
+
+
+def _plugin_module_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
+    """A tool an alpha plugin pins in its own install module, then its license entry.
+
+    The module's tables are read from its source, so one added to it later is named
+    without editing this script: each table whose strings carry the version (the asset
+    file names) and each table of SHA256 digests.
+    """
+    module = _required_module_pin(pin)
+    old_bare, new_bare = pin.version.lstrip("v"), latest.lstrip("v")
+    steps = [
+        f"{module.shown}: {module.name} -> {_spelled_like(module.version, latest)}"
+    ]
+    for name, keys, values in module.tables:
+        digests = [value for value in values if _SHA256_HEX.fullmatch(value)]
+        if digests:
+            steps.append(
+                f"{module.shown}: {name}, {len(digests)} SHA256 digest(s) -> the new "
+                "release's, taken the way the module's docstring says these were"
+            )
+        named = sorted(
+            {
+                text
+                for text in (*keys, *values)
+                if old_bare and old_bare in text and not _SHA256_HEX.fullmatch(text)
+            }
+        )
+        if named:
+            steps.append(
+                f"{module.shown}: {name}, the {len(named)} file name(s) that carry the "
+                f"version, {old_bare} -> {new_bare}; check each still exists upstream"
+            )
+    return steps + _license_steps(pins, pin.tool, latest)
+
+
 def _bundle_version_name(pins: Any, tool: str) -> str | None:
     """The module-level name ``RULES_BUNDLES[tool]`` takes its ``version=`` from.
 
@@ -1320,19 +1493,26 @@ _KIND_STEPS: dict[str, Callable[[Any, Pin, str], list[str]]] = {
     RULES_BUNDLE: _rules_bundle_steps,
     GEM: _gem_steps,
     BUNDLED_LIBRARY: _bundled_library_steps,
+    PLUGIN_MODULE: _plugin_module_steps,
     DOCKERFILE_ARG: _dockerfile_arg_steps,
 }
 
 
 def _pinned_digests(pins: Any, pin: Pin) -> list[str]:
-    """Every digest and commit the module pins for ``pin``; a bump replaces each."""
+    """Every digest and commit the module pins for ``pin``; a bump replaces each.
+
+    For a plugin-module pin that is also every digest its install module holds.
+    """
+    values: list[str] = []
     if pin.kind == RELEASE_BINARY:
         archives = list(pins._ASSET_TABLES.get(pin.tool, {}).values())
     elif pin.kind == RULES_BUNDLE:
         archives = [pins.RULES_BUNDLES[pin.tool].url.rsplit("/", 1)[-1]]
     else:
         archives = []
-    values: list[str] = []
+    if pin.kind == PLUGIN_MODULE:
+        for _, _, table_values in _required_module_pin(pin).tables:
+            values += [v for v in table_values if _SHA256_HEX.fullmatch(v)]
     for archive in archives:
         for table in ("_DIGESTS", "_EXECUTABLE_DIGESTS", "_BUNDLE_CONTENTS_DIGESTS"):
             value = getattr(pins, table, {}).get(archive)
@@ -1377,6 +1557,12 @@ def _copy_steps(pins: Any, pin: Pin, repo_root: Path) -> list[str]:
     for spelling in spellings:
         argv += ["-e", spelling]
     argv += ["--", ".", f":(exclude){PINS_FILE}"]
+    # A plugin-module pin's own install module holds its digest tables, which its
+    # steps name already, the way the pins module's are named.
+    if pin.kind == PLUGIN_MODULE:
+        module_path = _required_module_pin(pin).path
+        if module_path.is_relative_to(repo_root):
+            argv.append(f":(exclude){module_path.relative_to(repo_root).as_posix()}")
     try:
         found = subprocess.run(  # nosec B603 B607 - git, fixed arguments, this checkout
             argv, capture_output=True, timeout=60, check=False

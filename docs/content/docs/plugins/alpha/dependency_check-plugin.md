@@ -89,7 +89,7 @@ Without `--failOnCVSS` the tool exits 0 when the run finished, whether or not it
 
 ## Suppressions
 
-ASH suppressions by rule, path and line work as for any scanner. The rule id is the vulnerability id, such as `CVE-2021-44228`.
+ASH suppressions by rule and path work as for any scanner. The rule id is the vulnerability id, such as `CVE-2021-44228`. A Dependency-Check finding names a dependency file and no line, so a suppression with `line_start` or `line_end` never matches one.
 
 <!-- doctest: config kind=other reason="a suppression entry shown in isolation" -->
 ```yaml

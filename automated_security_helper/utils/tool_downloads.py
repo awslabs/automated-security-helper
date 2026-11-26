@@ -850,9 +850,9 @@ def get_rules_bundle(name: str) -> RulesBundle:
 #
 # ``scripts/check_pinned_tool_versions.py`` reads new entries from these tables and
 # needs no edit to start reporting the tool's upstream releases and what a bump of it
-# changes, as long as ``TOOL_VERSIONS`` or ``RULES_BUNDLES`` pins its download or it
-# has a ``distribution``. An entry none of those name is refused until the script is
-# taught what kind of pin it is.
+# changes, as long as something it reads pins the version: ``TOOL_VERSIONS``,
+# ``RULES_BUNDLES``, a ``distribution``, ``bundled_in``, a Dockerfile ARG, or an
+# alpha plugin's install module (``PIN_KINDS`` there). Any other entry is refused.
 #
 # Known limitations
 # -----------------

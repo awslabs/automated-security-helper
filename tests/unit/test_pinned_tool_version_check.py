@@ -727,6 +727,34 @@ _UNTRACKED_DOCKERFILE_VERSION_ARGS: dict[str, str] = {}
 PINS_REL = PINS_FILE.relative_to(REPO_ROOT).as_posix()
 GEMFILE_REL = "automated_security_helper/assets/Gemfile"
 GEMFILE_LOCK = REPO_ROOT / f"{GEMFILE_REL}.lock"
+PLUGIN_MODULES = REPO_ROOT / "automated_security_helper" / "plugin_modules"
+
+
+def _version_name(tool: str) -> str:
+    return f"{tool.upper().replace('-', '_')}_VERSION"
+
+
+def _install_modules(tool: str, root: Path = PLUGIN_MODULES) -> list[Path]:
+    """The alpha plugin install modules that assign ``<TOOL>_VERSION``, read as text."""
+    assignment = re.compile(
+        rf"^{re.escape(_version_name(tool))}\s*(?::[^=\n]*)?=", re.MULTILINE
+    )
+    return [
+        path
+        for path in sorted(root.glob("*/*_install.py"))
+        if assignment.search(path.read_text(encoding="utf-8"))
+    ]
+
+
+def _module_tables(text: str) -> dict[str, str]:
+    """Each module-level dict literal of an install module's text, by name: its body."""
+    return dict(
+        re.findall(
+            r"^([A-Z_][A-Z0-9_]*)\s*(?::[^=\n]*)?=\s*\{\n(.*?)^\}",
+            text,
+            re.MULTILINE | re.DOTALL,
+        )
+    )
 
 
 def _kind(pins: Any, tool: str) -> str:
@@ -742,6 +770,8 @@ def _kind(pins: Any, tool: str) -> str:
         return "uv-tool"
     if entry is not None and getattr(entry, "bundled_in", None):
         return "bundled-library"
+    if entry is not None and len(_install_modules(tool)) == 1:
+        return "plugin-module"
     if entry is not None and _dockerfile_args(tool):
         return "dockerfile-arg"
     return "unknown"
@@ -757,7 +787,10 @@ def _archives(pins: Any, tool: str) -> list[str]:
 
 
 def _pinned_digests(pins: Any, tool: str) -> set[str]:
-    """Every digest and commit the module pins for ``tool``; a bump replaces each."""
+    """Every digest and commit the module pins for ``tool``; a bump replaces each.
+
+    For a tool a plugin's install module pins, also every digest that module holds.
+    """
     values: set[str] = set()
     for archive in _archives(pins, tool):
         for table in ("_DIGESTS", "_EXECUTABLE_DIGESTS", "_BUNDLE_CONTENTS_DIGESTS"):
@@ -767,6 +800,11 @@ def _pinned_digests(pins: Any, tool: str) -> set[str]:
     for key, value in pins._THIRD_PARTY_HASHES.items():
         if key == f"{tool} commit" or key.startswith(f"{tool}/"):
             values.add(value)
+    if _kind(pins, tool) == "plugin-module":
+        (module,) = _install_modules(tool)
+        values |= set(
+            re.findall(r'"([0-9a-fA-F]{64})"', module.read_text(encoding="utf-8"))
+        )
     return values
 
 
@@ -890,6 +928,16 @@ def _needles(pins: Any, tool: str, version: str) -> list[str]:
         if constant:
             needles.append(constant)
         needles += ["rules_bundles.extract_bundle", "contents_digest"]
+    if kind == "plugin-module":
+        # The install module, its version constant, and each of its tables a release
+        # changes: one of SHA256 digests, or one whose names carry the version.
+        (module,) = _install_modules(tool)
+        needles += [module.relative_to(REPO_ROOT).as_posix(), _version_name(tool)]
+        needles += [
+            name
+            for name, body in _module_tables(module.read_text(encoding="utf-8")).items()
+            if re.search(r'"[0-9a-fA-F]{64}"', body) or bare in body
+        ]
     for archive in _archives(pins, tool):
         for table in ("_DIGESTS", "_EXECUTABLE_DIGESTS", "_BUNDLE_CONTENTS_DIGESTS"):
             if archive in getattr(pins, table, {}):
@@ -958,6 +1006,7 @@ class TestBumpStepsNameEveryValueABumpChanges:
             "bundled-library",
             "dockerfile-arg",
             "gem",
+            "plugin-module",
             "release-binary",
             "rules-bundle",
             "uv-tool",
@@ -1109,6 +1158,23 @@ class TestBumpStepsNameEveryValueABumpChanges:
         assert not unowned, unowned
 
     @pytest.mark.unit
+    def test_every_install_module_version_belongs_to_a_pin(self, pins: Any) -> None:
+        """A version an alpha plugin pins in its install module gets a report."""
+        assert _unowned_install_pins(pins, PLUGIN_MODULES) == []
+
+    @pytest.mark.unit
+    def test_an_install_module_version_with_no_license_entry_is_caught(
+        self, pins: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Negative control: without a license entry nothing reads the module's pin."""
+        root = _plugin_tree(
+            tmp_path, {"ash_fake_plugins/fake_install.py": _FAKE_MODULE}
+        )
+        monkeypatch.setattr(checker, "PLUGIN_MODULES", root)
+        planted = (root / "ash_fake_plugins" / "fake_install.py").as_posix()
+        assert _unowned_install_pins(pins, root) == [f"{planted} FAKETOOL_VERSION"]
+
+    @pytest.mark.unit
     def test_an_apt_pin_names_the_new_version_and_every_line(self) -> None:
         """The Dockerfile's apt pins: the report gives the edit and every line."""
         pin = checker.enumerate_apt_pins()[0]
@@ -1118,6 +1184,230 @@ class TestBumpStepsNameEveryValueABumpChanges:
         assert f"{pin.package}={pin.version} -> {pin.package}=9.9.9-1" in report
         for number in pin.lines:
             assert f"Dockerfile:{number}" in report
+
+
+# ---------------------------------------------------------------------------
+# Tools an alpha plugin pins in its own install module
+# ---------------------------------------------------------------------------
+
+#: A made-up digest, so a planted module looks like a real one.
+_FAKE_DIGEST = "ab" * 32
+
+#: An install module for a made-up tool, in the shape of the real ones.
+_FAKE_MODULE = (
+    'FAKETOOL_VERSION = "v1.0.0"\n'
+    "\n"
+    'ASSETS = {("linux", "amd64"): "faketool_1.0.0_linux_amd64.tar.gz"}\n'
+    "\n"
+    "ASSET_SHA256 = {\n"
+    f'    "faketool_1.0.0_linux_amd64.tar.gz": "{_FAKE_DIGEST}",\n'
+    "}\n"
+)
+
+
+def _plugin_tree(root: Path, modules: dict[str, str]) -> Path:
+    """A plugin_modules tree: a copy of every real install module, and ``modules``."""
+    for path in PLUGIN_MODULES.glob("*/*_install.py"):
+        copy = root / path.relative_to(PLUGIN_MODULES)
+        copy.parent.mkdir(parents=True, exist_ok=True)
+        copy.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    for relative, text in modules.items():
+        planted = root / relative
+        planted.parent.mkdir(parents=True, exist_ok=True)
+        planted.write_text(text, encoding="utf-8")
+    return root
+
+
+def _fake_license_entry(pins: Any, version: str = "v1.0.0") -> Any:
+    return dataclasses.replace(
+        pins.THIRD_PARTY_LICENSES["osv-scanner"],
+        tool="faketool",
+        version=version,
+        repository="https://github.com/example/faketool",
+    )
+
+
+def _unowned_install_pins(pins: Any, root: Path) -> list[str]:
+    """``<module> <NAME>`` for each install-module version no plugin-module pin reads."""
+    by_name = {_version_name(p.tool): p for p in checker.enumerate_pins(pins)}
+    unowned = []
+    for path in sorted(root.glob("*/*_install.py")):
+        names = re.findall(
+            r"^([A-Z][A-Z0-9_]*_VERSION)\s*(?::[^=\n]*)?=",
+            path.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        for name in names:
+            pin = by_name.get(name)
+            if pin is None or pin.kind != checker.PLUGIN_MODULE:
+                shown = (
+                    path.relative_to(REPO_ROOT)
+                    if path.is_relative_to(REPO_ROOT)
+                    else path
+                )
+                unowned.append(f"{shown.as_posix()} {name}")
+    return unowned
+
+
+class TestPluginModulePins:
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        ("tool", "name", "project"),
+        [
+            ("osv-scanner", "OSV_SCANNER_VERSION", "google/osv-scanner"),
+            ("polaris", "POLARIS_VERSION", "FairwindsOps/polaris"),
+        ],
+    )
+    def test_the_alpha_install_modules_are_read(
+        self, pins: Any, tool: str, name: str, project: str
+    ) -> None:
+        # Red at the base: enumerate_pins refused both license entries, "not in
+        # TOOL_VERSIONS or RULES_BUNDLES and has no distribution".
+        pin = {p.tool: p for p in checker.enumerate_pins(pins)}[tool]
+        (module,) = _install_modules(tool)
+        shown = module.relative_to(REPO_ROOT).as_posix()
+        assert pin.kind == checker.PLUGIN_MODULE
+        assert (pin.ecosystem, pin.project) == (checker.GITHUB, project)
+        assert pin.pinned_in == (f"{shown} {name}", "THIRD_PARTY_LICENSES")
+        assert pin.version == pins.THIRD_PARTY_LICENSES[tool].version
+        assert re.search(
+            rf'^{name} = "{re.escape(pin.version)}"$',
+            module.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+
+    @pytest.mark.unit
+    def test_a_license_entry_at_another_release_is_a_half_applied_bump(
+        self, pins: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        entry = dataclasses.replace(
+            pins.THIRD_PARTY_LICENSES["osv-scanner"], version="v0.0.1"
+        )
+        monkeypatch.setitem(pins.THIRD_PARTY_LICENSES, "osv-scanner", entry)
+        with pytest.raises(checker.PinEnumerationError, match="half-applied"):
+            checker.enumerate_pins(pins)
+
+    @pytest.mark.unit
+    def test_a_new_install_module_is_read_without_editing_the_script(
+        self, pins: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _plugin_tree(
+            tmp_path, {"ash_fake_plugins/fake_install.py": _FAKE_MODULE}
+        )
+        monkeypatch.setattr(checker, "PLUGIN_MODULES", root)
+        monkeypatch.setitem(
+            pins.THIRD_PARTY_LICENSES, "faketool", _fake_license_entry(pins)
+        )
+        pin = {p.tool: p for p in checker.enumerate_pins(pins)}["faketool"]
+        assert (pin.kind, pin.version, pin.project) == (
+            checker.PLUGIN_MODULE,
+            "v1.0.0",
+            "example/faketool",
+        )
+        assert not _uncovered(pins, checker.enumerate_pins(pins))
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "module",
+        [
+            _FAKE_MODULE.replace('"v1.0.0"', "_read_version()"),
+            _FAKE_MODULE + 'FAKETOOL_VERSION = "v1.0.1"\n',
+        ],
+        ids=["not a string literal", "assigned twice"],
+    )
+    def test_a_version_that_is_not_one_string_literal_is_refused(
+        self,
+        pins: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        module: str,
+    ) -> None:
+        root = _plugin_tree(tmp_path, {"ash_fake_plugins/fake_install.py": module})
+        monkeypatch.setattr(checker, "PLUGIN_MODULES", root)
+        monkeypatch.setitem(
+            pins.THIRD_PARTY_LICENSES, "faketool", _fake_license_entry(pins)
+        )
+        with pytest.raises(
+            checker.PinEnumerationError, match="not as one string literal"
+        ):
+            checker.enumerate_pins(pins)
+
+    @pytest.mark.unit
+    def test_two_install_modules_that_pin_one_tool_are_refused(
+        self, pins: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _plugin_tree(
+            tmp_path,
+            {
+                "ash_fake_plugins/fake_install.py": _FAKE_MODULE,
+                "ash_fake_two_plugins/fake_two_install.py": _FAKE_MODULE,
+            },
+        )
+        monkeypatch.setattr(checker, "PLUGIN_MODULES", root)
+        monkeypatch.setitem(
+            pins.THIRD_PARTY_LICENSES, "faketool", _fake_license_entry(pins)
+        )
+        with pytest.raises(checker.PinEnumerationError, match="pick one"):
+            checker.enumerate_pins(pins)
+
+    @pytest.mark.unit
+    def test_a_plugin_module_pin_whose_module_is_gone_gets_no_steps(
+        self, pins: Any
+    ) -> None:
+        pin = checker.Pin(
+            tool="faketool",
+            version="v1.0.0",
+            ecosystem=checker.GITHUB,
+            project="example/faketool",
+            pinned_in=("THIRD_PARTY_LICENSES",),
+            kind=checker.PLUGIN_MODULE,
+        )
+        with pytest.raises(checker.PinEnumerationError, match="FAKETOOL_VERSION"):
+            checker.bump_steps(pins, checker.Result(pin, "v9.9.9", "outdated"))
+
+    @pytest.mark.integration
+    def test_the_osv_scanner_steps_name_its_module_tables_and_copies(
+        self, pins: Any
+    ) -> None:
+        pin = {p.tool: p for p in checker.enumerate_pins(pins)}["osv-scanner"]
+        steps = checker.bump_steps(pins, checker.Result(pin, "v9.9.9", "outdated"))
+        text = "\n".join(steps)
+        module = (
+            "automated_security_helper/plugin_modules/ash_osv_scanner_plugins/"
+            "osv_scanner_install.py"
+        )
+        for needle in (
+            f"{module}: OSV_SCANNER_VERSION -> v9.9.9",
+            f"{module}: ASSET_SHA256, 6 SHA256 digest(s)",
+            'THIRD_PARTY_LICENSES["osv-scanner"].version -> v9.9.9',
+            "gh api repos/google/osv-scanner/commits/v9.9.9",
+            "tests/test_data/scanners/osv-scanner/captured/README.md:",
+        ):
+            assert needle in text, f"{needle!r} missing from:\n{text}"
+        # The asset names carry no version, so no rename step; and the module is not
+        # listed as a copy of its own digests.
+        assert "file name(s) that carry the version" not in text
+        assert not any(
+            step.startswith(f"{module}:") and "a copy" in step for step in steps
+        )
+
+    @pytest.mark.integration
+    def test_the_polaris_steps_rename_the_versioned_asset_names(
+        self, pins: Any
+    ) -> None:
+        pin = {p.tool: p for p in checker.enumerate_pins(pins)}["polaris"]
+        text = "\n".join(
+            checker.bump_steps(pins, checker.Result(pin, "v10.3.0", "outdated"))
+        )
+        for needle in (
+            ": POLARIS_VERSION -> v10.3.0",
+            ": ASSETS, the 5 file name(s) that carry the version, 10.2.6 -> 10.3.0",
+            ": ARCHIVE_SHA256, 5 SHA256 digest(s)",
+            ": ARCHIVE_SHA256, the 5 file name(s) that carry the version",
+            ": MEMBER_SHA256, 5 SHA256 digest(s)",
+            "tests/test_data/scanners/polaris/captured/README.md:",
+        ):
+            assert needle in text, f"{needle!r} missing from:\n{text}"
 
 
 @pytest.mark.unit
