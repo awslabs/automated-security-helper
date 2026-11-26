@@ -238,7 +238,7 @@ def build_merge_argv(
     output_formats: list[str] | None = None,
     ash_binary: str = ASH_CLI,
 ) -> list[str]:
-    """Return the ``ashx merge`` argv for the collector.
+    """Return the ``ashx results merge`` argv for the collector.
 
     One ``--results`` per shard directory, never the shared parent.
     ``resolve_results_file`` searches a directory recursively and requires exactly
@@ -268,7 +268,7 @@ def build_merge_argv(
     if min_severity is not None and min_severity not in SEVERITY_LEVELS:
         raise ContractError(f"minSeverity must be one of {SEVERITY_LEVELS}, got {min_severity!r}.")
 
-    argv = [ash_binary, "merge"]
+    argv = [ash_binary, "results", "merge"]
     for directory in results_dirs or []:
         argv += ["--results", shell_arg(directory)]
     if output_dir is not None:

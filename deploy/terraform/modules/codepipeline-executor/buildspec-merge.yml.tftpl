@@ -3,7 +3,7 @@ version: 0.2
 # Collect action: merge every shard's results and let ASH decide the verdict.
 #
 # This action produces the pipeline's pass or fail, but it does not *compute* it.
-# `ashx merge` does, and its exit code is propagated unchanged:
+# `ashx results merge` does, and its exit code is propagated unchanged:
 #
 #   0  no actionable findings at or above --min-severity
 #   1  refused to merge - shard coverage is incomplete, so the findings are
@@ -97,7 +97,7 @@ phases:
       #
       # errexit is disabled around the merge so its exit code can be captured and
       # propagated from post_build after the results are safely uploaded. The
-      # explicit set +e / set -e pair is used rather than `if ! ashx merge`,
+      # explicit set +e / set -e pair is used rather than `if ! ashx results merge`,
       # because that form disables errexit for the whole compound statement.
       - |
         set -eu
@@ -106,7 +106,7 @@ phases:
           printf '{}\n' > "$ASH_CONFIG"
           export ASH_CONFIG
         fi
-        set -- /usr/local/bin/ash-container-init ashx merge \
+        set -- /usr/local/bin/ash-container-init ashx results merge \
           --output-dir merged \
           --min-severity "$MIN_SEVERITY"
 
@@ -125,7 +125,7 @@ phases:
         "$@"
         MERGE_EXIT=$?
         set -e
-        echo "ashx merge exited $MERGE_EXIT"
+        echo "ashx results merge exited $MERGE_EXIT"
         printf '%s' "$MERGE_EXIT" > merge_exit_code
 
   post_build:
@@ -144,10 +144,10 @@ phases:
         set -eu
         MERGE_EXIT="$(cat merge_exit_code 2>/dev/null || echo 1)"
         case "$MERGE_EXIT" in
-          0) echo "ashx merge: no actionable findings at or above $MIN_SEVERITY" ;;
-          1) echo "ashx merge: refused to merge - shard coverage incomplete, findings UNKNOWN" >&2 ;;
-          2) echo "ashx merge: actionable findings at or above $MIN_SEVERITY" >&2 ;;
-          5) echo "ashx merge: usage error - ASH refused its command line; check the image's ash_version" >&2 ;;
-          *) echo "ashx merge: exited $MERGE_EXIT" >&2 ;;
+          0) echo "ashx results merge: no actionable findings at or above $MIN_SEVERITY" ;;
+          1) echo "ashx results merge: refused to merge - shard coverage incomplete, findings UNKNOWN" >&2 ;;
+          2) echo "ashx results merge: actionable findings at or above $MIN_SEVERITY" >&2 ;;
+          5) echo "ashx results merge: usage error - ASH refused its command line; check the image's ash_version" >&2 ;;
+          *) echo "ashx results merge: exited $MERGE_EXIT" >&2 ;;
         esac
         exit "$MERGE_EXIT"

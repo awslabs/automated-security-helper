@@ -856,7 +856,7 @@ function Invoke-ASH {
         # tests/unit/test_sandbox_refused_by_every_container_entrypoint.py checks these
         # lists against ./ash's and the real commands and options.
         # BEGIN generated: ps1-subcommands (scripts/generate_wrapper_tables.py)
-        $ashSubcommands = @('scan', 'build-image', 'report', 'diff', 'trend', 'merge', 'results', 'mcp', 'get-genai-guide', 'container', 'config', 'dependencies', 'inspect', 'plugin', 'suppress', 'express')
+        $ashSubcommands = @('scan', 'results', 'mcp', 'get-genai-guide', 'container', 'config', 'dependencies', 'plugin', 'suppress', 'express')
         $ashTakesSandbox = @('scan')
         # END generated: ps1-subcommands
         # The root ash options that take a value, ASH_ROOT_VALUE_OPTIONS in ./ash. A value
@@ -867,21 +867,21 @@ function Invoke-ASH {
         # END generated: ps1-root-value-options
         # BEGIN generated: ps1-option-subcommands (scripts/generate_wrapper_tables.py)
         $ashOptionSubcommands = @{
-            '--quiet'                = 'scan build-image mcp container'
-            '--no-color'             = 'scan build-image report merge mcp container'
+            '--quiet'                = 'scan mcp container'
+            '--no-color'             = 'scan mcp container'
             '--progress'             = 'scan'
             '--no-progress'          = 'scan'
             '--show-summary'         = 'scan'
             '--no-show-summary'      = 'scan'
-            '--fail-on-findings'     = 'scan merge'
-            '--no-fail-on-findings'  = 'scan merge'
-            '--verbose'              = 'scan build-image report merge mcp container'
-            '--debug'                = 'scan build-image report merge mcp container'
-            '--offline'              = 'scan build-image container'
-            '--config'               = 'scan build-image report merge container'
+            '--fail-on-findings'     = 'scan'
+            '--no-fail-on-findings'  = 'scan'
+            '--verbose'              = 'scan mcp container'
+            '--debug'                = 'scan mcp container'
+            '--offline'              = 'scan container'
+            '--config'               = 'scan container'
             '--scanners'             = 'scan'
             '--exclude-scanners'     = 'scan'
-            '--ignore-suppressions'  = 'scan merge'
+            '--ignore-suppressions'  = 'scan'
         }
         # END generated: ps1-option-subcommands
         $subcommandAt = -1

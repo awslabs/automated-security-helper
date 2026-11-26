@@ -368,8 +368,9 @@ class TestAfterUpgrade:
         assert status["phase"] == PHASE_FINDINGS, status
         assert before_upgrade["inflight_shard_argv"][1] == "scan"
         argv = upgraded["inflight_collect_argv"]
-        assert "--" in argv and argv[argv.index("--") + 1 : argv.index("--") + 3] == [
+        assert "--" in argv and argv[argv.index("--") + 1 : argv.index("--") + 4] == [
             ASH_CLI,
+            "results",
             "merge",
         ], argv
 

@@ -118,7 +118,7 @@ describe('sharded scan', () => {
       .filter((a) => a.name.includes('Shard'))
       .flatMap((a) => a.outputs);
 
-    expect(command).toContain('ashx merge');
+    expect(command).toContain('ashx results merge');
     expect(command.match(/--results/g)).toHaveLength(3);
 
     // Each --results points at the CodeBuild directory for one shard artifact,
@@ -429,8 +429,8 @@ describe('install modes', () => {
       .join('\n');
 
     expect(commands).toMatch(/^uvx --from "git\+https:[^"]+" ashx scan /m);
-    expect(commands).toMatch(/^uvx --from "git\+https:[^"]+" ashx merge /m);
-    expect(commands).not.toMatch(/" ash (scan|merge) /);
+    expect(commands).toMatch(/^uvx --from "git\+https:[^"]+" ashx results merge /m);
+    expect(commands).not.toMatch(/" ash (scan|results merge) /);
   });
 
   test('rejects a non-https repository at synth', () => {

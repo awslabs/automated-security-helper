@@ -2321,7 +2321,7 @@ jobs:
         shell: bash
         env:
           ASH_REPO_CLONE_URL: https://github.com/${{ github.repository }}.git
-          # The same config the scan used. `ash report` resolves a config too, and
+          # The same config the scan used. `ash results report` resolves a config too, and
           # loads the plugin modules it names, so without this it would discover the
           # checkout's.
           ASH_CONFIG: ${{ steps.config-ref-files.outputs.path || steps.inputs.outputs.config }}
@@ -2333,7 +2333,7 @@ jobs:
           # (merge_group queue branches are deleted mid-run) that fetch is what
           # fails, after the scan itself has already succeeded.
           uvx --from "${ASH_UVX_SOURCE}" ash \
-            --output-dir "${ASH_OUTPUT_DIR}" report ${ASH_CONFIG:+--config "${ASH_CONFIG}"}
+            --output-dir "${ASH_OUTPUT_DIR}" results report ${ASH_CONFIG:+--config "${ASH_CONFIG}"}
 
       # The listing holds names the scanned repository chose: an extracted archive
       # member keeps the name it had in the archive. The runner reads a line as a

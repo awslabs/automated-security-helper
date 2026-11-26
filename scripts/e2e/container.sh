@@ -30,7 +30,7 @@
 #    packaging, editors or workflows, and the merge of one). Builds both wheels. Container mode is driven by a host `ashx`, so an install of this
 #    channel is a host CLI plus the image it builds; the head wheel goes into a fresh
 #    host venv for step 2.
-# 2. Fresh install: requires the fresh tag to be absent, runs `ashx build-image --no-run
+# 2. Fresh install: requires the fresh tag to be absent, runs `ashx container build --no-run
 #    --ash-revision-to-install LOCAL` from the head export, and proves the image carries head's code
 #    byte for byte (scripts/e2e/image_provenance.py) and reports head's version. Then the
 #    three cases from tests/e2e/fixtures/cases.json through scripts/e2e/run_case.py with
@@ -158,15 +158,16 @@ image_version() {
   in_image "$1" sh -c "command -v $ASH_CLI_NAME >/dev/null && exec $ASH_CLI_NAME --version || exec ash --version"
 }
 
-# build <cli> <export dir> <tag> [build-image args]: the user-facing build, from the
-# export so its Dockerfile and its source are the build context.
+# build <cli> <export dir> <tag> [container build args]: the user-facing build, from
+# the export so its Dockerfile and its source are the build context. `container build`,
+# because 4.0 removed `build-image`; every release since 3.8 has `container build`, so
+# N-1's CLI takes it too when N-1 is the latest v3 release.
 # --ash-revision-to-install LOCAL keeps it from cloning a published revision instead;
-# provenance() is what proves it did not. The long name, because v3 has only that one
-# and N-1's CLI is v3 when N-1 is the latest v3 release.
+# provenance() is what proves it did not. The long name, because v3 has only that one.
 build() {
   local cli="$1" tree="$2" tag="$3"
   shift 3
-  (cd "$tree" && ASH_IMAGE_NAME="$tag" "$cli" build-image --no-run --ash-revision-to-install LOCAL "$@")
+  (cd "$tree" && ASH_IMAGE_NAME="$tag" "$cli" container build --no-run --ash-revision-to-install LOCAL "$@")
 }
 
 # run_case <cli> <image> <case> <label> [scan args]
@@ -270,7 +271,7 @@ PREV_WHEEL="$WORK/dist-prev/automated_security_helper-${PREV_VERSION}-py3-none-a
 uv venv --quiet --python "$PYTHON" "$WORK/venv-host"
 # Installed from the export directory, not the wheel built above: a LOCAL build finds its
 # Dockerfile and context from the running package (run_ash_container._local_source_tree),
-# and a package installed from a wheel records no source tree, so `build-image
+# and a package installed from a wheel records no source tree, so `container build
 # --ash-revision-to-install LOCAL` would refuse. A directory install records it. The
 # wheel is still built and checked, and the install builds its own from the same tree.
 uv pip install --quiet --no-cache --python "$WORK/venv-host/bin/python" "$SRC_HEAD"
@@ -348,7 +349,7 @@ prune_build_cache "the N build"
 UPGRADE_VENV="$WORK/venv-upgrade"
 uv venv --quiet --python "$PYTHON" "$UPGRADE_VENV"
 # From N-1's export directory, not its wheel, for the reason given at the host CLI's
-# install above: N-1's own `build-image --ash-revision-to-install LOCAL` builds the source
+# install above: N-1's own `container build --ash-revision-to-install LOCAL` builds the source
 # tree it was installed from, and a wheel install records none.
 uv pip install --quiet --no-cache --python "$UPGRADE_VENV/bin/python" "$SRC_PREV"
 if [ -x "$UPGRADE_VENV/bin/$ASH_CLI_NAME" ]; then

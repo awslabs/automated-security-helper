@@ -203,6 +203,12 @@ def _raises(fn, *args) -> bool:
 
 
 class TestMergeArgv:
+    def test_the_collector_runs_the_results_merge_command(self):
+        # ASH 4.0 removed the top-level `merge` spelling; `results merge` is the
+        # command, so an image of this release refuses `ashx merge` with exit 5.
+        argv = contract.build_merge_argv(results_dirs=["/r/shard-0"], output_dir="/m")
+        assert argv[:3] == [ASH_CLI, "results", "merge"]
+
     def test_one_results_flag_per_shard(self):
         argv = contract.build_merge_argv(
             results_dirs=["/r/shard-0", "/r/shard-1", "/r/shard-2"], output_dir="/m"
