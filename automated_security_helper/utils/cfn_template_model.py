@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Dict, cast
 
 from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.scan_targets import context_work_dir
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     open_in_scanned_tree,
@@ -808,7 +809,7 @@ def cloudformation_candidate_files(
     same list from the context (:func:`active_global_ignore_paths`).
     """
     if target_type == TargetType.CONVERTED:
-        files = [Path(p) for p in Path(context.work_dir).glob("**/*.*")]
+        files = [Path(p) for p in context_work_dir(context).glob("**/*.*")]
     else:
         from automated_security_helper.utils.get_scan_set import (
             honors_ignore_files,
@@ -1334,7 +1335,7 @@ def cloudformation_nothing_to_scan_reason(context: "PluginContext") -> str | Non
     work directory holds any file (ScanPhase adds it as a target then).
     """
     trees = [(TargetType.SOURCE, Path(context.source_dir))]
-    work_dir = Path(context.work_dir)
+    work_dir = context_work_dir(context)
     if work_dir.is_dir() and any(work_dir.rglob("*.*")):
         trees.append((TargetType.CONVERTED, work_dir))
     for target_type, root in trees:

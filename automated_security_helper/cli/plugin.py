@@ -443,6 +443,8 @@ def _print_tables(
                 try:
                     # ``plugin_type`` is the section key here (the table title).
                     kind = PluginKind.from_section(plugin_type)
+                    if kind is None:
+                        raise ValueError(f"{plugin_type!r} is not a plugin section")
                     if kind is PluginKind.REPORTER:
                         # The section a scan builds the reporter from: for a
                         # reporter that sends findings off the host, the
@@ -451,7 +453,8 @@ def _print_tables(
                         # as the report phase and ash report read it.
                         plugin_config = reporter_section(ash_config, plugin_class)
                     else:
-                        plugin_config = plugin_context.config.get_plugin_config(
+                        # The configuration the context was built with.
+                        plugin_config = ash_config.get_plugin_config(
                             plugin_type=kind,
                             plugin_name=plugin_config_key(plugin_class),
                         )

@@ -16,10 +16,25 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Tuple
 
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.vocab import TargetType
 
 if TYPE_CHECKING:
     from automated_security_helper.base.plugin_context import PluginContext
+
+
+def context_work_dir(context: "PluginContext") -> Path:
+    """The context's work directory, the converted tree's root, or a
+    ``ScannerError`` when the context has none.
+
+    A validated context always has one (``PluginContext._derive_work_dir``
+    derives it from the output directory); a context built with
+    ``model_construct`` and no work directory does not.
+    """
+    work_dir = context.work_dir
+    if work_dir is None:
+        raise ScannerError("The scan's context has no work directory")
+    return Path(work_dir)
 
 
 def scan_targets(
@@ -29,7 +44,7 @@ def scan_targets(
     targets: List[Tuple[TargetType, Path]] = [
         (TargetType.SOURCE, Path(context.source_dir))
     ]
-    work_dir = Path(context.work_dir)
+    work_dir = context_work_dir(context)
     if work_dir.is_dir() and any(work_dir.rglob("*.*")):
         targets.append((TargetType.CONVERTED, work_dir))
     return targets
