@@ -131,7 +131,7 @@
   and the Dockerfile build argument `ASH_COMMUNITY_PLUGIN_MODULES`, now
   `ASH_ALPHA_PLUGIN_MODULES` (a value given for the old name wins). The docs checks
   refuse the old `Community plugins` / `Community scanners` column headings and name
-  the new one. ASH 3.9.0 stops accepting the old spellings.
+  the new one. ASH 4.1.0 stops accepting the old spellings.
 
 ### Fixes
 

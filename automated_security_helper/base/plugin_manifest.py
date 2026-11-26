@@ -63,7 +63,9 @@ MANIFEST_SCHEMA_VERSION = 1
 
 #: The release that stops accepting the pre-rename "community" spellings. They are
 #: aliases for one release: accepted, mapped to the alpha spelling, and warned about.
-COMMUNITY_ALIASES_DROPPED_IN = "3.9.0"
+#: The 3.x line named 3.9.0; the 4.0 line keeps them through 4.0 and drops them in
+#: 4.1.0, so a 4.0 install still reads a "community" spelling and says what replaces it.
+COMMUNITY_ALIASES_DROPPED_IN = "4.1.0"
 
 #: The version a manifest declares for a plugin that ships inside the ASH wheel
 #: and so is versioned with it.
