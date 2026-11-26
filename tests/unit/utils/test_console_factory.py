@@ -22,7 +22,7 @@ terminal is passed everything as is.
 from __future__ import annotations
 
 import ast
-import datetime
+import datetime as dt
 import io
 import itertools
 import logging
@@ -183,7 +183,7 @@ def test_a_wrapped_suppression_reason_does_not_start_a_command(
     )
 
     monkeypatch.setattr(checker, "ASH_LOGGER", ci_logger(80))
-    soon = (datetime.date.today() + datetime.timedelta(days=10)).isoformat()
+    soon = (dt.date.today() + dt.timedelta(days=10)).isoformat()
     config = AshConfig(
         project_name="p",
         global_settings={

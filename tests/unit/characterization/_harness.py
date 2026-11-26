@@ -266,7 +266,7 @@ import collections
 import contextlib
 import ctypes
 import dataclasses
-import datetime as _datetime
+import datetime as dt
 import difflib
 import enum
 import errno
@@ -3523,7 +3523,7 @@ class _CountingUuids:
 
 
 #: The instant ``Harness.fix_clock`` stops ASH's clock at.
-FIXED_INSTANT = _datetime.datetime(2026, 1, 1, tzinfo=_datetime.timezone.utc)
+FIXED_INSTANT = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
 
 
 class _AnswersAsTheRealClass(type):
@@ -3540,7 +3540,7 @@ class _AnswersAsTheRealClass(type):
         return issubclass(subclass, cls._real)
 
 
-class _FixedDatetime(_datetime.datetime, metaclass=_AnswersAsTheRealClass):
+class _FixedDatetime(dt.datetime, metaclass=_AnswersAsTheRealClass):
     """``datetime`` whose clock reads ``FIXED_INSTANT``.
 
     What it returns is an instance of this class, which subclasses the real one, so
@@ -3549,10 +3549,10 @@ class _FixedDatetime(_datetime.datetime, metaclass=_AnswersAsTheRealClass):
     against this class too (``_AnswersAsTheRealClass``).
     """
 
-    _real = _datetime.datetime
+    _real = dt.datetime
 
     @classmethod
-    def _at(cls, value: _datetime.datetime) -> "_FixedDatetime":
+    def _at(cls, value: dt.datetime) -> "_FixedDatetime":
         return cls(
             value.year,
             value.month,
@@ -3565,7 +3565,7 @@ class _FixedDatetime(_datetime.datetime, metaclass=_AnswersAsTheRealClass):
         )
 
     @classmethod
-    def now(cls, tz: Optional[_datetime.tzinfo] = None) -> "_FixedDatetime":
+    def now(cls, tz: Optional[dt.tzinfo] = None) -> "_FixedDatetime":
         if tz is None:
             return cls._at(FIXED_INSTANT.replace(tzinfo=None))
         return cls._at(FIXED_INSTANT.astimezone(tz))
@@ -3580,7 +3580,7 @@ class _FixedDatetime(_datetime.datetime, metaclass=_AnswersAsTheRealClass):
 
     @classmethod
     def fromtimestamp(
-        cls, timestamp: float, tz: Optional[_datetime.tzinfo] = None
+        cls, timestamp: float, tz: Optional[dt.tzinfo] = None
     ) -> "_FixedDatetime":
         _refuse_real_clock_timestamp(timestamp)
         if tz is None:
@@ -3592,19 +3592,17 @@ class _FixedDatetime(_datetime.datetime, metaclass=_AnswersAsTheRealClass):
     def utcfromtimestamp(cls, timestamp: float) -> "_FixedDatetime":
         _refuse_real_clock_timestamp(timestamp)
         return cls._at(
-            _datetime.datetime.fromtimestamp(timestamp, _datetime.timezone.utc).replace(
-                tzinfo=None
-            )
+            dt.datetime.fromtimestamp(timestamp, dt.timezone.utc).replace(tzinfo=None)
         )
 
 
-class _FixedDate(_datetime.date, metaclass=_AnswersAsTheRealClass):
+class _FixedDate(dt.date, metaclass=_AnswersAsTheRealClass):
     """``date`` whose ``today()`` is the date of ``FIXED_INSTANT``."""
 
-    _real = _datetime.date
+    _real = dt.date
 
     @classmethod
-    def today(cls) -> _datetime.date:
+    def today(cls) -> dt.date:
         return FIXED_INSTANT.date()
 
 
@@ -3616,7 +3614,7 @@ def _refuse_real_clock_timestamp(timestamp: float) -> None:
     ASH measures from it against the fixed clock is negative.
     """
     if timestamp > FIXED_INSTANT.timestamp():
-        when = _datetime.datetime.fromtimestamp(timestamp, _datetime.timezone.utc)
+        when = dt.datetime.fromtimestamp(timestamp, dt.timezone.utc)
         raise _GUARDS.violation(
             f"ASH converted the timestamp {when.isoformat()} while the clock is fixed "
             f"at {FIXED_INSTANT.isoformat()}; it is later, so it came from the real "
@@ -4362,7 +4360,7 @@ class Harness:
         """
         import importlib.machinery
 
-        fixed = {_datetime.datetime: _FixedDatetime, _datetime.date: _FixedDate}
+        fixed = {dt.datetime: _FixedDatetime, dt.date: _FixedDate}
 
         def fix(module: types.ModuleType) -> None:
             for attr, value in list(vars(module).items()):

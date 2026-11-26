@@ -14,7 +14,7 @@ function beside it uses for plugin defaults.
 
 from __future__ import annotations
 
-import datetime
+import datetime as dt
 import sys
 from types import SimpleNamespace
 from typing import Any
@@ -61,7 +61,7 @@ def test_control_the_metrics_word_is_still_the_tightening(scanner: str) -> None:
 
 def test_a_value_that_is_not_json_is_not_a_tightening_and_does_not_raise() -> None:
     # A YAML date is data the loader can hand over; it matches no listed value.
-    assert _tightens("opengrep", "metrics", datetime.date(2026, 1, 1)) is False
+    assert _tightens("opengrep", "metrics", dt.date(2026, 1, 1)) is False
 
 
 def test_a_value_nested_too_deep_is_not_a_tightening_and_does_not_raise() -> None:

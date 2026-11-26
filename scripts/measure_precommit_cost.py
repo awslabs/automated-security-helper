@@ -70,7 +70,7 @@ exit status never depends on it.
 from __future__ import annotations
 
 import argparse
-import datetime
+import datetime as dt
 import hashlib
 import json
 import os
@@ -858,7 +858,7 @@ def main(argv: list[str] | None = None) -> int:
         with args.summary.open("a", encoding="utf-8") as handle:
             handle.write(format_summary(report))
     if args.trend_out:
-        today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+        today = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
         append_trend(args.trend_in, args.trend_out, trend_line(report, today))
     return 0
 

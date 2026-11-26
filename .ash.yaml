@@ -3869,131 +3869,72 @@ global_settings:
     # Harvested third-party Cargo.lock advisories. The sdist-lock harvester
     # extracts the Cargo.lock embedded in a dependency's PyPI sdist so grype
     # and trivy can read the upstream project's own build pins. Those pins are
-    # upstream's (ruff, pydantic-core, rpds-py, rtoml, polars, uv), not
-    # dependencies this repository installs or can bump directly; the cure is
-    # the upstream project releasing against the fixed crate and this
-    # repository taking that release. Each entry expires so the advisory
-    # resurfaces and the pin bump is reconsidered.
-    - rule_id: CVE-2026-115905
-      path: "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock"
-      package_name: zip
-      package_version: "8.6.0"
-      expires: "2026-12-27"
-      reason: >-
-        zip 8.6.0 inside ruff 0.16.10's sdist-embedded Cargo.lock (fixed in
-        zip 9.0.5). Upstream ruff's build input; taken when a ruff release
-        built against the fixed crate is adopted.
-    - rule_id: CVE-2026-115906
-      path: "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock"
-      package_name: zip
-      package_version: "8.6.0"
-      expires: "2026-12-27"
-      reason: >-
-        zip 8.6.0 inside ruff 0.16.10's sdist-embedded Cargo.lock. Upstream
-        ruff's build input; taken when a ruff release built against the fixed
-        crate is adopted.
-    - rule_id: CVE-2026-115907
-      path: "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock"
-      package_name: zip
-      package_version: "8.6.0"
-      expires: "2026-12-27"
-      reason: >-
-        zip 8.6.0 inside ruff 0.16.10's sdist-embedded Cargo.lock. Upstream
-        ruff's build input; taken when a ruff release built against the fixed
-        crate is adopted.
-    - rule_id: CVE-2026-115908
-      path: "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock"
-      package_name: zip
-      package_version: "8.6.0"
-      expires: "2026-12-27"
-      reason: >-
-        zip 8.6.0 inside ruff 0.16.10's sdist-embedded Cargo.lock. Upstream
-        ruff's build input; taken when a ruff release built against the fixed
-        crate is adopted.
-    - rule_id: CVE-2026-115909
-      path: "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock"
-      package_name: zip
-      package_version: "8.6.0"
-      expires: "2026-12-27"
-      reason: >-
-        zip 8.6.0 inside ruff 0.16.10's sdist-embedded Cargo.lock. Upstream
-        ruff's build input; taken when a ruff release built against the fixed
-        crate is adopted.
-    - rule_id: GHSA-m665-v7pm-7grj-zip
-      path: "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock"
-      package_name: zip
-      package_version: "8.6.0"
-      expires: "2026-12-27"
-      reason: >-
-        grype's id for the zip 8.6.0 advisory set in ruff 0.16.10's
-        sdist-embedded Cargo.lock (trivy reports the same as CVE-2026-115905).
-        Upstream ruff's build input.
-    - rule_id: GHSA-9hj8-73fh-9963-zip
-      path: "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock"
-      package_name: zip
-      package_version: "8.6.0"
-      expires: "2026-12-27"
-      reason: >-
-        grype's id for a zip 8.6.0 advisory in ruff 0.16.10's sdist-embedded
-        Cargo.lock. Upstream ruff's build input.
-    - rule_id: GHSA-q7v9-x93c-xqv3-zip
-      path: "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock"
-      package_name: zip
-      package_version: "8.6.0"
-      expires: "2026-12-27"
-      reason: >-
-        grype's id for a zip 8.6.0 advisory in ruff 0.16.10's sdist-embedded
-        Cargo.lock. Upstream ruff's build input.
-    - rule_id: GHSA-hjqx-j4rw-g7xv-zip
-      path: "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock"
-      package_name: zip
-      package_version: "8.6.0"
-      expires: "2026-12-27"
-      reason: >-
-        grype's id for a zip 8.6.0 advisory in ruff 0.16.10's sdist-embedded
-        Cargo.lock. Upstream ruff's build input.
-    - rule_id: GHSA-8hxf-qr8p-62x4-zip
-      path: "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock"
-      package_name: zip
-      package_version: "8.6.0"
-      expires: "2026-12-27"
-      reason: >-
-        grype's id for a zip 8.6.0 advisory in ruff 0.16.10's sdist-embedded
-        Cargo.lock. Upstream ruff's build input.
-    - rule_id: "GHSA-36hh-v3qg-5jq4*"
-      path: "**/sdist-lock-harvester/sdist-locks/**/Cargo.lock"
-      package_name: pyo3
-      expires: "2026-12-27"
-      reason: >-
-        pyo3 advisory inside the sdist-embedded Cargo.locks of pydantic-core
-        2.46.5, rpds-py 0.30.0 and rtoml 0.13.0 (trivy's bare GHSA id and
-        grype's -pyo3 suffixed id alike). The pin is each upstream's build
-        input; taken when those projects release against the fixed pyo3.
-    - rule_id: "GHSA-chgr-c6px-7xpp*"
-      path: "**/sdist-lock-harvester/sdist-locks/**/Cargo.lock"
-      package_name: pyo3
-      expires: "2026-12-27"
-      reason: >-
-        pyo3 advisory inside the sdist-embedded Cargo.locks of pydantic-core
-        2.46.5, rpds-py 0.30.0 and rtoml 0.13.0 (trivy's bare GHSA id and
-        grype's -pyo3 suffixed id alike). The pin is each upstream's build
-        input.
-    - rule_id: "GHSA-2mjx-qc3c-rqvc*"
-      path: "**/sdist-lock-harvester/sdist-locks/**/Cargo.lock"
+    # upstream's, not dependencies this repository installs or can bump
+    # directly; the cure is the upstream project releasing against the fixed
+    # crate and this repository taking that release. Each entry expires so the
+    # advisory resurfaces and the pin bump is reconsidered.
+    #
+    # Only polars-runtime-32 still embeds an advisory-hit crate: 1.44.2, the
+    # last polars 1.x release, pins rustls 0.23.43, and pyproject.toml holds
+    # polars below 2.0. ruff, pydantic-core, rpds-py, rtoml and uv are locked
+    # at releases whose sdist-embedded Cargo.locks carry the fixed zip (9.0.5),
+    # pyo3 (0.29 or later) and rustls (0.23.46), so they carry no entry here;
+    # tests/unit/config/test_no_stale_sdist_crate_suppressions.py fails if one
+    # comes back or a lock falls below a fixed release. One entry per scanner
+    # spelling (trivy's bare GHSA id, grype's id with the crate name appended),
+    # each pinned to the locked rustls, as tests/utils/sdist_harvest_oracle.py
+    # holds them. .ash/.ash_alpha_plugins.yaml carries no copy: it disables
+    # syft, and the harvester writes nothing while syft is disabled
+    # (converters/sdist_lock_harvester.py), so that scan has no harvested
+    # lockfile to report on.
+    - rule_id: GHSA-2mjx-qc3c-rqvc
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
       package_name: rustls
+      package_version: "0.23.43"
       expires: "2026-12-27"
       reason: >-
-        rustls advisory inside polars-runtime-32 1.44.2's sdist-embedded
-        Cargo.lock (trivy's bare GHSA id and grype's -rustls suffixed id
-        alike). Upstream polars' build input.
-    - rule_id: "GHSA-c8m5-c952-6cm4*"
-      path: "**/sdist-lock-harvester/sdist-locks/**/Cargo.lock"
+        trivy's id. rustls 0.23.43 inside polars-runtime-32 1.44.2's
+        sdist-embedded Cargo.lock (affected 0.23.13 through 0.23.44).
+        Unreachable from ASH: rustls backs polars' HTTP and cloud-storage IO
+        (reqwest and object_store under polars-io), and ASH calls no polars
+        read, scan, write or sink function; it builds frames from rows in
+        memory (models/frame_model.py to_frame and the reporters' frame
+        helpers). No polars 1.x release embeds a fixed rustls.
+    - rule_id: GHSA-2mjx-qc3c-rqvc-rustls
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
       package_name: rustls
+      package_version: "0.23.43"
       expires: "2026-12-27"
       reason: >-
-        rustls advisory inside the sdist-embedded Cargo.locks of
-        polars-runtime-32 1.44.2 and uv 0.13.5 (trivy's bare GHSA id and
-        grype's -rustls suffixed id alike). Each upstream's build input.
+        grype's id for the same rustls 0.23.43 advisory in polars-runtime-32
+        1.44.2's sdist-embedded Cargo.lock. Unreachable from ASH, which builds
+        polars frames from rows in memory and calls no polars IO function, so
+        polars' TLS client is never used. No polars 1.x release embeds a
+        fixed rustls.
+    - rule_id: GHSA-c8m5-c952-6cm4
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
+      package_name: rustls
+      package_version: "0.23.43"
+      expires: "2026-12-27"
+      reason: >-
+        trivy's id. rustls 0.23.43 inside polars-runtime-32 1.44.2's
+        sdist-embedded Cargo.lock (affected below 0.23.46). Unreachable from
+        ASH: rustls backs polars' HTTP and cloud-storage IO (reqwest and
+        object_store under polars-io), and ASH calls no polars read, scan,
+        write or sink function; it builds frames from rows in memory
+        (models/frame_model.py to_frame and the reporters' frame helpers). No
+        polars 1.x release embeds a fixed rustls.
+    - rule_id: GHSA-c8m5-c952-6cm4-rustls
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
+      package_name: rustls
+      package_version: "0.23.43"
+      expires: "2026-12-27"
+      reason: >-
+        grype's id for the same rustls 0.23.43 advisory in polars-runtime-32
+        1.44.2's sdist-embedded Cargo.lock. Unreachable from ASH, which builds
+        polars frames from rows in memory and calls no polars IO function, so
+        polars' TLS client is never used. No polars 1.x release embeds a
+        fixed rustls.
     # No GitHub Actions entries. `yaml.github-actions.security.*` was suppressed
     # over every workflow on the claim that interpolations were author-defined;
     # removing it surfaced shell injection through `${{ inputs.* }}` in
