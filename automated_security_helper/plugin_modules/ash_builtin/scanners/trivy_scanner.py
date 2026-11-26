@@ -681,22 +681,6 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         )
         return final_args, results_file, subprocess_env
 
-    def _unsupported_image_shape_reason(self, image) -> Optional[str]:
-        """trivy reads a reference or a saved archive; an OCI layout is neither.
-
-        ``trivy image`` takes a reference (resolved through its --image-src
-        order) or ``--input`` with a saved tarball; it has no input mode for an
-        image-layout directory. The scan is then a reported clean skip, and
-        grype and syft, whose stereoscope reads ``oci-dir:``, still scan it.
-        """
-        if image.oci_layout is not None:
-            return (
-                f"container image at {image.shown()} was not scanned by trivy: "
-                "trivy image reads a reference or a saved archive (--input), "
-                "not an OCI image-layout directory"
-            )
-        return None
-
     def _execute_image_scan(
         self, image
     ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
@@ -744,7 +728,19 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             for glob in self._image_exclude_globs()
         )
 
-        if image.oci_archive is not None:
+        if image.oci_layout is not None:
+            # trivy image has no input mode for a layout directory, so the layout
+            # is re-packed as a docker-archive in the results directory this scan
+            # owns and trivy reads that (utils/oci_layout_archive.py).
+            from automated_security_helper.utils.oci_layout_archive import (
+                layout_to_docker_archive,
+            )
+
+            repacked = layout_to_docker_archive(
+                image.oci_layout, results_file.parent / "layout-repacked.tar"
+            )
+            target_token = f"--input={repacked.absolute().as_posix()}"
+        elif image.oci_archive is not None:
             target_token = f"--input={Path(image.oci_archive).absolute().as_posix()}"
         else:
             engine = detect_container_engine()
