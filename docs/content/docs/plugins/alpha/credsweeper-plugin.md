@@ -106,4 +106,4 @@ A scan reads only the files it is given, with a rule set and model that ship in 
 
 ## License
 
-CredSweeper is MIT-licensed (Copyright 2021 Samsung). ASH installs it from PyPI at run time and does not redistribute it.
+CredSweeper is MIT-licensed (Copyright 2021 Samsung). ASH installs it from PyPI with `uv`, pinned to 1.19.7 (the release its license read was made on); the ASH container image pre-installs it at that version and ships the wheel's `LICENSE` beside it (the `credsweeper` entry in `THIRD_PARTY_LICENSES`).

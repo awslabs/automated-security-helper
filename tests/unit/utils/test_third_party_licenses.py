@@ -580,7 +580,8 @@ class TestThePythonTools:
     def test_their_licenses_are_staged_between_install_and_verification(self):
         core = _core_stage(DOCKERFILE.read_text())
         staged = core.index(
-            "install-pinned-tool --licenses-only bandit cfn-lint checkov guarddog semgrep zizmor"
+            "install-pinned-tool --licenses-only bandit cfn-lint checkov credsweeper "
+            "ggshield guarddog semgrep zizmor"
         )
         assert core.index('ash dependencies install --bin-path "${ASH_BIN_PATH}"') < (
             staged

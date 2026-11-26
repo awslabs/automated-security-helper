@@ -23,7 +23,7 @@ With the module listed, `kingfisher` runs by default. `scanners.kingfisher.enabl
 
 ## Installing the tool
 
-ASH has no pinned release of Kingfisher and its container image does not include it. Install the binary from the [Kingfisher releases](https://github.com/mongodb/kingfisher/releases) and put `kingfisher` on `PATH`. Without it the scanner is reported `MISSING`.
+ASH pins Kingfisher v2.19.1 in `utils/tool_downloads.py`: `ash dependencies install --tool kingfisher` downloads the release archive for the current platform, refuses a digest mismatch (archive and executable both), and puts `kingfisher` on `PATH`; the container image installs it the same way. A `kingfisher` already on `PATH` is left alone. Without either, the scanner is reported `MISSING`.
 
 ## Configuration
 

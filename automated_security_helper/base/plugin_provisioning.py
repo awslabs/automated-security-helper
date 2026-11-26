@@ -236,6 +236,16 @@ _CHECKOV = Provisioning(
 
 _GITLEAKS = Provisioning(tool_pins=(ToolPin("gitleaks", "v8.30.1"),))
 
+# The alpha Go SAST scanner. Its register already declares the pinned shape
+# (runtime PINNED_BINARY, all six platforms); the archive digests are the ones the
+# release's own gosec_2.30.0_checksums.txt publishes, re-verified by download.
+_GOSEC = Provisioning(tool_pins=(ToolPin("gosec", "v2.30.0"),))
+
+# The alpha secret scanner from MongoDB. Its release names its assets without a
+# version (kingfisher-linux-x64.tgz in every release), so tool_downloads also
+# records the version its digests were taken at (_DIGESTS_TAKEN_AT).
+_KINGFISHER = Provisioning(tool_pins=(ToolPin("kingfisher", "v2.19.1"),))
+
 # The Go toolchain syft or grype may run: no module proxy, no toolchain download. On a Go
 # module, syft (golang.use-packages-lib, on by default) and grype run the Go toolchain found
 # on PATH (``go list``; measured with a fake ``go``). A real toolchain resolves missing
@@ -500,8 +510,10 @@ PROVISIONING: Mapping[str, Provisioning] = MappingProxyType(
         "cfn-guard": _CFN_GUARD,
         "checkov": _CHECKOV,
         "gitleaks": _GITLEAKS,
+        "gosec": _GOSEC,
         "grype": _GRYPE,
         "hadolint": _HADOLINT,
+        "kingfisher": _KINGFISHER,
         "npm-audit": _NPM_AUDIT,
         "opengrep": _OPENGREP,
         "semgrep": _SEMGREP,

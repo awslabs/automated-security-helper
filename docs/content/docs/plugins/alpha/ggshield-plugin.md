@@ -99,4 +99,4 @@ This scanner cannot run offline: every scan calls the GitGuardian API. Under `AS
 
 ## License
 
-ggshield is MIT-licensed. ASH does not redistribute it: it is installed from PyPI with `uv`, and the GitGuardian service it calls has its own terms of use.
+ggshield is MIT-licensed. ASH installs it from PyPI with `uv`, pinned to 1.56.1 (the release its license read was made on); the ASH container image pre-installs it at that version and ships the wheel's `LICENSE` beside it (the `ggshield` entry in `THIRD_PARTY_LICENSES`). The GitGuardian service it calls has its own terms of use.

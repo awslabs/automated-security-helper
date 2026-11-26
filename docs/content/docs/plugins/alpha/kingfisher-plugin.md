@@ -24,7 +24,7 @@ Kingfisher runs beside the builtin secret scanners, not instead of them, so a se
 
 ## Installing Kingfisher
 
-ASH has no pinned release of Kingfisher: `utils/tool_downloads.py` has no `kingfisher` entry, and the ASH container image does not include it. Install the binary yourself, from the [Kingfisher releases](https://github.com/mongodb/kingfisher/releases), and put `kingfisher` on `PATH` (in a container run, in your own image). ASH's flags were checked against v2.19.1. If the binary is not found, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate).
+ASH pins Kingfisher v2.19.1 in `utils/tool_downloads.py`, so `ash dependencies install --config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_kingfisher_plugins"]' --tool kingfisher` downloads the release archive for your platform and refuses a digest mismatch (archive and executable both), and the ASH container image installs it the same way. A `kingfisher` already on `PATH` is left alone; ASH's flags were checked against v2.19.1. If no binary is found, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate).
 
 ## What is scanned
 
@@ -108,4 +108,4 @@ With `--no-validate` and `--no-update-check`, Kingfisher reads only the files it
 
 ## License
 
-Kingfisher is Apache-2.0 licensed. ASH does not bundle or redistribute it: you install the binary under its own license, and nothing of Kingfisher is shipped in the ASH package or image.
+Kingfisher is Apache-2.0 licensed. The ASH container image redistributes the pinned release binary, so it carries the repository `LICENSE` at the pinned commit and the release archive's `NOTICE` files beside it (the `kingfisher` entry in `THIRD_PARTY_LICENSES`); an `ash dependencies install` outside the image stages the same files. Nothing of Kingfisher is shipped in the ASH Python package itself.

@@ -245,6 +245,18 @@ _GRYPE_ASSETS: dict[PlatformArch, str] = {
     # windows/arm64: upstream publishes no such asset for this release.
 }
 
+# gosec (the alpha Go SAST scanner's tool). The v2.30.0 release also publishes
+# linux ppc64le and s390x archives; ASH's platform vocabulary has no such arch, so
+# they are not listed and get_tool_asset refuses them by name.
+_GOSEC_ASSETS: dict[PlatformArch, str] = {
+    ("linux", "amd64"): "gosec_2.30.0_linux_amd64.tar.gz",
+    ("linux", "arm64"): "gosec_2.30.0_linux_arm64.tar.gz",
+    ("darwin", "amd64"): "gosec_2.30.0_darwin_amd64.tar.gz",
+    ("darwin", "arm64"): "gosec_2.30.0_darwin_arm64.tar.gz",
+    ("windows", "amd64"): "gosec_2.30.0_windows_amd64.tar.gz",
+    ("windows", "arm64"): "gosec_2.30.0_windows_arm64.tar.gz",
+}
+
 # hadolint publishes bare executables, not archives, and its filenames carry no
 # version -- the version is only in the release tag in the URL. See
 # ToolAsset.archive, _BARE_EXECUTABLE_TOOLS and _DIGESTS_TAKEN_AT.
@@ -255,6 +267,21 @@ _HADOLINT_ASSETS: dict[PlatformArch, str] = {
     ("darwin", "arm64"): "hadolint-macos-arm64",
     ("windows", "amd64"): "hadolint-windows-x86_64.exe",
     # windows/arm64: upstream publishes no such asset for this release.
+}
+
+# kingfisher (the alpha secret scanner from MongoDB) names its assets without a
+# version -- every release publishes kingfisher-<os>-<arch>.tgz (zips on Windows) --
+# so the version lives only in the release tag in the URL, and the pin is completed
+# by its _DIGESTS_TAKEN_AT row, like crane's. The .deb/.rpm packages and the
+# kingfisher-rule-bundle.tgz the same release publishes are not used: the rules are
+# compiled into the executable, and the bundle is their source form.
+_KINGFISHER_ASSETS: dict[PlatformArch, str] = {
+    ("linux", "amd64"): "kingfisher-linux-x64.tgz",
+    ("linux", "arm64"): "kingfisher-linux-arm64.tgz",
+    ("darwin", "amd64"): "kingfisher-darwin-x64.tgz",
+    ("darwin", "arm64"): "kingfisher-darwin-arm64.tgz",
+    ("windows", "amd64"): "kingfisher-windows-x64.zip",
+    ("windows", "arm64"): "kingfisher-windows-arm64.zip",
 }
 
 _SYFT_ASSETS: dict[PlatformArch, str] = {
@@ -344,6 +371,20 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # with the assets, and each agreed with sha256sum over its asset and with the `digest`
 # field GitHub reports for it.
 #
+# gosec's six archive digests are transcribed from the release's own
+# gosec_2.30.0_checksums.txt and were re-verified on 2026-11-26 by downloading every
+# asset and hashing it (all six agreed). Its executable digests were taken from those
+# checked archives the same day: each member extracted and hashed with GNU tar and
+# sha256sum. The extracted linux/amd64 binary was run; it reports "Version: 2.30.0,
+# Git tag: v2.30.0".
+#
+# kingfisher publishes no checksums file, so like opengrep its digests are derived,
+# not transcribed: each of the six assets was downloaded on 2026-11-26 and hashed, and
+# the executable inside each was extracted (GNU tar for the .tgz assets, unzip for the
+# Windows zips) and hashed the same day. The extracted linux/x64 binary was run; it
+# reports "kingfisher 2.19.1". The first real install re-checks every value: a wrong
+# entry fails that install rather than sitting here unnoticed.
+#
 # Every line carries `# pragma: allowlist secret`, which is detect-secrets' own
 # inline marker. It is needed and it is honest: a 64-character hex string is exactly
 # what a high-entropy-string detector is built to find, and ASH scanning itself
@@ -431,6 +472,13 @@ _DIGESTS: dict[str, str] = {
     "gitleaks_8.30.1_darwin_arm64.tar.gz": "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5",  # pragma: allowlist secret
     "gitleaks_8.30.1_windows_x64.zip": "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e",  # pragma: allowlist secret
     "gitleaks_8.30.1_windows_arm64.zip": "b95f5e4f5c425cedca7ee203d9afd29597e692c4924a12ed42f970537c72cc0f",  # pragma: allowlist secret
+    # gosec v2.30.0 (from the release's gosec_2.30.0_checksums.txt, re-verified)
+    "gosec_2.30.0_linux_amd64.tar.gz": "3fcce2c4e802ff4169217874602a7df355e9a37bcb6ffaa34b08f3d5f336cdfb",  # pragma: allowlist secret
+    "gosec_2.30.0_linux_arm64.tar.gz": "0867994920453070a5d6a713e35921a3058473e5c3bf777fdd5a2d6f95313fda",  # pragma: allowlist secret
+    "gosec_2.30.0_darwin_amd64.tar.gz": "1b10b496954791f4b57448722f0cb93c0fa4aba24e9d286c0459dfde593e0898",  # pragma: allowlist secret
+    "gosec_2.30.0_darwin_arm64.tar.gz": "cac8c480673fc179798402b6d86efc12b6bcf11c18bcf377fda02cc55846dd97",  # pragma: allowlist secret
+    "gosec_2.30.0_windows_amd64.tar.gz": "503bdfe6155584f2497ef855846b66406bce5b574ce1a9c7a7bb171aff2caa02",  # pragma: allowlist secret
+    "gosec_2.30.0_windows_arm64.tar.gz": "836d13d37d53356d6214cdee7dae3fb2a3f9d5baf2b2ee38f6d2329c7c62e5aa",  # pragma: allowlist secret
     # grype v0.122.1
     "grype_0.122.1_linux_amd64.tar.gz": "f1ba7e2917ee1395618de20a98da0aa7c0fb1788927797651047c50502a37538",  # pragma: allowlist secret
     "grype_0.122.1_linux_arm64.tar.gz": "819e5be3d9516432fedb7b6b56df7306c3a16607606dfc05826eefbb00e471da",  # pragma: allowlist secret
@@ -443,6 +491,13 @@ _DIGESTS: dict[str, str] = {
     "hadolint-macos-x86_64": "ffe9bb18b23d5ed1eae50237aecdbb523d016e96da0bd4e7aa432040acfc3fde",  # pragma: allowlist secret
     "hadolint-macos-arm64": "5c09f3213f8e40406abe048233d985eebef336d4a6a20021be47fadb6cf480a2",  # pragma: allowlist secret
     "hadolint-windows-x86_64.exe": "01d927294962b5387f9ead4f18679158452be4f17c765ad0bdffe5264b9c7b0a",  # pragma: allowlist secret
+    # kingfisher v2.19.1 (no published checksums file; derived, see the comment above)
+    "kingfisher-linux-x64.tgz": "3449ba41007df91e6774a816dd64cc9385900a304ef3cbb58ab61e0a83448e1c",  # pragma: allowlist secret
+    "kingfisher-linux-arm64.tgz": "273744b70304704e46fb980cbe37fc9a94a96f62d65aaf07af1f21ea94b4b09f",  # pragma: allowlist secret
+    "kingfisher-darwin-x64.tgz": "4076a5985df5e92a4e209c90b1f6b635d80fbbac3d693ee7749d0782f7a1cc51",  # pragma: allowlist secret
+    "kingfisher-darwin-arm64.tgz": "c7441bb1708f65fb146121e351546661c5ace52fd948eff7fd7c6adb68e7c556",  # pragma: allowlist secret
+    "kingfisher-windows-x64.zip": "0318f322351da4b012d8c9619513ba3538f6f6c7aa10447003c3590da074efef",  # pragma: allowlist secret
+    "kingfisher-windows-arm64.zip": "9d4b6d2a97040ef7b05cbabfbe241ca315b71b439bf8e42db76954001fbb5f87",  # pragma: allowlist secret
     # syft v1.57.2
     "syft_1.57.2_linux_amd64.tar.gz": "ad92bd3ec1b94a3df01d4d0aec199afa9c42b72e86da436ff5f837914d32706b",  # pragma: allowlist secret
     "syft_1.57.2_linux_arm64.tar.gz": "8efe605309c98798e1ee0cffdcf8c05ca26819b4cd44c0b03650f1e963e9bdb6",  # pragma: allowlist secret
@@ -503,12 +558,26 @@ _EXECUTABLE_DIGESTS: dict[str, str] = {
     "gitleaks_8.30.1_darwin_arm64.tar.gz": "ba52fb1bfabbcde42f032afad3d6e0b19dff8ed105229a16e7caa338bbc0e84f",  # pragma: allowlist secret
     "gitleaks_8.30.1_windows_x64.zip": "17157e2ee8b76fc8b1d8bee607a250e34b8a8023c8bc81822d4b5ee4d78fcb7c",  # pragma: allowlist secret
     "gitleaks_8.30.1_windows_arm64.zip": "200df852fdecbedb19a33960657333cba5e231740bc8968972b507b50f93b194",  # pragma: allowlist secret
+    # gosec v2.30.0
+    "gosec_2.30.0_linux_amd64.tar.gz": "09008194e5c3a192a4b77d3872b591c638ccb698c6996f1ccbe2cd37d346eb6c",  # pragma: allowlist secret
+    "gosec_2.30.0_linux_arm64.tar.gz": "d9672cfbdeffe6ca40195a06cd8719a43eb0a08decf84a413d703840c90364d9",  # pragma: allowlist secret
+    "gosec_2.30.0_darwin_amd64.tar.gz": "91fd117ee448a29fd824da9da107cf595c6d2ef8c247030822320e122a949f16",  # pragma: allowlist secret
+    "gosec_2.30.0_darwin_arm64.tar.gz": "e2658e81b2eeb8239c409e72bc036a5ac51a896e7b67e1cb07789c94f35baa66",  # pragma: allowlist secret
+    "gosec_2.30.0_windows_amd64.tar.gz": "77bf70434f4779f80d9ed9410c0cfaa81f0f0ce7575653ad3ce4531eff3ed322",  # pragma: allowlist secret
+    "gosec_2.30.0_windows_arm64.tar.gz": "b70e0dd15744450ec45350cf6e75ff27da677e556bc315a0bd219773e0bd6889",  # pragma: allowlist secret
     # grype v0.122.1
     "grype_0.122.1_linux_amd64.tar.gz": "322a7839c1c9f6c1b6ac0aa6b61a7d94139b7f24780b82a05b63caab56d4286b",  # pragma: allowlist secret
     "grype_0.122.1_linux_arm64.tar.gz": "bd313717cfe7fa6807fed57942b661b02aa1709c77faaf3079a9b217b3a3d98c",  # pragma: allowlist secret
     "grype_0.122.1_darwin_amd64.tar.gz": "ca82c975f0788c9fa5a882c5eaa4b848e9d2c7c7d28d20519eadfe3cdc9a22f4",  # pragma: allowlist secret
     "grype_0.122.1_darwin_arm64.tar.gz": "df8effdd7d4069cfd8762516aa37ddc9e5bf026469f4f509daae2ef730c517f1",  # pragma: allowlist secret
     "grype_0.122.1_windows_amd64.zip": "663d5d39c88013ef043a159f7ccc3bf6a17a1bb1346edfc2272e2b7e241daf27",  # pragma: allowlist secret
+    # kingfisher v2.19.1
+    "kingfisher-linux-x64.tgz": "400f8706efe51a0b1207addbbce2e49bdd5d5807aace00faebf80c29aa8fe892",  # pragma: allowlist secret
+    "kingfisher-linux-arm64.tgz": "8c29ace632374540963a874f0e518a8bdc7cac1abaab06ca6296ee44eb669497",  # pragma: allowlist secret
+    "kingfisher-darwin-x64.tgz": "7798b1fb760bb8323cc151bdc49748925e723537c36da13292edfc8987a78d65",  # pragma: allowlist secret
+    "kingfisher-darwin-arm64.tgz": "831e2bafbb344644632490ada21c55e4843d8908ca794eb2bbe7b590ccb6bc2b",  # pragma: allowlist secret
+    "kingfisher-windows-x64.zip": "0b539b708725ecd0db8ed88be98aea87c5a0e52643954da191ec73e40bd5a0d6",  # pragma: allowlist secret
+    "kingfisher-windows-arm64.zip": "a16c881cdc4afc55862a8cf6f57c531a2f9a84136b161237ad898d07ea89eddf",  # pragma: allowlist secret
     # syft v1.57.2
     "syft_1.57.2_linux_amd64.tar.gz": "17cc40c1e40dbfdeb8c84b6d9928909bceb793f22e8a8023ef408625f1d96ec5",  # pragma: allowlist secret
     "syft_1.57.2_linux_arm64.tar.gz": "2bbe674996bbe831dcc68fa50b0c5e68acd728c5d9da7cc68d88713a9ef6b748",  # pragma: allowlist secret
@@ -564,6 +633,9 @@ _DIGESTS_TAKEN_AT: dict[str, str] = {
     # (go-containerregistry_Linux_x86_64.tar.gz), the version being in the tag.
     "crane": "v0.22.1",
     "hadolint": "v2.15.1",
+    # kingfisher names its assets for the platform only (kingfisher-linux-x64.tgz),
+    # the version being in the tag.
+    "kingfisher": "v2.19.1",
     "opengrep": "v2.0.0",
     "uv": "0.13.9",
 }
@@ -579,8 +651,10 @@ _RELEASE_BASE_URLS: dict[str, str] = {
     "cfn-guard": "https://github.com/aws-cloudformation/cloudformation-guard/releases/download",
     "crane": "https://github.com/google/go-containerregistry/releases/download",
     "gitleaks": "https://github.com/gitleaks/gitleaks/releases/download",
+    "gosec": "https://github.com/securego/gosec/releases/download",
     "grype": "https://github.com/anchore/grype/releases/download",
     "hadolint": "https://github.com/hadolint/hadolint/releases/download",
+    "kingfisher": "https://github.com/mongodb/kingfisher/releases/download",
     "opengrep": "https://github.com/opengrep/opengrep/releases/download",
     "syft": "https://github.com/anchore/syft/releases/download",
     "trivy": "https://github.com/aquasecurity/trivy/releases/download",
@@ -593,8 +667,10 @@ _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
     "cfn-guard": _CFN_GUARD_ASSETS,
     "crane": _CRANE_ASSETS,
     "gitleaks": _GITLEAKS_ASSETS,
+    "gosec": _GOSEC_ASSETS,
     "grype": _GRYPE_ASSETS,
     "hadolint": _HADOLINT_ASSETS,
+    "kingfisher": _KINGFISHER_ASSETS,
     "opengrep": _OPENGREP_ASSETS,
     "syft": _SYFT_ASSETS,
     "trivy": _TRIVY_ASSETS,
@@ -1038,12 +1114,17 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "cfn-guard/LICENSE": "28878a48de57252ed2c9119db71b2fc9766833a0c159d9f5df54cba4dea52dba",  # pragma: allowlist secret
     "cfn-guard/NOTICE": "ba249a48f79f76c72cffea8689eb7a5ce450a4a67ad6b1e44e8ff15a95b2b751",  # pragma: allowlist secret
     "crane commit": "8a72a424fdecb4caa14f2d525e5d2503331442b5",  # pragma: allowlist secret
+    "credsweeper commit": "f5887c0390dcd0b74aae9c7552ac51df3fc7b3fc",  # pragma: allowlist secret
+    "ggshield commit": "4cccd600fd3890a7aba07fd0a45e483f3099fe70",  # pragma: allowlist secret
     "gitleaks commit": "83d9cd684c87d95d656c1458ef04895a7f1cbd8e",  # pragma: allowlist secret
+    "gosec commit": "5eb1d104ef85ff2c905c877eb600e8c1dee33a22",  # pragma: allowlist secret
     "grype commit": "8f3ddeddc4a4ed6314248aaf0a7c510f98db8882",  # pragma: allowlist secret
     "guarddog commit": "3da172679cb58b1c9a780f9f5d640f855be016dc",  # pragma: allowlist secret
     "hadolint commit": "2eece55955ced00200be9729e9728cb7dacca505",  # pragma: allowlist secret
     "hadolint/LICENSE": "589ed823e9a84c56feb95ac58e7cf384626b9cbf4fda2a907bc36e103de1bad2",  # pragma: allowlist secret
     "hadolint/ThirdPartyNotices.txt": "424561d8aade37960e8db594ca5403f9a4a98f593ff1126a296298f11d3d1a27",  # pragma: allowlist secret
+    "kingfisher commit": "0b57b8122e10050db3cefffde1a555a061e0b280",  # pragma: allowlist secret
+    "kingfisher/LICENSE": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",  # pragma: allowlist secret
     "libgit2 commit": "0060d9cf5666f015b1067129bd874c6cc4c9c7ac",  # pragma: allowlist secret
     "libgit2/AUTHORS": "126ed06438e488d71f5232b39436b3a1dffccb9c2697e3a332fbe868975cd55f",  # pragma: allowlist secret
     "libgit2/COPYING": "e3712465634e97cfd850822a4eb5ac7d2f8a10f753189366d5a2060046f28288",  # pragma: allowlist secret
@@ -1241,6 +1322,29 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         commit=_THIRD_PARTY_HASHES["crane commit"],
         files=(LicenseFile("LICENSE"),),
     ),
+    # The alpha CredSweeper scanner's uv tool. The wheel's dist-info carries
+    # licenses/LICENSE (MIT, "Copyright (c) 2021 SAMSUNG"), the file the scanner's
+    # register cites; the repository publishes no NOTICE.
+    "credsweeper": ThirdPartyLicense(
+        tool="credsweeper",
+        version="1.19.7",
+        license="MIT",
+        repository="https://github.com/Samsung/CredSweeper",
+        commit=_THIRD_PARTY_HASHES["credsweeper commit"],
+        files=(LicenseFile("LICENSE"),),
+        distribution="credsweeper",
+    ),
+    # The alpha ggshield scanner's uv tool. The wheel's dist-info carries
+    # licenses/LICENSE (MIT), the file whose sha256 the scanner's register cites.
+    "ggshield": ThirdPartyLicense(
+        tool="ggshield",
+        version="1.56.1",
+        license="MIT",
+        repository="https://github.com/GitGuardian/ggshield",
+        commit=_THIRD_PARTY_HASHES["ggshield commit"],
+        files=(LicenseFile("LICENSE"),),
+        distribution="ggshield",
+    ),
     "gitleaks": ThirdPartyLicense(
         tool="gitleaks",
         version="v8.30.1",
@@ -1248,6 +1352,17 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         repository="https://github.com/gitleaks/gitleaks",
         commit=_THIRD_PARTY_HASHES["gitleaks commit"],
         files=(LicenseFile("LICENSE"),),
+    ),
+    # The alpha gosec scanner's tool. The release archive holds the executable, a
+    # README and the Apache-2.0 text as LICENSE.txt, byte-identical across the six
+    # pinned archives and the file the scanner's register cites.
+    "gosec": ThirdPartyLicense(
+        tool="gosec",
+        version="v2.30.0",
+        license="Apache-2.0",
+        repository="https://github.com/securego/gosec",
+        commit=_THIRD_PARTY_HASHES["gosec commit"],
+        files=(LicenseFile("LICENSE.txt"),),
     ),
     "grype": ThirdPartyLicense(
         tool="grype",
@@ -1296,6 +1411,26 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             "lists. Their sources are on Hackage at "
             "https://hackage.haskell.org/package/<name>-<version>, the links that "
             "file gives."
+        ),
+    ),
+    # The alpha kingfisher scanner's tool. The release archive holds the executable,
+    # a CHECKSUM file and a notices directory (the Apache-2.0 NOTICE, the generated
+    # Rust THIRD_PARTY_NOTICES and the vectorscan notice -- each read from the
+    # archive, and each platform's archive carries its own build's copies), but no
+    # license file, so the LICENSE comes from the repository at the pinned commit.
+    "kingfisher": ThirdPartyLicense(
+        tool="kingfisher",
+        version="v2.19.1",
+        license="Apache-2.0",
+        repository="https://github.com/mongodb/kingfisher",
+        commit=_THIRD_PARTY_HASHES["kingfisher commit"],
+        files=(
+            _from_source(
+                "kingfisher", "https://github.com/mongodb/kingfisher", "LICENSE"
+            ),
+            LicenseFile("NOTICE"),
+            LicenseFile("THIRD_PARTY_NOTICES"),
+            LicenseFile("kingfisher-vectorscan-NOTICE"),
         ),
     ),
     # Compiled into the pygit2 wheel GuardDog depends on (pygit2.libs/libgit2-*.so),

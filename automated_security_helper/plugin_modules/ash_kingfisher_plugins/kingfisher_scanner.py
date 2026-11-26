@@ -353,17 +353,19 @@ class KingfisherScanner(ScannerPluginBase[KingfisherScannerConfig]):
                 ),
             ),
             runtime=opsf.RuntimeFacet(
-                kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
+                kind=opsf.RuntimeKind.PINNED_BINARY,
                 external_programs=(),
                 invocations=opsf.Invocations.ONE,
+                tool_versions_key="kingfisher",
                 python_only=False,
                 use_uv_tool=False,
             ),
             runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
-                provisionable=(),
-                note="utils/tool_downloads has no kingfisher pin, so ASH provisions "
-                "nothing; the operator puts the binary on PATH",
+                provisionable=opsf.PLATFORMS_ALL,
+                note="the v2.19.1 release publishes darwin, linux and windows "
+                "archives for both amd64 and arm64; derived from "
+                "tool_downloads.supported_platforms",
             ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.DEGRADED,
@@ -405,7 +407,7 @@ class KingfisherScanner(ScannerPluginBase[KingfisherScannerConfig]):
                 "credential; 3 means nothing to scan and fails the scan",
             ),
             provenance=opsf.ProvenanceFacet(
-                source=opsf.ProvenanceSource.USER_INSTALLED,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=(
                     "ash_kingfisher_plugins in ash_plugin_modules",
                     "options.validate_credentials",
