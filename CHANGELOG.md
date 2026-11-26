@@ -180,6 +180,12 @@
   suppressed findings on resource `X` while its note said the scope was empty. A config
   file refuses this shape and still does. The stored entry now stays inert, and the
   empty-scope note is recorded once for it.
+- **A suppression's glob-free `package_path` now covers a finding whose install path is
+  spelled with a trailing slash.** An entry with `package_path: node_modules/a` did not
+  suppress a finding reported at `node_modules/a/`, so the finding stayed in the
+  report. It does now. Nothing else widens: `node_modules/ab/` and paths below the
+  named copy are still not covered, and an entry written with the trailing slash still
+  does not cover a finding reported without one.
 - **A cancelled scan no longer appears in `ash trend`.** The run's history record is
   removed on every path a cancel takes the run's results back: a cancel that lands
   during the final results rewrite or before the MCP server's own check now has the
