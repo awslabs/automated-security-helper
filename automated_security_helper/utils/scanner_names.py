@@ -115,7 +115,8 @@ the cycle it exists to route around.
 
 from __future__ import annotations
 
-from typing import FrozenSet, Mapping
+import re
+from typing import Dict, FrozenSet, Mapping
 
 from automated_security_helper.core.enums import ScannerToolType
 
@@ -164,3 +165,49 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
 #: Derived-and-compared by tests/unit/utils/test_scanner_names_registry_agreement.py.
 #: Add a scanner to the registry without adding it here and that test fails.
 SCANNER_TAG_NAMES: FrozenSet[str] = frozenset(SCANNER_TOOL_TYPES)
+
+
+#: Retired scanner names, each mapped to the shipped scanner that serves it.
+#:
+#: The name on the left is accepted everywhere a scanner name is read -- a
+#: ``scanners.<name>`` config section, ``--scanners`` / ``--exclude-scanners``,
+#: a ``dependencies install --tool`` name -- and resolves to the plugin on the
+#: right. It is a general table rather than a per-name special case so a
+#: retirement is one line here plus the fold ``config/ash_config.py`` already
+#: carries. The table is empty today: no shipped scanner is retired. A
+#: retirement adds its row here; alias-only options the serving plugin does not
+#: declare are dropped at the fold, with a log line naming them.
+SCANNER_NAME_ALIASES: Dict[str, str] = {}
+
+#: The spellings under which an alias is recognized: ASCII letters, digits and
+#: ``+`` kept, lowered. The same reduction ``AshConfig.get_plugin_config``
+#: applies to a plugin name, restated here because this module imports almost
+#: nothing from ASH (see the module docstring).
+_NAME_PUNCTUATION = re.compile(r"[^a-zA-Z0-9+]")
+
+
+def _reduced_name(name: str) -> str:
+    return _NAME_PUNCTUATION.sub("", name).lower()
+
+
+def canonical_scanner_name(name: str) -> str:
+    """The scanner name ``name`` selects, with retired names resolved.
+
+    An alias of ``SCANNER_NAME_ALIASES`` (matched case- and
+    punctuation-insensitively, so ``Old-Name`` and ``old_name`` count) answers
+    its canonical plugin name; any other name answers itself unchanged, in the
+    caller's own spelling. Callers that log the mapping do so themselves: this
+    module has no logger on purpose.
+    """
+    return SCANNER_NAME_ALIASES.get(_reduced_name(name), name)
+
+
+def selection_key(name: str) -> str:
+    """The key two scanner names are compared on when a run selects scanners.
+
+    Lower-cased and stripped, with a retired name resolved to the scanner that
+    serves it, so a retired spelling and the scanner serving it compare equal.
+    The scan phase, the selection helpers and the dependencies tool lookup all
+    compare names through this one function.
+    """
+    return canonical_scanner_name(name.strip()).lower().strip()

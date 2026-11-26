@@ -5689,8 +5689,9 @@ def _outputs_known_file_names() -> Set[str]:
     import automated_security_helper.plugin_modules as plugin_modules
     from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 
-    # ash.lock is the committed suppression lock (utils/ash_lock.py), an input
-    # ASH reads and ``ash suppress`` writes under .ash/, not a report.
+    # .ash.lock is the committed suppression lock (utils/ash_lock.py), an input
+    # ASH reads and ``ash suppress`` writes at the scan root; the bare ash.lock
+    # spelling is its deprecated .ash/ash.lock location, still read until v4.0.
     known = {
         "ash.log",
         "ash.log.jsonl",

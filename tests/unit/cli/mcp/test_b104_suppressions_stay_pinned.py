@@ -32,7 +32,10 @@ from typing import Any, Dict, List
 import pytest
 import yaml
 
-from automated_security_helper.utils.suppression_matcher import file_path_matches
+from automated_security_helper.utils.suppression_matcher import (
+    _rule_id_matches,
+    file_path_matches,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -44,13 +47,15 @@ FLAGGED_TEXT = '"0.0.0.0" if config.host is None'
 
 
 def _select_b104(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Every B104 entry whose path REACHES the mcp module, read by the real
-    matcher: string equality would let a glob or a bare directory (which
-    matches its whole subtree) hide a real ``0.0.0.0`` bind."""
+    """Every entry that suppresses a B104 finding in the mcp module, read by
+    the real matchers on both fields: string equality would let a ``b104``
+    or ``B10*`` spelling (the rule matcher is case-insensitive fnmatch), a
+    path glob or a bare directory (which matches its whole subtree) hide a
+    real ``0.0.0.0`` bind."""
     return [
         e
         for e in entries
-        if e.get("rule_id") == "B104"
+        if _rule_id_matches("B104", str(e.get("rule_id") or ""))
         and file_path_matches(MCP_PATH, str(e.get("path") or ""))
     ]
 
@@ -94,6 +99,21 @@ def test_the_two_configs_carry_the_same_pin():
         "the default and alpha self-scan configs must pin the mcp B104 entry "
         "to the same symbol (kept in step)"
     )
+
+
+def test_the_selector_sees_every_rule_spelling_the_product_matcher_accepts():
+    """Control: the product reads ``rule_id`` as case-insensitive fnmatch
+    (``_rule_id_matches``), so an entry spelled ``b104``, ``B10*`` or ``*``
+    suppresses the B104 finding too. Unselected, such an entry would sit
+    beside the pinned one without failing the exactly-one assertion."""
+    planted = [
+        {"rule_id": "b104", "path": MCP_PATH},
+        {"rule_id": "B10*", "path": MCP_PATH},
+        {"rule_id": "*", "path": MCP_PATH},
+    ]
+    assert _select_b104(planted) == planted
+    # An entry with no rule_id suppresses no B104 finding, so it stays out.
+    assert _select_b104([{"path": MCP_PATH}]) == []
 
 
 def test_the_selector_sees_every_path_spelling_that_reaches_the_module():

@@ -75,7 +75,6 @@ NON_SCAN_SUBCOMMANDS = frozenset(
         "plugin",
         "suppress",
         "express",
-        "trend",
     }
 )
 
@@ -515,8 +514,12 @@ def _run_on_daemon(
         }
 
         def send_signal_frame(signum: int) -> None:
+            # Built outside the swallow: the except exists for a dead socket,
+            # and a signal_frame that raised would otherwise stop signal
+            # forwarding to the daemon silently.
+            frame = runtime.signal_frame(signum)
             try:
-                runtime.send_frame(sock, runtime.signal_frame(signum))
+                runtime.send_frame(sock, frame)
             except Exception:
                 pass
 
