@@ -135,6 +135,7 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
     "cfn-nag": ScannerToolType.IAC.value,
     "checkov": ScannerToolType.IAC.value,
     "credsweeper": ScannerToolType.SECRETS.value,
+    "dep-scan": ScannerToolType.SCA.value,
     "dependency-check": ScannerToolType.SCA.value,
     "detect-secrets": ScannerToolType.SECRETS.value,
     "betterleaks": ScannerToolType.SECRETS.value,

@@ -1,0 +1,120 @@
+{
+  "runs": [
+    {
+      "results": [
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "."
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "BIT-apisix-2023-44487 affects io.netty/netty-codec-http2 4.1.94.Final. io.netty:netty-codec-http2 vulnerable to HTTP/2 Rapid Reset Attack Fixed in 4.1.100.Final."
+          },
+          "partialFingerprints": {
+            "depscan/v1": "f3e4e68605c7af1088d1dc0e0be1c0de"
+          },
+          "properties": {
+            "cwes": [
+              400
+            ],
+            "depscan_prioritized": false,
+            "fix_available": true,
+            "fixed_versions": [
+              "4.1.100.Final"
+            ],
+            "issue_severity": "HIGH",
+            "package_name": "io.netty/netty-codec-http2",
+            "package_version": "4.1.94.Final",
+            "purl": "pkg:maven/io.netty/netty-codec-http2@4.1.94.Final?type=jar",
+            "tags": [
+              "vulnerability",
+              "dependency",
+              "CWE-400"
+            ]
+          },
+          "ruleId": "BIT-apisix-2023-44487"
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "."
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "CVE-2023-4043 affects org.eclipse.parsson/parsson 1.1.2. In Eclipse Parsson before versions 1.1.4 and 1.0.5, Parsing JSON from untrusted sources can lead malicious actors to exploit the fact that the built-in support for parsing numbers with large scale in Java has a number of edge cases where the input text of a number can lead to much larger processi... Fixed in 1.1.4."
+          },
+          "partialFingerprints": {
+            "depscan/v1": "51afa26c496740b72313e820c9156c06"
+          },
+          "properties": {
+            "cwes": [
+              834
+            ],
+            "depscan_prioritized": false,
+            "fix_available": true,
+            "fixed_versions": [
+              "1.1.4"
+            ],
+            "issue_severity": "HIGH",
+            "package_name": "org.eclipse.parsson/parsson",
+            "package_version": "1.1.2",
+            "purl": "pkg:maven/org.eclipse.parsson/parsson@1.1.2?type=jar",
+            "tags": [
+              "vulnerability",
+              "dependency",
+              "CWE-834"
+            ]
+          },
+          "ruleId": "CVE-2023-4043"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "informationUri": "https://github.com/owasp-dep-scan/dep-scan",
+          "name": "dep-scan",
+          "rules": [
+            {
+              "id": "BIT-apisix-2023-44487",
+              "name": "BIT-apisix-2023-44487",
+              "properties": {
+                "tags": [
+                  "dep-scan",
+                  "vulnerability"
+                ]
+              },
+              "shortDescription": {
+                "text": "io.netty:netty-codec-http2 vulnerable to HTTP/2 Rapid Reset Attack"
+              }
+            },
+            {
+              "helpUri": "https://osv.dev/vulnerability/CVE-2023-4043",
+              "id": "CVE-2023-4043",
+              "name": "CVE-2023-4043",
+              "properties": {
+                "tags": [
+                  "dep-scan",
+                  "vulnerability"
+                ]
+              },
+              "shortDescription": {
+                "text": "In Eclipse Parsson before versions 1.1.4 and 1.0.5, Parsing JSON from untrusted sources can lead malicious actors to exploit the fact that the built-in support for parsing numbers with large scale in Java has a number of edge cases where the input text of a number can lead to much larger processi..."
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

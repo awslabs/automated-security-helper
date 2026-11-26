@@ -205,6 +205,10 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
         "(captured/*.json); a prep through the scanner's converter is still "
         "to author",
     ),
+    # The committed SARIF is the converter's output (sarif_document over
+    # convert_vdr) for a REAL dep-scan VDR (captured/positive.vdr.json); a
+    # regeneration test keeps it honest.
+    "dep-scan": CorpusSpec("dep-scan", sarif=("captured/*.sarif",)),
     # The committed captured/template-shaped.sarif is written to the adapter's
     # shape, not captured from a dependency-check run, so it is not evidence of
     # the tool (the snyk-code row's reasoning).
@@ -763,7 +767,7 @@ def test_the_gate_carries_no_waiver_but_the_register() -> None:
 def test_the_registry_and_the_corpus_table_agree() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
     names = {_name(cls) for cls in SCANNER_CLASSES}
-    assert len(SCANNER_CLASSES) == 30, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == 31, sorted(c.__name__ for c in SCANNER_CLASSES)
     assert names == set(CORPORA) == set(SCANNER_TOOL_TYPES), (
         f"registry {sorted(names)} / corpus table {sorted(CORPORA)}: a scanner "
         "needs a CORPORA row (a corpus, or None with the fixture to author)"

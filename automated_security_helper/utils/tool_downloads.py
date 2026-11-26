@@ -1114,6 +1114,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "cfn-guard/LICENSE": "28878a48de57252ed2c9119db71b2fc9766833a0c159d9f5df54cba4dea52dba",  # pragma: allowlist secret
     "cfn-guard/NOTICE": "ba249a48f79f76c72cffea8689eb7a5ce450a4a67ad6b1e44e8ff15a95b2b751",  # pragma: allowlist secret
     "crane commit": "8a72a424fdecb4caa14f2d525e5d2503331442b5",  # pragma: allowlist secret
+    "dep-scan commit": "6c998ee17d9bc4e1fc1da9b5df11821c8532a675",  # pragma: allowlist secret
     "ggshield commit": "4cccd600fd3890a7aba07fd0a45e483f3099fe70",  # pragma: allowlist secret
     "gitleaks commit": "83d9cd684c87d95d656c1458ef04895a7f1cbd8e",  # pragma: allowlist secret
     "gosec commit": "5eb1d104ef85ff2c905c877eb600e8c1dee33a22",  # pragma: allowlist secret
@@ -1322,6 +1323,22 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         repository="https://github.com/google/go-containerregistry",
         commit=_THIRD_PARTY_HASHES["crane commit"],
         files=(LicenseFile("LICENSE"),),
+    ),
+    # The alpha dep-scan scanner's uv tool: PyPI owasp-depscan, whose executable is
+    # depscan. Keyed by the scanner's config name, the name --uv-tool-pins writes
+    # the pin under. The wheel's dist-info carries licenses/LICENSE (MIT), the file
+    # whose sha256 the scanner's register cites; it is byte-identical to the
+    # repository LICENSE at the tag (compared on 2026-11-26). `depscan --version`
+    # prints "depscan 6.3.2".
+    "dep-scan": ThirdPartyLicense(
+        tool="dep-scan",
+        version="v6.3.2",
+        license="MIT",
+        repository="https://github.com/owasp-dep-scan/dep-scan",
+        commit=_THIRD_PARTY_HASHES["dep-scan commit"],
+        files=(LicenseFile("LICENSE"),),
+        executables=("depscan",),
+        distribution="owasp-depscan",
     ),
     # CredSweeper (alpha scanner) has NO entry: the table is what the image must
     # carry, and the image cannot install credsweeper 1.19.7 -- it depends on pyjks,

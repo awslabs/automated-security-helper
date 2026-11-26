@@ -57,6 +57,7 @@ _DENIED_OPTION_DEFAULTS: dict[str, dict[str, Any]] = {
         "offline": False,
     },
     "credsweeper": {"tool_version": None},
+    "dep-scan": {"tool_version": None},
     "ferret-scan": {
         "checks": "all",
         "confidence_levels": "all",
@@ -152,6 +153,14 @@ MANIFESTS = (
         "CredSweeperScanner",
         "CredSweeperScannerConfigOptions",
         owned=(f"{_DOCS}/credsweeper-plugin.md", f"{_FIXTURES}/credsweeper"),
+    ),
+    _alpha(
+        "dep-scan",
+        "ash_dep_scan_plugins",
+        "dep_scan_scanner",
+        "DepScanScanner",
+        "DepScanScannerConfigOptions",
+        owned=(f"{_DOCS}/dep-scan-plugin.md", f"{_FIXTURES}/dep-scan"),
     ),
     _alpha(
         "dependency-check",
