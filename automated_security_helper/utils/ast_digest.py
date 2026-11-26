@@ -1,6 +1,3 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 """Canonical syntax-tree digests: what ``.ash.lock`` records of a source file.
 
 A digest is the SHA-256 of a stream of records produced by walking a

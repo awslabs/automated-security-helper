@@ -1,6 +1,3 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 """``global_settings.suppression_invalidation_scope`` survives every path that
 writes a config back.
 

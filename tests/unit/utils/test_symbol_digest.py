@@ -1,6 +1,3 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 """The symbol digest: what a symbol-scoped ``.ash.lock`` scope is bound to.
 
 Why this exists

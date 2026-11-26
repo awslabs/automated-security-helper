@@ -1,6 +1,3 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 """The canonical syntax-tree digest ``.ash.lock`` records (utils/ast_digest.py).
 
 Why this exists

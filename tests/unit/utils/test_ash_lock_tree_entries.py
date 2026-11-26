@@ -1,6 +1,3 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 """``.ash.lock`` tree entries: per-scope states, binding, refresh, migration and scans.
 
 Why this exists
