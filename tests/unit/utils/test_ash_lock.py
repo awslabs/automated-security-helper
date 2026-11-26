@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -141,11 +142,17 @@ def _sarif(uri: str, lines) -> SarifReport:
     )
 
 
-def _apply(root: Path, tmp_path: Path, suppressions, lines):
+def _context(root: Path, tmp_path: Path, suppressions) -> PluginContext:
+    """One scan's context: every suppression pass of that scan shares it."""
     config = AshConfig(
         project_name="p", global_settings={"suppressions": list(suppressions)}
     )
-    context = PluginContext(source_dir=root, output_dir=tmp_path / "out", config=config)
+    return PluginContext(source_dir=root, output_dir=tmp_path / "out", config=config)
+
+
+def _apply(root: Path, tmp_path: Path, suppressions, lines, context=None):
+    if context is None:
+        context = _context(root, tmp_path, suppressions)
     report = apply_suppressions_to_sarif(_sarif("src/app.py", lines), context)
     return [bool(r.suppressions) for r in report.runs[0].results]
 
@@ -228,24 +235,59 @@ class TestRefusalWithoutALockEntry:
         _lock(root, LockScope("B602", "risky"))
         assert ConfigValidator.check_config_file(config, source_dir=root).scan_accepts
 
-    def test_config_validate_without_a_source_dir_still_checks_the_lock(
+    def test_config_validate_without_a_source_dir_warns_and_does_not_refuse(
         self, tmp_path, monkeypatch
     ):
         # MCP validate_config and validate_and_raise call check_config_file
-        # with no source_dir; skipping the lock check there answered
-        # ``valid: True`` for a config a scan refuses. The lock root falls
-        # back to the root the config's location implies (out of ``.ash/``).
+        # with no source_dir, so the directory a scan reads is unknown and the
+        # lock beside the config is only a guess at its lock: MCP content is
+        # written to an empty temporary directory, and a config outside the
+        # scanned tree sits beside none of that tree. As an error, every
+        # symbol suppression there made the config invalid where a scan of
+        # its tree accepts it. The check still runs (out of ``.ash/`` too) and
+        # what it finds is a warning naming the command.
         from automated_security_helper.config.config_validator import ConfigValidator
 
         monkeypatch.delenv("ASH_CONFIG", raising=False)
         root = _tree(tmp_path)
         config = _config_text(root, SYMBOL_ENTRY)
         check = ConfigValidator.check_config_file(config)
-        assert not check.scan_accepts
-        assert any("ash suppress add" in e for e in check.errors), check.errors
+        assert check.scan_accepts, check.errors
+        noted = [
+            w
+            for w in check.warnings
+            if w.startswith(ConfigValidator.LOCK_NOT_CHECKED_PREFIX)
+        ]
+        assert len(noted) == 1, check.warnings
+        assert "ash suppress add B602 --symbol risky --file src/app.py" in noted[0]
         _lock(root, LockScope("B602", "risky"))
         after = ConfigValidator.check_config_file(config)
-        assert not any("ash suppress add" in e for e in after.errors), after.errors
+        assert after.scan_accepts, after.errors
+        assert not any(
+            w.startswith(ConfigValidator.LOCK_NOT_CHECKED_PREFIX)
+            for w in after.warnings
+        ), after.warnings
+
+    def test_mcp_validate_config_content_is_not_refused_for_a_lock_it_cannot_see(
+        self, tmp_path, monkeypatch
+    ):
+        # The content is written to an empty temporary directory, so no lock
+        # is ever beside it: the scanned tree's lock below records the
+        # suppression, and the answer was still ``valid: False``.
+        from automated_security_helper.cli.mcp_tools import mcp_validate_config
+        from automated_security_helper.config.config_validator import ConfigValidator
+
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
+        root = _tree(tmp_path)
+        config = _config_text(root, SYMBOL_ENTRY)
+        _lock(root, LockScope("B602", "risky"))
+        result = mcp_validate_config(config_content=config.read_text(encoding="utf-8"))
+        assert result["valid"] is True, result
+        assert result["errors"] == [], result
+        assert any(
+            w["message"].startswith(ConfigValidator.LOCK_NOT_CHECKED_PREFIX)
+            for w in result["warnings"]
+        ), result["warnings"]
 
     def test_an_unrecorded_scope_on_a_locked_file_is_refused(self, tmp_path):
         # The entry alone is not enough: once src/app.py was locked for
@@ -306,6 +348,99 @@ class TestRefusalWithoutALockEntry:
         assert parts[:3] == ["ash", "suppress", "add"]
         plain = add_command_for("B602", "risky", "src/app.py")
         assert "ash suppress add B602 --symbol risky --file src/app.py" in plain
+
+    def test_the_suggested_command_writes_a_rule_id_that_is_not_a_string(self):
+        # An unquoted `rule_id: 602` reads from YAML as an int, and
+        # shlex.quote raised TypeError on it.
+        from automated_security_helper.utils.ash_lock import add_command_for
+
+        assert add_command_for(602, "risky", "src/app.py").startswith(
+            "ash suppress add 602 --symbol risky --file src/app.py "
+        )
+        assert add_command_for(None, "risky", "src/app.py").startswith(
+            "ash suppress add '<rule-id>' --symbol risky"
+        )
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="symlink creation needs privileges on Windows",
+    )
+    def test_a_path_through_a_link_is_looked_up_under_the_file_it_leads_to(
+        self, tmp_path
+    ):
+        # `add` keys a suppression by the file its path leads to, as a scan
+        # looks it up; the config check keyed it as written, so link/app.py
+        # stayed refused after its own advised `add` had locked src/app.py.
+        from automated_security_helper.utils.ash_lock import resolved_lock_key
+
+        root = _tree(tmp_path)
+        (root / "link").symlink_to(root / "src", target_is_directory=True)
+        _lock(root, LockScope("B602", "risky"))
+        refuse_unlocked_symbol_suppressions(
+            [_symbol_suppression(path="link/app.py")], root
+        )
+        assert resolved_lock_key(root, "link/app.py") == "src/app.py"
+        assert resolved_lock_key(root, "./src\\app.py") == "src/app.py"
+        assert resolved_lock_key(root, "../outside.py") is None
+        (root / "out").symlink_to(tmp_path, target_is_directory=True)
+        assert resolved_lock_key(root, "out/x.py") is None
+
+    def test_a_suppression_whose_file_is_gone_is_told_to_go_not_to_be_added(
+        self, tmp_path
+    ):
+        # `refresh --drop-missing` leaves the entry gone and the suppression
+        # unrecorded; the `add` command the refusal named then failed with
+        # "is not a file", so the advice could never be followed.
+        root = _tree(tmp_path)
+        (root / "src" / "app.py").unlink()
+        with pytest.raises(ASHConfigValidationError) as caught:
+            refuse_unlocked_symbol_suppressions([_symbol_suppression()], root)
+        text = str(caught.value)
+        assert "'src/app.py' no longer exists" in text, text
+        assert "remove it from the config" in text
+        assert "ash suppress add" not in text
+        # A root that is only a guess at the scanned tree calls nothing gone.
+        with pytest.raises(ASHConfigValidationError) as guessed:
+            refuse_unlocked_symbol_suppressions(
+                [_symbol_suppression()], root, scanned_tree=False
+            )
+        assert "ash suppress add B602 --symbol risky --file src/app.py" in str(
+            guessed.value
+        )
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="symlink creation needs privileges on Windows",
+    )
+    def test_only_a_file_that_no_longer_exists_is_gone(self, tmp_path):
+        from automated_security_helper.utils.ash_lock import file_is_gone
+
+        root = _tree(tmp_path)
+        assert not file_is_gone(root, "src/app.py")
+        assert file_is_gone(root, "src/missing.py")
+        # A pattern or a directory spelling names no one file to be gone.
+        assert not file_is_gone(root, "src/*.py")
+        assert not file_is_gone(root, "src/missing/")
+        assert not file_is_gone(root, "../missing.py")
+        # The link itself exists, so it is not gone; it cannot be hashed.
+        (root / "src" / "dangling.py").symlink_to(root / "nowhere.py")
+        assert not file_is_gone(root, "src/dangling.py")
+
+    def test_a_locked_file_that_exists_but_cannot_be_hashed_is_not_advised_the_drop(
+        self, tmp_path
+    ):
+        # `refresh --drop-missing` keeps the entry of a file that is still
+        # there, so a notice advising it would send the operator in a circle.
+        from automated_security_helper.utils.ash_lock import stale_notice
+
+        root = _tree(tmp_path)
+        entry = _lock(root, LockScope("B602", "risky")).entries["src/app.py"]
+        kept = stale_notice("src/app.py", entry, "missing", gone=False)
+        assert "--drop-missing" not in kept
+        assert "exists but cannot be hashed" in kept
+        assert "ash suppress refresh src/app.py" in kept
+        gone = stale_notice("src/app.py", entry, "missing", gone=True)
+        assert "ash suppress refresh --drop-missing src/app.py" in gone
 
     def test_a_missing_entry_is_advised_the_drop_and_a_stale_one_the_refresh(
         self, tmp_path
@@ -407,6 +542,57 @@ class TestInertOnMismatch:
         symbol_spans.clear_symbol_cache()
         assert _apply(root, tmp_path, [_symbol_suppression()], lines[:1]) == [True]
 
+    def test_each_scan_names_a_stale_file_once_though_the_process_goes_on(
+        self, tmp_path, caplog
+    ):
+        # The record of notices already printed was the process's, so in a
+        # long-lived process (the MCP server, the express daemon) every scan
+        # after the first dropped the suppression and said nothing. It is the
+        # scan's: two passes over one scan's context name the file once, and
+        # the next scan, a new context, names it again. No cache is cleared
+        # between them.
+        _need_symbols_extra()
+        root = _tree(tmp_path)
+        _lock(root, LockScope("B602", "risky"))
+        (root / "src" / "app.py").write_text(
+            SOURCE.replace("ls", "ls -l"), encoding="utf-8"
+        )
+        lines = [_line("MARK risky")]
+        suppressions = [_symbol_suppression()]
+        scan = _context(root, tmp_path, suppressions)
+
+        def notices():
+            return [
+                r.getMessage()
+                for r in caplog.records
+                if "Stale suppression" in r.getMessage()
+            ]
+
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            assert _apply(root, tmp_path, suppressions, lines, scan) == [False]
+            assert _apply(root, tmp_path, suppressions, lines, scan) == [False]
+            first_scan = notices()
+            assert _apply(root, tmp_path, suppressions, lines) == [False]
+        assert len(first_scan) == 1, first_scan
+        assert len(notices()) == 2, notices()
+
+    def test_each_scan_names_a_broken_lock_once(self, tmp_path, caplog):
+        root = _tree(tmp_path)
+        (root / LOCK_RELATIVE_PATH).write_text("{not json", encoding="utf-8")
+        lines = [_line("MARK risky")]
+        suppressions = [_symbol_suppression()]
+        scan = _context(root, tmp_path, suppressions)
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            assert _apply(root, tmp_path, suppressions, lines, scan) == [False]
+            assert _apply(root, tmp_path, suppressions, lines, scan) == [False]
+            assert _apply(root, tmp_path, suppressions, lines) == [False]
+        broken = [
+            r.getMessage()
+            for r in caplog.records
+            if r.getMessage().startswith("Symbol suppressions do not apply")
+        ]
+        assert len(broken) == 2, broken
+
     def test_a_locked_file_that_was_deleted_stays_inert(self, tmp_path):
         _need_symbols_extra()
         root = _tree(tmp_path)
@@ -469,6 +655,17 @@ class TestLockFile:
         (root / "src" / "app.py").write_text(SOURCE + "# edit\n", encoding="utf-8")
         with pytest.raises(AshLockError, match="ash suppress refresh"):
             lock.bind("src/app.py", LockScope("B602", "other"))
+
+    def test_binding_a_rule_id_that_differs_only_in_case_adds_no_scope(self, tmp_path):
+        # Rule ids match case-insensitively everywhere (scope_is_recorded);
+        # compared exactly, `add b602` after `add B602` bound a second scope
+        # and rewrote the lock while the config check called it the same one.
+        root = _tree(tmp_path)
+        lock = _lock(root, LockScope("B602", "risky"))
+        before = lock.to_text()
+        lock.bind("src/app.py", LockScope("b602", "risky"))
+        assert lock.entries["src/app.py"].scopes == [LockScope("B602", "risky")]
+        assert lock.to_text() == before
 
 
 def _legacy_lock(root: Path) -> bytes:

@@ -2180,12 +2180,8 @@ def _suppression_scanner_identity(result, run, scanner_name):
     return run.tool.driver.name if run.tool and run.tool.driver else "unknown"
 
 
-#: The roots whose broken ``.ash.lock`` was already warned about in this process.
-_BROKEN_LOCK_WARNED: set = set()
-
-
 def _symbol_resolver_for(
-    source_dir: Any, suppressions: Iterable[Any]
+    source_dir: Any, suppressions: Iterable[Any], noticed: Optional[set[Any]] = None
 ) -> SymbolResolver | None:
     """The resolver symbol suppressions are checked with, or None without any.
 
@@ -2193,26 +2189,36 @@ def _symbol_resolver_for(
     file changed since it was locked (or was never locked) does not apply. A
     lock that cannot be read leaves every symbol suppression inert and says why
     once: fail closed, as every other gap in a symbol check does.
+
+    ``noticed`` is the scan's record of the lock notices already printed
+    (``PluginContext.lock_notices``). Each notice is printed once per scan:
+    this factory runs once per suppression pass (each scanner's, then the
+    merged one), and the record is the scan's, not the process's, so the next
+    scan in a long-lived process (the MCP server, the express daemon) prints
+    its own. Without one, the record is this pass's alone.
     """
     if not any(getattr(s, "symbol", None) for s in suppressions):
         return None
+    if noticed is None:
+        noticed = set()
     try:
         lock = AshLock.load(source_dir)
     except AshLockError as e:
-        # Warned once per process and root: this factory runs once per
-        # suppression pass (each scanner's, then the merged one), and the
-        # resolver carries the error so its per-file notices do not claim the
-        # files "have no entry" in a lock that exists and is broken.
-        noticed = ("broken-lock", str(source_dir))
-        if noticed not in _BROKEN_LOCK_WARNED:
-            _BROKEN_LOCK_WARNED.add(noticed)
+        # The resolver carries the error so its per-file notices do not claim
+        # the files "have no entry" in a lock that exists and is broken.
+        notice = ("broken-lock", str(source_dir))
+        if notice not in noticed:
+            noticed.add(notice)
             ASH_LOGGER.warning(
                 f"Symbol suppressions do not apply: {e}.", extra=NO_MARKUP
             )
         return SymbolResolver(
-            source_dir, lock=AshLock(source_dir=Path(source_dir)), lock_error=str(e)
+            source_dir,
+            lock=AshLock(source_dir=Path(source_dir)),
+            lock_error=str(e),
+            noticed=noticed,
         )
-    return SymbolResolver(source_dir, lock=lock)
+    return SymbolResolver(source_dir, lock=lock, noticed=noticed)
 
 
 def apply_suppressions_to_sarif(
@@ -2351,7 +2357,11 @@ def _apply_suppressions_within_budget(
     # touches tree-sitter. The resolver parses a file only when every other
     # field of a symbol-scoped entry already matches a finding in it.
     _symbol_resolver: SymbolResolver | None = _symbol_resolver_for(
-        plugin_context.source_dir, suppressions
+        plugin_context.source_dir,
+        suppressions,
+        # Read with getattr: a stand-in context (a test double) without the
+        # record gets one of its own for this pass.
+        getattr(plugin_context, "lock_notices", None),
     )
 
     # The files a repository committed to ASH's output directories, which the

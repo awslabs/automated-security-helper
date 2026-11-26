@@ -303,6 +303,24 @@ class PluginContext(BaseModel):
         """
         return self._warned_unmatched_engines
 
+    # Private, like _scan_id: per-run state no dump or schema carries.
+    _lock_notices: Set[Any] = PrivateAttr(default_factory=set)
+
+    @property
+    def lock_notices(self) -> Set[Any]:
+        """This run's record of the ``.ash.lock`` notices already printed: a
+        locked file that is stale, gone or has no entry, and a lock that
+        cannot be read (``sarif_utils._symbol_resolver_for``).
+
+        On the context for the reason ``warned_unmatched_engines`` is: each
+        suppression pass of a run builds its own resolver, and the record
+        keeps each notice to once per run. Kept in the process instead, it
+        silenced the notice for every later scan in a long-lived process (the
+        MCP server, the express daemon), whose findings then came back with
+        nothing in the log to say why.
+        """
+        return self._lock_notices
+
     @field_validator("config")
     def validate_config(cls, value):
         from automated_security_helper.config.ash_config import AshConfig
