@@ -1637,11 +1637,18 @@ def mark_converted_results(sarif_report: Any, context: Any) -> int:
     and ``out2`` gave a converted notebook's findings different ids). The URI is
     left as it is, since it is where the converted file is.
 
+    A result :func:`map_back_converted_results` moved (it carries
+    ``converted_from``) is judged by its primary location, the first, which is the
+    one the finding is keyed by: when that location moved to the original file, a
+    later location still in the generated file does not mark the result, since the
+    key would then name the generated file with the original's line numbers.
+
     Returns:
         The number of results marked.
     """
     from automated_security_helper.schemas.sarif_schema_model import PropertyBag
     from automated_security_helper.utils.finding_identity import (
+        CONVERTED_FROM_PROPERTY,
         CONVERTED_PATH_PROPERTY,
     )
 
@@ -1655,7 +1662,13 @@ def mark_converted_results(sarif_report: Any, context: Any) -> int:
     marked = 0
     for run in runs:
         for result in getattr(run, "results", None) or []:
-            for candidate in _result_paths(result, source):
+            if getattr(result.properties, CONVERTED_FROM_PROPERTY, None) is not None:
+                locations = getattr(result, "locations", None) or []
+                primary = _location_path(locations[0], source) if locations else None
+                candidates: Iterable[Path] = [] if primary is None else [primary]
+            else:
+                candidates = _result_paths(result, source)
+            for candidate in candidates:
                 if candidate == work or not candidate.is_relative_to(work):
                     continue
                 relative = candidate.relative_to(work).as_posix()
@@ -1679,21 +1692,31 @@ MAX_SPAN_MAP_BYTES = 4 * 1024 * 1024
 
 _SPAN_ROW_INTS = ("script_line", "line", "col", "end_line", "end_col")
 
+#: A leading ``file:`` (with or without ``//``) or ``scheme://``, and a drive
+#: prefix (``C:/`` or ``C:\``), at the start of a row's ``source_file``.
+_SOURCE_FILE_SCHEME = re.compile(
+    r"^(?:file:|[A-Za-z][A-Za-z0-9+.\-]*://)", re.IGNORECASE
+)
+_SOURCE_FILE_DRIVE = re.compile(r"^[A-Za-z]:[/\\]")
+
 
 def _names_a_source_file(source_file: Any, source: Path) -> bool:
     """Whether *source_file* is a plain relative path to an existing file under *source*.
 
-    Text only is not enough: a scheme (``file:///etc/passwd``, ``https://...``), a
-    drive (``C:/x``), a backslash, an absolute path and a ``..`` segment are all
-    refused, and the path, resolved under *source* with its links followed, must
-    stay inside *source* and be a file.
+    The text refusals are the forms that name something other than a path under
+    *source*: a leading ``file:`` or ``scheme://`` and a drive (``C:/x``), an
+    absolute path and a ``..`` segment. A ``:`` or a backslash elsewhere in the
+    name is a legitimate POSIX file name, so it is not refused by text. What keeps
+    a name inside *source* is that it must equal the source the converter
+    recorded, and that the path, resolved under *source* with its links followed,
+    stays inside *source* and is a file.
     """
     if (
         not isinstance(source_file, str)
         or not source_file
-        or ":" in source_file
-        or "\\" in source_file
         or "\x00" in source_file
+        or _SOURCE_FILE_SCHEME.match(source_file)
+        or _SOURCE_FILE_DRIVE.match(source_file)
         or source_file.startswith("/")
         or ".." in source_file.split("/")
     ):
@@ -1786,14 +1809,19 @@ def map_back_converted_results(sarif_report: Any, context: Any) -> int:
     (the notebook and archive converters) is untouched by this.
 
     A mapped location also loses what described the generated file: its context
-    region and its artifact index. A mapped result's related locations and code
-    flows are cleared too, since they are positions in the generated script and the
-    sidecar maps one line only.
+    region, its artifact index and its annotations. A mapped result's related
+    locations, code flows, stacks and fixes are cleared too, since they are
+    positions in the generated script and the sidecar maps one line only. Its
+    ``fingerprints`` and ``partialFingerprints`` are kept: they are the scanner's
+    own identity for the finding and an input to its key, not coordinates the
+    sidecar can translate. Its graphs, attachments and analysis target are not
+    touched either.
 
-    Run before :func:`mark_converted_results`: a location it moved is no longer in
-    the work directory, so the marking skips it, and a result that still has a
-    location in the generated file (a line with no row) is marked and keeps an
-    identity independent of the output directory.
+    Run before :func:`mark_converted_results`, which judges a mapped result by its
+    primary location: a location it moved is no longer in the work directory, so
+    the marking skips the result, and a result whose primary location is still in
+    the generated file (a line with no row) is marked and keeps an identity
+    independent of the output directory.
 
     Returns:
         The number of results mapped.
@@ -1809,9 +1837,10 @@ def map_back_converted_results(sarif_report: Any, context: Any) -> int:
     runs = getattr(sarif_report, "runs", None) or []
     if not runs or getattr(context, "output_dir", None) is None:
         return 0
-    recorded = converted_sources_of(context)
-    if not recorded:
-        return 0
+    # Read when the first location in the converted tree turns up: a scan whose
+    # results are all in the scanned tree or an image (every source-tree and image
+    # scanner, once per scanner) never reads the record.
+    recorded: Optional[Dict[str, str]] = None
     source = Path(context.source_dir).resolve()
     work = path_in_record_form(_work_dir_of(context))
     sidecars: Dict[Path, Dict[int, Dict[str, Any]]] = {}
@@ -1835,6 +1864,8 @@ def map_back_converted_results(sarif_report: Any, context: Any) -> int:
                 ):
                     continue
                 if candidate not in sidecars:
+                    if recorded is None:
+                        recorded = converted_sources_of(context)
                     relative = candidate.relative_to(work).as_posix()
                     recorded_source = recorded.get(relative)
                     # Both names must be recorded as files, not only covered by a
@@ -1863,12 +1894,18 @@ def map_back_converted_results(sarif_report: Any, context: Any) -> int:
                 )
                 # Its lines and snippet are the script's.
                 root.contextRegion = None
+                # Regions of interest in the script.
+                location.annotations = None
                 if converted_from is None:
                     converted_from = candidate.relative_to(work).as_posix()
             if converted_from is None:
                 continue
+            # Positions in the generated script, which the sidecar maps one line
+            # at a time: they would point into the wrong file.
             result.relatedLocations = None
             result.codeFlows = None
+            result.stacks = None
+            result.fixes = None
             if result.properties is None:
                 result.properties = PropertyBag()
             setattr(result.properties, CONVERTED_FROM_PROPERTY, converted_from)
@@ -1961,7 +1998,8 @@ def record_converted_sources(
             f"{Path(results_dir).name}/{CONVERTED_SOURCES_FILE_NAME} "
             f"({type(error).__name__}: {error.strerror or error}); a "
             "--changed-files-only scan keeps their findings rather than placing "
-            "them by their sources"
+            "them by their sources, and a finding in a generated file is not "
+            "mapped back to the file it was generated from"
         )
         return None
     return target
@@ -2011,7 +2049,9 @@ def converted_sources_of(context: Any) -> Dict[str, str]:
                 f"Skipped {converter_dir.name}/{CONVERTED_SOURCES_FILE_NAME}: it "
                 "could not be read as the converter's record of what it "
                 "converted; the --changed-files-only filter keeps that "
-                "converter's findings rather than placing them by their sources"
+                "converter's findings rather than placing them by their sources, "
+                "and its findings are not mapped back to the files they were "
+                "generated from"
             )
             ASH_LOGGER.debug(
                 f"Why {converter_dir.name}/{CONVERTED_SOURCES_FILE_NAME} could not "
@@ -2023,7 +2063,9 @@ def converted_sources_of(context: Any) -> Dict[str, str]:
             ASH_LOGGER.warning(
                 f"Skipped {converter_dir.name}/{CONVERTED_SOURCES_FILE_NAME}: it "
                 "is not a JSON object; the --changed-files-only filter keeps that "
-                "converter's findings rather than placing them by their sources"
+                "converter's findings rather than placing them by their sources, "
+                "and its findings are not mapped back to the files they were "
+                "generated from"
             )
             continue
         for key, value in data.items():

@@ -265,7 +265,10 @@ class FindingIdentity(BaseModel):
 
     Attributes:
         base: The key's fields every result has: scanner, rule, file, package,
-            project, and ``tree`` for a converted file.
+            project, ``tree`` for a converted file or a file in an image, ``image``
+            (the image's digest or locator) for a file in an image, and
+            ``convertedFrom`` (the generated file's path) for a result mapped back
+            from a generated file to the original.
         lines: The start and end line.
         column: The start column, or None.
         fingerprints: Each fingerprint kind the result carries, in preference

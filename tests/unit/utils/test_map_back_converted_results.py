@@ -24,14 +24,18 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.mcp_config_
     McpConfigConverterConfig,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
+    ArtifactChange,
     ArtifactLocation,
+    Fix,
     Location,
     Message,
     PhysicalLocation,
     Region,
+    Replacement,
     Result,
     Run,
     SarifReport,
+    Stack,
     Tool,
     ToolComponent,
 )
@@ -220,7 +224,7 @@ def test_a_result_in_the_scanned_tree_is_untouched(converted):
     assert report.model_dump_json() == before
 
 
-def _unmapped_and_unmarked_by(context, script: Path) -> None:
+def _not_mapped_back(context, script: Path) -> None:
     report = _report(_result(script.as_posix(), 3))
 
     mapped, _ = place_converted_results(report, context)
@@ -247,7 +251,7 @@ def test_a_sidecar_inside_an_archive_the_converter_did_not_record_maps_nothing(
         json.dumps({"archive/bundle.zip-extracted/": "bundle.zip"}), encoding="utf-8"
     )
 
-    _unmapped_and_unmarked_by(context, member)
+    _not_mapped_back(context, member)
 
 
 def test_a_sidecar_the_converter_did_not_record_maps_nothing(converted):
@@ -260,7 +264,7 @@ def test_a_sidecar_the_converter_did_not_record_maps_nothing(converted):
         del recorded[key]
     record.write_text(json.dumps(recorded), encoding="utf-8")
 
-    _unmapped_and_unmarked_by(context, script)
+    _not_mapped_back(context, script)
 
 
 def test_a_row_naming_another_file_than_the_recorded_source_maps_nothing(converted):
@@ -270,7 +274,7 @@ def test_a_row_naming_another_file_than_the_recorded_source_maps_nothing(convert
         json.dumps([_row(source_file="other.json")]), encoding="utf-8"
     )
 
-    _unmapped_and_unmarked_by(context, script)
+    _not_mapped_back(context, script)
 
 
 @pytest.mark.parametrize(
@@ -315,7 +319,7 @@ def test_an_unusable_sidecar_row_maps_nothing(converted, contents):
     (context.source_dir / "subdir").mkdir(exist_ok=True)
     _sidecar(script).write_text(contents, encoding="utf-8")
 
-    _unmapped_and_unmarked_by(context, script)
+    _not_mapped_back(context, script)
 
 
 def test_a_source_that_resolves_outside_the_tree_through_a_link_maps_nothing(converted):
@@ -327,7 +331,7 @@ def test_a_source_that_resolves_outside_the_tree_through_a_link_maps_nothing(con
         json.dumps([_row(source_file="link.json")]), encoding="utf-8"
     )
 
-    _unmapped_and_unmarked_by(context, script)
+    _not_mapped_back(context, script)
 
 
 def test_an_oversized_sidecar_maps_nothing(converted):
@@ -335,7 +339,7 @@ def test_an_oversized_sidecar_maps_nothing(converted):
     padding = " " * (MAX_SPAN_MAP_BYTES + 1)
     _sidecar(script).write_text(json.dumps([_row()]) + padding, encoding="utf-8")
 
-    _unmapped_and_unmarked_by(context, script)
+    _not_mapped_back(context, script)
 
 
 def test_a_sidecar_that_is_a_link_maps_nothing(converted):
@@ -345,7 +349,7 @@ def test_a_sidecar_that_is_a_link_maps_nothing(converted):
     _sidecar(script).unlink()
     _sidecar(script).symlink_to(target)
 
-    _unmapped_and_unmarked_by(context, script)
+    _not_mapped_back(context, script)
 
 
 def test_a_mapped_result_drops_what_describes_the_generated_script(converted):
@@ -355,17 +359,48 @@ def test_a_mapped_result_drops_what_describes_the_generated_script(converted):
     physical = result.locations[0].physicalLocation.root
     physical.artifactLocation.index = 4
     physical.contextRegion = Region(startLine=1, endLine=9)
+    result.locations[0].annotations = [Region(startLine=2, endLine=4)]
     result.relatedLocations = [_location(script.as_posix(), 1)]
     result.codeFlows = []
+    result.stacks = [Stack(frames=[])]
+    result.fixes = [
+        Fix(
+            artifactChanges=[
+                ArtifactChange(
+                    artifactLocation=ArtifactLocation(uri=script.as_posix()),
+                    replacements=[Replacement(deletedRegion=Region(startLine=3))],
+                )
+            ]
+        )
+    ]
     report = _report(result)
 
     place_converted_results(report, context)
 
-    physical = _first(report).locations[0].physicalLocation.root
+    mapped = _first(report)
+    physical = mapped.locations[0].physicalLocation.root
     assert physical.artifactLocation.index is None
     assert physical.contextRegion is None
-    assert _first(report).relatedLocations is None
-    assert _first(report).codeFlows is None
+    assert mapped.locations[0].annotations is None
+    assert mapped.relatedLocations is None
+    assert mapped.codeFlows is None
+    assert mapped.stacks is None
+    assert mapped.fixes is None
+
+
+def test_a_mapped_result_keeps_the_fingerprints_the_scanner_gave_it(converted):
+    """Fingerprints are the scanner's own identity for the finding, not coordinates."""
+    script, context = converted
+    row = _sidecar_rows(script)[-1]
+    result = _result(script.as_posix(), row["script_line"])
+    result.partialFingerprints = {"primaryLocationLineHash": "abc123:1"}
+    result.fingerprints = {"fp/v1": "def456"}
+    report = _report(result)
+
+    place_converted_results(report, context)
+
+    assert _first(report).partialFingerprints == {"primaryLocationLineHash": "abc123:1"}
+    assert _first(report).fingerprints == {"fp/v1": "def456"}
 
 
 def test_a_result_with_one_location_mapped_and_one_not_keeps_its_converted_path(
@@ -386,6 +421,35 @@ def test_a_result_with_one_location_mapped_and_one_not_keeps_its_converted_path(
     assert getattr(_first(report).properties, "converted_path") == (
         script.resolve().relative_to(work).as_posix()
     )
+
+
+def test_a_result_mapped_at_its_primary_location_is_keyed_by_the_original_file(
+    converted,
+):
+    """locations[0] is mapped, a later location is on a script line with no row.
+
+    The result is judged by its primary location, which is the one the finding is
+    keyed by: it moved to ``.mcp.json``, so the later location in the script must
+    not mark the result with the script's converted path (the key would name the
+    script with ``.mcp.json``'s line numbers).
+    """
+    script, context = converted
+    row = _sidecar_rows(script)[-1]
+    result = _result(script.as_posix(), row["script_line"])
+    result.locations.append(_location(script.as_posix(), 99))
+    report = _report(result)
+
+    assert place_converted_results(report, context) == (1, 0)
+
+    assert _where(_first(report), 0)[0] == ".mcp.json"
+    assert _where(_first(report), 1)[0] == script.as_posix()
+    assert getattr(_first(report).properties, "converted_path", None) is None
+    flat = _flat(_first(report), report)
+    assert flat.file_path == ".mcp.json"
+    assert flat.line_start == row["line"]
+    assert flat._identity.base["file"] == ".mcp.json"
+    assert flat._identity.base.get("tree") is None
+    assert flat._identity.base["convertedFrom"]
 
 
 def test_a_mapped_finding_is_keyed_by_the_original_file_and_line(converted):
@@ -474,3 +538,148 @@ def test_the_scanner_executor_places_results_through_the_one_call():
         scanner_executor.place_converted_results
         is scan_output_dirs.place_converted_results
     )
+
+
+PLACE_CALL = "place_converted_results(raw_results"
+SUPPRESS_CALL = "apply_suppressions_to_sarif("
+
+
+def _places_before_suppressing(source: str) -> bool:
+    """Whether the first placement call precedes the first suppression call."""
+    placed = source.find(PLACE_CALL)
+    suppressed = source.find(SUPPRESS_CALL)
+    return 0 <= placed < suppressed
+
+
+def test_the_scanner_executor_places_before_it_applies_suppressions():
+    """A suppression written against the original file matches only a placed result."""
+    from automated_security_helper.core.phases import scanner_executor
+
+    source = Path(scanner_executor.__file__).read_text(encoding="utf-8")
+
+    assert source.count(PLACE_CALL) == 1
+    assert _places_before_suppressing(source)
+
+
+def test_the_order_check_flags_a_suppression_before_the_placement():
+    swapped = f"{SUPPRESS_CALL}raw)\n{PLACE_CALL}, ctx)\n"
+    absent = f"{SUPPRESS_CALL}raw)\n"
+
+    assert _places_before_suppressing(f"{PLACE_CALL}, ctx)\n{SUPPRESS_CALL}raw)\n")
+    assert not _places_before_suppressing(swapped)
+    assert not _places_before_suppressing(absent)
+
+
+def _map_through_source(context, script: Path, source_name: str) -> SarifReport:
+    """Record *source_name* as the script's source, with a row naming it, and map."""
+    record = _record_file(script)
+    recorded = json.loads(record.read_text(encoding="utf-8"))
+    relative = script.resolve().relative_to(Path(context.work_dir).resolve())
+    recorded[relative.as_posix()] = source_name
+    record.write_text(json.dumps(recorded), encoding="utf-8")
+    (context.source_dir / source_name).write_text("{}\n", encoding="utf-8")
+    _sidecar(script).write_text(
+        json.dumps([_row(source_file=source_name)]), encoding="utf-8"
+    )
+    report = _report(_result(script.as_posix(), 3))
+    place_converted_results(report, context)
+    return report
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["my:config.json", "sub\\config.json", "a'b.json"],
+    ids=["colon-in-name", "backslash-in-name", "quote-in-name"],
+)
+def test_a_posix_file_name_with_a_colon_or_backslash_is_a_source(converted, name):
+    """Containment is the check on a name; the text refusals are scheme and drive."""
+    script, context = converted
+
+    report = _map_through_source(context, script, name)
+
+    assert _where(_first(report))[0] == name
+
+
+def test_a_name_that_is_a_drive_or_scheme_still_maps_nothing(converted):
+    script, context = converted
+    for name in ("C:/x.json", "c:\\x.json", "file:x.json", "FILE:///x", "s3://b/x"):
+        report = _report(_result(script.as_posix(), 3))
+        _sidecar(script).write_text(
+            json.dumps([_row(source_file=name)]), encoding="utf-8"
+        )
+        recorded = json.loads(_record_file(script).read_text(encoding="utf-8"))
+        relative = script.resolve().relative_to(Path(context.work_dir).resolve())
+        recorded[relative.as_posix()] = name
+        _record_file(script).write_text(json.dumps(recorded), encoding="utf-8")
+
+        assert place_converted_results(report, context)[0] == 0, name
+
+
+def test_the_record_is_not_read_for_a_scan_with_no_result_in_a_converted_file(
+    converted, monkeypatch
+):
+    """A source-tree or image scan places nothing, so it need not read the record."""
+    from automated_security_helper.utils import scan_output_dirs
+
+    _, context = converted
+    reads = []
+    real = scan_output_dirs.converted_sources_of
+    monkeypatch.setattr(
+        scan_output_dirs,
+        "converted_sources_of",
+        lambda ctx: reads.append(1) or real(ctx),
+    )
+    report = _report(_result(".mcp.json", 3), _result("app/main.py", 7))
+
+    assert place_converted_results(report, context) == (0, 0)
+
+    assert reads == []
+
+
+def test_the_record_is_read_once_for_a_scan_with_results_in_a_converted_file(
+    converted, monkeypatch
+):
+    from automated_security_helper.utils import scan_output_dirs
+
+    script, context = converted
+    reads = []
+    real = scan_output_dirs.converted_sources_of
+    monkeypatch.setattr(
+        scan_output_dirs,
+        "converted_sources_of",
+        lambda ctx: reads.append(1) or real(ctx),
+    )
+    report = _report(
+        _result(script.as_posix(), 3),
+        _result(script.as_posix(), 99),
+        _result(script.as_posix(), 3, rule="R2"),
+    )
+
+    assert place_converted_results(report, context) == (2, 1)
+
+    assert len(reads) == 1
+
+
+def test_an_unreadable_record_warns_that_the_findings_are_not_mapped_back(
+    converted, monkeypatch
+):
+    script, context = converted
+    _record_file(script).write_text("not json", encoding="utf-8")
+    warnings = []
+    from automated_security_helper.utils import scan_output_dirs
+
+    monkeypatch.setattr(
+        scan_output_dirs.ASH_LOGGER,
+        "warning",
+        lambda text, *a, **k: warnings.append(text),
+    )
+
+    scan_output_dirs.converted_sources_of(context)
+
+    assert warnings
+    assert all("mapped back" in text for text in warnings)
+    _record_file(script).write_text("[]", encoding="utf-8")
+    warnings.clear()
+    scan_output_dirs.converted_sources_of(context)
+    assert warnings
+    assert all("mapped back" in text for text in warnings)
