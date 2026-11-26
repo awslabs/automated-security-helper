@@ -1858,6 +1858,7 @@ __all__ = [
     "SOURCE_DIR_NAME",
     "ConfigInputCheck",
     "SessionSandbox",
+    "caller_is_remote",
     "check_config_input",
     "config_base_gate",
     "config_chain_refusal",
@@ -1869,6 +1870,7 @@ __all__ = [
     "unknown_transport_override",
     "operator_config_roots",
     "operator_scan_roots",
+    "resolve_workspace_root",
     "scan_grant_is_unresolved",
     "session_sandbox",
     "set_server_transport",
@@ -1876,5 +1878,6 @@ __all__ = [
     "transport_is_networked",
     "validate_config_chain",
     "validate_config_input",
+    "validate_discovered_config",
     "validate_scan_target_in_sandbox",
 ]
