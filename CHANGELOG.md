@@ -162,6 +162,13 @@
   being run from the working directory, which is usually the repository being scanned.
   The same path given as `-OCIRunner` is used as written, as before.
 
+- **On Windows, `--no-color` now also turns color off in the progress display and the
+  final metrics table.** Both consoles forced Rich's "windows" color system on every
+  Windows run, so the flag was ignored there: the progress display kept color whatever
+  it was given, and the metrics table, which is told to use color when the progress
+  display has a color system, kept it too. Both now follow the color option the way
+  the logger does: "auto" when color is on, no color when it is off, on every platform.
+
 ### Features
 
 - **Symbol suppressions are bound to their file's content hash in `.ash.lock`.**
