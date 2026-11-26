@@ -10,7 +10,7 @@ scan already wrote and run no scan, so they sit under one noun instead of beside
 ``inspect_app``); no command body lives here.
 
 The old top-level spellings (``ash report`` and the rest) keep working through
-3.9 with a stderr deprecation warning and are removed in 4.0; the warning is
+4.0 with a stderr deprecation warning and are removed in 4.1; the warning is
 emitted by ``AshRootTyperGroup`` in :mod:`automated_security_helper.cli.main`.
 """
 

@@ -499,7 +499,7 @@ ASH_DEFAULT_SEVERITY_LEVEL = _resolve_default_severity_level(
 # The canonical config file: ``.ash.yaml`` at the scan root. Discovery looks here
 # first, and every command that creates a config file writes it here. Every other
 # location below is a legacy one that still loads, warns once that it is
-# deprecated, and is removed in ASH 4.0.
+# deprecated, and is removed in ASH 4.1.
 ASH_CANONICAL_CONFIG_FILE_NAME = ".ash.yaml"
 
 # The legacy name list, in the order discovery has always read it (each at the

@@ -61,9 +61,9 @@ from automated_security_helper.base.plugin_provisioning import (
 #: The manifest schema this code reads and writes.
 MANIFEST_SCHEMA_VERSION = 1
 
-#: The release that stops accepting the pre-rename "community" spellings. They are
-#: aliases for one release: accepted, mapped to the alpha spelling, and warned about.
-COMMUNITY_ALIASES_DROPPED_IN = "3.9.0"
+#: The release that stops accepting the pre-rename "community" spellings. Until then
+#: (4.0 included) they are aliases: accepted, mapped to alpha, and warned about.
+COMMUNITY_ALIASES_DROPPED_IN = "4.1.0"
 
 #: The version a manifest declares for a plugin that ships inside the ASH wheel
 #: and so is versioned with it.
@@ -116,7 +116,7 @@ class PluginTier(str, Enum):
     @classmethod
     def _missing_(cls, value: object) -> "PluginTier | None":
         """``"community"``, this tier's spelling before the rename, is an alias
-        of ``alpha`` for one release and warns when it is read."""
+        of ``alpha`` until ``COMMUNITY_ALIASES_DROPPED_IN`` and warns when it is read."""
         if value in ("community", "community_optin"):
             warn_community_alias(str(value), cls.ALPHA.value)
             return cls.ALPHA

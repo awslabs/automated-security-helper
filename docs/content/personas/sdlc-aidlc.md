@@ -47,7 +47,7 @@ results itself. The checkpoints map over directly:
 |---|---|---|
 | Write code in an editor | The agent generates code for a task | The agent scans over [MCP](../getting-started/agents.md) and fixes actionable findings before presenting the work |
 | Commit and push hooks | The agent's task or Unit ends | A precommit-mode scan at the task boundary rather than at each of dozens of commits; the hooks still back it up |
-| Review the pull request | A human approval gate | The scan summary, the diff's suppressions with reasons and expirations, and `ash diff` or `diff_scan_results` between before and after |
+| Review the pull request | A human approval gate | The scan summary, the diff's suppressions with reasons and expirations, and `ashx diff` or `diff_scan_results` between before and after |
 | Triage a backlog | MCP-driven triage | `explain_finding` for context, `suggest_suppression` for a drafted, expiring exception a human approves ([MCP tools](../reference/mcp-tools.md)) |
 
 Two practices from the persona pages matter more here. Give the agent ASH's

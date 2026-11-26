@@ -5,8 +5,9 @@
 
 The five commands that read, compare and combine saved results moved under one
 noun. Each new spelling runs the same implementation as the old top-level one;
-each old spelling keeps working through 3.9, prints one DeprecationWarning on
-stderr naming its replacement, and is removed in 4.0.
+each old spelling keeps working through 4.0, prints one DeprecationWarning on
+stderr naming its replacement under the v4 entry point ``ashx``, and is removed
+in 4.1.
 """
 
 import typer.main
@@ -83,9 +84,9 @@ def test_the_old_spelling_warns_once_and_still_works(verb, tmp_path):
     old = _run(_argv(verb, tmp_path))
     warned = _warnings(old.stderr)
     assert len(warned) == 1
-    assert f"'ash {verb}' is deprecated" in warned[0]
-    assert "removed in 4.0" in warned[0]
-    assert f"'ash results {verb}'" in warned[0]
+    assert f"'ashx {verb}' is deprecated" in warned[0]
+    assert "removed in 4.1" in warned[0]
+    assert f"'ashx results {verb}'" in warned[0]
     # Same behavior as the new spelling: same verdict, and the command's own
     # message, when it prints one a spelling-free way, is unchanged.
     assert old.exit_code == new.exit_code

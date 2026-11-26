@@ -58,7 +58,6 @@ SCANNER_SECTION_FIELDS = {
     "mcp_config": "mcp-config",
     "npm_audit": "npm-audit",
     "opengrep": None,
-    "semgrep": None,
     "syft": None,
     "trivy": None,
     "zizmor": None,
@@ -142,7 +141,8 @@ def test_only_the_builtin_scanners_have_typed_sections():
     with_section = {m.name for m in scanner_manifests() if m.config_section}
     builtin = {m.name for m in scanner_manifests() if m.default_enabled}
     assert with_section == builtin, "an alpha scanner is configured through extras"
-    assert len(builtin) == 17, "control: the builtin set shrank"
+    # 16: the v4 builtin set has no semgrep (retired; opengrep serves its name).
+    assert len(builtin) == 16, "control: the builtin set shrank"
 
 
 def test_the_section_class_is_built_into_the_default_config():
@@ -168,7 +168,6 @@ def test_the_exclusion_table_is_what_the_manifests_declare():
         ("bandit", "excluded_paths", "bandit", ()),
         ("checkov", "skip_path", "checkov", ()),
         ("opengrep", "exclude", "glob", ("*-converted.py", "*_report_result.txt")),
-        ("semgrep", "exclude", "glob", ("*-converted.py", "*_report_result.txt")),
         ("syft", "exclude", "glob", ()),
         ("ferret-scan", "exclude_patterns", "glob", ()),
         ("guarddog", "excluded_paths", "guarddog-path", ()),

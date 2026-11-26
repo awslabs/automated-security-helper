@@ -1219,7 +1219,7 @@ def generate() -> tuple[str, dict]:
             "config file: `ash config init` and `ash config wizard` write it, and it "
             "wins over every other file. Every other file name above is a deprecated "
             "location. ASH still reads it, says so in a warning that names the file and "
-            "the path to move it to, and stops reading it in ASH 4.0. "
+            "the path to move it to, and stops reading it in ASH 4.1. "
             f"{code(ASH_PYPROJECT_FILE_NAME)} is a different kind of source and is not "
             "deprecated."
         ),

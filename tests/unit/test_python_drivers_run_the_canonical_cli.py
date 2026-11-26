@@ -63,6 +63,11 @@ SUBCOMMANDS = frozenset(
         "get-genai-guide",
         "container",
         "results",
+        "build-image",
+        "diff",
+        "trend",
+        "suppress",
+        "express",
     }
 )
 
@@ -142,10 +147,23 @@ def test_no_python_driver_starts_v3s_cli():
         'exe = shutil.which("ash")',
         'exe = find_executable("ash")',
         'subprocess.run(["ash", "scan", "--source-dir", "."])',
+        'subprocess.run(["ash", "suppress", "verify"])',
     ],
 )
 def test_each_v3_spelling_is_reported(source):
     assert v3_spellings(source)
+
+
+def test_every_top_level_command_is_checked():
+    """A command missing from SUBCOMMANDS is not checked: ``suppress`` came from
+    main while the list held only the commands it already had."""
+    import typer.main
+
+    from automated_security_helper.cli.main import app
+
+    commands = set(typer.main.get_command(app).commands.keys())
+    assert "suppress" in commands and "scan" in commands
+    assert commands <= SUBCOMMANDS, sorted(commands - SUBCOMMANDS)
 
 
 @pytest.mark.parametrize(

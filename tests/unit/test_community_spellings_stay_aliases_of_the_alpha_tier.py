@@ -1,14 +1,15 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The pre-rename "community" spellings of the alpha tier are aliases for one release.
+"""The pre-rename "community" spellings of the alpha tier are aliases through 4.0.
 
 The opt-in scanners ASH ships but does not promote as supported were called
 "community"; the tier is now "alpha". The old spellings that still work map to
-the new one for one release: the tier values warn once per process, and the
-Dockerfile build argument wins over the new one and warns at build time. The
-docs-lint column headings are the exception: that lint is internal, so the old
-headings are refused with the heading to use rather than kept as aliases. Each
+the new one until ``COMMUNITY_ALIASES_DROPPED_IN`` (4.1.0): the tier values warn
+once per process, and the Dockerfile build argument wins over the new one and
+warns at build time. The docs-lint column headings are the exception: that lint
+is internal, so the old headings are refused with the heading to use rather than
+kept as aliases. Each
 test here reads one old spelling through the real code path and fails when its
 alias is gone, does not map, or stays silent where a warning is promised.
 """
@@ -156,7 +157,8 @@ def test_the_new_scanner_column_heading_does_not_warn(tmp_path, warnings_logged)
 
 
 def test_the_alias_window_names_the_next_release():
-    assert plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN == "3.9.0"
+    """4.0 keeps the aliases, so the release after it is the one that drops them."""
+    assert plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN == "4.1.0"
 
 
 def test_the_aliases_are_gone_by_the_release_that_says_it_drops_them():

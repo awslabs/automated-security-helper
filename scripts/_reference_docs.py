@@ -454,6 +454,10 @@ _CLI_SUBCOMMANDS = (
     "get-genai-guide",
     "container",
     "results",
+    "diff",
+    "trend",
+    "suppress",
+    "express",
 )
 _V3_COMMAND = re.compile(
     r"(?:^|(?<=[\s`(&;|]))ash (?=(?:" + "|".join(_CLI_SUBCOMMANDS) + r")(?:[\s`]|$))",

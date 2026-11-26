@@ -110,13 +110,13 @@ ashx report --format gitlab-sast > gl-sast-report.json
 
 ## Compare two saved scans {#compare-scans}
 
-Use [`ash diff`](../reference/cli.md#diff) with the earlier results first. It reads both
+Use [`ashx diff`](../reference/cli.md#diff) with the earlier results first. It reads both
 files without running a scan or changing any reports.
 
 <!-- doctest: illustrative reason="requires two saved ASH scan results files" -->
 ```bash
-ash diff baseline/ash_aggregated_results.json current/ash_aggregated_results.json
-ash diff baseline/ash_aggregated_results.json current/ash_aggregated_results.json --format json
+ashx diff baseline/ash_aggregated_results.json current/ash_aggregated_results.json
+ashx diff baseline/ash_aggregated_results.json current/ash_aggregated_results.json --format json
 ```
 
 The JSON groups are `new`, `absent_after`, `moved`, `severity_changed`,

@@ -65,7 +65,7 @@ def test_importing_every_manifest_loads_no_plugin_module() -> None:
     loaded = _run(
         "from automated_security_helper.plugin_manifests import ("
         "scanner_manifests, opt_in_scanner_modules, dispatch_target)\n"
-        "assert len(scanner_manifests()) == 23\n"
+        "assert len(scanner_manifests()) == 22\n"
         "assert opt_in_scanner_modules()\n"
         "assert dispatch_target('semgrep') == 'opengrep'\n"
     )

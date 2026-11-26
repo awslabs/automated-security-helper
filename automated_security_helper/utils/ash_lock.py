@@ -65,7 +65,7 @@ LOCK_RELATIVE_PATH = ".ash.lock"
 
 #: Where the lock was first written. Still read, with a deprecation warning, when
 #: ``.ash.lock`` does not exist; never written. Deprecated since v3.9, removed in
-#: v4.0, as the other renamed config paths are.
+#: v4.1, as the other renamed config paths are.
 LEGACY_LOCK_RELATIVE_PATH = ".ash/ash.lock"
 
 #: The legacy locations already warned about in this process, so a scan that loads
@@ -75,8 +75,10 @@ _LEGACY_WARNED: set[str] = set()
 #: The lock format version this module reads and writes.
 LOCK_VERSION = 1
 
-#: The command that records a new review of locked files.
-REFRESH_COMMAND = "ash suppress refresh"
+#: The command that records a new review of locked files. ``ashx`` is v4's command
+#: (``cli.deprecations.CANONICAL_CLI_NAME``), written out because utils/ does not
+#: import from cli/.
+REFRESH_COMMAND = "ashx suppress refresh"
 
 #: A file larger than this is refused rather than read whole into memory.
 MAX_LOCKED_FILE_BYTES = 64 * 1024 * 1024
@@ -207,7 +209,7 @@ class AshLock:
                 # which is the failure the lock exists to stop.
                 ASH_LOGGER.warning(
                     f"{LEGACY_LOCK_RELATIVE_PATH} is deprecated since v3.9 and "
-                    f"will not be read from v4.0. Move it with "
+                    f"will not be read from v4.1. Move it with "
                     f"`git mv {LEGACY_LOCK_RELATIVE_PATH} {LOCK_RELATIVE_PATH}`.",
                     extra=NO_MARKUP,
                 )
@@ -359,7 +361,7 @@ def add_command_for(rule_id: Optional[str], symbol: str, path: str) -> str:
     command from CI output.
     """
     return (
-        f"ash suppress add {shlex.quote(rule_id or '<rule-id>')} "
+        f"ashx suppress add {shlex.quote(rule_id or '<rule-id>')} "
         f"--symbol {shlex.quote(symbol)} --file {shlex.quote(path)} "
         f"--reason '<why this is safe>'"
     )

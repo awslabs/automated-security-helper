@@ -42,7 +42,7 @@ Otherwise ASH looks in the scan's source directory and uses the first of these i
 20. `ashrc.json`
 21. `pyproject.toml`
 
-The first, `.ash.yaml` in the source directory, is the canonical config file: `ashx config init` and `ashx config wizard` write it, and it wins over every other file. Every other file name above is a deprecated location. ASH still reads it, says so in a warning that names the file and the path to move it to, and stops reading it in ASH 4.0. `pyproject.toml` is a different kind of source and is not deprecated.
+The first, `.ash.yaml` in the source directory, is the canonical config file: `ashx config init` and `ashx config wizard` write it, and it wins over every other file. Every other file name above is a deprecated location. ASH still reads it, says so in a warning that names the file and the path to move it to, and stops reading it in ASH 4.1. `pyproject.toml` is a different kind of source and is not deprecated.
 
 `pyproject.toml` counts only when it has a `[tool.ash]` table; one without it is not a configuration source.
 
@@ -211,7 +211,7 @@ A key not listed here is an error when the configuration is loaded.
 
 ### <a id="section-global_settings-history"></a>`global_settings.history`
 
-Run history: a compact record of each completed scan, for `ash trend`.
+Run history: a compact record of each completed scan, for `ashx trend`.
 
 A key not listed here is an error when the configuration is loaded.
 

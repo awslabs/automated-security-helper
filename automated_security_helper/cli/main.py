@@ -238,7 +238,7 @@ _LAZY_SUBCOMMANDS: dict[str, tuple[str, str]] = {
 
 #: The top-level spellings that moved under ``ash results`` (``ash report`` is now
 #: ``ash results report``). They keep working through the deprecation window: each
-#: prints one DeprecationWarning on stderr (3.9) and is removed in 4.0. They are
+#: prints one DeprecationWarning on stderr (3.9, 4.0) and is removed in 4.1. They are
 #: hidden from the root ``--help`` so the listing shows the new tree, but stay in
 #: the command mapping, so the docs generator, the wrapper tables and the help
 #: snapshots still walk them.
@@ -249,7 +249,7 @@ DEPRECATED_RESULTS_SPELLINGS: frozenset[str] = frozenset(
 #: Every top-level spelling deprecated in 3.9, mapped to the spelling that replaces
 #: it: the results commands that moved under ``ash results``, and ``ash build-image``,
 #: which is ``ash container build``. All of them deprecate the same way: hidden from
-#: the root ``--help``, one warning on stderr per invocation, removed in 4.0.
+#: the root ``--help``, one warning on stderr per invocation, removed in 4.1.
 DEPRECATED_SPELLINGS: dict[str, str] = {
     **{name: f"results {name}" for name in sorted(DEPRECATED_RESULTS_SPELLINGS)},
     "build-image": "container build",
@@ -659,7 +659,7 @@ class AshRootTyperGroup(AshTyperGroup):
         """Say, on stderr and on every invocation, that a top-level command moved.
 
         ``ash report``, ``ash build-image`` and the other spellings in
-        ``DEPRECATED_SPELLINGS`` still run unchanged through the 3.9 window; this
+        ``DEPRECATED_SPELLINGS`` still run unchanged until 4.1 removes them; this
         is the only thing the old spelling adds. A help request and ``--generate-cli-skeleton`` only
         print what the command takes, which is not a use of it, and shell
         completion (``resilient_parsing``) must print nothing, so none of them warns.
