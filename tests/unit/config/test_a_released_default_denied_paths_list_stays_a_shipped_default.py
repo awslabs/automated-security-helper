@@ -14,6 +14,7 @@ outside the table (``_shipped_denied_paths_v3_8_0.py``).
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -64,9 +65,21 @@ def _deliver(tmp_path: Path, monkeypatch, rules):
     )
 
 
+# sha256 of the v3.8.0 entries, sorted and joined by newlines, computed from the
+# tag's own bytes (ash_config.py's list, and the tag's table entry in
+# client_config_policy.py, both give this digest). A rewrite that changes the
+# fixture and the table entry together, such as a repository-wide rename of an
+# option, changes the digest and fails here.
+_V3_8_0_SHA256 = "d09fa5e3e8414c7fbda8b87a170fa93f2e438cef7a2f34dfcaf1b5322f16841a"
+
+
 def test_the_fixture_is_the_v3_8_0_list() -> None:
     assert len(V3_8_0_DEFAULT_DENIED_PATHS) == 102
     assert len(set(V3_8_0_DEFAULT_DENIED_PATHS)) == 102
+    digest = hashlib.sha256(
+        "\n".join(sorted(V3_8_0_DEFAULT_DENIED_PATHS)).encode("utf-8")
+    ).hexdigest()
+    assert digest == _V3_8_0_SHA256
 
 
 def test_the_v3_8_0_default_is_a_shipped_default() -> None:
@@ -101,13 +114,14 @@ def test_the_table_comment_about_the_derived_entries_matches_the_entries() -> No
     """
     table = ccp.SHIPPED_DEFAULT_DENIED_PATHS
     v380 = frozenset(V3_8_0_DEFAULT_DENIED_PATHS)
-    written_out, first_derived = table[-4], table[-3]
+    # Anchored on the entry's content, so an entry added after the next release
+    # does not shift what is compared.
+    at = table.index(v380)
+    written_out, first_derived = table[at + 1], table[at + 2]
     assert first_derived - written_out == {"/global_settings/exclusions"}
-    assert written_out != v380
     assert v380 < written_out
-    assert table[-5] == v380
-    assert table[-2] > first_derived
-    assert table[-1] > table[-2]
+    assert table[at + 3] > first_derived
+    assert table[at + 4] > table[at + 3]
 
 
 def test_an_edited_v3_8_0_list_is_still_the_operators_own() -> None:
