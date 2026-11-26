@@ -78,6 +78,16 @@ HADOLINT_BEHAVIOR_TEST = (
 BETTERLEAKS_SCANNER_TEST = (
     "tests/unit/plugin_modules/ash_betterleaks_plugins/test_betterleaks_scanner.py"
 )
+MCP_CONFIG_SCANNER = "automated_security_helper/plugin_modules/ash_builtin/scanners/mcp_config_scanner.py"
+IMAGE_DELIVERY_SNAPSHOTS = "tests/snapshot/mcp/test_snapshot_mcp_image_delivery.py"
+IMAGE_DELIVERY_TEST = "tests/unit/cli/mcp/test_image_delivery_names_one_subject.py"
+IMAGE_ANCHOR_TEST = (
+    "tests/unit/cli/mcp/test_run_ash_scan_anchors_an_image_scan_in_its_own_directory.py"
+)
+FAIL_CLOSED_BASES_TEST = (
+    "tests/unit/base/test_a_plugin_with_no_tool_or_directory_fails_closed.py"
+)
+DEPENDABOT_APPROVAL_WORKFLOW = ".github/workflows/ash-dependabot-auto-merge.yml"
 
 
 @dataclass(frozen=True)
@@ -167,6 +177,24 @@ _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
     # pin against: the commit the v1.10.1 tag points at.
     ("API_KEY_OR_SECRET", BETTERLEAKS_SCANNER_TEST): [
         _Marker((r'^    COMMIT = "',)),
+    ],
+    # The module constant holding the id of the MCP config scanner's env-secret rule.
+    ("API_KEY_OR_SECRET", MCP_CONFIG_SCANNER): [_Marker((r"^RULE_ENV_SECRET\b",))],
+    # The two request-header constants of the image-delivery snapshots, one pin for
+    # both; the patterns name the constants, not their values.
+    ("API_KEY_OR_SECRET", IMAGE_DELIVERY_SNAPSHOTS): [
+        _Marker((r"^_BAD_SESSION\b", r"^_SESSION\b")),
+    ],
+    # The made-up session label each image test runs under.
+    ("API_KEY_OR_SECRET", IMAGE_DELIVERY_TEST): [_Marker((r"^_SESSION\b",))],
+    ("API_KEY_OR_SECRET", IMAGE_ANCHOR_TEST): [_Marker((r"^_SESSION\b",))],
+    # gitleaks: the made-up npm error line the tool-text redaction test feeds in.
+    ("generic-api-key", FAIL_CLOSED_BASES_TEST): [
+        _Marker((r'^    text = "npm ERR! ',)),
+    ],
+    # zizmor: the workflow_run trigger the dependabot approval workflow is built on.
+    ("zizmor/dangerous-triggers", DEPENDABOT_APPROVAL_WORKFLOW): [
+        _Marker((r"^  workflow_run:",)),
     ],
 }
 
