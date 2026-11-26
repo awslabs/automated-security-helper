@@ -36,6 +36,7 @@ from automated_security_helper.base.uv_tool_mixin import (
     guarded_values_read,
 )
 from automated_security_helper.core.enums import PackageManager
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.core.exceptions import (
     ScannerError,
     ToolNotProvisionableError,
@@ -56,6 +57,9 @@ from automated_security_helper.utils.uv_tool_runner import (
 from automated_security_helper.utils.log import ASH_LOGGER, MARKUP, escape_markup
 from automated_security_helper.utils.offline_tool_env import (
     with_offline_tool_environment,
+)
+from automated_security_helper.utils.runtime_compat_env import (
+    with_runtime_compat_environment,
 )
 from automated_security_helper.utils.redacted_model import (
     NO_RICH_REPR,
@@ -957,7 +961,6 @@ class PluginBase(UVToolMixin, BaseModel):
     model_config = ConfigDict(
         extra="allow",
         arbitrary_types_allowed=True,
-        use_enum_values=True,
         # A phase builds a plugin from its config section, which a config model
         # may not type (a plugin module's section), so the plugin's own error is
         # the one raised. A refused value can be a secret read from the
@@ -1071,6 +1074,12 @@ class PluginBase(UVToolMixin, BaseModel):
     # so a reader that needs to know whether the tool said anything can tell the
     # two apart. ``errors`` still holds both. See ``_tool_error_lines``.
     _plugin_log_lines: List[str] = PrivateAttr(default_factory=list)
+
+    # True while ``_run_unrecorded`` has a side run in flight: ``_plugin_log``
+    # then keeps an ERROR note out of the operator's view, because the run's
+    # record is put back afterwards and a scan that passes should not carry an
+    # ERROR line for a run that did not count.
+    _side_run_active: bool = PrivateAttr(default=False)
 
     # Whether this plugin's configuration was read from its context's resolved
     # configuration (a section ``AshConfig.get_plugin_config`` answered, as a
@@ -1259,7 +1268,7 @@ class PluginBase(UVToolMixin, BaseModel):
         self,
         *msg: str,
         level: int = 15,
-        target_type: str | None = "source",
+        target_type: TargetType | None = TargetType.SOURCE,
         append_to_stream: Literal["stderr", "stdout", "none"] = "none",
     ):
         """Log a message to the plugin's log file.
@@ -1274,6 +1283,11 @@ class PluginBase(UVToolMixin, BaseModel):
         tt = ""
         if target_type is not None:
             tt = f" @ [magenta]{escape_markup(target_type)}[/magenta]"
+        if level >= logging.ERROR and getattr(self, "_side_run_active", False):
+            # A side run's own failure notes (a timeout, a spawn failure) are
+            # put back with the rest of its record; shown at ERROR they would
+            # read as a failure of a scan that is reported as it would have been.
+            level = logging.DEBUG
 
         # The prefix is styled, so the record asks for markup, and everything
         # interpolated is escaped: the message is the plugin's, and it often names a
@@ -2128,19 +2142,25 @@ class PluginBase(UVToolMixin, BaseModel):
             level=logging.ERROR,
         )
 
-    #: What a run leaves on the plugin: the output and error lines, the exit code
-    #: and the per-run flags the recorders set (``_record_response``).
+    #: What a run leaves on the plugin that a side run puts back: the output and
+    #: error lines, ASH's own notes among them (``_plugin_log_lines``, which
+    #: ``_plugin_log`` writes beside ``errors`` and ``_reset_errors`` clears with
+    #: it), the exit code and the per-run flags the recorders set
+    #: (``_record_response``).
+    #:
+    #: Left out on purpose: the could-not-stop record (``_scan_could_not_stop``
+    #: and its two per-run forms). It says a tool ASH could not kill may still be
+    #: writing into the output directory, which stays true whichever run left it
+    #: there, so a side run adds to it and never erases it.
     _RUN_RECORD_ATTRIBUTES: ClassVar[Tuple[str, ...]] = (
         "output",
         "errors",
         "exit_code",
+        "_plugin_log_lines",
         "_scan_timed_out_after",
         "_scan_spawn_failure",
         "_scan_post_run_error",
         "_scan_kept_flag",
-        "_scan_could_not_stop",
-        "_scan_could_not_stop_runs",
-        "_scan_could_not_stop_history",
         "_unevaluated_targets",
     )
 
@@ -2160,15 +2180,29 @@ class PluginBase(UVToolMixin, BaseModel):
         failed, or only wrote to stderr, must not fail or annotate a scan whose
         main run was fine, so those attributes are put back to what they were.
         Its response is returned for the caller to read; nothing of it is kept.
+
+        One record is not put back: a tool ASH could not stop (the could-not-stop
+        state, see :data:`_RUN_RECORD_ATTRIBUTES`). That ending means a process
+        may still be running and writing into the output directory after the
+        report is read, so ``run_ash_scan`` fails the run on it whichever run
+        left it.
+
+        The put-back is a save and a restore of this plugin's own attributes, so
+        it must not run beside another run on the same plugin: that run's
+        record would be overwritten when this one ends. Both callers run their
+        side run after the main run's response is read, one at a time.
         """
         saved: Dict[str, Any] = {}
         for name in self._RUN_RECORD_ATTRIBUTES:
             if hasattr(self, name):
                 value = getattr(self, name)
                 saved[name] = copy.copy(value)
+        was_active = self._side_run_active
+        self._side_run_active = True
         try:
             return run(command, **kwargs)
         finally:
+            self._side_run_active = was_active
             for name, value in saved.items():
                 setattr(self, name, value)
 
@@ -2239,6 +2273,11 @@ class PluginBase(UVToolMixin, BaseModel):
             env = with_offline_tool_environment(
                 env, scanner_offline() if callable(scanner_offline) else None
             )
+
+            # A POLYFILL row of the scanner's runtime-compat facet puts its shim
+            # directory on the child's PYTHONPATH (utils/runtime_compat_env.py);
+            # a scanner with no such row gets its environment back unchanged.
+            env = with_runtime_compat_environment(env, self)
 
             # A uv command started in the scanned tree (`uv pip ...`, `uv run ...`)
             # runs the tree's .venv python and builds its project unless told not

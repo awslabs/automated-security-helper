@@ -30,6 +30,10 @@ from automated_security_helper.utils.directory_refusals import (
     _WINDOWS_INVALID_NAME_ERRORS,
     output_dir_refusal,
 )
+from automated_security_helper.models.vocab import (
+    SEVERITY_THRESHOLD_VALUES,
+    SeverityThreshold,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -90,7 +94,7 @@ def _read_regular_file_text(path_obj: Path) -> str:
     raise AssertionError("unreachable: the last attempt returns or raises")
 
 
-class ErrorCategory(Enum):
+class ErrorCategory(str, Enum):
     """Categories of errors for better error handling and reporting."""
 
     FILE_NOT_FOUND = "file_not_found"
@@ -764,7 +768,7 @@ def validate_scan_id(scan_id: str) -> Optional[MCPResourceError]:
 
 #: The severity thresholds a scan accepts, in any case: the values
 #: ``AshConfig.global_settings.severity_threshold`` allows, loosest first.
-VALID_SEVERITY_THRESHOLDS = ("ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL")
+VALID_SEVERITY_THRESHOLDS = SEVERITY_THRESHOLD_VALUES
 
 
 def validate_severity_threshold(severity_threshold: str) -> Optional[MCPResourceError]:
@@ -915,7 +919,7 @@ def validate_config_path(
 
 def validate_scan_parameters(
     directory_path: Union[str, Path],
-    severity_threshold: str = "MEDIUM",
+    severity_threshold: str = SeverityThreshold.MEDIUM.value,
     config_path: Optional[Union[str, Path]] = None,
 ) -> Tuple[bool, List[MCPResourceError]]:
     """

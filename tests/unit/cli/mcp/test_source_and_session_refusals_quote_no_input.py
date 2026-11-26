@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List
 from unittest.mock import AsyncMock, MagicMock
 
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 import pytest
 
 from automated_security_helper.cli.mcp import source_delivery
@@ -48,7 +49,7 @@ def _raised_from_one(kind: Callable[[str], BaseException]) -> BaseException:
 
 
 def _git_command_error(message: str) -> BaseException:
-    return source_delivery.GitCommandError(message, source_delivery.GIT_CLONE_FAILED)
+    return source_delivery.GitCommandError(message, McpErrorType.GIT_CLONE_FAILED.value)
 
 
 @pytest.fixture(autouse=True)
@@ -152,7 +153,7 @@ def test_an_upload_whose_workspace_is_unavailable_quotes_no_input(
             "up-1", "0" * 64, session_id=SESSION
         )
 
-    assert response["error_type"] == source_delivery.SESSION_WORKSPACE_UNAVAILABLE
+    assert response["error_type"] == McpErrorType.SESSION_WORKSPACE_UNAVAILABLE.value
     _quotes_nothing(response)
 
 

@@ -28,27 +28,51 @@ import polars as pl
 from automated_security_helper.utils.frame_text import ranks, unwire, wire
 
 
+#: The graded frame's declared shape. The rows are per-finding gradings computed
+#: on the host (no model to derive a spec from), so the one schema dict here is
+#: the record, and the drift gate pins the frame against it. The columns of
+#: :func:`graded_frame`, always all four, in this order.
+#:
+#: - ``level`` is the severity BUCKET (``_severity_level`` of the finding's
+#:   severity, ``unknown`` for none), not ``FlatVulnerability.severity``.
+#: - ``is_suppressed`` is ``FlatVulnerability.is_suppressed``, the name
+#:   ``flat_frame`` gives it.
+#: - ``left_out`` is the report's policy grading (``is_policy_not_gating``), not
+#:   a model field.
+#: - ``actionable`` is the report's threshold grading; null in every row when the
+#:   caller did not ask for it, so a column of nulls is "not decided", never "no".
+GRADED_SCHEMA: dict[str, Any] = {
+    "level": pl.String,
+    "is_suppressed": pl.Boolean,
+    "left_out": pl.Boolean,
+    "actionable": pl.Boolean,
+}
+
+
 def graded_frame(
     levels: Sequence[str],
-    suppressed: Sequence[bool],
+    is_suppressed: Sequence[bool],
     left_out: Sequence[bool],
     actionable: Sequence[bool] | None = None,
 ) -> pl.DataFrame:
     """One row per finding: its severity bucket and its three yes/no gradings.
 
-    ``actionable`` is optional because deciding it costs a threshold lookup per
-    finding, and some summaries never need it.
+    ``is_suppressed`` bears the model field's name it carries
+    (``FlatVulnerability.is_suppressed``). ``actionable`` is optional because deciding it costs a threshold lookup per
+    finding, and some summaries never need it. The frame has the same four
+    columns either way (:data:`GRADED_SCHEMA`); without ``actionable`` that
+    column is null.
     """
-    columns: dict[str, Any] = {
-        "level": pl.Series("level", list(levels), dtype=pl.String),
-        "suppressed": pl.Series("suppressed", list(suppressed), dtype=pl.Boolean),
-        "left_out": pl.Series("left_out", list(left_out), dtype=pl.Boolean),
-    }
-    if actionable is not None:
-        columns["actionable"] = pl.Series(
-            "actionable", list(actionable), dtype=pl.Boolean
-        )
-    return pl.DataFrame(columns)
+    rows = len(levels)
+    return pl.DataFrame(
+        {
+            "level": list(levels),
+            "is_suppressed": list(is_suppressed),
+            "left_out": list(left_out),
+            "actionable": list(actionable) if actionable is not None else [None] * rows,
+        },
+        schema=GRADED_SCHEMA,
+    )
 
 
 def flag_total(frame: pl.DataFrame, flag: str) -> int:
@@ -59,7 +83,9 @@ def flag_total(frame: pl.DataFrame, flag: str) -> int:
 def active_level_counts(frame: pl.DataFrame) -> List[tuple[str, int]]:
     """``(level, count)`` for the unsuppressed rows, levels in first-seen order."""
     counted = (
-        frame.filter(~pl.col("suppressed")).group_by("level", maintain_order=True).len()
+        frame.filter(~pl.col("is_suppressed"))
+        .group_by("level", maintain_order=True)
+        .len()
     )
     return [(level, int(count)) for level, count in counted.iter_rows()]
 
@@ -91,7 +117,10 @@ def severity_order(keys: Sequence[tuple[int, str, int, str]]) -> List[int]:
 
     Each key is ``(severity place, file, line, rule)``. A file or rule may hold a
     lone surrogate and a line is an unbounded int, so text goes in as
-    :func:`wire` and lines as their ranks.
+    :func:`wire` and lines as their ranks. The ``line`` column is a dense rank of
+    the lines given, not a line: only the order of lines is read here, and every
+    line has a rank, where ``models.flat_frame`` holds the line and a null for
+    one that does not fit 64 bits.
     """
     if not keys:
         return []

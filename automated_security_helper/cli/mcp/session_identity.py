@@ -87,6 +87,7 @@ import re
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Dict, Iterator, Mapping, Optional, cast
 
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
 
 if TYPE_CHECKING:
@@ -97,16 +98,12 @@ if TYPE_CHECKING:
 # against a lowercased key.
 MCP_SESSION_ID_HEADER = "mcp-session-id"
 
-#: The session id of a network caller the server cannot identify: stateless
-#: streamable-HTTP without ``--trust-upstream-session-id``, or a header the
-#: server never issued, or headers that name no session. Remote, owns no
-#: sandbox, and every tool that needs a session refuses it. Never accepted from
-#: a client.
-UNIDENTIFIED_SESSION_ID = "__unidentified__"
+#: The session id of a network caller the server cannot identify. Defined in
+#: ``config.session_paths`` (the config trust layer reads it); re-exported here.
+from automated_security_helper.config.session_paths import (  # noqa: E402
+    UNIDENTIFIED_SESSION_ID as UNIDENTIFIED_SESSION_ID,
+)
 
-#: ``error_type`` of the refusal a session-dependent tool returns for
-#: :data:`UNIDENTIFIED_SESSION_ID`.
-SESSION_IDENTITY_REQUIRED = "session_identity_required"
 
 #: Set while the caller is the local client; see :func:`serving_local_client`.
 _LOCAL_CLIENT: ContextVar[bool] = ContextVar("ash_mcp_local_client", default=False)
@@ -145,7 +142,7 @@ def validate_path_component(value: str, label: str) -> str:
     """Refuse a caller-supplied value that could name anything but one directory.
 
     A delegate, not a rule. The rule lives in
-    :func:`automated_security_helper.cli.mcp.session_paths.validated_path_component`
+    :func:`automated_security_helper.config.session_paths.validated_path_component`
     and is the only one: this module and ``session_paths`` each used to carry a
     copy, the copies disagreed about ``~``, ``+``, ``=`` and length, and an id one
     accepted and the other refused was admitted at the transport and then failed
@@ -160,7 +157,7 @@ def validate_path_component(value: str, label: str) -> str:
             raises.
     """
 
-    from automated_security_helper.cli.mcp.session_paths import (
+    from automated_security_helper.config.session_paths import (
         validated_path_component,
     )
 
@@ -228,7 +225,7 @@ def resolve_session_id(headers: Optional[Mapping[str, str]]) -> str:
     # Imported here rather than at module scope: profile_registry imports the
     # config stack, and cli/mcp modules are imported from mcp_server at tool
     # registration time.
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         DEFAULT_SESSION_ID,
     )
 
@@ -299,7 +296,7 @@ def is_reserved_session_id(value: str) -> bool:
     aliases it and none is reserved for it.
     """
 
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         DEFAULT_SESSION_ID,
     )
     from automated_security_helper.cli.mcp.sessions import (
@@ -357,7 +354,7 @@ def resolve_caller_session_id(ctx: object) -> str:
     """
 
     from automated_security_helper.cli.mcp.http_sessions import caller_of
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         DEFAULT_SESSION_ID,
     )
 
@@ -501,14 +498,13 @@ def session_identity_refusal(
     return {
         "success": False,
         "operation": operation,
-        "error_type": SESSION_IDENTITY_REQUIRED,
+        "error_type": McpErrorType.SESSION_IDENTITY_REQUIRED.value,
         "error": raw_controls_on_one_line(error),
     }
 
 
 __all__ = [
     "MCP_SESSION_ID_HEADER",
-    "SESSION_IDENTITY_REQUIRED",
     "UNIDENTIFIED_SESSION_ID",
     "is_reserved_session_id",
     "resolve_caller_session_id",

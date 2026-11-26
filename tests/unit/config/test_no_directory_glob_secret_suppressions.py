@@ -64,9 +64,10 @@ WILDCARD_CHARS = ("*", "?", "[")
 
 
 def _config_files() -> list[Path]:
-    return sorted(
+    in_ash_dir = [
         p for p in ASH_CONFIG_DIR.iterdir() if p.is_file() and p.suffix == ".yaml"
-    )
+    ]
+    return sorted([REPO_ROOT / ".ash.yaml", *in_ash_dir])
 
 
 def is_directory_glob(path: str) -> bool:
@@ -95,7 +96,7 @@ def broad_guarded_suppressions(config: dict) -> list[dict]:
 def test_the_repository_ships_config_files_to_check():
     # Without this the parametrized test below collects zero cases and passes.
     names = {p.name for p in _config_files()}
-    assert {".ash.yaml", ".ash_community_plugins.yaml"} <= names
+    assert {".ash.yaml", ".ash_alpha_plugins.yaml"} <= names
 
 
 @pytest.mark.parametrize("config_path", _config_files(), ids=lambda p: p.name)

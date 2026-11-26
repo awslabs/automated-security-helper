@@ -16,6 +16,24 @@ from automated_security_helper.utils.undecodable_text import (
 
 _DOUBLE_STAR = "**"
 
+#: The characters that make a pattern a glob rather than a bare path:
+#: ``fnmatch``'s wildcards and the opening bracket of a character class. A
+#: pattern holding none of them names a path, and :func:`_path_pattern_matches`
+#: reads such a pattern as the path itself OR the directory of that name, whose
+#: whole subtree it matches (the bare-directory rule, issue #894). An unmatched
+#: ``]`` without ``[`` is an ordinary character to ``fnmatch`` and here alike.
+_GLOB_SYNTAX = frozenset("*?[")
+
+
+def has_glob_syntax(pattern: str) -> bool:
+    """Whether *pattern* holds a glob character (``*``, ``?`` or ``[``).
+
+    The one test every reader of the bare-directory rule uses, so the matcher
+    and the rewrites derived from it (``utils/workspace_paths.py``) cannot
+    disagree about which patterns the rule covers.
+    """
+    return any(character in _GLOB_SYNTAX for character in pattern)
+
 
 def _pattern_components(pattern: str) -> List[str]:
     """Split *pattern* into path components, normalizing the ``**`` forms.
@@ -188,7 +206,9 @@ def _class_holds_surrogate(pattern: str) -> bool:
     return False
 
 
-def _path_pattern_matches(file_path: Optional[str], pattern: str) -> bool:
+def _path_pattern_matches(
+    file_path: Optional[str], pattern: str, *, bare_directory: bool = True
+) -> bool:
     """Case-sensitive path match supporting ``**`` recursive globs.
 
     Gives the same answer on every platform. ``fnmatch.fnmatch`` does not: it
@@ -197,6 +217,20 @@ def _path_pattern_matches(file_path: Optional[str], pattern: str) -> bool:
     in :func:`_match_form`, the path is taken as given, and the two are compared
     with ``fnmatchcase``, which skips normcase. ``TESTS/x.py`` is not below
     ``tests/``. A pattern :func:`names_no_path` matches nothing.
+
+    A pattern with no glob character (:func:`has_glob_syntax`) names a path: it
+    matches that exact path, as it always did, and -- the bare-directory rule,
+    issue #894 -- every path below the directory of that name, anchored at the
+    start, so ``tests`` and ``tests/`` cover ``tests/test_x.py`` and
+    ``tests/sub/test_y.py`` and nothing in ``pkg/tests/``. Before the rule a
+    bare directory name in an ignore path or a suppression silently matched
+    nothing. The trailing-slash spelling names the directory only, never a file
+    of that name, which the slashless spelling still matches exactly. Glob
+    patterns are untouched: a ``*``, ``?`` or ``[`` anywhere keeps the pattern's
+    glob reading and nothing else. ``bare_directory=False`` turns the rule off
+    for a caller whose pattern names an identity rather than a scope (a
+    suppression's ``package_path``, which separates two installed copies and
+    must not also cover packages nested below the one named).
     """
     if file_path is None or names_no_path(pattern):
         return False
@@ -230,6 +264,21 @@ def _path_pattern_matches(file_path: Optional[str], pattern: str) -> bool:
     # is how a pattern is made to name one file only.
     if finding_norm == pattern_norm:
         return True
+
+    if not has_glob_syntax(pattern_norm):
+        # The bare-directory rule: a glob-free pattern also names the directory
+        # it spells, and matches everything below it. Anchored, so ``tests``
+        # covers nothing in ``pkg/tests/``; a pattern that is only separators
+        # strips to nothing and matches nothing. Compared in the record form,
+        # as the exact match above is: the two forms are one deterministic
+        # spelling of both sides, and ``/`` never occurs inside a ``\\udcNN``
+        # escape, so the component boundary is the same in either form. The
+        # glob branches below are equality for a glob-free pattern, which the
+        # exact match already answered, so this branch is the last word for one.
+        if not bare_directory:
+            return False
+        directory = pattern_norm.rstrip("/")
+        return bool(directory) and finding_norm.startswith(directory + "/")
 
     if "**" in pattern_norm:
         if not record_form_reads_it_wider and _recursive_glob_match(
@@ -269,9 +318,11 @@ def ignore_path_pattern(pattern: str) -> str:
     pre-filter then stopped scanning. The ``*`` requires one component below
     the directory.
 
-    For ignore paths only. A suppression's path ending in ``/`` keeps its literal
-    meaning, which matches no file (see
-    ``suppression_matcher.warn_unmatched_directory_suppressions``).
+    For ignore paths only, and now largely a spelling kept for its readers (the
+    workspace rewrites, bandit's exclude spelling): the bare-directory rule in
+    :func:`_path_pattern_matches` reads a glob-free ``vendor/`` as the same
+    directory for suppressions and ignore paths alike, and the two forms match
+    the same files.
 
     ``./`` and ``.\\`` are not read as the directory ``.``, which would be every
     ``./``-prefixed path: like ``.`` and ``""`` they name no path
@@ -340,12 +391,14 @@ def literal_path_pattern(path: str) -> str:
 def directory_spelling(directory: str, *, ignore_path: bool) -> str:
     """How to write "every file inside ``directory``", for advice ASH prints.
 
-    One spelling for one meaning, so the config lint, ``ash config validate`` and
-    the warning after the scan agree. For an ignore path, ``<dir>/``, which
-    ``ignore_path_pattern`` reads as what is inside the directory. For a
-    suppression path, whose trailing slash is literal, ``<dir>/**/*``: every file
-    below the directory and not a path named exactly ``<dir>``, which ``<dir>/**``
-    would also match.
+    One spelling for one meaning, so the config lint and ``ash config validate``
+    agree. For an ignore path, ``<dir>/``, which ``ignore_path_pattern`` reads as
+    what is inside the directory. For a suppression path, ``<dir>/**/*``: every
+    file below the directory and not a path named exactly ``<dir>``, which the
+    slashless spelling and ``<dir>/**`` would also match. Since the
+    bare-directory rule (issue #894) a suppression's ``<dir>/`` matches the same
+    files; the glob spelling is kept as the advice because it is explicit about
+    covering the whole subtree.
 
     A directory that is only separators (``/``, ``\\``) has no spelling here: ``""``
     is returned, which a caller reads as "no advice to give". It was ``/`` for an

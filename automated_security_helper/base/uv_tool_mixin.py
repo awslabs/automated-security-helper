@@ -43,6 +43,7 @@ from typing import (
 from automated_security_helper.utils.error_text import ESCAPE_CODES as _ANSI_ESCAPE
 from automated_security_helper.utils.error_text import error_text, text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.pre_installed_tool import ToolInstallStatus
 from automated_security_helper.utils.subprocess_utils import (
     RESPONSE_FLAGS,
     OutputPreference,
@@ -1767,7 +1768,7 @@ class UVToolMixin:
                 limit=None,
             )
 
-        if verdict.status == "satisfied":
+        if verdict.status == ToolInstallStatus.SATISFIED:
             self._plugin_log(
                 _shown(
                     f"Using pre-installed {self.command} at {executable} directly; "
@@ -1788,9 +1789,14 @@ class UVToolMixin:
             # (SARIF scanner_version) is its own, not the one the uv probe read
             # from uv's environment. Read with a default: a verifier stand-in
             # that carries only status and detail is a verdict without one.
-            verified_version = getattr(verdict, "version", None)
-            if verified_version:
-                self.tool_version = verified_version
+            # A copy that answered no version leaves the record empty: the
+            # value an earlier uv probe wrote names an environment the scan
+            # does not run (#955, the probe resolved 3.4.5 while the PATH copy
+            # was 3.3.15), and the uv probe is no longer owed on this route.
+            # mypy reads this mixin's tool_version as the str the first assignment above
+            # gave it; PluginBase declares it ``str | None``, which is what this holds.
+            self.tool_version = getattr(verdict, "version", None) or None  # type: ignore[assignment]
+            self._deferred_tool_version_probe = None
             return True
 
         # A tool from the Nix store is the pinned one `--mode nix` exists to run.
@@ -1809,8 +1815,8 @@ class UVToolMixin:
             offline
             and source == "pre_installed"
             and (
-                verdict.status == "unsatisfied"
-                or (verdict.status == "unverifiable" and from_nix)
+                verdict.status == ToolInstallStatus.UNSATISFIED
+                or (verdict.status == ToolInstallStatus.UNVERIFIABLE and from_nix)
             )
         ):
             if from_nix:
@@ -1824,11 +1830,11 @@ class UVToolMixin:
                 remedy = (
                     "uv cannot fetch what is missing while offline. Install it "
                     f"before going offline, e.g. `uv tool install '{requirement}'`, "
-                    "or rebuild the image with `ash build-image --offline`."
+                    "or rebuild the image with `ash container build --offline`."
                 )
             cannot = (
                 "cannot be used"
-                if verdict.status == "unsatisfied"
+                if verdict.status == ToolInstallStatus.UNSATISFIED
                 else "could not be verified"
             )
             # The log gets the full story: the copy's path and the verdict's
@@ -1863,7 +1869,7 @@ class UVToolMixin:
                     f"not directly: {verdict.detail}"
                 ),
                 level=logging.WARNING
-                if verdict.status == "unsatisfied"
+                if verdict.status == ToolInstallStatus.UNSATISFIED
                 else logging.INFO,
             )
         self.dependencies_satisfied = True
@@ -2893,18 +2899,39 @@ class UVToolMixin:
     def _get_tool_python_request(self) -> Optional[str]:
         """Interpreter request for ``uv tool install/run --python``, or None.
 
-        None, the default, leaves the interpreter to uv, which is how every
-        uv-backed plugin behaved before this hook existed. Override it for a tool
-        whose dependencies publish no wheels for the newest interpreter uv may
-        pick: uv then builds those dependencies from source, which needs a C
-        toolchain and system headers, and the install fails. GuardDog is the
-        case that added this (pygit2 and yara-python have no CPython 3.14 wheels
-        at the pinned version). A version specifier such as ``">=3.10,<3.14"``
-        lets uv choose, or download, any interpreter that satisfies it.
+        Derived from the scanner's runtime-compatibility facet
+        (``operational_facets.runtime_compat``,
+        ``base/scanner_operational_facets.py``): the PIN rows that apply at the
+        scanner's effective tool version constraint, combined. None, when no
+        row applies or the class declares no register row (a third-party plugin
+        predating the register), leaves the interpreter to uv, which is how
+        every uv-backed plugin behaved before this hook existed. A tool whose
+        dependencies publish no wheels for the newest interpreter uv may pick,
+        or whose own code breaks on it, declares a row instead of overriding
+        this method: GuardDog (pygit2 and yara-python have no CPython 3.14
+        wheels) and checkov (CPython 3.15 breaks its JSON decoder) are the
+        rows. A request such as ``">=3.10,<3.14"`` lets uv choose, or
+        download, any interpreter that satisfies it.
 
-        The value must carry no whitespace; see ``_setup_uv_tool_install_commands``.
+        This is the one derivation point: the stored install command, the
+        runner calls, the version probes and ``ash dependencies install`` all
+        read it. A plugin may still override the method, and then the override
+        answers for every one of them.
+
+        The value carries no whitespace by construction (the row refuses one);
+        see ``_setup_uv_tool_install_commands``.
         """
-        return None
+        from automated_security_helper.base.scanner_operational_facets import (
+            RuntimeName,
+            declared_runtime_compat,
+        )
+
+        compat = declared_runtime_compat(type(self))
+        if compat is None:
+            return None
+        return compat.pin_request(
+            RuntimeName.PYTHON, self._get_tool_version_constraint()
+        )
 
     def _uv_python_kwargs(self) -> Dict[str, Any]:
         """``{"python_request": ...}`` for the runner calls, or ``{}`` when unset.

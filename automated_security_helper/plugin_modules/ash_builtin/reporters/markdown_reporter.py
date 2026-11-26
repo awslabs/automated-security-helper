@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 
 from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
@@ -26,6 +27,9 @@ from automated_security_helper.utils.converter_refusals import (
     markdown_summary_lines,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+    SUMMARY_BELOW_THRESHOLD,
+    SUMMARY_POLICY_NOT_GATING,
+    OutcomeTone,
     ReportContentEmitter,
     coverage_shortfall_text,
     deduplicated_summary_text,
@@ -255,9 +259,7 @@ def _code_block(value: str, language: str = "") -> str:
 
 def outcome_markdown(summary: Dict[str, Any]) -> str:
     """The factual outcome shared by standard and generated Markdown reports."""
-    alert = {"danger": "CAUTION", "warning": "WARNING", "success": "TIP"}[
-        summary["tone"]
-    ]
+    alert = OutcomeTone(summary["tone"]).alert
     deduplicated = deduplicated_summary_text(summary)
     return "\n".join(
         [
@@ -268,12 +270,12 @@ def outcome_markdown(summary: Dict[str, Any]) -> str:
             ">",
             (
                 f"> **{summary['actionable']} actionable** · "
-                f"{summary['below_threshold']} below threshold · "
+                f"{summary[SUMMARY_BELOW_THRESHOLD]} below threshold · "
                 # Findings the project's outcome left out are counted apart from
                 # the ones the threshold sets aside, only when present.
                 + (
-                    f"{summary['policy_not_gating']} not gating (workspace policy) · "
-                    if summary.get("policy_not_gating")
+                    f"{summary[SUMMARY_POLICY_NOT_GATING]} not gating (workspace policy) · "
+                    if summary.get(SUMMARY_POLICY_NOT_GATING)
                     else ""
                 )
                 + f"{summary['suppressed']} suppressed · "
@@ -526,8 +528,11 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             shown = 0
             for result in emitter.get_scanner_results():
                 if options.compact and (
-                    result["status"] == "SKIPPED"
-                    or (result["total"] == 0 and result["status"] == "PASSED")
+                    result["status"] == ScannerStatus.SKIPPED.value
+                    or (
+                        result["total"] == 0
+                        and result["status"] == ScannerStatus.PASSED.value
+                    )
                 ):
                     continue
                 threshold = f"{result['threshold']} ({result['threshold_source']})"
@@ -569,7 +574,9 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             not_run = [
                 entry
                 for entry in emitter.get_scanners_not_run()
-                if not (options.compact and entry["status"] == "SKIPPED")
+                if not (
+                    options.compact and entry["status"] == ScannerStatus.SKIPPED.value
+                )
             ]
             if not_run:
                 parts.append("Scanners that did not run:\n")
@@ -718,12 +725,12 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             )
             # A limit of 0 lists none of them, yet the summary still counts
             # them, so the section and the pointer follow the count.
-            if summary["policy_not_gating"]:
+            if summary[SUMMARY_POLICY_NOT_GATING]:
                 parts.append("## Not gating (workspace policy)\n")
                 if left_out:
                     parts.append(
                         f"Showing {len(left_out)} of "
-                        f"{summary['policy_not_gating']} findings reported and "
+                        f"{summary[SUMMARY_POLICY_NOT_GATING]} findings reported and "
                         "left out of the outcome because "
                         "`policy_scanners_gate` is off.\n"
                     )
@@ -731,9 +738,9 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                     parts.append("")
                 # The table stops at the same limit as the list above, so
                 # say where the rest is, as that list does.
-                if len(left_out) < summary["policy_not_gating"]:
+                if len(left_out) < summary[SUMMARY_POLICY_NOT_GATING]:
                     parts.append(
-                        f"> Showing {len(left_out)} of {summary['policy_not_gating']} "
+                        f"> Showing {len(left_out)} of {summary[SUMMARY_POLICY_NOT_GATING]} "
                         "findings left out of the outcome. "
                         'Open the HTML report and choose the "Not gating" scope '
                         "to review the full set. "

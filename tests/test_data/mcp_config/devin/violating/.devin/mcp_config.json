@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "elevated": {
+      "args": [
+        "/usr/local/bin/mcp-files",
+        "--root",
+        "/srv/data"
+      ],
+      "command": "sudo"
+    },
+    "remote": {
+      "serverUrl": "http://mcp.example.com/docs"
+    },
+    "runner": {
+      "args": [
+        "-y",
+        "some-mcp-server"
+      ],
+      "command": "npx"
+    }
+  }
+}

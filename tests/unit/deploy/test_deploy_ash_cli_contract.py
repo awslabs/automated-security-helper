@@ -263,6 +263,7 @@ _COMMANDS = frozenset(
     {
         "build-image",
         "config",
+        "container",
         "dependencies",
         "diff",
         "express",
@@ -272,7 +273,10 @@ _COMMANDS = frozenset(
         "merge",
         "plugin",
         "report",
+        "results",
         "scan",
+        "suppress",
+        "trend",
     }
 )
 

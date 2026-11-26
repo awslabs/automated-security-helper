@@ -44,6 +44,8 @@ ASH_INSTALLED_REVISION_PATH: Path = ASH_ASSETS_PATH.joinpath("ASH_INSTALLED_REVI
 DOCKERFILE_STAGED_PACKAGE_FILES: tuple = (
     ("utils/tool_downloads.py", "tool_downloads.py"),
     ("core/exceptions.py", "exceptions.py"),
+    # The pins every plugin declares; tool_downloads.TOOL_VERSIONS is derived from it.
+    ("base/plugin_provisioning.py", "plugin_provisioning.py"),
 )
 
 

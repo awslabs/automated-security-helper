@@ -2441,7 +2441,7 @@ def test_an_import_path_entry_elsewhere_in_home_is_not_mounted(layout, monkeypat
 
 @pytest.mark.unit
 class TestPluginDeclarations:
-    """Third-party and community plugin scanners get exactly what they declare.
+    """Third-party and alpha plugin scanners get exactly what they declare.
 
     A scanner that declares no sandbox_requirements gets the strictest default: no
     network, read-only source, its own results directory as the only writable

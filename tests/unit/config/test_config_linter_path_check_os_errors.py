@@ -128,14 +128,19 @@ def test_a_path_the_os_refuses_does_not_end_the_lint_run(
 
 
 def test_a_directory_path_still_gets_its_advice(tmp_path):
-    """The control: the guarded call still returns the helpers' advice."""
+    """The control: the guarded call still returns the helpers' advice.
+
+    A bare ``tests`` matches the directory's subtree since the bare-directory
+    rule (issue #894); the ``**/tests`` shape still matches no file and draws
+    the directory advice.
+    """
     (tmp_path / "tests").mkdir()
     config_path = tmp_path / ".ash.yaml"
     config_path.write_text(
         "project_name: demo\n"
         "global_settings:\n"
         "  suppressions:\n"
-        "    - path: tests\n"
+        '    - path: "**/tests"\n'
         "      rule_id: B101\n"
         "      reason: probe\n",
         encoding="utf-8",

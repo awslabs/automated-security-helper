@@ -53,6 +53,7 @@
           "package_name": null,
           "package_version": null,
           "package_path": null,
+          "image": null,
           "symbol": null,
           "scope": null,
           "resource_id": null
@@ -68,11 +69,13 @@
           "package_name": null,
           "package_version": null,
           "package_path": null,
+          "image": null,
           "symbol": null,
           "scope": null,
           "resource_id": null
         }
       ],
+      "exclusions": [],
       "mcp": {
         "runtime_overrides": {
           "enabled": false,
@@ -97,6 +100,7 @@
             "/scanners/detect-secrets/options/baseline_file",
             "/global_settings/ignore_paths",
             "/global_settings/suppressions",
+            "/global_settings/exclusions",
             "/global_settings/mcp",
             "/global_settings/mcp/**",
             "/scanners/opengrep/options/exclude_rule",

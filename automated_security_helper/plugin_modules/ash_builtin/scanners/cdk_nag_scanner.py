@@ -29,6 +29,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import CustomCommand
@@ -1226,11 +1227,10 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             "YAML-rendered into Region.snippet",
         ),
         references=FacetDecl(
-            state=FacetState.DROPPED,
+            state=FacetState.MAPPED,
             native_field="per-pack rule help URI (_rule_help_uri, "
-            "ReportingDescriptor.helpUri)",
-            reason="rule-level only: the flat reader takes references from "
-            "result relatedLocations, so the help link is discarded today",
+            "ReportingDescriptor.helpUri), read into the flat references "
+            "when the result carries no relatedLocations",
         ),
         tags=FacetDecl(
             state=FacetState.MAPPED,
@@ -1288,6 +1288,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="runs in ASH's own interpreter plus a jsii child that needs node on PATH; ASH installs neither",
@@ -1325,7 +1326,6 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 semantics="the base default {0, 1}; the evaluation is in-process, so there is no tool exit",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
                 selection_surfaces=("options nag packs",),
                 upstream_license=(
@@ -1657,7 +1657,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: CdkNagScannerConfig | None = None,
     ) -> SarifReport | bool:
@@ -1885,7 +1885,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # before it reaches the worker, and the worker reads it under the same rule.
         scan_root = (
             self.context.work_dir
-            if target_type == "converted"
+            if target_type == TargetType.CONVERTED
             else self.context.source_dir
         )
         # Candidates the scanned-tree rule refused, counted so a target that
@@ -2396,7 +2396,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             _reporting_descriptor_for(
                 representative,
                 tool_name=self.config.name,
-                tool_type=self.tool_type or "UNKNOWN",
+                tool_type=self.tool_type or ScannerToolType.UNKNOWN,
             )
             for representative in rule_reps.values()
         ]
@@ -2548,7 +2548,9 @@ if __name__ == "__main__":
             )
         ),
     )
-    report = scanner.scan(target=scanner.context.source_dir, target_type="source")
+    report = scanner.scan(
+        target=scanner.context.source_dir, target_type=TargetType.SOURCE
+    )
 
     from automated_security_helper.utils.command_safe_stream import (
         json_commands_broken,

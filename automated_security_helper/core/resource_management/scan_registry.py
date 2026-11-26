@@ -21,6 +21,7 @@ from threading import Event, Lock
 from time import monotonic
 
 from automated_security_helper.core.cancellation import CancelEvent
+from automated_security_helper.models.vocab import SeverityThreshold
 from automated_security_helper.core.constants import ASH_EXIT_CODES
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -74,7 +75,7 @@ def _canonical_directory(directory_path: str) -> Path:
         return Path(directory_path)
 
 
-class MCScanStatus(Enum):
+class MCScanStatus(str, Enum):
     """Status of a scan.
 
     ``INCOMPLETE`` is terminal, like ``COMPLETED``: the run finished and its results
@@ -119,7 +120,7 @@ ENDED = frozenset(
 
 #: The session a scan belongs to when its registrar named none: stdio's single
 #: client and in-process callers. The same value as
-#: ``cli.mcp.profile_registry.DEFAULT_SESSION_ID``, spelled here rather than
+#: ``config.session_profiles.DEFAULT_SESSION_ID``, spelled here rather than
 #: imported because this module sits below the MCP CLI package.
 DEFAULT_SCAN_SESSION = "__default__"
 
@@ -165,7 +166,7 @@ class ScanRegistryEntry:
         scan_id: str,
         directory_path: str,
         output_directory: str,
-        severity_threshold: Optional[str] = "MEDIUM",
+        severity_threshold: Optional[str] = SeverityThreshold.MEDIUM.value,
         config_path: Optional[str] = None,
         session_id: Optional[str] = None,
         slot: Optional[str] = None,
@@ -908,7 +909,7 @@ class ScanRegistry:
         self,
         directory_path: str,
         output_directory: str,
-        severity_threshold: Optional[str] = "MEDIUM",
+        severity_threshold: Optional[str] = SeverityThreshold.MEDIUM.value,
         config_path: Optional[str] = None,
         scan_id: Optional[str] = None,
         max_active: Optional[int] = None,
@@ -990,7 +991,7 @@ class ScanRegistry:
         self,
         directory_path: str,
         output_directory: str,
-        severity_threshold: Optional[str] = "MEDIUM",
+        severity_threshold: Optional[str] = SeverityThreshold.MEDIUM.value,
         config_path: Optional[str] = None,
         scan_id: Optional[str] = None,
         max_active: Optional[int] = None,

@@ -299,18 +299,19 @@ class TestDownConversionAnchored:
         assert _down_suppression("project-a/src/x.py", "project-a") == "src/x.py"
         assert file_path_matches("project-a/src/x.py", "Project-A/src/x.py") is False
 
-    def test_a_pattern_naming_only_the_project_directory_does_not_apply(self):
-        """ "project-a" matches the directory, not the files inside it.
+    def test_a_pattern_naming_only_the_project_directory_covers_it_all(self):
+        """ "project-a" names the directory and matches the files below it.
 
-        An earlier version returned "**" here on the reading that naming a
-        project means "all of it". The contract sweep disproved that:
-        file_path_matches("project-a/src/x.py", "project-a") is False, so
-        returning "**" would have suppressed a whole project that the
-        workspace-level pattern never covered.
+        The bare-directory rule (issue #894):
+        file_path_matches("project-a/src/x.py", "project-a") is True, so the
+        workspace-level pattern covers the whole project and the project-side
+        pattern is "**". Before the rule a bare name matched only its literal
+        path and the conversion was None; the contract sweep checks both eras
+        against the real matcher.
         """
-        assert file_path_matches("project-a/src/x.py", "project-a") is False
-        assert _down_suppression("project-a", "project-a") is None
-        assert _down_suppression("project-a/", "project-a") is None
+        assert file_path_matches("project-a/src/x.py", "project-a") is True
+        assert _down_suppression("project-a", "project-a") == "**"
+        assert _down_suppression("project-a/", "project-a") == "**"
 
 
 class TestDownConversionNotApplicable:
@@ -336,8 +337,9 @@ class TestDownConversionNotApplicable:
         assert _down_suppression("apps/x.py", "apps/web") is None
 
     def test_a_pattern_with_fewer_components_than_the_prefix(self):
-        """'apps' cannot address anything inside 'apps/web'."""
-        assert _down_suppression("apps", "apps/web") is None
+        """A glob-free ancestor covers the project: the bare-directory rule
+        (issue #894) reads 'apps' as the directory and everything below it."""
+        assert _down_suppression("apps", "apps/web") == "**"
 
 
 class TestDownConversionWildcardFirstComponent:
@@ -352,11 +354,6 @@ class TestDownConversionWildcardFirstComponent:
             ("project-*/src/x.py", "**/src/x.py"),
             ("**/src/x.py", "**/src/x.py"),
             ("**/test_*.py", "**/test_*.py"),
-            # A BOUNDED leading glob ("?", "[...]") matches a fixed number of
-            # characters, so it consumed exactly the prefix and nothing more.
-            # Rewriting these to "**" would suppress "sub/src/x.py" too.
-            ("?roject-a/src/x.py", "src/x.py"),
-            ("[pq]roject-a/src/x.py", "src/x.py"),
             # An all-stars leading matches anything, so the whole project.
             ("*", "**"),
             ("**", "**"),
@@ -375,6 +372,18 @@ class TestDownConversionWildcardFirstComponent:
     def test_a_leading_glob_that_cannot_reach_the_project_is_none(self):
         """ "api*" cannot match a project whose first component is "services"."""
         assert _down_suppression("api*/src/x.py", "services/api") is None
+
+    @pytest.mark.parametrize("pattern", ["?roject-a/src/x.py", "[pq]roject-a/src/x.py"])
+    def test_a_glob_whose_remainder_is_glob_free_is_refused(self, pattern):
+        """A BOUNDED leading glob ("?", "[...]") consumed exactly the prefix,
+        leaving the glob-free remainder "src/x.py". Under the bare-directory
+        rule (issue #894) that remainder names a directory project-side and
+        would cover a subtree the workspace glob never matched; no project-side
+        pattern spells "this exact path only" for a plain name, so the
+        conversion is refused, never widened."""
+        with pytest.raises(WorkspacePatternError) as refused:
+            _down_suppression(pattern, "project-a")
+        assert "bare-directory" in str(refused.value)
 
     def test_a_trailing_double_star_inside_the_prefix_span_covers_the_project(self):
         """ "api/**" covers everything below "api", so all of "api/sub"."""
@@ -800,12 +809,16 @@ class TestDownConversionPerKind:
         assert file_path_matches("api/vendor", "api/vendor/") is False
         assert file_path_matches("vendor", "vendor/") is False
 
-    @pytest.mark.parametrize("pattern", ["api/", "*/", "api*/", "?pi/"])
-    def test_a_suppression_reaching_the_project_root_is_dropped_not_widened(
+    @pytest.mark.parametrize("pattern", ["*/", "api*/", "?pi/"])
+    def test_a_glob_suppression_reaching_the_project_root_is_dropped_not_widened(
         self, pattern
     ):
-        """ "**/" would be "**", which suppresses the whole project."""
+        """ "**/" would be "**", which suppresses a whole project these glob
+        patterns, whose trailing slash is literal, never matched. A glob-free
+        "api/" names the directory (the bare-directory rule, issue #894) and
+        covers the project instead."""
         assert to_project_pattern(pattern, "api", kind=SUPPRESSION) is None
+        assert to_project_pattern("api/", "api", kind=SUPPRESSION) == "**"
 
     @pytest.mark.parametrize("kind", [IGNORE_PATH, SUPPRESSION])
     @pytest.mark.parametrize(

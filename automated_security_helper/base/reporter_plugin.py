@@ -624,13 +624,12 @@ class ReporterPluginBase(PluginBase, Generic[T]):
     #: What this reporter does with a multi-project model. See the module
     #: docstring for why the default is ``PER_PROJECT`` and not ``MERGED``.
     #:
-    #: A ``ClassVar`` rather than a pydantic field, for two reasons. It is a
-    #: property of the reporter *class*, not of an instance's configuration, so
-    #: it must be readable before instantiation -- the workspace driver decides
-    #: whether to build the instance at all. And ``PluginBase`` sets
-    #: ``use_enum_values=True``, which would coerce a field holding an enum down
-    #: to its bare string on assignment; a ClassVar is untouched by that, so
-    #: identity comparisons against enum members keep working.
+    #: A ``ClassVar`` rather than a pydantic field because it is a property of
+    #: the reporter *class*, not of an instance's configuration, so it must be
+    #: readable before instantiation -- the workspace driver decides whether to
+    #: build the instance at all. (``PluginBase`` once set ``use_enum_values``,
+    #: which made a field holding an enum a bare string; it no longer does, so
+    #: that was never the reason to keep this off the model.)
     workspace_behaviour: ClassVar[ReporterWorkspaceBehaviour] = (
         ReporterWorkspaceBehaviour.PER_PROJECT
     )

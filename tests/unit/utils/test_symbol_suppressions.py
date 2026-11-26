@@ -57,6 +57,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.utils import symbol_spans
+from automated_security_helper.utils.ash_lock import AshLock, LockScope, lock_key
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.symbol_spans import (
@@ -319,6 +320,20 @@ class TestPythonSpans:
         assert "Inner" not in spans
         # A same-named method one level up is a different symbol.
         assert not any(a <= inner_method <= b for a, b in spans["Outer.method"])
+
+    def test_a_class_attribute_line_is_inside_the_class_and_no_method(self):
+        """A line at class-body level, between methods, is covered by the class
+        symbol alone. This is the shape that decides how a class-attribute pin
+        can migrate: the only addressable symbol is the whole class, so a pin
+        whose intent is one attribute line stays line-pinned (see
+        tests/test_data/suppression_symbol_migration.yaml's kept entries)."""
+        spans = _python_spans()
+        attr = _line(PYTHON_SOURCE, "MARK Outer attr")
+        assert any(a <= attr <= b for a, b in spans["Outer"])
+        for name, spanlist in spans.items():
+            if name == "Outer":
+                continue
+            assert not any(a <= attr <= b for a, b in spanlist), name
 
     def test_nested_function_and_conditional_definition(self):
         spans = _python_spans()
@@ -822,7 +837,7 @@ class TestLint:
         self, tmp_path, caplog, monkeypatch
     ):
         """The printed command is pip's; uv tool, pipx and uvx users need the page."""
-        url = f"{ASH_DOCS_URL}/docs/suppressions/#installing-the-extra"
+        url = f"{ASH_DOCS_URL}/how-to/suppress-findings/#installing-the-extra"
         scan_hints = _missing_extra_scan_hints(tmp_path, caplog, monkeypatch)
         lint_issues = _symbol_issues(
             _lint([{"path": "src/app.py", "reason": "r", "symbol": "module_function"}])
@@ -903,9 +918,17 @@ def _sarif(uri: str, lines) -> SarifReport:
 
 
 def _context(root: Path, out: Path, suppressions) -> PluginContext:
-    config = AshConfig(
-        project_name="p", global_settings={"suppressions": list(suppressions)}
-    )
+    suppressions = list(suppressions)
+    # A scan applies a symbol suppression only to a file locked in
+    # .ash.lock (utils/ash_lock.py); these tests are about the spans, so
+    # each file a suppression names is locked as it stands.
+    lock = AshLock(source_dir=root)
+    for s in suppressions:
+        if s.symbol and (root / s.path).is_file():
+            lock.bind(lock_key(s.path), LockScope(s.rule_id or "", s.symbol))
+    if lock.entries:
+        lock.save()
+    config = AshConfig(project_name="p", global_settings={"suppressions": suppressions})
     return PluginContext(source_dir=root, output_dir=out, config=config)
 
 

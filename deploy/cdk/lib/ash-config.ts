@@ -754,7 +754,7 @@ export function scanEgressCidr(scope: Stack): CfnParameter {
  * SCOPE OF THIS CHANGE, STATED SO NOBODY IS MISLED
  * -----------------------------------------------
  * This declares the name. The listener is still HTTP only: `CKV_AWS_2` and
- * `CKV_AWS_103` are suppressed in `.ash/.ash.yaml` with the cost that suppression
+ * `CKV_AWS_103` are suppressed in `.ash.yaml` with the cost that suppression
  * names, because clearing them needs a second, conditional listener RESOURCE
  * rather than a conditional property, and checkov reads the HTTP listener that
  * would remain alongside it either way. The name is fixed here so the shared

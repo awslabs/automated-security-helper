@@ -246,7 +246,7 @@ def _online(monkeypatch):
 # --------------------------------------------------------------------------- #
 
 
-def test_trivy_is_a_builtin_on_by_default_beside_the_community_trivy_repo():
+def test_trivy_is_a_builtin_on_by_default_beside_the_alpha_trivy_repo():
     assert TrivyScannerConfig().enabled is True
     assert TrivyRepoScannerConfig().enabled is True
 
@@ -829,7 +829,7 @@ def test_trivy_repo_records_each_targets_own_exit_code(tmp_path, monkeypatch):
     assert report.runs[0].invocations[0].exitCode == 0
 
 
-def test_the_community_plugin_command_line_is_unchanged(tmp_path):
+def test_the_alpha_plugin_command_line_is_unchanged(tmp_path):
     """trivy-repo's flags, in order, as before the shared base existed, plus
     --offline-scan, which every trivy scan gets, and --skip-version-check, which
     every online one gets."""
@@ -993,7 +993,7 @@ def test_a_measurement_is_recorded_under_the_scanner_that_read_it(reader, record
     record = staleness.measure(
         cdb.get("trivy-db"),
         staleness.ProbeContext(env={}),
-        cdb.STALENESS_FAIL,
+        cdb.StalenessPolicy.FAIL,
         scanner=reader,
     )
     assert record.scanner == recorded
@@ -1267,7 +1267,7 @@ def _repo_scanner(tmp_path: Path, **options) -> TrivyRepoScanner:
     )
 
 
-def test_the_community_plugin_offline_command_line_is_unchanged(tmp_path):
+def test_the_alpha_plugin_offline_command_line_is_unchanged(tmp_path):
     """Every flag trivy-repo can emit, in the order it always emitted them, with
     --offline-scan, which every trivy scan gets, ahead of the offline flags. Offline
     there is no --skip-version-check: TRIVY_SKIP_VERSION_CHECK turns that check off
@@ -1294,7 +1294,7 @@ def test_the_community_plugin_offline_command_line_is_unchanged(tmp_path):
     ]
 
 
-def test_the_community_plugin_follows_ash_offline_mode(tmp_path, monkeypatch):
+def test_the_alpha_plugin_follows_ash_offline_mode(tmp_path, monkeypatch):
     """trivy-repo and trivy read offline the same way (_scanner_offline, #748).
 
     ``offline: false`` follows ASH: under ASH_OFFLINE trivy-repo skips its
@@ -1312,12 +1312,12 @@ def test_the_community_plugin_follows_ash_offline_mode(tmp_path, monkeypatch):
     assert "--skip-db-update" not in args
 
 
-def test_the_community_plugin_still_reads_the_trivy_database(tmp_path):
+def test_the_alpha_plugin_still_reads_the_trivy_database(tmp_path):
     scanner = _repo_scanner(tmp_path)
     assert [e.name for e in scanner.content_databases_in_use()] == ["trivy-db"]
 
 
-def test_the_community_plugin_scan_still_ties_results_to_package_copies(
+def test_the_alpha_plugin_scan_still_ties_results_to_package_copies(
     tmp_path, monkeypatch
 ):
     """trivy-repo's own scan() path, with trivy replaced by the captured report."""
@@ -1360,7 +1360,7 @@ def test_an_assessment_that_cannot_ask_trivy_repo_still_records_trivy_db():
             raise AssertionError("not reached")
 
     records = staleness.assess_scanner(
-        Broken(), SarifReport(version="2.1.0", runs=[]), cdb.STALENESS_FAIL
+        Broken(), SarifReport(version="2.1.0", runs=[]), cdb.StalenessPolicy.FAIL
     )
     assert [(r.name, r.scanner, r.stale) for r in records] == [
         ("trivy-db", "trivy-repo", True)

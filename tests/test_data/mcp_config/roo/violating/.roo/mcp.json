@@ -1,0 +1,27 @@
+{
+  "mcpServers": {
+    "elevated": {
+      "alwaysAllow": [
+        "read_file",
+        "write_file"
+      ],
+      "args": [
+        "/usr/local/bin/mcp-files",
+        "--root",
+        "/srv/data"
+      ],
+      "command": "sudo"
+    },
+    "remote": {
+      "type": "streamable-http",
+      "url": "http://mcp.example.com/docs"
+    },
+    "runner": {
+      "args": [
+        "-y",
+        "some-mcp-server"
+      ],
+      "command": "npx"
+    }
+  }
+}

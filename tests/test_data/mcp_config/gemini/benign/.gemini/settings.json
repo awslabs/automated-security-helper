@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "events": {
+      "url": "https://mcp.example.com/sse"
+    },
+    "files": {
+      "args": [
+        "--root",
+        "/srv/data"
+      ],
+      "command": "/usr/local/bin/mcp-files",
+      "env": {
+        "LOG_LEVEL": "info"
+      },
+      "trust": false
+    },
+    "stream": {
+      "headers": {
+        "X-Client": "ash-fixture"
+      },
+      "httpUrl": "https://mcp.example.com/stream"
+    }
+  },
+  "theme": "Default"
+}

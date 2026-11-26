@@ -21,7 +21,7 @@ description: >-
 # sees is "the scan produced no output", three steps removed from the cause.
 #
 # Pulling once per job, ahead of the build, puts the retry in one place instead of at every
-# `ash build-image` call site, and leaves the build itself untouched: the runtimes use a base
+# `ash container build` call site, and leaves the build itself untouched: the runtimes use a base
 # image already in the local store rather than going back to the registry.
 #
 # TWO QUOTAS WEAR THE SAME WIRE ERROR, AND ONLY ONE IS WORTH WAITING ON

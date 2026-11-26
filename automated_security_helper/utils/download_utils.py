@@ -35,6 +35,7 @@ from automated_security_helper.core.constants import (
     warn_if_home_unusable,
 )
 from automated_security_helper.core.exceptions import (
+    DownloadTooLargeError,
     ToolDownloadIntegrityError,
     ToolNotProvisionableError,
 )
@@ -288,8 +289,18 @@ def _windows_misreads_name(name: str) -> bool:
     )
 
 
-def _copy_whole_body(response, sink, url: str) -> int:
+def _copy_whole_body(response, sink, url: str, max_bytes: Optional[int] = None) -> int:
     """Copy the response body to ``sink``, refusing a body the server cut short.
+
+    ``max_bytes`` bounds the transfer itself: a response that DECLARES a longer
+    body is refused before any byte of it is read, and a body with no usable
+    declared length (chunked, or a server whose header lies) is aborted the
+    moment the copied bytes pass the bound, raising ``DownloadTooLargeError``
+    without writing the over-bound chunk. The bound exists for callers whose
+    size expectation comes from data the other side of a trust boundary wrote
+    (the sdist harvest's ``max_sdist_mb``, where the lockfile's recorded size
+    is the scanned repository's own claim); checking a claim and streaming
+    without a bound would be no limit at all.
 
     ``HTTPResponse.read(amt)`` returns an empty read when the connection closes
     before ``Content-Length`` bytes have arrived (http.client leaves the
@@ -315,10 +326,20 @@ def _copy_whole_body(response, sink, url: str) -> int:
     Returns the number of bytes copied.
     """
     expected = _declared_body_length(response)
+    if max_bytes is not None and expected is not None and expected > max_bytes:
+        raise DownloadTooLargeError(
+            f"{_without_query(url)} declares a body of {expected} bytes, over "
+            f"the caller's bound of {max_bytes}; nothing was read"
+        )
     copied = 0
     for chunk in iter(lambda: response.read(_HASH_CHUNK_BYTES), b""):
-        sink.write(chunk)
         copied += len(chunk)
+        if max_bytes is not None and copied > max_bytes:
+            raise DownloadTooLargeError(
+                f"the transfer of {_without_query(url)} passed the caller's "
+                f"bound of {max_bytes} bytes and was aborted"
+            )
+        sink.write(chunk)
     if expected is not None and copied != expected:
         raise ConnectionError(
             f"the connection closed after {copied} of {expected} bytes of {url}"
@@ -400,6 +421,7 @@ def download_file(
     expected_sha256: Optional[str] = None,
     *,
     mode: int = 0o644,
+    max_bytes: Optional[int] = None,
 ) -> Path:
     """Download a file from a URL to the specified destination.
 
@@ -417,15 +439,24 @@ def download_file(
             bit is then set on the staged file's own descriptor before the rename,
             never by a later chmod of the landed path. Every download used to land
             executable whatever it was; the data default is least privilege.
+        max_bytes: Bound on the transferred body, enforced ON THE WIRE: a
+            response declaring a longer body is refused before any byte of it
+            is read, and an undeclared body is aborted the moment the bound
+            passes (``_copy_whole_body``). For callers whose size expectation
+            comes from the other side of a trust boundary, where checking the
+            claim alone would be no limit at all. When omitted, the transfer
+            is unbounded, as before.
 
     Returns:
         Path to the downloaded file
 
     Raises:
         ToolDownloadIntegrityError: if expected_sha256 is given and does not match
+        DownloadTooLargeError: if max_bytes is given and the body exceeds it;
+            the transfer is aborted at the bound and nothing lands
     """
     landed, _digest = _download_verified(
-        url, destination, rename_to, expected_sha256, mode=mode
+        url, destination, rename_to, expected_sha256, mode=mode, max_bytes=max_bytes
     )
     return landed
 
@@ -437,6 +468,7 @@ def _download_verified(
     expected_sha256: Optional[str] = None,
     *,
     mode: int,
+    max_bytes: Optional[int] = None,
 ) -> "tuple[Path, str]":
     """``download_file``, and also the digest of the bytes that landed.
 
@@ -490,7 +522,7 @@ def _download_verified(
                 try:
                     with _open_url(url, _DOWNLOAD_SOCKET_TIMEOUT_SECONDS) as response:
                         _refuse_a_non_https_landing(url, response)
-                        _copy_whole_body(response, temp_file, url)
+                        _copy_whole_body(response, temp_file, url, max_bytes=max_bytes)
                     break
                 except Exception as exc:
                     # Re-raised unless the error is both transient and there is
@@ -1948,8 +1980,10 @@ def install_pinned_tool(
     bin_dir.mkdir(parents=True, exist_ok=True)
     target = bin_dir.joinpath(asset.install_as)
 
-    if not force and _already_installed(
-        bin_dir, asset.install_as, asset.url, asset.sha256
+    if (
+        not force
+        and _already_installed(bin_dir, asset.install_as, asset.url, asset.sha256)
+        and _companions_verified(bin_dir, asset)
     ):
         ASH_LOGGER.info(
             f"{asset.tool} {asset.version} already installed at {target}, "
@@ -2064,6 +2098,35 @@ def _executable_by_caller(candidate: Path, info: os.stat_result) -> bool:
     check adds nothing a swapped link could exploit.
     """
     return bool(info.st_mode & 0o111) and os.access(candidate, os.X_OK)
+
+
+def _companions_verified(directory: Path, asset) -> bool:  # asset: ToolAsset
+    """Whether every pinned companion of ``asset`` sits in ``directory`` with its bytes.
+
+    The install verifies each companion (opengrep's Windows DLLs) before it places
+    the executable; accepting an executable already on disk has to ask the same,
+    or a lone ``opengrep.exe`` -- or one whose DLLs were deleted -- reads as
+    installed and then fails to start. Each file is judged on one open descriptor,
+    as the executable is: not a link, a regular file, hashing to its pin.
+    """
+    for name, digest in asset.companion_sha256:
+        path = Path(directory).joinpath(name)
+        if path.is_symlink():
+            return False
+        try:
+            fd = os.open(path, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY | _O_NONBLOCK)
+        except OSError:
+            return False
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return False
+            if _sha256_of_open_file(fd) != digest.lower():
+                return False
+        except OSError:
+            return False
+        finally:
+            os.close(fd)
+    return True
 
 
 @dataclass(frozen=True)
@@ -2191,6 +2254,12 @@ def find_verified_pinned_executable(
             f"{candidate} is named {asset.install_as} but is not the pinned "
             f"{tool} {asset.version} (SHA256 {actual}, pinned {expected.lower()}); "
             "installing the pinned build"
+        )
+        return None
+    if not _companions_verified(candidate.parent, asset):
+        ASH_LOGGER.debug(
+            f"{candidate} is the pinned {tool} {asset.version}, but a companion "
+            "file it loads is missing or differs from its pin; installing"
         )
         return None
     return VerifiedPresentTool(

@@ -140,6 +140,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -163,7 +164,6 @@ from automated_security_helper.utils.config_trust import (
     LEADS_OUT_OF_THE_TREE,
     operator_path,
     refusal_warning,
-    set_by_operator,
 )
 from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -386,31 +386,34 @@ def _is_a_uv_route(command: Optional[List[str]]) -> bool:
     return executable in _UV_EXECUTABLE_NAMES and command[1:3] == ["tool", "run"]
 
 
+# zizmor's own severity words on the left; the ASH side is a ``Severity`` member's
+# wire value. The tables stay text-keyed because zizmor's JSON and the finding's
+# ``severity`` field are text.
 _BASE_SEVERITY: Dict[str, str] = {
-    "high": "HIGH",
-    "medium": "MEDIUM",
-    "low": "LOW",
-    "informational": "INFO",
+    "high": Severity.HIGH.value,
+    "medium": Severity.MEDIUM.value,
+    "low": Severity.LOW.value,
+    "informational": Severity.INFO.value,
 }
+# One band down the ladder, the least severe band staying where it is: derived
+# from the member order, so the ladder is not spelled a second time here.
+_LADDER: Tuple[Severity, ...] = tuple(Severity)
 _ONE_BAND_LOWER: Dict[str, str] = {
-    "CRITICAL": "HIGH",
-    "HIGH": "MEDIUM",
-    "MEDIUM": "LOW",
-    "LOW": "INFO",
-    "INFO": "INFO",
+    member.value: _LADDER[min(position + 1, len(_LADDER) - 1)].value
+    for position, member in enumerate(_LADDER)
 }
 _LEVEL_TO_SEVERITY: Dict[str, str] = {
-    "error": "HIGH",
-    "warning": "MEDIUM",
-    "note": "LOW",
-    "none": "INFO",
+    Level.error.value: Severity.HIGH.value,
+    Level.warning.value: Severity.MEDIUM.value,
+    Level.note.value: Severity.LOW.value,
+    Level.none.value: Severity.INFO.value,
 }
 _SEVERITY_TO_LEVEL: Dict[str, Level] = {
-    "CRITICAL": Level.error,
-    "HIGH": Level.error,
-    "MEDIUM": Level.warning,
-    "LOW": Level.note,
-    "INFO": Level.none,
+    Severity.CRITICAL.value: Level.error,
+    Severity.HIGH.value: Level.error,
+    Severity.MEDIUM.value: Level.warning,
+    Severity.LOW.value: Level.note,
+    Severity.INFO.value: Level.none,
 }
 
 _CONSTRAINT_CLAUSE = re.compile(
@@ -504,7 +507,9 @@ def map_zizmor_severity(
     """
     base = _BASE_SEVERITY.get(str(zizmor_severity or "").strip().lower())
     if base is None:
-        return _LEVEL_TO_SEVERITY.get(str(sarif_level or "").strip().lower(), "MEDIUM")
+        return _LEVEL_TO_SEVERITY.get(
+            str(sarif_level or "").strip().lower(), Severity.MEDIUM.value
+        )
     if str(zizmor_confidence or "").strip().lower() == "low":
         return _ONE_BAND_LOWER[base]
     return base
@@ -715,10 +720,6 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     # The inputs of the most recent invocation, which _post_process_sarif maps
     # zizmor's URIs back onto.
     _last_inputs: List[Path] = PrivateAttr(default_factory=list)
-    # Whether the tree-set online_audits refusal was already logged.
-    _online_refusal_logged: bool = PrivateAttr(default=False)
-    # Whether the tree-set honor_inline_ignores refusal was already logged.
-    _ignores_refusal_logged: bool = PrivateAttr(default=False)
     # The zizmor on PATH the version probe rejected in this dependency check,
     # so the uv route does not hand the same binary back as "available".
     _rejected_executable: Optional[str] = PrivateAttr(default=None)
@@ -757,13 +758,17 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     #: locations carry ``properties.symbolic.route`` (``jobs/greet/steps/0``)
     #: and ``key.Local.verbatim_path``, a position inside one file's document
     #: and not a name with a lifecycle independent of the file. The route stays
-    #: verbatim in the property bag for anyone who later disagrees.
+    #: in the property bag for anyone who later disagrees; the
+    #: ``verbatim_path`` beside it is rewritten relative to the target by
+    #: ``_relative_logical_path``, so it does not keep an absolute checkout path.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(state=FacetState.MAPPED, native_field="results[].ruleId"),
         severity=FacetDecl(
             state=FacetState.MAPPED,
             native_field='results[].properties."zizmor/severity" and '
-            '"zizmor/confidence" (ASH rewrites them to a severity band)',
+            '"zizmor/confidence" (ASH rewrites them to a severity band, '
+            "written to properties.issue_severity, and rewrites results[].level "
+            "to agree with it; map_zizmor_severity)",
         ),
         file_path=FacetDecl(
             state=FacetState.MAPPED,
@@ -832,22 +837,21 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             native_field="results[].locations[].physicalLocation.region.snippet.text",
         ),
         references=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="tool.driver.rules[].helpUri",
-            reason="rule-level only: the flat reader takes references from "
-            "result relatedLocations, so the help link is discarded today",
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].helpUri, read into the flat "
+            "references when the result carries no relatedLocations",
         ),
         tags=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="tool.driver.rules[].properties.tags",
-            reason="rule-level only: the flat reader takes tags from result "
-            "properties, so the rule tags are discarded today",
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags, read into the "
+            "flat tags when the result carries none",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
             native_field='results[].properties ("zizmor/severity", '
             '"zizmor/confidence", "zizmor/persona"), plus the symbolic '
-            "route in logicalLocations",
+            "route in logicalLocations, and the ASH-written issue_severity "
+            "(no native property of that name)",
         ),
     )
 
@@ -901,6 +905,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 python_only=True,
                 use_uv_tool=True,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="a PyPI package run through uv; platform support is the package's and was not read here",
@@ -934,7 +939,6 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 semantics="exit 3 is the no-inputs code: success with nothing to scan",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=("options.online_audits (off by default)",),
                 upstream_license=(
@@ -1183,20 +1187,19 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             return False
         # Online audits send the GitHub token in the environment to the GitHub
         # API, so only the operator can turn them on, as for config_file.
-        if not set_by_operator(
-            self._plugin_context.config,
+        # No plugin context raises ScannerError here, as the direct
+        # self._plugin_context.config read did before the conversion; the base
+        # method would read a missing context as "nothing set" and refuse quietly.
+        self._plugin_context  # noqa: B018
+        if not self._operator_gated(
             "scanners.zizmor.options.online_audits",
             True,
+            False,
+            "scanners.zizmor.options.online_audits is true in a config inside "
+            "a git checkout or the scanned directory, or from an MCP client, "
+            "so it is ignored: zizmor runs with --offline and without the "
+            f"GitHub token variables. {KEEP_A_SETTING}",
         ):
-            if not self._online_refusal_logged:
-                self._online_refusal_logged = True
-                self._plugin_log(
-                    "scanners.zizmor.options.online_audits is true in a config inside "
-                    "a git checkout or the scanned directory, or from an MCP client, "
-                    "so it is ignored: zizmor runs with --offline and without the "
-                    f"GitHub token variables. {KEEP_A_SETTING}",
-                    level=logging.WARNING,
-                )
             return False
         # ASH's own offline mode, or this scanner's options.offline (read by the
         # base class as every scanner's is): either keeps zizmor offline. The
@@ -1220,23 +1223,18 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         """
         if not self._options.honor_inline_ignores:
             return False
-        if set_by_operator(
-            self._plugin_context.config,
+        # No plugin context raises ScannerError, as before the conversion.
+        self._plugin_context  # noqa: B018
+        return self._operator_gated(
             "scanners.zizmor.options.honor_inline_ignores",
             True,
-        ):
-            return True
-        if not self._ignores_refusal_logged:
-            self._ignores_refusal_logged = True
-            self._plugin_log(
-                "scanners.zizmor.options.honor_inline_ignores is true in a config "
-                "inside a git checkout or the scanned directory, or from an MCP "
-                "client, so it is ignored: zizmor runs with --no-ignores and its "
-                "ignore comments do not apply; suppress findings with ASH "
-                f"suppressions. {KEEP_A_SETTING}",
-                level=logging.WARNING,
-            )
-        return False
+            False,
+            "scanners.zizmor.options.honor_inline_ignores is true in a config "
+            "inside a git checkout or the scanned directory, or from an MCP "
+            "client, so it is ignored: zizmor runs with --no-ignores and its "
+            "ignore comments do not apply; suppress findings with ASH "
+            f"suppressions. {KEEP_A_SETTING}",
+        )
 
     def _child_env(self, online: bool) -> Dict[str, str]:
         """The process environment minus what must not reach zizmor."""
@@ -1272,7 +1270,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     def _collect_inputs(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
         report: bool = True,
     ) -> List[Path]:
@@ -1290,7 +1288,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         """
         target_abs = Path(target).absolute()
         target_real = Path(target).resolve()
-        if target_type == "converted":
+        if target_type == TargetType.CONVERTED:
             candidates = [p for p in target_abs.rglob("*") if p.is_file()]
         else:
             # In a workspace scan the workspace's output directory holds every
@@ -1462,7 +1460,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: Any = None,
         *args: Any,
@@ -1671,7 +1669,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Build zizmor's argv; SARIF arrives on stdout, written to the stdout log."""

@@ -112,6 +112,27 @@ _ALLOWED_SIZED_READS = {
     ): "one byte to check database readability and bounded+1 metadata JSON; "
     "only the parsed timestamp leaves the reader",
     (
+        "utils/sdist_harvest.py",
+        "harvest_lockfiles_from_sdist",
+    ): "an embedded lockfile member of a hash-verified sdist, read at "
+    "MAX_LOCKFILE_MEMBER_BYTES + 1 and dropped over the cap; the bytes are "
+    "written into the converted target for the scanners, never shown",
+    (
+        "plugin_modules/ash_builtin/converters/mcp_config_converter.py",
+        "McpConfigConverter._read_entries",
+    ): "an MCP client config file read at MAX_CONFIG_BYTES + 1 and refused over "
+    "the cap; the bytes are parsed into server entries, never shown",
+    (
+        "plugin_modules/ash_builtin/scanners/mcp_config_scanner.py",
+        "McpConfigScanner._read_entries",
+    ): "an MCP client config file read at MAX_CONFIG_BYTES + 1 and refused over "
+    "the cap; the bytes are parsed into server entries, never shown",
+    (
+        "utils/mcp_config/readers.py",
+        "parse_mcp_config_file",
+    ): "an MCP client config file read at MAX_CONFIG_BYTES + 1 and refused over "
+    "the cap; the bytes are parsed into server entries, never shown",
+    (
         "assets/install-pinned-tool.py",
         "download",
     ): "chunked download into a hash and a file; network bytes, never shown",
@@ -160,6 +181,16 @@ _ALLOWED_SIZED_READS = {
     ): "sha chunks over the operator's own uploaded archive, and the name "
     "of a refused symlink target from it; not tool output (the work behind "
     "set_source_zip_finalize, whose own body holds no read)",
+    (
+        "cli/mcp/source_delivery.py",
+        "set_source_image_archive_finalize",
+    ): "1 MiB sha chunks over the operator's own uploaded image archive; hashed, "
+    "never shown, and not tool output",
+    (
+        "utils/image_payload_refusals.py",
+        "image_archive_refusal",
+    ): "the 2-byte gzip head and the 8-byte tar magic of the operator's own saved "
+    "image, compared with fixed byte strings; bytes compared, not shown",
     (
         "cli/scan.py",
         "_marker_head",

@@ -1,0 +1,316 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": "cfn-guard",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "cfn-guard-3.2.1-wa-security-pillar-and-cis-aws-benchmark-level-1-insecure",
+      "live_input": false,
+      "note": null,
+      "observable": true,
+      "pin_stamp": {
+        "tool": "cfn-guard",
+        "version": "3.2.1"
+      },
+      "provenance": "attested",
+      "reason": "recorded with cfn-guard 3.2.1, before the pin moved to 3.3.0; the native shape is still read by the adapter, so the recording stays until it is re-recorded at the pin",
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/cfn-guard-3.2.1-wa-Security-Pillar-and-cis-aws-benchmark-level-1-insecure.sarif",
+          "sha256": "8d2fa9d2d91335c9cdba924e8c7b352e0e53f0debde7f9440fcbc63f4d2682b0"
+        }
+      ],
+      "retention": "historical",
+      "scanner": "cfn-guard",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cfn-guard",
+        "version": "3.2.1"
+      }
+    },
+    {
+      "adapter_prep": "cfn-guard",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "cfn-guard-3.2.1-wa-security-pillar-compliant",
+      "live_input": false,
+      "note": null,
+      "observable": true,
+      "pin_stamp": {
+        "tool": "cfn-guard",
+        "version": "3.2.1"
+      },
+      "provenance": "attested",
+      "reason": "recorded with cfn-guard 3.2.1, before the pin moved to 3.3.0; the native shape is still read by the adapter, so the recording stays until it is re-recorded at the pin",
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/cfn-guard-3.2.1-wa-Security-Pillar-compliant.sarif",
+          "sha256": "b6fc05aee9de7315d4d5bee85df12f48a8967130db988fbc9d68db17ff01b9b5"
+        }
+      ],
+      "retention": "historical",
+      "scanner": "cfn-guard",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cfn-guard",
+        "version": "3.2.1"
+      }
+    },
+    {
+      "adapter_prep": "cfn-guard",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "cfn-guard-3.2.1-wa-security-pillar-insecure",
+      "live_input": false,
+      "note": null,
+      "observable": true,
+      "pin_stamp": {
+        "tool": "cfn-guard",
+        "version": "3.2.1"
+      },
+      "provenance": "attested",
+      "reason": "recorded with cfn-guard 3.2.1, before the pin moved to 3.3.0; the native shape is still read by the adapter, so the recording stays until it is re-recorded at the pin",
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/cfn-guard-3.2.1-wa-Security-Pillar-insecure.sarif",
+          "sha256": "f0d8ecc0c0aa0e717287a7d7d0547eaa0cea134cc5c34e2b37bbc6f54d239c37"
+        }
+      ],
+      "retention": "historical",
+      "scanner": "cfn-guard",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cfn-guard",
+        "version": "3.2.1"
+      }
+    },
+    {
+      "adapter_prep": "cfn-guard",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "cfn-guard-3.3.0-wa-security-pillar-insecure",
+      "live_input": false,
+      "note": null,
+      "observable": true,
+      "pin_stamp": {
+        "tool": "cfn-guard",
+        "version": "3.3.0"
+      },
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/cfn-guard-3.3.0-wa-Security-Pillar-insecure.sarif",
+          "sha256": "f38cc9b3aeac03c848ddc311315470de48504d3f7674d073c6de817ef87416af"
+        }
+      ],
+      "retention": "current",
+      "scanner": "cfn-guard",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cfn-guard",
+        "version": "3.3.0"
+      }
+    },
+    {
+      "adapter_prep": "cfn-guard",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "cfn-guard-3.3.0-wa-security-pillar-planted-string-insecure",
+      "live_input": false,
+      "note": null,
+      "observable": true,
+      "pin_stamp": {
+        "tool": "cfn-guard",
+        "version": "3.3.0"
+      },
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/cfn-guard-3.3.0-wa-Security-Pillar-planted-string-insecure.sarif",
+          "sha256": "fce2e9782ebadd4c8d401b59473e3cf0ab7b06490dadb3167b23ab89e8289294"
+        }
+      ],
+      "retention": "current",
+      "scanner": "cfn-guard",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cfn-guard",
+        "version": "3.3.0"
+      }
+    },
+    {
+      "adapter_prep": "cfn-lint",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "cfn-lint-1.57.1-compliant",
+      "live_input": false,
+      "note": null,
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/cfn-lint-1.57.1-compliant.sarif",
+          "sha256": "d893d319809aa66f55232b07fa20d06225cef8c57e04bd9d0e5118e94a925dbc"
+        }
+      ],
+      "retention": "current",
+      "scanner": "cfn-lint",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cfn-lint",
+        "version": "1.57.1"
+      }
+    },
+    {
+      "adapter_prep": "cfn-lint",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "cfn-lint-1.57.1-insecure",
+      "live_input": false,
+      "note": null,
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/cfn-lint-1.57.1-insecure.sarif",
+          "sha256": "3da15c54296d87e2419aa677e8dde340e710b9303c4d153d5a81553ee6aeedcb"
+        }
+      ],
+      "retention": "current",
+      "scanner": "cfn-lint",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cfn-lint",
+        "version": "1.57.1"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": [
+        "cfn-lint",
+        "--format",
+        "json",
+        "m0_sources/m0_bad_property.yaml"
+      ],
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": {
+        "paths": [
+          "m0_sources/m0_bad_property.yaml"
+        ],
+        "sha256": "3267fad6a2b0d9897b0bda69164d087659ed4a61c9fcd1a783b3151799df4fe5"
+      },
+      "id": "cfn-lint-1.61.0-m0-bad-property",
+      "live_input": false,
+      "note": "one E3002; kept outside repo/ so the scanner tests do not count it",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "captured/cfn-lint-1.61.0-m0-bad-property.json",
+          "sha256": "cd119984d73da04535d1ea74f319f375cfb95d08c358dc6c823ebce2bc094310"
+        }
+      ],
+      "retention": "current",
+      "scanner": "cfn-lint",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cfn-lint",
+        "version": "1.61.0"
+      }
+    },
+    {
+      "adapter_prep": "cfn-lint",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "cfn-lint-1.57.2-m0-two-bad-properties",
+      "live_input": false,
+      "note": "two bad-property results; the JSON run beside the SARIF carries each result's resource, which the adapter attaches",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/cfn-lint-1.57.2-m0-two-bad-properties.sarif",
+          "sha256": "9ae07af4f81f1cf292005deec47e1337035695eb7576456592c5face27880bf2"
+        }
+      ],
+      "retention": "current",
+      "scanner": "cfn-lint",
+      "side_reports": [
+        {
+          "format": "json",
+          "path": "captured/cfn-lint-1.57.2-m0-two-bad-properties.json",
+          "sha256": "f1dc25358e7664e179645e92b1adc07b18fbb27a9de1e4e85a540481488cc8d1"
+        }
+      ],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cfn-lint",
+        "version": "1.57.2"
+      }
+    }
+  ],
+  "unrecorded": []
+}

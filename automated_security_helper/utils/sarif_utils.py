@@ -1,5 +1,6 @@
 """Utility functions for working with SARIF reports."""
 
+import fnmatch
 import math
 import os
 import random
@@ -20,6 +21,7 @@ from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.models.vocab import SEVERITY_VALUES, Severity
 from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
     Tool,
@@ -46,6 +48,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.suppression_matcher import (
     active_ignore_paths,
+    file_path_matches,
     find_inline_suppressions,
     recorded_suppressions,
     should_suppress_finding,
@@ -59,7 +62,14 @@ if TYPE_CHECKING:
     from automated_security_helper.config.client_scanner_exclusions import (
         EvaluationBudget,
     )
-from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.models.flat_vulnerability import (
+    FlatVulnerability,
+    _string_property,
+)
+from automated_security_helper.utils.finding_identity import (
+    IMAGE_DIGEST_PROPERTY,
+    IMAGE_REF_PROPERTY,
+)
 from automated_security_helper.utils.package_identity import (
     extract_package_identity,
     extract_resource_identity,
@@ -67,7 +77,11 @@ from automated_security_helper.utils.package_identity import (
 )
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
-from automated_security_helper.utils.shared_finding_ids import shared_ids_by_position
+from automated_security_helper.utils.ash_lock import AshLock, AshLockError
+from automated_security_helper.utils.shared_finding_ids import (
+    shared_correlation_ids_by_position,
+    shared_ids_by_position,
+)
 from automated_security_helper.utils.symbol_spans import SymbolResolver
 from automated_security_helper.utils.suppression_frame import (
     first_ignore_path,
@@ -518,13 +532,13 @@ def _severity_from_security_score(value: object) -> str | None:
     if not math.isfinite(score) or not 0 <= score <= 10:
         return None
     if score >= 9:
-        return "CRITICAL"
+        return Severity.CRITICAL.value
     if score >= 7:
-        return "HIGH"
+        return Severity.HIGH.value
     if score >= 4:
-        return "MEDIUM"
+        return Severity.MEDIUM.value
     if score > 0:
-        return "LOW"
+        return Severity.LOW.value
     # A score of exactly 0 is treated as "no usable score", not as INFO, so it
     # is skipped by normalize_sarif_result_severities and the result keeps its
     # SARIF level fallback. npm-audit defaults its rule security-severity to 0
@@ -538,7 +552,7 @@ def _severity_from_security_score(value: object) -> str | None:
 #: The severity bands _resolve_result_severity honors from ``issue_severity``.
 #: Kept as one constant so the normalizer's skip test and the resolver's read
 #: cannot drift apart.
-_CANONICAL_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
+_CANONICAL_SEVERITIES = SEVERITY_VALUES
 
 
 def _rule_for_result(
@@ -927,6 +941,25 @@ def shared_finding_ids(model: Any, all_results: List[Any]) -> List[str | None]:
         return [None] * len(all_results)
 
 
+def shared_correlation_ids(model: Any, all_results: List[Any]) -> List[str | None]:
+    """The cross-scanner correlation id of each result, by position, else None.
+
+    The same pairing as :func:`shared_finding_ids`, reading the flattened
+    finding's ``correlation_id`` (assigned once at flatten time,
+    ``models/flat_vulnerability.assign_correlation_ids``), so every reporter
+    exports the one value the model computed rather than re-deriving the key.
+    None at a position whose finding carries none (only the ``secret/`` and
+    ``dep/`` families have one, ``utils/finding_identity``), and at every
+    position when the flattening fails.
+    """
+    try:
+        flat = list(model.to_flat_vulnerabilities())
+        return shared_correlation_ids_by_position(flat, all_results)
+    except Exception as e:  # noqa: BLE001 -- a fallback, see the docstring
+        ASH_LOGGER.debug(f"Could not derive shared correlation ids: {str(e)}")
+        return [None] * len(all_results)
+
+
 def _result_message_text(result: Any) -> str | None:
     """The text of *result*'s message, or None when it has none.
 
@@ -1301,6 +1334,44 @@ def _matching_ignore_path(
     # predicate stays Python (utils/suppression_frame.py).
     index = first_ignore_path(normalized_uri, ignore_paths, ignore_path_matches)
     return ignore_paths[index] if index is not None else None
+
+
+def _matching_exclusion(
+    rule_id: str,
+    located_uris: List[str],
+    exclusions: List[Any],
+    scanner: str | None,
+) -> Any | None:
+    """The first ``global_settings.exclusions`` entry that drops this result, or None.
+
+    An entry drops a result (issue #894) when its ``rule_id`` matches the
+    result's -- the exact id, case-insensitively, or a glob, as a suppression's
+    rule id is read -- its ``scanner``, when named, is the result's scanner
+    (case-insensitively), and EVERY location that names a file is under its
+    ``path``, read as a suppression's path (``file_path_matches``, the
+    bare-directory rule included). Every location, as the ignore-path drop
+    requires: a result also located in a file outside the path is a finding
+    about that file too, and dropping it would hide it. A result naming no file
+    is never dropped. The caller filters expired entries and ones kept from a
+    results file with unknown keys (``active_ignore_paths``); a blank rule id
+    kept from a results file applies to nothing.
+    """
+    if not located_uris:
+        return None
+    found = rule_id.lower()
+    for exclusion in exclusions:
+        wanted = (exclusion.rule_id or "").strip().lower()
+        if not wanted:
+            continue
+        if found != wanted and not fnmatch.fnmatch(found, wanted):
+            continue
+        if exclusion.scanner and (
+            scanner is None or scanner.lower() != exclusion.scanner.strip().lower()
+        ):
+            continue
+        if all(file_path_matches(uri, exclusion.path) for uri in located_uris):
+            return exclusion
+    return None
 
 
 def _apply_config_suppression(
@@ -1770,6 +1841,17 @@ class _OutputDirExclusion:
             work_dir = plugin_context.output_dir.joinpath(ASH_WORK_DIR_NAME)
         self.work_dir = Path(work_dir).resolve()
         self.source_dir = plugin_context.source_dir.resolve()
+        # A container-image scan: every location is an in-image path, as the tool
+        # wrote it (``/usr/lib/libssl.so.3``). The source directory only anchors
+        # such a scan, so no path is read relative to it (``normalize``), none is
+        # ASH's own output, and an ignore path or suppression names the in-image
+        # path as written.
+        from automated_security_helper.core.asset import Asset, AssetKind
+
+        asset = getattr(plugin_context, "asset", None)
+        self.in_image = (
+            isinstance(asset, Asset) and asset.kind == AssetKind.CONTAINER_IMAGE
+        )
         # Spelled with "/" only where a backslash separates (uri_separators):
         # a bare replace turned a POSIX source directory named a\b into a/b,
         # which no URI under it starts with.
@@ -1837,7 +1919,12 @@ class _OutputDirExclusion:
 
         *decode* False keeps a relative URI's percent escapes, the spelling the
         report records (:func:`_normalize_sarif_uri`).
+
+        An image scan's URI is an in-image path and is never made relative to the
+        source directory: it is put in the one matching spelling and returned.
         """
+        if self.in_image:
+            return _matched_path_text(raw_uri, self.source_dir_prefix, decode)
         return _normalize_sarif_uri(
             raw_uri,
             self.source_dir_prefix,
@@ -1875,7 +1962,7 @@ class _OutputDirExclusion:
 
     def holds(self, uri: str) -> bool:
         """Whether the normalized ``uri`` is ASH's output, outside the work directory."""
-        if self.output_dir_contains_source:
+        if self.output_dir_contains_source or self.in_image:
             return False
         if uri not in self._resolve_cache:
             # Anchored on the source directory, NOT on the process's working
@@ -2020,6 +2107,26 @@ def _suppression_scanner_identity(result, run, scanner_name):
     return run.tool.driver.name if run.tool and run.tool.driver else "unknown"
 
 
+def _symbol_resolver_for(
+    source_dir: Any, suppressions: Iterable[Any]
+) -> SymbolResolver | None:
+    """The resolver symbol suppressions are checked with, or None without any.
+
+    It carries the scan root's ``.ash.lock``, so a symbol suppression whose
+    file changed since it was locked (or was never locked) does not apply. A
+    lock that cannot be read leaves every symbol suppression inert and says why
+    once: fail closed, as every other gap in a symbol check does.
+    """
+    if not any(getattr(s, "symbol", None) for s in suppressions):
+        return None
+    try:
+        lock = AshLock.load(source_dir)
+    except AshLockError as e:
+        ASH_LOGGER.warning(f"Symbol suppressions do not apply: {e}.", extra=NO_MARKUP)
+        lock = AshLock(source_dir=Path(source_dir))
+    return SymbolResolver(source_dir, lock=lock)
+
+
 def apply_suppressions_to_sarif(
     sarif_report: SarifReport,
     plugin_context: PluginContext,
@@ -2092,6 +2199,13 @@ def _apply_suppressions_within_budget(
     ignore_paths = active_ignore_paths(
         plugin_context.config.global_settings.ignore_paths
     )
+    # Rule+path exclusions (issue #894), filtered through the same
+    # expiry/unknown-keys gate as ignore paths. The field is read with getattr
+    # so a stand-in config (a test double) without it reads as none.
+    exclusions = active_ignore_paths(
+        getattr(plugin_context.config.global_settings, "exclusions", None),
+        where="global_settings.exclusions",
+    )
 
     suppressions = plugin_context.config.global_settings.suppressions or []
     # The written form each used entry is recorded by (written_suppression_id),
@@ -2145,10 +2259,8 @@ def _apply_suppressions_within_budget(
     # Built only when an entry sets `symbol`, so a config without one never
     # touches tree-sitter. The resolver parses a file only when every other
     # field of a symbol-scoped entry already matches a finding in it.
-    _symbol_resolver: SymbolResolver | None = (
-        SymbolResolver(plugin_context.source_dir)
-        if any(getattr(s, "symbol", None) for s in suppressions)
-        else None
+    _symbol_resolver: SymbolResolver | None = _symbol_resolver_for(
+        plugin_context.source_dir, suppressions
     )
 
     # The files a repository committed to ASH's output directories, which the
@@ -2260,6 +2372,49 @@ def _apply_suppressions_within_budget(
                 )
                 updated_results.append(result)
                 continue
+
+            # --- Step 1b: rule+path exclusions (issue #894) ---
+            # After the ignore paths and before the config suppressions: a
+            # matching result is DROPPED, not marked, so a known-benign class
+            # (bandit B101 under tests/) does not pile up as suppressed noise.
+            # Exclusions are a suppression mechanism, so --ignore-suppressions
+            # lifts them with the rest; an entry a client-delivered config
+            # supplied marks the result instead, so the results show what the
+            # client chose to hide, as a client-supplied ignore path does.
+            if exclusions and not ignore_suppressions and result.ruleId:
+                located_uris = [
+                    output_exclusion.normalize(
+                        location.physicalLocation.root.artifactLocation.uri
+                    )
+                    for location in (result.locations or [])
+                    if location.physicalLocation
+                    and location.physicalLocation.root.artifactLocation
+                    and location.physicalLocation.root.artifactLocation.uri
+                ]
+                excluding = _matching_exclusion(
+                    result.ruleId,
+                    located_uris,
+                    exclusions,
+                    _suppression_scanner_identity(result, run, scanner_name),
+                )
+                if excluding is not None:
+                    if getattr(excluding, "client_supplied", False) is True:
+                        _add_client_suppression(
+                            result,
+                            "(ASH, client-supplied config) Excluding finding on "
+                            f"rule '{excluding.rule_id}' under path "
+                            f"'{excluding.path}' with reason: {excluding.reason}",
+                        )
+                        updated_results.append(result)
+                        continue
+                    ASH_LOGGER.verbose(
+                        f"Excluding finding on rule '{escape_markup(result.ruleId)}' "
+                        f"file location '{escape_markup(located_uris[0])}' based on "
+                        f"global_settings.exclusions match with reason: "
+                        f"[yellow]{escape_markup(excluding.reason)}[/yellow]",
+                        extra=MARKUP,
+                    )
+                    continue
 
             if client_exclusions:
                 excluded_by = _client_exclusion_for(
@@ -2389,7 +2544,7 @@ def _apply_suppressions_within_budget(
                         id=get_finding_id(result.ruleId, uri, line_start, line_end),
                         title=message_text or "Unknown Issue",
                         description=message_text or "No description available",
-                        severity="MEDIUM",
+                        severity=Severity.MEDIUM.value,
                         scanner=_suppression_scanner_identity(
                             result, run, scanner_name
                         ),
@@ -2398,6 +2553,10 @@ def _apply_suppressions_within_budget(
                         file_path=uri,
                         line_start=line_start,
                         line_end=line_end,
+                        # An image finding's subject, for an ``image:``-scoped
+                        # suppression (stamped by the scanner executor).
+                        image_ref=_string_property(result, IMAGE_REF_PROPERTY),
+                        image_digest=_string_property(result, IMAGE_DIGEST_PROPERTY),
                     )
 
                 if flat_finding:

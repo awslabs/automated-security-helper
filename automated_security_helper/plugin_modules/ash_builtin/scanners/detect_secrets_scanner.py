@@ -60,6 +60,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -498,6 +499,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 python_only=True,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="a pinned Python dependency imported in-process; platform support is the package's and was not read here",
@@ -542,7 +544,6 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 semantics="the base default {0, 1}; the scan is in-process, so there is no tool exit",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
                 selection_surfaces=("verification (baseline-driven)",),
                 upstream_license=(
@@ -715,7 +716,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     def _pre_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         config: Optional[ScannerPluginConfigBase] = None,
         *args,
         **kwargs,
@@ -2584,7 +2585,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         start_column: Optional[int] = None,
         suppressions: Optional[List[Any]] = None,
         config_name: str = "detect-secrets",
-        tool_type: str = "SECRETS",
+        tool_type: str = ScannerToolType.SECRETS.value,
     ) -> Result:
         """One SARIF result for one detect-secrets finding, value-free.
 
@@ -2660,7 +2661,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             return path.relative_to(source).as_posix()
         return path.as_posix()
 
-    def _baseline_anchor(self, scan_root: Path, target_type: str) -> Path:
+    def _baseline_anchor(self, scan_root: Path, target_type: TargetType) -> Path:
         """The directory the baseline's paths are relative to.
 
         ``detect-secrets scan`` writes a baseline from the directory it runs in,
@@ -2707,7 +2708,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         this rule, and a debug line says so.
         """
         if (
-            target_type != "source"
+            target_type != TargetType.SOURCE
             or self._baseline_real is None
             or self._baseline_document is None
             or self._baseline_from_option
@@ -2851,7 +2852,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: DetectSecretsScannerConfig | None = None,
     ) -> SarifReport | bool:
@@ -2997,7 +2998,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # a baseline outside the source tree.
             baseline_document = None
             if (
-                target_type == "source"
+                target_type == TargetType.SOURCE
                 and self._baseline_in_use()
                 and self._baseline_document is not None
             ):
@@ -3039,7 +3040,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # turn every key into a chain of '..' segments.
             scan_root = (
                 self.context.work_dir
-                if target_type == "converted"
+                if target_type == TargetType.CONVERTED
                 else self.context.source_dir
             )
             self._secrets_collection.root = Path(scan_root).absolute()
@@ -3079,7 +3080,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # handed to detect-secrets.
             candidates = (
                 [item for item in self.context.work_dir.rglob("*") if item.is_file()]
-                if target_type == "converted"
+                if target_type == TargetType.CONVERTED
                 else scan_set(
                     source=self.context.source_dir,
                     output=self.context.output_dir,
@@ -3115,7 +3116,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # (_process_config_options fell back to the default settings), so
             # it is scanned like any other file.
             baseline_names: Set[str] = set()
-            if target_type == "source" and self._baseline_document is not None:
+            if target_type == TargetType.SOURCE and self._baseline_document is not None:
                 baseline_names = {
                     self._root_relative(str(path), scan_root)
                     for path in (self._baseline_named, self._baseline_real)
@@ -3525,7 +3526,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                                 else None
                             ),
                             config_name=self.config.name,
-                            tool_type=str(self.tool_type or "UNKNOWN"),
+                            # The enum's value, not str(): str() of a (str, Enum)
+                            # reads "ScannerToolType.SECRETS" on every Python,
+                            # where the f-string this replaced gave the bare
+                            # value on 3.10 and 3.11 (the project supports 3.10).
+                            tool_type=str(
+                                getattr(self.tool_type, "value", self.tool_type)
+                                or ScannerToolType.UNKNOWN.value
+                            ),
                         )
                     )
             if kept_known:
@@ -3636,7 +3644,7 @@ def _main(cwd: Path) -> SarifReport | bool:
         config=get_default_config(),
     )
     scanner = DetectSecretsScanner(context=context)
-    return scanner.scan(target=cwd, target_type="source")
+    return scanner.scan(target=cwd, target_type=TargetType.SOURCE)
 
 
 if __name__ == "__main__":

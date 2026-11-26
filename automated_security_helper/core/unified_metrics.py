@@ -81,9 +81,9 @@ class ScannerMetrics(ScannerSeverityCount):
     duration: Optional[float] = (
         None  # Time taken by the scanner in seconds, None for skipped/missing scanners
     )
-    status: str = (
-        "PASSED"  # Scanner status: "PASSED", "FAILED", "SKIPPED", or "MISSING"
-    )
+    # Scanner status: a ScannerStatus value ("PASSED", "FAILED", "SKIPPED",
+    # "MISSING" or "ERROR")
+    status: str = ScannerStatus.PASSED.value
     threshold: str = ""  # Severity threshold used for this scanner
     threshold_source: str = ""  # Source of the threshold ("global", "config", etc.)
     # True when ``threshold`` is the written reference of a value the resolver read
@@ -179,7 +179,11 @@ class ScannerMetrics(ScannerSeverityCount):
         ``status`` sits in the same row and says it outright, and reasons 1 and 2
         are untouched.
         """
-        return self.status in ("PASSED", "SKIPPED", "MISSING")
+        return self.status in (
+            ScannerStatus.PASSED,
+            ScannerStatus.SKIPPED,
+            ScannerStatus.MISSING,
+        )
 
 
 #: What ``target_counts`` answers for a scanner whose stored counters cannot be trusted. Never a
@@ -467,7 +471,8 @@ def dependencies_recorded_satisfied(
     recorded = [
         report.get("dependencies_satisfied")
         for report in reports.values()
-        if getattr(report.get("status"), "value", report.get("status")) == "MISSING"
+        if getattr(report.get("status"), "value", report.get("status"))
+        == ScannerStatus.MISSING.value
         and isinstance(report.get("dependencies_satisfied"), bool)
     ]
     return bool(recorded) and all(recorded)
@@ -818,7 +823,9 @@ def get_unified_scanner_metrics(
                 asharp_model.scanner_results.get(scanner_name, None)
             )
             recorded_status = (
-                scan_result.status if scan_result and scan_result.status else "PASSED"
+                scan_result.status
+                if scan_result and scan_result.status
+                else ScannerStatus.PASSED.value
             )
             # The recorded row is not authoritative about the finding count: a
             # FAILED it carries from an earlier rebuild stayed on a scanner whose
@@ -843,7 +850,7 @@ def get_unified_scanner_metrics(
             # report recording LOW beside a record that now says MEDIUM flipped
             # the same way (graded_level_agrees).
             status = (
-                "PASSED"
+                ScannerStatus.PASSED.value
                 if getattr(recorded_status, "value", recorded_status)
                 == ScannerStatus.FAILED.value
                 and not ScannerStatisticsCalculator.dict_counts_unrecorded(
@@ -866,14 +873,14 @@ def get_unified_scanner_metrics(
         # not scan is not dropped with that (contract clause 3i).
         missing_reason = None
         skipped_reason = None
-        if status == "MISSING" or (
-            status == "FAILED" and stats["dependencies_missing"]
+        if status == ScannerStatus.MISSING.value or (
+            status == ScannerStatus.FAILED.value and stats["dependencies_missing"]
         ):
             missing_reason = (
                 recorded_reason(asharp_model, scanner_name, "missing_reason")
                 or NO_MISSING_REASON_RECORDED
             )
-        elif status == "SKIPPED":
+        elif status == ScannerStatus.SKIPPED.value:
             skipped_reason = recorded_reason(
                 asharp_model, scanner_name, "skipped_reason"
             )
@@ -1101,17 +1108,23 @@ def _populate_summary_stats_from_unified_metrics(
     # partial one. ERROR had no counter until this was added, which made the other
     # four sum to less than the scanner count on exactly the runs where the
     # difference mattered.
-    passed_count = sum(1 for m in unified_metrics if m.status == "PASSED")
-    failed_count = sum(1 for m in unified_metrics if m.status == "FAILED")
-    skipped_count = sum(1 for m in unified_metrics if m.status == "SKIPPED")
-    missing_count = sum(1 for m in unified_metrics if m.status == "MISSING")
+    passed_count = sum(1 for m in unified_metrics if m.status == ScannerStatus.PASSED)
+    failed_count = sum(1 for m in unified_metrics if m.status == ScannerStatus.FAILED)
+    skipped_count = sum(1 for m in unified_metrics if m.status == ScannerStatus.SKIPPED)
+    missing_count = sum(1 for m in unified_metrics if m.status == ScannerStatus.MISSING)
     # Every other status is an error: a status that is not one of ASH's own is
     # no result, and counted in no column the five no longer summed to the
     # scanner count.
     error_count = sum(
         1
         for m in unified_metrics
-        if m.status not in ("PASSED", "FAILED", "SKIPPED", "MISSING")
+        if m.status
+        not in (
+            ScannerStatus.PASSED,
+            ScannerStatus.FAILED,
+            ScannerStatus.SKIPPED,
+            ScannerStatus.MISSING,
+        )
     )
 
     # Preserve timing information if it exists
@@ -1252,18 +1265,10 @@ def _populate_scanner_results_from_unified_metrics(
             info=metrics.info,
         )
 
-        # Convert status from string to enum
-        if metrics.status == "PASSED":
-            status = ScannerStatus.PASSED
-        elif metrics.status == "FAILED":
-            status = ScannerStatus.FAILED
-        elif metrics.status == "SKIPPED":
-            status = ScannerStatus.SKIPPED
-        elif metrics.status == "MISSING":
-            status = ScannerStatus.MISSING
-        elif metrics.status == "ERROR":
-            status = ScannerStatus.ERROR
-        else:
+        # Convert status from string to enum (the ingest point for the row's text)
+        try:
+            status = ScannerStatus(metrics.status)
+        except (ValueError, TypeError):
             # Not a status of ASH's: no result that can be read, so the row
             # says ERROR, never a PASSED nothing graded.
             ASH_LOGGER.warning(

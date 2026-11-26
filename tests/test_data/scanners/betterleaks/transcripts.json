@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": "betterleaks",
+      "also_for": [],
+      "argv": [
+        "betterleaks",
+        "dir",
+        "--report-format=sarif",
+        "--report-path=<file>",
+        "--redact=100",
+        "--exit-code=2",
+        "--no-banner",
+        "--no-color",
+        "--gitleaks-ignore-path=<empty directory>",
+        "--ignore-gitleaks-allow",
+        "--config=<min.toml>",
+        "--",
+        "."
+      ],
+      "env_allowlist": [],
+      "exit_code": 2,
+      "fixture_tree": null,
+      "id": "betterleaks-1.10.1-positive",
+      "live_input": false,
+      "note": "two fabricated GitHub tokens in two files; the report holds REDACTED",
+      "observable": true,
+      "pin_stamp": {
+        "tool": "betterleaks",
+        "version": "1.10.1"
+      },
+      "provenance": "captured",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/positive.sarif",
+          "sha256": "4001226d5a721d5f6570319be5fb6ea9846ac82eed8a412967609b528eb9c472"
+        }
+      ],
+      "retention": "current",
+      "scanner": "betterleaks",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "betterleaks",
+        "version": "1.10.1"
+      }
+    },
+    {
+      "adapter_prep": "betterleaks",
+      "also_for": [],
+      "argv": [
+        "betterleaks",
+        "dir",
+        "--report-format=sarif",
+        "--report-path=<file>",
+        "--redact=100",
+        "--exit-code=2",
+        "--no-banner",
+        "--no-color",
+        "--gitleaks-ignore-path=<empty directory>",
+        "--ignore-gitleaks-allow",
+        "--config=<min.toml>",
+        "--",
+        "."
+      ],
+      "env_allowlist": [],
+      "exit_code": 0,
+      "fixture_tree": null,
+      "id": "betterleaks-1.10.1-negative",
+      "live_input": false,
+      "note": "one clean file",
+      "observable": true,
+      "pin_stamp": {
+        "tool": "betterleaks",
+        "version": "1.10.1"
+      },
+      "provenance": "captured",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/negative.sarif",
+          "sha256": "b1ed45ca62ee7994c2411f874c6f62321b84d11dc746e2a7e542891924a9a4dc"
+        }
+      ],
+      "retention": "current",
+      "scanner": "betterleaks",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "betterleaks",
+        "version": "1.10.1"
+      }
+    }
+  ],
+  "unrecorded": []
+}

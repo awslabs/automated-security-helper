@@ -27,6 +27,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, List
 
 import anyio
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 import pytest
 from mcp.server.mcpserver import Context
 
@@ -40,7 +41,6 @@ from automated_security_helper.cli.mcp.http_sessions import (
     SessionBoundary,
 )
 from automated_security_helper.cli.mcp.session_identity import (
-    SESSION_IDENTITY_REQUIRED,
     UNIDENTIFIED_SESSION_ID,
     session_identity_refusal,
 )
@@ -187,7 +187,7 @@ def test_the_refusal_says_the_session_expired() -> None:
     )
 
     assert refusal is not None
-    assert refusal["error_type"] == SESSION_IDENTITY_REQUIRED
+    assert refusal["error_type"] == McpErrorType.SESSION_IDENTITY_REQUIRED.value
     assert "expired" in refusal["error"], refusal
     assert "did not issue" not in refusal["error"], refusal
     assert "initialize" in refusal["error"], refusal

@@ -168,6 +168,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -607,7 +608,8 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             "email, date, commitMessage)",
             reason="dir mode emits empty-string git metadata, which "
             "_post_process_sarif drops because an empty fingerprint is "
-            "identical across every result; git-mode values pass through",
+            "identical across every result; ASH runs only the dir subcommand, "
+            "so no git metadata is ever kept",
         ),
         fix_available=FacetDecl(
             state=FacetState.NA,
@@ -679,6 +681,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=opsf.PLATFORMS_ALL,
                 note="asset table lists all six platform/arch pairs",
@@ -719,7 +722,6 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 semantics="ASH passes --exit-code=2 because the tool's default 1 means both leaks and some errors",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=("options.honor_inline_ignores",),
                 upstream_license=(
@@ -1044,7 +1046,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Resolve the argv and results path for one gitleaks run.
@@ -1918,7 +1920,9 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 result.properties = PropertyBag(tags=tags)
             else:
                 result.properties.tags = tags
-            setattr(result.properties, "issue_severity", "CRITICAL")  # noqa: B010
+            setattr(  # noqa: B010
+                result.properties, "issue_severity", Severity.CRITICAL.value
+            )
 
             for location in result.locations or []:
                 physical = location.physicalLocation

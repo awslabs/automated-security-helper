@@ -1,14 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A new config file gets the name discovery treats as current.
+"""A new config file gets the canonical name, `.ash.yaml` at the root.
 
-Discovery (config/config_sources.py, #313) reads the `ashrc` names and
-`[tool.ash]` after the older `.ash.*`/`ash.*` names, and its warning calls the
-older names deprecated. So `ash config init` and `ash config wizard`
-create a config under a current name, and so does `ash inspect findings` when it
-writes a suppression and finds no config, never `.ash/.ash.yaml` or
-`<cwd>/.ash.yaml`. Existing files under the old names keep loading.
+Discovery (config/config_sources.py) reads `.ash.yaml` at the scan root before
+any other source, and warns that every other location is deprecated. So `ash
+config init` and `ash config wizard` create `<cwd>/.ash.yaml`, and so does `ash
+inspect findings` when it writes a suppression and finds no config, never
+`.ash/.ash.yaml` or an `ashrc` name. Existing files at the legacy locations keep
+loading.
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 from automated_security_helper.config.config_sources import discover_config_source
 from automated_security_helper.core.constants import (
+    ASH_CANONICAL_CONFIG_FILE_NAME,
     ASH_DEFAULT_CONFIG_FILE_NAME,
-    ASH_RC_FILE_NAMES,
 )
 
 pytestmark = pytest.mark.unit
@@ -41,8 +41,8 @@ def _run(*args: str, stdin: str | None = None):
     return CliRunner().invoke(app, ["config", *args], input=stdin)
 
 
-def test_default_name_is_a_current_yaml_source():
-    assert ASH_DEFAULT_CONFIG_FILE_NAME in ASH_RC_FILE_NAMES
+def test_default_name_is_the_canonical_yaml_file():
+    assert ASH_DEFAULT_CONFIG_FILE_NAME == ASH_CANONICAL_CONFIG_FILE_NAME == ".ash.yaml"
     # The writers write YAML, and refuse TOML.
     assert ASH_DEFAULT_CONFIG_FILE_NAME.endswith((".yaml", ".yml"))
 
@@ -64,7 +64,9 @@ class TestInit:
         gitignore = project / ".ash" / ".gitignore"
         assert "ash_output" in gitignore.read_text(encoding="utf-8")
 
-    @pytest.mark.parametrize("existing", [".ash/.ash.yaml", ".ash.yaml", "ash.yml"])
+    @pytest.mark.parametrize(
+        "existing", [".ash/.ash.yaml", ".ash.yml", "ash.yml", ".ashrc.yaml"]
+    )
     @pytest.mark.parametrize("force", [False, True], ids=["plain", "force"])
     def test_refuses_to_add_a_second_source(self, project, existing, force):
         path = project / existing
@@ -127,7 +129,7 @@ class TestWizard:
         assert not (project / ".ash" / ".ash.yaml").exists()
 
     def test_edits_the_config_a_scan_uses(self, project):
-        existing = project / ".ash.yaml"
+        existing = project / ".ash.yml"
         existing.write_text("project_name: existing\n", encoding="utf-8")
 
         result = _run("wizard", stdin=_wizard_answers())

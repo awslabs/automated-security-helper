@@ -391,10 +391,18 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
         and not the other depending on whether the scan found anything.
         """
         from automated_security_helper.models.flat_vulnerability import (
+            IMAGE_ATTRIBUTION_FIELDS,
             FlatVulnerability,
         )
 
-        fields = list(FlatVulnerability.model_fields)
+        # Left out as the populated form leaves them out of a row with no image
+        # attribution (FlatVulnerability's serializer), so a scan that found
+        # nothing writes the header every other filesystem scan writes.
+        fields = [
+            field
+            for field in FlatVulnerability.model_fields
+            if field not in IMAGE_ATTRIBUTION_FIELDS
+        ]
         if annotated:
             fields.extend(ANNOTATION_COLUMNS)
         return CsvReporter._order(fields, is_workspace)

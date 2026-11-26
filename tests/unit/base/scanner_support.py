@@ -69,6 +69,21 @@ def execute_writing(content=None):
     return _impl
 
 
+def is_resource_run(command) -> bool:
+    """Whether ``command`` is a scanner's side run that asks the tool for JSON.
+
+    Read from the value after ``--format``, not from a fixed position, so a prefix
+    before the flag (a ``uv run`` wrapper, a reordered option) does not turn the
+    side run into one of the scan's own invocations in a test double.
+    """
+    for index, token in enumerate(command[:-1]):
+        if token == "--format":
+            return command[index + 1] == "json"
+        if token == "--format=json":
+            return True
+    return command[-1:] == ["--format=json"]
+
+
 MINIMAL_SARIF = {
     "version": "2.1.0",
     "$schema": "https://json.schemastore.org/sarif-2.1.0.json",

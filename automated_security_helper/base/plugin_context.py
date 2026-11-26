@@ -17,6 +17,7 @@ from pydantic.json_schema import SkipJsonSchema
 from typing import Annotated, Any, Dict, List, Optional, Set, TYPE_CHECKING
 
 from automated_security_helper.base.forward_refs import OnceOnlyResolver
+from automated_security_helper.core.asset import Asset
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.plugins.plugin_manager import AshPluginManager
 
@@ -212,6 +213,21 @@ class PluginContext(BaseModel):
                 "(the default) means no staged scope; the whole tree is scanned. "
                 "An empty list means something was staged and none of it is "
                 "inside source_dir, so every scanner has nothing to scan."
+            )
+        ),
+    ] = None
+    asset: Annotated[
+        Optional[Asset],
+        Field(
+            description=(
+                "The subject of this scan, when the caller named one that is "
+                "not the source directory: a CONTAINER_IMAGE asset carries the "
+                "image locator the scan was submitted with. None (the default) "
+                "means the subject is source_dir, exactly as it always was, so "
+                "every existing caller and every filesystem scan is unchanged. "
+                "source_dir stays set either way: it is where the output tree "
+                "and the config are anchored, and the scan phase routes by the "
+                "asset's kind, not by which directory fields exist."
             )
         ),
     ] = None

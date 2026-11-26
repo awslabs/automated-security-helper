@@ -35,11 +35,14 @@
 │                                                                      default, ASH looks for the  │
 │                                                                      following config file names │
 │                                                                      in the source directory of  │
-│                                                                      a scan: ['.ash.yml',        │
-│                                                                      '.ash.yaml', '.ash.json',   │
-│                                                                      'ash.yml', 'ash.yaml',      │
-│                                                                      'ash.json'] (each at the    │
-│                                                                      root, then in .ash/), then  │
+│                                                                      a scan: .ash.yaml at the    │
+│                                                                      root, then the deprecated   │
+│                                                                      ['.ash.yml', '.ash.yaml',   │
+│                                                                      '.ash.json', 'ash.yml',     │
+│                                                                      'ash.yaml', 'ash.json']     │
+│                                                                      (each at the root, then in  │
+│                                                                      .ash/; .ash.yaml only in    │
+│                                                                      .ash/), then                │
 │                                                                      ['.ashrc.toml',             │
 │                                                                      '.ashrc.yaml',              │
 │                                                                      '.ashrc.yml',               │

@@ -7,8 +7,11 @@
 Python, so neither can ask the CLI anything at run time. Each carries written-out
 tables of the CLI's own surface: the subcommand names, which root options take a
 value, which subcommands take the options the wrapper adds, the order in which OCI
-runners are looked for. Those tables are the part of the two wrappers that drifts when
-the CLI changes.
+runners are looked for, the CI runner markers passed into the container, the image
+build targets, the image-name pattern and the refusal and usage-error exit codes.
+Those tables are the part of the two wrappers that drifts when the CLI changes.
+Every field of the contract is rendered into a block of at least one wrapper and read
+by that wrapper's own control flow; a field no block renders does not belong here.
 
 This module is the one place that computes them. It reads the real typer app and the
 constants container mode itself uses, never a hand-kept copy, and
@@ -69,24 +72,12 @@ WRAPPER_FORWARDED_OPTIONS: tuple[str, ...] = (
 #: The subcommands whose own ``-o`` is not the container runtime's. ``scan`` and
 #: ``build-image`` are the container-mode commands, where the wrapper reads ``-o`` as
 #: the runner; every other command's ``-o`` is its own and is forwarded.
-CONTAINER_MODE_SUBCOMMANDS: tuple[str, ...] = ("scan", "build-image")
+CONTAINER_MODE_SUBCOMMANDS: tuple[str, ...] = ("scan", "build-image", "container")
 
-#: Where container mode mounts the source and the output directory.
-SOURCE_MOUNT = "/src"
-OUTPUT_MOUNT = "/out"
-
-#: The names container mode sets inside the container to tell the scan where the host
-#: paths were.
-ACTUAL_DIRECTORY_ENV_NAMES: tuple[str, ...] = (
-    "ASH_ACTUAL_SOURCE_DIR",
-    "ASH_ACTUAL_OUTPUT_DIR",
-)
-
-#: The exit code the wrapper's own refusals leave. The wrappers exit with the same
-#: value when no OCI runner is found; the CI action's "3, or 1 without a runner" means
-#: its catch falls back to 1 when PowerShell raised an error before Invoke-ASH set one.
-NO_OCI_RUNNER_EXIT = 3
-CI_CATCH_FALLBACK_EXIT = 1
+#: The subcommands that are groups handing the options typed before them to one of
+#: their commands (AshTyperGroup._options_for_subcommand), so `./ash --quiet container
+#: build` passes `--quiet` on to `build`: such a group takes what that command takes.
+OPTION_ROUTING_GROUPS: dict[str, str] = {"container": "build"}
 
 
 def _options(command: Any) -> set[str]:
@@ -95,6 +86,15 @@ def _options(command: Any) -> set[str]:
         found.update(getattr(param, "opts", None) or [])
         found.update(getattr(param, "secondary_opts", None) or [])
     return found
+
+
+def _taken_options(name: str, command: Any) -> set[str]:
+    """The options the subcommand *name* takes when the wrapper hands it one: its own,
+    or for a group in OPTION_ROUTING_GROUPS those of the command the options go to."""
+    leaf = OPTION_ROUTING_GROUPS.get(name)
+    if leaf is not None:
+        return _options(command.commands[leaf])
+    return _options(command)
 
 
 def _tree_options(command: Any) -> set[str]:
@@ -125,15 +125,11 @@ class WrapperContract:
     build_targets: tuple[str, ...]
     #: The characters an image name may hold, as a regular expression.
     image_name_pattern: str
-    #: Exit codes: refusal, usage error, no runner found.
+    #: Exit codes: refusal (also the code for no runner found), and usage error.
     refusal_exit: int
     usage_error_exit: int
-    no_runner_exit: int
     #: The runner markers that are passed into the container by name.
     ci_runner_markers: tuple[str, ...]
-    #: Container paths the wrapper mounts onto.
-    mount_destinations: tuple[str, ...]
-    actual_directory_env_names: tuple[str, ...]
 
     def takers(self, option: str) -> tuple[str, ...]:
         for name, subcommands in self.option_subcommands:
@@ -159,7 +155,9 @@ def contract() -> WrapperContract:
     forwarded = []
     for option in WRAPPER_FORWARDED_OPTIONS:
         takers = tuple(
-            name for name, command in commands.items() if option in _options(command)
+            name
+            for name, command in commands.items()
+            if option in _taken_options(name, command)
         )
         forwarded.append((option, takers))
 
@@ -189,13 +187,5 @@ def contract() -> WrapperContract:
         image_name_pattern=rac._IMAGE_NAME_PATTERN.pattern,
         refusal_exit=rac._WRAPPER_REFUSAL_EXIT,
         usage_error_exit=ASH_EXIT_USAGE_ERROR,
-        no_runner_exit=NO_OCI_RUNNER_EXIT,
         ci_runner_markers=tuple(rac.RUNNER_MARKERS_ON_ARGV),
-        mount_destinations=(
-            SOURCE_MOUNT,
-            OUTPUT_MOUNT,
-            rac.CONTAINER_CONFIG_ROOT,
-            rac.CONTAINER_ENV_CONFIG_ROOT,
-        ),
-        actual_directory_env_names=ACTUAL_DIRECTORY_ENV_NAMES,
     )

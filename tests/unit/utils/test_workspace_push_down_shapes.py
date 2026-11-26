@@ -43,8 +43,11 @@ def _answer(pattern, prefix, kind):
         # covers no file there.
         (IGNORE_PATH, "api", "api/", "**"),
         (IGNORE_PATH, "api/sub", "api/", "**"),
-        (SUPPRESSION, "api", "api/", None),
-        (SUPPRESSION, "api/sub", "api/", None),
+        # The bare-directory rule (issue #894): a glob-free suppression ending
+        # in "/" names the directory in both matchers, so it converts as the
+        # ignore path does.
+        (SUPPRESSION, "api", "api/", "**"),
+        (SUPPRESSION, "api/sub", "api/", "**"),
         # A directory at any depth reaches every project.
         (IGNORE_PATH, "api", "**/vendor/**", "**/vendor/**"),
         (IGNORE_PATH, "vendor", "**/vendor/**", "**"),
@@ -84,11 +87,13 @@ def test_each_shape_is_pushed_down_as_its_kind_reads_it(
 class TestTrailingSlash:
     """A trailing slash keeps its meaning in both directions.
 
-    As an ignore path it names the directory's files. PurePosixPath drops it, so
-    through it "api/vendor/" would come down as "vendor", which names the path
-    vendor and nothing in it, and "api/" as None. As a suppression path it is literal and
-    matches no file, and the pushed-down pattern keeps it, so it matches none in
-    the project either; after "**" the matcher absorbs the slash.
+    As an ignore path it names the directory's files, and since the
+    bare-directory rule (issue #894) a glob-free suppression path reads the same
+    way, so both kinds convert a glob-free "api/vendor/" to "vendor/" and the
+    project root to "**". A GLOB suppression's trailing slash stays literal and
+    matches no file, and the pushed-down pattern keeps the slash and a glob
+    character, so it matches none in the project either; after "**" the matcher
+    absorbs the slash.
     """
 
     @pytest.mark.parametrize(
@@ -108,7 +113,7 @@ class TestTrailingSlash:
         "pattern,prefix,expected",
         [
             ("api/vendor/", "api", "vendor/"),
-            ("api/", "api", None),
+            ("api/", "api", "**"),
             ("**/vendor/", "api", "**/vendor/"),
             ("api/**/", "api", "**"),
             ("api/vendor/**/", "api", "vendor/**"),
@@ -116,15 +121,18 @@ class TestTrailingSlash:
         ],
     )
     def test_down_as_a_suppression_path(self, pattern, prefix, expected):
-        """A suppression path ending in "/" matches no file at workspace level, and
-        the one pushed down keeps its slash, so it matches none in the project;
-        pushed down as the directory form, "api/" would suppress every finding of
-        project api, so the project root itself is dropped."""
-        if expected is None or expected.endswith("/"):
+        """A glob-free suppression path ending in "/" names the directory (the
+        bare-directory rule, issue #894), so it converts as the ignore path
+        does, the project root becoming "**". A GLOB suppression's slash stays
+        literal: it matches no file at workspace level, and the pushed-down
+        pattern keeps the slash and a glob character, so it matches none in the
+        project either."""
+        if any(c in pattern for c in "*?[") and (
+            expected is not None and expected.endswith("/")
+        ):
             for path in ("api/vendor/x.py", "api/x.py", "api/a/b/c.py"):
                 assert not file_path_matches(path, pattern), pattern
-                if expected is not None:
-                    assert not file_path_matches(path[len("api/") :], expected)
+                assert not file_path_matches(path[len("api/") :], expected)
         assert to_project_pattern(pattern, prefix, kind=SUPPRESSION) == expected
 
     @pytest.mark.parametrize(
@@ -207,16 +215,19 @@ class TestTrailingSlash:
 
     @pytest.mark.parametrize(
         "pattern,expected",
-        [("***", None), ("****", None), ("***/x.py", "x.py"), ("api/***", REFUSED)],
+        [("***", None), ("****", None), ("***/x.py", REFUSED), ("api/***", REFUSED)],
     )
     def test_a_run_of_three_or_more_stars_is_read_as_one_star(self, pattern, expected):
         """The matcher reads a run of three or more stars as one "*" in a single
         component, and so does the push-down: "***" covers no file of a project at
         workspace level, and "***/x.py" covers "api/x.py" of project api. Read
-        as "**", "***" would suppress every finding in every project and
-        "***/x.py" every x.py at any depth, so the push-down reads it as one
-        star. "api/***" leaves one starred component with no
-        "**", which the project side would read across "/", so it is refused."""
+        as "**", "***" would suppress every finding in every project.
+        "***/x.py" is refused: its only remainder, "x.py", has no glob
+        character, and under the bare-directory rule (issue #894) a glob-free
+        pattern also covers the subtree below the path it names, which the
+        workspace pattern never matched. "api/***" leaves one starred component
+        with no "**", which the project side would read across "/", so it is
+        refused too."""
         assert _answer(pattern, "api", SUPPRESSION) == expected
         if expected == REFUSED:
             return

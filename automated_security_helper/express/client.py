@@ -65,6 +65,7 @@ NON_SCAN_SUBCOMMANDS = frozenset(
         "build-image",
         "report",
         "diff",
+        "trend",
         "merge",
         "mcp",
         "get-genai-guide",
@@ -72,7 +73,9 @@ NON_SCAN_SUBCOMMANDS = frozenset(
         "dependencies",
         "inspect",
         "plugin",
+        "suppress",
         "express",
+        "trend",
     }
 )
 
@@ -480,7 +483,7 @@ def _run_on_daemon(
         # autostart path (await_daemon) had the handshake budget.
         sock.settimeout(runtime.HANDSHAKE_TIMEOUT_SECONDS)
         request = {
-            "op": "scan",
+            "op": runtime.ExpressOp.SCAN.value,
             "protocol": runtime.PROTOCOL_VERSION,
             "version": runtime.ash_version(),
             "fingerprint": runtime.runtime_fingerprint(),
@@ -513,7 +516,7 @@ def _run_on_daemon(
 
         def send_signal_frame(signum: int) -> None:
             try:
-                runtime.send_frame(sock, {"op": "signal", "signum": int(signum)})
+                runtime.send_frame(sock, runtime.signal_frame(signum))
             except Exception:
                 pass
 
@@ -604,7 +607,7 @@ def _run_on_daemon(
                 # send is therefore still a safe fallback: no complete go
                 # frame reached the wire, so nothing forks.
                 try:
-                    runtime.send_frame(sock, {"op": "go"})
+                    runtime.send_frame(sock, runtime.go_frame())
                 except (OSError, runtime.ExpressProtocolError) as exc:
                     interrupted = _signal_exit_code(state["pending"])
                     if interrupted is not None:
@@ -719,7 +722,7 @@ def stop_daemon(path: PathLike) -> None:
     socket and all: the caller's fallbacks already cover a daemon that will
     not die, and removing its socket would not kill it, only hide it.
     """
-    answer = control_request(path, {"op": "stop"})
+    answer = control_request(path, runtime.stop_frame())
     if answer is None:
         return
     pid = answer.get("pid")

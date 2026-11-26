@@ -10,7 +10,6 @@ from typing import (
     ClassVar,
     Generic,
     List,
-    Literal,
     TypeVar,
     cast,
 )
@@ -37,7 +36,9 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.asharp_model import (
     FailedInputInfo,
     RefusedInputInfo,
+    known_failed_input_kind,
 )
+from automated_security_helper.models.vocab import FailureKind
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
@@ -394,7 +395,10 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         )
 
     def record_failed_input(
-        self, path: Path | str, reason: str, kind: Literal["input", "tool"] = "tool"
+        self,
+        path: Path | str,
+        reason: str,
+        kind: FailureKind | str = FailureKind.TOOL,
     ) -> None:
         """Log an input that could not be converted and keep it for the results row.
 
@@ -440,7 +444,10 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         # error the input is not accepted, the side that keeps the gate strict,
         # and the error's type is logged.
         accepting = None
-        if kind == "input" and not getattr(self.context, "ignore_suppressions", False):
+        kind = known_failed_input_kind(kind)
+        if kind is FailureKind.INPUT and not getattr(
+            self.context, "ignore_suppressions", False
+        ):
             try:
                 accepting = accepting_unconverted_input(
                     display, getattr(global_settings, "suppressions", None)

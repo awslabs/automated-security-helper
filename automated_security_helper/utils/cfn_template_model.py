@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from typing import TYPE_CHECKING, Annotated, Any, Dict, cast
 
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
@@ -787,7 +788,7 @@ def active_global_ignore_paths(context: "PluginContext") -> list[Any]:
 
 def cloudformation_candidate_files(
     context: "PluginContext",
-    target_type: str,
+    target_type: TargetType,
     global_ignore_paths: Iterable[object] | None = None,
 ) -> list[str]:
     """The files cfn-nag and cdk-nag consider in one tree, as posix paths, sorted.
@@ -806,7 +807,7 @@ def cloudformation_candidate_files(
     None, from a caller that has no list (``nothing_to_scan_reason``), reads the
     same list from the context (:func:`active_global_ignore_paths`).
     """
-    if target_type == "converted":
+    if target_type == TargetType.CONVERTED:
         files = [Path(p) for p in Path(context.work_dir).glob("**/*.*")]
     else:
         from automated_security_helper.utils.get_scan_set import (
@@ -1332,10 +1333,10 @@ def cloudformation_nothing_to_scan_reason(context: "PluginContext") -> str | Non
     Both trees a scan gives them: the source tree, and the converted tree when the
     work directory holds any file (ScanPhase adds it as a target then).
     """
-    trees = [("source", Path(context.source_dir))]
+    trees = [(TargetType.SOURCE, Path(context.source_dir))]
     work_dir = Path(context.work_dir)
     if work_dir.is_dir() and any(work_dir.rglob("*.*")):
-        trees.append(("converted", work_dir))
+        trees.append((TargetType.CONVERTED, work_dir))
     for target_type, root in trees:
         if holds_cloudformation_template(
             cloudformation_candidate_files(context, target_type), root

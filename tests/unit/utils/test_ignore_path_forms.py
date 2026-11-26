@@ -83,10 +83,19 @@ FILES_UNDER_VENDOR = ["vendor/v.py", "vendor/lib/deep/v.py"]
 #: on a case-sensitive filesystem VENDOR/ is another directory.
 OTHER_CASE_FORMS = ["VENDOR/", "Vendor/**", "**/VENDOR/**", "**/Vendor/"]
 
-#: Suppression paths that name the files under vendor, and ones that, read
-#: literally, name none of them.
-SUPPRESSION_DIRECTORY_FORMS = ["vendor/**", "**/vendor/**", "vendor/**/*"]
-LITERAL_SUPPRESSION_FORMS = ["vendor/", "**/vendor/", "VENDOR/", "vendor\\"]
+#: Suppression paths that name the files under vendor -- glob-free directory
+#: spellings included since the bare-directory rule (issue #894) -- and ones
+#: that name none of them: a GLOB whose trailing slash stays literal, and
+#: another directory's case.
+SUPPRESSION_DIRECTORY_FORMS = [
+    "vendor/**",
+    "**/vendor/**",
+    "vendor/**/*",
+    "vendor/",
+    "vendor",
+    "vendor\\",
+]
+LITERAL_SUPPRESSION_FORMS = ["**/vendor/", "VENDOR/"]
 
 
 @pytest.mark.parametrize("pattern", DIRECTORY_FORMS)
@@ -117,7 +126,7 @@ def test_a_directory_form_in_another_case_names_another_directory(pattern, path)
 
 
 @pytest.mark.parametrize("path", FILES_UNDER_VENDOR)
-def test_a_suppression_path_reads_a_trailing_slash_literally(path):
+def test_a_suppression_path_reads_a_directory_spelling_as_its_subtree(path):
     for pattern in SUPPRESSION_DIRECTORY_FORMS:
         assert file_path_matches(path, pattern), (pattern, path)
     for pattern in LITERAL_SUPPRESSION_FORMS:
@@ -127,8 +136,9 @@ def test_a_suppression_path_reads_a_trailing_slash_literally(path):
 @pytest.mark.parametrize(
     "pattern,path,expected",
     [
-        # A bare name is the path itself.
-        ("vendor", "vendor/v.py", False),
+        # A bare name is the path itself and, since the bare-directory rule
+        # (issue #894), the directory of that name.
+        ("vendor", "vendor/v.py", True),
         ("vendor", "vendor", True),
         # The long form keeps matching the path itself; the
         # suppressions guide says so.
@@ -209,28 +219,30 @@ _MATRIX_PATHS = [
 ]
 
 #: For each pattern, the paths it matches as an ignore path, and as a suppression
-#: path where that differs (None: the same). Only a pattern ending in a separator
+#: path where that differs (None: the same). Since the bare-directory rule
+#: (issue #894) a glob-free pattern names its directory in both readers, with or
+#: without the trailing separator, so only a GLOB pattern ending in a separator
 #: reads differently: as an ignore path it names the directory's files, as a
 #: suppression path it is literal.
 _MATCHED_PATHS = {
-    "vendor/": (("vendor/a.py", "vendor/sub/b.py"), ()),
-    "vendor": (("vendor",), None),
+    "vendor/": (("vendor/a.py", "vendor/sub/b.py"), None),
+    "vendor": (("vendor", "vendor/a.py", "vendor/sub/b.py"), None),
     "vendor/*": (("vendor/a.py", "vendor/sub/b.py"), None),
     "vendor/**": (("vendor/a.py", "vendor/sub/b.py", "vendor"), None),
-    "a/vendor/": (("a/vendor/d.py",), ()),
+    "a/vendor/": (("a/vendor/d.py",), None),
     "/vendor/": ((), None),
-    "vendor//": (("vendor/a.py", "vendor/sub/b.py"), ()),
-    "vendor\\": (("vendor/a.py", "vendor/sub/b.py"), ()),
-    "./vendor/": (("./vendor/a.py",), ()),
+    "vendor//": (("vendor/a.py", "vendor/sub/b.py"), None),
+    "vendor\\": (("vendor/a.py", "vendor/sub/b.py"), None),
+    "./vendor/": (("./vendor/a.py",), None),
     "**/vendor/": (
         ("vendor/a.py", "vendor/sub/b.py", "a/vendor/d.py", "./vendor/a.py"),
         (),
     ),
-    ".git/": ((".git/config",), ()),
+    ".git/": ((".git/config",), None),
     "ven*/": (("vendor/a.py", "vendor/sub/b.py", "vendorx/c.py"), ()),
     "v[e]ndor/": (("vendor/a.py", "vendor/sub/b.py"), ()),
     # Case is compared as written: VENDOR/ is another directory.
-    "VENDOR/": (("VENDOR/a.py",), ()),
+    "VENDOR/": (("VENDOR/a.py",), None),
     "./": ((), None),
     ".\\": ((), None),
     "/": ((), None),
@@ -244,9 +256,11 @@ _MATCHED_PATHS = {
 def test_every_reader_matches_the_paths_listed_for_the_pattern(pattern, path):
     """The two ignore-path readers and the two suppression readers, cell by cell.
 
-    Within each pair the readers agree, and the pairs differ only on a pattern
-    ending in a separator. No ``./`` is dropped and no backslash in a path is read
-    as a separator; ``./``, ``.\\``, ``/``, ``//`` and ``""`` match nothing.
+    Within each pair the readers agree, and the pairs differ only on a GLOB
+    pattern ending in a separator (a glob-free one names its directory in both,
+    the bare-directory rule of issue #894). No ``./`` is dropped and no backslash
+    in a path is read as a separator; ``./``, ``.\\``, ``/``, ``//`` and ``""``
+    match nothing.
     """
     as_ignore, as_suppression = _MATCHED_PATHS[pattern]
     expected_ignore = path in as_ignore
@@ -550,12 +564,12 @@ def test_the_source_directory_reads_the_same_with_a_trailing_slash(tmp_path):
     )
 
 
-@pytest.mark.parametrize(
-    "path, suppressed", [("vendor/", False), ("vendor/**/*", True)]
-)
-def test_a_suppression_path_keeps_a_trailing_slash_literal(tmp_path, path, suppressed):
-    """``vendor/`` as a suppression path covers no file; ``vendor/**/*`` covers the
-    files inside the directory."""
+@pytest.mark.parametrize("path, suppressed", [("vendor/", True), ("vendor/**/*", True)])
+def test_a_suppression_path_trailing_slash_names_the_directory(
+    tmp_path, path, suppressed
+):
+    """``vendor/`` and ``vendor/**/*`` both cover the files inside the directory
+    (the bare-directory rule, issue #894)."""
     suppression = AshSuppression(rule_id="python/Sqli", path=path, reason="r")
     config = AshConfig(
         project_name="t", global_settings={"suppressions": [suppression]}
@@ -596,10 +610,12 @@ class TestConfigChecksAgree:
         _, errors = ConfigValidator.validate_config_file(config, source_dir=tmp_path)
         assert not [e for e in errors if DIRECTORY_ADVICE in e], errors
 
-    def test_a_bare_directory_name_is_flagged(self, tmp_path):
+    def test_a_bare_directory_name_is_accepted(self, tmp_path):
+        """The bare-directory rule (issue #894): ``vendor`` names the directory
+        and matches the files below it, so the checks no longer flag it."""
         config = self._write(tmp_path, "vendor")
         issues = ConfigLinter.lint(config, source_dir=tmp_path).issues
-        assert [i for i in issues if DIRECTORY_ADVICE in i.message], issues
+        assert not [i for i in issues if DIRECTORY_ADVICE in i.message], issues
 
 
 class TestDirectoryAdvice:
@@ -637,27 +653,11 @@ class TestDirectoryAdvice:
         )
         return config
 
-    @pytest.mark.parametrize(
-        "kind, advice",
-        [
-            (
-                "ignore",
-                (
-                    "Path 'docs' points to a directory but matches no file in it. "
-                    "Use 'docs/' to ignore every file inside the directory."
-                ),
-            ),
-            (
-                "suppression",
-                (
-                    "Path 'docs' points to a directory but matches no file in it. "
-                    "Use 'docs/**/*' to suppress the findings in every file "
-                    "inside the directory."
-                ),
-            ),
-        ],
-    )
-    def test_lint_and_validate_give_the_same_advice(self, tmp_path, kind, advice):
+    @pytest.mark.parametrize("kind", ["ignore", "suppression"])
+    def test_lint_and_validate_accept_a_glob_free_directory_name(self, tmp_path, kind):
+        """The bare-directory rule (issue #894): ``docs`` names the directory and
+        matches the files below it in both kinds, so neither check advises a
+        respelling for it any more."""
         config = self._config(tmp_path, kind)
 
         lint = [
@@ -667,8 +667,8 @@ class TestDirectoryAdvice:
         ]
         _, problems = ConfigValidator.validate_config_file(config, source_dir=tmp_path)
 
-        assert lint == [advice], lint
-        assert [p for p in problems if DIRECTORY_ADVICE in p] == [advice], problems
+        assert lint == [], lint
+        assert [p for p in problems if DIRECTORY_ADVICE in p] == [], problems
 
 
 @pytest.mark.parametrize(
