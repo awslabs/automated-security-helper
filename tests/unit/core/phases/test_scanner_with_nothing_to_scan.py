@@ -1127,19 +1127,24 @@ DATE_LIKE_VALUES = ["2024-13-01", "2024-02-30"]
 
 def _cfn_nag_answers_with_a_finding_for(marker: str):
     """cfn_nag_scan's answer: one finding, located on the staged copy it was given,
-    for a template whose results directory's name holds *marker*.
+    for a template whose own file name holds *marker*.
 
     The copy has a fixed name (``template`` plus the template's extension) and sits
-    in a directory named after the template, so the marker is read off that
-    directory's name. The finding's URI is the copy's path, as cfn_nag writes it;
-    the scanner points it back at the template, which is what the tests read.
+    in a directory named after the template's whole path, with each separator
+    written as ``_s``, so the marker is read off the part of that directory's name
+    after the last ``_s``: the template's own name. Read off the whole name, it
+    also matched the directories above the source tree, and a run whose temporary
+    directory had the marker in its path gave every template the finding. The
+    finding's URI is the copy's path, as cfn_nag writes it; the scanner points it
+    back at the template, which is what the tests read.
     """
 
     def answer(command=None, **_kwargs):
         command = [str(a) for a in command or []]
         staged = command[command.index("--input-path") + 1]
+        template_name = Path(staged).parent.parent.name.rsplit("_s", 1)[-1]
         results = []
-        if marker in Path(staged).parent.parent.name:
+        if marker in template_name:
             results = [
                 {
                     "ruleId": "W51",
@@ -1728,6 +1733,44 @@ def test_a_merge_key_is_merged_into_its_mapping():
 def test_cfn_nag_with_its_tool_scans_a_template_with_a_merge_key(context):
     (context.source_dir / "stack.json").write_text(json.dumps(TEMPLATE), "utf-8")
     (context.source_dir / "merged.yaml").write_text(MERGED_TEMPLATE, "utf-8")
+    scanner = _with_its_tool(CfnNagScanner)(context=context)
+
+    with patch.object(
+        scanner,
+        "_run_subprocess",
+        side_effect=_cfn_nag_answers_with_a_finding_for("merged"),
+    ):
+        report = scanner.scan(target=context.source_dir, target_type="source")
+
+    assert (scanner.targets_attempted, scanner.targets_failed) == (2, 0), scanner.errors
+    found = [
+        location.physicalLocation.root.artifactLocation.uri
+        for run in report.runs
+        for result in run.results or []
+        for location in result.locations or []
+    ]
+    assert found == ["merged.yaml"], found
+
+
+def test_a_directory_above_the_tree_named_for_the_marker_gives_no_other_template_a_finding(
+    tmp_path,
+):
+    """The double reads its marker off each template's own name. Read off the whole
+    results directory name, which spells the template's path, it matched the
+    ``merged`` directory above this tree and gave ``stack.json`` the finding too."""
+    root = tmp_path / "merged"
+    source = root / "source"
+    source.mkdir(parents=True)
+    output = root / "output"
+    (output / ASH_WORK_DIR_NAME).mkdir(parents=True)
+    context = PluginContext(
+        source_dir=source,
+        output_dir=output,
+        work_dir=output / ASH_WORK_DIR_NAME,
+        config=get_default_config(),
+    )
+    (source / "stack.json").write_text(json.dumps(TEMPLATE), "utf-8")
+    (source / "merged.yaml").write_text(MERGED_TEMPLATE, "utf-8")
     scanner = _with_its_tool(CfnNagScanner)(context=context)
 
     with patch.object(
