@@ -723,9 +723,10 @@ def test_an_eager_reserved_flag_would_have_ended_the_scan_with_exit_0(flag):
     ``--version`` is not eager; its row in the table above resolves it, and
     ``run_ash_scan_cli_command`` exits 0 on it before starting anything.
     """
-    import click
+    import typer
 
-    with pytest.raises(click.exceptions.Exit) as excinfo:
+    # typer vendors click, so the parse raises typer's Exit, not the click package's.
+    with pytest.raises(typer.Exit) as excinfo:
         _resolve_scan_params(["ash", "scan", flag])
 
     assert excinfo.value.exit_code == 0, (
