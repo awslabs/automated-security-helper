@@ -195,23 +195,6 @@ def _severity_level(severity: Any) -> str:
     return str(severity or "UNKNOWN").lower()
 
 
-def _count_severity(counts: Dict[str, int], severity: Any) -> None:
-    """Count one finding under its severity's bucket.
-
-    The buckets are ASH's five levels, and every flattened finding carries one
-    of them: a SARIF result's level is read by the gate's ladder, and an
-    additional report's own text (``moderate``, ``UNRATED``) is read the same
-    way by ``FlatVulnerability.from_additional_report`` and lands on MEDIUM, as
-    a result with no level does. So the count never meets a sixth name from the
-    model; a stand-in row that carries one gets a bucket of its own rather than
-    being dropped, which once read more actionable findings than active ones.
-    A row with no severity counts under ``unknown``, the name the grading and
-    the finding lists give it, not under an empty name.
-    """
-    level = _severity_level(severity)
-    counts[level] = counts.get(level, 0) + 1
-
-
 def _add_level_counts(counts: Dict[str, int], graded: pl.DataFrame) -> None:
     """Add the unsuppressed findings of *graded* to *counts* by severity bucket."""
     for level, found in active_level_counts(graded):
