@@ -135,6 +135,7 @@ redirects:
   docs/plugins/community/snyk-plugin-setup.md: docs/plugins/alpha/snyk-plugin-setup.md
   docs/plugins/community/snyk-plugin.md: docs/plugins/alpha/snyk-plugin.md
   docs/plugins/community/trivy-plugin.md: docs/plugins/alpha/trivy-plugin.md
+  docs/plugins/community/trufflehog-plugin.md: docs/plugins/alpha/trufflehog-plugin.md
   docs/plugins/converter-plugins-diagrams.md: plugins/write-a-converter.md
   docs/plugins/converter-plugins.md: plugins/write-a-converter.md
   docs/plugins/development-guide.md: plugins/write-a-scanner.md

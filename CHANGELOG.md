@@ -232,6 +232,19 @@
   Betterleaks, pinned and digest-verified; `ash dependencies install --tool betterleaks`,
   with the module loaded, installs the same build locally. See
   [Betterleaks Plugin](docs/content/docs/plugins/alpha/betterleaks-plugin.md).
+- **A TruffleHog alpha plugin, `ash_trufflehog_plugins`.** It runs
+  [TruffleHog](https://github.com/trufflesecurity/trufflehog) as `trufflehog filesystem`
+  over the scan target when the module is listed in `ash_plugin_modules` (or passed with
+  `--ash-plugin-modules`), and is on by default then. It runs beside the builtin secret
+  scanners, so a secret two of them find is reported by each. Verification, which sends
+  each credential found to its provider, is off unless the operator sets
+  `scanners.trufflehog.options.verify`: a credential the provider confirms is CRITICAL,
+  every other detection is HIGH. ASH reads TruffleHog's SARIF output, which never holds
+  the secret, and passes `trufflehog --no-ignore-tag`, so a `trufflehog:ignore` comment
+  hides nothing unless the operator sets `honor_inline_ignores`. TruffleHog is licensed
+  under AGPL-3.0, so ASH does not install it and the container image does not include
+  it: install TruffleHog 3.100.0 or later yourself. See
+  [TruffleHog Plugin](docs/content/docs/plugins/alpha/trufflehog-plugin.md).
 - **Engine-scoped suppressions for ferret-scan** (`scope.engines.ferret-scan`): a
   suppression entry can now be narrowed to the confidence band ferret-scan reported
   (`confidence_level: low|medium|high`, or a list) and/or the detector that produced

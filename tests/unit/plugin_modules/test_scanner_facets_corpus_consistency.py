@@ -231,6 +231,9 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
     "trivy-repo": CorpusSpec(
         "trivy", sarif=("*.sarif", "captured/*.sarif"), prep="trivy"
     ),
+    "trufflehog": CorpusSpec(
+        "trufflehog", sarif=("captured/*.sarif",), prep="trufflehog"
+    ),
     "zizmor": CorpusSpec("zizmor", sarif=("*.sarif",)),
 }
 
@@ -419,6 +422,20 @@ def _prep_betterleaks(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Resu
     for pattern in spec.sarif:
         for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
             report = BetterleaksScanner.normalize_results(_load_sarif(path))
+            yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_trufflehog(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The committed `trufflehog filesystem --sarif` capture through the adapter's
+    own context-free post-processing (generic-duplicate drop, rating, tags,
+    verification)."""
+    from automated_security_helper.plugin_modules.ash_trufflehog_plugins.trufflehog_scanner import (
+        TruffleHogScanner,
+    )
+
+    for pattern in spec.sarif:
+        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+            report = TruffleHogScanner.normalize_results(_load_sarif(path))
             yield report, [r for run in report.runs or [] for r in run.results or []]
 
 
@@ -647,6 +664,7 @@ _PREPS: Mapping[
     "npm-audit": _prep_npm_audit,
     "snyk-code": _prep_snyk_code,
     "trivy": _prep_trivy,
+    "trufflehog": _prep_trufflehog,
 }
 
 
@@ -740,7 +758,7 @@ def test_the_gate_carries_no_waiver_but_the_register() -> None:
 def test_the_registry_and_the_corpus_table_agree() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
     names = {_name(cls) for cls in SCANNER_CLASSES}
-    assert len(SCANNER_CLASSES) == 23, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == 24, sorted(c.__name__ for c in SCANNER_CLASSES)
     assert names == set(CORPORA) == set(SCANNER_TOOL_TYPES), (
         f"registry {sorted(names)} / corpus table {sorted(CORPORA)}: a scanner "
         "needs a CORPORA row (a corpus, or None with the fixture to author)"

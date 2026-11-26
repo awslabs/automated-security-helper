@@ -28,7 +28,7 @@ Alpha plugins run only when you load their module with `ash_plugin_modules` or
 | Dockerfiles | checkov | hadolint, trivy-repo |
 | GitHub Actions workflows | actionlint, zizmor, checkov | |
 | Composite actions (`action.yml`) | zizmor | guarddog |
-| Secrets, in any file | detect-secrets, gitleaks | betterleaks, ferret-scan (sensitive data), trivy-repo |
+| Secrets, in any file | detect-secrets, gitleaks | betterleaks, ferret-scan (sensitive data), trivy-repo, trufflehog |
 | A software bill of materials | syft | |
 | MCP server config files (`.mcp.json`, `.cursor/mcp.json`, `.codex/config.toml` and the others the [MCP config page](../docs/plugins/builtin/mcp-config.md) lists) | mcp-config, semgrep, opengrep (semgrep and opengrep on the shell scripts the converter writes for them) | |
 | Jupyter notebooks | bandit, detect-secrets, gitleaks (on the converted script, bandit only for a Python notebook; see [Converted files](#converted-files)) | |
@@ -82,6 +82,7 @@ them to the tool.
 | hadolint | IaC | Selected files: Dockerfiles, named `Dockerfile`, `Containerfile`, `*.Dockerfile`, or `Dockerfile.*`, with that exact capitalization | no | no |
 | snyk-code | SAST | Whole directory, sent to Snyk's service | no | no |
 | trivy-repo | SCA | Whole directory: `trivy repository` with the vulnerability, secret, misconfiguration, and license scanners | no | no |
+| trufflehog | Secrets | Whole directory: the files on disk, not git history, and not `.git` directories | no | no |
 
 `--python-only` runs only the scanners marked yes and reports the rest `SKIPPED`, whether
 or not their tools are installed.

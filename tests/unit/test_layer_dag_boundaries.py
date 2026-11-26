@@ -108,11 +108,11 @@ KNOWN_VIOLATIONS: Dict[Tuple[str, str], int] = {
     # 73 -> 74: npm_audit_scanner's normalize-results harness entry resolves the
     # scanner model's AshConfig forward reference before it builds one (landed on
     # main with the consolidated fixes).
-    ("plugin_modules", "config"): 74,
+    ("plugin_modules", "config"): 75,
     # 70 -> 75: the sdist lock harvester (core.constants, core.exceptions), the MCP
     # config scanner (core.enums), cdk-nag (core.exceptions) and trivy
     # (core.container_engine) read core types the way the other plugins do.
-    ("plugin_modules", "core"): 81,
+    ("plugin_modules", "core"): 83,
     ("plugin_modules", "interactions"): 2,
     ("plugin_modules", "workspace"): 1,
     ("schemas", "config"): 2,

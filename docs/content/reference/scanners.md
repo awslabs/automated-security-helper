@@ -12,7 +12,7 @@
 
 This page is generated from the scanner plugins in the ASH source code by `scripts/generate_scanner_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH ships 23 scanners. The built-in ones are loaded on every scan. The others are alpha scanners, each in a plugin module that `ash scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
+ASH ships 24 scanners. The built-in ones are loaded on every scan. The others are alpha scanners, each in a plugin module that `ash scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
 
 <!-- doctest: options of=scanners -->
 | Scanner | Tool type | Enabled by default | Provided by | Command | Runs with `--python-only` |
@@ -40,6 +40,7 @@ ASH ships 23 scanners. The built-in ones are loaded on every scan. The others ar
 | [`hadolint`](#hadolint) | IAC | yes | alpha module `ash_hadolint_plugins` | `hadolint` | no |
 | [`snyk-code`](#snyk-code) | SAST | yes | alpha module `ash_snyk_plugins` | `snyk` | no |
 | [`trivy-repo`](#trivy-repo) | SCA | yes | alpha module `ash_trivy_plugins` | `trivy` | no |
+| [`trufflehog`](#trufflehog) | SECRETS | yes | alpha module `ash_trufflehog_plugins` | `trufflehog` | no |
 
 Tool type is the scanner's own `ScannerToolType`. `--python-only` keeps a scanner when its `is_python_only()` is true: the scanner class's own `python_only` when it states one; otherwise only when the scanner runs its tool through uv, declares no install commands, and has only pip dependencies. A scanner it does not keep is SKIPPED.
 
@@ -216,7 +217,7 @@ Options, under `scanners.cfn-nag.options`. An option not listed here refuses the
 - Enabled by default: yes
 - Tool type: IAC
 - Command: `checkov`
-- Install: `uv tool install` on first use (`checkov>=3.2.0,<4.0.0`)
+- Install: `uv tool install` on first use (`checkov>=3.2.0,<4.0.0` with Python `>=3.10,<3.15`)
 - Offline strategy: `cache_flags`
 - Network in the sandbox, by default: no
 - Environment passed into the sandbox: `CHECKOV_*`, `CKV_*`
@@ -700,3 +701,29 @@ Options, under `scanners.trivy-repo.options`. An option not listed here refuses 
 | <a id="scanners.trivy-repo.options.module_dir"></a>`module_dir` | path, string, or null | `null` | A directory of trivy modules, passed as --module-dir. Unset, ASH passes an empty directory of its own. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The directory is used, and a relative path taken, as for config_file. A path that is not a directory fails the scan. |
 | <a id="scanners.trivy-repo.options.ignore_file"></a>`ignore_file` | string or null | `null` | A trivy ignore file, passed as --ignorefile. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; a relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides and the environment variable. Unset, TRIVY_IGNOREFILE is used the same way, and otherwise trivy gets an empty one, so a .trivyignore in the scanned repository does not remove findings. |
 | <a id="scanners.trivy-repo.options.secret_config_file"></a>`secret_config_file` | string or null | `null` | A trivy secret scanning config (trivy-secret.yaml), passed as --secret-config. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; a relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides and the environment variable. Unset, TRIVY_SECRET_CONFIG is used the same way, and otherwise trivy gets an empty one, so a trivy-secret.yaml in the scanned repository does not disable secret rules. |
+
+## `trufflehog`
+
+- Scanner page: [`trufflehog` scanner page](../docs/plugins/alpha/trufflehog-plugin.md)
+- Class: `automated_security_helper.plugin_modules.ash_trufflehog_plugins.trufflehog_scanner.TruffleHogScanner`
+- Provided by: alpha module `ash_trufflehog_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_trufflehog_plugins`
+- Enabled by default: yes
+- Tool type: SECRETS
+- Command: `trufflehog`
+- Install: none declared
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.trufflehog.options`. An option not listed here refuses the configuration.
+
+<!-- doctest: options of=scanners.trufflehog -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.trufflehog.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.trufflehog.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.trufflehog.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
+| <a id="scanners.trufflehog.options.verify"></a>`verify` | boolean | `false` | Let TruffleHog verify each credential it finds. Off by default: ASH runs `trufflehog --no-verification` and nothing leaves the host. When true, TruffleHog sends each credential it finds to its provider's API, or to a host the scanned file names, to learn whether it is live, and a confirmed one is reported as CRITICAL. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. It is ignored, with a warning, when ASH runs in offline mode or this scanner's own `offline` option is true. |
+| <a id="scanners.trufflehog.options.results"></a>`results` | string | `verified,unknown` | Which results TruffleHog reports when `verify` is on, as `trufflehog --results` takes them: a comma-separated list of `verified` (the provider confirmed the credential), `unknown` (the check failed, so it may be live) and `unverified` (the provider rejected it, or the detector has no check). Without `verify` every detection is reported whatever this is set to. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning and the default applies. |
+| <a id="scanners.trufflehog.options.honor_inline_ignores"></a>`honor_inline_ignores` | boolean | `false` | Honor inline `trufflehog:ignore` comments. Off by default: ASH runs `trufflehog --no-ignore-tag`, so every finding reaches ASH, where suppressions are reported and counted. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning. |

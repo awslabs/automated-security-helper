@@ -417,10 +417,10 @@ The alpha scanners declare theirs:
 - trivy-repo shares the builtin trivy's declaration: a network, the database cache and
   the `TRIVY_` variables.
 - ferret-scan asks only for its `FERRET_` variables.
-- hadolint, Betterleaks and GuardDog take the strict default. hadolint's
+- hadolint, Betterleaks, GuardDog and TruffleHog take the strict default. hadolint's
   `HADOLINT_*` variables and user-level config are not passed in, Betterleaks'
   `BETTERLEAKS_CONFIG*` and `GITLEAKS_CONFIG*` variables are not passed in, and
-  GuardDog's `verify` runs without a network.
+  GuardDog's `verify` and TruffleHog's `verify` run without a network.
 
 A file outside the source tree that a scanner option names is not mounted (cfn-guard's
 `rules_paths` needs no mount: ASH copies those rules into the scanner run's own

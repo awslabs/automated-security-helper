@@ -395,6 +395,9 @@ class TestDefaults:
         from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
             TrivyRepoScannerConfig,
         )
+        from automated_security_helper.plugin_modules.ash_trufflehog_plugins.trufflehog_scanner import (
+            TruffleHogScannerConfig,
+        )
         from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
             SnykCodeScannerConfig,
         )
@@ -431,6 +434,7 @@ class TestDefaults:
                     "guarddog": GuardDogScannerConfig().model_dump(by_alias=True),
                     "hadolint": HadolintScannerConfig().model_dump(by_alias=True),
                     "trivy-repo": TrivyRepoScannerConfig().model_dump(by_alias=True),
+                    "trufflehog": TruffleHogScannerConfig().model_dump(by_alias=True),
                     "snyk-code": SnykCodeScannerConfig().model_dump(by_alias=True),
                 },
             }

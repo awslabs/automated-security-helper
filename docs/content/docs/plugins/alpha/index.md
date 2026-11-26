@@ -12,8 +12,9 @@ This section covers the alpha plugins for ASH: the opt-in scanner packages (`ash
 - **[hadolint Plugin](hadolint-plugin.md)** (`ash_hadolint_plugins`) - Lints Dockerfiles and Containerfiles with hadolint and its ShellCheck integration (pending licensing review)
 - **[Snyk Code Plugin](snyk-plugin.md)** - Integrates Snyk Code for static application security testing (SAST) of source code vulnerabilities
 - **[Trivy Plugin](trivy-plugin.md)** - Integrates Aquasec's Trivy for vulnerability, misconfiguration, secret, and license scanning
+- **[TruffleHog Plugin](trufflehog-plugin.md)** (`ash_trufflehog_plugins`) - Secret detection with TruffleHog, which can verify a credential with its provider when the operator turns that on
 
-These six ship inside ASH. Each takes part in a scan only when that scan names its
+These seven ship inside ASH. Each takes part in a scan only when that scan names its
 plugin module in `ash_plugin_modules` or `--ash-plugin-modules`, as its page shows.
 The MCP `list_scanners` tool reports them either way; listing one does not add it to
 any scan.
@@ -102,4 +103,4 @@ ash scan --ash-plugin-modules my_plugin
 ```
 ````
 
-> [!CAUTION] > **Alpha Plugin Security**: The alpha plugins listed above ship with ASH, in `automated_security_helper/plugin_modules`, and need no separate package. `ash scan` loads one only when its module is listed in `ash_plugin_modules` or passed with `--ash-plugin-modules`. Each runs an external tool: the container image includes trivy, Betterleaks, GuardDog and hadolint, and you install the Snyk CLI and ferret-scan yourself, so check where each tool comes from. A plugin published outside ASH is a third-party package you install separately (for example with `pip install`), and ASH imports it into its own process, so verify its source and trustworthiness before installing it.
+> [!CAUTION] > **Alpha Plugin Security**: The alpha plugins listed above ship with ASH, in `automated_security_helper/plugin_modules`, and need no separate package. `ash scan` loads one only when its module is listed in `ash_plugin_modules` or passed with `--ash-plugin-modules`. Each runs an external tool: the container image includes trivy, Betterleaks, GuardDog and hadolint, and you install the Snyk CLI, ferret-scan and TruffleHog yourself, so check where each tool comes from. A plugin published outside ASH is a third-party package you install separately (for example with `pip install`), and ASH imports it into its own process, so verify its source and trustworthiness before installing it.

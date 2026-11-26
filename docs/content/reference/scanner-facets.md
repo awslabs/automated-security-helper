@@ -11,7 +11,7 @@
 
 This page is generated from the scanner facets register in the ASH source code by `scripts/generate_facets_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH ships 23 scanners, and every one declares, per facet of the shared vocabulary, whether its native output maps into the shared pipeline. The register is production code (`automated_security_helper/base/scanner_facets.py`): the declaration has runtime consumers, and a scanner without one is refused by the registry totality test. The four states:
+ASH ships 24 scanners, and every one declares, per facet of the shared vocabulary, whether its native output maps into the shared pipeline. The register is production code (`automated_security_helper/base/scanner_facets.py`): the declaration has runtime consumers, and a scanner without one is refused by the registry totality test. The four states:
 
 - `mapped`: the facet lands where the shared pipeline reads it, and the cell names the native field it comes from. The corpus-consistency gate (`tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py`) holds these cells against the committed fixtures.
 - `mappable-dropped`: the native output carries the value and ASH discards it today: a roadmap record, not a promise. The cell names the native field and why it is dropped.
@@ -47,6 +47,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | [`hadolint`](#hadolint) | 7 | 0 | 13 | 0 |
 | [`snyk-code`](#snyk-code) | 0 | 0 | 6 | 14 |
 | [`trivy-repo`](#trivy-repo) | 15 | 0 | 3 | 2 |
+| [`trufflehog`](#trufflehog) | 8 | 0 | 12 | 0 |
 
 ## Runtime compatibility
 
@@ -63,7 +64,7 @@ Ranges are written in the grammar native to the runtime: `python` uses PEP 440 s
 | [`checkov`](#checkov) | `python` | all | `>=3.10,<3.15` | `pin` | yes, [https://github.com/bridgecrewio/checkov/issues/7777](https://github.com/bridgecrewio/checkov/issues/7777) | CPython 3.15 made array_hook a required argument of json.decoder.JSONArray (signature 3.14.9: (s_and_end, scan_once, \_w, \_ws); 3.15.0: (s_and_end, scan_once, array_hook, \_w, \_ws)); checkov's Decoder.json_array (checkov/common/parsers/json/decoder.py) calls it without one, so every JSON document that holds an array fails to parse, and on a large tree the parallel runner can wait indefinitely on the worker error; reported against checkov 3.4.3 and 3.4.0 on 3.15.0; a fix is proposed upstream in bridgecrewio/checkov#7778 and not merged |
 | [`guarddog`](#guarddog) | `python` | all | `>=3.10,<3.14` | `pin` | yes, no upstream issue exists to cite: a search of the VirusTotal/yara-python issues for a cp314 report found none (a 'wheel' search returned issues, so the search itself works; read 2026-11-25); re-check pygit2 and yara-python cp314 wheels at the next guarddog version bump | pygit2 1.18 and yara-python 4.5 publish no CPython 3.14 wheels at the pinned guarddog==3.2.0, so on a host where uv would pick 3.14 the install builds them from source, which needs libgit2 headers and a C toolchain, and fails; measured with uv 0.12 on Linux x86_64: an unconstrained 'uv tool install guarddog==3.2.0' picked 3.14 and failed on pygit2, and with --python '&gt;=3.10,&lt;3.14' it installed; PyPI read 2026-11-25: pygit2 publishes cp314 wheels from 1.19.0, while yara-python publishes none through 4.5.4 |
 
-2 of 23 scanners declare a row. The other 21 declare none: no incompatibility between their tool versions and their runtime versions is known.
+2 of 24 scanners declare a row. The other 22 declare none: no incompatibility between their tool versions and their runtime versions is known.
 
 ## `actionlint`
 
@@ -685,3 +686,30 @@ Ranges are written in the grammar native to the runtime: `python` uses PEP 440 s
 | `references` | `mapped` | SARIF rule helpUri, read into the flat references by FlatVulnerability.from_sarif_result when the result carries no relatedLocations |  |
 | `tags` | `mapped` | SARIF rule properties.tags, read into the flat tags by FlatVulnerability.from_sarif_result when the result carries none (the severity word among them still feeds issue_severity) |  |
 | `extras` | `mapped` | result properties bag (issue_severity and the package identity keys this adapter writes) passed through to the flat properties |  |
+
+## `trufflehog`
+
+- Class: `automated_security_helper.plugin_modules.ash_trufflehog_plugins.trufflehog_scanner.TruffleHogScanner`
+
+| Facet | State | Native field | Reason |
+|-------|-------|--------------|--------|
+| `rule_id` | `mapped` | result "ruleId" (the detector name, for example Github or URI) |  |
+| `severity` | `mapped` | result "level" (warning in every result of the capture; error is a provider-confirmed credential per the module header), rated by \_post_process_sarif into properties "issue_severity" (error to CRITICAL, anything else to HIGH) |  |
+| `file_path` | `mapped` | locations[].physicalLocation.artifactLocation.uri |  |
+| `line_range` | `mapped` | locations[].physicalLocation.region.startLine (no endLine in the capture) |  |
+| `column` | `n/a` |  | the regions of the capture carry startLine only (4 of 4 results); TruffleHog's SARIF holds no column |
+| `message` | `mapped` | result "message.text" (names the detector and the verification state, never the secret) |  |
+| `resource_id` | `n/a` |  | secret findings name a file location, not a deployable resource; the SARIF carries a detector, a region and a fingerprint only |
+| `resource_type` | `n/a` |  | secret findings name a file location, not a deployable resource |
+| `package_name` | `n/a` |  | secret findings carry no package |
+| `package_version` | `n/a` |  | secret findings carry no package |
+| `package_path` | `n/a` |  | secret findings carry no package |
+| `taxonomy_cve` | `n/a` |  | secret findings carry no CVE taxonomy |
+| `taxonomy_cwe` | `n/a` |  | the rules of the capture carry id, name and shortDescription only; no CWE taxonomy |
+| `fingerprints` | `mapped` | result "partialFingerprints" ("trufflehogFingerprint/v1", one value per result; 4 distinct values over 4 results in the capture) |  |
+| `fix_available` | `n/a` |  | secret findings carry no fix state |
+| `remediation_text` | `n/a` |  | the rules of the capture carry id, name and shortDescription only |
+| `snippet` | `n/a` |  | the regions of the capture carry no snippet, and ASH never asks for the --json output whose Raw fields hold the secret (module header) |
+| `references` | `n/a` |  | the rules of the capture carry id, name and shortDescription only; no reference URLs |
+| `tags` | `mapped` | result properties "tags" (absent natively); the adapter appends secret and security |  |
+| `extras` | `mapped` | result properties "issue_severity" and "verification" written by the adapter |  |

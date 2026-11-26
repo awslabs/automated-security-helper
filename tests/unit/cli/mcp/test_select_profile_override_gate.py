@@ -596,6 +596,18 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
         },
         {"scanners": {"trivy": {"options": {"disable_telemetry": False}}}},
     ),
+    "/scanners/trufflehog/**": (
+        {
+            "op": "add",
+            "path": "/scanners/trufflehog",
+            "value": {"enabled": True, "options": {"results": "verified"}},
+        },
+        {
+            "scanners": {
+                "trufflehog": {"enabled": True, "options": {"results": "verified"}}
+            }
+        },
+    ),
     "/scanners/zizmor/**": (
         {
             "op": "replace",
@@ -857,6 +869,18 @@ _POINTED_DENIALS: Dict[str, Tuple[str, Any]] = {
     ),
     "/scanners/betterleaks/options/honor_inline_ignores": (
         "/scanners/betterleaks/options/honor_inline_ignores",
+        True,
+    ),
+    "/scanners/trufflehog/options/verify": (
+        "/scanners/trufflehog/options/verify",
+        True,
+    ),
+    "/scanners/trufflehog/options/results": (
+        "/scanners/trufflehog/options/results",
+        "verified",
+    ),
+    "/scanners/trufflehog/options/honor_inline_ignores": (
+        "/scanners/trufflehog/options/honor_inline_ignores",
         True,
     ),
     "/scanners/*/options/tool_version": (
@@ -1374,7 +1398,7 @@ def test_override_yaml_is_refused_by_every_shipped_denied_path(
     if entry.startswith(added_section):
         covering = first_denied_under(added_section)
     # The override restates the profile, which configures no ferret-scan,
-    # guarddog, hadolint, snyk-code or trivy-repo section, so its patch adds that
+    # guarddog, hadolint, snyk-code, trivy-repo or trufflehog section, so its patch adds that
     # whole section and the first denied entry under it is the one named.
     section = "/".join(entry.split("/")[:3]) + "/"
     plugin_section = section in (
@@ -1384,6 +1408,7 @@ def test_override_yaml_is_refused_by_every_shipped_denied_path(
         "/scanners/hadolint/",
         "/scanners/snyk-code/",
         "/scanners/trivy-repo/",
+        "/scanners/trufflehog/",
     )
     # An entry earlier in the list can cover the same write: the whole section of
     # a plugin that sends data off the host comes after its options, and an op

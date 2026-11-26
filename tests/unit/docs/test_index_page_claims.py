@@ -4,7 +4,7 @@
 """The index pages of the docs site say what is under them, and what they say is true.
 
 Three pages of the site are hubs: ``reference/index.md`` (a table of the reference pages
-and the generator of each), ``docs/plugins/alpha/index.md`` (the six alpha
+and the generator of each), ``docs/plugins/alpha/index.md`` (the seven alpha
 plugins that ship inside ASH) and ``personas/index.md`` (the three roles and the pages
 for them). Each lists pages and names things in the code, and none had a mechanism that
 reads the list, so a page added under a hub, or a generator renamed, left the hub
@@ -19,8 +19,8 @@ What is pinned, and what is not:
   maps to that page in ``REFERENCE_PAGES`` of the freshness test, and is the generator
   the page's own banner names; a row that says "written by hand" is a page with no
   banner. Not pinned: the one-line description of what a page lists.
-- alpha/index.md: the six plugins in the list are the six ``alpha`` pages beside
-  it, and the three that name a module (``ash_*_plugins``) name a package that exists
+- alpha/index.md: the seven plugins in the list are the seven ``alpha`` pages beside
+  it, and the four that name a module (``ash_*_plugins``) name a package that exists
   under ``automated_security_helper/plugin_modules``. Not pinned: the submission
   guidelines, which are policy, and the tools each plugin runs.
 - personas/index.md: the three roles in the table are the three role pages, and every
@@ -173,10 +173,10 @@ def test_every_generated_reference_page_is_in_the_index_and_no_other_is() -> Non
 
 
 def test_the_community_index_lists_the_plugins_that_ship_in_ash() -> None:
-    assert_on_page(COMMUNITY_INDEX, "These six ship inside ASH.")
+    assert_on_page(COMMUNITY_INDEX, "These seven ship inside ASH.")
     text = page_text(COMMUNITY_INDEX)
     listed = re.findall(r"^- \*\*\[[^\]]+\]\(([^)]+)\)\*\*", text, re.MULTILINE)
-    assert len(listed) == 6, listed
+    assert len(listed) == 7, listed
     community = CONTENT / "docs" / "plugins" / "alpha"
     pages = {p.name for p in community.glob("*-plugin.md")}
     assert set(listed) == pages, (sorted(set(listed) ^ pages), "lists vs pages")
@@ -189,6 +189,7 @@ def test_the_community_index_modules_exist() -> None:
         "ash_betterleaks_plugins",
         "ash_guarddog_plugins",
         "ash_hadolint_plugins",
+        "ash_trufflehog_plugins",
     ]
     for module in modules:
         assert (PLUGIN_MODULES / module / "__init__.py").is_file(), module

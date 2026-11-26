@@ -101,6 +101,14 @@ _DENIED_OPTION_DEFAULTS: dict[str, dict[str, Any]] = {
         "secret_config_file": None,
         "severity_threshold": None,
     },
+    "trufflehog": {
+        "honor_inline_ignores": False,
+        "offline": False,
+        "results": "verified,unknown",
+        "scan_timeout": 1800,
+        "severity_threshold": None,
+        "verify": False,
+    },
 }
 
 
@@ -182,6 +190,14 @@ MANIFESTS = (
         "TrivyRepoScanner",
         "TrivyRepoScannerConfigOptions",
         owned=(f"{_DOCS}/trivy-plugin.md",),
+    ),
+    _alpha(
+        "trufflehog",
+        "ash_trufflehog_plugins",
+        "trufflehog_scanner",
+        "TruffleHogScanner",
+        "TruffleHogScannerConfigOptions",
+        owned=(f"{_DOCS}/trufflehog-plugin.md", f"{_FIXTURES}/trufflehog"),
     ),
 )
 

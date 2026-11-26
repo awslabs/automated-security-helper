@@ -396,6 +396,7 @@ _SHIPPED_PLUGIN_KEYS: Dict[str, FrozenSet[str]] = {
             "syft",
             "trivy",
             "trivy-repo",
+            "trufflehog",
             "zizmor",
         }
     ),

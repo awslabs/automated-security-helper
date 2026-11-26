@@ -74,6 +74,7 @@ FLOOR = [
     "/scanners/snyk-code/**",
     "/scanners/trivy-repo/**",
     "/scanners/trivy/**",
+    "/scanners/trufflehog/**",
     "/scanners/zizmor/**",
 ]
 

@@ -93,6 +93,8 @@ global_settings:
       - /scanners/hadolint/options/config_file
       - /scanners/betterleaks/options/config_file
       - /scanners/betterleaks/options/honor_tree_ignore_files
+      - /scanners/trufflehog/options/verify
+      - /scanners/trufflehog/options/results
       - /scanners/guarddog/options/ecosystems
       - /scanners/guarddog/options/rules
       - /scanners/guarddog/options/exclude_rules
@@ -102,6 +104,7 @@ global_settings:
       - /scanners/betterleaks/options/honor_inline_ignores
       - /scanners/cfn-lint/options/honor_inline_ignores
       - /scanners/gitleaks/options/honor_inline_ignores
+      - /scanners/trufflehog/options/honor_inline_ignores
       - /scanners/zizmor/options/honor_inline_ignores
       - /scanners/*/options/tool_version
       - /converters/jupyter/options/tool_version
@@ -126,6 +129,7 @@ global_settings:
       - /scanners/snyk-code/**
       - /scanners/trivy-repo/**
       - /scanners/trivy/**
+      - /scanners/trufflehog/**
       - /scanners/zizmor/**
       - /converters/archive/options/max_members
       - /converters/archive/options/max_member_bytes

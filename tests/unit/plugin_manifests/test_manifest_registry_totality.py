@@ -97,8 +97,8 @@ def _resolve(ref: str) -> typing.Any:
 def test_the_enumeration_holds_every_shipped_scanner_and_manifest() -> None:
     """Planted controls: a shrunken universe fails here, not silently."""
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
-    assert len(SCANNER_CLASSES) == 23, sorted(c.__name__ for c in SCANNER_CLASSES)
-    assert len(MANIFESTS) == 23, sorted(m.name for m in MANIFESTS)
+    assert len(SCANNER_CLASSES) == 24, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(MANIFESTS) == 24, sorted(m.name for m in MANIFESTS)
     names = {m.name for m in MANIFESTS}
     assert {"cdk-nag", "semgrep", "opengrep", "trivy-repo", "snyk-code"} <= names
 

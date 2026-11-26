@@ -418,6 +418,17 @@ def _prep_actionlint(
     yield report, [r for run in report.runs or [] for r in run.results or []]
 
 
+def _prep_trufflehog(
+    transcript: ToolTranscript, base: Path, file: Path
+) -> Iterator[tuple[SarifReport, list[Result]]]:
+    cls = resolve_ref(
+        "automated_security_helper.plugin_modules.ash_trufflehog_plugins."
+        "trufflehog_scanner:TruffleHogScanner"
+    )
+    report = cls.normalize_results(_load_sarif(file))
+    yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
 def _prep_betterleaks(
     transcript: ToolTranscript, base: Path, file: Path
 ) -> Iterator[tuple[SarifReport, list[Result]]]:
@@ -671,6 +682,7 @@ PREPS: Mapping[str, Prep] = {
     "npm-audit": _prep_npm_audit,
     "snyk-code": _prep_snyk_code,
     "trivy": _prep_trivy,
+    "trufflehog": _prep_trufflehog,
 }
 
 

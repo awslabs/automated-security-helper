@@ -1196,8 +1196,9 @@ ARCHIVE_LIMIT_RUNTIME_PATHS: Tuple[str, ...] = tuple(
 #: arguments can still leave a scanner out of a run, never add one): the reporters
 #: that send the results, and the scanners that send the source (snyk-code),
 #: dependency lists (npm-audit), candidate secrets (detect-secrets), usage metrics
-#: (semgrep, opengrep) or usage data (trivy, trivy-repo), or that call the GitHub
-#: API with the token in ASH's environment (zizmor's online audits).
+#: (semgrep, opengrep) or usage data (trivy, trivy-repo), that call the GitHub
+#: API with the token in ASH's environment (zizmor's online audits), or that send
+#: each credential found to its issuer (trufflehog's verification).
 #: tests/unit/config/test_off_host_plugins_are_operator_only.py lists what each one
 #: sends and classifies every plugin.
 #:
@@ -1227,6 +1228,7 @@ ALWAYS_DENIED_PATHS = (
     "/scanners/snyk-code/**",
     "/scanners/trivy-repo/**",
     "/scanners/trivy/**",
+    "/scanners/trufflehog/**",
     "/scanners/zizmor/**",
 )
 
@@ -1279,7 +1281,8 @@ class RuntimeOverridesConfig(RedactedSection):
                 "sections of the plugins that send data off the host: the s3, "
                 "aws-security-hub, cloudwatch-logs and bedrock-summary-reporter "
                 "reporters and the detect-secrets, npm-audit, opengrep, semgrep, "
-                "snyk-code, trivy, trivy-repo and zizmor scanners) are added to it."
+                "snyk-code, trivy, trivy-repo, trufflehog and zizmor scanners) are "
+                "added to it."
             )
         ),
     ] = [
@@ -1432,6 +1435,11 @@ class RuntimeOverridesConfig(RedactedSection):
         # findings before ASH's suppressions see them.
         "/scanners/betterleaks/options/config_file",
         "/scanners/betterleaks/options/honor_tree_ignore_files",
+        # And trufflehog's verification, which sends each credential it finds
+        # to its issuer, or to a host the scanned file names, and which of the
+        # verified results it reports.
+        "/scanners/trufflehog/options/verify",
+        "/scanners/trufflehog/options/results",
         "/scanners/guarddog/options/ecosystems",
         "/scanners/guarddog/options/rules",
         "/scanners/guarddog/options/exclude_rules",
@@ -1440,12 +1448,13 @@ class RuntimeOverridesConfig(RedactedSection):
         # Whether snyk code test may apply the .snyk and .dcignore files in the
         # tree it tests, which leave files out of its analysis.
         "/scanners/snyk-code/options/honor_tree_exclusions",
-        # Whether cfn-lint, gitleaks and zizmor honor the ignore comments and
-        # template metadata in the files they scan, which drop findings before
-        # ASH's suppressions see them.
+        # Whether cfn-lint, gitleaks, trufflehog and zizmor honor the ignore
+        # comments and template metadata in the files they scan, which drop
+        # findings before ASH's suppressions see them.
         "/scanners/betterleaks/options/honor_inline_ignores",
         "/scanners/cfn-lint/options/honor_inline_ignores",
         "/scanners/gitleaks/options/honor_inline_ignores",
+        "/scanners/trufflehog/options/honor_inline_ignores",
         "/scanners/zizmor/options/honor_inline_ignores",
         "/scanners/*/options/tool_version",
         "/converters/jupyter/options/tool_version",
@@ -1481,7 +1490,8 @@ class RuntimeOverridesConfig(RedactedSection):
         # The scanners that send data off the host, whole, for the same reason: the
         # source (snyk-code), dependency lists (npm-audit), candidate secrets
         # (detect-secrets), usage metrics (semgrep, opengrep) or usage data (trivy,
-        # trivy-repo), or the GitHub token (zizmor's online audits). Also in
+        # trivy-repo), the GitHub token (zizmor's online audits), or each
+        # credential found (trufflehog's verification). Also in
         # ALWAYS_DENIED_PATHS.
         "/scanners/detect-secrets/**",
         "/scanners/npm-audit/**",
@@ -1490,6 +1500,7 @@ class RuntimeOverridesConfig(RedactedSection):
         "/scanners/snyk-code/**",
         "/scanners/trivy-repo/**",
         "/scanners/trivy/**",
+        "/scanners/trufflehog/**",
         "/scanners/zizmor/**",
         # The archive converter's extraction limits bound what extracting an
         # archive in the scanned tree may write, so a client may not raise them.

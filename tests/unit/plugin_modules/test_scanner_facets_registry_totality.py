@@ -131,6 +131,6 @@ def test_no_registered_scanner_rests_on_the_unknown_offline_strategy(
     )
 
 
-def test_the_enumeration_holds_all_twenty_three_shipped_scanners() -> None:
+def test_the_enumeration_holds_all_twenty_four_shipped_scanners() -> None:
     """The planted-control count: a shrunken universe fails here, not silently."""
-    assert len(SCANNER_CLASSES) == 23, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == 24, sorted(c.__name__ for c in SCANNER_CLASSES)

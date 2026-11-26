@@ -8515,7 +8515,7 @@ def check_report_files(
 # headed Scanner, Scanners, Built-in scanners or Alpha plugins lists scanners:
 # each item of its cells must be one name, of a scanner ASH ships, built in or from an
 # alpha module as the header says. An item of several words ("the CloudFormation
-# scanners") is reported: nothing can check it, and "trufflehog scanner" would hide an
+# scanners") is reported: nothing can check it, and "whispers scanner" would hide an
 # invented name. A note in parentheses is dropped first. Whether such a table lists
 # every scanner is the options marker's complete: of=scanners complete.
 

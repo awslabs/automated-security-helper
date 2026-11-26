@@ -573,6 +573,9 @@ class TestThePythonTools:
                 "automated_security_helper.plugin_modules.ash_ferret_plugins",
                 "automated_security_helper.plugin_modules.ash_snyk_plugins",
                 "automated_security_helper.plugin_modules.ash_trivy_plugins",
+                # ASH installs no TruffleHog (AGPL-3.0): the plugin runs the
+                # one on PATH, so the image has nothing to install for it.
+                "automated_security_helper.plugin_modules.ash_trufflehog_plugins",
             }
         )
         assert sorted(declared[0].split(",")) == expected

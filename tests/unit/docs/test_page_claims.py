@@ -22662,14 +22662,329 @@ def test_betterleaks_is_pinned_where_the_page_says_with_both_digests_on_every_pl
 
 
 # --------------------------------------------------------------------------- #
+# docs/plugins/alpha/trufflehog-plugin.md
+# --------------------------------------------------------------------------- #
+
+TRUFFLEHOG_PLUGIN = "docs/plugins/alpha/trufflehog-plugin.md"
+_TRUFFLEHOG_MODULE = "automated_security_helper.plugin_modules.ash_trufflehog_plugins"
+
+
+def _trufflehog_scanner(
+    source: Path, output: Path, operator: bool = True, **options: Any
+) -> Any:
+    """A TruffleHog scanner over ``source``, its options the operator's or the tree's."""
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.plugin_modules.ash_trufflehog_plugins.trufflehog_scanner import (
+        TruffleHogScanner,
+        TruffleHogScannerConfig,
+        TruffleHogScannerConfigOptions,
+    )
+    from automated_security_helper.utils.config_trust import record_provenance
+
+    source.mkdir(parents=True, exist_ok=True)
+    config = AshConfig(project_name="page-claims")
+    record_provenance(
+        config,
+        in_tree=[] if operator else [source / ".ash" / ".ash.yaml"],
+        trusted=AshConfig(),
+    )
+    return TruffleHogScanner(
+        context=PluginContext(
+            source_dir=source,
+            output_dir=output,
+            work_dir=output / "converted",
+            config=config,
+        ),
+        config=TruffleHogScannerConfig(
+            options=TruffleHogScannerConfigOptions(**options)
+        ),
+    )
+
+
+def _trufflehog_argv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator: bool = True,
+    **options: Any,
+) -> List[str]:
+    """The argv a TruffleHog run is given, online, with ``options`` set."""
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    source = tmp_path / "src"
+    scanner = _trufflehog_scanner(
+        source, tmp_path / "output", operator=operator, **options
+    )
+    return scanner._build_arguments(source, tmp_path / "output" / "exclude.txt")
+
+
+def _trufflehog_page_yaml(start: str) -> Any:
+    """The YAML of the fenced block of the TruffleHog page that opens with ``start``."""
+    blocks = re.findall(
+        r"```yaml\n(.*?)```", _page_text(TRUFFLEHOG_PLUGIN), flags=re.DOTALL
+    )
+    (block,) = [text for text in blocks if text.lstrip().startswith(start)]
+    return yaml.safe_load(block)
+
+
+@pytest.mark.unit
+def test_the_trufflehog_page_names_the_module_the_code_ships_and_the_defaults_it_keeps() -> (
+    None
+):
+    """trufflehog-plugin.md (Enabling it, Configuration).
+
+    The module the page tells an operator to list is imported, and it offers the
+    ``trufflehog`` scanner; the configuration block the page shows is the scanner's
+    own defaults, key for key, so an option renamed or a default flipped fails here.
+    """
+    assert_on_page(
+        TRUFFLEHOG_PLUGIN,
+        "With the module listed, `trufflehog` runs by default, like every other "
+        "scanner.",
+    )
+    enabling = _trufflehog_page_yaml("# .ash/.ash.yaml")
+    assert enabling == {"ash_plugin_modules": [_TRUFFLEHOG_MODULE]}
+    module = importlib.import_module(_TRUFFLEHOG_MODULE)
+    from automated_security_helper.plugin_modules.ash_trufflehog_plugins.trufflehog_scanner import (
+        TruffleHogScanner,
+        TruffleHogScannerConfig,
+    )
+
+    assert module.ASH_SCANNERS == [TruffleHogScanner]
+
+    defaults = TruffleHogScannerConfig()
+    shown = _trufflehog_page_yaml("scanners:")["scanners"]["trufflehog"]
+    assert defaults.name == "trufflehog"
+    assert defaults.enabled is True and shown["enabled"] is True
+    assert shown["options"] == {
+        "verify": defaults.options.verify,
+        "results": defaults.options.results,
+        "honor_inline_ignores": defaults.options.honor_inline_ignores,
+        "scan_timeout": defaults.options.scan_timeout,
+        "severity_threshold": defaults.options.severity_threshold,
+    }
+    assert shown["options"] == {
+        "verify": False,
+        "results": "verified,unknown",
+        "honor_inline_ignores": False,
+        "scan_timeout": 1800,
+        "severity_threshold": None,
+    }
+
+
+@pytest.mark.unit
+def test_trufflehog_is_run_as_the_page_says_and_sends_nothing_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """trufflehog-plugin.md (the opening paragraph, Installing TruffleHog,
+    Verification, What is scanned, Configuration).
+
+    The argv a default run is given: ``trufflehog filesystem``, SARIF and never the
+    JSON output that holds the secret, no verification, no self-update, ignore
+    comments not honored, no config. The scan path is ``.`` for the source, which
+    is what makes a reported path source-relative.
+    """
+    assert_on_page(
+        TRUFFLEHOG_PLUGIN,
+        "ASH runs it as `trufflehog filesystem` over the scan target: the files as "
+        "they are on disk, not git history",
+    )
+    assert_on_page(
+        TRUFFLEHOG_PLUGIN,
+        "ASH runs it as a separate process and passes `trufflehog --no-update`, so "
+        "it never replaces itself with a newer release.",
+    )
+    assert_on_page(
+        TRUFFLEHOG_PLUGIN,
+        "So verification is off by default. ASH passes `trufflehog "
+        "--no-verification`, TruffleHog makes no network call, and every detection "
+        "is reported.",
+    )
+    assert_on_page(
+        TRUFFLEHOG_PLUGIN,
+        "ASH asks for TruffleHog's SARIF output, which names the detector and never "
+        "holds the secret, and never for its JSON output, which does.",
+    )
+    assert_on_page(
+        TRUFFLEHOG_PLUGIN,
+        "ASH never passes `trufflehog --config`, so no custom detector or "
+        "verification endpoint is loaded",
+    )
+    assert_on_page(
+        TRUFFLEHOG_PLUGIN,
+        "ASH passes `trufflehog --no-ignore-tag` so such comments hide nothing, "
+        "unless `honor_inline_ignores` is set by the operator.",
+    )
+
+    argv = _trufflehog_argv(tmp_path, monkeypatch)
+
+    assert argv[:2] == ["trufflehog", "filesystem"], argv
+    assert "--sarif" in argv
+    assert "--no-update" in argv
+    assert "--no-verification" in argv
+    assert "--no-ignore-tag" in argv
+    assert not {"--json", "-j", "--json-legacy"} & set(argv), argv
+    assert not [token for token in argv if token.startswith("--config")], argv
+    assert not [token for token in argv if token.startswith("--results")], argv
+    assert argv[-2:] == ["--", "."], argv
+
+    honored = _trufflehog_argv(tmp_path, monkeypatch, honor_inline_ignores=True)
+    assert "--no-ignore-tag" not in honored
+
+
+@pytest.mark.unit
+def test_only_the_operator_turns_trufflehog_verification_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """trufflehog-plugin.md (Verification).
+
+    Set by the operator, ``verify`` replaces ``--no-verification`` with the
+    ``results`` the page gives as the default. Set by a config inside the scanned
+    repository it changes nothing, and neither does it under ``--offline``.
+    """
+    assert_on_page(
+        TRUFFLEHOG_PLUGIN,
+        "Set by a config inside the scanned repository, or by an MCP client, it is "
+        "ignored with a warning",
+    )
+    assert_on_page(TRUFFLEHOG_PLUGIN, "The default is `verified,unknown`.")
+    assert_on_page(
+        TRUFFLEHOG_PLUGIN,
+        "`--offline` and the scanner's own `offline` option turn verification off "
+        "again, with a warning.",
+    )
+
+    operator = _trufflehog_argv(tmp_path, monkeypatch, verify=True)
+    assert "--no-verification" not in operator
+    assert "--results=verified,unknown" in operator
+
+    tree = _trufflehog_argv(tmp_path, monkeypatch, operator=False, verify=True)
+    assert "--no-verification" in tree
+    assert not [token for token in tree if token.startswith("--results")], tree
+
+    own_option = _trufflehog_argv(tmp_path, monkeypatch, verify=True, offline=True)
+    assert "--no-verification" in own_option
+
+    source = tmp_path / "offline-src"
+    scanner = _trufflehog_scanner(source, tmp_path / "offline-output", verify=True)
+    monkeypatch.setenv("ASH_OFFLINE", "true")
+    offline = scanner._build_arguments(source, tmp_path / "exclude.txt")
+    assert "--no-verification" in offline
+
+
+@pytest.mark.unit
+def test_trufflehog_results_are_rated_as_the_page_says_and_duplicates_dropped(
+    tmp_path: Path,
+) -> None:
+    """trufflehog-plugin.md (What is scanned, Severity).
+
+    A result TruffleHog wrote at level ``error`` is a confirmed credential, CRITICAL;
+    any other is HIGH. A ``URI`` result on a line a provider detector reports is
+    dropped, and so is a result under ASH's output directory.
+    """
+    from automated_security_helper.schemas.sarif_schema_model import SarifReport
+
+    assert_on_page(
+        TRUFFLEHOG_PLUGIN,
+        "Each result carries `properties.verification`, `verified` or `not verified`.",
+    )
+    assert_on_page(
+        TRUFFLEHOG_PLUGIN,
+        "ASH drops that `URI` result when a provider detector reports the same file "
+        "and line at the same or a stronger level.",
+    )
+    assert_on_page(
+        TRUFFLEHOG_PLUGIN,
+        "ASH drops every result under it, except for a file the repository "
+        "committed there.",
+    )
+
+    source = tmp_path / "src"
+    output = source / ".ash" / "ash_output"
+    output.mkdir(parents=True)
+    scanner = _trufflehog_scanner(source, output)
+
+    def result(rule: str, level: str, uri: str, line: int) -> Dict[str, Any]:
+        return {
+            "ruleId": rule,
+            "level": level,
+            "message": {"text": "found"},
+            "locations": [
+                {
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": uri},
+                        "region": {"startLine": line},
+                    }
+                }
+            ],
+        }
+
+    report = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "trufflehog"}},
+                    "results": [
+                        result("Github", "error", "app.py", 4),
+                        result("Github", "warning", "old.py", 9),
+                        result("URI", "warning", "old.py", 9),
+                        result("Github", "warning", ".ash/ash_output/copy.py", 4),
+                    ],
+                }
+            ],
+        }
+    )
+    scanner._post_process_sarif(report, [], source)
+    rated = {
+        (
+            r.ruleId,
+            r.locations[0].physicalLocation.root.artifactLocation.uri,
+        ): (r.properties.issue_severity, r.properties.verification)
+        for r in report.get_all_results()
+    }
+    assert rated == {
+        ("Github", "app.py"): ("CRITICAL", "verified"),
+        ("Github", "old.py"): ("HIGH", "not verified"),
+    }
+
+
+@pytest.mark.unit
+def test_ash_installs_no_trufflehog_and_the_image_carries_none() -> None:
+    """trufflehog-plugin.md (Installing TruffleHog, License).
+
+    No pinned download, no install command and no Dockerfile line: the plugin runs
+    the ``trufflehog`` on PATH.
+    """
+    from automated_security_helper.utils.tool_downloads import (
+        THIRD_PARTY_LICENSES,
+        TOOL_VERSIONS,
+    )
+
+    assert_on_page(
+        TRUFFLEHOG_PLUGIN,
+        "ASH does not install TruffleHog, and the ASH container image does not "
+        "include it: TruffleHog is licensed under AGPL-3.0.",
+    )
+    assert_on_page(
+        TRUFFLEHOG_PLUGIN,
+        "ASH does not distribute it: this plugin runs the `trufflehog` you installed.",
+    )
+    assert "trufflehog" not in TOOL_VERSIONS
+    assert "trufflehog" not in THIRD_PARTY_LICENSES
+    dockerfile = (_code_root() / "Dockerfile").read_text(encoding="utf-8")
+    assert "trufflehog" not in dockerfile.lower()
+
+
+# --------------------------------------------------------------------------- #
 # Alpha scanners on the homepage and the plugins overview
 # --------------------------------------------------------------------------- #
 
 _HOMEPAGE = "index.md"
 _HOMEPAGE_ALPHA_SENTENCE = (
-    "Six more scanners ship with ASH as alpha plugins: "
-    "[Betterleaks](docs/plugins/alpha/betterleaks-plugin.md) and "
-    "[Ferret Scan](docs/plugins/alpha/ferret-scan-plugin.md) for secrets, "
+    "Seven more scanners ship with ASH as alpha plugins: "
+    "[Betterleaks](docs/plugins/alpha/betterleaks-plugin.md), "
+    "[Ferret Scan](docs/plugins/alpha/ferret-scan-plugin.md) and "
+    "[TruffleHog](docs/plugins/alpha/trufflehog-plugin.md) for secrets, "
     "[GuardDog](docs/plugins/alpha/guarddog-plugin.md) for malicious packages, "
     "[hadolint](docs/plugins/alpha/hadolint-plugin.md) for Dockerfiles, "
     "[Snyk Code](docs/plugins/alpha/snyk-plugin.md) for SAST, and "
@@ -22677,7 +22992,7 @@ _HOMEPAGE_ALPHA_SENTENCE = (
     "A scan runs one only when its module is named in `ash_plugin_modules` or "
     "`--ash-plugin-modules`. See the "
     "[alpha plugins](docs/plugins/alpha/index.md) and the "
-    "[scanners reference](reference/scanners.md) for all 23 scanners."
+    "[scanners reference](reference/scanners.md) for all 24 scanners."
 )
 
 
@@ -22693,14 +23008,14 @@ def _shipped_scanner_split(
 
 
 @pytest.mark.unit
-def test_the_homepage_says_asha_ships_six_alpha_scanners_and_links_each(
+def test_the_homepage_says_asha_ships_seven_alpha_scanners_and_links_each(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """index.md (Scanners).
 
-    The sentence is on the page. Its count of six is the number of scanners the
+    The sentence is on the page. Its count of seven is the number of scanners the
     vendored alpha plugin packages declare, which is every in-tree alpha
-    module; its 23 is built in plus alpha; and each link it carries resolves to
+    module; its 24 is built in plus alpha; and each link it carries resolves to
     a page under docs/content, the alpha index and the scanners reference
     included.
     """
@@ -22708,13 +23023,13 @@ def test_the_homepage_says_asha_ships_six_alpha_scanners_and_links_each(
 
     assert_on_page(_HOMEPAGE, _HOMEPAGE_ALPHA_SENTENCE)
     builtin, alpha = _shipped_scanner_split(tmp_path, monkeypatch)
-    assert len(modules_needing_naming()) == len(alpha) == 6, (
+    assert len(modules_needing_naming()) == len(alpha) == 7, (
         len(modules_needing_naming()),
         sorted(alpha),
     )
-    assert len(builtin) + len(alpha) == 23, (len(builtin), len(alpha))
+    assert len(builtin) + len(alpha) == 24, (len(builtin), len(alpha))
     links = re.findall(r"\]\(([^)#]+\.md)", _HOMEPAGE_ALPHA_SENTENCE)
-    assert len(links) == 8, links
+    assert len(links) == 9, links
     for link in links:
         assert (CONTENT / link).is_file(), link
     # Each alpha scanner's own page is one of the links, by its name.
@@ -22731,7 +23046,7 @@ def test_the_plugins_overview_names_every_alpha_scanner_and_no_other(
     """plugins/index.md (Where plugins come from).
 
     The alpha plugins row lists exactly the scanners the alpha plugin
-    modules ship, so a seventh module fails this test until the row names it.
+    modules ship, so an eighth module fails this test until the row names it.
     """
     _builtin, alpha = _shipped_scanner_split(tmp_path, monkeypatch)
     assert alpha

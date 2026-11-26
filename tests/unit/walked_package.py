@@ -57,6 +57,7 @@ PACKAGE_DIRS = frozenset(
         "plugin_modules/ash_hadolint_plugins",
         "plugin_modules/ash_snyk_plugins",
         "plugin_modules/ash_trivy_plugins",
+        "plugin_modules/ash_trufflehog_plugins",
         "plugins",
         "schemas",
         "utils/mcp_config",

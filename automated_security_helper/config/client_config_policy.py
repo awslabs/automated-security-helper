@@ -439,6 +439,7 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
             "/scanners/snyk-code/**",
             "/scanners/trivy-repo/**",
             "/scanners/trivy/**",
+            "/scanners/trufflehog/**",
             "/scanners/zizmor/**",
             "/converters/archive/options/max_members",
             "/converters/archive/options/max_member_bytes",
@@ -466,6 +467,8 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
             "/scanners/hadolint/options/config_file",
             "/scanners/betterleaks/options/config_file",
             "/scanners/betterleaks/options/honor_tree_ignore_files",
+            "/scanners/trufflehog/options/verify",
+            "/scanners/trufflehog/options/results",
             "/scanners/guarddog/options/ecosystems",
             "/scanners/guarddog/options/rules",
             "/scanners/guarddog/options/exclude_rules",
@@ -474,6 +477,7 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
             "/scanners/cfn-lint/options/honor_inline_ignores",
             "/scanners/betterleaks/options/honor_inline_ignores",
             "/scanners/gitleaks/options/honor_inline_ignores",
+            "/scanners/trufflehog/options/honor_inline_ignores",
             "/scanners/zizmor/options/honor_inline_ignores",
         ),
     )
@@ -530,13 +534,13 @@ class _OptionDefaults(Mapping[Tuple[str, str], Any]):
 
 
 #: Defaults of the denied options of scanners that come from a plugin package
-#: (betterleaks, ferret-scan, guarddog, hadolint, snyk-code, trivy-repo). The trusted config
+#: (betterleaks, ferret-scan, guarddog, hadolint, snyk-code, trivy-repo, trufflehog). The trusted config
 #: carries a built-in scanner's defaults, so a delivered value equal to one is
 #: accepted as no change; it need not carry a plugin's section at all, so
 #: without this a delivered file that wrote such a default would be refused.
-#: Used only where the trusted config has no value of its own. snyk-code's and
-#: trivy-repo's whole sections are denied (``ALWAYS_DENIED_PATHS``), so every
-#: one of their options is listed. For ferret-scan, guarddog and hadolint the
+#: Used only where the trusted config has no value of its own. snyk-code's,
+#: trivy-repo's and trufflehog's whole sections are denied
+#: (``ALWAYS_DENIED_PATHS``), so every one of their options is listed. For ferret-scan, guarddog and hadolint the
 #: denied options are listed: those named in the default ``denied_paths`` and
 #: the ones the ``/scanners/*/options/offline`` and ``tool_version`` globs reach
 #: (hadolint has no ``tool_version`` option). A list default is compared with

@@ -247,7 +247,7 @@ def test_only_plugins_that_do_not_load_by_default_declare_denied_option_defaults
     declaring = {m.name for m in scanner_manifests() if m.denied_option_defaults}
     assert declaring == {m.name for m in scanner_manifests() if not m.default_enabled}
     assert {scanner for scanner, _ in PLUGIN_OPTION_DEFAULTS} == declaring
-    assert len(PLUGIN_OPTION_DEFAULTS) == 42, "control: the table lost rows"
+    assert len(PLUGIN_OPTION_DEFAULTS) == 48, "control: the table lost rows"
     assert PLUGIN_OPTION_DEFAULTS[("trivy-repo", "scanners")] == [
         "vuln",
         "secret",

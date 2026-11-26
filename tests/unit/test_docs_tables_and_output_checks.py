@@ -1324,9 +1324,9 @@ SCANNER_DEFECTS = [
         "an invented scanner in a plain-text cell",
         (
             "| What | Built-in scanners | Alpha plugins |\n|---|---|---|\n"
-            "| Secrets | detect-secrets, trufflehog | |\n"
+            "| Secrets | detect-secrets, whispers | |\n"
         ),
-        "'trufflehog' in the Built-in scanners column is not a scanner ASH ships",
+        "'whispers' in the Built-in scanners column is not a scanner ASH ships",
     ),
     (
         "a misspelled scanner row",
@@ -1345,8 +1345,8 @@ SCANNER_DEFECTS = [
     ),
     (
         "an invented scanner with a word after it",
-        "| What | Built-in scanners |\n|---|---|\n| Secrets | trufflehog scanner |\n",
-        "'trufflehog scanner' in the Built-in scanners column is not one scanner name",
+        "| What | Built-in scanners |\n|---|---|\n| Secrets | whispers scanner |\n",
+        "'whispers scanner' in the Built-in scanners column is not one scanner name",
     ),
     (
         "prose in a scanner column",
