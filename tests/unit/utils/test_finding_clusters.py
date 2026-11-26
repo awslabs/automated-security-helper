@@ -231,10 +231,88 @@ def test_no_line_or_no_file_is_not_the_location_class():
 
 
 def test_overlap_chains_join_into_one_component():
+    # Chaining is bounded by the split guard: it joins rows of three different
+    # scanners here, and never two findings of one scanner and rule id that are
+    # connected only through a bridge row (the tests below pin the bound).
     rows = [
         code("a", "semgrep", line=1, end=5),
         code("b", "bandit", line=5, end=9),
         code("c", "opengrep", line=9, end=12),
+    ]
+    (cluster,) = cluster_findings(rows)
+    assert cluster.members == (0, 1, 2)
+
+
+def test_a_bridge_row_never_folds_two_findings_of_one_scanner_and_rule():
+    # Two separate semgrep findings of one rule, 40 lines apart, and a wide
+    # multi-CWE bandit row spanning both: without the guard the chain
+    # x1-w-x2 folded all three into one cluster. The guard splits it, the
+    # bridge clusters with nothing, and nothing is left to fold.
+    rows = [
+        code("x1", "semgrep", line=10, end=12, cwe="CWE-79", rule_id="xss"),
+        code("x2", "semgrep", line=50, end=52, cwe="CWE-89", rule_id="xss"),
+        code("w", "bandit", line=1, end=100, cwe="CWE-79, CWE-89"),
+    ]
+    assert cluster_findings(rows) == []
+
+
+def test_the_split_guard_keeps_the_directly_connected_remainder():
+    # Removing the bridge re-clusters the rest: x1 and o overlap directly and
+    # stay one cluster; x2 and the bridge w each stand alone.
+    rows = [
+        code("x1", "semgrep", line=10, end=12, cwe="CWE-79", rule_id="xss"),
+        code("o", "opengrep", line=11, end=13, cwe="CWE-79"),
+        code("x2", "semgrep", line=50, end=52, cwe="CWE-89", rule_id="xss"),
+        code("w", "bandit", line=1, end=100, cwe="CWE-79, CWE-89"),
+    ]
+    (cluster,) = cluster_findings(rows)
+    assert cluster.members == (0, 1)
+    assert cluster.finding_class == CLASS_LOCATION and cluster.foldable
+
+
+def test_two_rows_of_one_scanner_that_overlap_directly_still_fold():
+    # The guard severs transitive-only connections, never a direct overlap:
+    # one scanner double-reporting one span is still one finding.
+    rows = [
+        code("a", "semgrep", line=10, end=12, rule_id="xss"),
+        code("b", "semgrep", line=11, end=14, rule_id="xss"),
+    ]
+    (cluster,) = cluster_findings(rows)
+    assert set(cluster.members) == {0, 1}
+
+
+def test_two_findings_legitimately_sharing_a_cwe_stay_clustered():
+    # The negative control: two scanners, one line, one CWE. The guard does
+    # not touch a component with no same-scanner-and-rule pair.
+    rows = [
+        code("s", "semgrep", line=10, end=12, cwe="CWE-89"),
+        code("b", "bandit", line=11, end=13, cwe="CWE-89"),
+    ]
+    (cluster,) = cluster_findings(rows)
+    assert set(cluster.members) == {0, 1} and cluster.foldable
+
+
+def test_a_chain_with_no_single_bridge_leaves_the_two_findings_alone():
+    # x1 and x2 are connected only through b1-b2, and no single row touches
+    # both. Fail closed: the two semgrep findings stand alone, and the chain
+    # rows re-cluster without them (b1 and b2 overlap directly).
+    rows = [
+        code("x1", "semgrep", line=10, end=12, cwe="CWE-79", rule_id="xss"),
+        code("b1", "bandit", line=12, end=30, cwe="CWE-79, CWE-89"),
+        code("b2", "opengrep", line=30, end=52, cwe="CWE-89"),
+        code("x2", "semgrep", line=50, end=52, cwe="CWE-89", rule_id="xss"),
+    ]
+    (cluster,) = cluster_findings(rows)
+    assert cluster.members == (1, 2)
+
+
+def test_the_split_guard_keys_on_scanner_and_rule_id_together():
+    # Two semgrep findings under different rules bridged by a wide row are
+    # not the guard's pair, so the documented chaining still joins them.
+    rows = [
+        code("x1", "semgrep", line=10, end=12, cwe="CWE-79", rule_id="xss"),
+        code("x2", "semgrep", line=50, end=52, cwe="CWE-89", rule_id="sqli"),
+        code("w", "bandit", line=1, end=100, cwe="CWE-79, CWE-89"),
     ]
     (cluster,) = cluster_findings(rows)
     assert cluster.members == (0, 1, 2)

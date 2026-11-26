@@ -707,21 +707,21 @@ kept:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: .ash.yaml
-  line_start: 774
-  line_end: 774
-  remeasured_at: e19cc22a5d6
+  line_start: 715
+  line_end: 715
+  remeasured_at: adc5e7c2270
   kept_because: no symbol grammar for this file type; the target file is now the root .ash.yaml (it was
-    .ash/.ash.yaml, where this pin sat at line 1050), and its lines moved again, so the pin was
-    re-measured at main e19cc22a5d6
+    .ash/.ash.yaml, where this pin sat at line 1050, then line 774), and its lines moved again, so the
+    pin was re-measured in the merge of main adc5e7c2270 into the facets fold branch
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: .ash.yaml
-  line_start: 1021
-  line_end: 1021
-  remeasured_at: e19cc22a5d6
+  line_start: 962
+  line_end: 962
+  remeasured_at: adc5e7c2270
   kept_because: no symbol grammar for this file type; the target file is now the root .ash.yaml (it was
-    .ash/.ash.yaml, where this pin sat at line 1297), and its lines moved again, so the pin was
-    re-measured at main e19cc22a5d6
+    .ash/.ash.yaml, where this pin sat at line 1297, then line 1021), and its lines moved again, so the
+    pin was re-measured in the merge of main adc5e7c2270 into the facets fold branch
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: .github/workflows/ash-repo-docs.yml

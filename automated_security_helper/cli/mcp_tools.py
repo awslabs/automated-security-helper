@@ -6064,7 +6064,7 @@ def mcp_validate_config(
             scan refuse it; empty when valid
           - warnings: the same shape, for what a scan accepts but is probably a
             mistake (an unknown or internal-only key, a missing project_name, a
-            directory path without ``**``)
+            ``**`` pattern whose last component names a directory)
 
         ``errors`` holds errors only, so a valid config has none there, whatever
         its warnings.

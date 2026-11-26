@@ -124,9 +124,11 @@ class FacetState(str, Enum):
     NA = "n/a"
     #: Nobody has read a real run of this tool's output for the facet, so the
     #: register can claim neither that it maps nor that it cannot exist. The
-    #: corpus gate treats the cell as a fixture owed (it passes whatever the
-    #: corpus holds, and is listed), and the reference page says so. Reason
-    #: required: what was read instead, and the run that would settle it.
+    #: corpus gate lists the cell as a fixture owed while its column is empty
+    #: or has no corpus, and FAILS it once the column is populated (the cell
+    #: is then settled or contaminated: redeclare it, or fix the adapter). The
+    #: reference page says so. Reason required: what was read instead, and the
+    #: run that would settle it.
     UNCONFIRMED = "unconfirmed"
 
 
@@ -134,9 +136,9 @@ class FacetDecl(BaseModel):
     """One facet's declaration: its state, and the evidence the state needs.
 
     The per-state requirements are validation, not etiquette: a MAPPED or
-    DROPPED cell with no named native field, or a DROPPED or N/A cell with no
-    reason, refuses to construct, so an unevidenced cell cannot enter the
-    register at all.
+    DROPPED cell with no named native field, or a DROPPED, N/A or UNCONFIRMED
+    cell with no reason, refuses to construct, so an unevidenced cell cannot
+    enter the register at all.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
@@ -144,7 +146,7 @@ class FacetDecl(BaseModel):
     state: FacetState
     #: The native field carrying the value, verbatim, for MAPPED and DROPPED.
     native_field: Optional[str] = None
-    #: One line, for NA and DROPPED: why the cell is what it is.
+    #: One line, for NA, DROPPED and UNCONFIRMED: why the cell is what it is.
     reason: Optional[str] = None
     #: A value from a real read (fixture or tool run). Required for a MAPPED
     #: ``resource_id`` -- enforced by :class:`ScannerFacets`, which knows
@@ -159,8 +161,8 @@ class FacetDecl(BaseModel):
         ):
             raise ValueError(
                 f"a {self.state.value} facet must name its native field "
-                "verbatim; if the output was never read, declare n/a with "
-                "the reason instead"
+                "verbatim; if the output was never read, declare unconfirmed "
+                "with the reason instead"
             )
         if (
             self.state in (FacetState.NA, FacetState.DROPPED, FacetState.UNCONFIRMED)
