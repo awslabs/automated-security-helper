@@ -3057,7 +3057,7 @@
           "default": [
             "cyclonedx_json"
           ],
-          "description": "List of additional formats to output. Defaults to including CycloneDX JSON. checkov's JSON report is written whatever this lists: ASH reads the resource of each finding from it.",
+          "description": "List of additional formats to output. Defaults to including CycloneDX JSON. checkov's JSON report is written whatever this lists: ASH reads the resource of each finding from it, and rewrites its paths to the source-relative form the SARIF uses.",
           "items": {
             "anyOf": [
               {
