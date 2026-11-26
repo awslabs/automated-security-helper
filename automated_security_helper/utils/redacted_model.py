@@ -1233,15 +1233,58 @@ def _holder_core_schema(schema: Any) -> Any:
     return None
 
 
-_GENERATED_ALIAS_CACHE: Dict[Tuple[Any, int], Tuple[Any, Optional[Dict[str, Any]]]] = {}
+class _UnreadAliasSchema:
+    """What :func:`_generated_aliases` answers when it cannot read the keys an
+    ``alias_generator`` gives a holder from the core schema pydantic builds
+    for it, so the refusal can say what went unread
+    (:func:`_refuse_unplaced_reference`): *node* is the ``type`` of the
+    schema node the read stopped at (``call``, say, or a dataclass's fields
+    node of another type than ``dataclass-args``), or None when it reached no
+    node; *cause* says why a node of a type it reads gave nothing (reading it
+    raised), or why there was no node, and is None for a node of another
+    type.
+
+    It is kept apart from a read that succeeded: a holder whose generator
+    gives its fields no validation key (an ``AliasGenerator`` that names a
+    serialization alias only) reads as a map whose aliases are all None, so
+    its fields are read under their own names, as any holder that was read."""
+
+    __slots__ = ("node", "cause")
+
+    def __init__(self, node: Optional[str], cause: Optional[str] = None) -> None:
+        self.node = node
+        self.cause = cause
+
+    def __repr__(self) -> str:
+        return f"_UnreadAliasSchema({self.node!r}, {self.cause!r})"
+
+
+class _UnreadKeys(Dict[Any, Any]):
+    """The field map :func:`_typed_container_fields` and
+    :func:`_dataclass_fields` give for a holder whose ``alias_generator`` keys
+    could not be read (*unread*, from :func:`_generated_aliases`): the names
+    and explicit aliases the field metadata gives, which hold no generated
+    key. The walk refuses a reference in such a holder's dict input
+    (:func:`_marker_a_slot_would_type`); every other reader
+    (:func:`_arm_structurally_takes`) reads it as the plain map it holds."""
+
+    def __init__(self, fields: Dict[Any, Any], unread: _UnreadAliasSchema) -> None:
+        super().__init__(fields)
+        self.unread = unread
+
+
+_GENERATED_ALIAS_CACHE: Dict[
+    Tuple[Any, int], Tuple[Any, Union[Dict[str, Any], _UnreadAliasSchema]]
+] = {}
 
 
 def _generated_aliases(
     annotation: Any, alias_generator: Any
-) -> Optional[Dict[str, Any]]:
+) -> Union[Dict[str, Any], _UnreadAliasSchema]:
     """The validation alias of each field of the TypedDict, NamedTuple or
     standard-library dataclass *annotation* once *alias_generator* has been
-    applied, by field name; None when it cannot be read.
+    applied, by field name; an :class:`_UnreadAliasSchema` when it cannot be
+    read.
 
     pydantic applies the generator while it builds the schema, to a copy of
     each field's metadata, so neither the class nor a bare ``FieldInfo``
@@ -1254,44 +1297,61 @@ def _generated_aliases(
     ``validation_alias``), which is documented but less stable than a field
     object: pydantic 2.14 builds a NamedTuple as a ``named-tuple`` node, where
     2.13 built a ``call`` node over an ``arguments`` schema whose parameters
-    carried the same alias as ``alias``. A schema of another shape reads as
-    None and the caller falls back to the metadata, which holds no generated
-    key, so the tests that pin these shapes are what keeps the refusal behind
-    a generated key from lapsing. Built once per holder and generator (a
-    generator is kept alive by its entry, which is cleared at 256)."""
+    carried the same alias as ``alias``. A schema of another shape, and one
+    that cannot be built here, reads as an :class:`_UnreadAliasSchema` naming
+    what it met, and the walk refuses a reference in the holder's input
+    (:func:`_marker_a_slot_would_type`). Before, it read as None and the walk
+    fell back to the field metadata, which holds no generated key, so a
+    reference under one went to pydantic downcast and was converted
+    silently; the tests that pin these shapes keep that refusal from
+    spreading to every holder of a later pydantic. Built once per holder and
+    generator (a generator is kept alive by its entry, which is cleared at
+    256)."""
     key = (annotation, id(alias_generator))
     cached = _GENERATED_ALIAS_CACHE.get(key)
     if cached is not None and cached[0] is alias_generator:
         return cached[1]
-    result: Optional[Dict[str, Any]] = None
+    result: Union[Dict[str, Any], _UnreadAliasSchema]
+    node: Any = None
     try:
         adapter = TypeAdapter(
             List[annotation],
             config=ConfigDict(alias_generator=alias_generator),
         )
         node = _holder_core_schema(adapter.core_schema)
-        if isinstance(node, dict) and node.get("type") == "typed-dict":
+        kind = node.get("type") if isinstance(node, dict) else None
+        arguments = node.get("schema") if kind == "dataclass" else None
+        if kind == "typed-dict":
             result = {
                 name: _alias_object(field.get("validation_alias"))
                 for name, field in node["fields"].items()
             }
-        elif isinstance(node, dict) and node.get("type") == "named-tuple":
+        elif kind == "named-tuple":
             result = {
                 field["name"]: _alias_object(field.get("validation_alias"))
                 for field in node["fields"]
             }
-        elif isinstance(node, dict) and node.get("type") == "dataclass":
-            arguments = node.get("schema")
-            if (
-                isinstance(arguments, dict)
-                and arguments.get("type") == "dataclass-args"
-            ):
-                result = {
-                    field["name"]: _alias_object(field.get("validation_alias"))
-                    for field in arguments["fields"]
-                }
-    except Exception:  # a holder pydantic cannot build is not read
-        result = None
+        elif isinstance(arguments, dict) and arguments.get("type") == "dataclass-args":
+            result = {
+                field["name"]: _alias_object(field.get("validation_alias"))
+                for field in arguments["fields"]
+            }
+        else:
+            # The node the read stopped at: a dataclass's fields node when
+            # it is of another type, else the holder's own node.
+            stopped = arguments.get("type") if isinstance(arguments, dict) else kind
+            result = (
+                _UnreadAliasSchema(stopped)
+                if isinstance(stopped, str)
+                else _UnreadAliasSchema(None, "no node was found for it")
+            )
+    except Exception as error:  # a holder not built here, or a node not read
+        kind = node.get("type") if isinstance(node, dict) else None
+        result = _UnreadAliasSchema(
+            kind if isinstance(kind, str) else None,
+            f"{'reading' if isinstance(kind, str) else 'building'} it raised "
+            f"{type(error).__name__}",
+        )
     if len(_GENERATED_ALIAS_CACHE) >= 256:
         _GENERATED_ALIAS_CACHE.clear()
     _GENERATED_ALIAS_CACHE[key] = (alias_generator, result)
@@ -1308,7 +1368,9 @@ def _typed_container_fields(annotation: Any) -> Optional[Dict[Any, Any]]:
     for a model or a dataclass, so the keys are listed through the same slot
     helpers. When a config in force has an ``alias_generator`` the aliases come
     from the built schema instead (:func:`_generated_aliases`), which holds
-    the explicit ones and the generated ones as pydantic resolved them. None
+    the explicit ones and the generated ones as pydantic resolved them; when
+    that schema cannot be read, the metadata's map comes back as an
+    :class:`_UnreadKeys`, which the walk refuses a reference under. None
     when the hints cannot be resolved."""
     whole = annotation
     annotation, bindings = _typed_container_class(annotation)
@@ -1333,7 +1395,7 @@ def _typed_container_fields(annotation: Any) -> Optional[Dict[Any, Any]]:
     own = {name: hints.get(name, Any) for name in names}
     by_name = dict(own)
     for name in names:
-        if generated is not None:
+        if isinstance(generated, dict):
             aliases: Tuple[Any, ...] = (generated.get(name),)
         else:
             try:
@@ -1346,6 +1408,8 @@ def _typed_container_fields(annotation: Any) -> Optional[Dict[Any, Any]]:
         for alias in aliases:
             for path in _alias_paths(alias):
                 _add_alias_slot(by_name, path, own[name])
+    if isinstance(generated, _UnreadAliasSchema):
+        return _UnreadKeys(by_name, generated)
     return by_name
 
 
@@ -1426,7 +1490,8 @@ def _dataclass_fields(
     (``pydantic.with_config``) or, without one, the config in force around it
     (the holder's, which pydantic applies to a stdlib dataclass used as a
     field), whose ``alias_generator`` names the keys of its fields
-    (:func:`_generated_aliases`), as for a TypedDict."""
+    (:func:`_generated_aliases`), as for a TypedDict, an unread schema
+    included (:class:`_UnreadKeys`)."""
     try:
         hints = get_type_hints(annotation)
     except Exception:  # an unresolvable forward reference
@@ -1456,7 +1521,7 @@ def _dataclass_fields(
         declared = {}
     for field in dc_fields:
         name = field.name
-        if generated is not None:
+        if isinstance(generated, dict):
             aliases: Tuple[Any, ...] = (generated.get(name),)
         else:
             try:
@@ -1467,6 +1532,8 @@ def _dataclass_fields(
         for alias in aliases:
             for path in _alias_paths(alias):
                 _add_alias_slot(by_name, path, own[name])
+    if isinstance(generated, _UnreadAliasSchema):
+        return _UnreadKeys(by_name, generated)
     return by_name
 
 
@@ -1861,7 +1928,12 @@ def _marker_a_slot_would_type(
     mapping, as ``(marker, slot, as_item)``; None when every marker sits
     where a plain str lands. A container sitting at a slot no arm of which
     can hold a container comes back as ``(marker, slot, as_item, container)``,
-    so the refusal can speak of the container rather than the reference.
+    so the refusal can speak of the container rather than the reference. A
+    dict at a TypedDict, NamedTuple or stdlib dataclass whose keys an
+    ``alias_generator`` names, when those keys could not be read from the
+    schema (:class:`_UnreadKeys`), comes back as ``(marker, holder, as_item,
+    unread)`` for its first marker wherever it sits, so the refusal can say
+    what went unread (:func:`_refuse_unplaced_reference`).
 
     Walks the annotation beside the value: a dict's keys against the key
     argument and its values against the value argument, a sequence's items
@@ -1939,6 +2011,16 @@ def _marker_a_slot_would_type(
         return found
     if isinstance(value, dict):
         fields = _declared_field_annotations(annotation)
+        if isinstance(fields, _UnreadKeys):
+            # The holder's keys are the ones its alias_generator makes, and
+            # they could not be read from its schema, so no entry can be
+            # matched to the field it lands on: a generated key may be any
+            # entry's key, a field's own name included. A reference anywhere
+            # in the value cannot be placed, so the first one is refused; a
+            # value that holds none is read as before.
+            marker = first_env_scalar(value)
+            if marker is not None:
+                return marker, annotation, as_item, fields.unread
         if fields is not None:
             # A model or dataclass takes the dict by field name: each entry
             # is walked against the annotation of the field it lands on, as
@@ -2137,6 +2219,48 @@ def _refuse_value_nested_too_deeply(value: Any, field_name: str) -> NoReturn:
     )
 
 
+def _refuse_unplaced_reference(
+    marker: EnvResolvedScalar,
+    holder: Any,
+    unread: _UnreadAliasSchema,
+    field_name: str,
+) -> NoReturn:
+    """Refuse a reference in the input of a TypedDict, NamedTuple or stdlib
+    dataclass *holder* whose keys an ``alias_generator`` names, when those
+    keys could not be read from the core schema pydantic builds for it
+    (:func:`_generated_aliases`), naming the field, the holder, the schema
+    node that went unread, and the variable of the first reference; never the
+    value.
+
+    The keys say which field each entry lands on, and so whether that field
+    converts the text. Read off the field metadata instead, they held no
+    generated key, and a reference under one went to pydantic downcast and
+    was converted silently. With the keys unread no reference in the value
+    can be placed, so it is refused, opening as the depth refusal does for a
+    value it cannot check (:func:`_refuse_value_nested_too_deeply`).
+    """
+    holder_class, _ = _typed_container_class(holder)
+    name = getattr(holder_class, "__name__", None) or str(holder_class)
+    if unread.node is None:
+        found = f"its core schema could not be read here ({unread.cause})"
+    elif unread.cause is None:
+        found = (
+            f"the core schema pydantic builds for it holds a `{unread.node}` "
+            "node, which this check does not read"
+        )
+    else:
+        found = (
+            f"the core schema pydantic builds for it holds a `{unread.node}` "
+            f"node this check could not read ({unread.cause})"
+        )
+    raise ValueError(
+        f"Input could not be checked: {field_name} holds a value for {name}, "
+        f"whose keys an alias_generator names, and {found}, so which field a "
+        "reference in it lands on is not known; it holds a reference to "
+        f"{marker.variable}. Write the value in the file instead."
+    )
+
+
 def _refuse_typed_env_reference(
     annotation: Any,
     value: Any,
@@ -2212,9 +2336,11 @@ def _refuse_typed_env_reference(
         _SECTIONS_OPAQUE.reset(opaque_token)
         _WALK_CONFIG.reset(token)
     if typed is not None:
-        marker, slot, in_item, *container = typed
-        if container:
-            _refuse_container_at_scalar(marker, container[0], slot, field_name)
+        marker, slot, in_item, *rest = typed
+        if rest and isinstance(rest[0], _UnreadAliasSchema):
+            _refuse_unplaced_reference(marker, slot, rest[0], field_name)
+        if rest:
+            _refuse_container_at_scalar(marker, rest[0], slot, field_name)
         _refuse_env_reference(
             marker,
             _refused_noun(slot),

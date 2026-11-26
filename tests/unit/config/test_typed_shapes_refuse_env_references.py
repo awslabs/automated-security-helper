@@ -1748,6 +1748,152 @@ def test_a_marker_behind_a_generated_alias_key_at_a_str_field_keeps_the_text():
     assert type(section.items.name) is str
 
 
+#: A core-schema node type no pydantic release builds: the shape a later
+#: release might build a holder as, which the generated-alias reader does not
+#: know.
+_LATER_NODE = "holder-of-a-later-pydantic"
+
+
+class _UnreadTypedDict(TypedDict):
+    count: int
+
+
+class _UnreadNamedTuple(NamedTuple):
+    count: int
+
+
+@dataclasses.dataclass
+class _UnreadDataclass:
+    count: int
+
+
+class _OpaqueHandle:
+    """A class pydantic checks by isinstance alone, and only under
+    ``arbitrary_types_allowed``."""
+
+
+class _TypedDictWithAnOpaqueField(TypedDict):
+    count: int
+    handle: _OpaqueHandle
+
+
+class _UnreadTypedDictSection(RedactedSection):
+    model_config = ConfigDict(alias_generator=_prefixed)
+    items: Optional[_UnreadTypedDict] = None
+
+
+class _UnreadNamedTupleSection(RedactedSection):
+    model_config = ConfigDict(alias_generator=_prefixed)
+    items: Optional[_UnreadNamedTuple] = None
+
+
+class _UnreadDataclassSection(RedactedSection):
+    model_config = ConfigDict(alias_generator=_prefixed)
+    items: Optional[_UnreadDataclass] = None
+
+
+class _OpaqueFieldSection(RedactedSection):
+    model_config = ConfigDict(alias_generator=_prefixed, arbitrary_types_allowed=True)
+    items: Optional[_TypedDictWithAnOpaqueField] = None
+
+
+_HANDLE = _OpaqueHandle()
+
+#: Each way the generated-alias reader can fail to read a holder's keys: the
+#: section, the node the reader's holder-node lookup is made to return (None
+#: keeps the real one), and what the refusal must name. The last row needs no
+#: stand-in: the reader builds the holder's schema with the alias_generator
+#: alone, so a holder whose field only arbitrary_types_allowed admits cannot
+#: be built there, while the section builds it under its own config.
+_UNREAD_SCHEMAS = {
+    "typed-dict-as-a-later-node": (
+        _UnreadTypedDictSection,
+        {"type": _LATER_NODE},
+        (f"`{_LATER_NODE}`", "_UnreadTypedDict"),
+    ),
+    "named-tuple-as-a-later-node": (
+        _UnreadNamedTupleSection,
+        {"type": _LATER_NODE},
+        (f"`{_LATER_NODE}`", "_UnreadNamedTuple"),
+    ),
+    "dataclass-as-a-later-node": (
+        _UnreadDataclassSection,
+        {"type": _LATER_NODE},
+        (f"`{_LATER_NODE}`", "_UnreadDataclass"),
+    ),
+    "dataclass-fields-as-a-later-node": (
+        _UnreadDataclassSection,
+        {"type": "dataclass", "schema": {"type": _LATER_NODE}},
+        (f"`{_LATER_NODE}`", "_UnreadDataclass"),
+    ),
+    "typed-dict-node-whose-fields-cannot-be-read": (
+        _UnreadTypedDictSection,
+        {"type": "typed-dict"},
+        ("`typed-dict`", "KeyError", "_UnreadTypedDict"),
+    ),
+    "holder-schema-that-cannot-be-built-here": (
+        _OpaqueFieldSection,
+        None,
+        ("PydanticSchemaGenerationError", "_TypedDictWithAnOpaqueField"),
+    ),
+}
+
+
+def _unread_holder_schema(monkeypatch, kind):
+    """The section and the payload builder of the *kind* row, with the
+    generated-alias cache emptied so no earlier read of a holder answers for
+    it, and the row's stand-in node, if any, returned by the reader's
+    holder-node lookup."""
+    from automated_security_helper.utils import redacted_model as module
+
+    section_type, node, _ = _UNREAD_SCHEMAS[kind]
+    monkeypatch.setattr(module, "_GENERATED_ALIAS_CACHE", {})
+    if node is not None:
+        monkeypatch.setattr(module, "_holder_core_schema", lambda schema: node)
+
+    def payload(value):
+        items = {"x_count": value}
+        if section_type is _OpaqueFieldSection:
+            items["x_handle"] = _HANDLE
+        return {"x_items": items}
+
+    return section_type, payload
+
+
+@pytest.mark.parametrize("kind", list(_UNREAD_SCHEMAS))
+def test_a_marker_under_a_generated_key_the_reader_cannot_read_is_refused(
+    kind, monkeypatch
+):
+    """The keys an alias_generator gives a TypedDict, NamedTuple or stdlib
+    dataclass are read from the core schema pydantic builds for it. When that
+    schema holds a node the reader does not know, or cannot be read or built,
+    the walk used to fall back to the field metadata, which holds no generated
+    key, so a reference under one went to pydantic downcast and the int field
+    converted it silently. It cannot be placed, so it is refused, naming the
+    holder and the schema node that went unread."""
+    section_type, payload = _unread_holder_schema(monkeypatch, kind)
+    text = _refusal_text(section_type, payload(env_resolved_scalar("067", VARIABLE)))
+    assert VARIABLE in text, text
+    assert "067" not in text, text
+    for named in _UNREAD_SCHEMAS[kind][2]:
+        assert named in text, text
+
+
+@pytest.mark.parametrize("kind", list(_UNREAD_SCHEMAS))
+def test_the_same_value_without_a_marker_validates_at_an_unread_holder_schema(
+    kind, monkeypatch
+):
+    """The must-not-flag control for the refusal above: the same value with
+    the text written in place of the reference validates as it did, so the
+    refusal answers to the reference, not to the holder or the payload."""
+    section_type, payload = _unread_holder_schema(monkeypatch, kind)
+    section = section_type.model_validate(payload("067"))
+    items = section.items
+    assert items is not None
+    count = items["count"] if isinstance(items, dict) else items.count
+    assert count == 67
+
+
 def test_sections_under_a_root_model_keep_a_marker_at_a_str_field_as_text():
     """The must-not-flag control for the cells above: a str field keeps the
     text, downcast to a plain str, behind the RootModel."""
