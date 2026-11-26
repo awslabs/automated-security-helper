@@ -10,7 +10,7 @@ so on) and runs [ShellCheck](https://www.shellcheck.net/) over the shell in ever
 
 ## Enabling
 
-This plugin ships with ASH and is loaded only when its module is listed. An `ash scan` that does not list it is unchanged.
+This plugin ships with ASH and is loaded only when its module is listed. A scan that does not list it is unchanged.
 
 ```yaml
 # .ash.yaml
@@ -22,7 +22,7 @@ or, for one run:
 
 <!-- doctest: illustrative reason="runs a full ash scan of the current directory" -->
 ```bash
-ash scan --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins
+ash scan fs --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins
 ```
 
 With the module listed, `hadolint` runs by default. `scanners.hadolint.enabled: false` turns it off again.

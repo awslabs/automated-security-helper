@@ -83,7 +83,7 @@ Load it with `--ash-plugin-modules`:
 
 <!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
-uv run ash --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
+uv run ash scan fs --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
 ```
 
 or with the `ASH_PLUGIN_MODULES` environment variable, which the commands on the
@@ -122,10 +122,10 @@ snyk-code reports `ERROR` for the source and names the output directory.
 <!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
 # Scan current directory
-uv run ash --scanners snyk-code --output-dir ../ash_output
+uv run ash scan fs --scanners snyk-code --output-dir ../ash_output
 
 # Scan specific directory
-uv run ash --scanners snyk-code --output-dir /path/to/ash_output --source-dir /path/to/project
+uv run ash scan fs /path/to/project --scanners snyk-code --output-dir /path/to/ash_output
 ```
 
 ### Run Snyk Code Scan without Configuration File
@@ -135,10 +135,10 @@ If you want to run Snyk code scan without saving a configuration file for ASH:
 <!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
 # Scan current directory only with snyk-code
-uv run ash --scanners snyk-code --output-dir ../ash_output --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
+uv run ash scan fs --scanners snyk-code --output-dir ../ash_output --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
 
 # Scan current directory with all available scanners (including snyk-code)
-uv run ash --output-dir ../ash_output --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
+uv run ash scan fs --output-dir ../ash_output --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
 ```
 
 ## Configuration Options
@@ -172,7 +172,7 @@ To accept a repository's exclusions, set `honor_tree_exclusions` with
 
 <!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
-uv run ash --scanners snyk-code --config-overrides 'scanners.snyk-code.options.honor_tree_exclusions=true'
+uv run ash scan fs --scanners snyk-code --config-overrides 'scanners.snyk-code.options.honor_tree_exclusions=true'
 ```
 
 or in a config file outside the scanned tree, passed with `--config`:
@@ -226,10 +226,10 @@ scanners:
 <!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
 # Use Snyk Code alongside other ASH scanners
-uv run ash --scanners snyk-code,bandit,semgrep --output-dir ../ash_output
+uv run ash scan fs --scanners snyk-code,bandit,semgrep --output-dir ../ash_output
 
 # Use with alpha plugins
-uv run ash --scanners snyk-code,trivy-repo --output-dir ../ash_output --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
+uv run ash scan fs --scanners snyk-code,trivy-repo --output-dir ../ash_output --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
 ```
 
 ### CI/CD Integration
@@ -237,7 +237,7 @@ uv run ash --scanners snyk-code,trivy-repo --output-dir ../ash_output --config .
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Run in container mode for CI/CD
-uv run ash --mode container --scanners snyk-code --output-dir ../ash_output --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
+uv run ash scan fs --mode container --scanners snyk-code --output-dir ../ash_output --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
 ```
 
 ## Output Integration
@@ -325,7 +325,7 @@ Enable verbose logging to troubleshoot issues:
 
 <!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
-uv run ash --scanners snyk-code --output-dir ../ash_output --log-level DEBUG
+uv run ash scan fs --scanners snyk-code --output-dir ../ash_output --log-level DEBUG
 ```
 
 ### Offline Mode
@@ -339,10 +339,10 @@ configuration, as shown above:
 <!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
 # snyk-code is MISSING here, and the scan exits 1
-uv run ash --offline --scanners snyk-code
+uv run ash scan fs --offline --scanners snyk-code
 
 # An offline scan that does not ask for snyk-code
-uv run ash --offline --exclude-scanners snyk-code
+uv run ash scan fs --offline --exclude-scanners snyk-code
 ```
 
 ## Integration Examples
@@ -357,7 +357,7 @@ repos:
     hooks:
       - id: ash-snyk-code
         name: ASH Snyk Code Security Scan
-        entry: uv run ash --scanners snyk-code --mode precommit --output-dir ../ash_output --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
+        entry: uv run ash scan fs --scanners snyk-code --mode precommit --output-dir ../ash_output --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
         language: system
         pass_filenames: false
 ```
@@ -383,7 +383,7 @@ jobs:
           ASH_PLUGIN_MODULES: automated_security_helper.plugin_modules.ash_snyk_plugins
         # ASH's output outside the checkout, so snyk-code scans the source.
         run: |
-          uv run ash --scanners snyk-code --output-format sarif --output-dir "${{ runner.temp }}/ash_output"
+          uv run ash scan fs --scanners snyk-code --output-format sarif --output-dir "${{ runner.temp }}/ash_output"
       - name: Upload SARIF results
         # Also when ASH exits non-zero on findings: without a status function
         # GitHub skips this step after any failed step.
@@ -406,7 +406,7 @@ snyk-security-scan:
   script:
     # ASH's output outside the checkout, so snyk-code scans the source; the
     # report is copied back in afterwards, since artifacts come from the checkout.
-    - uv run ash --scanners snyk-code --output-dir /tmp/ash_output
+    - uv run ash scan fs --scanners snyk-code --output-dir /tmp/ash_output
   after_script:
     - cp /tmp/ash_output/reports/ash.sarif ash.sarif
   variables:

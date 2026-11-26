@@ -17,9 +17,9 @@ removal starts from: each row there becomes a refusal row in 4.0. The rows were 
 when written, since they pin behavior the scan group, results group and container
 group already deliver.
 
-The second half pins the hints ASH prints and its help text: each one names the
-spelling that does not warn, so following a hint never leads to a deprecation line.
-Each of those rows failed before the hint moved.
+The second half pins the hints ASH prints, its help text and the markdown it ships in
+the package: each one names the spelling that does not warn, so following a hint never
+leads to a deprecation line. Each of those rows failed before the hint moved.
 
 Every scan row passes ``--shard-index 3`` without ``--shard-count``, which the engine
 refuses with the usage-error code right after the deprecation line would print, so no
@@ -29,6 +29,7 @@ arguments, so no image is built.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -40,6 +41,7 @@ import typer.main
 from pydantic import BaseModel
 from typer.testing import CliRunner
 
+import automated_security_helper
 from automated_security_helper.cli.main import app
 
 pytestmark = pytest.mark.unit
@@ -190,7 +192,7 @@ def test_both_build_spellings_start_the_same_build(tmp_path, isolated):
 
 
 # --------------------------------------------------------------------------- #
-# Hints and help text name the spellings that do not warn
+# Hints, help text and shipped markdown name the spellings that do not warn
 # --------------------------------------------------------------------------- #
 
 
@@ -436,3 +438,86 @@ def test_comparing_sharded_results_is_refused_naming_results_merge():
     assert str(refused.value) == (
         "use ash results merge before comparing sharded results"
     )
+
+
+#: The legacy spellings, as the topology plan counts them: a scan with no subject,
+#: a bare root with an option, and the top-level commands that moved.
+_LEGACY_COMMAND = re.compile(
+    r"\b(?:ash|ashv3) scan\b(?! (?:fs|workspace|image|git)\b)"
+    r"|(?<![\w./-])(?:\./)?(?:ash|ashv3|automated-security-helper) "
+    r"--(?!version\b|help\b|install-completion\b|show-completion\b)"
+    r"|(?<![\w./-])(?:\./)?(?:ash|ashv3) (?:report|diff|trend|merge|inspect|build-image)\b"
+)
+_SCAN_FS = re.compile(r"\b(?:ash|ashv3) scan fs\b")
+_INLINE_CODE = re.compile(r"`([^`\n]+)`")
+
+#: The markdown under the package that is a dated record, not documentation a reader
+#: is sent to, and the gitignored copy of a docs page the wheel build writes; the
+#: docs checks leave out the same two (scripts/verify_docs_freshness.py).
+_NOT_DOCUMENTATION = (
+    "plugin_modules/ash_ferret_plugins/spec/",
+    "assets/genai-steering-guide.md",
+)
+
+
+def _is_legacy(command: str) -> bool:
+    return bool(_LEGACY_COMMAND.search(command)) or bool(
+        _SCAN_FS.search(command) and "--source-dir" in command
+    )
+
+
+def _commands(markdown: str):
+    """(line number, text) of each command a reader of *markdown* is shown: every
+    line of a fenced block that is not a comment, and every inline code span. A
+    span with no option counts too: ``to run a scan, use `ash scan``` is a command
+    to type even though it passes nothing."""
+    fenced = False
+    for number, line in enumerate(markdown.splitlines(), start=1):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            if not line.lstrip().startswith("#"):
+                yield number, line
+            continue
+        for span in _INLINE_CODE.findall(line):
+            yield number, span
+
+
+def test_the_markdown_the_package_ships_shows_no_legacy_spelling_in_a_command():
+    package = Path(automated_security_helper.__file__).parent
+    pages = [
+        page
+        for page in sorted(package.rglob("*.md"))
+        if not page.relative_to(package).as_posix().startswith(_NOT_DOCUMENTATION)
+    ]
+    assert pages, "no markdown found under the package"
+
+    found = [
+        f"{page.relative_to(package).as_posix()}:{number}: {command.strip()}"
+        for page in pages
+        for number, command in _commands(page.read_text(encoding="utf-8"))
+        if _is_legacy(command)
+    ]
+
+    assert found == [], "\n".join(found)
+
+
+@pytest.mark.parametrize(
+    ("command", "legacy"),
+    [
+        ("uv run ash --scanners trivy-repo", True),
+        ("ash scan --ash-plugin-modules x", True),
+        ("uv run ash scan fs src --source-dir src", True),
+        ("ash report --format text", True),
+        ("ash scan fs --ash-plugin-modules x", False),
+        ("uv run ash scan fs /path/to/project --scanners trivy-repo", False),
+        ("ash config get --source-dir src", False),
+        ("ash --version", False),
+        ("uv run ash plugin list --ash-plugin-modules x", False),
+    ],
+)
+def test_the_markdown_check_tells_a_legacy_command_from_a_noun_one(command, legacy):
+    """The check's own controls: it flags each kind of old spelling, and passes the
+    noun forms and the commands whose ``--source-dir`` is their own option."""
+    assert _is_legacy(command) is legacy

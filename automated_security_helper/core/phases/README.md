@@ -10,7 +10,7 @@ This directory holds the phases of the ASH scan engine. Each phase is a subclass
 
 `ScanExecutionEngine` (`automated_security_helper/core/execution_engine.py`) creates each phase
 with the scan's `PluginContext` and the plugins for that phase, then runs them in order. The phases
-are internal: to run a scan, use `ash scan` or the
+are internal: to run a scan, use `ash scan fs` or the
 [Python API](https://awslabs.github.io/automated-security-helper/reference/python-api/) rather than
 creating phases yourself.
 
