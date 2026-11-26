@@ -500,67 +500,6 @@ global_settings:
         dependency only, reached through jest-config, not shipped in the wheel or the
         container image. npm's only fix is a jest 25.1.0 major downgrade, refused. Revisit
         when a fix ships; see the block comment above.
-    # === Time-boxed: minimatch GHSA-g3hv-75wg-m249 bundled inside aws-cdk-lib (expires 2026-12-27) ===
-    # minimatch below 11.0.1 is affected (globparts amplification denial of service).
-    # The copies our lockfiles resolve are overridden to 11.x in deploy/cdk and
-    # deploy/cdk-constructs, so the only affected copy left is the one BUNDLED inside
-    # aws-cdk-lib (`inBundle` lockfile entries). npm `overrides` cannot replace a
-    # bundled dependency, and every aws-cdk-lib release through 2.277.0 (the latest at
-    # 2026-11-13, bundling minimatch ^10.2.6 per its registry metadata) bundles
-    # minimatch ^10. It is deploy tooling only: none of it ships in
-    # the wheel or the container image. One npm-audit entry per lockfile; grype and
-    # trivy each report the same bundled copy against deploy/cdk/package-lock.json
-    # under their own id spellings, one entry per spelling. The transitive findings are
-    # covered by these root entries, as the braces block above explains. Revisit when
-    # an aws-cdk-lib release bundles minimatch 11.0.1 or later.
-    - rule_id: "GHSA-g3hv-75wg-m249"
-      path: "deploy/cdk/package-lock.json"
-      package_name: "minimatch"
-      package_version: "10.2.5"
-      package_path: "deploy/cdk/node_modules/aws-cdk-lib/node_modules/minimatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-g3hv-75wg-m249: minimatch 10.2.5 bundled inside aws-cdk-lib 2.273.0 in
-        deploy/cdk/package-lock.json. npm overrides cannot replace a bundled dependency and
-        no aws-cdk-lib release bundles the fixed 11.0.1 yet (latest 2.277.0 bundles ^10.2.6).
-        Deploy tooling only, not shipped in the wheel or the container image. Revisit when
-        aws-cdk-lib rebundles; see the block comment above.
-    - rule_id: "GHSA-g3hv-75wg-m249"
-      path: "deploy/cdk-constructs/package-lock.json"
-      package_name: "minimatch"
-      package_version: "10.2.5"
-      package_path: "deploy/cdk-constructs/node_modules/aws-cdk-lib/node_modules/minimatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-g3hv-75wg-m249: minimatch 10.2.5 bundled inside aws-cdk-lib 2.273.0 in
-        deploy/cdk-constructs/package-lock.json. npm overrides cannot replace a bundled
-        dependency and no aws-cdk-lib release bundles the fixed 11.0.1 yet (latest 2.277.0
-        bundles ^10.2.6). Dev dependency of the constructs package only, not shipped in the
-        wheel or the container image. Revisit when aws-cdk-lib rebundles; see the block
-        comment above.
-    - rule_id: "GHSA-g3hv-75wg-m249-minimatch"
-      path: "deploy/cdk/package-lock.json"
-      package_name: "minimatch"
-      package_version: "10.2.5"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-g3hv-75wg-m249 (grype spelling): minimatch 10.2.5 bundled inside aws-cdk-lib
-        2.273.0 in deploy/cdk/package-lock.json. The lockfile's own minimatch is overridden
-        to 11.x; the bundled copy cannot be overridden and no aws-cdk-lib release bundles
-        11.0.1 yet. Deploy tooling only, not shipped in the wheel or the container image.
-        Revisit when aws-cdk-lib rebundles; see the block comment above.
-    - rule_id: "CVE-2026-118764"
-      path: "deploy/cdk/package-lock.json"
-      package_name: "minimatch"
-      package_version: "10.2.5"
-      expires: "2026-12-27"
-      reason: >-
-        CVE-2026-118764 (GHSA-g3hv-75wg-m249, trivy spelling): minimatch 10.2.5 bundled
-        inside aws-cdk-lib 2.273.0 in deploy/cdk/package-lock.json. The lockfile's own
-        minimatch is overridden to 11.x; the bundled copy cannot be overridden and no
-        aws-cdk-lib release bundles 11.0.1 yet. Deploy tooling only, not shipped in the
-        wheel or the container image. Revisit when aws-cdk-lib rebundles; see the block
-        comment above.
     # === Time-boxed: picomatch GHSA-fc5q-39xc-vjpf, no patched version (expires 2026-12-27) ===
     # picomatch up to and including 4.0.7 is affected (ReDoS through single-branch
     # repeated extglobs) and 4.0.7 is the newest release on the registry (read
