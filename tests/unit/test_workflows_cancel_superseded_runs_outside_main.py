@@ -92,6 +92,15 @@ QUEUEING = {
     "ash-dependabot-auto-merge.yml": (
         "${{ github.workflow }}-${{ github.event.workflow_run.head_sha }}"
     ),
+    # Also on workflow_run, so also not keyed on the ref. Keyed on the head repository
+    # and branch, which name the pull request whose comment it writes, and queued: a job
+    # that is writing that comment must not be cancelled, and the queued run re-reads the
+    # whole state, so it loses nothing by waiting.
+    "ash-unified-ci-matrix-comment.yml": (
+        "${{ github.workflow }}"
+        "-${{ github.event.workflow_run.head_repository.full_name }}"
+        "-${{ github.event.workflow_run.head_branch }}"
+    ),
     # The docs publish. Keyed on what it publishes (main, or the release tag given as
     # the `ref` input), never on the caller's ref, and never cancelled: the job only
     # publishes main or a release tag, so the rule above has nothing to cancel here.

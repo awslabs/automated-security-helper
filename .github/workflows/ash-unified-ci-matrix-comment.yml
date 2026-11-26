@@ -1,0 +1,109 @@
+name: ASH - Unified CI matrix comment
+
+# WHAT THIS DOES
+#
+# Keeps one comment on each pull request that shows every cell of every matrix in
+# ash-unified-ci.yml (operating system and runner image, Python version, shard, install
+# method, container engine, config file, ...) with the result of the job that ran for it,
+# and rewrites the whole comment as the run's jobs finish. Cells the matrix leaves out on
+# a pull request are drawn as excluded, not missing. The script's docstring
+# (.github/scripts/unified-ci-matrix-comment.py) describes the layout.
+#
+# WHY workflow_run, AND WHY THE JOB WAITS FOR THE RUN
+#
+# No trigger fires when one job of another workflow finishes: workflow_job is a webhook
+# event only, and a check_run event never starts a workflow for a check suite that
+# GitHub Actions created. So this starts when a Unified CI run is requested, and its job
+# reads the run's job list every 45 seconds until the run completes, re-rendering the
+# whole table from that list each time; a cell can therefore not be lost to two jobs
+# finishing close together. The completed event starts one last render, which waits in
+# the concurrency group until the watching job has finished. requested does not fire for
+# a re-run, so a re-run's comment is rewritten when it completes; in_progress is not
+# subscribed because GitHub does not say how often it is delivered, and each delivery
+# would queue a run of this workflow.
+#
+# A read costs about three API requests, and the token's hourly request budget is the
+# whole repository's, so with under a quarter of it left the script reads four times
+# less often.
+#
+# THE SAFETY OF THE TRIGGER
+#
+# A workflow_run job holds a write token even for a pull request from a fork, which is
+# why zizmor flags the trigger. This one never checks out or runs anything from the pull
+# request: the checkout is the default-branch commit this file was read from (github.sha
+# on workflow_run), sparse, without persisted credentials, and holds only the script, its
+# pinned requirement and ash-unified-ci.yml. What comes from the run -- job names, which a
+# fork's own workflow file sets, the branch name, runner labels -- reaches the comment
+# only inside markdown code spans (the script's code() and html_code()) and the job log
+# only through one_line(). The token can read the run and write pull-request comments,
+# nothing else, and the script edits only a comment of its own that carries its marker.
+
+on:
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: ["ASH - Unified CI"]
+    types: [requested, completed]
+    # A merge-queue entry has no pull request to comment on.
+    branches-ignore:
+      - "gh-readonly-queue/**"
+
+# No workflow-level grant: the one job asks for what it uses.
+permissions: {}
+
+concurrency:
+  # One writer per pull-request branch at a time, queued rather than cancelled: a
+  # watching job must not be cancelled mid-write, and the queued run re-reads the whole
+  # state, so it loses nothing by waiting. github.ref is the default branch on
+  # workflow_run, so a ref-keyed group would put every pull request in one group; the
+  # head repository and branch name the pull request instead, a fork's too. GitHub keeps
+  # one pending run per group, so a newer event replaces an older queued one, which shows
+  # as a cancelled run of this workflow.
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  matrix-comment:
+    name: matrix comment
+    runs-on: ubuntu-24.04-arm
+    # The script stops watching at 170 minutes; the run's completed event renders the
+    # final state whenever the run ends.
+    timeout-minutes: 180
+    # Pull-request runs of the Unified CI file itself, in this repository only, so a fork
+    # of the repository running this file comments nowhere.
+    if: >-
+      github.repository == 'awslabs/automated-security-helper' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.path == '.github/workflows/ash-unified-ci.yml'
+    permissions:
+      # The run, its jobs, and the first lines of a finished job's log.
+      actions: read
+      # The default-branch checkout below.
+      contents: read
+      # Create and update the one comment.
+      pull-requests: write
+    steps:
+      - name: Check out the script and the matrix from the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/scripts/unified-ci-matrix-comment.py
+            .github/scripts/unified-ci-matrix-comment.requirements.txt
+            .github/workflows/ash-unified-ci.yml
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install the YAML parser, pinned by hash
+        run: >-
+          python -m pip install --disable-pip-version-check --no-deps
+          --only-binary=:all: --require-hashes
+          -r .github/scripts/unified-ci-matrix-comment.requirements.txt
+      - name: Keep the matrix comment current until the run finishes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python .github/scripts/unified-ci-matrix-comment.py watch
+          --workflow .github/workflows/ash-unified-ci.yml
+          --poll-seconds 45
+          --deadline-minutes 170

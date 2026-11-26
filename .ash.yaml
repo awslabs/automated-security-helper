@@ -385,6 +385,9 @@ global_settings:
     - rule_id: zizmor/dangerous-triggers
       path: .github/workflows/ash-dependabot-auto-merge.yml
       reason: "Reviewed. The workflow_run trigger is the point of the file: it approves a dependabot bump only after every required check on the head is green. The header of the workflow, under THE SAFETY OF THE TRIGGER, names why nothing the audit warns about can happen there. ASH runs zizmor without its inline ignore comments, so the decision is recorded here."
+    - rule_id: zizmor/dangerous-triggers
+      path: .github/workflows/ash-unified-ci-matrix-comment.yml
+      reason: "Reviewed. No other trigger can update a pull request's comment as each job of a Unified CI run finishes, fork pull requests included. The job checks out only its script and the matrix from the default branch, runs nothing from the pull request, and can read the run and write pull-request comments, nothing else. The header of the workflow, under THE SAFETY OF THE TRIGGER, gives the details. ASH runs zizmor without its inline ignore comments, so the decision is recorded here."
     - rule_id: generic-api-key
       path: tests/unit/utils/test_finding_trend.py
       reason: "False positive. A report-id helper whose default argument is a made-up twelve-character token, so the generated ids are fixed. The provider-specific gitleaks rules still apply to this file."

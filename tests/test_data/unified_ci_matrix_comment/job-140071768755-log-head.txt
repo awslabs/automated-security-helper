@@ -1,0 +1,35 @@
+﻿2026-11-26T17:20:13.9554704Z Current runner version: '2.338.2'
+2026-11-26T17:20:13.9576954Z ##[group]Runner Image Provisioner
+2026-11-26T17:20:13.9577612Z Hosted Compute Agent
+2026-11-26T17:20:13.9578053Z Version: 20261111.635
+2026-11-26T17:20:13.9578517Z Commit: b8a594ea514ff44cadb5342986c68b1eac6e22ed
+2026-11-26T17:20:13.9579111Z Build Date: 2026-11-11T01:49:01Z
+2026-11-26T17:20:13.9579614Z Worker ID: {7ba10c51-1ac8-4c74-9274-80fcdabe2e1f}
+2026-11-26T17:20:13.9580141Z Region: westus2
+2026-11-26T17:20:13.9580551Z Cloud: Azure
+2026-11-26T17:20:13.9580938Z ##[endgroup]
+2026-11-26T17:20:13.9581956Z ##[group]Operating System
+2026-11-26T17:20:13.9582425Z Microsoft Windows Server 2025
+2026-11-26T17:20:13.9582873Z 10.0.26100
+2026-11-26T17:20:13.9583314Z Datacenter
+2026-11-26T17:20:13.9583698Z ##[endgroup]
+2026-11-26T17:20:13.9584142Z ##[group]Runner Image
+2026-11-26T17:20:13.9584581Z Image: windows-2025-vs2026
+2026-11-26T17:20:13.9585013Z Version: 20261116.315.1
+2026-11-26T17:20:13.9586688Z Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20261116.315/images/windows/Windows2025-VS2026-Readme.md
+2026-11-26T17:20:13.9588062Z Image Release: https://github.com/actions/runner-images/releases/tag/win25-vs2026%2F20261116.315
+2026-11-26T17:20:13.9588813Z ##[endgroup]
+2026-11-26T17:20:13.9589880Z ##[group]GITHUB_TOKEN Permissions
+2026-11-26T17:20:13.9591456Z Checks: write
+2026-11-26T17:20:13.9591887Z Contents: read
+2026-11-26T17:20:13.9592328Z Metadata: read
+2026-11-26T17:20:13.9592738Z PullRequests: write
+2026-11-26T17:20:13.9593153Z Statuses: write
+2026-11-26T17:20:13.9593565Z ##[endgroup]
+2026-11-26T17:20:13.9595307Z Secret source: Actions
+2026-11-26T17:20:13.9596022Z Cache mode: write
+2026-11-26T17:20:13.9596595Z Prepare workflow directory
+2026-11-26T17:20:13.9909030Z Prepare all required actions
+2026-11-26T17:20:13.9948278Z Getting action download info
+2026-11-26T17:20:14.2916652Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+2026-11-26T17:20:14.5965827Z Complete job name: e2e-test (windows-latest)
