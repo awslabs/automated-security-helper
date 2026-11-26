@@ -17,9 +17,10 @@ from automated_security_helper.base.plugin_config import (
     config_validated_by_declared_model,
 )
 from automated_security_helper.base.uv_tool_mixin import (
-    _tool_name,
+    _restore_uv_route,
     guarded_values,
     guarded_values_read,
+    tool_name,
 )
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
@@ -941,7 +942,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             # No tool to look for: nothing can be found, and an empty name is
             # never handed to the lookup.
             return False
-        found = find_executable(_tool_name(self))
+        found = find_executable(tool_name(self))
         if found is None:
             # A copy inside the scanned tree was refused: say so in the MISSING row,
             # with the path and how to allow it, rather than "not installed".
@@ -1432,12 +1433,13 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         resolver, which pays the cold uv probe and flips the route -- the exact
         shape this unit removes -- so the flag goes back to the uv route the
         decision started from, and the next validation runs selection afresh.
+        The version recorded for that copy goes with the route and the uv
+        version probe is owed again, since the scan now runs through uv.
         """
         self._dependencies_validated = None
         if self._verified_pre_installed_executable is not None:
             self._verified_pre_installed_executable = None
-            if self.use_uv_tool is False:
-                self.use_uv_tool = True
+            _restore_uv_route(self)
 
     def _pre_scan(
         self,
@@ -2991,7 +2993,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                     text,
                     read.values,
                     plugin_inputs=self._uv_run_inputs_for_records(),
-                    tool_name=_tool_name(self),
+                    tool_name=tool_name(self),
                     limit=None,
                 )
             except Exception:  # noqa: BLE001 -- the error being reported outranks it
@@ -3259,7 +3261,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                             raw,
                             values,
                             plugin_inputs=inputs,
-                            tool_name=_tool_name(self),
+                            tool_name=tool_name(self),
                             limit=None,
                         )
                 else:

@@ -87,6 +87,30 @@
   baseline or a suppression keyed by that id needs refreshing. A suppression written
   against the config file's path and lines is not affected. A result that has a line in
   the generated script with no sidecar row is unchanged.
+- **checkov's `all` no longer runs its GitLab, GitHub and Bitbucket configuration
+  frameworks.** `frameworks` defaults to `all`, and checkov now leaves
+  `gitlab_configuration`, `github_configuration` and `bitbucket_configuration` out of
+  it, so a scan that reported their `CKV_GITLAB_*`, `CKV_GITHUB_*` or `CKV_BITBUCKET_*`
+  findings no longer does. They check the repository host's settings through its API
+  rather than files in the scanned tree, and GitLab's CI job token is not documented to
+  reach the project approvals API that checkov's GitLab check reads. To run one, name
+  it in `frameworks`, with or without `all` (`frameworks: [all, gitlab_configuration]`);
+  the `framework` list of the operator's checkov config file is read the same way. In
+  an offline scan their settings are not fetched, and the scan warns for each one that
+  runs. The conf directory ASH names for each below the scanner's results directory is
+  emptied before every run, so a framework never reports settings an earlier run
+  fetched as this scan's; a directory set in `CKV_GITLAB_CONF_DIR_NAME`,
+  `CKV_GITHUB_CONF_DIR_NAME` or `CKV_BITBUCKET_CONF_DIR_NAME` is left as it is.
+- **`frameworks: []` runs checkov as `all` does, and checkov gets a GitLab, GitHub or
+  Bitbucket token only for a configuration framework that runs in an online scan.**
+  checkov reads no `--framework` as all frameworks, and an empty list was passed as no
+  `--framework`, so it ran the three configuration frameworks; it is now passed as `all`
+  is, the config file's `framework` list takes its place the same way, and checkov's
+  `CKV_FRAMEWORK` variable no longer chooses the frameworks for it. checkov reads
+  `CI_JOB_TOKEN`, `GITHUB_TOKEN` and `APP_PASSWORD`, the API tokens of its GitLab, GitHub
+  and Bitbucket configuration frameworks, every time it starts, whichever frameworks
+  run. Each is now left out of checkov's environment in an offline scan and when its
+  framework does not run, and a framework that runs online gets its token as before.
 
 ### Maintenance
 
@@ -267,9 +291,15 @@
   finding. Two instances of one module, or two resources of a Terraform plan (every
   plan finding is on the plan file), gave findings that differed in nothing. ASH now
   reads the resource from checkov's JSON report, for Terraform, Terraform plans,
-  Terraform JSON, CloudFormation, Kubernetes, ARM and Bicep: `aws_db_instance.this`,
+  CloudFormation, Kubernetes and Bicep: `aws_db_instance.this`,
   `module.db.aws_db_instance.this`, `AWS::S3::Bucket.Bucket`, `Deployment.shop.web`,
-  `Microsoft.Storage/storageAccounts.st`.
+  `Microsoft.Storage/storageAccounts.st`. An id names one resource: when the records of
+  one file give an id at two different line ranges, two resources share it, and the
+  findings of neither carry it, so a suppression for them is scoped by path and lines.
+  Terraform JSON and ARM findings name no resource. checkov leaves the resource type out
+  of a Terraform JSON id. An ARM name built from a parameter with no default stays the
+  template expression, so resources can share an id, and an ARM template's line ranges
+  cannot always tell them apart: a template on one line puts every resource at line 1.
   It is in the `resource_id` of the flat JSON and CSV reports, and a `resource_id`
   suppression now binds to it. checkov is always asked for its JSON report for this,
   so `results_json.json` is in checkov's results directory on every run, not only when
@@ -305,12 +335,6 @@
   scanner's results directory instead of below checkov's working directory, the
   filesystem root. A directory set in `CKV_GITLAB_CONF_DIR_NAME`,
   `CKV_GITHUB_CONF_DIR_NAME` or `CKV_BITBUCKET_CONF_DIR_NAME` is used as set.
-- checkov leaves its GitLab, GitHub and Bitbucket configuration frameworks out when
-  `frameworks` is `all`, the default. They read the repository host's settings through
-  its API rather than files in the scanned tree, and GitLab's CI job token is not
-  documented to reach the project approvals API that checkov's GitLab check reads.
-  Name a framework in `frameworks`, with or without `all`, to run it. In an offline
-  scan their settings are not fetched.
 - Listed `GIT_CONFIG_*` environment entries are refused for scanners that need
   git `safe.directory` (opengrep); remove the entry from the environment list to
   run such a scanner.

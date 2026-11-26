@@ -206,7 +206,7 @@ Ranges are written in the grammar native to the runtime: `python` uses PEP 440 s
 
 | Facet | State | Native field | Reason |
 |-------|-------|--------------|--------|
-| `rule_id` | `mapped` | violation "id" (e.g. W51), the SARIF ruleId |  |
+| `rule_id` | `mapped` | SARIF result ruleId, CFN_NAG\_&lt;id&gt; (e.g. CFN_NAG_W51); the JSON violation "id" is the bare &lt;id&gt; (e.g. W51) |  |
 | `severity` | `mapped` | violation "type" (WARN or FAIL), rendered by the tool as the SARIF result level |  |
 | `file_path` | `mapped` | file result "filename", the SARIF artifact uri (restored from the staged copy by \_restore_cfn_nag_uris) |  |
 | `line_range` | `mapped` | violation "line_numbers", the SARIF region startLine |  |
@@ -225,7 +225,7 @@ Ranges are written in the grammar native to the runtime: `python` uses PEP 440 s
 | `snippet` | `n/a` |  | the captured SARIF region carries startLine only, with no snippet, and the JSON carries no excerpt (M0 item b) |
 | `references` | `n/a` |  | the captured SARIF rules are {id, name, fullDescription} with no helpUri, and the JSON carries no URL (M0 item b) |
 | `tags` | `n/a` |  | the adapter adds no tags and the tool's JSON carries none |
-| `extras` | `n/a` |  | the adapter writes no result property bag (its only PropertyBag is on the Invocation) |
+| `extras` | `n/a` |  | the captured SARIF results carry no property bag (M0 item b); the one result property the adapter writes is ash_resource_id, which the resource_id cell declares |
 
 ## `checkov`
 
@@ -247,7 +247,7 @@ Ranges are written in the grammar native to the runtime: `python` uses PEP 440 s
 | `taxonomy_cve` | `n/a` |  | checkov publishes its own check ids; no CVE taxonomy in the policy-check results |
 | `taxonomy_cwe` | `n/a` |  | checkov publishes its own check ids; no CWE taxonomy in the policy-check results |
 | `fingerprints` | `n/a` |  | none of the committed checkov-3.4.6 capture's six SARIF results carries fingerprints or partialFingerprints, and the side report carries no fingerprint |
-| `fix_available` | `n/a` |  | the side report has a fixed_definition key and it is null on every record read: 34 of 34 across terraform, cloudformation, kubernetes and dockerfile (checkov 3.4.5, an offline desk run beside the committed fixture), so no run ASH makes has shown a fix state to map; a populated record would redeclare it |
+| `fix_available` | `n/a` |  | the side report has a fixed_definition key and it is null on every record read: 34 of 34 across terraform, cloudformation, kubernetes and dockerfile (checkov 3.4.5, an offline run beside the committed fixture), so no run ASH makes has shown a fix state to map; a populated record would redeclare it |
 | `remediation_text` | `n/a` |  | check_name states the finding, not a remediation; no remediation text field exists in the side report |
 | `snippet` | `mapped` | SARIF region.snippet.text (settled by the committed checkov-3.4.6 capture; the side report's "code_block" carries the same lines) |  |
 | `references` | `n/a` |  | the side report has a "guideline" key and it is null on every record of the committed capture (9 of 9, checkov 3.4.6 insecure-s3), so no run ASH makes has shown a URL to map; attach_checkov_guidelines copies a non-null guideline onto the result as a related location, which the flat references read, so a capture whose records carry one redeclares this cell MAPPED |

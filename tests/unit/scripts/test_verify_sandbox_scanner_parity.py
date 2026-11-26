@@ -6,12 +6,15 @@
 * findings filed under a scanner name absent from scanner_results (the "?"
   fallback bucket included) are compared, not skipped;
 * the backend ASH resolved for ``--sandbox auto`` is read from the log, so an
-  auto run is not reported as "never selected".
+  auto run is not reported as "never selected";
+* ``--require-findings`` reports a named scanner with no finding of its own, and
+  the fixture gives mcp-config, which reads only MCP config files, findings.
 """
 
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -196,6 +199,69 @@ class TestGitleaksFixtureLoader:
             "gitleaks_fixture.py"
         )
         assert callable(module.materialize)
+
+
+class TestRequireFindings:
+    """A scanner whose clean status is also what a run that read nothing reports."""
+
+    def test_a_named_scanner_with_no_finding_is_a_problem(self, parity):
+        problems = parity.missing_findings(
+            "offline", {"mcp-config": Counter()}, "mcp-config"
+        )
+        assert problems == [
+            (
+                "[offline] scanner mcp-config reported no findings unsandboxed: it "
+                "read nothing the fixture gives it"
+            )
+        ]
+
+    def test_a_named_scanner_absent_from_the_results_is_a_problem(self, parity):
+        assert len(parity.missing_findings("offline", {}, "mcp-config")) == 1
+
+    def test_a_named_scanner_with_a_finding_is_clean(self, parity):
+        finding = ("mcp-config", "MCP-UNPINNED-RUNNER", ".mcp.json", 17, "unpinned")
+        found = {"mcp-config": Counter({finding: 1})}
+        assert parity.missing_findings("offline", found, " mcp-config ,") == []
+
+    def test_a_scanner_that_is_not_named_is_not_checked(self, parity):
+        assert parity.missing_findings("offline", {"bandit": Counter()}, "") == []
+
+
+class TestTheFixtureGivesMcpConfigFindings:
+    def test_mcp_config_reports_findings_on_the_built_fixture(self, parity, tmp_path):
+        """The real scanner over the real fixture, with the real scan set.
+
+        mcp-config reads only MCP server config files; on a fixture without one it
+        reports nothing, and ``--require-findings mcp-config`` fails. The scan set
+        is not patched, so a config file the fixture's ignore rules dropped would
+        fail here too.
+        """
+        from automated_security_helper.base.plugin_context import PluginContext
+        from automated_security_helper.config.default_config import (
+            get_default_config,
+        )
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.mcp_config_scanner import (
+            RULE_PRIVILEGE_ESCALATION,
+            RULE_UNPINNED_RUNNER,
+            McpConfigScanner,
+            McpConfigScannerConfig,
+        )
+
+        source = parity.build_fixture(tmp_path / "fixture")
+        context = PluginContext(
+            source_dir=source,
+            output_dir=tmp_path / "output",
+            work_dir=tmp_path / "work",
+            config=get_default_config(),
+        )
+        scanner = McpConfigScanner(context=context, config=McpConfigScannerConfig())
+        report = scanner.scan(target=source, target_type="source")
+        found = Counter(result.ruleId for result in report.runs[0].results)
+        assert (
+            parity.missing_findings("offline", {"mcp-config": found}, "mcp-config")
+            == []
+        )
+        assert set(found) == {RULE_PRIVILEGE_ESCALATION, RULE_UNPINNED_RUNNER}
 
 
 class TestSelectedBackend:
