@@ -452,6 +452,14 @@ _DROPPED_FIXTURES: dict[str, tuple[str, str | None, str]] = {
         "search_key",
         "aws_s3_bucket[b].acl=public-read",
     ),
+    # Kyverno's native output is the policy report as YAML, which the JSON
+    # reader cannot parse, so the object it names under "resources" is read as
+    # a substring of the captured report's text (the key-None reading).
+    "KyvernoScanner": (
+        "kyverno/captured/kyverno-1.19.2-high.report.yaml",
+        None,
+        "    kind: Pod\n    name: bad-pod\n    namespace: default\n",
+    ),
 }
 
 

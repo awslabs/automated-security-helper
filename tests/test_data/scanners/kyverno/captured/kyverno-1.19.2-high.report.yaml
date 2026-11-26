@@ -1,0 +1,50 @@
+Warning: policies/high.yaml: kyverno.io/v1 ClusterPolicy is deprecated and will be removed in a future release; migrate to ValidatingPolicy, MutatingPolicy, GeneratingPolicy or ImageValidatingPolicy (policies.kyverno.io), see https://kyverno.io/docs/guides/migration-to-cel/
+apiVersion: openreports.io/v1alpha1
+kind: ClusterReport
+metadata:
+  name: merged
+results:
+- category: Best Practices
+  message: 'validation error: The label team is required. rule check-team-label failed
+    at path /metadata/labels/'
+  policy: require-team-label
+  properties:
+    process: background scan
+  resources:
+  - apiVersion: v1
+    kind: Pod
+    name: bad-pod
+    namespace: default
+  result: fail
+  rule: check-team-label
+  scored: true
+  severity: high
+  source: kyverno
+  timestamp:
+    nanos: 0
+    seconds: 1795565965
+- category: Best Practices
+  message: validation rule 'check-team-label' passed.
+  policy: require-team-label
+  properties:
+    process: background scan
+  resources:
+  - apiVersion: v1
+    kind: Pod
+    name: good-pod
+    namespace: default
+  result: pass
+  rule: check-team-label
+  scored: true
+  severity: high
+  source: kyverno
+  timestamp:
+    nanos: 0
+    seconds: 1795565965
+source: ""
+summary:
+  error: 0
+  fail: 1
+  pass: 1
+  skip: 0
+  warn: 0

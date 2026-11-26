@@ -1124,6 +1124,9 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "hadolint/ThirdPartyNotices.txt": "424561d8aade37960e8db594ca5403f9a4a98f593ff1126a296298f11d3d1a27",  # pragma: allowlist secret
     "kingfisher commit": "0b57b8122e10050db3cefffde1a555a061e0b280",  # pragma: allowlist secret
     "kingfisher/LICENSE": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",  # pragma: allowlist secret
+    "kyverno commit": "e63308f1e16c05cd009ac4864be6ec25c66b49be",  # pragma: allowlist secret
+    "kyverno/LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",  # pragma: allowlist secret
+    "kyverno/NOTICE": "ca6931d83fcf86ea492e557913f41c1722e4e13c9e0f6d152cdd9e4731028113",  # pragma: allowlist secret
     "libgit2 commit": "0060d9cf5666f015b1067129bd874c6cc4c9c7ac",  # pragma: allowlist secret
     "libgit2/AUTHORS": "126ed06438e488d71f5232b39436b3a1dffccb9c2697e3a332fbe868975cd55f",  # pragma: allowlist secret
     "libgit2/COPYING": "e3712465634e97cfd850822a4eb5ac7d2f8a10f753189366d5a2060046f28288",  # pragma: allowlist secret
@@ -1428,6 +1431,26 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             LicenseFile("THIRD_PARTY_NOTICES"),
             LicenseFile("kingfisher-vectorscan-NOTICE"),
         ),
+    ),
+    # The alpha Kyverno scanner's tool. Pinned and installed by its own module
+    # (``ash_kyverno_plugins/kyverno_install.py``), not by install-pinned-tool, so
+    # its license files are staged from the repository at the pinned commit on the
+    # --licenses-only line. Each release archive holds the executable and a LICENSE
+    # byte-identical to the repository's (compared on 2026-11-26) but not the
+    # repository's NOTICE, which is fetched beside it. ``kyverno --version`` is an
+    # unknown flag, so the version check runs ``kyverno version`` (prints
+    # "Version: 1.19.2").
+    "kyverno": ThirdPartyLicense(
+        tool="kyverno",
+        version="v1.19.2",
+        license="Apache-2.0",
+        repository="https://github.com/kyverno/kyverno",
+        commit=_THIRD_PARTY_HASHES["kyverno commit"],
+        files=(
+            _from_source("kyverno", "https://github.com/kyverno/kyverno", "LICENSE"),
+            _from_source("kyverno", "https://github.com/kyverno/kyverno", "NOTICE"),
+        ),
+        version_probe=("kyverno", "version"),
     ),
     # Compiled into the pygit2 wheel GuardDog depends on (pygit2.libs/libgit2-*.so),
     # in GuardDog's uv tool environment. COPYING carries the linking exception and

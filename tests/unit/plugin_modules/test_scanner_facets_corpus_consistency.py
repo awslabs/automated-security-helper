@@ -226,6 +226,10 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
     "hadolint": CorpusSpec("hadolint", sarif=("captured/*.sarif",)),
     "kics": CorpusSpec("kics", sarif=("captured/*.sarif",)),
     "kingfisher": CorpusSpec("kingfisher", sarif=("captured/*.sarif",)),
+    # The committed SARIF is the adapter's output for a REAL captured Kyverno
+    # v1.19.2 report (captured/kyverno-1.19.2-high.report.yaml); a regeneration
+    # test keeps it honest.
+    "kyverno": CorpusSpec("kyverno", sarif=("captured/*.sarif",)),
     "mcp-config": CorpusSpec("mcp_config", sarif=("captured/*.sarif",)),
     "npm-audit": CorpusSpec("npmaudit", prep="npm-audit"),
     "opengrep": CorpusSpec("opengrep", sarif=("captured/*.sarif",)),

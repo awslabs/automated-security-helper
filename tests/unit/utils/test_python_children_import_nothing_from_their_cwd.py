@@ -348,6 +348,12 @@ RAW_PYTHON_ARGV_ALLOWED = {
     ),
     ("cli/dependencies.py", "_with_path_imported"),
     ("utils/cdk_nag_worker.py", "_run_child"),
+    # kyverno's own pinned installer: its install commands are argv lists that only
+    # run_command starts, through python_child (the install-command case above).
+    (
+        "plugin_modules/ash_kyverno_plugins/kyverno_install.py",
+        "kyverno_install_commands",
+    ),
 }
 
 #: Spawn helpers a Python child may be handed to.

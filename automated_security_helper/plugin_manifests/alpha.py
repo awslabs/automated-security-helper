@@ -218,6 +218,14 @@ MANIFESTS = (
         owned=(f"{_DOCS}/kingfisher-plugin.md", f"{_FIXTURES}/kingfisher"),
     ),
     _alpha(
+        "kyverno",
+        "ash_kyverno_plugins",
+        "kyverno_scanner",
+        "KyvernoScanner",
+        "KyvernoScannerConfigOptions",
+        owned=(f"{_DOCS}/kyverno-plugin.md", f"{_FIXTURES}/kyverno"),
+    ),
+    _alpha(
         "polaris",
         "ash_polaris_plugins",
         "polaris_scanner",
