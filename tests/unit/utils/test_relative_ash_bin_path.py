@@ -8,7 +8,10 @@ usually runs from the repository it scans. Were ``ASH_BIN_PATH=bin`` searched, a
 repository that committed ``bin/grype`` would have that file run as grype. Tool
 lookup keeps the anchored directories only (as #798's PATH filter does) and
 logs one warning per process that names the value and asks for an absolute
-path.
+path. The writers follow the same rule: a relative value is never installed into,
+downloaded into or used to place the cfn-guard rules, since each would write into
+the repository being scanned, so they use ``~/.ash/bin`` and warn once, and with no
+usable home they install nothing.
 """
 
 from __future__ import annotations
@@ -20,11 +23,19 @@ import shutil
 import stat
 import subprocess
 import sys
+import urllib.error
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
-from automated_security_helper.utils import subprocess_utils
+from automated_security_helper.core import constants
+from automated_security_helper.core.constants import home_bin_path
+from automated_security_helper.utils import (
+    download_utils,
+    rules_bundles,
+    subprocess_utils,
+)
 from tests.utils.helpers import checkout_env
 from tests.utils.tool_guard import use_the_real_candidate_names
 
@@ -193,6 +204,369 @@ def test_no_such_line_without_both(rows, bin_path, tmp_path, monkeypatch, capsys
     monkeypatch.setenv("ASH_BIN_PATH", bin_path or str(tmp_path / "bin"))
     print_incompleteness_message(rows, [])
     assert "were not looked for" not in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# The writers: nothing is installed, downloaded or placed under the working directory
+# ---------------------------------------------------------------------------
+
+#: What is logged, once per process, for the value these tests set.
+RELATIVE_VALUE_WARNING = f"{WARNING_TEXT} 'rel-bin'"
+#: The pinned rules bundle the rules-directory tests install.
+BUNDLE = "aws-guard-rules-registry"
+
+
+class RelativeSetting(NamedTuple):
+    """Where a writer test runs: an empty working directory, and a home that exists."""
+
+    cwd: Path
+    home: Path
+
+
+@pytest.fixture
+def relative_ash_bin_path(tmp_path, monkeypatch) -> RelativeSetting:
+    """ASH_BIN_PATH=rel-bin, run from an empty directory, in a home of its own.
+
+    The rules directory variable is unset, and the record of what was warned about
+    starts empty, so each test counts its own warnings.
+    """
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.chdir(cwd)
+    monkeypatch.setenv("HOME", str(home))
+    # What Path.home() reads on Windows.
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("ASH_BIN_PATH", "rel-bin")
+    monkeypatch.delenv(rules_bundles.RULES_DIR_ENV, raising=False)
+    monkeypatch.setattr(subprocess_utils, "_warned_relative_bin_paths", set())
+    return RelativeSetting(cwd, home)
+
+
+def _names_in(directory: Path) -> list:
+    """What is directly in ``directory``: empty when nothing was made there."""
+    return sorted(path.name for path in directory.iterdir())
+
+
+def _relative_value_warnings(caplog) -> list:
+    """The logged messages that name the relative value, as they were logged."""
+    messages = [record.getMessage() for record in caplog.records]
+    return [message for message in messages if RELATIVE_VALUE_WARNING in message]
+
+
+def _as_the_builders_write_it(directory: Path) -> str:
+    """A directory as the install command builders spell it: ``/`` on Windows only."""
+    text = str(directory)
+    return text.replace("\\", "/") if os.name == "nt" else text
+
+
+def _without_a_usable_home(monkeypatch) -> None:
+    """HOME and USERPROFILE empty, so ``~/.ash/bin`` does not exist."""
+    monkeypatch.setenv("HOME", "")
+    monkeypatch.setenv("USERPROFILE", "")
+    assert home_bin_path() is None
+
+
+def _the_import_time_constant_is_relative(monkeypatch) -> None:
+    """Every copy of ``ASH_BIN_PATH``, as an import under ``rel-bin`` computed it.
+
+    ``raising=False``: a fix that stops importing the constant into a module leaves
+    nothing to set there.
+    """
+    for module in (constants, download_utils, subprocess_utils):
+        monkeypatch.setattr(module, "ASH_BIN_PATH", Path("rel-bin"), raising=False)
+
+
+def _outcome(call):
+    """``(what the call returned, None)``, or ``(None, what it raised)``."""
+    try:
+        return call(), None
+    except Exception as error:
+        return None, error
+
+
+def _install_command(kind: str):
+    """An install command built with no destination, and where its destination sits.
+
+    The pinned-tool command carries the destination as argv[6], the URL download
+    command as argv[4].
+    """
+    if kind == "pinned":
+        command = download_utils.create_pinned_tool_install_command(
+            "grype", "linux", "amd64"
+        )
+        return command, 6
+    command = download_utils.create_url_download_command(
+        "https://example.invalid/tool", rename_to="tool", expected_sha256="0" * 64
+    )
+    return command, 4
+
+
+@pytest.fixture
+def tool_already_installed(monkeypatch):
+    """``install_pinned_tool`` finds its tool in place, so it downloads nothing.
+
+    It makes its bin directory first, which is what the tests using this are about.
+    """
+    monkeypatch.setattr(download_utils, "_already_installed", lambda *a, **k: True)
+    monkeypatch.setattr(download_utils, "_companions_verified", lambda *a, **k: True)
+
+
+@pytest.fixture
+def no_network(monkeypatch) -> list:
+    """Every download of the rules bundle fails as when offline; each call is listed."""
+    attempts: list = []
+
+    def refuse(*args, **kwargs):
+        attempts.append(args)
+        raise urllib.error.URLError("no network in this test")
+
+    monkeypatch.setattr(download_utils, "download_file", refuse)
+    return attempts
+
+
+@pytest.mark.unit
+def test_the_tool_lookup_takes_the_default_directory_in_the_same_setting(
+    relative_ash_bin_path, caplog
+):
+    """Control for the writer tests below, green at the base: the lookup side.
+
+    The same setting (a relative value in the environment, an empty working
+    directory, a home of its own), asked of ``_bin_path``, which already follows the
+    rule. It answers ``~/.ash/bin`` for both calls and warns once, so the setting
+    reaches the rule and the count of one is what a correct reader logs.
+    """
+    cwd, _home = relative_ash_bin_path
+    with caplog.at_level(logging.WARNING):
+        first = subprocess_utils._bin_path()
+        second = subprocess_utils._bin_path()
+    assert first == second == home_bin_path()
+    assert _names_in(cwd) == []
+    warnings = _relative_value_warnings(caplog)
+    assert len(warnings) == 1, warnings
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "arrives_as",
+    [
+        pytest.param("environment", id="environment-variable"),
+        pytest.param("constant-unset", id="import-time-constant-variable-unset"),
+        pytest.param("constant-blank", id="import-time-constant-variable-blank"),
+    ],
+)
+def test_the_installers_bin_directory_is_the_default_one_for_a_relative_value(
+    arrives_as, relative_ash_bin_path, monkeypatch, caplog
+):
+    """``current_bin_path`` is the directory every installer asks for.
+
+    A relative ASH_BIN_PATH was made absolute against the working directory, and the
+    import-time constant (what a process that started with ``rel-bin`` keeps once
+    the variable is unset or blank) was returned as it was; both name a directory in
+    the repository being scanned. Like the lookup (``_bin_path``), it warns once per
+    value and answers ``~/.ash/bin``.
+
+    Fails at the base on the answer: ``<working directory>/rel-bin`` or ``rel-bin``.
+    """
+    cwd, home = relative_ash_bin_path
+    if arrives_as != "environment":
+        _the_import_time_constant_is_relative(monkeypatch)
+        if arrives_as == "constant-unset":
+            monkeypatch.delenv("ASH_BIN_PATH")
+        else:
+            monkeypatch.setenv("ASH_BIN_PATH", " ")
+    expected = home_bin_path()
+    assert expected == home / ".ash" / "bin"
+    with caplog.at_level(logging.WARNING):
+        first = download_utils.current_bin_path()
+        second = download_utils.current_bin_path()
+    assert first == second == expected
+    assert _names_in(cwd) == []
+    warnings = _relative_value_warnings(caplog)
+    assert len(warnings) == 1, warnings
+
+
+@pytest.mark.unit
+def test_the_installers_bin_directory_is_none_for_a_relative_value_without_a_home(
+    relative_ash_bin_path, monkeypatch
+):
+    """With no usable home ``~/.ash/bin`` does not exist, so there is no directory.
+
+    ``current_bin_path`` answers None, as documented, and each installer then
+    refuses (``NO_BIN_DIRECTORY``). It answered ``<working directory>/rel-bin``.
+    """
+    cwd, _home = relative_ash_bin_path
+    _without_a_usable_home(monkeypatch)
+    directory = download_utils.current_bin_path()
+    assert directory is None, directory
+    assert _names_in(cwd) == []
+
+
+@pytest.mark.unit
+def test_a_direct_install_goes_to_the_default_directory_for_a_relative_value(
+    relative_ash_bin_path, tool_already_installed, caplog
+):
+    """``install_pinned_tool`` with no destination makes its bin directory first.
+
+    With ASH_BIN_PATH=rel-bin it made ``rel-bin`` in the working directory, then
+    installed there (stubbed here to find the tool in place, so nothing is
+    downloaded). It makes ``~/.ash/bin`` and warns once.
+
+    Fails at the base on the working directory: ``rel-bin`` is in it.
+    """
+    cwd, home = relative_ash_bin_path
+    with caplog.at_level(logging.WARNING):
+        first = download_utils.install_pinned_tool("grype", "linux", "amd64")
+        second = download_utils.install_pinned_tool("grype", "linux", "amd64")
+    assert _names_in(cwd) == []
+    assert first.parent == second.parent == home_bin_path()
+    assert (home / ".ash" / "bin").is_dir()
+    warnings = _relative_value_warnings(caplog)
+    assert len(warnings) == 1, warnings
+
+
+@pytest.mark.unit
+def test_a_direct_install_refuses_for_a_relative_value_without_a_home(
+    relative_ash_bin_path, tool_already_installed, monkeypatch
+):
+    """With no usable home there is no directory to install into: a RuntimeError.
+
+    ``install_pinned_tool`` raises ``NO_BIN_DIRECTORY`` before it makes anything. It
+    made ``<working directory>/rel-bin`` and installed there.
+
+    Fails at the base on the working directory: ``rel-bin`` is in it.
+    """
+    cwd, _home = relative_ash_bin_path
+    _without_a_usable_home(monkeypatch)
+    installed, refusal = _outcome(
+        lambda: download_utils.install_pinned_tool("grype", "linux", "amd64")
+    )
+    assert _names_in(cwd) == [], installed
+    assert isinstance(refusal, RuntimeError), (installed, refusal)
+    assert str(refusal) == download_utils.NO_BIN_DIRECTORY
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("kind", ["pinned", "url"])
+def test_an_install_command_names_the_default_directory_for_a_relative_value(
+    kind, relative_ash_bin_path, caplog
+):
+    """A command built with no destination carries the bin directory as an argument.
+
+    ``create_pinned_tool_install_command`` and ``create_url_download_command`` build
+    their argv when a plugin is constructed, a scan included, and the child that
+    runs it installs into that directory. With ASH_BIN_PATH=rel-bin the argument was
+    ``<working directory>/rel-bin``. It is ``~/.ash/bin``, with one warning.
+
+    Fails at the base on the destination argument.
+    """
+    cwd, _home = relative_ash_bin_path
+    with caplog.at_level(logging.WARNING):
+        first, index = _install_command(kind)
+        second, _ = _install_command(kind)
+    expected = _as_the_builders_write_it(home_bin_path())
+    assert first.args[index] == second.args[index] == expected
+    assert _names_in(cwd) == []
+    warnings = _relative_value_warnings(caplog)
+    assert len(warnings) == 1, warnings
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("kind", ["pinned", "url"])
+def test_an_install_command_only_refuses_for_a_relative_value_without_a_home(
+    kind, relative_ash_bin_path, monkeypatch
+):
+    """With no usable home the command built is the one that says why and exits 1.
+
+    It was an install command aimed at ``<working directory>/rel-bin``.
+
+    Fails at the base on the command: it is the install, not the refusal.
+    """
+    cwd, _home = relative_ash_bin_path
+    _without_a_usable_home(monkeypatch)
+    command, _ = _install_command(kind)
+    refusal = download_utils.refusing_install_command(download_utils.NO_BIN_DIRECTORY)
+    assert command.args == refusal.args, command.args
+    assert _names_in(cwd) == []
+
+
+@pytest.mark.unit
+def test_the_rules_directory_is_beside_the_default_bin_directory_for_a_relative_value(
+    relative_ash_bin_path, caplog
+):
+    """With ``ASH_CFN_GUARD_RULES_DIR`` unset the rules go beside the bin directory.
+
+    ``rules_root`` is ``<bin directory>/../share/cfn-guard-rules``, so with
+    ASH_BIN_PATH=rel-bin it named ``share`` directly in the working directory. It is
+    ``~/.ash/share/cfn-guard-rules``, with one warning.
+
+    Fails at the base on the answer: ``<working directory>/share/cfn-guard-rules``.
+    """
+    cwd, _home = relative_ash_bin_path
+    expected = home_bin_path().parent / "share" / "cfn-guard-rules"
+    with caplog.at_level(logging.WARNING):
+        first = rules_bundles.rules_root()
+        second = rules_bundles.rules_root()
+    assert first == second == expected
+    assert _names_in(cwd) == []
+    warnings = _relative_value_warnings(caplog)
+    assert len(warnings) == 1, warnings
+
+
+@pytest.mark.unit
+def test_installing_the_rules_bundle_writes_nothing_under_the_working_directory(
+    relative_ash_bin_path, no_network, caplog
+):
+    """``install_rules_bundle`` makes the rules root and its lock before it downloads.
+
+    The download is refused as it is offline, after those are made, so what the
+    install wrote is what is left. With ASH_BIN_PATH=rel-bin it wrote ``share`` in
+    the working directory; it writes under ``~/.ash/share/cfn-guard-rules``, and
+    warns once.
+
+    Fails at the base on the working directory: ``share`` is in it.
+    """
+    cwd, home = relative_ash_bin_path
+    with caplog.at_level(logging.WARNING):
+        for _ in range(2):
+            with pytest.raises(rules_bundles.RulesBundleUnavailable):
+                rules_bundles.install_rules_bundle(BUNDLE)
+    assert _names_in(cwd) == []
+    assert (home / ".ash" / "share" / "cfn-guard-rules").is_dir()
+    assert len(no_network) == 2, no_network
+    warnings = _relative_value_warnings(caplog)
+    assert len(warnings) == 1, warnings
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("entry", ["rules_root", "install_rules_bundle"])
+def test_the_rules_bundle_has_no_directory_for_a_relative_value_without_a_home(
+    entry, relative_ash_bin_path, no_network, monkeypatch
+):
+    """With no usable home there is nowhere to put the rules: a refusal.
+
+    Both the resolver and the installer refuse with ``NO_BIN_DIRECTORY``, before
+    anything is made or downloaded. They resolved
+    ``<working directory>/share/cfn-guard-rules`` and, for the installer, wrote it.
+
+    Fails at the base on the working directory (the installer) or on the missing
+    refusal (the resolver, which returned that path).
+    """
+    cwd, _home = relative_ash_bin_path
+    _without_a_usable_home(monkeypatch)
+    calls = {
+        "rules_root": rules_bundles.rules_root,
+        "install_rules_bundle": lambda: rules_bundles.install_rules_bundle(BUNDLE),
+    }
+    returned, refusal = _outcome(calls[entry])
+    assert _names_in(cwd) == [], returned
+    assert isinstance(refusal, rules_bundles.RulesBundleUnavailable), (
+        returned,
+        refusal,
+    )
+    assert download_utils.NO_BIN_DIRECTORY in str(refusal)
+    assert no_network == []
 
 
 #: Run first in the scan's child, so it finds no grype the host has. Past PATH, a
