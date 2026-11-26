@@ -11,7 +11,7 @@
 
 This page is generated from the scanner facets register in the ASH source code by `scripts/generate_facets_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH ships 23 scanners, and every one declares, per facet of the shared vocabulary, whether its native output maps into the shared pipeline. The register is production code (`automated_security_helper/base/scanner_facets.py`): the declaration has runtime consumers, and a scanner without one is refused by the registry totality test. The four states:
+ASH ships 31 scanners, and every one declares, per facet of the shared vocabulary, whether its native output maps into the shared pipeline. The register is production code (`automated_security_helper/base/scanner_facets.py`): the declaration has runtime consumers, and a scanner without one is refused by the registry totality test. The four states:
 
 - `mapped`: the facet lands where the shared pipeline reads it, and the cell names the native field it comes from. The corpus-consistency gate (`tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py`) holds these cells against the committed fixtures.
 - `mappable-dropped`: the native output carries the value and ASH discards it today: a roadmap record, not a promise. The cell names the native field and why it is dropped.
@@ -42,9 +42,17 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | [`trivy`](#trivy) | 15 | 0 | 3 | 2 |
 | [`zizmor`](#zizmor) | 10 | 0 | 10 | 0 |
 | [`betterleaks`](#betterleaks) | 9 | 1 | 10 | 0 |
+| [`credsweeper`](#credsweeper) | 9 | 1 | 10 | 0 |
+| [`dependency-check`](#dependency-check) | 7 | 0 | 13 | 0 |
 | [`ferret-scan`](#ferret-scan) | 8 | 0 | 12 | 0 |
+| [`ggshield`](#ggshield) | 9 | 0 | 11 | 0 |
+| [`gosec`](#gosec) | 8 | 2 | 10 | 0 |
 | [`guarddog`](#guarddog) | 12 | 0 | 8 | 0 |
 | [`hadolint`](#hadolint) | 7 | 0 | 13 | 0 |
+| [`kics`](#kics) | 6 | 6 | 8 | 0 |
+| [`kingfisher`](#kingfisher) | 9 | 0 | 11 | 0 |
+| [`polaris`](#polaris) | 7 | 2 | 11 | 0 |
+| [`secretlint`](#secretlint) | 7 | 1 | 12 | 0 |
 | [`snyk-code`](#snyk-code) | 0 | 0 | 6 | 14 |
 | [`trivy-repo`](#trivy-repo) | 15 | 0 | 3 | 2 |
 
@@ -63,7 +71,7 @@ Ranges are written in the grammar native to the runtime: `python` uses PEP 440 s
 | [`checkov`](#checkov) | `python` | all | `>=3.10,<3.15` | `pin` | yes, [https://github.com/bridgecrewio/checkov/issues/7777](https://github.com/bridgecrewio/checkov/issues/7777) | CPython 3.15 made array_hook a required argument of json.decoder.JSONArray (signature 3.14.9: (s_and_end, scan_once, \_w, \_ws); 3.15.0: (s_and_end, scan_once, array_hook, \_w, \_ws)); checkov's Decoder.json_array (checkov/common/parsers/json/decoder.py) calls it without one, so every JSON document that holds an array fails to parse, and on a large tree the parallel runner can wait indefinitely on the worker error; reported against checkov 3.4.3 and 3.4.0 on 3.15.0; a fix is proposed upstream in bridgecrewio/checkov#7778 and not merged |
 | [`guarddog`](#guarddog) | `python` | all | `>=3.10,<3.14` | `pin` | yes, no upstream issue exists to cite: a search of the VirusTotal/yara-python issues for a cp314 report found none (a 'wheel' search returned issues, so the search itself works; read 2026-11-25); re-check pygit2 and yara-python cp314 wheels at the next guarddog version bump | pygit2 1.18 and yara-python 4.5 publish no CPython 3.14 wheels at the pinned guarddog==3.2.0, so on a host where uv would pick 3.14 the install builds them from source, which needs libgit2 headers and a C toolchain, and fails; measured with uv 0.12 on Linux x86_64: an unconstrained 'uv tool install guarddog==3.2.0' picked 3.14 and failed on pygit2, and with --python '&gt;=3.10,&lt;3.14' it installed; PyPI read 2026-11-25: pygit2 publishes cp314 wheels from 1.19.0, while yara-python publishes none through 4.5.4 |
 
-2 of 23 scanners declare a row. The other 21 declare none: no incompatibility between their tool versions and their runtime versions is known.
+2 of 31 scanners declare a row. The other 29 declare none: no incompatibility between their tool versions and their runtime versions is known.
 
 ## `actionlint`
 
@@ -551,6 +559,60 @@ Ranges are written in the grammar native to the runtime: `python` uses PEP 440 s
 | `tags` | `mapped` | result properties "tags" (empty natively); the adapter appends secret and security |  |
 | `extras` | `mapped` | result properties "issue_severity" written by the adapter |  |
 
+## `credsweeper`
+
+- Class: `automated_security_helper.plugin_modules.ash_credsweeper_plugins.credsweeper_scanner.CredSweeperScanner`
+
+| Facet | State | Native field | Reason |
+|-------|-------|--------------|--------|
+| `rule_id` | `mapped` | finding "rule" |  |
+| `severity` | `mapped` | finding "confidence" (strong, moderate, weak), mapped by CONFIDENCE_MAP; the rule's own "severity" is kept in extras |  |
+| `file_path` | `mapped` | finding "line_data_list"[0]."path" |  |
+| `line_range` | `mapped` | finding "line_data_list"[0]."line_num" (start line only) |  |
+| `column` | `mappable-dropped` | finding "line_data_list"[0]."value_start" / "value_end" | the report carries character offsets of the value in its line; the converter writes no column into the SARIF region |
+| `message` | `mapped` | finding "rule", "confidence" and "ml_probability", composed into the message by the converter (the value is never included) |  |
+| `resource_id` | `n/a` |  | credential findings name a file location, not a deployable resource; the report carries a rule and a path only |
+| `resource_type` | `n/a` |  | credential findings name a file location, not a deployable resource |
+| `package_name` | `n/a` |  | credential findings carry no package |
+| `package_version` | `n/a` |  | credential findings carry no package |
+| `package_path` | `n/a` |  | credential findings carry no package |
+| `taxonomy_cve` | `n/a` |  | credential findings carry no CVE taxonomy |
+| `taxonomy_cwe` | `n/a` |  | the report carries no CWE taxonomy |
+| `fingerprints` | `mapped` | (no native fingerprint) result partialFingerprints "credsweeper/v1", a sha256 digest of rule, path and line computed by the converter |  |
+| `fix_available` | `n/a` |  | credential findings carry no fix state |
+| `remediation_text` | `n/a` |  | the report carries no remediation text |
+| `snippet` | `mapped` | region.snippet.text, the constant REDACTED written by the converter; the report's "line" and "value" are never read |  |
+| `references` | `n/a` |  | the report carries no reference URLs |
+| `tags` | `mapped` | (no native tags) the converter writes secret and security |  |
+| `extras` | `mapped` | finding "severity" and "ml_probability", written as properties credsweeper_rule_severity and credsweeper_ml_probability, with "confidence" as credsweeper_confidence |  |
+
+## `dependency-check`
+
+- Class: `automated_security_helper.plugin_modules.ash_dependency_check_plugins.dependency_check_scanner.DependencyCheckScanner`
+
+| Facet | State | Native field | Reason |
+|-------|-------|--------------|--------|
+| `rule_id` | `mapped` | result ruleId (the CVE id) |  |
+| `severity` | `mapped` | rule properties security-severity (CVSS v3/v4 base score), else cvssv2_severity; rated by the adapter because every native result level is warning |  |
+| `file_path` | `mapped` | locations[].physicalLocation.artifactLocation.uri |  |
+| `line_range` | `n/a` |  | findings name an analyzed dependency file, not a line in it |
+| `column` | `n/a` |  | findings name an analyzed dependency file, not a position |
+| `message` | `mapped` | result message.text |  |
+| `resource_id` | `n/a` |  | findings name a dependency, not a deployable resource |
+| `resource_type` | `n/a` |  | findings name a dependency, not a deployable resource |
+| `package_name` | `n/a` |  | output not read; a sample run would settle it |
+| `package_version` | `n/a` |  | output not read; a sample run would settle it |
+| `package_path` | `n/a` |  | output not read; a sample run would settle it |
+| `taxonomy_cve` | `mapped` | result ruleId (the CVE id) |  |
+| `taxonomy_cwe` | `n/a` |  | output not read; a sample run would settle it |
+| `fingerprints` | `mapped` | partialFingerprints["vulnerabilityHash"] |  |
+| `fix_available` | `n/a` |  | output not read; a sample run would settle it |
+| `remediation_text` | `n/a` |  | output not read; a sample run would settle it |
+| `snippet` | `n/a` |  | findings name a file, not a source region |
+| `references` | `n/a` |  | output not read; a sample run would settle it |
+| `tags` | `n/a` |  | the template writes no tags; the adapter adds sca, vulnerability and security while rating the report, after the native read this register describes |
+| `extras` | `mapped` | result PropertyBag issue_severity, written by the adapter |  |
+
 ## `ferret-scan`
 
 - Class: `automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.FerretScanScanner`
@@ -577,6 +639,60 @@ Ranges are written in the grammar native to the runtime: `python` uses PEP 440 s
 | `references` | `mapped` | tool.driver.rules[].helpUri, read into the flat references by the shared rule read when the result carries none of its own | ferret-scan results carry no reference URLs of their own; the rule-level helpUri is what the flat row carries |
 | `tags` | `n/a` |  | ferret-scan results carry no tags; the adapter attaches scanner details, not tags |
 | `extras` | `mapped` | result properties "confidenceLevel" and "validator" |  |
+
+## `ggshield`
+
+- Class: `automated_security_helper.plugin_modules.ash_ggshield_plugins.ggshield_scanner.GgshieldScanner`
+
+| Facet | State | Native field | Reason |
+|-------|-------|--------------|--------|
+| `rule_id` | `mapped` | result "ruleId" (the detector display name) |  |
+| `severity` | `mapped` | (no native severity) constant level error plus properties "issue_severity" CRITICAL, both set by \_post_process_sarif |  |
+| `file_path` | `mapped` | locations[].physicalLocation.artifactLocation.uri |  |
+| `line_range` | `mapped` | region.startLine / region.endLine |  |
+| `column` | `mapped` | region.startColumn / region.endColumn |  |
+| `message` | `mapped` | result "message.text" |  |
+| `resource_id` | `n/a` |  | secret findings name a file location, not a deployable resource; the SARIF carries a detector name and a region only |
+| `resource_type` | `n/a` |  | secret findings name a file location, not a deployable resource |
+| `package_name` | `n/a` |  | secret findings carry no package |
+| `package_version` | `n/a` |  | secret findings carry no package |
+| `package_path` | `n/a` |  | secret findings carry no package |
+| `taxonomy_cve` | `n/a` |  | secret findings carry no CVE taxonomy |
+| `taxonomy_cwe` | `n/a` |  | ggshield's SARIF writer emits no CWE taxonomy |
+| `fingerprints` | `mapped` | result "partialFingerprints" key "secret/v1" (a hash of the secret; \_post_process_sarif drops empty values only) |  |
+| `fix_available` | `n/a` |  | secret findings carry no fix state |
+| `remediation_text` | `n/a` |  | ggshield's SARIF writer emits no remediation text |
+| `snippet` | `n/a` |  | the SARIF writer never writes the secret value; any snippet a future release adds is overwritten with REDACTED by \_post_process_sarif |
+| `references` | `mapped` | relatedLocations[].physicalLocation.artifactLocation.uri (the match locations; ASH reads their URIs as references, made source-relative by \_post_process_sarif) |  |
+| `tags` | `n/a` |  | ggshield's SARIF writer emits no result properties and so no tags; the adapter adds the constant tags secret and security (\_post_process_sarif), which come from ASH, not from the tool's output |
+| `extras` | `mapped` | result properties "issue_severity" written by the adapter |  |
+
+## `gosec`
+
+- Class: `automated_security_helper.plugin_modules.ash_gosec_plugins.gosec_scanner.GosecScanner`
+
+| Facet | State | Native field | Reason |
+|-------|-------|--------------|--------|
+| `rule_id` | `mapped` | result "ruleId" (G101 ... G7xx) |  |
+| `severity` | `mapped` | result "level" (warning is LOW; error is MEDIUM or HIGH) and rule properties "tags" (LOW\|MEDIUM\|HIGH); the adapter sets the level and properties "issue_severity" from them |  |
+| `file_path` | `mapped` | locations[].physicalLocation.artifactLocation.uri |  |
+| `line_range` | `mapped` | region.startLine / region.endLine |  |
+| `column` | `mapped` | region.startColumn / region.endColumn |  |
+| `message` | `mapped` | result "message.text" |  |
+| `resource_id` | `n/a` |  | Go source findings name a file location, not a deployable resource; the SARIF carries a rule id and a region only |
+| `resource_type` | `n/a` |  | Go source findings name a file location, not a deployable resource |
+| `package_name` | `n/a` |  | gosec reads the project's own source; findings carry no dependency package |
+| `package_version` | `n/a` |  | gosec findings carry no dependency package |
+| `package_path` | `n/a` |  | gosec findings carry no dependency package |
+| `taxonomy_cve` | `n/a` |  | gosec rules are code patterns and carry no CVE taxonomy |
+| `taxonomy_cwe` | `mappable-dropped` | rules[].relationships[].target (CWE "id") and the run's taxonomies[] CWE taxa | the CWE sits in rule relationships, not in the rule tags the shared pipeline reads (the tags are only security and the severity) |
+| `fingerprints` | `n/a` |  | gosec SARIF results carry no fingerprints or partialFingerprints (none in the captured report); finding identity keys on scanner, rule and file |
+| `fix_available` | `n/a` |  | gosec findings carry no fix or fixed-version data |
+| `remediation_text` | `n/a` |  | the rule help text repeats the description with the severity and confidence; gosec publishes no remediation field |
+| `snippet` | `mapped` | region.snippet.text |  |
+| `references` | `n/a` |  | the SARIF rules carry no helpUri; the only URLs are the tool's informationUri and the CWE taxonomy's own |
+| `tags` | `mappable-dropped` | rules[].properties "tags" (security, &lt;SEVERITY&gt;) | the tags sit on the rule, not the result, so the result's own tags column is empty in gosec's output; the severity tag is read to rate each result, and the adapter appends security and sast to the result itself |
+| `extras` | `mapped` | result properties "issue_severity" written by the adapter |  |
 
 ## `guarddog`
 
@@ -631,6 +747,114 @@ Ranges are written in the grammar native to the runtime: `python` uses PEP 440 s
 | `references` | `n/a` |  | the native SARIF driver has no rules array, so no help URIs (captured/positive.sarif) |
 | `tags` | `n/a` |  | the native SARIF has no rules array and results carry no tags |
 | `extras` | `mapped` | result properties "issue_severity" and "hadolint_level" written by the adapter |  |
+
+## `kics`
+
+- Class: `automated_security_helper.plugin_modules.ash_kics_plugins.kics_scanner.KicsScanner`
+
+| Facet | State | Native field | Reason |
+|-------|-------|--------------|--------|
+| `rule_id` | `mapped` | SARIF result ruleId (the KICS query id, a UUID) |  |
+| `severity` | `mapped` | JSON report queries[].severity (CRITICAL..TRACE), joined to the SARIF result by query_id; the SARIF carries only a rule-level defaultConfiguration.level |  |
+| `file_path` | `mapped` | SARIF result locations[].physicalLocation.artifactLocation.uri |  |
+| `line_range` | `mapped` | SARIF result locations[].physicalLocation.region.startLine (no endLine is written) |  |
+| `column` | `n/a` |  | KICS regions carry startLine only (captured positive.sarif) |
+| `message` | `mapped` | SARIF result message.text (the actual value, e.g. 'acl' is equal 'public-read') |  |
+| `resource_id` | `mappable-dropped` | JSON report queries[].files[].search_key (e.g. aws_s3_bucket[b].acl=public-read) | the JSON report is read for severity only; search_key is a query-specific locator that includes an attribute path, and resource_name is the name attribute for some queries and 'n/a' for others, so neither is a stable resource id as it stands |
+| `resource_type` | `mappable-dropped` | JSON report queries[].files[].resource_type (e.g. aws_s3_bucket) | the JSON report is read for severity only; the value is 'n/a' for queries that report an absent resource |
+| `package_name` | `n/a` |  | infrastructure-as-code findings name no package |
+| `package_version` | `n/a` |  | infrastructure-as-code findings name no package |
+| `package_path` | `n/a` |  | infrastructure-as-code findings name no package |
+| `taxonomy_cve` | `n/a` |  | misconfiguration queries carry no CVE taxonomy |
+| `taxonomy_cwe` | `mappable-dropped` | JSON report queries[].cwe (e.g. "732") | the JSON report is read for severity only; the SARIF relationships point at KICS' own category taxonomy, not at CWE |
+| `fingerprints` | `mappable-dropped` | JSON report queries[].files[].similarity_id (a sha256) | the JSON report is read for severity only; the SARIF results carry no partialFingerprints |
+| `fix_available` | `n/a` |  | KICS reports expected and actual values, not a fix state |
+| `remediation_text` | `mappable-dropped` | JSON report queries[].files[].expected_value (e.g. 'acl' should equal to 'private') | the JSON report is read for severity only |
+| `snippet` | `n/a` |  | KICS regions carry no snippet in either report (captured positive.sarif and positive.json) |
+| `references` | `mappable-dropped` | SARIF rule helpUri (the provider documentation page for the resource the query checks) | the shared pipeline does not read a rule's helpUri into the flat references column; observed 0 of 5 results over the captured reports |
+| `tags` | `n/a` |  | KICS writes no tags in either report; the adapter adds the 'iac' tag after the read, so the raw output carries none |
+| `extras` | `mapped` | SARIF result message.properties (platform, riskScore) and rule properties.riskScore; the adapter adds issue_severity |  |
+
+## `kingfisher`
+
+- Class: `automated_security_helper.plugin_modules.ash_kingfisher_plugins.kingfisher_scanner.KingfisherScanner`
+
+| Facet | State | Native field | Reason |
+|-------|-------|--------------|--------|
+| `rule_id` | `mapped` | result "ruleId" |  |
+| `severity` | `mapped` | (constant) level error plus properties "issue_severity" CRITICAL, both set by \_post_process_sarif; the native result "level" follows the confidence setting and is overwritten (see the module docstring, Severity) |  |
+| `file_path` | `mapped` | locations[].physicalLocation.artifactLocation.uri |  |
+| `line_range` | `mapped` | region.startLine / region.endLine |  |
+| `column` | `mapped` | region.startColumn / region.endColumn |  |
+| `message` | `mapped` | result "message.text" |  |
+| `resource_id` | `n/a` |  | secret findings name a file location, not a deployable resource; the SARIF carries a rule id and a region only |
+| `resource_type` | `n/a` |  | secret findings name a file location, not a deployable resource |
+| `package_name` | `n/a` |  | secret findings carry no package |
+| `package_version` | `n/a` |  | secret findings carry no package |
+| `package_path` | `n/a` |  | secret findings carry no package |
+| `taxonomy_cve` | `n/a` |  | secret findings carry no CVE taxonomy |
+| `taxonomy_cwe` | `n/a` |  | Kingfisher rules carry no CWE taxonomy in the SARIF |
+| `fingerprints` | `mapped` | result "partialFingerprints.fingerprint" |  |
+| `fix_available` | `n/a` |  | secret findings carry no fix state |
+| `remediation_text` | `n/a` |  | the SARIF rules carry an empty "help" text; no remediation guidance is emitted |
+| `snippet` | `mapped` | region.snippet.text ([REDACTED:&lt;hash&gt;] under --redact), forced to REDACTED by \_post_process_sarif when it is not in that form |  |
+| `references` | `n/a` |  | the SARIF rules carry descriptions only; no reference URLs per rule or result |
+| `tags` | `n/a` |  | the native SARIF carries no per-result or per-rule tags; the adapter appends secret and security afterwards |
+| `extras` | `mapped` | result properties "issue_severity" written by the adapter |  |
+
+## `polaris`
+
+- Class: `automated_security_helper.plugin_modules.ash_polaris_plugins.polaris_scanner.PolarisScanner`
+
+| Facet | State | Native field | Reason |
+|-------|-------|--------------|--------|
+| `rule_id` | `mapped` | check "ID" (the key of the Results map) |  |
+| `severity` | `mapped` | check "Severity" (danger, warning, ignore) through POLARIS_SEVERITY_MAP onto issue_severity and the SARIF level |  |
+| `file_path` | `mapped` | (none in Polaris's JSON) the YAML file found by the object's Kind, Name and Namespace under the scanned tree |  |
+| `line_range` | `mapped` | (none in Polaris's JSON) the line of metadata.name in the located document; a start line only |  |
+| `column` | `n/a` |  | Polaris reports an object and a check, never a column; the converter writes a start line only |
+| `message` | `mapped` | check "Message", with "Details" when present, prefixed with Kind/Name and the container name |  |
+| `resource_id` | `mappable-dropped` | entry Kind, Name and Namespace (Deployment web in demo) | the object is a Kubernetes resource, but the adapter folds it into the message text and never writes ash_resource_id; binding resource-scoped suppressions is its own decision |
+| `resource_type` | `mappable-dropped` | entry "Kind" | carried in the message prefix only; the adapter writes no ash_resource_type |
+| `package_name` | `n/a` |  | manifest checks carry no package |
+| `package_version` | `n/a` |  | manifest checks carry no package |
+| `package_path` | `n/a` |  | manifest checks carry no package |
+| `taxonomy_cve` | `n/a` |  | best-practice checks carry no CVE taxonomy |
+| `taxonomy_cwe` | `n/a` |  | the check records carry no CWE taxonomy |
+| `fingerprints` | `n/a` |  | Polaris emits no fingerprint or hash for a check result |
+| `fix_available` | `n/a` |  | Polaris's Mutations list a patch for some checks, but the adapter reads no fix state from it |
+| `remediation_text` | `n/a` |  | the check record's Message states the problem; the only fix-shaped field is Mutations (a JSON patch), which is not read |
+| `snippet` | `n/a` |  | the JSON carries no source text of the object |
+| `references` | `n/a` |  | the check records carry no reference URLs |
+| `tags` | `mapped` | check "Category" (Security, Reliability, Efficiency), lowercased, after the constant kubernetes tag |  |
+| `extras` | `mapped` | result properties "issue_severity" written by the converter |  |
+
+## `secretlint`
+
+- Class: `automated_security_helper.plugin_modules.ash_secretlint_plugins.secretlint_scanner.SecretlintScanner`
+
+| Facet | State | Native field | Reason |
+|-------|-------|--------------|--------|
+| `rule_id` | `mapped` | result "ruleId" |  |
+| `severity` | `mapped` | result "level" (error, warning, note), rated by \_post_process_sarif into level plus properties "issue_severity" |  |
+| `file_path` | `mapped` | locations[].physicalLocation.artifactLocation.uri |  |
+| `line_range` | `mapped` | region.startLine / region.endLine |  |
+| `column` | `mapped` | region.startColumn / region.endColumn |  |
+| `message` | `mapped` | result "message.text" (the secret value is masked by Secretlint; ASH never passes --no-maskSecrets) |  |
+| `resource_id` | `n/a` |  | secret findings name a file location, not a deployable resource; the SARIF carries a rule id and a region only |
+| `resource_type` | `n/a` |  | secret findings name a file location, not a deployable resource |
+| `package_name` | `n/a` |  | secret findings carry no package |
+| `package_version` | `n/a` |  | secret findings carry no package |
+| `package_path` | `n/a` |  | secret findings carry no package |
+| `taxonomy_cve` | `n/a` |  | secret findings carry no CVE taxonomy |
+| `taxonomy_cwe` | `n/a` |  | Secretlint rules carry no CWE taxonomy in the SARIF |
+| `fingerprints` | `n/a` |  | the formatter writes no partialFingerprints or fingerprints |
+| `fix_available` | `n/a` |  | secret findings carry no fix state |
+| `remediation_text` | `n/a` |  | the SARIF rules carry id, shortDescription and helpUri only |
+| `snippet` | `n/a` |  | the formatter writes no region.snippet, so no secret text reaches the report |
+| `references` | `mappable-dropped` | rules[] "helpUri" (a link to the rule documentation) | the rule documentation link is not read into the flat references column today |
+| `tags` | `n/a` |  | the native SARIF carries no tags; the adapter writes the generic tags secret and security itself in \_post_process_sarif, which are not a native field |
+| `extras` | `mapped` | result properties "issue_severity" written by the adapter |  |
 
 ## `snyk-code`
 
