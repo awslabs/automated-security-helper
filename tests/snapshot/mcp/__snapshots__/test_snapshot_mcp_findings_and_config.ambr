@@ -92,6 +92,13 @@
           'dependencies_satisfied': True,
           'enabled': True,
           'installs_on_first_scan': False,
+          'name': 'mcp_config',
+          'version': None,
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
           'name': 'npm_audit',
           'version': None,
         }),
@@ -193,7 +200,10 @@
           'file_path': 'src/settings.py',
           'fix_available': None,
           'id': 'bandit-B105-d8e89f4bf133',
+          'image_digest': None,
+          'image_ref': None,
           'is_suppressed': False,
+          'layer_digest': None,
           'line_end': 7,
           'line_start': 7,
           'package_name': None,
@@ -226,7 +236,10 @@
           'file_path': 'tests/test_app.py',
           'fix_available': None,
           'id': 'bandit-B101-30eccaf87e25',
+          'image_digest': None,
+          'image_ref': None,
           'is_suppressed': True,
+          'layer_digest': None,
           'line_end': 4,
           'line_start': 4,
           'package_name': None,
@@ -257,7 +270,10 @@
           'file_path': 'config/settings.ini',
           'fix_available': None,
           'id': 'detect-secrets-SECRET-AWS-ACCESS-KEY-49559df70b2e',
+          'image_digest': None,
+          'image_ref': None,
           'is_suppressed': False,
+          'layer_digest': None,
           'line_end': 3,
           'line_start': 3,
           'package_name': None,
@@ -663,6 +679,12 @@
           'options': dict({
             'install_timeout': 300,
             'tool_version': '>=7.16.0,<8.0.0',
+          }),
+        }),
+        'mcp_config': dict({
+          'enabled': True,
+          'name': 'mcp_config',
+          'options': dict({
           }),
         }),
       }),
@@ -1175,6 +1197,24 @@
             'severity_threshold': None,
           }),
         }),
+        'mcp_config': dict({
+          'enabled': True,
+          'name': 'mcp-config',
+          'options': dict({
+            'allowed_command_prefixes': list([
+            ]),
+            'flag_env_secrets': True,
+            'forbid_auto_approval': True,
+            'forbid_privilege_escalation': True,
+            'forbid_unpinned_runners': True,
+            'offline': False,
+            'remote_url_prefixes': list([
+            ]),
+            'require_local': False,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
         'npm_audit': dict({
           'enabled': True,
           'name': 'npm-audit',
@@ -1241,6 +1281,19 @@
             ]),
             'offline': False,
             'scan_timeout': 1800,
+            'sdist_harvest': dict({
+              'cache_dir': None,
+              'ecosystems': list([
+                'cargo',
+                'gomod',
+                'npm',
+              ]),
+              'enabled': True,
+              'lockfiles': list([
+                'uv.lock',
+              ]),
+              'max_sdist_mb': 100,
+            }),
             'severity_threshold': None,
           }),
         }),
@@ -1315,6 +1368,12 @@
           'options': dict({
             'install_timeout': 300,
             'tool_version': '>=7.16.0,<8.0.0',
+          }),
+        }),
+        'mcp_config': dict({
+          'enabled': True,
+          'name': 'mcp_config',
+          'options': dict({
           }),
         }),
       }),
@@ -1827,6 +1886,24 @@
             'severity_threshold': None,
           }),
         }),
+        'mcp_config': dict({
+          'enabled': True,
+          'name': 'mcp-config',
+          'options': dict({
+            'allowed_command_prefixes': list([
+            ]),
+            'flag_env_secrets': True,
+            'forbid_auto_approval': True,
+            'forbid_privilege_escalation': True,
+            'forbid_unpinned_runners': True,
+            'offline': False,
+            'remote_url_prefixes': list([
+            ]),
+            'require_local': False,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
         'npm_audit': dict({
           'enabled': True,
           'name': 'npm-audit',
@@ -1893,6 +1970,19 @@
             ]),
             'offline': False,
             'scan_timeout': 1800,
+            'sdist_harvest': dict({
+              'cache_dir': None,
+              'ecosystems': list([
+                'cargo',
+                'gomod',
+                'npm',
+              ]),
+              'enabled': True,
+              'lockfiles': list([
+                'uv.lock',
+              ]),
+              'max_sdist_mb': 100,
+            }),
             'severity_threshold': None,
           }),
         }),
@@ -2050,6 +2140,14 @@
         'enabled': True,
         'installs_on_first_scan': False,
         'name': 'hadolint',
+        'offline_strategy': 'bundled',
+        'version': None,
+      }),
+      'mcp_config': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'installs_on_first_scan': False,
+        'name': 'mcp_config',
         'offline_strategy': 'bundled',
         'version': None,
       }),
