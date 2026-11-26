@@ -298,6 +298,107 @@ def test_a_skipped_second_run_is_warned_about_once(scanner, tmp_path) -> None:
     assert "32" in warnings[0].args[1]
 
 
+def _warnings(log) -> list:
+    return [
+        call
+        for call in log.call_args_list
+        if call.kwargs.get("level") == logging.WARNING
+    ]
+
+
+@pytest.mark.parametrize(
+    "response, said",
+    [
+        (
+            {
+                "returncode": None,
+                "timed_out": True,
+                "could_not_stop": True,
+                "could_not_stop_pid": 4242,
+            },
+            "could not be stopped",
+        ),
+        ({"returncode": -1, "timed_out": True}, "the second run timed out"),
+        ({"returncode": None, "cancelled": True}, "the second run was cancelled"),
+    ],
+    ids=["could-not-stop", "timed-out", "cancelled"],
+)
+def test_a_second_run_that_did_not_finish_says_so_not_its_exit_code(
+    scanner, tmp_path, response, said
+) -> None:
+    """A run stopped at its timeout, cancelled, or left running has no exit code
+    worth naming: the reason is read from the response's flags."""
+
+    def fake(self, command=None, **kwargs):
+        return dict(response)
+
+    with patch.object(CfnLintScanner, "_plugin_log", autospec=True) as log:
+        _attach(scanner, tmp_path, fake)
+    (warning,) = _warnings(log)
+    assert said in warning.args[1]
+    assert "exited None" not in warning.args[1]
+
+
+def test_a_report_that_names_resources_none_of_which_match_is_warned_about(
+    scanner, tmp_path
+) -> None:
+    """The JSON names resources, but under rule ids the SARIF does not carry, so
+    nothing attaches and nothing else in the run says why."""
+    document = json.loads((CAPTURED / f"{STEM}.json").read_text(encoding="utf-8"))
+    for entry in document:
+        entry["Rule"]["Id"] = "E9999"
+
+    def fake(self, command=None, **kwargs):
+        _output_file(command).write_text(json.dumps(document))
+        return {"returncode": 6}
+
+    with patch.object(CfnLintScanner, "_plugin_log", autospec=True) as log:
+        report, _ = _attach(scanner, tmp_path, fake)
+    assert set(_by_line(report).values()) == {None}
+    (warning,) = _warnings(log)
+    assert "none matched a result" in warning.args[1]
+
+
+def test_a_report_whose_resources_matched_is_not_warned_about(
+    scanner, tmp_path
+) -> None:
+    """Control for the test above: the unchanged report attaches and says nothing."""
+
+    def fake(self, command=None, **kwargs):
+        _output_file(command).write_text(
+            (CAPTURED / f"{STEM}.json").read_text(encoding="utf-8")
+        )
+        return {"returncode": 6}
+
+    with patch.object(CfnLintScanner, "_plugin_log", autospec=True) as log:
+        report, _ = _attach(scanner, tmp_path, fake)
+    assert _by_line(report)[14] == "M0FixtureBucketA"
+    assert _warnings(log) == []
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        AssertionError("an invariant"),
+        TypeError("a defect"),
+        AttributeError("a defect"),
+        NameError("a defect"),
+    ],
+    ids=["assertion", "type", "attribute", "name"],
+)
+def test_a_defect_in_the_enrichment_is_not_swallowed_as_a_skipped_report(
+    scanner, tmp_path, defect
+) -> None:
+    """The guard keeps a failed second run from costing the scan its report; a
+    programming error is not a failed run and surfaces."""
+
+    def fake(self, command=None, **kwargs):
+        raise defect
+
+    with pytest.raises(type(defect)):
+        _attach(scanner, tmp_path, fake)
+
+
 def test_a_clean_report_costs_no_second_run(scanner, tmp_path) -> None:
     report = SarifReport.model_validate(
         {"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "cfn-lint"}}}]}

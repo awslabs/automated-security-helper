@@ -89,6 +89,7 @@ from automated_security_helper.config.ash_config import (
     AshConfig,
     RuntimeOverridesConfig,
 )
+from automated_security_helper.base.plugin_manifest import thawed
 from automated_security_helper.plugin_manifests import scanner_manifests
 from automated_security_helper.core.enums import SandboxMode
 from automated_security_helper.utils.import_caches import invalidate_import_caches
@@ -492,6 +493,14 @@ SHIPPED_DEFAULT_DENIED_PATHS = (
     *SHIPPED_DEFAULT_DENIED_PATHS,
     SHIPPED_DEFAULT_DENIED_PATHS[-1] | {"/scanners/syft/options/sdist_harvest/**"},
 )
+#: The default after the run history's section joined it: ``enabled`` turns on
+#: writes beside the output on every scan, and ``keep_runs`` bounds what pruning
+#: may delete, so neither is a client's to change through a runtime override.
+SHIPPED_DEFAULT_DENIED_PATHS = (
+    *SHIPPED_DEFAULT_DENIED_PATHS,
+    SHIPPED_DEFAULT_DENIED_PATHS[-1]
+    | {"/global_settings/history", "/global_settings/history/**"},
+)
 
 
 class _OptionDefaults(Mapping[Tuple[str, str], Any]):
@@ -506,7 +515,9 @@ class _OptionDefaults(Mapping[Tuple[str, str], Any]):
     """
 
     def __init__(self, rows: Mapping[Tuple[str, str], Any]) -> None:
-        self._rows = {key: copy.deepcopy(value) for key, value in rows.items()}
+        # Thawed: the manifests hand out frozen lists, and a caller of this table
+        # gets plain ones it may edit without touching the next read.
+        self._rows = {key: thawed(value) for key, value in rows.items()}
 
     def __getitem__(self, key: Tuple[str, str]) -> Any:
         return copy.deepcopy(self._rows[key])

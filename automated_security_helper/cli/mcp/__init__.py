@@ -44,6 +44,7 @@ from automated_security_helper.core.constants import (
     ASH_EXIT_USAGE_ERROR,
 )
 from automated_security_helper.core.enums import (
+    DEFAULT_TRANSPORT,
     TRANSPORT_HELP,
     TRANSPORT_VALUES,
     AshLogLevel,
@@ -1391,7 +1392,7 @@ def mcp_command(
             "--transport",
             help=TRANSPORT_HELP,
         ),
-    ] = Transport.STDIO.value,
+    ] = DEFAULT_TRANSPORT.value,
     host: Annotated[
         str,
         typer.Option("--host", help="Host to bind for HTTP transports."),

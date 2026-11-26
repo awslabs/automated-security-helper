@@ -142,9 +142,12 @@ def test_a_patched_binding_whose_operator_copy_was_replaced_is_written_again():
     assert Path(trusted).read_bytes() == trusted_bytes
 
 
-def test_a_binding_for_files_this_process_did_not_write_is_checked_for_presence_only():
+def test_a_binding_for_files_this_process_did_not_write_is_checked_for_presence_only(
+    tmp_path,
+):
     """A path bound without a write here has no digest: it is as it was."""
-    elsewhere = Path(session_profiles.__file__).parent / "ash_config.py"
+    elsewhere = tmp_path / "written-by-another-process.yaml"
+    elsewhere.write_text("project_name: elsewhere\n", encoding="utf-8")
     registered = _register("strict")
     session_profiles.bind_session_config(
         None,

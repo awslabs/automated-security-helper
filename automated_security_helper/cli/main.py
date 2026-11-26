@@ -23,9 +23,9 @@ from automated_security_helper.cli.deprecation import deprecated_command_message
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
 from automated_security_helper.cli.scan_group import ScanTyperGroup, build_scan_app
 from automated_security_helper.core.enums import (
+    DEFAULT_TRANSPORT,
     TRANSPORT_HELP,
     AshLogLevel,
-    Transport,
 )
 from automated_security_helper.utils.console import echo, typer_console
 from automated_security_helper.utils.log import show_debug_locals
@@ -728,7 +728,7 @@ def _mcp_wrapper(
     color: bool = typer.Option(True, help="Enable/disable colorized output"),
     quiet: bool = typer.Option(False, help="Hide all log output"),
     transport: str = typer.Option(
-        Transport.STDIO.value,
+        DEFAULT_TRANSPORT.value,
         "--transport",
         help=TRANSPORT_HELP,
     ),

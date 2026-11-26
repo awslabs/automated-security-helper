@@ -740,6 +740,39 @@ def _could_not_stop_run_key(response: Dict) -> str:
     return "unflagged"
 
 
+#: Prefix of the ``scan_could_not_stop_runs`` key a SIDE run's failed stop is filed
+#: under (``_run_unrecorded``). A side run is a second launch of the tool whose
+#: result only adds to a report already read; its stop failing is as serious as
+#: any other (the process may still be writing), so the entry is kept, but under
+#: its own key: ``timed_out`` in the record means the SCAN's timeout could not be
+#: stopped, which is what the timeout headline reads it to say.
+SIDE_RUN_KEY_PREFIX = "side_run:"
+
+#: Exception types that mean a defect in ASH's own code, never a condition of the
+#: run. A best-effort guard around a side run lets these through, so a defect
+#: fails loudly instead of leaving a scan quietly without what the side run
+#: should have added. The same set the express client uses for the same purpose.
+PROGRAMMING_ERRORS = (AttributeError, TypeError, NameError, AssertionError)
+
+
+def side_run_skip_reason(response: Any) -> str | None:
+    """Why a side run's response says the run did not finish, or None.
+
+    Read from the response's own flags (the run was stopped at its timeout, was
+    cancelled, or its tool could not be stopped), because a run that never
+    produced an exit code has nothing to report as ``exited <code>``.
+    """
+    if not isinstance(response, dict):
+        return None
+    if response_could_not_stop(response):
+        return "the second run could not be stopped"
+    if response.get("timed_out") is True:
+        return "the second run timed out"
+    if response.get("cancelled") is True:
+        return "the second run was cancelled"
+    return None
+
+
 def worse_exit_code(current: int | None, new: int) -> int:
     """The worse of two runs' exit codes, for a plugin's accumulated ``exit_code``.
 
@@ -1920,6 +1953,14 @@ class PluginBase(UVToolMixin, BaseModel):
         self._scan_could_not_stop_runs = {}
         self._scan_could_not_stop_history = []
 
+    def _could_not_stop_key_for(self, response: Dict) -> str:
+        """The ``scan_could_not_stop_runs`` key for ``response``: its run key, under
+        :data:`SIDE_RUN_KEY_PREFIX` while a side run is in flight."""
+        key = _could_not_stop_run_key(response)
+        if getattr(self, "_side_run_active", False):
+            return SIDE_RUN_KEY_PREFIX + key
+        return key
+
     def _could_not_stop_state(self, response: Dict) -> None:
         """Set the could-not-stop state from ``response``: state only, shared with
         _run_subprocess's handler like the other pure state steps.
@@ -1950,7 +1991,7 @@ class PluginBase(UVToolMixin, BaseModel):
         self._scan_could_not_stop = recorded
         # Kept per run as well, under the flag this run ended with, so a reader
         # can tell which run's stop failed when scan() launched more than once.
-        run_key = _could_not_stop_run_key(response)
+        run_key = self._could_not_stop_key_for(response)
         self._scan_could_not_stop_runs[run_key] = recorded
         self._scan_could_not_stop_history.append((run_key, recorded))
 
@@ -2151,7 +2192,10 @@ class PluginBase(UVToolMixin, BaseModel):
     #: Left out on purpose: the could-not-stop record (``_scan_could_not_stop``
     #: and its two per-run forms). It says a tool ASH could not kill may still be
     #: writing into the output directory, which stays true whichever run left it
-    #: there, so a side run adds to it and never erases it.
+    #: there, so a side run adds to it and never erases it. A side run's entry is
+    #: filed under :data:`SIDE_RUN_KEY_PREFIX` so a reader of the per-run record
+    #: can tell it from the scan's own run: any entry fails the run, but only the
+    #: scan's own ``timed_out`` entry says the scan's timed-out tool survived.
     _RUN_RECORD_ATTRIBUTES: ClassVar[Tuple[str, ...]] = (
         "output",
         "errors",
@@ -2198,6 +2242,7 @@ class PluginBase(UVToolMixin, BaseModel):
                 value = getattr(self, name)
                 saved[name] = copy.copy(value)
         was_active = self._side_run_active
+        history_before = len(self._scan_could_not_stop_history)
         self._side_run_active = True
         try:
             return run(command, **kwargs)
@@ -2205,6 +2250,35 @@ class PluginBase(UVToolMixin, BaseModel):
             self._side_run_active = was_active
             for name, value in saved.items():
                 setattr(self, name, value)
+            self._log_side_run_could_not_stop(history_before)
+
+    def _log_side_run_could_not_stop(self, history_before: int) -> None:
+        """Say once, at ERROR, that a side run left a tool ASH could not stop.
+
+        ``_plugin_log`` lowers a side run's own ERROR notes to DEBUG, because
+        its record is put back and the scan is reported as it would have been.
+        A could-not-stop entry is the one thing that is not put back: it fails
+        the run, so the line that says which scanner and why is written here,
+        after the put-back, where it stays with the scan's error lines.
+        """
+        new = self._scan_could_not_stop_history[history_before:]
+        if not new:
+            return
+        keys = ", ".join(dict.fromkeys(key for key, _ in new))
+        reasons = "; ".join(dict.fromkeys(reason for _, reason in new))
+        name = getattr(self.config, "name", "<scanner>")
+        hint = (
+            f" Raise scanners.{name}.options.scan_timeout if this target "
+            "legitimately needs longer."
+            if any(key.endswith("timed_out") for key, _ in new)
+            else ""
+        )
+        self._plugin_log(
+            f"a second run of the tool ({keys}) could not be stopped: {reasons}. "
+            "The scan is failed on it, because the process may still be writing "
+            f"into the output directory.{hint}",
+            level=logging.ERROR,
+        )
 
     def _run_subprocess(
         self,
@@ -2594,7 +2668,7 @@ class PluginBase(UVToolMixin, BaseModel):
             # key, so an earlier run's record does not stand in for it.
             if (
                 self._scan_could_not_stop is None
-                or _could_not_stop_run_key(post_run)
+                or self._could_not_stop_key_for(post_run)
                 not in self._scan_could_not_stop_runs
             ):
                 self._could_not_stop_state(post_run)

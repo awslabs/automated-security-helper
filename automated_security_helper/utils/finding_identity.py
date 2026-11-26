@@ -18,7 +18,11 @@ The key of a result is:
   different machines agree. A file a converter wrote (a notebook converted to
   Python, a member extracted from an archive) is keyed by its path relative to
   the converted root, with ``"tree": "converted"``, so the key does not depend on
-  where the output directory is. A finding inside a container image is keyed by
+  where the output directory is. A result moved from a generated file back to the
+  original it was generated from (the MCP config converter's) is keyed by the
+  original's path, with ``"convertedFrom"`` naming the generated file, so it is not
+  the same finding as a source-tree scanner's result at that place. A finding
+  inside a container image is keyed by
   the in-image path as the tool reports it, with ``"tree": "image"`` and an
   ``"image"`` component: the image's sha256 digest when the scan resolved one,
   else the locator as submitted, so two scans of one pinned image agree across
@@ -27,8 +31,10 @@ The key of a result is:
   still carries the same vulnerable file at the same path is the same finding,
   the reasoning that keeps the package version out); it travels as attribution
   only, through the result properties named below;
-* the package name and path, for a dependency finding (grype and npm-audit put
-  every package of a lockfile at its line 1);
+* the package name and path, for a dependency finding (the location does not
+  tell packages apart: grype puts every package of a lockfile at its line 1,
+  and npm-audit's results share the lockfile's URI, with a line only where an
+  npm lockfile names the package's entry);
 * the workspace project;
 * the result's SARIF ``fingerprints``, or failing those its ``partialFingerprints``,
   as sorted ``[key, value]`` pairs under the kind's name, so that an edit above the
@@ -100,8 +106,9 @@ is the run's correlation scope, the scan metadata's project name
   a column, and those that do disagree on where a secret starts); the
   scanner-inclusive ``id`` still tells them apart.
 * ``dep/`` (:func:`dep_correlation_key`): the advisory id upper-cased, the
-  package name and the installed version. No file or line, since grype and
-  npm-audit put every package of a lockfile at its line 1. The version is in
+  package name and the installed version. No file or line: the location does
+  not tell packages apart (grype puts every package of a lockfile at its line
+  1, and npm-audit's results share the lockfile's URI). The version is in
   this key although the identity key leaves it out on purpose: the identity
   serves longitudinal continuity (upgrading to a release that is still
   vulnerable is the same finding), where a correlation id answers the
@@ -215,8 +222,15 @@ FINGERPRINT_KINDS = ("fingerprints", "partialFingerprints")
 #: relative to the converted root in (``utils/scan_output_dirs``).
 CONVERTED_PATH_PROPERTY = "converted_path"
 
+#: The SARIF result property a result moved from a generated file back to its
+#: original (``utils/scan_output_dirs.map_back_converted_results``) records the
+#: generated file's path in, relative to the converted root. It keys the result as
+#: ``"convertedFrom"``, so that a result mapped to a file stays distinct from a
+#: source-tree scanner's result at the same place in that file.
+CONVERTED_FROM_PROPERTY = "converted_from"
+
 #: The ``tree`` of a finding inside a container image.
-IMAGE_TREE = "image"
+IMAGE_TREE = TargetType.IMAGE.value
 
 #: SARIF result properties carrying an image finding's attribution, written by
 #: the scanner executor on every image-scan result (``utils/image_attribution``)
@@ -254,7 +268,10 @@ class FindingIdentity(BaseModel):
 
     Attributes:
         base: The key's fields every result has: scanner, rule, file, package,
-            project, and ``tree`` for a converted file.
+            project, ``tree`` for a converted file or a file in an image, ``image``
+            (the image's digest or locator) for a file in an image, and
+            ``convertedFrom`` (the generated file's path) for a result mapped back
+            from a generated file to the original.
         lines: The start and end line.
         column: The start column, or None.
         fingerprints: Each fingerprint kind the result carries, in preference
@@ -423,11 +440,14 @@ def finding_identity(
     message: Optional[str] = None,
     converted: bool = False,
     image: Optional[str] = None,
+    converted_from: Optional[str] = None,
 ) -> FindingIdentity:
     """One result's identity; see the module docstring for what is in it.
 
     *file_path* is used as given: pass it through :func:`relative_path` first, or,
-    with *converted*, pass the path relative to the converted root. *fingerprints*
+    with *converted*, pass the path relative to the converted root. *converted_from*
+    is the generated file a result mapped back to *file_path* was found in; it is
+    in the key as ``convertedFrom``. *fingerprints*
     is what :func:`result_fingerprints` returns. *message* is the masked message
     with the finding's own path replaced by *file_path*. *image* is the subject
     image's resolved digest, or failing that the locator as submitted, for a
@@ -444,9 +464,13 @@ def finding_identity(
     }
     if image is not None:
         base["tree"] = IMAGE_TREE
-        base["image"] = image
+        # The key is spelled as the tree label on purpose: an id that hashed it
+        # is already in reports and must not change.
+        base[IMAGE_TREE] = image
     elif converted:
         base["tree"] = TargetType.CONVERTED.value
+    if converted_from is not None:
+        base["convertedFrom"] = converted_from
     return FindingIdentity(
         base=base,
         lines=(line_start, line_end),

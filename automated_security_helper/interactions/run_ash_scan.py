@@ -331,11 +331,7 @@ class ScanOptions(BaseModel):
     output_formats: Optional[List[ExportFormat]] = Field(default_factory=list)
     cleanup: bool = False
     phases: Optional[List[ExecutionPhase]] = Field(
-        default_factory=lambda: [
-            ExecutionPhase.CONVERT,
-            ExecutionPhase.SCAN,
-            ExecutionPhase.REPORT,
-        ]
+        default_factory=lambda: list(DEFAULT_EXECUTION_PHASES)
     )
     inspect: bool = False
     existing_results: Optional[str] = None
@@ -432,7 +428,7 @@ class ScanOptions(BaseModel):
     @classmethod
     def _phases_default(cls, v):
         if v is None:
-            return [ExecutionPhase.CONVERT, ExecutionPhase.SCAN, ExecutionPhase.REPORT]
+            return list(DEFAULT_EXECUTION_PHASES)
         return v
 
 
@@ -1059,6 +1055,32 @@ def _refuse_an_inner_file_that_is_not_regular(path: Path, what: str) -> None:
     )
     print(f"[bold red]ERROR (1) {escape_markup(reason)}[/bold red]")
     raise ReportPathRefusedExit(reason)
+
+
+def _discard_history_record(results: Any, output_dir: Path) -> None:
+    """Remove the run record of a scan a cancel is taking back. Never raises.
+
+    The orchestrator appends the record right after it writes the results file
+    (``_record_history``); the cancel check before the final rewrite lands
+    after that, so a cancelled or restored MCP run kept a record saying it
+    completed. The record's id is the run's own ``report_id``; a results value
+    that carries none names no record, and nothing is removed.
+    """
+    try:
+        from automated_security_helper.utils.scan_history import discard_run_record
+
+        if isinstance(results, BaseModel):
+            report_id = getattr(getattr(results, "metadata", None), "report_id", None)
+        elif isinstance(results, dict):
+            metadata = results.get("metadata")
+            report_id = (
+                metadata.get("report_id") if isinstance(metadata, dict) else None
+            )
+        else:
+            return
+        discard_run_record(output_dir, report_id)
+    except Exception:  # noqa: BLE001 - the cancel is what the caller must see
+        pass
 
 
 def _read_back_inner_results(
@@ -5782,8 +5804,15 @@ def _run_local_mode(
 
         # A scan cancelled after its last phase began must not leave a results
         # file behind: a client polling a cancelled scan reads that file as
-        # finished results. A no-op outside a cancellable scan.
-        raise_if_cancelled()
+        # finished results. A no-op outside a cancellable scan. The history
+        # record goes with it: the orchestrator recorded this run right after
+        # it wrote the results file, and a record a restore leaves behind made
+        # the cancelled run a point in ``ash trend``.
+        try:
+            raise_if_cancelled()
+        except BaseException:
+            _discard_history_record(results, opts.output_dir)
+            raise
 
         # This rewrite lands after the REPORT phase, while an MCP client that has seen
         # the reports appear may already be re-reading this file for progress. A

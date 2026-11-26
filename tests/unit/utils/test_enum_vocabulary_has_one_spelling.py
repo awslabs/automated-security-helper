@@ -67,13 +67,37 @@ def test_ladder_tables_are_derived_from_the_one_ladder():
     }
 
 
+def test_no_two_modules_define_a_same_named_severity_bucket_constant():
+    """``SEVERITY_BUCKETS`` is the ladder's five buckets and is defined once.
+
+    A second module that defined a tuple of the same name with different members
+    (scan_tracking's six-member tally used to) lets an auto-import from the wrong
+    module silently add or drop ``suppressed``.
+    """
+    import ast
+
+    definers = []
+    for path in sorted(PACKAGE.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in tree.body:
+            targets = []
+            if isinstance(node, ast.Assign):
+                targets = [t for t in node.targets if isinstance(t, ast.Name)]
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                targets = [node.target]
+            if any(t.id == "SEVERITY_BUCKETS" for t in targets):
+                definers.append(path.relative_to(PACKAGE).as_posix())
+    assert definers == ["models/vocab.py"]
+    assert not hasattr(scan_tracking, "SEVERITY_BUCKETS")
+
+
 def test_count_field_sites_read_the_ladders_keys():
     keys = severity_ladder.SEVERITY_COUNT_KEYS
     suppressed = severity_ladder.SUPPRESSED_COUNT_KEY
     assert scanner_executor._SEVERITY_COUNT_FIELDS == (suppressed, *keys)
     assert result_filters._SEVERITY_KEYS == (*keys, suppressed)
     assert result_filters._COUNTED_SEVERITY_KEYS == keys
-    assert scan_tracking.SEVERITY_BUCKETS == (*keys, suppressed)
+    assert scan_tracking.SEVERITY_TALLY_BUCKETS == (*keys, suppressed)
     assert asharp_model._SEVERITY_ORDER == keys
     assert asharp_model._SUMMARY_SEVERITY_FIELDS == frozenset((*keys, suppressed))
     assert ui_theme.SEVERITY_LEVELS == keys

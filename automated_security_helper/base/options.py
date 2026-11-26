@@ -176,7 +176,8 @@ class PluginOptionsBase(RedactedSection):
 
         The generic bases themselves record nothing when a results file is read
         (utils/unknown_keys.py). They stand in for a plugin's own options model
-        wherever that model cannot be known: an out-of-tree plugin's section in the
+        wherever that model cannot be known: the section of a plugin that is not built in
+        (an alpha or out-of-tree plugin) in the
         config segments is validated against ``ScannerPluginConfigBase`` as one
         branch of a union, which then keeps the plain mapping. Its declared
         options are unknown only to the stand-in, and a note recorded there
