@@ -194,9 +194,9 @@ class TestOnShowsOneRowPerCluster:
     def test_markdown_detailed_findings_name_the_duplicates_once(self, context):
         markdown = _markdown(context, _model(fold=True))
         assert markdown.count(f"- Duplicates: {NOTE}") == 1
-        assert "Showing 1 of 1 actionable findings" in markdown or (
-            "actionable findings, highest severity first" in markdown
-        )
+        # One exact note, not an or of two phrasings (the second was a
+        # substring of every Showing line, so the assertion could not fail).
+        assert "Showing 1 of 1 actionable findings, highest severity first." in markdown
 
     def test_the_showing_note_counts_the_rows_the_list_can_show(self, context):
         emitter = ReportContentEmitter(_model(fold=True), human_presentation=True)
@@ -249,6 +249,63 @@ class TestOnShowsOneRowPerCluster:
         for key in ("actionable", "active", "counts", "suppressed", "below_threshold"):
             assert on_summary[key] == off_summary[key], key
         assert on.get_scanner_results() == off.get_scanner_results()
+
+
+def _split_gate_model(*, trivy_threshold="LOW") -> AshAggregatedResults:
+    """One cluster whose severer member is below ITS scanner's gate.
+
+    grype reports the pair's MEDIUM row under a HIGH threshold (below it);
+    trivy reports its LOW row under *trivy_threshold* (actionable at "LOW").
+    """
+    left_pad = {
+        "package_name": "left-pad",
+        "package_path": "node_modules/left-pad",
+    }
+    model = AshAggregatedResults()
+    model.ash_config = get_default_config()
+    model.ash_config.global_settings.deduplication.fold = True
+    model.ash_config.scanners.grype.options.severity_threshold = "HIGH"
+    model.ash_config.scanners.trivy.options.severity_threshold = trivy_threshold
+    model.sarif = SarifReport(
+        runs=[
+            _run("grype", CVE, "warning", package_version="1.0.0", **left_pad),
+            _run("trivy", CVE, "note", package_version="1.0.1", **left_pad),
+        ]
+    )
+    return model
+
+
+class TestTheRepresentativeIsActionableFirst:
+    def test_an_actionable_finding_is_never_hidden_under_a_below_threshold_card(self):
+        # The gate is per scanner, so a cluster can hold a row one scanner's
+        # threshold leaves below it beside a less severe row another scanner's
+        # gate makes actionable. Severity ranking alone made the
+        # below-threshold row the card for both, which the HTML's default view
+        # hides, while the masthead still counted one actionable finding.
+        emitter = ReportContentEmitter(_split_gate_model(), human_presentation=True)
+        shown, notes = emitter.fold_findings(emitter.flat_vulns)
+        (representative,) = shown
+        assert representative.scanner == "trivy"
+        assert emitter.is_finding_actionable(representative)
+        assert "grype" in notes[id(representative)]
+        # The actionable list and its count agree with the card.
+        detailed = emitter.get_detailed_findings(100)
+        assert emitter.actionable_finding_count() == len(detailed) == 1
+        assert detailed[0]["scanner"] == "trivy"
+
+    def test_with_no_actionable_member_the_severity_ranked_primary_stands(self):
+        emitter = ReportContentEmitter(
+            _split_gate_model(trivy_threshold="HIGH"), human_presentation=True
+        )
+        shown, _notes = emitter.fold_findings(emitter.flat_vulns)
+        (representative,) = shown
+        assert representative.scanner == "grype"
+
+    def test_fold_findings_refuses_a_row_that_is_not_the_models(self):
+        emitter = ReportContentEmitter(_model(fold=True), human_presentation=True)
+        foreign = _model().to_flat_vulnerabilities()[:1]
+        with pytest.raises(ValueError, match="emitter's own rows"):
+            emitter.fold_findings(foreign)
 
 
 class TestWhatTheFoldNeverTouches:

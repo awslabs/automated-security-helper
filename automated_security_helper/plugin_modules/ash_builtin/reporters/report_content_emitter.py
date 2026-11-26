@@ -287,6 +287,10 @@ class ReportContentEmitter:
             if self.fold
             else {}
         )
+        # The positions a fold prefers as a cluster's representative (the
+        # actionable rows), filled on first fold: grading needs the threshold
+        # tables read below.
+        self._fold_prefer: set[int] | None = None
         # Each project's recorded gate, read once: is_finding_actionable runs
         # several times per finding (summary, hotspots, cards, detailed
         # findings), and the project list is scanned here instead of there.
@@ -328,12 +332,31 @@ class ReportContentEmitter:
         that stands for others, keyed by ``id(row)``. With the fold off the rows
         come back as they are and there are no notes. Only the rows in *vulns*
         fold, so a view that is already filtered (the actionable findings) folds
-        what it holds; the note names those rows only.
+        what it holds; the note names those rows only. The representative of a
+        cluster with an actionable member in the view is actionable, so a
+        finding the gate fails the scan for is never hidden under a
+        below-threshold or not-gating card. *vulns* are this emitter's own
+        rows; a copied or foreign row is refused by name rather than raising a
+        bare KeyError.
         """
         if not self.fold:
             return list(vulns), {}
-        shown = [self._positions[id(vuln)] for vuln in vulns]
-        kept = fold_positions(self.flat_vulns, self._clusters, shown)
+        try:
+            shown = [self._positions[id(vuln)] for vuln in vulns]
+        except KeyError:
+            raise ValueError(
+                "fold_findings folds this emitter's own rows; a copied or "
+                "foreign row has no position in the model's finding list"
+            ) from None
+        if self._fold_prefer is None:
+            self._fold_prefer = {
+                position
+                for position, vuln in enumerate(self.flat_vulns)
+                if self.is_finding_actionable(vuln)
+            }
+        kept = fold_positions(
+            self.flat_vulns, self._clusters, shown, prefer=self._fold_prefer
+        )
         notes = {}
         for position, others in kept:
             note = provenance_note(provenance_entries(self.flat_vulns, others))
