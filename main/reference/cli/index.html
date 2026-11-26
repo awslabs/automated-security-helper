@@ -6785,7 +6785,7 @@ but some row was not run, 2 for a usage error (an unknown plugin, no transcript 
 <td>flag</td>
 <td>off</td>
 <td></td>
-<td>Show one row per duplicate cluster in the HTML, Markdown and text reports, with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Off by default because it changes row counts. Sets <code>global_settings.deduplication.fold</code>.</td>
+<td>Show one row per duplicate cluster in the human-readable reports (HTML, Markdown, text, and the Bedrock summary), with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Findings fold when they share a CVE and package, or when overlapping lines share a CWE; line overlaps chain, so two findings can fold through a third that overlaps both. Off by default because it changes row counts. Sets <code>global_settings.deduplication.fold</code>.</td>
 </tr>
 <tr>
 <td><a id="report--verbose"></a><code>--verbose</code>, <code>-v</code></td>
@@ -7176,7 +7176,7 @@ across different scanners and ensure fields are preserved during aggregation.</p
 <td>flag</td>
 <td>off</td>
 <td></td>
-<td>Show one row per duplicate cluster in the HTML, Markdown and text reports, with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Off by default because it changes row counts. Sets <code>global_settings.deduplication.fold</code>.</td>
+<td>Show one row per duplicate cluster in the human-readable reports (HTML, Markdown, text, and the Bedrock summary), with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Findings fold when they share a CVE and package, or when overlapping lines share a CWE; line overlaps chain, so two findings can fold through a third that overlaps both. Off by default because it changes row counts. Sets <code>global_settings.deduplication.fold</code>.</td>
 </tr>
 <tr>
 <td><a id="results-report--verbose"></a><code>--verbose</code>, <code>-v</code></td>
@@ -7236,7 +7236,7 @@ across different scanners and ensure fields are preserved during aggregation.</p
 <td>path, any number</td>
 <td>not set</td>
 <td></td>
-<td>ASH scan results JSON files, one per run. They are put in chronological order by report id. At least two.</td>
+<td>ASH scan results JSON files, one per run. When every file names one of ASH's timestamped report ids they are put in chronological order by it; otherwise they are kept in the order given, which the output says. At least two.</td>
 </tr>
 </tbody>
 </table>
@@ -7572,7 +7572,7 @@ across different scanners and ensure fields are preserved during aggregation.</p
 <td>flag</td>
 <td>off</td>
 <td></td>
-<td>Show one row per duplicate cluster in the HTML, Markdown and text reports, with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Only the same CVE and package, or the same line and CWE, fold. Finding ids, SARIF, per-scanner counts, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. Sets <code>global_settings.deduplication.fold</code>.</td>
+<td>Show one row per duplicate cluster in the human-readable reports (HTML, Markdown, text, and the Bedrock summary), with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Findings fold when they share a CVE and package, or when overlapping lines share a CWE; line overlaps chain, so two findings can fold through a third that overlaps both. Finding ids, SARIF, per-scanner counts, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. Sets <code>global_settings.deduplication.fold</code>.</td>
 </tr>
 <tr>
 <td><a id="scan--changed-files-only"></a><code>--changed-files-only</code></td>
@@ -7990,7 +7990,7 @@ code 0 means a scan applies every symbol suppression.</p>
 <td>path, any number</td>
 <td>not set</td>
 <td></td>
-<td>ASH scan results JSON files, one per run. They are put in chronological order by report id. At least two.</td>
+<td>ASH scan results JSON files, one per run. When every file names one of ASH's timestamped report ids they are put in chronological order by it; otherwise they are kept in the order given, which the output says. At least two.</td>
 </tr>
 </tbody>
 </table>
