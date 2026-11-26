@@ -20,6 +20,7 @@ binary.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Dict, List
 
@@ -561,7 +562,7 @@ def _scanner(
     config = get_default_config()
     record_provenance(
         config,
-        in_tree=[] if operator else [source / ".ash" / ".ash.yaml"],
+        in_tree=[] if operator else [source / ".ash.yaml"],
         trusted=AshConfig(),
     )
     return KyvernoScanner(
@@ -889,6 +890,146 @@ class TestExitStatus:
         assert _run(scanner, fake, monkeypatch) is False
         assert scanner.dependencies_satisfied is False
         assert fake.calls == []
+
+
+#: What the planted stderr log holds: a line as Kyverno writes it when a manifest does
+#: not load, quoting the manifest's own text (a Secret's data among it).
+_QUOTED_MANIFEST_TEXT = "S0VZVkVSTk8tTEVBSy1DQU5BUlk="
+_STDERR_LOG = (
+    "Error: failed to load resources: k8s/secret.yaml: "
+    f"data: {{password: {_QUOTED_MANIFEST_TEXT}}}\n"
+)
+
+
+def _fail_after_the_run(tree, tmp_path, monkeypatch) -> tuple:
+    """A scan that fails past kyverno's run, with a stderr log quoting a manifest.
+
+    The failure comes from the adapter, after the tool exited 1 with a report, so it
+    reaches the ``except Exception`` branch of scan(), which describes it with
+    ``_describe_scan_failure``. Returns the message and the log's path.
+    """
+    scanner = _scanner(tree, tmp_path, policy_paths=["policies"])
+    log = (
+        Path(scanner.results_dir or scanner.context.output_dir)
+        / "source"
+        / "KyvernoScanner.stderr.log"
+    )
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text(_STDERR_LOG, encoding="utf-8")
+
+    def adapter_failure(*args, **kwargs):
+        raise RuntimeError("the adapter could not convert the report")
+
+    monkeypatch.setattr(ks, "convert_report_results", adapter_failure)
+    with pytest.raises(ScannerError) as raised:
+        _run(scanner, FakeKyverno(), monkeypatch)
+    return str(raised.value), log
+
+
+class TestTheStderrLogIsNotQuoted:
+    """Kyverno's stderr can quote a scanned file, so a failure never quotes the log.
+
+    The failure text reaches ash.log, the console and every results file. The base
+    class quotes the head and tail of the tool's stderr log for a scanner that leaves
+    ``quote_tool_stderr`` on; kyverno turns it off, so the text names the log instead.
+    """
+
+    def test_the_scanner_turns_quoting_off(self):
+        assert KyvernoScanner.quote_tool_stderr is False
+
+    def test_a_failure_names_the_log_and_does_not_quote_it(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        message, log = _fail_after_the_run(tree, tmp_path, monkeypatch)
+        assert "the adapter could not convert the report" in message
+        assert _QUOTED_MANIFEST_TEXT not in message
+        assert "secret.yaml" not in message
+        assert "not quoted here" in message
+        assert log.as_posix() in message
+
+    def test_control_with_quoting_on_the_same_failure_quotes_the_log(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        """Must-flag control: the probe above can see a quoted log."""
+        monkeypatch.setattr(KyvernoScanner, "quote_tool_stderr", True)
+        message, _log = _fail_after_the_run(tree, tmp_path, monkeypatch)
+        assert _QUOTED_MANIFEST_TEXT in message
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
+class TestPolicyDirectoryLinks:
+    """A file under a policy directory must resolve inside it, or it is not read."""
+
+    @staticmethod
+    def _recorded_reads(monkeypatch) -> List[Path]:
+        """Every path ``_holds_policy`` is asked to read, which is every file it opens."""
+        read: List[Path] = []
+        real = KyvernoScanner._holds_policy
+
+        def recording(path: Path) -> bool:
+            read.append(Path(path))
+            return real(path)
+
+        monkeypatch.setattr(KyvernoScanner, "_holds_policy", staticmethod(recording))
+        return read
+
+    @staticmethod
+    def _policies_passed(fake: FakeKyverno) -> List[str]:
+        argv = fake.calls[0]["argv"]
+        return argv[argv.index("--") + 1 :]
+
+    def test_a_file_link_leaving_the_directory_is_skipped_and_not_read(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "elsewhere.yaml").write_text(
+            POLICY.replace("require-team-label", "elsewhere")
+        )
+        (tree / "policies" / "linked.yaml").symlink_to(outside / "elsewhere.yaml")
+        read = self._recorded_reads(monkeypatch)
+        scanner = _scanner(tree, tmp_path, policy_paths=["policies"])
+        fake = FakeKyverno()
+        _run(scanner, fake, monkeypatch)
+        assert self._policies_passed(fake) == ["policies/require-team.yaml"]
+        # By name: the walk starts at the policy directory as operator_paths resolved
+        # it, so a path read is spelled under that, not under the fixture's spelling.
+        names = {path.name for path in read}
+        assert "linked.yaml" not in names
+        assert "require-team.yaml" in names
+
+    def test_a_file_under_a_linked_directory_is_skipped_and_not_read(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        outside = tmp_path / "outside-policies"
+        outside.mkdir()
+        (outside / "inner.yaml").write_text(
+            POLICY.replace("require-team-label", "inner")
+        )
+        (tree / "policies" / "shared").symlink_to(outside, target_is_directory=True)
+        read = self._recorded_reads(monkeypatch)
+        scanner = _scanner(tree, tmp_path, policy_paths=["policies"])
+        fake = FakeKyverno()
+        _run(scanner, fake, monkeypatch)
+        assert self._policies_passed(fake) == ["policies/require-team.yaml"]
+        assert not [path for path in read if "shared" in path.parts]
+
+    def test_control_a_link_that_stays_in_the_directory_is_kept(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        """Must-not-flag control: what is refused is leaving the directory, not a link."""
+        (tree / "policies" / "alias.yaml").symlink_to(
+            tree / "policies" / "require-team.yaml"
+        )
+        scanner = _scanner(tree, tmp_path, policy_paths=["policies"])
+        fake = FakeKyverno()
+        _run(scanner, fake, monkeypatch)
+        assert self._policies_passed(fake) == [
+            "policies/alias.yaml",
+            "policies/require-team.yaml",
+        ]
 
 
 class TestDependencyCheck:

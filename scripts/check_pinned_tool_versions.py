@@ -28,14 +28,17 @@ runs it weekly with ``--fail-on-outdated``.
 There is no second list of tools here. The pins come from ``TOOL_VERSIONS``,
 ``THIRD_PARTY_LICENSES``, ``RULES_BUNDLES``, ``CFN_NAG_GEM_VERSION`` and
 ``BUNDLER_VERSION``, so a tool pinned in any of them is checked without editing this
-file. A pin kept in a new module-level name would not be;
+file. An alpha plugin that installs its own tool keeps the pin in its own install
+module (``PLUGIN_PIN_MODULE``, found from the tool's license entry by name), and that
+module is read too, as source. A pin kept in a new module-level name would not be;
 ``tests/unit/test_pinned_tool_version_check.py`` fails on any module global named
 like a version pin that ``PIN_SOURCES`` below does not name, and on any Dockerfile
 ``ARG <NAME>_VERSION`` that no pin owns.
 
 Each pin is one of ``PIN_KINDS``, and each kind has its own bump steps. A license
-entry that no download pin names is refused, because what a bump of it changes is
-kept somewhere this script does not read. The same test file builds the steps for
+entry that no download pin names, and whose tool has no plugin install module, is
+refused, because what a bump of it changes is kept somewhere this script does not
+read. The same test file builds the steps for
 every real pin and fails when one leaves out a value a bump changes, read
 independently from the module's tables, the Dockerfile and the tracked files.
 
@@ -219,6 +222,10 @@ BUNDLED_LIBRARY = "bundled-library"
 # THIRD_PARTY_LICENSES with none of the above, held to one version by a Dockerfile
 # ``ARG <TOOL>_VERSION=``: a dependency of a uv tool, such as the pygit2 GuardDog needs
 DOCKERFILE_ARG = "dockerfile-arg"
+# THIRD_PARTY_LICENSES with none of the above, pinned by the alpha plugin that owns the
+# tool in its own install module (PLUGIN_PIN_MODULE): kyverno and polaris, whose plugins
+# keep the version, the release download prefix and the per-asset digests themselves
+PLUGIN_MODULE = "plugin-module"
 PIN_KINDS = (
     RELEASE_BINARY,
     UV_TOOL,
@@ -226,7 +233,19 @@ PIN_KINDS = (
     GEM,
     BUNDLED_LIBRARY,
     DOCKERFILE_ARG,
+    PLUGIN_MODULE,
 )
+
+# Where an alpha plugin that installs its own tool keeps the pin, relative to the
+# package root, by the tool's name with each hyphen an underscore. The module spells
+# the pin as ``<TOOL>_VERSION`` (the release tag), ``_RELEASE_BASE`` (the release
+# download prefix) and the ``ASSETS``, ``ARCHIVE_SHA256`` and ``MEMBER_SHA256``
+# tables. A license entry that no table of the pins module names is read as such a
+# pin when this file exists.
+PLUGIN_PIN_MODULE = "plugin_modules/ash_{stem}_plugins/{stem}_install.py"
+# The tables such a module keeps beside its version, in the order a bump changes them.
+PLUGIN_PIN_TABLES = ("ASSETS", "ARCHIVE_SHA256", "MEMBER_SHA256")
+_SHA256_HEX = re.compile(r"[0-9a-fA-F]{64}")
 
 # The gem CFN_NAG_GEM_VERSION is the version of; see assets/Gemfile.
 CFN_NAG_GEM = "cfn-nag"
@@ -361,11 +380,152 @@ def _license_project(tool: str, entry: Any) -> str:
     )
 
 
+@dataclass(frozen=True)
+class PluginModulePin:
+    """A pin an alpha plugin keeps in its own install module, read from its source.
+
+    ``path`` is relative to the repository root. The values are the module's own
+    literals, read with ``ast.literal_eval``: nothing in the package is imported, so
+    this works on a bare interpreter like the rest of the script.
+    """
+
+    path: str
+    version_name: str
+    version: str
+    release_base: str
+    assets: dict[tuple[str, str], str]
+    archive_sha256: dict[str, str]
+    member_sha256: dict[str, str]
+
+
+def _package_root(pins: Any) -> Path:
+    """The package ``pins`` was loaded from (``<root>/utils/tool_downloads.py``)."""
+    source = getattr(pins, "__file__", None)
+    return Path(source).resolve().parents[1] if source else PACKAGE_ROOT
+
+
+def _module_literals(
+    tree: ast.Module, wanted: tuple[str, ...], shown: str, tool: str
+) -> dict[str, Any]:
+    """The module-level literals of ``tree`` bound to the names in ``wanted``."""
+    values: dict[str, Any] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            target, value = node.target, node.value
+        else:
+            continue
+        if not isinstance(target, ast.Name) or target.id not in wanted:
+            continue
+        if target.id in values:
+            raise PinEnumerationError(
+                f"{shown} binds {target.id} twice, so which value is {tool}'s pin is "
+                "not clear"
+            )
+        try:
+            values[target.id] = ast.literal_eval(value)
+        except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError) as exc:
+            raise PinEnumerationError(
+                f"{shown}: {target.id} is not a literal, so this script cannot read "
+                f"{tool}'s pin from it"
+            ) from exc
+    return values
+
+
+def plugin_module_pin(pins: Any, tool: str) -> PluginModulePin | None:
+    """``tool``'s pin in its alpha plugin's install module, or None when it has none.
+
+    The module is ``PLUGIN_PIN_MODULE`` under the package ``pins`` was loaded from.
+
+    Raises:
+        PinEnumerationError: when the module exists but its pin cannot be read in
+            full: a name missing or bound twice, a value that is not a literal of the
+            shape the module's own ``pinned_asset`` reads, or an asset one of the
+            digest tables has no entry for (a half-applied bump). Refused rather than
+            skipped, because a pin read in part gets bump steps that leave out the rest.
+    """
+    root = _package_root(pins)
+    path = root / PLUGIN_PIN_MODULE.format(stem=tool.replace("-", "_"))
+    if not path.is_file():
+        return None
+    shown = path.relative_to(root.parent).as_posix()
+    version_name = f"{_arg_stem(tool)}_VERSION"
+    wanted = (version_name, "_RELEASE_BASE", *PLUGIN_PIN_TABLES)
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=shown)
+    except (OSError, SyntaxError, ValueError) as exc:
+        raise PinEnumerationError(
+            f"{shown} holds {tool}'s pin and cannot be read "
+            f"({type(exc).__name__}: {exc})"
+        ) from exc
+    values = _module_literals(tree, wanted, shown, tool)
+    missing = [name for name in wanted if name not in values]
+    if missing:
+        raise PinEnumerationError(
+            f"{shown} holds {tool}'s pin but binds no {', '.join(missing)} at module "
+            f"level. A plugin's own pin is spelled {', '.join(wanted)}, so the bump "
+            "steps can name every value a bump changes."
+        )
+    version, release_base = values[version_name], values["_RELEASE_BASE"]
+    if not isinstance(version, str) or not version.strip():
+        raise PinEnumerationError(f"{shown}: {version_name} is not a version string")
+    if not isinstance(release_base, str):
+        raise PinEnumerationError(f"{shown}: _RELEASE_BASE is not a string")
+    assets = values["ASSETS"]
+    if not (
+        isinstance(assets, dict)
+        and assets
+        and all(
+            isinstance(key, tuple)
+            and len(key) == 2
+            and all(isinstance(part, str) for part in key)
+            and isinstance(name, str)
+            for key, name in assets.items()
+        )
+    ):
+        raise PinEnumerationError(
+            f"{shown}: ASSETS is not a map of (platform, arch) to a release file name"
+        )
+    digests: dict[str, dict[str, str]] = {}
+    for name in ("ARCHIVE_SHA256", "MEMBER_SHA256"):
+        table = values[name]
+        if not (
+            isinstance(table, dict)
+            and all(
+                isinstance(key, str)
+                and isinstance(value, str)
+                and _SHA256_HEX.fullmatch(value)
+                for key, value in table.items()
+            )
+        ):
+            raise PinEnumerationError(
+                f"{shown}: {name} is not a map of release file name to a SHA256"
+            )
+        unpinned = sorted(set(assets.values()) - set(table))
+        if unpinned:
+            raise PinEnumerationError(
+                f"{shown}: {name} has no digest for {', '.join(unpinned)}; a version "
+                "bump is half-applied."
+            )
+        digests[name] = dict(table)
+    return PluginModulePin(
+        path=shown,
+        version_name=version_name,
+        version=version,
+        release_base=release_base,
+        assets=dict(assets),
+        archive_sha256=digests["ARCHIVE_SHA256"],
+        member_sha256=digests["MEMBER_SHA256"],
+    )
+
+
 def enumerate_pins(pins: Any, dockerfile: Path = DOCKERFILE) -> list[Pin]:
     """Every pin ``pins`` carries, one per tool, sorted by tool name.
 
-    A license entry that no table names is a pin only when ``dockerfile`` has an
-    ``ARG <TOOL>_VERSION=`` for it.
+    A license entry that no table names is a pin only when its tool's alpha plugin
+    pins it in its own install module (``plugin_module_pin``), or when ``dockerfile``
+    has an ``ARG <TOOL>_VERSION=`` for it.
 
     Raises:
         PinEnumerationError: when a pin cannot be attributed to an upstream, when
@@ -454,6 +614,15 @@ def enumerate_pins(pins: Any, dockerfile: Path = DOCKERFILE) -> list[Pin]:
             continue
         elif tool in gems:
             continue
+        elif entry is not None and (module := plugin_module_pin(pins, tool)):
+            # Read before the Dockerfile ARG: the module holds the version and the
+            # digests, and a Dockerfile ARG of the tool's is named for every kind.
+            version = module.version
+            kind = PLUGIN_MODULE
+            pinned_in.append(f"{module.path} {module.version_name}")
+            project = _github_project(
+                module.release_base, f"{module.path} _RELEASE_BASE"
+            )
         elif entry is not None and _dockerfile_args(tool, dockerfile):
             version = entry.version
             kind = DOCKERFILE_ARG
@@ -465,10 +634,11 @@ def enumerate_pins(pins: Any, dockerfile: Path = DOCKERFILE) -> list[Pin]:
             recorded = entry.version if entry is not None else None
             raise PinEnumerationError(
                 f"THIRD_PARTY_LICENSES[{tool!r}] records {recorded}, but {tool} is "
-                "not in TOOL_VERSIONS or RULES_BUNDLES and has no distribution, so this "
-                "script cannot tell what a bump of it changes. Give it a kind in "
-                "PIN_KINDS, with its own steps in bump_steps, or pin it with a "
-                f"Dockerfile ARG {_arg_stem(tool)}_VERSION."
+                "not in TOOL_VERSIONS or RULES_BUNDLES, has no distribution and no "
+                f"plugin install module ({PLUGIN_PIN_MODULE.format(stem='<tool>')}), "
+                "so this script cannot tell what a bump of it changes. Give it a "
+                "kind in PIN_KINDS, with its own steps in bump_steps, or pin it with "
+                f"a Dockerfile ARG {_arg_stem(tool)}_VERSION."
             )
 
         if entry is not None:
@@ -1313,6 +1483,45 @@ def _bundled_library_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
     return steps
 
 
+def _plugin_module_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
+    """An alpha plugin's own pin: its install module's values, then its license entry.
+
+    The module's version and its three tables move together (its ``pinned_asset``
+    refuses an asset either digest table lacks), so each is a step of its own.
+    """
+    module = plugin_module_pin(pins, pin.tool)
+    if module is None:
+        raise ValueError(
+            f"{pin.tool} is a {PLUGIN_MODULE!r} pin, but its install module "
+            f"({PLUGIN_PIN_MODULE.format(stem=pin.tool.replace('-', '_'))}) is gone"
+        )
+    old_bare, new_bare = pin.version.lstrip("v"), latest.lstrip("v")
+    filenames = list(module.assets.values())
+    version = _spelled_like(module.version, latest)
+    steps = [f"{module.path}: {module.version_name} -> {version}"]
+    # Each name is judged on its own, as for a release binary's asset table.
+    versioned = [name for name in filenames if old_bare in name]
+    if versioned:
+        which = "" if len(versioned) == len(filenames) else " that carry the version"
+        steps.append(
+            f"{module.path}: ASSETS, the {len(versioned)} asset file names of "
+            f"{pin.tool}{which}, {old_bare} -> {new_bare}; check each still exists "
+            "upstream"
+        )
+    steps += [
+        (
+            f"{module.path}: ARCHIVE_SHA256, {len(module.archive_sha256)} archive "
+            "digest(s), from the release's checksums file or each asset's GitHub "
+            "`digest` field, each re-verified by download"
+        ),
+        (
+            f"{module.path}: MEMBER_SHA256, {len(module.member_sha256)} executable "
+            "digest(s), hashed from each verified archive's extracted member"
+        ),
+    ]
+    return steps + _license_steps(pins, pin.tool, latest)
+
+
 # One function per kind in PIN_KINDS; a test keeps the two in step.
 _KIND_STEPS: dict[str, Callable[[Any, Pin, str], list[str]]] = {
     RELEASE_BINARY: _release_binary_steps,
@@ -1321,6 +1530,7 @@ _KIND_STEPS: dict[str, Callable[[Any, Pin, str], list[str]]] = {
     GEM: _gem_steps,
     BUNDLED_LIBRARY: _bundled_library_steps,
     DOCKERFILE_ARG: _dockerfile_arg_steps,
+    PLUGIN_MODULE: _plugin_module_steps,
 }
 
 
@@ -1339,6 +1549,9 @@ def _pinned_digests(pins: Any, pin: Pin) -> list[str]:
             if value:
                 values.append(value)
         values += getattr(pins, "_COMPANION_DIGESTS", {}).get(archive, {}).values()
+    module = plugin_module_pin(pins, pin.tool) if pin.kind == PLUGIN_MODULE else None
+    if module is not None:
+        values += [*module.archive_sha256.values(), *module.member_sha256.values()]
     entry = pins.THIRD_PARTY_LICENSES.get(pin.tool)
     if entry is not None:
         values.append(entry.commit)
@@ -1368,6 +1581,12 @@ def _copy_steps(pins: Any, pin: Pin, repo_root: Path) -> list[str]:
             spellings.append(f"sha256-{sri}")
     if not spellings:
         return []
+    # A plugin's own pin keeps its digests in its install module, whose tables the
+    # kind's steps name; only the copies elsewhere are steps here.
+    excluded = [PINS_FILE]
+    module = plugin_module_pin(pins, pin.tool) if pin.kind == PLUGIN_MODULE else None
+    if module is not None:
+        excluded.append(module.path)
     # -z prints each path verbatim and ends the path and the line number with a NUL,
     # so a path that holds a colon, a non-ASCII character or a quote is read back as
     # it is. --no-color keeps a user's color.grep=always out of the paths. The output is
@@ -1376,7 +1595,7 @@ def _copy_steps(pins: Any, pin: Pin, repo_root: Path) -> list[str]:
     argv = ["git", "-C", str(repo_root), "grep", "-n", "-z", "--no-color", "-I", "-F"]
     for spelling in spellings:
         argv += ["-e", spelling]
-    argv += ["--", ".", f":(exclude){PINS_FILE}"]
+    argv += ["--", ".", *(f":(exclude){path}" for path in excluded)]
     try:
         found = subprocess.run(  # nosec B603 B607 - git, fixed arguments, this checkout
             argv, capture_output=True, timeout=60, check=False

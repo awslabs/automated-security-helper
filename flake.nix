@@ -122,6 +122,13 @@
           pkgs.gitleaks
           pkgs.grype
           pkgs.hadolint # alpha scanner; runs when its module is listed
+          # alpha scanner; runs when its module is listed and policies are named. nixpkgs
+          # ships 1.19.0 at the locked revision (34ab9907, checked 2026-11-26 in
+          # pkgs/by-name/ky/kyverno), older than the 1.19.2 the image and `ash dependencies
+          # install` pin (ash_kyverno_plugins/kyverno_install.py). Both load the legacy
+          # kyverno.io/v1 policies; 1.20.0 and later do not, so compare `kyverno version`
+          # with the pin after a flake.lock bump.
+          pkgs.kyverno
           pkgs.nodejs # provides `npm audit`
           semgrep
           pkgs.syft

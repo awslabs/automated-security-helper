@@ -708,6 +708,38 @@ runs:
           --exit-code $Rc --expect-exit 1 --min-findings 12
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+    # The kyverno check of the Unix step "Validate alpha kyverno (Python Local Unix)",
+    # in pwsh for the same reason as the hadolint one above.
+    - name: Validate alpha kyverno (Python Local Windows)
+      if: inputs.method == 'python-local' && inputs.config-file == 'default' && runner.os == 'Windows'
+      shell: pwsh
+      env:
+        ASH_ENTRY_POINT_DIRS: ${{ steps.ash-entry-point.outputs.dirs }}
+        ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
+      run: |
+        # See "Put ASH's entry point ahead of the MSYS2 toolchain (Windows)".
+        $env:PATH = "$env:ASH_ENTRY_POINT_DIRS;$env:PATH"
+        $AshPath = (Get-Command ash -ErrorAction SilentlyContinue).Source
+        if ($AshPath -notmatch '\\Scripts\\ash\.exe$') {
+          Write-Host "::error::ash resolved to '$AshPath', not the ASH entry point"
+          exit 1
+        }
+        & ash dependencies install --tool kyverno --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_kyverno_plugins]"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $Out = Join-Path $env:RUNNER_TEMP "kyverno-out"
+        & ash scan --mode local --no-progress --simple `
+          --source-dir tests/test_data/scanners/kyverno/positive `
+          --output-dir $Out `
+          --ash-plugin-modules automated_security_helper.plugin_modules.ash_kyverno_plugins `
+          --config-overrides "scanners.kyverno.options.policy_paths=[policies]" `
+          --scanners kyverno
+        $Rc = $LASTEXITCODE
+        $Python = if (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } else { "python" }
+        & $Python "${{ github.action_path }}/assert_alpha_scanner_ran.py" `
+          (Join-Path $Out "ash_aggregated_results.json") kyverno `
+          --exit-code $Rc --expect-exit 2 --min-findings 1
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
     # Python Local scan (Unix)
     - name: Validate ASH using Python Local (Unix)
       if: inputs.method == 'python-local' && runner.os != 'Windows'
@@ -774,6 +806,34 @@ runs:
         "$PY" "${{ github.action_path }}/assert_alpha_scanner_ran.py" \
           "$out/ash_aggregated_results.json" hadolint --exit-code "$rc" \
           --expect-exit 1 --min-findings 12
+
+    # kyverno is an alpha scanner too, and also applies only the policies the operator
+    # names, so this installs it with its module loaded and scans the committed fixture
+    # with its policy directory named in an override: k8s/bad.yaml fails the policy's
+    # one rule and k8s/good.yaml passes it. Every manifest is evaluated, so the scan is
+    # complete and the finding makes 2 the expected exit.
+    - name: Validate alpha kyverno (Python Local Unix)
+      if: inputs.method == 'python-local' && inputs.config-file == 'default' && runner.os != 'Windows'
+      shell: bash
+      env:
+        ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
+      run: |
+        ash dependencies install --tool kyverno \
+          --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_kyverno_plugins]"
+        out="${RUNNER_TEMP}/kyverno-out"
+        set +e
+        ash scan --mode local --no-progress --simple \
+          --source-dir tests/test_data/scanners/kyverno/positive \
+          --output-dir "$out" \
+          --ash-plugin-modules automated_security_helper.plugin_modules.ash_kyverno_plugins \
+          --config-overrides "scanners.kyverno.options.policy_paths=[policies]" \
+          --scanners kyverno
+        rc=$?
+        set -e
+        PY=python3; command -v python3 >/dev/null 2>&1 || PY=python
+        "$PY" "${{ github.action_path }}/assert_alpha_scanner_ran.py" \
+          "$out/ash_aggregated_results.json" kyverno --exit-code "$rc" \
+          --expect-exit 2 --min-findings 1
 
     # PowerShell scan. `pwsh -File {0}`, not `pwsh`: the built-in shell runs the
     # script as `pwsh -command ". '<script>'"`, which reports every non-zero exit as

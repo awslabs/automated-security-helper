@@ -151,6 +151,12 @@ LOCAL: Dict[Plugin, str] = {
         "reads the Dockerfiles in the scan set (hadolint_scanner.py:391-448); "
         "declares no network (:284)"
     ),
+    ("scanners", "kyverno"): (
+        "reads the manifests in the scan set and the operator's policy files; runs "
+        "`kyverno apply` without --cluster or --registry, so it reaches no cluster "
+        "and no registry, and declares no network (kyverno_scanner.py:563, :577, "
+        ":691-701)"
+    ),
     ("reporters", "asff"): "writes a file",
     ("reporters", "csv"): "writes a file",
     ("reporters", "cyclonedx"): "writes a file",

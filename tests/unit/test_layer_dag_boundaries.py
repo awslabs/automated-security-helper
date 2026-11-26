@@ -108,11 +108,18 @@ KNOWN_VIOLATIONS: Dict[Tuple[str, str], int] = {
     # 73 -> 74: npm_audit_scanner's normalize-results harness entry resolves the
     # scanner model's AshConfig forward reference before it builds one (landed on
     # main with the consolidated fixes).
-    ("plugin_modules", "config"): 74,
+    # 74 -> 78: the alpha scanner build-out's plugins read the operator-trust rules
+    # where the other plugins read them: dependency-check and ggshield
+    # config.tool_config_trust, kingfisher and kyverno config.confinement_remedy.
+    ("plugin_modules", "config"): 78,
     # 70 -> 75: the sdist lock harvester (core.constants, core.exceptions), the MCP
     # config scanner (core.enums), cdk-nag (core.exceptions) and trivy
     # (core.container_engine) read core types the way the other plugins do.
-    ("plugin_modules", "core"): 81,
+    # 81 -> 101: the alpha scanner build-out's nine plugins (credsweeper,
+    # dependency-check, ggshield, gosec, kics, kingfisher, kyverno, polaris and
+    # secretlint) read core.enums and core.exceptions the same way, two statements
+    # each, and the kyverno and polaris install modules core.exceptions.
+    ("plugin_modules", "core"): 101,
     ("plugin_modules", "interactions"): 2,
     ("plugin_modules", "workspace"): 1,
     ("schemas", "config"): 2,

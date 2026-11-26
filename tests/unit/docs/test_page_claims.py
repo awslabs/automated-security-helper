@@ -22667,18 +22667,43 @@ def test_betterleaks_is_pinned_where_the_page_says_with_both_digests_on_every_pl
 
 _HOMEPAGE = "index.md"
 _HOMEPAGE_ALPHA_SENTENCE = (
-    "Six more scanners ship with ASH as alpha plugins: "
-    "[Betterleaks](docs/plugins/alpha/betterleaks-plugin.md) and "
-    "[Ferret Scan](docs/plugins/alpha/ferret-scan-plugin.md) for secrets, "
+    "Fifteen more scanners ship with ASH as alpha plugins: "
+    "[Betterleaks](docs/plugins/alpha/betterleaks-plugin.md), "
+    "[CredSweeper](docs/plugins/alpha/credsweeper-plugin.md), "
+    "[Ferret Scan](docs/plugins/alpha/ferret-scan-plugin.md), "
+    "[ggshield](docs/plugins/alpha/ggshield-plugin.md), "
+    "[Kingfisher](docs/plugins/alpha/kingfisher-plugin.md) and "
+    "[Secretlint](docs/plugins/alpha/secretlint-plugin.md) for secrets, "
+    "[Dependency-Check](docs/plugins/alpha/dependency_check-plugin.md) for "
+    "vulnerable dependencies, "
     "[GuardDog](docs/plugins/alpha/guarddog-plugin.md) for malicious packages, "
+    "[gosec](docs/plugins/alpha/gosec-plugin.md) for Go, "
+    "[Snyk Code](docs/plugins/alpha/snyk-plugin.md) for SAST, "
     "[hadolint](docs/plugins/alpha/hadolint-plugin.md) for Dockerfiles, "
-    "[Snyk Code](docs/plugins/alpha/snyk-plugin.md) for SAST, and "
+    "[KICS](docs/plugins/alpha/kics-plugin.md) for infrastructure as code, "
+    "[Kyverno](docs/plugins/alpha/kyverno-plugin.md) and "
+    "[Polaris](docs/plugins/alpha/polaris-plugin.md) for Kubernetes manifests, and "
     "[Trivy](docs/plugins/alpha/trivy-plugin.md) for repository scanning. "
     "A scan runs one only when its module is named in `ash_plugin_modules` or "
     "`--ash-plugin-modules`. See the "
     "[alpha plugins](docs/plugins/alpha/index.md) and the "
-    "[scanners reference](reference/scanners.md) for all 23 scanners."
+    "[scanners reference](reference/scanners.md) for all 32 scanners."
 )
+
+_ONES = (
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen "
+    "fourteen fifteen sixteen seventeen eighteen nineteen"
+).split()
+_TENS = "- - twenty thirty forty fifty sixty seventy eighty ninety".split()
+
+
+def _spelled(number: int) -> str:
+    """``number`` (0 to 99) in words, the way the homepage writes its count."""
+    assert 0 <= number < 100, number
+    if number < 20:
+        return _ONES[number]
+    tens, ones = divmod(number, 10)
+    return _TENS[tens] + (f"-{_ONES[ones]}" if ones else "")
 
 
 def _shipped_scanner_split(
@@ -22693,28 +22718,33 @@ def _shipped_scanner_split(
 
 
 @pytest.mark.unit
-def test_the_homepage_says_asha_ships_six_alpha_scanners_and_links_each(
+def test_the_homepage_counts_the_alpha_scanners_and_links_each(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """index.md (Scanners).
 
-    The sentence is on the page. Its count of six is the number of scanners the
-    vendored alpha plugin packages declare, which is every in-tree alpha
-    module; its 23 is built in plus alpha; and each link it carries resolves to
-    a page under docs/content, the alpha index and the scanners reference
-    included.
+    The sentence is on the page. The count it opens with is the number of
+    scanners the vendored alpha plugin packages declare, which is every in-tree
+    alpha module; its total is built in plus alpha; and each link it carries
+    resolves to a page under docs/content, the alpha index and the scanners
+    reference included. The counts are the code's, not numbers written here, so
+    an alpha module added without a sentence edit fails this test.
     """
     from automated_security_helper.plugins.enablement import modules_needing_naming
 
     assert_on_page(_HOMEPAGE, _HOMEPAGE_ALPHA_SENTENCE)
     builtin, alpha = _shipped_scanner_split(tmp_path, monkeypatch)
-    assert len(modules_needing_naming()) == len(alpha) == 6, (
+    assert len(modules_needing_naming()) == len(alpha), (
         len(modules_needing_naming()),
         sorted(alpha),
     )
-    assert len(builtin) + len(alpha) == 23, (len(builtin), len(alpha))
+    opening = f"{_spelled(len(alpha)).capitalize()} more scanners ship with ASH as "
+    assert _HOMEPAGE_ALPHA_SENTENCE.startswith(opening), (opening, sorted(alpha))
+    total = f"for all {len(builtin) + len(alpha)} scanners."
+    assert _HOMEPAGE_ALPHA_SENTENCE.endswith(total), (total, len(builtin), len(alpha))
     links = re.findall(r"\]\(([^)#]+\.md)", _HOMEPAGE_ALPHA_SENTENCE)
-    assert len(links) == 8, links
+    # One page per alpha scanner, plus the alpha index and the scanners reference.
+    assert len(links) == len(alpha) + 2, links
     for link in links:
         assert (CONTENT / link).is_file(), link
     # Each alpha scanner's own page is one of the links, by its name.

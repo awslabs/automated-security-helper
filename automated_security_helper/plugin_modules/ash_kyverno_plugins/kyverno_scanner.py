@@ -74,6 +74,12 @@ kinds and admission policies are not treated as resources. Files that do not par
 and files over ``MAX_MANIFEST_BYTES``, are skipped. Helm templates and other
 templated YAML therefore do not reach Kyverno.
 
+Links. A manifest must resolve inside the scanned target, and a file under a policy
+directory must resolve inside that directory: a file reached through a link that
+leaves it is skipped with a warning and never read, so a link in the scanned tree
+cannot hand ASH or Kyverno a file from elsewhere. A policy path the operator names is
+checked by ``operator_paths``, which refuses one that leaves the tree through a link.
+
 Offline and sandbox
 -------------------
 Nothing in a ``kyverno apply`` run without ``--cluster`` reaches the network, so
@@ -559,6 +565,11 @@ class KyvernoScanner(ScannerPluginBase[KyvernoScannerConfig]):
     # 0 nothing failed, 1 a failed result or an error; see "Exit status" above. A run
     # that exits 1 is complete only when it printed a report.
     success_exit_codes: ClassVar[Set[int]] = {0, 1}
+    # Kyverno's stderr can quote a scanned file: a "failed to load resources" error
+    # names the manifest and its text, and a Secret manifest is a scanned file. So
+    # the failure text names the scanner's stderr log and never quotes it, and the
+    # stream stays in that log (scanner_plugin.py, quote_tool_stderr).
+    quote_tool_stderr: ClassVar[bool] = False
     # The strict default: no network, baseline environment only. The scanner reads
     # the policy files and manifests inside the source directory, and the operator's
     # policy paths outside it are not granted to the sandbox yet; grants derived from
@@ -822,8 +833,9 @@ class KyvernoScanner(ScannerPluginBase[KyvernoScannerConfig]):
         """The policy files to pass to kyverno, sorted; empty when none is configured.
 
         Every operator entry is resolved (``operator_paths``); one the scanned tree
-        set is ignored with a warning. A file is kept when it holds a policy
-        document. A directory contributes the policy files under it.
+        set is ignored with a warning, and so is one that leaves the tree through a
+        link. A file is kept when it holds a policy document. A directory contributes
+        the policy files under it that resolve inside it (``_policy_dir_files``).
 
         Raises:
             ScannerError: when an entry the operator set does not exist.
@@ -855,17 +867,45 @@ class KyvernoScanner(ScannerPluginBase[KyvernoScannerConfig]):
                     f"does not exist (looked for {path.as_posix()}). Fix the path, "
                     "or remove it to leave the kyverno scanner idle."
                 )
-            candidates = (
-                sorted(
-                    p for p in path.rglob("*") if p.suffix.lower() in MANIFEST_SUFFIXES
-                )
-                if path.is_dir()
-                else [path]
-            )
+            candidates = self._policy_dir_files(path) if path.is_dir() else [path]
             for file in candidates:
                 if self._holds_policy(file):
                     files.add(file)
         return sorted(files)
+
+    def _policy_dir_files(self, directory: Path) -> List[Path]:
+        """The ``.yaml``, ``.yml`` and ``.json`` files under a policy *directory*, sorted.
+
+        A file must resolve inside the directory. One reached through a link that
+        leaves it (a link to a file elsewhere, or a file under a linked directory) is
+        skipped with a warning and never read: a policy directory is often in the
+        scanned tree, so its links are the tree's to choose, and ``_holds_policy``
+        reads every file it is given. The operator names the directory such a link
+        leads to in ``policy_paths`` to have its policies applied.
+        """
+        base = directory.resolve()
+        kept: List[Path] = []
+        for path in sorted(directory.rglob("*")):
+            if path.suffix.lower() not in MANIFEST_SUFFIXES:
+                continue
+            try:
+                resolved: Optional[Path] = path.resolve()
+            except (OSError, RuntimeError):
+                resolved = None
+            if resolved is None or not resolved.is_relative_to(base):
+                where = (
+                    "a path that cannot be resolved"
+                    if resolved is None
+                    else resolved.as_posix()
+                )
+                self._plugin_log(
+                    f"Skipping policy file {path.as_posix()}: it resolves to {where}, "
+                    f"outside the policy directory {directory.as_posix()}.",
+                    level=logging.WARNING,
+                )
+                continue
+            kept.append(path)
+        return kept
 
     @staticmethod
     def _holds_policy(path: Path) -> bool:

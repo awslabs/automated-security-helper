@@ -25,7 +25,14 @@ CONTAINER = ROOT / ".github/actions/validate-container/action.yml"
 NIX = ROOT / ".github/actions/validate-nix/action.yml"
 FLAKE = ROOT / "flake.nix"
 UNIFIED = ROOT / ".github/workflows/ash-unified-ci.yml"
+RUN_SCAN_TEST = ROOT / ".github/actions/run-scan-test/action.yml"
 BETTERLEAKS_MODULE = "automated_security_helper.plugin_modules.ash_betterleaks_plugins"
+KYVERNO_MODULE = "automated_security_helper.plugin_modules.ash_kyverno_plugins"
+KYVERNO_FIXTURE = "tests/test_data/scanners/kyverno/positive"
+#: kyverno applies only the policies the operator names; every leg names the fixture's.
+KYVERNO_POLICIES = (
+    '--config-overrides "scanners.kyverno.options.policy_paths=[policies]"'
+)
 
 
 @pytest.fixture(scope="module")
@@ -173,6 +180,63 @@ class TestNixEntry:
         assert f"--ash-plugin-modules {BETTERLEAKS_MODULE}" in text
         listing = text.split("flake_supplied = [", 1)[1].split("]", 1)[0]
         assert '"betterleaks",' in listing
+
+    def test_flake_supplies_kyverno_and_records_the_version_gap(self):
+        flake = FLAKE.read_text()
+        assert "pkgs.kyverno" in flake
+        # The comment between the entry before it and the kyverno entry.
+        note = flake.split("pkgs.kyverno", 1)[0].rsplit("pkgs.hadolint", 1)[-1]
+        assert "1.19.0" in note and "1.19.2" in note
+
+    def test_nix_leg_loads_kyverno_names_its_policies_and_requires_it(self):
+        text = NIX.read_text()
+        assert f"--ash-plugin-modules {KYVERNO_MODULE}" in text
+        assert KYVERNO_POLICIES in text
+        assert f"{KYVERNO_FIXTURE}/policies" in text
+        listing = text.split("flake_supplied = [", 1)[1].split("]", 1)[0]
+        assert '"kyverno",' in listing
+
+
+class TestKyvernoLocalLegs:
+    """The python-local legs install kyverno with its module loaded, on every OS, and
+    require a finding from the committed fixture."""
+
+    @pytest.mark.parametrize("runner", ["Unix", "Windows"])
+    def test_the_leg_installs_kyverno_and_requires_the_fixtures_finding(self, runner):
+        step = _step(RUN_SCAN_TEST, f"Validate alpha kyverno (Python Local {runner})")
+        run = step["run"]
+        assert "ash dependencies install --tool kyverno" in run
+        assert f"ash_plugin_modules+=[{KYVERNO_MODULE}]" in run
+        assert f"--source-dir {KYVERNO_FIXTURE}" in run
+        assert f"--ash-plugin-modules {KYVERNO_MODULE}" in run
+        assert KYVERNO_POLICIES in run
+        assert "--scanners kyverno" in run
+        assert "--expect-exit 2 --min-findings 1" in run
+
+    def test_the_fixture_holds_the_policy_and_one_manifest_that_fails_it(self):
+        from automated_security_helper.plugin_modules.ash_kyverno_plugins.kyverno_scanner import (
+            is_policy_document,
+            is_resource_document,
+        )
+
+        fixture = ROOT / KYVERNO_FIXTURE
+        policy = yaml.safe_load((fixture / "policies/require-team.yaml").read_text())
+        assert is_policy_document(policy)
+        annotations = policy["metadata"]["annotations"]
+        assert annotations["policies.kyverno.io/severity"] == "high"
+        (rule,) = policy["spec"]["rules"]
+        required = rule["validate"]["pattern"]["metadata"]["labels"]
+        pods = {
+            path.name: yaml.safe_load(path.read_text())
+            for path in sorted((fixture / "k8s").glob("*.yaml"))
+        }
+        assert set(pods) == {"bad.yaml", "good.yaml"}
+        assert all(is_resource_document(pod) for pod in pods.values())
+        labels = {name: pod["metadata"].get("labels", {}) for name, pod in pods.items()}
+        # One manifest lacks the label the rule requires, so the legs expect one finding.
+        assert [name for name, have in labels.items() if set(required) - set(have)] == [
+            "bad.yaml"
+        ]
 
 
 class TestSandboxParityLeg:

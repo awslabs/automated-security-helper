@@ -25,6 +25,7 @@ import re
 import socket
 import subprocess  # nosec B404 - git ls-files over this checkout only
 import sys
+import types
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -729,6 +730,21 @@ GEMFILE_REL = "automated_security_helper/assets/Gemfile"
 GEMFILE_LOCK = REPO_ROOT / f"{GEMFILE_REL}.lock"
 
 
+def _plugin_install_module(tool: str) -> Any:
+    """The alpha plugin install module that pins ``tool``, imported, or None.
+
+    Read by importing the module, where the script reads its source: two readings.
+    """
+    stem = tool.replace("-", "_")
+    package = f"ash_{stem}_plugins"
+    path = REPO_ROOT / "automated_security_helper" / "plugin_modules" / package
+    if not (path / f"{stem}_install.py").is_file():
+        return None
+    return importlib.import_module(
+        f"automated_security_helper.plugin_modules.{package}.{stem}_install"
+    )
+
+
 def _kind(pins: Any, tool: str) -> str:
     """The kind of pin ``tool`` is, read from the module's tables."""
     if tool in _GEM_PINS:
@@ -742,6 +758,8 @@ def _kind(pins: Any, tool: str) -> str:
         return "uv-tool"
     if entry is not None and getattr(entry, "bundled_in", None):
         return "bundled-library"
+    if entry is not None and _plugin_install_module(tool) is not None:
+        return "plugin-module"
     if entry is not None and _dockerfile_args(tool):
         return "dockerfile-arg"
     return "unknown"
@@ -764,6 +782,11 @@ def _pinned_digests(pins: Any, tool: str) -> set[str]:
             value = getattr(pins, table, {}).get(archive)
             if value:
                 values.add(value)
+    if _kind(pins, tool) == "plugin-module":
+        module = _plugin_install_module(tool)
+        values |= set(module.ARCHIVE_SHA256.values()) | set(
+            module.MEMBER_SHA256.values()
+        )
     for key, value in pins._THIRD_PARTY_HASHES.items():
         if key == f"{tool} commit" or key.startswith(f"{tool}/"):
             values.add(value)
@@ -890,6 +913,17 @@ def _needles(pins: Any, tool: str, version: str) -> list[str]:
         if constant:
             needles.append(constant)
         needles += ["rules_bundles.extract_bundle", "contents_digest"]
+    if kind == "plugin-module":
+        # The install module and each value it pins: the version, the asset names
+        # (when they carry the version) and both digest tables.
+        module = _plugin_install_module(tool)
+        needles.append(
+            Path(module.__file__).resolve().relative_to(REPO_ROOT).as_posix()
+        )
+        needles.append(f"{tool.upper().replace('-', '_')}_VERSION")
+        if all(bare in name for name in module.ASSETS.values()):
+            needles.append("ASSETS")
+        needles += ["ARCHIVE_SHA256", "MEMBER_SHA256"]
     for archive in _archives(pins, tool):
         for table in ("_DIGESTS", "_EXECUTABLE_DIGESTS", "_BUNDLE_CONTENTS_DIGESTS"):
             if archive in getattr(pins, table, {}):
@@ -958,6 +992,7 @@ class TestBumpStepsNameEveryValueABumpChanges:
             "bundled-library",
             "dockerfile-arg",
             "gem",
+            "plugin-module",
             "release-binary",
             "rules-bundle",
             "uv-tool",
@@ -1118,6 +1153,177 @@ class TestBumpStepsNameEveryValueABumpChanges:
         assert f"{pin.package}={pin.version} -> {pin.package}=9.9.9-1" in report
         for number in pin.lines:
             assert f"Dockerfile:{number}" in report
+
+
+# ---------------------------------------------------------------------------
+# A tool its alpha plugin pins in its own install module
+#
+# kyverno and polaris pin their tools in ash_<tool>_plugins/<tool>_install.py, and
+# tool_downloads.py carries only their license entries. The script reads the module
+# as source (it imports nothing of the package); these tests read the real modules
+# by importing them, and planted modules through the script's reader.
+# ---------------------------------------------------------------------------
+
+_DIGEST_A, _DIGEST_B = "a" * 64, "b" * 64
+_DIGEST_C, _DIGEST_D = "c" * 64, "d" * 64
+_LINUX, _DARWIN = "fake_1.2.3_linux_amd64.tar.gz", "fake_1.2.3_darwin_arm64.tar.gz"
+
+#: A planted install module for the tool "fake", by module-level name.
+_PLANTED_PARTS = {
+    "FAKE_VERSION": 'FAKE_VERSION = "v1.2.3"\n',
+    "_RELEASE_BASE": (
+        '_RELEASE_BASE = "https://github.com/example/fake/releases/download"\n'
+    ),
+    "ASSETS": (
+        f'ASSETS: dict = {{("linux", "amd64"): "{_LINUX}", '
+        f'("darwin", "arm64"): "{_DARWIN}"}}\n'
+    ),
+    "ARCHIVE_SHA256": (
+        f'ARCHIVE_SHA256 = {{"{_LINUX}": "{_DIGEST_A}", "{_DARWIN}": "{_DIGEST_B}"}}\n'
+    ),
+    "MEMBER_SHA256": (
+        f'MEMBER_SHA256 = {{"{_LINUX}": "{_DIGEST_C}", "{_DARWIN}": "{_DIGEST_D}"}}\n'
+    ),
+}
+
+
+def _planted_pins(tmp_path: Path, **changes: Any) -> Any:
+    """Pins whose package root holds a planted install module for the tool "fake".
+
+    ``changes`` replaces a part of the module by name, or drops it when None.
+    """
+    parts = dict(_PLANTED_PARTS)
+    for name, text in changes.items():
+        if text is None:
+            parts.pop(name)
+        else:
+            parts[name] = text
+    root = tmp_path / "automated_security_helper"
+    module = root / "plugin_modules" / "ash_fake_plugins" / "fake_install.py"
+    module.parent.mkdir(parents=True)
+    module.write_text('"""Planted; read as source."""\n' + "".join(parts.values()))
+    return types.SimpleNamespace(__file__=str(root / "utils" / "tool_downloads.py"))
+
+
+@pytest.mark.unit
+class TestPluginModulePins:
+    @pytest.mark.parametrize("tool", ["kyverno", "polaris"])
+    def test_the_pin_is_read_from_the_plugins_install_module(self, pins, tool):
+        module = _plugin_install_module(tool)
+        version_name = f"{tool.upper()}_VERSION"
+        pin = {p.tool: p for p in checker.enumerate_pins(pins)}[tool]
+        assert (pin.kind, pin.ecosystem) == (checker.PLUGIN_MODULE, checker.GITHUB)
+        assert pin.version == getattr(module, version_name)
+        assert pin.version == pins.THIRD_PARTY_LICENSES[tool].version
+        assert module._RELEASE_BASE.startswith(f"https://github.com/{pin.project}/")
+        path = Path(module.__file__).resolve().relative_to(REPO_ROOT).as_posix()
+        assert pin.pinned_in == (f"{path} {version_name}", "THIRD_PARTY_LICENSES")
+
+    def test_the_module_digests_are_searched_for_copies(self, pins):
+        """A copy of an install module's digest outside it is a bump step too."""
+        module = _plugin_install_module("kyverno")
+        pin = {p.tool: p for p in checker.enumerate_pins(pins)}["kyverno"]
+        digests = checker._pinned_digests(pins, pin)
+        assert set(module.ARCHIVE_SHA256.values()) <= set(digests)
+        assert set(module.MEMBER_SHA256.values()) <= set(digests)
+
+    def test_kyverno_is_held_below_the_release_its_plugin_cannot_take(self, pins):
+        """The hold names the release kyverno_install.py documents the pin stops below."""
+        hold = pins.HELD_PINS["kyverno"]
+        assert hold.acknowledged == "v1.20.0"
+        assert "v1.20.0" in _plugin_install_module("kyverno").__doc__
+        assert hold.reason.strip() and hold.until.strip()
+
+    def test_a_half_applied_bump_of_the_license_entry_is_refused(
+        self, pins, monkeypatch
+    ):
+        entry = dataclasses.replace(
+            pins.THIRD_PARTY_LICENSES["kyverno"], version="v9.9.9"
+        )
+        monkeypatch.setitem(pins.THIRD_PARTY_LICENSES, "kyverno", entry)
+        with pytest.raises(checker.PinEnumerationError, match="half-applied"):
+            checker.enumerate_pins(pins)
+
+    def test_a_planted_install_module_is_read_in_full(self, tmp_path):
+        module = checker.plugin_module_pin(_planted_pins(tmp_path), "fake")
+        assert module is not None
+        assert (module.version_name, module.version) == ("FAKE_VERSION", "v1.2.3")
+        assert module.path == (
+            "automated_security_helper/plugin_modules/ash_fake_plugins/fake_install.py"
+        )
+        assert module.release_base.startswith("https://github.com/example/fake/")
+        assert module.assets == {
+            ("linux", "amd64"): _LINUX,
+            ("darwin", "arm64"): _DARWIN,
+        }
+        assert module.archive_sha256 == {_LINUX: _DIGEST_A, _DARWIN: _DIGEST_B}
+        assert module.member_sha256 == {_LINUX: _DIGEST_C, _DARWIN: _DIGEST_D}
+
+    def test_control_a_tool_with_no_install_module_has_no_plugin_pin(self, tmp_path):
+        """Must-not-flag: the reader keys on the module's path, not on any module."""
+        assert checker.plugin_module_pin(_planted_pins(tmp_path), "other") is None
+
+    @pytest.mark.parametrize("name", list(_PLANTED_PARTS))
+    def test_a_module_that_leaves_out_a_value_is_refused(self, tmp_path, name):
+        planted = _planted_pins(tmp_path, **{name: None})
+        # The refusal lists every expected name, so match the one it says is missing.
+        with pytest.raises(
+            checker.PinEnumerationError, match=f"binds no {re.escape(name)} at module"
+        ):
+            checker.plugin_module_pin(planted, "fake")
+
+    def test_an_asset_with_no_digest_is_a_half_applied_bump(self, tmp_path):
+        planted = _planted_pins(
+            tmp_path, MEMBER_SHA256=f'MEMBER_SHA256 = {{"{_LINUX}": "{_DIGEST_C}"}}\n'
+        )
+        with pytest.raises(checker.PinEnumerationError, match="half-applied"):
+            checker.plugin_module_pin(planted, "fake")
+
+    @pytest.mark.parametrize(
+        ("name", "text", "match"),
+        [
+            ("FAKE_VERSION", "FAKE_VERSION = _computed()\n", "not a literal"),
+            ("FAKE_VERSION", 'FAKE_VERSION = ""\n', "not a version string"),
+            (
+                "ARCHIVE_SHA256",
+                f'ARCHIVE_SHA256 = {{"{_LINUX}": "x", "{_DARWIN}": "{_DIGEST_B}"}}\n',
+                "SHA256",
+            ),
+            ("ASSETS", f'ASSETS = {{"linux": "{_LINUX}"}}\n', "platform, arch"),
+            (
+                "_RELEASE_BASE",
+                '_RELEASE_BASE = "https://a"\n_RELEASE_BASE = "https://b"\n',
+                "twice",
+            ),
+        ],
+        ids=["computed", "empty-version", "bad-digest", "flat-assets", "bound-twice"],
+    )
+    def test_a_value_of_another_shape_is_refused(self, tmp_path, name, text, match):
+        planted = _planted_pins(tmp_path, **{name: text})
+        with pytest.raises(checker.PinEnumerationError, match=match):
+            checker.plugin_module_pin(planted, "fake")
+
+    @pytest.mark.integration
+    def test_a_bump_names_the_install_modules_values_and_the_license_entry(self, pins):
+        pin = {p.tool: p for p in checker.enumerate_pins(pins)}["kyverno"]
+        steps = _steps_text(pins, pin)
+        path = (
+            "automated_security_helper/plugin_modules/ash_kyverno_plugins/"
+            "kyverno_install.py"
+        )
+        for needle in (
+            f"{path}: KYVERNO_VERSION -> v9.9.9",
+            f"{path}: ASSETS, the 6 asset file names of kyverno, 1.19.2 -> 9.9.9",
+            f"{path}: ARCHIVE_SHA256, 6 archive digest(s)",
+            f"{path}: MEMBER_SHA256, 6 executable digest(s)",
+            'THIRD_PARTY_LICENSES["kyverno"].version -> v9.9.9',
+            "gh api repos/kyverno/kyverno/commits/v9.9.9",
+            'HELD_PINS["kyverno"] (acknowledged v1.20.0)',
+        ):
+            assert needle in steps, f"{needle!r} missing from:\n{steps}"
+        # Its own module is named by the steps above, not again as a copy.
+        copies = [s for s in steps.splitlines() if "a copy of a digest" in s]
+        assert not [s for s in copies if s.startswith(path)], copies
 
 
 @pytest.mark.unit

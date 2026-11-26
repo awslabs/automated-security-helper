@@ -4,7 +4,7 @@
 """The index pages of the docs site say what is under them, and what they say is true.
 
 Three pages of the site are hubs: ``reference/index.md`` (a table of the reference pages
-and the generator of each), ``docs/plugins/alpha/index.md`` (the six alpha
+and the generator of each), ``docs/plugins/alpha/index.md`` (the alpha
 plugins that ship inside ASH) and ``personas/index.md`` (the three roles and the pages
 for them). Each lists pages and names things in the code, and none had a mechanism that
 reads the list, so a page added under a hub, or a generator renamed, left the hub
@@ -19,10 +19,12 @@ What is pinned, and what is not:
   maps to that page in ``REFERENCE_PAGES`` of the freshness test, and is the generator
   the page's own banner names; a row that says "written by hand" is a page with no
   banner. Not pinned: the one-line description of what a page lists.
-- alpha/index.md: the six plugins in the list are the six ``alpha`` pages beside
-  it, and the three that name a module (``ash_*_plugins``) name a package that exists
-  under ``automated_security_helper/plugin_modules``. Not pinned: the submission
-  guidelines, which are policy, and the tools each plugin runs.
+- alpha/index.md: the plugins in the list are the ``alpha`` pages beside it, the
+  sentence after the list counts them, and each row that names a module
+  (``ash_*_plugins``) names the package, under
+  ``automated_security_helper/plugin_modules``, whose manifest owns that row's page.
+  Not pinned: the submission guidelines, which are policy, and the tools each plugin
+  runs.
 - personas/index.md: the three roles in the table are the three role pages, and every
   link on the page names a page that exists. Not pinned: the argument about pace of
   iteration, which is prose.
@@ -36,7 +38,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.unit.docs.test_page_claims import CONTENT, assert_on_page
+from tests.unit.docs.test_page_claims import CONTENT, _spelled, assert_on_page
 from tests.unit.test_generated_docs_freshness import REFERENCE_PAGES
 
 pytestmark = pytest.mark.unit
@@ -172,26 +174,44 @@ def test_every_generated_reference_page_is_in_the_index_and_no_other_is() -> Non
 # --------------------------------------------------------------------------- #
 
 
+_LISTED = re.compile(
+    r"^- \*\*\[[^\]]+\]\((?P<page>[^)]+)\)\*\*(?: \(`(?P<module>ash_[a-z_]+_plugins)`\))?",
+    re.MULTILINE,
+)
+
+
 def test_the_community_index_lists_the_plugins_that_ship_in_ash() -> None:
-    assert_on_page(COMMUNITY_INDEX, "These six ship inside ASH.")
+    """The list is the alpha pages beside it, and the sentence after it counts them.
+
+    The count is the number of pages, not a number written here, so an alpha
+    plugin page added without a list row and a count edit fails this test.
+    """
     text = page_text(COMMUNITY_INDEX)
-    listed = re.findall(r"^- \*\*\[[^\]]+\]\(([^)]+)\)\*\*", text, re.MULTILINE)
-    assert len(listed) == 6, listed
+    listed = [match["page"] for match in _LISTED.finditer(text)]
     community = CONTENT / "docs" / "plugins" / "alpha"
     pages = {p.name for p in community.glob("*-plugin.md")}
+    assert pages, "no alpha plugin pages found"
+    assert len(listed) == len(set(listed)), listed
     assert set(listed) == pages, (sorted(set(listed) ^ pages), "lists vs pages")
+    assert_on_page(COMMUNITY_INDEX, f"These {_spelled(len(pages))} ship inside ASH.")
 
 
 def test_the_community_index_modules_exist() -> None:
+    """Each list row that names a module names the plugin package of its own page."""
+    from automated_security_helper.plugin_manifests import scanner_manifests
+
     text = page_text(COMMUNITY_INDEX)
-    modules = re.findall(r"`(ash_[a-z]+_plugins)`", text)
-    assert sorted(modules) == [
-        "ash_betterleaks_plugins",
-        "ash_guarddog_plugins",
-        "ash_hadolint_plugins",
-    ]
-    for module in modules:
+    owner = {
+        Path(path).name: manifest.plugin_module.rsplit(".", 1)[-1]
+        for manifest in scanner_manifests()
+        for path in manifest.file_ownership
+        if path.startswith("docs/content/docs/plugins/alpha/")
+    }
+    named = {m["page"]: m["module"] for m in _LISTED.finditer(text) if m["module"]}
+    assert named, "no list row names its plugin module"
+    for page, module in sorted(named.items()):
         assert (PLUGIN_MODULES / module / "__init__.py").is_file(), module
+        assert owner.get(page) == module, (page, module, owner.get(page))
 
 
 def test_the_community_index_links_resolve() -> None:

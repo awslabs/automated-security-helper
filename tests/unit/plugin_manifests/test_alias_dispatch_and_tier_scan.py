@@ -90,21 +90,38 @@ def test_only_one_scanner_is_deprecated_and_only_one_alias_exists() -> None:
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize(
-    "scanner,package",
-    [
-        ("betterleaks", "ash_betterleaks_plugins"),
-        ("ferret-scan", "ash_ferret_plugins"),
-        ("guarddog", "ash_guarddog_plugins"),
-        ("hadolint", "ash_hadolint_plugins"),
-        ("snyk-code", "ash_snyk_plugins"),
-        ("trivy-repo", "ash_trivy_plugins"),
-    ],
-)
+#: Each alpha scanner and the plugin package it loads from, written out by hand so
+#: the test reads the manifests against a second inventory rather than themselves.
+_ALPHA_PACKAGES = [
+    ("betterleaks", "ash_betterleaks_plugins"),
+    ("credsweeper", "ash_credsweeper_plugins"),
+    ("dependency-check", "ash_dependency_check_plugins"),
+    ("ferret-scan", "ash_ferret_plugins"),
+    ("ggshield", "ash_ggshield_plugins"),
+    ("gosec", "ash_gosec_plugins"),
+    ("guarddog", "ash_guarddog_plugins"),
+    ("hadolint", "ash_hadolint_plugins"),
+    ("kics", "ash_kics_plugins"),
+    ("kingfisher", "ash_kingfisher_plugins"),
+    ("kyverno", "ash_kyverno_plugins"),
+    ("polaris", "ash_polaris_plugins"),
+    ("secretlint", "ash_secretlint_plugins"),
+    ("snyk-code", "ash_snyk_plugins"),
+    ("trivy-repo", "ash_trivy_plugins"),
+]
+
+
+@pytest.mark.parametrize("scanner,package", _ALPHA_PACKAGES)
 def test_each_alpha_scanner_maps_to_its_plugin_module(scanner, package) -> None:
     expected = f"automated_security_helper.plugin_modules.{package}"
     assert opt_in_module_for(scanner) == expected
     assert opt_in_module_for(f"  {scanner.upper()} ") == expected
+
+
+def test_the_table_above_names_every_alpha_scanner() -> None:
+    """A new alpha scanner gets a row in ``_ALPHA_PACKAGES``, or this fails."""
+    alpha = {m.name for m in scanner_manifests() if m.tier is PluginTier.ALPHA}
+    assert {scanner for scanner, _ in _ALPHA_PACKAGES} == alpha
 
 
 def test_the_opt_in_scan_lists_exactly_the_scanners_that_do_not_load_by_default() -> (
@@ -113,7 +130,7 @@ def test_the_opt_in_scan_lists_exactly_the_scanners_that_do_not_load_by_default(
     assert set(opt_in_scanner_modules()) == {
         m.name for m in scanner_manifests() if not m.default_enabled
     }
-    assert len(opt_in_scanner_modules()) == 6
+    assert len(opt_in_scanner_modules()) == 15
     # Today the opt-in scanners are the alpha ones; that is the data, not the
     # rule (test_a_promoted_optin_scanner_keeps_its_hint covers the difference).
     assert {m.name for m in scanner_manifests() if m.tier is PluginTier.ALPHA} == set(

@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": [
+        "kyverno",
+        "apply",
+        "--policy-report",
+        "--remove-color",
+        "--output-format=yaml",
+        "--resource=k8s/bad.yaml",
+        "--resource=k8s/good.yaml",
+        "--",
+        "policies/high.yaml"
+      ],
+      "env_allowlist": [],
+      "exit_code": 1,
+      "fixture_tree": null,
+      "id": "kyverno-1.19.2-high",
+      "live_input": false,
+      "note": "argv and exit status as captured/README.md records them; the tool's stdout is the side report, verbatim, and the results file is the SARIF convert_report_results makes of that report with a manifest index that places Pod default/bad-pod in k8s/bad.yaml at line 1. The run's input tree is not committed, only bad.yaml, so no fixture tree is recorded.",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/kyverno-1.19.2-high.sarif",
+          "sha256": "4041d4fd469d62927c0615f0d36c133e2c12a446f42ebacdc763942a36b28456"
+        }
+      ],
+      "retention": "current",
+      "scanner": "kyverno",
+      "side_reports": [
+        {
+          "format": "text",
+          "path": "captured/kyverno-1.19.2-high.report.yaml",
+          "sha256": "de4d31160c2b921b3a638101f7d2d5132cbf6a69675bf381f3d02e5cbe6986c3"
+        }
+      ],
+      "stderr_tail": null,
+      "tool": {
+        "name": "kyverno",
+        "version": "1.19.2"
+      }
+    }
+  ],
+  "unrecorded": []
+}

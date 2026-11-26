@@ -128,10 +128,19 @@ redirects:
   docs/plugins/builtin/scanners-diagrams.md: reference/scanners.md
   docs/plugins/builtin/scanners.md: reference/scanners.md
   docs/plugins/community/betterleaks-plugin.md: docs/plugins/alpha/betterleaks-plugin.md
+  docs/plugins/community/credsweeper-plugin.md: docs/plugins/alpha/credsweeper-plugin.md
+  docs/plugins/community/dependency_check-plugin.md: docs/plugins/alpha/dependency_check-plugin.md
   docs/plugins/community/ferret-scan-plugin.md: docs/plugins/alpha/ferret-scan-plugin.md
+  docs/plugins/community/ggshield-plugin.md: docs/plugins/alpha/ggshield-plugin.md
+  docs/plugins/community/gosec-plugin.md: docs/plugins/alpha/gosec-plugin.md
   docs/plugins/community/guarddog-plugin.md: docs/plugins/alpha/guarddog-plugin.md
   docs/plugins/community/hadolint-plugin.md: docs/plugins/alpha/hadolint-plugin.md
   docs/plugins/community/index.md: docs/plugins/alpha/index.md
+  docs/plugins/community/kics-plugin.md: docs/plugins/alpha/kics-plugin.md
+  docs/plugins/community/kingfisher-plugin.md: docs/plugins/alpha/kingfisher-plugin.md
+  docs/plugins/community/kyverno-plugin.md: docs/plugins/alpha/kyverno-plugin.md
+  docs/plugins/community/polaris-plugin.md: docs/plugins/alpha/polaris-plugin.md
+  docs/plugins/community/secretlint-plugin.md: docs/plugins/alpha/secretlint-plugin.md
   docs/plugins/community/snyk-plugin-setup.md: docs/plugins/alpha/snyk-plugin-setup.md
   docs/plugins/community/snyk-plugin.md: docs/plugins/alpha/snyk-plugin.md
   docs/plugins/community/trivy-plugin.md: docs/plugins/alpha/trivy-plugin.md

@@ -73,6 +73,11 @@ runs:
         # For hadolint, an alpha scanner whose module the scan below lists. Unpinned base
         # image tag, so DL3007 fires and the scanner has something to report.
         printf 'FROM ubuntu:latest\nRUN echo fixture\n' > /tmp/ash-nix-selftest/Dockerfile
+        # For kyverno, also an alpha scanner the scan below lists, which applies only the
+        # policies the operator names: a Pod that fails the one rule of the policy, a Pod
+        # that passes it, and the policy, which the scan names with --config-overrides.
+        cp -R tests/test_data/scanners/kyverno/positive/k8s \
+          tests/test_data/scanners/kyverno/positive/policies /tmp/ash-nix-selftest/
 
     - name: "nix: scan"
       shell: bash
@@ -103,6 +108,8 @@ runs:
           --output-dir /tmp/ash-nix-selftest/output \
           --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins \
           --ash-plugin-modules automated_security_helper.plugin_modules.ash_betterleaks_plugins \
+          --ash-plugin-modules automated_security_helper.plugin_modules.ash_kyverno_plugins \
+          --config-overrides "scanners.kyverno.options.policy_paths=[policies]" \
           --simple
         rc=$?
         set -e
@@ -154,13 +161,15 @@ runs:
         # Rules Registry seeded by the shellHook; trivy's vulnerability database is
         # seeded the same way. Without the seeding both would be MISSING here.
         #
-        # hadolint and betterleaks are alpha scanners, so the scan above lists their
-        # modules with --ash-plugin-modules; otherwise they would be absent from the
-        # report and this list could not check that the flake supplies them. The GuardDog
-        # module is not listed: nixpkgs has no GuardDog package, so the flake does not
-        # supply it. betterleaks comes from nixpkgs at the version flake.lock locks,
-        # which is older than ASH's pin (see the comment at pkgs.betterleaks in
-        # flake.nix); this check says it runs, not that it is the pinned version.
+        # hadolint, betterleaks and kyverno are alpha scanners, so the scan above lists
+        # their modules with --ash-plugin-modules; otherwise they would be absent from the
+        # report and this list could not check that the flake supplies them. kyverno also
+        # needs its policy_paths override: with no policy named it is skipped, which says
+        # nothing about its binary. The GuardDog module is not listed: nixpkgs has no
+        # GuardDog package, so the flake does not supply it. betterleaks and kyverno come
+        # from nixpkgs at the versions flake.lock locks, which are older than ASH's pins
+        # (see the comments at pkgs.betterleaks and pkgs.kyverno in flake.nix); this
+        # check says they run, not that they are the pinned versions.
         flake_supplied = [
             "actionlint",
             "bandit",
@@ -173,6 +182,7 @@ runs:
             "gitleaks",
             "grype",
             "hadolint",
+            "kyverno",
             "npm-audit",
             "opengrep",
             "semgrep",

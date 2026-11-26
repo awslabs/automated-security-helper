@@ -849,10 +849,10 @@ def get_rules_bundle(name: str) -> RulesBundle:
 # scanner's name, because it is also the key ``--uv-tool-pins`` overrides.
 #
 # ``scripts/check_pinned_tool_versions.py`` reads new entries from these tables and
-# needs no edit to start reporting the tool's upstream releases and what a bump of it
-# changes, as long as ``TOOL_VERSIONS`` or ``RULES_BUNDLES`` pins its download or it
-# has a ``distribution``. An entry none of those name is refused until the script is
-# taught what kind of pin it is.
+# needs no edit to report the tool's upstream releases and what a bump changes, as
+# long as ``TOOL_VERSIONS`` or ``RULES_BUNDLES`` pins its download, it has a
+# ``distribution``, or its alpha plugin pins it in ``<tool>_install.py`` (a
+# plugin-module pin). Any other entry is refused until the script learns its kind.
 #
 # Known limitations
 # -----------------
@@ -1704,6 +1704,20 @@ class HeldPin:
 # with the pins, so the decision to hold a tool is reviewed in the same diff as its
 # pin and not in a CI argument. See HeldPin for what a hold does and does not excuse.
 HELD_PINS: dict[str, HeldPin] = {
+    # Pinned by its alpha plugin (ash_kyverno_plugins/kyverno_install.py).
+    "kyverno": HeldPin(
+        acknowledged="v1.20.0",
+        reason=(
+            "Kyverno 1.20.0 no longer loads the legacy kyverno.io/v1 ClusterPolicy and "
+            "Policy kinds, which 1.19.2 loads beside the policies.kyverno.io kinds, so "
+            "moving the pin would stop an operator's legacy policies from loading."
+        ),
+        until=(
+            "ASH documents a migration of the operator's policies to the "
+            "policies.kyverno.io kinds, or a Kyverno release loads the legacy kinds "
+            "again."
+        ),
+    ),
     "pygit2": HeldPin(
         acknowledged="1.21.0",
         reason=(

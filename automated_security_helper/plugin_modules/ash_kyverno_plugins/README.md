@@ -9,7 +9,7 @@ Kyverno ships no policies, so the scanner is bring-your-own-policy: with none co
 This plugin ships with ASH and is loaded only when its module is listed. An `ash scan` that does not list it is unchanged.
 
 ```yaml
-# .ash/.ash.yaml
+# .ash.yaml
 ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_kyverno_plugins
 ```
@@ -42,7 +42,8 @@ scanners:
       # path is taken from the source directory. Honored only when set with
       # --config-overrides or an ASH config file outside every git checkout and the
       # scanned tree. Empty: the scanner is skipped. A path that does not exist
-      # fails the scan.
+      # fails the scan. A file under a directory that resolves outside it through
+      # a link is skipped and not read.
       policy_paths:
         - policies/
       # Seconds for the whole Kyverno scan (default 1800; null for no limit).

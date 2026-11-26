@@ -5,8 +5,8 @@
 
 ASH's scan set leaves out a link to a file whose target leaves the scanned tree, but
 only detect-secrets, cfn-nag, cdk-nag, npm-audit, actionlint, zizmor, cfn-lint,
-cfn-guard, guarddog and hadolint read the scan set. Every other scanner is handed a
-directory and walks it. bandit, checkov and ferret-scan are covered in their own tests
+cfn-guard, guarddog, hadolint and kyverno read the scan set. Every other scanner is
+handed a directory and walks it. bandit, checkov and ferret-scan are covered in their own tests
 (test_scanners_skip_links_leaving_the_tree.py and the ferret one). This covers the rest, and pins that every registered scanner is one of
 the kinds below, so a new one cannot be added without deciding which:
 
@@ -90,6 +90,10 @@ LINK_HANDLING = {
     # resolves outside the target (hadolint_scanner.py _dockerfiles).
     "guarddog": READS_THE_SCAN_SET,
     "hadolint": READS_THE_SCAN_SET,
+    # Through scan_set_of, for its manifests; it also skips a manifest that resolves
+    # outside the target (kyverno_scanner.py _manifests), and a policy file that
+    # resolves outside its policy directory (_policy_dir_files).
+    "kyverno": READS_THE_SCAN_SET,
     # Reads the scan set, then opens each config file under the scanned-tree rule.
     "mcp-config": READS_THE_SCAN_SET,
     "bandit": EXCLUDES_THE_LINK,
@@ -197,6 +201,11 @@ SCANNER_CLASSES = {
         "ash_betterleaks_plugins.betterleaks_scanner",
         "BetterleaksScanner",
         "Betterleaks",
+    ),
+    "kyverno": (
+        "ash_kyverno_plugins.kyverno_scanner",
+        "KyvernoScanner",
+        "Kyverno",
     ),
 }
 #: Where the scanners that take their inputs from utils/cfn_template_discovery.py
@@ -351,6 +360,28 @@ def test_every_registered_scanner_has_a_link_handling():
     assert _registered_scanner_names() == set(LINK_HANDLING) == set(SCANNER_CLASSES)
 
 
+#: A policy kyverno loads, so its scan reaches the manifests (it is idle without one).
+_KYVERNO_POLICY = """\
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-team-label
+spec:
+  rules:
+    - name: check-team-label
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: the team label is required
+        pattern:
+          metadata:
+            labels:
+              team: "?*"
+"""
+
+
 def _scanner_for(name: str, source: Path, base: Path):
     import importlib
 
@@ -358,7 +389,24 @@ def _scanner_for(name: str, source: Path, base: Path):
     module = importlib.import_module(f"{_SCANNERS}.{module_name}")
     scanner_class = getattr(module, class_name)
     config_class = getattr(module, f"{config_prefix}ScannerConfig")
-    return module, scanner_class(context=_context(source, base), config=config_class())
+    context = _context(source, base)
+    config = config_class()
+    if name == "kyverno":
+        # kyverno applies only the policies the operator names, and does nothing
+        # with none, so give it one: in the tree, named in policy_paths, with the
+        # provenance that says the operator set it.
+        from automated_security_helper.utils.config_trust import record_provenance
+
+        (source / "policies").mkdir(exist_ok=True)
+        (source / "policies" / "require-team.yaml").write_text(
+            _KYVERNO_POLICY, encoding="utf-8"
+        )
+        record_provenance(context.config, in_tree=[], trusted=AshConfig())
+        config = config_class(
+            enabled=True,
+            options=module.KyvernoScannerConfigOptions(policy_paths=["policies"]),
+        )
+    return module, scanner_class(context=context, config=config)
 
 
 #: Links that leave the tree, one for each kind of file a scanner reads; every name

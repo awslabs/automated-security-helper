@@ -9,7 +9,7 @@ Kyverno ships no policies of its own, so this scanner is bring-your-own-policy. 
 Kyverno is an alpha plugin that ships with ASH. Its plugin module is loaded only when you list it, so an `ash scan` that does not list it is unchanged: no row in the results, the summary, the reports or the SARIF.
 
 ```yaml
-# .ash/.ash.yaml
+# .ash.yaml
 ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_kyverno_plugins
 ```
@@ -55,7 +55,7 @@ scanners:
       severity_threshold: null
 ```
 
-An entry set by a config file the scanned repository controls is ignored with a warning, so a scanned tree cannot choose which policy files ASH reads. A directory contributes every `.yaml`, `.yml` and `.json` file under it that holds a Kyverno policy document; other files in it are not passed to Kyverno.
+An entry set by a config file the scanned repository controls is ignored with a warning, so a scanned tree cannot choose which policy files ASH reads. A directory contributes every `.yaml`, `.yml` and `.json` file under it that holds a Kyverno policy document; other files in it are not passed to Kyverno. A file under the directory that resolves outside it, through a link to a file elsewhere or under a linked directory, is skipped with a warning and not read; to apply the policies such a link leads to, add their directory to `policy_paths`.
 
 ## What is scanned
 
