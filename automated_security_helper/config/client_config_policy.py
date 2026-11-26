@@ -73,6 +73,7 @@ from typing import (
     Callable,
     Dict,
     FrozenSet,
+    Iterator,
     List,
     Literal,
     Mapping,
@@ -522,7 +523,7 @@ class _OptionDefaults(Mapping[Tuple[str, str], Any]):
     def __getitem__(self, key: Tuple[str, str]) -> Any:
         return copy.deepcopy(self._rows[key])
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Tuple[str, str]]:
         return iter(self._rows)
 
     def __len__(self) -> int:

@@ -355,7 +355,9 @@ def _grant_is_configured(raw: Optional[str]) -> bool:
     and read as unset, as :func:`_parse_roots` already treats their entries.
     """
 
-    return bool(raw) and any(e.strip() for e in raw.split(os.pathsep))
+    if not raw:
+        return False
+    return any(e.strip() for e in raw.split(os.pathsep))
 
 
 def operator_scan_roots() -> Tuple[Path, ...]:
