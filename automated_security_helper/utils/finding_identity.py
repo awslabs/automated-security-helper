@@ -27,8 +27,10 @@ The key of a result is:
   still carries the same vulnerable file at the same path is the same finding,
   the reasoning that keeps the package version out); it travels as attribution
   only, through the result properties named below;
-* the package name and path, for a dependency finding (grype and npm-audit put
-  every package of a lockfile at its line 1);
+* the package name and path, for a dependency finding (the location does not
+  tell packages apart: grype puts every package of a lockfile at its line 1,
+  and npm-audit's results share the lockfile's URI, with a line only where an
+  npm lockfile names the package's entry);
 * the workspace project;
 * the result's SARIF ``fingerprints``, or failing those its ``partialFingerprints``,
   as sorted ``[key, value]`` pairs under the kind's name, so that an edit above the
@@ -100,8 +102,9 @@ is the run's correlation scope, the scan metadata's project name
   a column, and those that do disagree on where a secret starts); the
   scanner-inclusive ``id`` still tells them apart.
 * ``dep/`` (:func:`dep_correlation_key`): the advisory id upper-cased, the
-  package name and the installed version. No file or line, since grype and
-  npm-audit put every package of a lockfile at its line 1. The version is in
+  package name and the installed version. No file or line: the location does
+  not tell packages apart (grype puts every package of a lockfile at its line
+  1, and npm-audit's results share the lockfile's URI). The version is in
   this key although the identity key leaves it out on purpose: the identity
   serves longitudinal continuity (upgrading to a release that is still
   vulnerable is the same finding), where a correlation id answers the

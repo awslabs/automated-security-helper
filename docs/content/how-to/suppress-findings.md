@@ -245,6 +245,20 @@ global_settings:
 
 Grype's findings in a lockfile are suppressed the same way.
 
+The move widens suppressions as well as narrowing them. A suppression that names no `rule_id` matches every rule, so one whose `path` matches a lockfile now covers npm-audit findings there too. An entry such as `path: deploy/**` or `path: "**/package-lock.json"`, written for other scanners while npm-audit findings sat at `node_modules/...` locations, never touched them; now it hides them, so advisories that failed the scan in earlier releases can pass with no config change. Audit for this once when you upgrade: list the suppressions that name no rule, counting an entry whose `rule_id` is `null` or an empty string as naming none, and check each one's `path` against your lockfiles.
+
+<!-- doctest: illustrative reason="the audit recipe needs yq and a repository with an .ash.yaml, and the docs runner's sample project has neither" -->
+```bash
+yq '.global_settings.suppressions[] | select((.rule_id // "") == "") | .path' .ash.yaml
+git ls-files '*package-lock.json' '*npm-shrinkwrap.json' '*pnpm-lock.yaml' '*yarn.lock'
+```
+
+A rule-less entry whose pattern matches a listed lockfile now covers that lockfile's npm-audit findings. Add a `rule_id` or a `package_name` to each entry that should not. ASH also warns, once per entry per run, when a rule-less suppression that also names no `package_name` matches a lockfile-located npm-audit finding, so the first scan after an upgrade points at the entries to audit; an entry that names a `package_name` is read as scoped on purpose and is not warned about.
+
+The old and the new spelling of one suppression can sit in one config during version skew: a config shared by machines running different ASH releases keeps the `node_modules/...` entry for the old release beside the lockfile entry for the new one. Each release matches its own location shape and lists the other entry in the unused-suppressions report, which is the sign to drop it once every machine has upgraded. A persisted report skews the same way: a SARIF written by the previous release carries root-advisory references without package names, which this release still matches by rule and location alone — deliberate compatibility, so suppressions keep resolving against old reports — so re-processing such a report does not get the new per-package discrimination for path-less roots; re-run the scan for that.
+
+One flow keeps the old shape: a report converted on its own, with no lockfile known, still locates each finding at `node_modules/<package>/package.json`, so the re-keyed entry does not match those findings. Keep the old-path entry where that flow matters.
+
 An ignore path can also have an `expires` date, which works the way a suppression's does: on that date the ignore path stops applying, so the files it covered are scanned again and their findings count on the next scan. The same holds for the entries of bandit `excluded_paths`, checkov `skip_path`, and syft `exclude`. This expired ignore path no longer drops the finding in `app.py`:
 
 <!-- doctest: run expect-exit=2 -->

@@ -25,7 +25,6 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
-    IDENTITY_FINGERPRINT_KEY,
     NpmAuditScanner,
     NpmAuditScannerConfig,
 )
@@ -35,6 +34,34 @@ pytestmark = pytest.mark.unit
 
 BRACES = "GHSA-vfj7-8cjw-p6xm"
 PICOMATCH = "GHSA-0000-pico-0000"
+
+#: The partialFingerprints key a lockfile-located result carries, as a literal:
+#: importing the scanner's constant failed collection on a tree without the
+#: lockfile-location change, so the whole module errored instead of these
+#: assertions failing. ``test_fingerprint_key_matches_the_scanner_constant``
+#: pins the literal against the source constant.
+IDENTITY_FINGERPRINT_KEY = "ashNpmAuditFinding/v1"
+
+
+def identity_fingerprint(result):
+    """The result's identity fingerprint, or None when it carries none, which
+    is what a tree without the lockfile-location change answers: the
+    assertions over these values then fail as assertions."""
+    return (result.partialFingerprints or {}).get(IDENTITY_FINGERPRINT_KEY)
+
+
+def test_fingerprint_key_matches_the_scanner_constant():
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        npm_audit_scanner,
+    )
+
+    # getattr, not attribute access: on a tree without the constant this must
+    # fail as an assertion, the way the module docstring above promises, not
+    # error with AttributeError.
+    assert (
+        getattr(npm_audit_scanner, "IDENTITY_FINGERPRINT_KEY", None)
+        == IDENTITY_FINGERPRINT_KEY
+    )
 
 
 def write_npm_lockfile(project: Path, entries: dict) -> Path:
@@ -288,10 +315,8 @@ class TestFindingsOfOneLockfileStayDistinct:
         by_rule = {r.ruleId: r for r in results_of(report)}
         braces, picomatch = by_rule[BRACES], by_rule[PICOMATCH]
         assert {uri_of(braces), uri_of(picomatch)} == {"package-lock.json"}
-        prints = {
-            r.ruleId: r.partialFingerprints[IDENTITY_FINGERPRINT_KEY]
-            for r in (braces, picomatch)
-        }
+        prints = {r.ruleId: identity_fingerprint(r) for r in (braces, picomatch)}
+        assert prints[BRACES] is not None
         assert prints[BRACES] != prints[PICOMATCH]
         assert props(braces)["package_name"] == "braces"
         assert props(braces)["package_version"] == "3.0.3"
@@ -325,9 +350,8 @@ class TestFindingsOfOneLockfileStayDistinct:
             "node_modules/braces",
             "node_modules/a/node_modules/braces",
         }
-        assert (
-            len({r.partialFingerprints[IDENTITY_FINGERPRINT_KEY] for r in results}) == 2
-        )
+        prints = {identity_fingerprint(r) for r in results}
+        assert None not in prints and len(prints) == 2
         assert len({region_of(r).startLine for r in results}) == 2
 
     def test_two_pnpm_advisories_in_one_lockfile_are_two_findings(
@@ -347,10 +371,8 @@ class TestFindingsOfOneLockfileStayDistinct:
         by_package = {props(r)["package_name"]: r for r in results_of(report)}
         minimist, braces = by_package["minimist"], by_package["braces"]
         assert uri_of(minimist) == uri_of(braces) == "pnpm-lock.yaml"
-        assert (
-            minimist.partialFingerprints[IDENTITY_FINGERPRINT_KEY]
-            != braces.partialFingerprints[IDENTITY_FINGERPRINT_KEY]
-        )
+        assert identity_fingerprint(minimist) is not None
+        assert identity_fingerprint(minimist) != identity_fingerprint(braces)
         assert props(braces)["package_version"] == "3.0.3"
         assert props(braces)["dependency_paths"] == [".>micromatch>braces"]
 
@@ -398,10 +420,8 @@ class TestFindingsOfOneLockfileStayDistinct:
         assert region_of(transitive).startLine == line_of(
             lock, "node_modules/micromatch"
         )
-        assert (
-            transitive.partialFingerprints[IDENTITY_FINGERPRINT_KEY]
-            != by_rule[BRACES].partialFingerprints[IDENTITY_FINGERPRINT_KEY]
-        )
+        assert identity_fingerprint(transitive) is not None
+        assert identity_fingerprint(transitive) != identity_fingerprint(by_rule[BRACES])
         (root,) = props(transitive)["root_advisories"]
         assert root["uri"] == uri_of(by_rule[BRACES])
 

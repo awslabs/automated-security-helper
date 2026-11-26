@@ -315,7 +315,7 @@ class TestJsonReportRewrite:
         source = tmp_path / "src"
         source.mkdir()
         (source / "main.tf").write_text("", encoding="utf-8")
-        scanner = _scanner(source, tmp_path / "out")
+        scanner = _scanner(source, tmp_path / "out", additional_formats=["json"])
         results_file = self._results(scanner)
         json_report = results_file.parent / "results_json.json"
         json_report.write_text(
@@ -354,6 +354,10 @@ class TestJsonReportRewrite:
         with caplog.at_level(logging.WARNING, logger="ash"):
             scanner._read_results_file(results_file)
         assert "Could not rewrite the paths" in caplog.text
+        # The cost the operator pays on a default run, where nothing else
+        # explains it: no resource id, so resource-scoped suppressions stop
+        # matching.
+        assert "carry no resource id" in caplog.text
         assert any(r.levelno == logging.WARNING for r in caplog.records)
 
     def test_the_json_report_is_written_through_the_atomic_guard(self, tmp_path):
@@ -366,7 +370,7 @@ class TestJsonReportRewrite:
         """
         source = tmp_path / "src"
         source.mkdir()
-        scanner = _scanner(source, tmp_path / "out")
+        scanner = _scanner(source, tmp_path / "out", additional_formats=["json"])
         results_file = self._results(scanner)
         json_report = results_file.parent / "results_json.json"
         document = {"results": {"failed_checks": []}}
