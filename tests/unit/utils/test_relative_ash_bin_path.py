@@ -269,13 +269,9 @@ def _without_a_usable_home(monkeypatch) -> None:
 
 
 def _the_import_time_constant_is_relative(monkeypatch) -> None:
-    """Every copy of ``ASH_BIN_PATH``, as an import under ``rel-bin`` computed it.
-
-    ``raising=False``: a fix that stops importing the constant into a module leaves
-    nothing to set there.
-    """
+    """Every copy of ``ASH_BIN_PATH``, as an import under ``rel-bin`` computed it."""
     for module in (constants, download_utils, subprocess_utils):
-        monkeypatch.setattr(module, "ASH_BIN_PATH", Path("rel-bin"), raising=False)
+        monkeypatch.setattr(module, "ASH_BIN_PATH", Path("rel-bin"))
 
 
 def _outcome(call):

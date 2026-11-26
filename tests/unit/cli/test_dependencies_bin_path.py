@@ -457,8 +457,7 @@ def test_a_blank_bin_path_ignores_a_relative_ash_bin_path(
     """
     monkeypatch.setenv("ASH_BIN_PATH", "rel-bin")
     # What the import computed in a process that started with the variable set.
-    # raising=False: a fix that stops importing the constant leaves nothing to set.
-    monkeypatch.setattr(dependencies, "ASH_BIN_PATH", Path("rel-bin"), raising=False)
+    monkeypatch.setattr(dependencies, "ASH_BIN_PATH", Path("rel-bin"))
     monkeypatch.setattr(subprocess_utils, "_warned_relative_bin_paths", set())
     project = tmp_path / "project"
     result = _install(project, "--bin-path", "")
@@ -526,7 +525,7 @@ def test_a_blank_bin_path_without_a_usable_home_installs_nothing(
     monkeypatch.setenv("USERPROFILE", "")
     assert home_bin_path() is None
     monkeypatch.setenv("ASH_BIN_PATH", "rel-bin")
-    monkeypatch.setattr(dependencies, "ASH_BIN_PATH", Path("rel-bin"), raising=False)
+    monkeypatch.setattr(dependencies, "ASH_BIN_PATH", Path("rel-bin"))
     project = tmp_path / "project"
     result = _install(project, "--bin-path", "")
     out = _flat(result.output)

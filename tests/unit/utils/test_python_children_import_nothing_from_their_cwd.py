@@ -191,8 +191,8 @@ def test_the_detect_secrets_worker_imports_nothing_from_the_tree_or_its_results(
 def test_a_relative_bin_path_is_warned_about_and_not_searched(tmp_path, monkeypatch):
     """A relative ASH_BIN_PATH is not used: tool lookup warns once per value and
     searches ``~/.ash/bin`` instead (``_bin_path``), and so does ``current_bin_path``,
-    the installer's reader, which made the value absolute against the working
-    directory and installed into it."""
+    the installer's reader. It used to make the value absolute against the working
+    directory and install into it."""
     from automated_security_helper.core.constants import home_bin_path
     from automated_security_helper.utils import subprocess_utils
 
