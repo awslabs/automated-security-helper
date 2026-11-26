@@ -1,0 +1,16 @@
+{
+  "AuditTime": "2026-11-25T00:18:38Z",
+  "ClusterInfo": {
+    "Controllers": 0,
+    "Namespaces": 0,
+    "Nodes": 0,
+    "Pods": 0,
+    "Version": "unknown"
+  },
+  "DisplayName": "in/neg",
+  "PolarisOutputVersion": "1.0",
+  "Results": [],
+  "Score": 100,
+  "SourceName": "in/neg",
+  "SourceType": "Path"
+}

@@ -1139,6 +1139,8 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "openssl/LICENSE.txt": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",  # pragma: allowlist secret
     "pcre commit": "c8dd39955982faaf63176bedc456746e5cf43e2f",  # pragma: allowlist secret
     "pcre/LICENCE": "f998c0f52eb704eff28f503580cfca3f2547280aa212994f6cf2d8e317587c1c",  # pragma: allowlist secret
+    "polaris commit": "6e76dd36aea6a5d8dd380ddf3e9199a83d252c55",  # pragma: allowlist secret
+    "polaris/LICENSE": "85c0a67ceecf745307029604127ff16e674d2900f94aa79dd6f486fbc2685dca",  # pragma: allowlist secret
     "pygit2 commit": "d88fa3dcbab21a7eb33ff354222c4ec8e5ff6ece",  # pragma: allowlist secret
     "pygit2/AUTHORS.md": "4ecad3164600b3c7a216cdd636288d1434afd6307737cfeba8fc1372dc04ba20",  # pragma: allowlist secret
     "pygit2/COPYING": "3f2a642de5f24ed216404873b875e9d1c5dd112a4e0ae27a42f7303583f69683",  # pragma: allowlist secret
@@ -1574,6 +1576,25 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             "-c",
             "import pygit2; print(pygit2.__version__)",
         ),
+    ),
+    # The alpha Polaris scanner's tool. Pinned and installed by its own module
+    # (``ash_polaris_plugins/polaris_install.py``), not by install-pinned-tool, so
+    # its license is staged from the repository at the pinned commit on the
+    # --licenses-only line; the release archive's LICENSE is byte-identical to that
+    # file (compared on 2026-11-26). ``polaris --version`` is an unknown flag, so
+    # the version check runs ``polaris version`` (prints "Polaris version:10.2.6").
+    "polaris": ThirdPartyLicense(
+        tool="polaris",
+        version="v10.2.6",
+        license="Apache-2.0",
+        repository="https://github.com/FairwindsOps/polaris",
+        commit=_THIRD_PARTY_HASHES["polaris commit"],
+        files=(
+            _from_source(
+                "polaris", "https://github.com/FairwindsOps/polaris", "LICENSE"
+            ),
+        ),
+        version_probe=("polaris", "version"),
     ),
     # The wheel's dist-info holds no license file, only METADATA's
     # `License-Expression: LGPL-2.1-or-later`, so both files come from the

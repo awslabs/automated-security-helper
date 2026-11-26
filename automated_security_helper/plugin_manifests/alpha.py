@@ -218,6 +218,14 @@ MANIFESTS = (
         owned=(f"{_DOCS}/kingfisher-plugin.md", f"{_FIXTURES}/kingfisher"),
     ),
     _alpha(
+        "polaris",
+        "ash_polaris_plugins",
+        "polaris_scanner",
+        "PolarisScanner",
+        "PolarisScannerConfigOptions",
+        owned=(f"{_DOCS}/polaris-plugin.md", f"{_FIXTURES}/polaris"),
+    ),
+    _alpha(
         "secretlint",
         "ash_secretlint_plugins",
         "secretlint_scanner",
