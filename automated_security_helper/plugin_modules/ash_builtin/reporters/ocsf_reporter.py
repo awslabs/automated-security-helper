@@ -1177,6 +1177,20 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                     fallback_metadata, DEGRADED_FINDING_LABEL
                 )
 
+                # As the whole record carries it (metadata.correlation_uid plus
+                # the raw spelled key in unmapped): the correlation id was
+                # paired before this record's build began, so a record the
+                # fallback built keeps it, or a finding whose OCSF build failed
+                # correlates in ASFF and not in OCSF.
+                fallback_extra: Dict[str, Any] = {}
+                if correlation_id:
+                    fallback_metadata = fallback_metadata.model_copy(
+                        update={"correlation_uid": correlation_id}
+                    )
+                    fallback_extra["unmapped"] = Object(
+                        **{CORRELATION_ID_PROPERTY: correlation_id}
+                    )
+
                 fallback_vulnerability = Vulnerability(
                     desc=_FALLBACK_VULNERABILITY_DESC,
                     title=rule_id if rule_id != "Unknown Rule" else "Unknown Rule",
@@ -1220,6 +1234,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                     metadata=fallback_metadata,
                     finding_info=fallback_finding_info,
                     vulnerabilities=[fallback_vulnerability],
+                    **fallback_extra,
                 )
                 ASH_LOGGER.debug(f"Created fallback VulnerabilityFinding for {rule_id}")
                 return fallback_finding

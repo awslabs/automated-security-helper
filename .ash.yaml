@@ -455,7 +455,7 @@ global_settings:
     # so the entry below covers them. A transitive finding that gains a second,
     # unsuppressed root stays visible and fails the scan.
     - rule_id: "GHSA-vfj7-8cjw-p6xm"
-      path: "node_modules/braces/package.json"
+      path: "deploy/cdk-constructs/package-lock.json"
       package_name: "braces"
       package_version: "3.0.3"
       package_path: "deploy/cdk-constructs/node_modules/braces"
@@ -477,7 +477,7 @@ global_settings:
     # `npm-audit-transitive-<package>` findings are covered by these root entries, as
     # the braces block above explains.
     - rule_id: "GHSA-gcqx-w48m-w2h4"
-      path: "node_modules/deepmerge/package.json"
+      path: "deploy/cdk/package-lock.json"
       package_name: "deepmerge"
       package_version: "4.3.1"
       package_path: "deploy/cdk/node_modules/deepmerge"
@@ -489,7 +489,7 @@ global_settings:
         npm's only fix is a jest 25.1.0 major downgrade, refused. Revisit when a fix ships;
         see the block comment above.
     - rule_id: "GHSA-gcqx-w48m-w2h4"
-      path: "node_modules/deepmerge/package.json"
+      path: "deploy/cdk-constructs/package-lock.json"
       package_name: "deepmerge"
       package_version: "4.3.1"
       package_path: "deploy/cdk-constructs/node_modules/deepmerge"
@@ -514,7 +514,7 @@ global_settings:
     # covered by these root entries, as the braces block above explains. Revisit when
     # an aws-cdk-lib release bundles minimatch 11.0.1 or later.
     - rule_id: "GHSA-g3hv-75wg-m249"
-      path: "node_modules/aws-cdk-lib/minimatch/package.json"
+      path: "deploy/cdk/package-lock.json"
       package_name: "minimatch"
       package_version: "10.2.5"
       package_path: "deploy/cdk/node_modules/aws-cdk-lib/node_modules/minimatch"
@@ -526,7 +526,7 @@ global_settings:
         Deploy tooling only, not shipped in the wheel or the container image. Revisit when
         aws-cdk-lib rebundles; see the block comment above.
     - rule_id: "GHSA-g3hv-75wg-m249"
-      path: "node_modules/aws-cdk-lib/minimatch/package.json"
+      path: "deploy/cdk-constructs/package-lock.json"
       package_name: "minimatch"
       package_version: "10.2.5"
       package_path: "deploy/cdk-constructs/node_modules/aws-cdk-lib/node_modules/minimatch"
@@ -569,98 +569,39 @@ global_settings:
     # copy in both lockfiles is a dev dependency ("dev": true) of the deploy tooling
     # (jest 30, @parcel/watcher, anymatch and micromatch under ts-jest and the jsii
     # toolchain); none of it ships in the wheel or the container image. One entry per
-    # install path, version pinned, so a new copy or a different version reports again.
+    # lockfile, scoped to the advisory it names and to picomatch installs under that
+    # lockfile's node_modules (package_path glob): npm-audit locates every advisory at
+    # the lockfile it audited, so the lockfile is the path, and the copies inside one
+    # lockfile are told apart by package_path alone. A copy in a new lockfile reports
+    # again; a new version inside these lockfiles is still in the affected range (every
+    # release through 4.0.7 is) and stays covered until the expiry forces a revisit.
     # The `npm-audit-transitive-<package>` findings whose via chains reach these copies
     # are covered by these root entries, as the braces block above explains. Revisit
     # when a picomatch release above 4.0.7 ships.
     - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/picomatch/package.json"
+      path: "deploy/cdk/package-lock.json"
       package_name: "picomatch"
-      package_version: "2.3.2"
-      package_path: "deploy/cdk/node_modules/picomatch"
+      package_path: "deploy/cdk/node_modules/**/picomatch"
       expires: "2026-12-27"
       reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 in deploy/cdk/package-lock.json, hoisted for
-        anymatch. No patched version exists (newest release is 4.0.7, inside the affected
-        range). Dev dependency of the deploy tooling only, not shipped in the wheel or the
-        container image. Revisit when a fix ships; see the block comment above.
+        GHSA-fc5q-39xc-vjpf: every picomatch copy in deploy/cdk/package-lock.json (2.3.2
+        hoisted for anymatch; 4.0.7 under @parcel/watcher, jest-haste-map,
+        jest-message-util and jest-util). No patched version exists (newest release is
+        4.0.7, inside the affected range). Dev dependencies of the deploy tooling only,
+        not shipped in the wheel or the container image. Revisit when a fix ships; see
+        the block comment above.
     - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/@parcel/watcher/picomatch/package.json"
+      path: "deploy/cdk-constructs/package-lock.json"
       package_name: "picomatch"
-      package_version: "4.0.7"
-      package_path: "deploy/cdk/node_modules/@parcel/watcher/node_modules/picomatch"
+      package_path: "deploy/cdk-constructs/node_modules/**/picomatch"
       expires: "2026-12-27"
       reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under @parcel/watcher in
-        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
-        deploy tooling only, not shipped in the wheel or the container image. Revisit when
-        a fix ships; see the block comment above.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/jest-haste-map/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "4.0.7"
-      package_path: "deploy/cdk/node_modules/jest-haste-map/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-haste-map in
-        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
-        deploy tooling only, not shipped in the wheel or the container image. Revisit when
-        a fix ships; see the block comment above.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/jest-message-util/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "4.0.7"
-      package_path: "deploy/cdk/node_modules/jest-message-util/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-message-util in
-        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
-        deploy tooling only, not shipped in the wheel or the container image. Revisit when
-        a fix ships; see the block comment above.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/jest-util/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "4.0.7"
-      package_path: "deploy/cdk/node_modules/jest-util/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-util in
-        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
-        deploy tooling only, not shipped in the wheel or the container image. Revisit when
-        a fix ships; see the block comment above.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "4.0.7"
-      package_path: "deploy/cdk-constructs/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 in deploy/cdk-constructs/package-lock.json,
-        hoisted for fdir and the jest 30 tree. No patched version exists. Dev dependency of
-        the constructs package's build tooling only, not shipped in the wheel or the
-        container image. Revisit when a fix ships; see the block comment above.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/anymatch/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "2.3.2"
-      package_path: "deploy/cdk-constructs/node_modules/anymatch/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 under anymatch in
-        deploy/cdk-constructs/package-lock.json. No patched version exists. Dev dependency
-        of the constructs package's build tooling only, not shipped in the wheel or the
-        container image. Revisit when a fix ships; see the block comment above.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/micromatch/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "2.3.2"
-      package_path: "deploy/cdk-constructs/node_modules/micromatch/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 under micromatch in
-        deploy/cdk-constructs/package-lock.json. No patched version exists. Dev dependency
-        of the constructs package's build tooling only, not shipped in the wheel or the
-        container image. Revisit when a fix ships; see the block comment above.
+        GHSA-fc5q-39xc-vjpf: every picomatch copy in
+        deploy/cdk-constructs/package-lock.json (4.0.7 hoisted for fdir and the jest 30
+        tree; 2.3.2 under anymatch and micromatch). No patched version exists. Dev
+        dependencies of the constructs package's build tooling only, not shipped in the
+        wheel or the container image. Revisit when a fix ships; see the block comment
+        above.
     # === detect-secrets: broad patterns by path ===
     #
     # detect-secrets does support an inline marker: `# pragma: allowlist secret` on

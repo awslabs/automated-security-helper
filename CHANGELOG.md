@@ -48,6 +48,13 @@
 
 ### Behavior changes
 
+- **npm-audit findings are located at the lockfile they were audited from**
+  (`deploy/cdk/package-lock.json`, say), not at the installed package's
+  `node_modules/<package>/package.json`. A path-scoped suppression for an npm-audit
+  finding must name the lockfile in `path`; one that names the old `node_modules`
+  path matches nothing. Use `package_name` / `package_path` on the entry to scope
+  to a package or an installed copy within the lockfile, as this repository's own
+  `.ash.yaml` entries now do.
 - **`.ash.yaml` at the project root is the canonical config file.** A scan reads it
   before any other config source, and `ash config init`, `ash config wizard` and
   `ash inspect findings` create it when no config exists (they wrote `.ashrc.yaml`

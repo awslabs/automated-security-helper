@@ -170,7 +170,15 @@ def _is_transient_download_error(exc: BaseException) -> bool:
     message by the whole backoff. A TLS error raised past the connection, while
     the body is read (``ssl.SSLError``, an unexpected EOF say), is the same blip
     a reset is, and a socket error naming the network (``EHOSTUNREACH``) too.
+
+    ``DownloadTooLargeError`` is refused by name before anything else. Today it
+    is a plain ``Exception`` subclass and would fall through every class check
+    anyway; the explicit guard pins the contract against a reparenting (onto
+    ``OSError``, say), because a body past the caller's bound is past the bound
+    on every attempt and retrying it only re-downloads what will be refused.
     """
+    if isinstance(exc, DownloadTooLargeError):
+        return False
     if isinstance(exc, urllib.error.HTTPError):
         return exc.code >= 500 or exc.code in _TRANSIENT_HTTP_STATUS
     if isinstance(exc, urllib.error.URLError):
