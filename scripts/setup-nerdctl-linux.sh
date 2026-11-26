@@ -261,10 +261,12 @@ cat /etc/buildkit/buildkitd.toml
 # containerd, which is exactly the state this paragraph says is wrong. Run this in a
 # throwaway VM or container, not on a workstation.
 echo "=== Stopping Docker so it does not contend for containerd ==="
-echo "    (one-way: to undo, run 'sudo systemctl stop buildkit containerd', delete"
+# The next four echos only PRINT the undo commands for a human to run later;
+# nothing here executes sudo (the whole script already runs as root, see Usage).
+echo "    (one-way: to undo, run 'sudo systemctl stop buildkit containerd', delete" # nosemgrep: sudo-in-shell-script
 echo "     /usr/local/lib/systemd/system/containerd.service and buildkit.service,"
-echo "     run 'sudo systemctl daemon-reload', then"
-echo "     'sudo systemctl start docker.socket docker.service')"
+echo "     run 'sudo systemctl daemon-reload', then" # nosemgrep: sudo-in-shell-script
+echo "     'sudo systemctl start docker.socket docker.service')" # nosemgrep: sudo-in-shell-script
 # The previous form was `systemctl stop docker.socket docker.service 2>/dev/null ||
 # true`, which discarded the message and the status together. A runner image with no
 # Docker is a fine place to install nerdctl, so absence must be tolerated -- but a

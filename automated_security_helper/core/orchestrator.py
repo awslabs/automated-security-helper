@@ -733,6 +733,16 @@ class ASHScanOrchestrator(BaseModel):
                 "Using the configuration supplied by the caller; skipping resolution"
             )
             config = self.resolved_config
+            # The branch below refuses an unrecorded symbol suppression inside
+            # resolve_scan_config; a caller-resolved config (a workspace
+            # project's) skips that resolution, so the same refusal runs here,
+            # against the same lock root a scan's resolver reads
+            # (sarif_utils._symbol_resolver_for loads self.source_dir's lock).
+            # Both branches of this if therefore refuse before any scan work.
+            global_settings = getattr(config, "global_settings", None)
+            refuse_unlocked_symbol_suppressions(
+                getattr(global_settings, "suppressions", None) or [], self.source_dir
+            )
             if self.severity_threshold_restriction is not None:
                 # The restriction below rewrites thresholds in place. The caller
                 # keeps this object, and a workspace hands the same one to more

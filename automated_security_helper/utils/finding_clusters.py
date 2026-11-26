@@ -49,6 +49,13 @@ the first class whose required columns it carries:
     the location class knows neither the advisory nor the package). Overlap is not transitive, so a cluster is a connected component
     of the overlap relation; a chain A-B-C joins A and C even when they do not
     overlap one another. That is order independent, which a sweep is not.
+    The chaining is bounded by a split guard: two rows of one scanner and
+    rule id are one finding only when they overlap each other directly, so a
+    cluster never folds two findings of the same scanner and rule id that are
+    connected only through a bridge row (a wide multi-CWE row spanning both).
+    Such a component splits: the bridge rows cluster with nothing and the
+    rest re-cluster; a chain with no single bridge leaves the two findings
+    standing alone instead. Fail closed, as for the package class.
 
 A class with only one matching row makes no cluster. Secrets (no CWE, a
 masked value) never cluster.
@@ -244,6 +251,60 @@ def _location_groups(
     return groups
 
 
+def _overlaps(
+    spans: Dict[int, Tuple[str, int, int, frozenset[str]]], a: int, b: int
+) -> bool:
+    """Whether two rows of one file overlap directly and share a CWE."""
+    _, a_start, a_end, a_cwes = spans[a]
+    _, b_start, b_end, b_cwes = spans[b]
+    return a_start <= b_end and b_start <= a_end and bool(a_cwes & b_cwes)
+
+
+def _location_split_guard(
+    rows: Sequence[FlatVulnerability],
+    spans: Dict[int, Tuple[str, int, int, frozenset[str]]],
+    members: List[int],
+) -> List[List[int]]:
+    """Bound the chaining: the clusters one connected component yields.
+
+    Two rows of one scanner and rule id are one finding only when they overlap
+    each other directly; a wide multi-CWE row can bridge two separate findings
+    into one component, and folding them would hide one. A component with such
+    a pair splits: the bridge rows (each directly connected to both sides of a
+    pair) cluster with nothing, the rest re-cluster, and this guard runs again
+    on each part. A chain with no single bridge leaves the pair's rows standing
+    alone instead. A missing scanner or rule id compares equal to another
+    missing one, failing closed. A component with no such pair is returned
+    whole, so the documented A-B-C chaining is otherwise unchanged.
+    """
+    by_key: Dict[Tuple[str, str], List[int]] = {}
+    for i in members:
+        key = (rows[i].scanner or "", rows[i].rule_id or "")
+        by_key.setdefault(key, []).append(i)
+    violations = [
+        (a, b)
+        for same in by_key.values()
+        for position, a in enumerate(same)
+        for b in same[position + 1 :]
+        if not _overlaps(spans, a, b)
+    ]
+    if not violations:
+        return [members]
+    bridges = {
+        w
+        for w in members
+        for a, b in violations
+        if w != a and w != b and _overlaps(spans, w, a) and _overlaps(spans, w, b)
+    }
+    removed = bridges or {i for pair in violations for i in pair}
+    rest = {i: spans[i] for i in members if i not in removed}
+    return [
+        part
+        for group in _location_groups(rest)
+        for part in _location_split_guard(rows, spans, group)
+    ]
+
+
 def _primary(rows: Sequence[FlatVulnerability], members: Iterable[int]) -> int:
     members = list(members)
     live = [i for i in members if not rows[i].is_suppressed]
@@ -330,9 +391,10 @@ def cluster_findings(rows: Sequence[FlatVulnerability]) -> List[FindingCluster]:
         for copy in copies:
             if len(copy) > 1:
                 clusters.append(_build(rows, key[0], copy))
-    for members in _location_groups(unclaimed):
-        if len(members) > 1:
-            clusters.append(_build(rows, CLASS_LOCATION, members))
+    for group in _location_groups(unclaimed):
+        for members in _location_split_guard(rows, unclaimed, group):
+            if len(members) > 1:
+                clusters.append(_build(rows, CLASS_LOCATION, members))
     clusters.sort(key=lambda c: c.members[0])
     return clusters
 

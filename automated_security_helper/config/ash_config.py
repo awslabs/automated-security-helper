@@ -93,6 +93,7 @@ from automated_security_helper.models.core import (
 from automated_security_helper.utils.config_trust import ConfigProvenance
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.report_yaml import NoCommandLineDumper
+from automated_security_helper.utils.scanner_names import canonical_scanner_name
 
 
 def config_env_var_is_interpolatable(var_name: str) -> bool:
@@ -660,6 +661,37 @@ def _merge_config_values(base: Any, overlay: Any) -> Any:
     return merged
 
 
+def _declared_option_names(segment_cls: type[BaseModel], plugin_key: str) -> set | None:
+    """The option names (field names and aliases) a declared plugin's options
+    model accepts, or None when they cannot be read.
+
+    Read for the alias fold: an alias section's option keys outside this set
+    name settings the canonical plugin would never consult, so the fold drops
+    them with a warning instead of carrying them as silent extras. None (an
+    alias whose canonical plugin is not a declared field, or a field whose
+    options model cannot be resolved) means "drop nothing": an unreadable set
+    must not cost the operator's settings.
+    """
+    field = segment_cls.model_fields.get(plugin_key)
+    if field is None:
+        return None
+    config_model = field.annotation
+    if not (isinstance(config_model, type) and issubclass(config_model, BaseModel)):
+        return None
+    options_field = config_model.model_fields.get("options")
+    if options_field is None:
+        return None
+    options_model = options_field.annotation
+    if not (isinstance(options_model, type) and issubclass(options_model, BaseModel)):
+        return None
+    names = set()
+    for name, info in options_model.model_fields.items():
+        names.add(name)
+        if isinstance(info.alias, str):
+            names.add(info.alias)
+    return names
+
+
 def field_name_spellings(segment_cls: type[BaseModel]) -> Dict[str, str]:
     """Map each declared field name to its alias, where the two differ.
 
@@ -820,6 +852,90 @@ class _ScannerConfigSegmentBase(_PluginConfigSegment):
     )
 
     __pydantic_extra__: Dict[str, Any | ScannerPluginConfigBase] = {}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fold_scanner_name_aliases(cls, data: Any) -> Any:
+        """Fold a retired scanner's section onto the plugin that serves it.
+
+        ``utils/scanner_names.SCANNER_NAME_ALIASES`` names the retired scanners
+        (the table is empty today; a retirement adds one row there). A config
+        written for a retired name keeps working: its section is applied to the
+        canonical plugin's section, with one log line naming the mapping, so
+        ``enabled`` and the shared options take effect on the scanner that
+        actually runs.
+
+        Without the fold, a retired name would land in the ``extra="allow"``
+        bucket and read as an unknown third-party scanner: never instantiated,
+        never run, and the operator's ``<retired name>: enabled: false``
+        silently ignored while the serving scanner ran anyway.
+
+        Merge rules, stated in fold order:
+
+        * ``name`` is dropped: the alias section's literal (``name: <retired
+          name>``) is the one key that must not reach the canonical plugin's
+          config.
+        * Option keys the canonical options model does not declare are dropped,
+          each named in a warning: carrying them as extras would show settings
+          that nothing reads (a retired scanner's install options can describe
+          machinery its serving plugin does not have).
+        * A section already present under the canonical name is the base and
+          the alias section is the overlay, key by key -- the same choice as
+          the field-name-spelling fold above, for the same reason:
+          ``apply_config_overrides`` round-trips through ``model_dump()``, which
+          emits the canonical section with every default filled in, so on any
+          override run the canonical side is mostly machine-written defaults
+          while the alias side holds what the operator actually wrote (the
+          alias section's ``enabled: false`` must win over the dumped
+          ``enabled: true``). A hand-written config with both spellings is
+          flagged by ``ash config lint``.
+        """
+        if not isinstance(data, dict):
+            return data
+        for key in list(data):
+            if not isinstance(key, str):
+                continue
+            canonical = canonical_scanner_name(key)
+            if canonical == key or canonical in (None, ""):
+                continue
+            data = dict(data)
+            section = data.pop(key)
+            ASH_LOGGER.info(
+                f"scanners.{key} is an alias of the {canonical} plugin; "
+                f"applying its section to scanners.{canonical}"
+            )
+            if isinstance(section, BaseModel):
+                section = section.model_dump(exclude_unset=True)
+            if section is None:
+                section = {}
+            if not isinstance(section, dict):
+                ASH_LOGGER.warning(
+                    f"scanners.{key} is not a mapping; nothing of it can be "
+                    f"applied to scanners.{canonical}"
+                )
+                continue
+            section = dict(section)
+            section.pop("name", None)
+            declared = _declared_option_names(cls, canonical)
+            options = section.get("options")
+            if declared is not None and isinstance(options, dict):
+                dropped = sorted(k for k in options if k not in declared)
+                if dropped:
+                    section["options"] = {
+                        k: v for k, v in options.items() if k in declared
+                    }
+                    ASH_LOGGER.warning(
+                        f"scanners.{key}.options.{{{', '.join(dropped)}}} have no "
+                        f"{canonical} counterpart and were dropped"
+                    )
+            if canonical in data:
+                canonical_section = data[canonical]
+                if isinstance(canonical_section, BaseModel):
+                    canonical_section = canonical_section.model_dump(exclude_unset=True)
+                data[canonical] = _merge_config_values(canonical_section, section)
+            else:
+                data[canonical] = section
+        return data
 
     if TYPE_CHECKING:
 
