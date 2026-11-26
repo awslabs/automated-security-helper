@@ -18,7 +18,11 @@ The key of a result is:
   different machines agree. A file a converter wrote (a notebook converted to
   Python, a member extracted from an archive) is keyed by its path relative to
   the converted root, with ``"tree": "converted"``, so the key does not depend on
-  where the output directory is. A finding inside a container image is keyed by
+  where the output directory is. A result moved from a generated file back to the
+  original it was generated from (the MCP config converter's) is keyed by the
+  original's path, with ``"convertedFrom"`` naming the generated file, so it is not
+  the same finding as a source-tree scanner's result at that place. A finding
+  inside a container image is keyed by
   the in-image path as the tool reports it, with ``"tree": "image"`` and an
   ``"image"`` component: the image's sha256 digest when the scan resolved one,
   else the locator as submitted, so two scans of one pinned image agree across
@@ -218,6 +222,13 @@ FINGERPRINT_KINDS = ("fingerprints", "partialFingerprints")
 #: relative to the converted root in (``utils/scan_output_dirs``).
 CONVERTED_PATH_PROPERTY = "converted_path"
 
+#: The SARIF result property a result moved from a generated file back to its
+#: original (``utils/scan_output_dirs.map_back_converted_results``) records the
+#: generated file's path in, relative to the converted root. It keys the result as
+#: ``"convertedFrom"``, so that a result mapped to a file stays distinct from a
+#: source-tree scanner's result at the same place in that file.
+CONVERTED_FROM_PROPERTY = "converted_from"
+
 #: The ``tree`` of a finding inside a container image.
 IMAGE_TREE = TargetType.IMAGE.value
 
@@ -257,7 +268,10 @@ class FindingIdentity(BaseModel):
 
     Attributes:
         base: The key's fields every result has: scanner, rule, file, package,
-            project, and ``tree`` for a converted file.
+            project, ``tree`` for a converted file or a file in an image, ``image``
+            (the image's digest or locator) for a file in an image, and
+            ``convertedFrom`` (the generated file's path) for a result mapped back
+            from a generated file to the original.
         lines: The start and end line.
         column: The start column, or None.
         fingerprints: Each fingerprint kind the result carries, in preference
@@ -426,11 +440,14 @@ def finding_identity(
     message: Optional[str] = None,
     converted: bool = False,
     image: Optional[str] = None,
+    converted_from: Optional[str] = None,
 ) -> FindingIdentity:
     """One result's identity; see the module docstring for what is in it.
 
     *file_path* is used as given: pass it through :func:`relative_path` first, or,
-    with *converted*, pass the path relative to the converted root. *fingerprints*
+    with *converted*, pass the path relative to the converted root. *converted_from*
+    is the generated file a result mapped back to *file_path* was found in; it is
+    in the key as ``convertedFrom``. *fingerprints*
     is what :func:`result_fingerprints` returns. *message* is the masked message
     with the finding's own path replaced by *file_path*. *image* is the subject
     image's resolved digest, or failing that the locator as submitted, for a
@@ -452,6 +469,8 @@ def finding_identity(
         base[IMAGE_TREE] = image
     elif converted:
         base["tree"] = TargetType.CONVERTED.value
+    if converted_from is not None:
+        base["convertedFrom"] = converted_from
     return FindingIdentity(
         base=base,
         lines=(line_start, line_end),

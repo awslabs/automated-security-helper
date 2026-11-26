@@ -47,8 +47,7 @@ from automated_security_helper.models.scan_results_container import (
 )
 from automated_security_helper.utils.scan_output_dirs import (
     drop_results_in_ash_output_dirs,
-    map_back_converted_results,
-    mark_converted_results,
+    place_converted_results,
 )
 from automated_security_helper.core.cancellation import (
     ScanCancelled,
@@ -2127,14 +2126,13 @@ class ScannerExecutor:
                                 self.plugin_context,
                                 scanner_name=scanner_config_name,
                             )
-                            # So a converted file's finding keeps its id wherever the
-                            # output directory is.
-                            mark_converted_results(raw_results, self.plugin_context)
                             # A generated file with a span sidecar (the MCP config
                             # converter's) has its findings moved to the original
                             # file and span before suppressions are applied, so a
-                            # suppression written against the original matches.
-                            map_back_converted_results(raw_results, self.plugin_context)
+                            # suppression written against the original matches. What
+                            # is still in a converted file is then marked, so its
+                            # finding keeps its id wherever the output directory is.
+                            place_converted_results(raw_results, self.plugin_context)
                             if target_type == "image":
                                 # Before suppressions and flattening: an
                                 # image:-scoped suppression matches on these

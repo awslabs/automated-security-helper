@@ -69,6 +69,15 @@
   names, with no warning. To move a config, run `git mv .ash/.ash.yaml .ash.yaml`
   (or the same with the file's own name). This repository's own config moved the same
   way.
+- **A finding moved from an MCP config's generated script back to the config file has a
+  new property name and a new id.** The result property that names the generated script
+  is now `converted_from`; it was `ash/convertedFrom`, so a tool that reads the old name
+  from ASH's SARIF output finds nothing. The generated script's path is now part of the
+  finding's identity, so the id of such a finding (a finding at a line of `.mcp.json`
+  that a scanner reported in the script the MCP config converter wrote) changes, and a
+  baseline or a suppression keyed by that id needs refreshing. A suppression written
+  against the config file's path and lines is not affected. A result that has a line in
+  the generated script with no sidecar row is unchanged.
 
 ### Maintenance
 
