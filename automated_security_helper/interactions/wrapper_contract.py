@@ -1,23 +1,25 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What the two host wrappers must agree with the ``ash`` CLI about.
+"""What the host wrapper must agree with the ``ashx`` CLI about.
 
-``./ash`` (bash) and ``utils/ash_helpers.ps1`` (``Invoke-ASH``) exist for hosts with no
-Python, so neither can ask the CLI anything at run time. Each carries written-out
-tables of the CLI's own surface: the subcommand names, which root options take a
-value, which subcommands take the options the wrapper adds, the order in which OCI
-runners are looked for, the CI runner markers passed into the container, the image
-build targets, the image-name pattern and the refusal and usage-error exit codes.
-Those tables are the part of the two wrappers that drifts when the CLI changes.
-Every field of the contract is rendered into a block of at least one wrapper and read
-by that wrapper's own control flow; a field no block renders does not belong here.
+``utils/ash_helpers.ps1`` (``Invoke-ASH``) exists for hosts with no Python, so it
+cannot ask the CLI anything at run time. It carries written-out tables of the CLI's own
+surface: the subcommand names, which root options take a value, which subcommands take
+the options the wrapper adds, the order in which OCI runners are looked for, the CI
+runner markers passed into the container, the image build targets, the image-name
+pattern and the refusal and usage-error exit codes. Those tables are the part of the
+wrapper that drifts when the CLI changes. Every field of the contract is rendered into
+a block of the wrapper and read by its own control flow; a field no block renders does
+not belong here. v4 removed the second wrapper, the ``./ash`` bash script, and with it
+the one table only that script read: the subcommands whose own ``-o`` it forwarded
+instead of taking it as the OCI runner.
 
 This module is the one place that computes them. It reads the real typer app and the
 constants container mode itself uses, never a hand-kept copy, and
 ``scripts/generate_wrapper_tables.py`` renders the result into marked blocks inside
-the two wrappers. It is data only: importing it, or calling :func:`contract`, changes
-no behavior anywhere.
+the wrapper. It is data only: importing it, or calling :func:`contract`, changes no
+behavior anywhere.
 
 What stays hand-written in the wrappers is control flow (mount assembly, refusal
 order, the checkout judgment); the agreement suites under ``tests/unit`` hold those
@@ -70,7 +72,7 @@ WRAPPER_FORWARDED_OPTIONS: tuple[str, ...] = (
 )
 
 #: The subcommands that are groups handing the options typed before them to one of
-#: their commands (AshTyperGroup._options_for_subcommand), so `./ash --quiet container
+#: their commands (AshTyperGroup._options_for_subcommand), so `ashx --quiet container
 #: build` passes `--quiet` on to `build`: such a group takes what that command takes.
 OPTION_ROUTING_GROUPS: dict[str, str] = {"container": "build"}
 
@@ -104,9 +106,6 @@ class WrapperContract:
     root_value_options: tuple[str, ...]
     #: For each wrapper-forwarded option, the subcommands that declare it, in order.
     option_subcommands: tuple[tuple[str, tuple[str, ...]], ...]
-    # No table of the subcommands whose own ``-o`` is forwarded instead of read as the
-    # runner: the root ``./ash`` script was the one wrapper that read ``-o`` itself, and
-    # it is gone, so a field computed for it would be rendered nowhere.
     #: The order OCI runners are looked for when none is named.
     runner_order: tuple[str, ...]
     #: The image stages a wrapper accepts for its build-target parameter.
