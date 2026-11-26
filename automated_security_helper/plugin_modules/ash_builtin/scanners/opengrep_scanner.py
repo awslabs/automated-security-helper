@@ -69,13 +69,18 @@ _OpengrepPlatform = Literal[
     "darwin/arm64",
     "windows/amd64",
 ]
-#: Every ``_OpengrepPlatform``, in the order the install commands are built.
-_OPENGREP_PLATFORMS: Tuple[_OpengrepPlatform, ...] = (
-    "linux/amd64",
-    "linux/arm64",
-    "darwin/amd64",
-    "darwin/arm64",
-    "windows/amd64",
+#: The operating-system half of an ``_OpengrepPlatform`` key, as ``get_opengrep_url``
+#: takes it.
+_OpengrepOs = Literal["linux", "darwin", "windows"]
+#: Every ``_OpengrepPlatform`` with the operating system and architecture it names, in
+#: the order the install commands are built. The two halves are written out rather
+#: than split from the key, so each keeps its literal type.
+_OPENGREP_PLATFORMS: Tuple[Tuple[_OpengrepPlatform, _OpengrepOs, str], ...] = (
+    ("linux/amd64", "linux", "amd64"),
+    ("linux/arm64", "linux", "arm64"),
+    ("darwin/amd64", "darwin", "amd64"),
+    ("darwin/arm64", "darwin", "arm64"),
+    ("windows/amd64", "windows", "amd64"),
 )
 
 
@@ -533,8 +538,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         digests = self.config.options.sha256
         # TODO: detect manylinux vs musllinux. Only matters for a 1.x version: from
         # 2.0.0 the Linux build is one static executable (get_opengrep_url).
-        for platform_key in _OPENGREP_PLATFORMS:
-            target_platform, arch = platform_key.split("/")
+        for platform_key, target_platform, arch in _OPENGREP_PLATFORMS:
             url = get_opengrep_url(
                 target_platform, arch, version=version, linux_type="manylinux"
             )
