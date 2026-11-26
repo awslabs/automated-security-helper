@@ -12,6 +12,7 @@ from automated_security_helper.config.ash_config import (
     AshConfigGlobalSettingsSection,
     AshHistoryConfig,
 )
+from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils import scan_history
 from automated_security_helper.utils.scan_results_file import parse_full_scan_results
 
@@ -57,6 +58,11 @@ def results(*findings, rid=None, **metadata):
             "runs": [{"tool": {"driver": {"name": "bandit"}}, "results": findings}],
         },
     }
+    if meta["changed_files_only"]:
+        # parse_full_scan_results refuses a filtered run by design (no
+        # comparison can use one). record_run receives the scan's own
+        # in-memory results, so build the model directly for that shape.
+        return AshAggregatedResults.model_validate(payload)
     return parse_full_scan_results(json.dumps(payload).encode("utf-8"))
 
 

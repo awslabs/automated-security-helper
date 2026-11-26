@@ -26,7 +26,7 @@
           "symbol": "_run_declared_install_command"
         }
       ],
-      "sha256": "5cbb9bbd42377748d45c6d76e0d8cf284100e2e7ed45f9e0bfabb8083f12802a"
+      "sha256": "be4006aca3875599f78b47033ebd4558a35a20831aefff2f7e65534218cd3912"
     },
     "automated_security_helper/cli/mcp/__init__.py": {
       "created": "2026-11-25T17:03:33Z",
@@ -36,7 +36,7 @@
           "symbol": "_log_where_the_server_listens"
         }
       ],
-      "sha256": "66710ab8eeec9b1851a66620e0bd7529ae0474a780a5cef45f77346e0ad6f73c"
+      "sha256": "479e9d96695bb5f1b66ebb78fbe74450d12b2567b6e6f7701cf24d0bf18f2a2d"
     },
     "automated_security_helper/cli/mcp/source_delivery.py": {
       "created": "2026-11-25T17:02:52Z",
@@ -76,7 +76,7 @@
           "symbol": "NpmAuditScanner._probe_npm_version"
         }
       ],
-      "sha256": "8f1053578a57d93dc454fe9f65ab735eb7754b1144d20f422fa4f3a20cddcb2f"
+      "sha256": "361c6ec58e5f8d0af33a76ed0610588f962024be794721162d0b7205770f00e4"
     },
     "automated_security_helper/utils/content_db_refresh.py": {
       "created": "2026-11-25T17:03:23Z",
@@ -166,7 +166,7 @@
           "symbol": "test_the_scanned_repos_secret_config_cannot_disable_rules"
         }
       ],
-      "sha256": "f533592788a8603ca60dbf12e3b9497326518735595219461e6636588b4ef9ea"
+      "sha256": "a06cb16f8d3e36fc1e67842faa92680d0cf2e639b6b349eaad522110bd053c88"
     },
     "tests/snapshot/test_snapshot_normalizer.py": {
       "created": "2026-11-25T17:03:00Z",
@@ -194,7 +194,7 @@
           "symbol": "TestPlantedPayload.test_link_whose_target_escapes_the_artifact_is_rejected"
         }
       ],
-      "sha256": "25accaee4851d1a27f198df4b86a770f2ba6e4f4a348389ed66587c2d47ece01"
+      "sha256": "775a9e037993fb46b73de8b5c1238ff3fc19564cf475c8c4f523e2b4c131526f"
     },
     "tests/unit/test_defense_in_depth.py": {
       "created": "2026-11-25T17:03:07Z",

@@ -289,6 +289,19 @@ class PluginContext(BaseModel):
 
     # Private, like _scan_id: per-run state no dump or schema carries.
     _warned_unmatched_engines: Set[str] = PrivateAttr(default_factory=set)
+    _warned_rule_less_suppressions: Set[int] = PrivateAttr(default_factory=set)
+
+    @property
+    def warned_rule_less_suppressions(self) -> Set[int]:
+        """This run's warn-once receipts for a rule-less suppression covering
+        npm-audit findings (``sarif_utils._apply_config_suppression``), keyed by
+        the entry's ``id()``; the entries live on this context's config, so the
+        ids are stable for the run. On the context for the same reason as
+        ``warned_unmatched_engines`` below: the context is the one object built
+        per run and shared with every phase, so one entry warns once per scan
+        (the docs' "once per entry per run"), not once per report pass.
+        """
+        return self._warned_rule_less_suppressions
 
     @property
     def warned_unmatched_engines(self) -> Set[str]:
