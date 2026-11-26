@@ -379,7 +379,7 @@ def ceiling_unreachable_counts(
     from automated_security_helper.utils.frame_ops import ordered_counts
     from automated_security_helper.utils.frame_text import unwire, wire
 
-    names: list[str] = []
+    names: list[str | None] = []
     for result in results:
         if not isinstance(result, Mapping):
             continue
