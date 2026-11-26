@@ -37,7 +37,7 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      DeprecationWarning: 'ash report' is deprecated and is removed in 4.0. Use 'ash results report' instead; 'ash report' keeps its current behavior until then.
+      DeprecationWarning: 'ashx report' is deprecated and is removed in 4.1. Use 'ashx results report' instead; 'ashx report' keeps its current behavior until then.
       Usage: ashx [OPTIONS] COMMAND [ARGS]...
       Try 'ashx -h' for help.
       Error: 'ashx report' does not take --source-dir, given before it (see 'ashx report --help'). Options given before a subcommand are passed to it only when it takes them: drop it, give it after a subcommand that takes it, or leave out 'report' to scan with it.
