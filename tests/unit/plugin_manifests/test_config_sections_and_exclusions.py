@@ -43,7 +43,9 @@ from automated_security_helper.plugin_manifests import (
 
 pytestmark = pytest.mark.unit
 
-#: The scanner sections as the config schema listed them before they were derived.
+#: The scanner sections as the config schema listed them before they were derived. No
+#: ``semgrep`` row: the semgrep scanner plugin was removed in v4 and its name is an
+#: alias of opengrep, which has a section of its own.
 SCANNER_SECTION_FIELDS = {
     "actionlint": None,
     "bandit": None,
@@ -58,7 +60,6 @@ SCANNER_SECTION_FIELDS = {
     "mcp_config": "mcp-config",
     "npm_audit": "npm-audit",
     "opengrep": None,
-    "semgrep": None,
     "syft": None,
     "trivy": None,
     "zizmor": None,
@@ -142,7 +143,8 @@ def test_only_the_builtin_scanners_have_typed_sections():
     with_section = {m.name for m in scanner_manifests() if m.config_section}
     builtin = {m.name for m in scanner_manifests() if m.default_enabled}
     assert with_section == builtin, "an alpha scanner is configured through extras"
-    assert len(builtin) == 17, "control: the builtin set shrank"
+    # 16 on v4: main's 17 builtins less semgrep, whose scanner plugin v4 removed.
+    assert len(builtin) == 16, "control: the builtin set shrank"
 
 
 def test_the_section_class_is_built_into_the_default_config():
@@ -168,7 +170,6 @@ def test_the_exclusion_table_is_what_the_manifests_declare():
         ("bandit", "excluded_paths", "bandit", ()),
         ("checkov", "skip_path", "checkov", ()),
         ("opengrep", "exclude", "glob", ("*-converted.py", "*_report_result.txt")),
-        ("semgrep", "exclude", "glob", ("*-converted.py", "*_report_result.txt")),
         ("syft", "exclude", "glob", ()),
         ("ferret-scan", "exclude_patterns", "glob", ()),
         ("guarddog", "excluded_paths", "guarddog-path", ()),
@@ -176,8 +177,9 @@ def test_the_exclusion_table_is_what_the_manifests_declare():
         ("trivy", "ignore_file", "trivy-ignore-file", ()),
     }
     # A number, not ``len(exclusion_options())``: the table is built one-to-one from
-    # that function, so comparing the two could not fail.
-    assert len(SCANNER_EXCLUSION_OPTIONS) == 9
+    # that function, so comparing the two could not fail. 8 on v4: main's 9 less the
+    # semgrep row, which went with the semgrep scanner plugin.
+    assert len(SCANNER_EXCLUSION_OPTIONS) == 8
 
 
 def test_a_manifest_listing_an_exclusion_option_twice_is_refused():

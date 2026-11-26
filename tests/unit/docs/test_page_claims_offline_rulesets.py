@@ -120,17 +120,24 @@ def test_migrate_from_v2_maps_the_v2_flag_to_the_canonical_one(capsys) -> None:
 
 
 def test_advanced_usage_examples_use_the_canonical_flag(capsys) -> None:
-    """advanced-usage.md (Offline Mode)."""
-    assert_on_page(ADVANCED_PAGE, "ashx build-image --offline --offline-rulesets p/ci")
+    """advanced-usage.md (Offline Mode).
+
+    The page builds with ``container build``, the name main gave ``build-image``. Both
+    names run one function (``cli.image.build_ash_image_cli_command``), so the
+    ``build-image`` probe below binds the option the examples use.
+    """
+    assert_on_page(
+        ADVANCED_PAGE, "ashx container build --offline --offline-rulesets p/ci"
+    )
     assert_on_page(
         ADVANCED_PAGE,
-        'ashx build-image --offline --offline-rulesets "p/ci p/python"',
+        'ashx container build --offline --offline-rulesets "p/ci p/python"',
     )
     assert_on_page(
         ADVANCED_PAGE,
         "the deprecated spelling `--offline-semgrep-rulesets` still works and warns",
     )
-    assert f"build-image --offline {DEPRECATED}" not in _page_text(ADVANCED_PAGE)
+    assert f"container build --offline {DEPRECATED}" not in _page_text(ADVANCED_PAGE)
     _probe_the_rename(capsys)
 
 
