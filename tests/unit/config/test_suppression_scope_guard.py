@@ -83,8 +83,9 @@ ALLOWLIST: dict[tuple[str, str | None, str], str] = {}
 FROZEN_SIZES = {
     # 426: the merge of origin/main at ae28f8411ce added six whole-file entries main
     # wrote for its express tests since 617e17c3629 (the baseline's last block).
-    "main": {".ash/.ash.yaml": 426, ".ash/.ash_community_plugins.yaml": 227},
-    "pre_guard": {".ash/.ash.yaml": 27, ".ash/.ash_community_plugins.yaml": 8},
+    # Keyed by CONFIGS like the baselines: the files moved, the counts did not.
+    "main": {".ash.yaml": 426, ".ash/.ash_alpha_plugins.yaml": 227},
+    "pre_guard": {".ash.yaml": 27, ".ash/.ash_alpha_plugins.yaml": 8},
 }
 
 PACKAGE_FIELDS = ("package_name", "package_version", "package_path")
@@ -331,7 +332,7 @@ def test_worktree_line_count_reads_the_file():
 
 
 def test_a_new_whole_file_entry_is_an_offender():
-    config = ".ash/.ash.yaml"
+    config = ".ash.yaml"
     entries = suppressions(config) + [
         {"rule_id": "SECRET-*", "path": "deploy/new_module.py", "reason": "x"}
     ]
@@ -357,7 +358,7 @@ def test_a_new_whole_file_entry_is_an_offender():
     ],
 )
 def test_a_range_or_package_that_covers_everything_is_an_offender(widened):
-    config = ".ash/.ash.yaml"
+    config = ".ash.yaml"
     entry = {"rule_id": "SECRET-*", "path": "pyproject.toml", "reason": "x"}
     entries = suppressions(config) + [{**entry, **widened}]
     assert offenders(config, entries) == [("SECRET-*", "pyproject.toml")]

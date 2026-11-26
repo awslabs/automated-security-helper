@@ -28,8 +28,10 @@ pytestmark = pytest.mark.unit
 
 def _resolve(tmp_path: Path, operator_text: str, selected_text: str):
     source = tmp_path / "repo"
-    (source / ".ash").mkdir(parents=True)
-    selected = source / ".ash" / ".ash.yaml"
+    source.mkdir()
+    # The canonical file at the scan root: inside the scanned tree, which is the
+    # case #780 loads the operator's file for.
+    selected = source / ".ash.yaml"
     selected.write_text(selected_text)
     operator = tmp_path / "operator.yaml"
     operator.write_text(operator_text)

@@ -6,7 +6,7 @@
 ``tests/e2e/fixtures/findings/leak.py`` plants AWS's documented example secret
 access key so the e2e cases have three detect-secrets findings to assert. Those
 scans need the line unmarked, so the repository's own scan suppresses it in
-``.ash/.ash.yaml`` by a one-line range instead (see the comment on that entry).
+``.ash.yaml`` by a one-line range instead (see the comment on that entry).
 
 A line range is only as narrow as the line it names: an edit above the line would
 move the range onto whatever moved in. So the entry is tied here to the text of
@@ -31,7 +31,7 @@ from automated_security_helper.utils.suppression_matcher import (
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CONFIG = REPO_ROOT / ".ash" / ".ash.yaml"
+CONFIG = REPO_ROOT / ".ash.yaml"
 FIXTURE = "tests/e2e/fixtures/findings/leak.py"
 # The assignment's left-hand side only; the value is not repeated here.
 PINNED_PREFIX = "AWS_SECRET_ACCESS_KEY = "
