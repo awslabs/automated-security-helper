@@ -3067,10 +3067,12 @@ def resolve_config(
     # that sits in another checkout is not applied, and nothing else says so.
     # With no config selected, ASH_CONFIG's chain IS the configuration and the
     # confinement step above names its files. Said once the value in force is
-    # settled, so the warning reports the value the scan uses. When a file of the
-    # operator's own that wrote the key last decided the value, it keeps its value
-    # over the trusted base's, so the warning is given only for a dropped chain
-    # that wrote the opposite of both, and it names that file.
+    # settled, so the warning reports the value the scan uses. When the operator
+    # decided the value (a file of the operator's own that wrote the key last, or
+    # the operator's overrides for it), that keeps its value over the trusted
+    # base's, so the warning is given only for a dropped chain that wrote the
+    # opposite of both, and it names that file as the selected chain names it, or
+    # the override.
     if operator is not None:
         operator_files_stopped: List[Path] = []
         _warn_dropped_honor_ignore_files(
@@ -6129,6 +6131,9 @@ def _honor_ignore_files_writers(
     *chain* order to write the key (bases first, the root last, as the chain
     merges), and a file outside *in_tree* is the operator's own: an operator
     file that extends a base inside a checkout still keeps what it writes itself.
+    It is returned under the name *chain* gives it, which is the name the chain's
+    own list of files the environment chose holds it by, and not as the resolved
+    path the documents are keyed by.
 
     *documents* is keyed by resolved path, as ``resolve_config``'s read cache is.
     A confined file with no document stays a writer, because nothing shows it
@@ -6140,11 +6145,13 @@ def _honor_ignore_files_writers(
         return confined, None
     confined_keys = {path.resolve() for path in confined}
     ordered: List[Path] = []
-    seen: Set[Path] = set()
+    # Each file by the name it is first given: the chain's, then the confined
+    # list's. The keys are resolved paths, which is how the documents are read.
+    spelled: Dict[Path, Path] = {}
     for path in (*(Path(each) for each in chain), *confined):
         key = path.resolve()
-        if key not in seen:
-            seen.add(key)
+        if key not in spelled:
+            spelled[key] = path
             ordered.append(key)
     wrote = [
         key
@@ -6157,8 +6164,34 @@ def _honor_ignore_files_writers(
     ]
     wrote_set = set(wrote)
     named = [path for path in confined if path.resolve() in wrote_set]
-    decided_by = wrote[-1] if wrote and wrote[-1] not in confined_keys else None
+    decided_by = (
+        spelled[wrote[-1]] if wrote and wrote[-1] not in confined_keys else None
+    )
     return named, decided_by
+
+
+class HonorIgnoreFilesDecider(NamedTuple):
+    """Who decided ``honor_ignore_files`` when the operator did, as
+    ``confine_honor_ignore_files`` hands it to the warning for a dropped chain.
+
+    The value then does not depend on the trusted base, so a trusted chain that
+    was dropped whole changed it only if it wrote the opposite of the trusted
+    base's value (*value*) too, which is what that warning checks.
+    """
+
+    #: The operator's own file that wrote the key last, named as the selected
+    #: chain names it; None when the operator's overrides for the key decide the
+    #: value, whichever file wrote it.
+    file: Optional[Path]
+    #: The value the trusted base gives, with the operator's overrides for the key
+    #: replayed on it.
+    value: bool
+    #: *file* as a warning names it: ``<value>`` when an ``extends`` entry chose
+    #: it with a value read from the environment, its path otherwise. Said by the
+    #: selected chain, whose files the environment chose are the ones that know
+    #: it; a warning for another chain holds no such record of this file. Empty
+    #: when no file decided.
+    shown: str = ""
 
 
 def confine_honor_ignore_files(
@@ -6171,7 +6204,7 @@ def confine_honor_ignore_files(
     chain: Sequence[Path] = (),
     remedy: str = KEEP_A_SETTING,
     environment_paths: Collection[Path] = frozenset(),
-) -> Optional[Tuple[Path, bool]]:
+) -> Optional[HonorIgnoreFilesDecider]:
     """Take ``honor_ignore_files`` from the trusted base, never from an untrusted file.
 
     The setting decides whether the scanned repository's own ``.gitignore`` and
@@ -6210,9 +6243,13 @@ def confine_honor_ignore_files(
             variable's value.
 
     Returns:
-        None, or, when the operator's own file decided the value (the last file
-        of the chain that writes the key is one that is not in *in_tree*), that
-        file and the value the trusted base gives. The value then does not
+        None, or, when the operator decided the value, who did
+        (``HonorIgnoreFilesDecider``) and the value the trusted base gives. The
+        operator decided it when the operator's overrides set the key, which
+        decide it whichever file wrote it, or else when the operator's own file
+        wrote it last (the last file of the chain that writes the key is one
+        that is not in *in_tree*), and that file is then named as the chain names
+        it and shown as *environment_paths* knows it. The value then does not
         depend on the trusted base, so a trusted chain that was dropped whole
         changed it only if it wrote the opposite of the trusted base's value
         too, which is what the warning that names such a chain checks.
@@ -6221,13 +6258,24 @@ def confine_honor_ignore_files(
     if key_overrides:
         trusted = apply_config_overrides(trusted, key_overrides)
     writers, decided_by = _honor_ignore_files_writers(in_tree, chain, documents)
+    decided: Optional[HonorIgnoreFilesDecider] = None
+    if key_overrides:
+        # The overrides are applied last, so the value in force is theirs, and the
+        # file that wrote the key may have written the other one.
+        decided = HonorIgnoreFilesDecider(None, trusted.honor_ignore_files)
+    elif decided_by is not None:
+        decided = HonorIgnoreFilesDecider(
+            decided_by,
+            trusted.honor_ignore_files,
+            described([decided_by], environment_paths),
+        )
     if decided_by is not None:
-        return decided_by, trusted.honor_ignore_files
+        return decided
     if config.honor_ignore_files == trusted.honor_ignore_files:
-        return None
+        return decided
     config.honor_ignore_files = trusted.honor_ignore_files
     if not writers:
-        return None
+        return decided
     files = ", ".join(_owned_file_shown(path, environment_paths) for path in writers)
     ASH_LOGGER.warning(
         f"Ignoring honor_ignore_files from {files}: {reason}, and whether the "
@@ -6236,7 +6284,7 @@ def confine_honor_ignore_files(
         f"{str(trusted.honor_ignore_files).lower()}. {remedy} Or turn it "
         "off with --no-honor-ignore-files."
     )
-    return None
+    return decided
 
 
 def confine_to_trusted_base(
@@ -7217,8 +7265,10 @@ _DROPPED_OWN_SANDBOX_LOCK = threading.Lock()
 
 #: The off-host reporter sections ``_warn_dropped_operator_reporters`` already
 #: named in this process, by file and section: the same config is resolved more
-#: than once in a request, and a workspace resolves it once per project.
-_DROPPED_OPERATOR_REPORTERS_WARNED: Set[Tuple[str, str]] = set()
+#: than once in a request, and a workspace resolves it once per project. It also
+#: holds what ``_warn_dropped_honor_ignore_files`` said, by file, the key and the
+#: warning's ending (a third element), since each ending is said once.
+_DROPPED_OPERATOR_REPORTERS_WARNED: Set[Tuple[str, ...]] = set()
 
 
 def reset_dropped_own_sandbox_warnings() -> None:
@@ -7334,7 +7384,7 @@ def _warn_dropped_honor_ignore_files(
     given_root_membership: bool,
     rootless_wording: bool,
     undecided_files: Sequence[Path] = (),
-    decided_by_operator: Optional[Tuple[Path, bool]] = None,
+    decided_by_operator: Optional[HonorIgnoreFilesDecider] = None,
 ) -> None:
     """Name the files whose ``honor_ignore_files`` the trusted base left out.
 
@@ -7358,14 +7408,20 @@ def _warn_dropped_honor_ignore_files(
     so and gives the remedy for a file nobody could place
     (``_dropped_chain_membership``).
 
-    *decided_by_operator* is what ``confine_honor_ignore_files`` returned when a
-    file of the operator's own that wrote the key last decided the value: that
-    file and the value the trusted base gives. The dropped chain then lost to the
-    operator's file whatever it wrote, so it is reported only when its value
-    differs from the trusted base's as well as from the one in force: a dropped
-    chain that wrote the trusted base's value was left out in favor of nothing
-    different. The warning names the operator's file as the source of the value in
-    force, and not the remedy for the dropped chain, which would change nothing.
+    *decided_by_operator* is what ``confine_honor_ignore_files`` returned when the
+    operator decided the value: a file of the operator's own that wrote the key
+    last, or the operator's overrides for the key, which decide it whichever file
+    wrote it, with the value the trusted base gives. The dropped chain then lost to
+    the operator whatever it wrote, so it is reported only when its value differs
+    from the trusted base's as well as from the one in force: a dropped chain that
+    wrote the trusted base's value was left out in favor of nothing different. The
+    warning names the operator's file as the source of the value in force, or says
+    the override decides it, and not the remedy for the dropped chain, which would
+    change nothing. The file is named as the decider carries it, which the selected
+    chain shaped (``<value>`` for a base an ``extends`` entry chose with a value
+    read from the environment): *environment_paths* is the dropped chain's, and
+    does not know that file. The warning is said once for a file in a process for
+    each of its endings, since one ending does not say what another does.
     """
     if dropped is None or not blamed:
         return
@@ -7373,7 +7429,7 @@ def _warn_dropped_honor_ignore_files(
         return
     if (
         decided_by_operator is not None
-        and dropped.honor_ignore_files == decided_by_operator[1]
+        and dropped.honor_ignore_files == decided_by_operator.value
     ):
         return
     selected = {Path(path).resolve() for path in selected_chain}
@@ -7386,7 +7442,17 @@ def _warn_dropped_honor_ignore_files(
     ]
     if not writers:
         return
-    once = (os.path.realpath(writers[0]), "honor_ignore_files")
+    # The warning has three endings, each its own sentence: how to keep the setting,
+    # that a file of the operator's own decides the value, and that the operator's
+    # override does. Having said one for a file does not say what another would
+    # when a later resolution in the same process calls for it, so each is said once.
+    if decided_by_operator is None:
+        ending_kind = "remedy"
+    elif decided_by_operator.file is None:
+        ending_kind = "override"
+    else:
+        ending_kind = "file"
+    once = (os.path.realpath(writers[0]), "honor_ignore_files", ending_kind)
     with _DROPPED_OWN_SANDBOX_LOCK:
         if once in _DROPPED_OPERATOR_REPORTERS_WARNED:
             return
@@ -7409,13 +7475,19 @@ def _warn_dropped_honor_ignore_files(
         membership,
         environment_paths,
     )
-    ending = f"{remedy} Or turn it off with --no-honor-ignore-files."
-    if decided_by_operator is not None:
+    if decided_by_operator is None:
+        ending = f"{remedy} Or turn it off with --no-honor-ignore-files."
+    elif decided_by_operator.file is None:
         ending = (
-            f"{described([decided_by_operator[0]], environment_paths)} is the "
-            "operator's own file and writes honor_ignore_files, so it decides "
-            "the value, and moving the dropped file out of a checkout would not "
+            "The operator's override sets honor_ignore_files, so it decides the "
+            "value, and moving the dropped file out of a checkout would not "
             "change it."
+        )
+    else:
+        ending = (
+            f"{decided_by_operator.shown} is the operator's own file and writes "
+            "honor_ignore_files, so it decides the value, and moving the dropped "
+            "file out of a checkout would not change it."
         )
     ASH_LOGGER.warning(
         shown_on_one_line(
