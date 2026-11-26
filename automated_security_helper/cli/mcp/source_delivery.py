@@ -470,7 +470,7 @@ def ensure_session_image_scan_dir(
     return _ensure_dir(session_dir / "image-scan")
 
 
-def is_session_image_scan_dir(path: "os.PathLike | str", session_id: str) -> bool:
+def is_session_image_scan_dir(path: "os.PathLike[str] | str", session_id: str) -> bool:
     """Whether *path* names this session's image-scan anchor directory.
 
     Creates nothing and never raises for a malformed path or session id: a

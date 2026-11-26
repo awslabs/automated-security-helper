@@ -1471,7 +1471,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         lock_rel = (
             lock_index.relative(uri) if (lock_index is not None and uri) else None
         )
-        if lock_rel:
+        if lock_rel and lock_index is not None:
             entry = lock_index.unique_by_name_version(lock_rel, name, version)
             if entry is not None:
                 path = install_path(lock_rel, entry.key)

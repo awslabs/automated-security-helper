@@ -1496,8 +1496,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             return None
         if hasattr(config, "model_dump") and callable(config.model_dump):
             config = config.model_dump(by_alias=True)
-        if config != self.config.model_dump(by_alias=True):
-            self.config = self.config.__class__.model_validate(config)
+        current = self._require_config()
+        if config != current.model_dump(by_alias=True):
+            self.config = current.__class__.model_validate(config)
             self._reset_dependency_validation()
         return config
 

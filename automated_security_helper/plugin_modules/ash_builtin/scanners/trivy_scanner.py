@@ -801,7 +801,13 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             # the manifest the finding ids key on, however the tag has moved.
             # Read against the one reference grammar once more, whichever way
             # the locator was built: it lands in a positional slot.
-            target_token = checked_image_reference(image.pulled_ref())
+            pulled = image.pulled_ref()
+            if pulled is None:
+                raise ScannerError(
+                    f"container image at {image.shown()} has neither a reference "
+                    "nor a saved archive for trivy image to read"
+                )
+            target_token = checked_image_reference(pulled)
 
         original_subcommands = self.subcommands
         try:
