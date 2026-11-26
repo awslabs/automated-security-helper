@@ -309,9 +309,9 @@ _NARROWING_OPTIONS_WITH_VALUES = [
         "--add-scanners",
         "bandit",
         (
-            "outside --mode precommit it means what --scanners means, so with no "
-            "default_scanners in the config the scanners it names are the whole "
-            "selection"
+            "means what --scanners means: in a mode with no default set, such as the "
+            "local mode the gate scans in, and with no default_scanners.only in the "
+            "config, the scanners it names are the whole selection"
         ),
     ),
     (
@@ -345,6 +345,14 @@ _NARROWING_OPTIONS_WITH_VALUES = [
         "HEAD~1",
         "filters findings to one commit's diff before the exit code is computed",
     ),
+    (
+        "--cli-json-input",
+        "selection.json",
+        (
+            "the document it names sets any parameter the gate does not pass "
+            "itself, the scanner selection among them"
+        ),
+    ),
 ]
 
 #: The same class, spelled as flags that take no value. ``--full`` and its aliases are ASH's
@@ -352,6 +360,10 @@ _NARROWING_OPTIONS_WITH_VALUES = [
 #: already refuses a redundant ``--fail-on-incomplete-scanners``, which is that accepting the
 #: harmless polarity establishes this variable as the place the setting gets chosen, and the
 #: next edit to it is the harmful one.
+#:
+#: The last three leave nothing scanned: ``--help``, ``--version`` and
+#: ``--generate-cli-skeleton`` each end ``ash scan`` with exit 0 before any
+#: scanner starts, and exit 0 is the outcome this gate reads as a pass.
 _NARROWING_FLAGS = [
     ("--python-only", "narrows to Python-only plugins; the rest are recorded SKIPPED"),
     ("--python-based-scanners-only", "an alias of the same option"),
@@ -362,6 +374,12 @@ _NARROWING_FLAGS = [
     ("--use-existing", "answers from a prior results file instead of scanning"),
     ("--no-use-existing", "the other polarity of the same option"),
     ("--changed-files-only", "drops findings outside a git diff from the verdict"),
+    ("--help", "prints the help and exits 0 before any scanner runs"),
+    ("--version", "prints the version and exits 0 before any scanner runs"),
+    (
+        "--generate-cli-skeleton",
+        "prints a --cli-json-input template and exits 0 before any scanner runs",
+    ),
 ]
 
 
@@ -526,21 +544,21 @@ def test_every_reserved_spelling_is_one_the_cli_actually_accepts():
 _SCANNER_OPTIONS_NOT_RESERVED = {
     "require_scanner_selection": (
         "hidden; container mode passes it to the scan it starts, and it only refuses "
-        "a scan whose settled default_scanners differs from the document it names: it "
-        "can stop a scan but cannot narrow one"
+        "a scan whose settled default_scanners differs from the document it names "
+        "or a document it cannot read, so it can stop a scan but cannot narrow one"
     ),
 }
 
 
 def test_every_option_that_names_scanners_is_reserved():
-    """Every option whose spelling names scanners is one the gate refuses.
+    """Every option whose spelling names scanners is refused by the gate or exempted.
 
     GATE_OWNED_SCAN_OPTIONS is written out by hand while the CLI keeps growing, so an
     option that chooses scanners can arrive without an entry here.
-    ``--only-scanners`` states the whole selection, and outside ``--mode precommit``
-    ``--add-scanners`` means what ``--scanners`` means, so with no ``default_scanners``
-    in the config the scanners it names are the whole selection; both are reserved
-    for the reason ``--scanners`` is.
+    ``--only-scanners`` states the whole selection, and ``--add-scanners`` means what
+    ``--scanners`` means, so in the local mode the gate scans in, with no
+    ``default_scanners.only`` in the config, the scanners it names are the whole
+    selection; both are reserved for the reason ``--scanners`` is.
     ``test_every_reserved_spelling_is_one_the_cli_actually_accepts`` cannot see a
     missing entry: it checks that every reserved spelling is a real option, not that
     every real option that chooses scanners is reserved.
@@ -553,7 +571,9 @@ def test_every_option_that_names_scanners_is_reserved():
     What this does NOT catch is an option that changes the selection under a name with
     no "scanner" in it. ``--mode``, ``--phases``, ``--config`` and the shard options
     are of that kind; they are reserved and the refusal tables above hold them, but a
-    new option spelled that way would pass here.
+    new option spelled that way would pass here. An option click handles before the
+    scan function runs, ``--cli-json-input`` among them, is held by
+    ``test_every_option_handled_before_the_scan_runs_is_reserved`` instead.
     """
     import typer.main
 
@@ -599,6 +619,53 @@ def test_every_option_that_names_scanners_is_reserved():
     )
 
 
+def test_every_option_handled_before_the_scan_runs_is_reserved():
+    """Options click handles itself, which the scan function never sees, are reserved.
+
+    ``--help`` and ``--generate-cli-skeleton`` print and end the command with exit 0,
+    and ``--cli-json-input`` reads a document whose values stand for every parameter
+    the command line does not set. None of the three reaches the scan function
+    (click's ``expose_value=False``), and none has "scanner" in its spelling, so
+    ``test_every_option_that_names_scanners_is_reserved`` cannot see them. Exit 0 is
+    the outcome this gate reads as a pass, and a document reaches every option the
+    gate does not pass itself, so every option of this kind is reserved. They are read
+    off the real click command, so one added the same way fails here until the gate
+    reserves it.
+    """
+    import typer.main
+
+    from automated_security_helper.cli.main import app
+
+    scan_command = typer.main.get_command(app).commands["scan"]
+    # Resilient parsing, so the eager options do not run their callbacks here.
+    ctx = scan_command.make_context("scan", [], resilient_parsing=True)
+    not_exposed = {
+        param.name: {*param.opts, *param.secondary_opts}
+        for param in scan_command.get_params(ctx)
+        if not param.expose_value
+    }
+
+    # Control on the rule: it has to find the three options this test was written for.
+    expected = {"help", "cli_json_input", "generate_cli_skeleton"}
+    assert expected <= set(not_exposed), sorted(not_exposed)
+
+    gate_module = _load_gate()
+    reserved = (
+        gate_module.GATE_OWNED_SCAN_OPTIONS | gate_module.GATE_OWNED_SHORT_OPTIONS
+    )
+    unreserved = sorted(
+        spelling
+        for spellings in not_exposed.values()
+        for spelling in spellings
+        if spelling not in reserved
+    )
+    assert not unreserved, (
+        "these options are handled before the scan function runs and "
+        f"ASH_SCAN_EXTRA_ARGS can set them: {unreserved}. Add every spelling to "
+        "GATE_OWNED_SCAN_OPTIONS."
+    )
+
+
 @pytest.mark.parametrize(
     "argv_tail, parameter, expected",
     [
@@ -614,6 +681,7 @@ def test_every_option_that_names_scanners_is_reserved():
         (["--shard-index", "0"], "shard_index", 0),
         (["--shard-count", "4"], "shard_count", 4),
         (["--use-existing"], "use_existing", True),
+        (["--version"], "version", True),
         (["--config", "/tmp/none.yaml"], "config", "/tmp/none.yaml"),  # nosec B108
         (["-c", "/tmp/none.yaml"], "config", "/tmp/none.yaml"),  # nosec B108
         (["-c/tmp/none.yaml"], "config", "/tmp/none.yaml"),  # nosec B108
@@ -643,6 +711,47 @@ def test_a_reserved_option_would_really_have_narrowed_the_scan(
         "option does not do what the refusal says it does, the refusal is costing an operator "
         "an extra arg for nothing"
     )
+
+
+@pytest.mark.parametrize("flag", ["--help", "--generate-cli-skeleton"])
+def test_an_eager_reserved_flag_would_have_ended_the_scan_with_exit_0(flag):
+    """The positive control for the two eager flags in ``_NARROWING_FLAGS``.
+
+    ``click`` runs an eager option's callback while it parses, so resolving the command
+    line is enough to see it end the command: each raises ``Exit(0)`` before the scan
+    function is called, and exit 0 is the outcome this gate reads as a pass.
+    ``--version`` is not eager; its row in the table above resolves it, and
+    ``run_ash_scan_cli_command`` exits 0 on it before starting anything.
+    """
+    import click
+
+    with pytest.raises(click.exceptions.Exit) as excinfo:
+        _resolve_scan_params(["ash", "scan", flag])
+
+    assert excinfo.value.exit_code == 0, (
+        f"{flag} ended the command with {excinfo.value.exit_code}, not 0"
+    )
+
+
+@pytest.mark.parametrize("form", ["space", "equals"])
+def test_a_cli_json_input_document_would_really_have_set_the_selection(tmp_path, form):
+    """The positive control for ``--cli-json-input`` in the refusal table.
+
+    Its value has to name a real document, so it is resolved here rather than in the
+    table above. A document that sets ``only_scanners`` decides the selection the same
+    way ``--only-scanners`` does, which is why the option is reserved: the gate passes
+    no selection of its own for the command line to win with.
+    """
+    document = tmp_path / "selection.json"
+    document.write_text('{"only_scanners": ["bandit"]}\n', encoding="utf-8")
+    if form == "space":
+        tail = ["--cli-json-input", str(document)]
+    else:
+        tail = [f"--cli-json-input={document}"]
+
+    params = _resolve_scan_params(["ash", "scan", *tail])
+
+    assert tuple(params["only_scanners"]) == ("bandit",), params["only_scanners"]
 
 
 def test_a_benign_extra_arg_is_still_passed_through(gate, monkeypatch, tmp_path):
