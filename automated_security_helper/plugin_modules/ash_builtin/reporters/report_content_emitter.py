@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 import json
 import re
-from typing import Dict, List, Any, TYPE_CHECKING
+from typing import Dict, List, Any, Sequence, TYPE_CHECKING
 
 import polars as pl
 
@@ -613,7 +613,24 @@ class ReportContentEmitter:
         rows_failed = any(
             result["status"] == ScannerStatus.FAILED for result in results
         )
-        if is_workspace_scan(self.model):
+        workspace = is_workspace_scan(self.model)
+        # Every finding is graded once, into one frame the counts below read.
+        # Whether a row's actionable grading is read depends on the branch: a
+        # workspace scan recounts every finding, a scan with no scanner rows
+        # counts every finding, and otherwise only the findings an additional
+        # report lists are counted beside the scanner rows. A row nobody reads
+        # is left ungraded (null), so no hook runs for it.
+        in_extras = [False] * len(self.flat_vulns)
+        if results:
+            extra_ids = {id(vuln) for vuln in self._additional_report_findings()}
+            in_extras = [id(vuln) in extra_ids for vuln in self.flat_vulns]
+        every = self._graded_frame(
+            self.flat_vulns,
+            grade_actionable=(
+                [True] * len(self.flat_vulns) if workspace or not results else in_extras
+            ),
+        )
+        if workspace:
             # The scanner rows grade each finding by the scanner resolver's
             # answer, which with the merged file's missing ash_config is ASH's
             # default for every project. The cards, the hotspots and the
@@ -621,9 +638,7 @@ class ReportContentEmitter:
             # (is_finding_actionable), so a headline summed from the rows could
             # name one count while the cards below it showed another. The
             # headline counts the findings as the cards do.
-            actionable = sum(
-                self.is_finding_actionable(vuln) for vuln in self.flat_vulns
-            )
+            actionable = flag_total(every, "actionable")
             # The rows' FAILED status is that same resolver grading, so it
             # cannot decide the title here either: a project whose recorded
             # gate is stricter than ASH's default (HIGH, with one MEDIUM
@@ -636,7 +651,6 @@ class ReportContentEmitter:
             # Imported SARIF can contain findings without execution metadata.
             # Count those findings while making no completion claim.
             counts = dict.fromkeys(counts, 0)
-            every = self._graded_frame(self.flat_vulns, actionable=True)
             _add_level_counts(counts, every)
             actionable = flag_total(every, "actionable")
             suppressed = flag_total(every, "is_suppressed")
@@ -645,13 +659,10 @@ class ReportContentEmitter:
             # report lists (a plugin's own list of finding dicts) reach the
             # cards and the hotspots, and a headline that left them out read
             # "No actionable findings" above cards marked Actionable.
-            extras = self._graded_frame(
-                self._additional_report_findings(),
-                actionable=not is_workspace_scan(self.model),
-            )
+            extras = every.filter(pl.Series(in_extras, dtype=pl.Boolean))
             _add_level_counts(counts, extras)
             suppressed += flag_total(extras, "is_suppressed")
-            if not is_workspace_scan(self.model):
+            if not workspace:
                 # A workspace scan counted every finding above, these included.
                 actionable += flag_total(extras, "actionable")
         completed = sum(ran(result) for result in results)
@@ -684,7 +695,7 @@ class ReportContentEmitter:
         active = sum(counts.values())
         # Policy-scanner findings the project's outcome left out are counted
         # apart: they are active, not actionable, and not below any threshold.
-        policy_not_gating = flag_total(self._graded_frame(self.flat_vulns), "left_out")
+        policy_not_gating = flag_total(every, "left_out")
         # A tool ASH could not stop fails the run whatever the gate says, and it
         # may still be writing into the output directory after this report is
         # rendered, so the report is not final. The exit code reads it from the
@@ -787,23 +798,33 @@ class ReportContentEmitter:
         return summary
 
     def _graded_frame(
-        self, vulns: List[FlatVulnerability], *, actionable: bool = False
+        self,
+        vulns: List[FlatVulnerability],
+        *,
+        grade_actionable: Sequence[bool] | None = None,
     ) -> pl.DataFrame:
         """The findings as a frame of severity bucket and yes/no gradings.
 
         Each finding's grading is one lookup against the model's recorded
         gates (:meth:`is_finding_actionable`, :meth:`is_policy_not_gating`),
         made here row by row; the counting over the result is the frame's.
-        ``actionable`` is asked for only by the callers that read it.
+        ``grade_actionable`` names, one flag per finding, the rows whose
+        actionable grading the caller reads: the others are left null, since
+        the threshold lookup costs a call per finding. Every grading enters the
+        frame through ``bool``, as the suppression flag does, because a hook
+        that answers 1 or 0 is not a Boolean cell to the frame.
         """
         return graded_frame(
             levels=[_severity_level(vuln.severity) for vuln in vulns],
             is_suppressed=[bool(vuln.is_suppressed) for vuln in vulns],
-            left_out=[self.is_policy_not_gating(vuln) for vuln in vulns],
+            left_out=[bool(self.is_policy_not_gating(vuln)) for vuln in vulns],
             actionable=(
-                [self.is_finding_actionable(vuln) for vuln in vulns]
-                if actionable
-                else None
+                None
+                if grade_actionable is None
+                else [
+                    bool(self.is_finding_actionable(vuln)) if grade else None
+                    for vuln, grade in zip(vulns, grade_actionable, strict=True)
+                ]
             ),
         )
 

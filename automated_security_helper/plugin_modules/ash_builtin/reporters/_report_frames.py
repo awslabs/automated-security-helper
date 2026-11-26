@@ -40,8 +40,9 @@ from automated_security_helper.utils.frame_text import ranks, unwire, wire
 #:   ``flat_frame`` gives it.
 #: - ``left_out`` is the report's policy grading (``is_policy_not_gating``), not
 #:   a model field.
-#: - ``actionable`` is the report's threshold grading; null in every row when the
-#:   caller did not ask for it, so a column of nulls is "not decided", never "no".
+#: - ``actionable`` is the report's threshold grading; null in each row the
+#:   caller did not grade, so a null is "not decided", never "no", and a total
+#:   over the column counts only the rows that were graded.
 GRADED_SCHEMA: dict[str, Any] = {
     "level": pl.String,
     "is_suppressed": pl.Boolean,
@@ -54,15 +55,16 @@ def graded_frame(
     levels: Sequence[str],
     is_suppressed: Sequence[bool],
     left_out: Sequence[bool],
-    actionable: Sequence[bool] | None = None,
+    actionable: Sequence[bool | None] | None = None,
 ) -> pl.DataFrame:
     """One row per finding: its severity bucket and its three yes/no gradings.
 
     ``is_suppressed`` bears the model field's name it carries
-    (``FlatVulnerability.is_suppressed``). ``actionable`` is optional because deciding it costs a threshold lookup per
-    finding, and some summaries never need it. The frame has the same four
-    columns either way (:data:`GRADED_SCHEMA`); without ``actionable`` that
-    column is null.
+    (``FlatVulnerability.is_suppressed``). ``actionable`` is optional because
+    deciding it costs a threshold lookup per finding, and a summary reads it for
+    only some of its rows: a row given ``None`` (or every row, when the argument
+    is left out) was not graded. The frame has the same four columns either way
+    (:data:`GRADED_SCHEMA`); a row that was not graded has a null there.
     """
     rows = len(levels)
     return pl.DataFrame(

@@ -442,6 +442,69 @@ class TestTheSummaryIsUnchanged:
         assert new.calls["policy"] <= old.calls["policy"]
 
 
+class _IntHooks:
+    """Grading hooks that answer 1 and 0 where the real ones answer True and False."""
+
+    def is_finding_actionable(self, vuln):
+        return int(super().is_finding_actionable(vuln))
+
+    def is_policy_not_gating(self, vuln):
+        return int(super().is_policy_not_gating(vuln))
+
+
+class IntEmitter(_IntHooks, ReportContentEmitter):
+    pass
+
+
+class _TruthyHooks:
+    """Grading hooks that answer a truthy or falsy non-bool of another type."""
+
+    def is_finding_actionable(self, vuln):
+        return "yes" if super().is_finding_actionable(vuln) else ""
+
+    def is_policy_not_gating(self, vuln):
+        return [vuln] if super().is_policy_not_gating(vuln) else []
+
+
+class TruthyEmitter(_TruthyHooks, ReportContentEmitter):
+    pass
+
+
+@pytest.fixture(params=SCENARIOS, ids=_name)
+def plain_and_odd(request, tmp_path):
+    workspace, scanner_rows, listed, policy_gates, suppressed, fold = request.param
+    model = _model(
+        tmp_path,
+        workspace=workspace,
+        scanner_rows=scanner_rows,
+        listed=listed,
+        policy_gates=policy_gates,
+    )
+    return (
+        _emitter(ReportContentEmitter, model, fold=fold, suppressed=suppressed),
+        _emitter(IntEmitter, model, fold=fold, suppressed=suppressed),
+        _emitter(TruthyEmitter, model, fold=fold, suppressed=suppressed),
+    )
+
+
+class TestAGradingHookThatAnswersANonBool:
+    """A hook that returns 1 for True used to raise TypeError from the frame's
+    strict Boolean column, and the summary was lost. Every grading enters the
+    frame through ``bool``, as the suppression flag does."""
+
+    def test_a_hook_that_answers_one_and_zero_gives_the_same_summary(
+        self, plain_and_odd
+    ):
+        plain, odd, _ = plain_and_odd
+        assert odd.get_scan_summary() == plain.get_scan_summary()
+
+    def test_a_hook_that_answers_a_truthy_or_falsy_object_gives_the_same_summary(
+        self, plain_and_odd
+    ):
+        plain, _, truthy = plain_and_odd
+        assert truthy.get_scan_summary() == plain.get_scan_summary()
+
+
 class TestTheScenariosAreNotEmpty:
     """Guards that the oracle comparison has something to compare."""
 
