@@ -1399,6 +1399,9 @@ class RuntimeOverridesConfig(RedactedSection):
         # the packages those sdists embed to the findings, so a client's file
         # may neither turn it off nor widen it.
         "/scanners/syft/options/sdist_harvest/**",
+        # And the converter that runs that harvest: its own section's enabled
+        # turns the harvest off as sdist_harvest.enabled does.
+        "/converters/sdist-lock-harvester/**",
         "/scanners/trivy-repo/options/secret_config_file",
         # And the builtin scanners' own config files, trivy-repo's config file
         # and modules directory, cfn-guard's rules files, the programs actionlint

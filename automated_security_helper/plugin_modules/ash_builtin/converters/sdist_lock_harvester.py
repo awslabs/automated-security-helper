@@ -202,11 +202,13 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
         the scanned tree or the scan's output directory: the default output
         layout sits INSIDE the scanned tree, where a repository could commit a
         pre-warmed entry and have its own bytes served as a verified harvest.
-        An operator may point ``cache_dir`` at a persistent location (a CI
-        cache volume); the configured value goes through the same
-        operator-trust gate the syft ``config_file`` option uses -- which
-        refuses a path inside the scanned tree whoever named it -- and a
-        refused value falls back to the default rather than being honored.
+        Only the operator chooses where the cache lives, for example a
+        persistent CI cache volume. A value from a config file inside a git
+        checkout or the scanned directory, or from an MCP client, is not used
+        wherever it points, and the cache falls back to the default. The
+        operator's own value then goes through the same tree check the syft
+        ``config_file`` option uses, which refuses a path inside the scanned
+        tree whoever named it; that refusal falls back to the default as well.
         Whatever root results is held to the same line once more below, and
         None (no usable root at all) makes the caller cache in a private
         per-run directory that no repository content can pre-fill.
@@ -217,30 +219,56 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
                 operator_wrote_value,
             )
             from automated_security_helper.config.path_trust import honored_path
+            from automated_security_helper.utils.config_trust import (
+                NOT_THE_OPERATORS,
+                refusal_warning,
+            )
 
             context_config = getattr(self.context, "config", None)
-            root = honored_path(
-                cast(Union[str, Path], configured),
-                source_dir=Path(self.context.source_dir),
-                config=context_config,
-                key="scanners.syft.options.sdist_harvest.cache_dir",
-                operator_written=operator_wrote_value(
-                    context_config,
-                    "scanner",
-                    "syft",
-                    ("options", "sdist_harvest", "cache_dir"),
-                    configured,
-                    config_from_context=self._config_from_context,
-                ),
+            operator_written = operator_wrote_value(
+                context_config,
+                "scanner",
+                "syft",
+                ("options", "sdist_harvest", "cache_dir"),
+                configured,
+                config_from_context=self._config_from_context,
             )
-            if root is None:
+            if not operator_written:
+                # Only the operator chooses where the cache lives, so a value
+                # from a config file inside a git checkout or the scanned
+                # directory, or from an MCP client, is not handed to
+                # honored_path: wherever it points, it is not used. The warning
+                # leaves the value out, since it is the repository's own text
+                # and can be one the config read from the environment.
                 ASH_LOGGER.warning(
-                    "Configured sdist-harvest cache directory was not used "
-                    "(scanners.syft.options.sdist_harvest.cache_dir): it is inside "
-                    "the scanned tree, was delivered by an MCP client, or was "
-                    "derived from the repository. The cache falls back to the "
-                    "user-level default."
+                    refusal_warning(
+                        "Configured sdist-harvest cache directory was not used "
+                        "(scanners.syft.options.sdist_harvest.cache_dir): "
+                        f"{NOT_THE_OPERATORS}, and only the operator chooses "
+                        "where verified harvests are cached. The cache falls "
+                        "back to the user-level default.",
+                        NOT_THE_OPERATORS,
+                    )
                 )
+            else:
+                # The operator's own value still may not point into the
+                # scanned tree.
+                root = honored_path(
+                    cast(Union[str, Path], configured),
+                    source_dir=Path(self.context.source_dir),
+                    config=context_config,
+                    key="scanners.syft.options.sdist_harvest.cache_dir",
+                    operator_written=True,
+                )
+                if root is None:
+                    ASH_LOGGER.warning(
+                        "Configured sdist-harvest cache directory was not used "
+                        "(scanners.syft.options.sdist_harvest.cache_dir): it is "
+                        "inside the scanned tree or a git checkout, an MCP "
+                        "client delivered it, or its name could not be resolved "
+                        "to the end. The cache falls back to the user-level "
+                        "default."
+                    )
         if root is None:
             root = default_harvest_cache_root()
             if root is None:
