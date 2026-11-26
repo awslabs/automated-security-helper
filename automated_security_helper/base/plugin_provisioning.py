@@ -236,6 +236,11 @@ _CHECKOV = Provisioning(
 
 _GITLEAKS = Provisioning(tool_pins=(ToolPin("gitleaks", "v8.30.1"),))
 
+# The alpha container-image linter. The archive digests are the ones the release's
+# own dockle_0.4.15_checksums.txt publishes, re-verified by download; the release
+# publishes no Windows build.
+_DOCKLE = Provisioning(tool_pins=(ToolPin("dockle", "v0.4.15"),))
+
 # The alpha Go SAST scanner. Its register already declares the pinned shape
 # (runtime PINNED_BINARY, all six platforms); the archive digests are the ones the
 # release's own gosec_2.30.0_checksums.txt publishes, re-verified by download.
@@ -509,6 +514,7 @@ PROVISIONING: Mapping[str, Provisioning] = MappingProxyType(
         "betterleaks": _BETTERLEAKS,
         "cfn-guard": _CFN_GUARD,
         "checkov": _CHECKOV,
+        "dockle": _DOCKLE,
         "gitleaks": _GITLEAKS,
         "gosec": _GOSEC,
         "grype": _GRYPE,

@@ -162,6 +162,14 @@ MANIFESTS = (
         owned=(f"{_DOCS}/dependency_check-plugin.md", f"{_FIXTURES}/dependency-check"),
     ),
     _alpha(
+        "dockle",
+        "ash_dockle_plugins",
+        "dockle_scanner",
+        "DockleScanner",
+        "DockleScannerConfigOptions",
+        owned=(f"{_DOCS}/dockle-plugin.md", f"{_FIXTURES}/dockle"),
+    ),
+    _alpha(
         "ferret-scan",
         "ash_ferret_plugins",
         "ferret_scanner",

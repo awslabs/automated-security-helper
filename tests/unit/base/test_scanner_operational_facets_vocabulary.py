@@ -202,6 +202,21 @@ def test_every_target_kind_is_served_or_unclaimed_by_a_tool_type() -> None:
     assert not orphaned, f"target kinds served by no tool type: {orphaned}"
 
 
+def test_a_container_scanner_is_served_by_a_container_image() -> None:
+    """dockle lints one image, so the CONTAINER tool type has a served kind: the
+    container_image kind alone, which a CONTAINER row can claim."""
+    assert opsf.TargetKind.CONTAINER_IMAGE not in opsf.UNCLAIMED_TARGET_KINDS
+    assert opsf.TOOL_TYPE_SERVED_BY[ScannerToolType.CONTAINER] == frozenset(
+        {opsf.TargetKind.CONTAINER_IMAGE}
+    )
+    row = opsf.TargetsFacet(
+        kinds=(opsf.TargetKind.CONTAINER_IMAGE,),
+        tool_type=ScannerToolType.CONTAINER,
+        selection="an image reference, or a saved image handed to --input",
+    )
+    assert row.kinds == (opsf.TargetKind.CONTAINER_IMAGE,)
+
+
 # ---- runtime --------------------------------------------------------------
 
 

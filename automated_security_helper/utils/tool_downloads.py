@@ -236,6 +236,18 @@ _CRANE_ASSETS: dict[PlatformArch, str] = {
     # windows/arm64: the release publishes one; ASH's table does not list it.
 }
 
+# dockle (the alpha container-image linter's tool). The v0.4.15 release also
+# publishes 32-bit, ARM and loong64 Linux archives and .deb, .rpm and .apk packages;
+# ASH's platform vocabulary has no such arch, and the archives are what it installs,
+# so they are not listed.
+_DOCKLE_ASSETS: dict[PlatformArch, str] = {
+    ("linux", "amd64"): "dockle_0.4.15_Linux-64bit.tar.gz",
+    ("linux", "arm64"): "dockle_0.4.15_Linux-ARM64.tar.gz",
+    ("darwin", "amd64"): "dockle_0.4.15_macOS-64bit.tar.gz",
+    ("darwin", "arm64"): "dockle_0.4.15_macOS-ARM64.tar.gz",
+    # windows: upstream publishes no Windows build for this release.
+}
+
 _GRYPE_ASSETS: dict[PlatformArch, str] = {
     ("linux", "amd64"): "grype_0.122.1_linux_amd64.tar.gz",
     ("linux", "arm64"): "grype_0.122.1_linux_arm64.tar.gz",
@@ -385,6 +397,13 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # reports "kingfisher 2.19.1". The first real install re-checks every value: a wrong
 # entry fails that install rather than sitting here unnoticed.
 #
+# dockle's four archive digests are transcribed from the release's own
+# dockle_0.4.15_checksums.txt and were re-verified on 2026-11-26 by downloading each
+# asset and hashing it (all four agreed; GitHub reports no `digest` for this release's
+# assets). Its executable digests were taken from those checked archives the same
+# day: each member extracted with GNU tar and hashed with sha256sum. The extracted
+# linux/amd64 binary was run; it reports "dockle version 0.4.15".
+#
 # Every line carries `# pragma: allowlist secret`, which is detect-secrets' own
 # inline marker. It is needed and it is honest: a 64-character hex string is exactly
 # what a high-entropy-string detector is built to find, and ASH scanning itself
@@ -465,6 +484,11 @@ _DIGESTS: dict[str, str] = {
     "go-containerregistry_Darwin_x86_64.tar.gz": "6fedd06a648c11335f0e8b9547e4783002c30e9336047fec292942cd518bb799",  # pragma: allowlist secret
     "go-containerregistry_Darwin_arm64.tar.gz": "2231fc8df8806d20d680ff1225db44e095a55dd6ac1ae8eced4faf4b278b78fb",  # pragma: allowlist secret
     "go-containerregistry_Windows_x86_64.tar.gz": "0e073ea8192c3b8442ec8aaf44d53c1050a09084669fae3a6ceb0f2026cf8b21",  # pragma: allowlist secret
+    # dockle v0.4.15 (from the release's dockle_0.4.15_checksums.txt, re-verified)
+    "dockle_0.4.15_Linux-64bit.tar.gz": "8bfc9183d1d3d67800edb45bea4bb63ddf1d28bec5f89944075a07007d79caad",  # pragma: allowlist secret
+    "dockle_0.4.15_Linux-ARM64.tar.gz": "14c2fbcd675afaa0f1717e97ab71eee178dabdef676066189f49bad0f53b8762",  # pragma: allowlist secret
+    "dockle_0.4.15_macOS-64bit.tar.gz": "e6b68aca0e7776d857d7f5f226c6dae9b74d8905376636ac4ad93355ec84892d",  # pragma: allowlist secret
+    "dockle_0.4.15_macOS-ARM64.tar.gz": "dc6120234cd74a40fedba84290f6b5c397c8f09c645063a3b59dce8283056847",  # pragma: allowlist secret
     # gitleaks v8.30.1
     "gitleaks_8.30.1_linux_x64.tar.gz": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",  # pragma: allowlist secret
     "gitleaks_8.30.1_linux_arm64.tar.gz": "e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080",  # pragma: allowlist secret
@@ -551,6 +575,11 @@ _EXECUTABLE_DIGESTS: dict[str, str] = {
     "go-containerregistry_Darwin_x86_64.tar.gz": "ea88e2619c139c69c6022c04bd6fd75692935f16798de281fa30a4fbf5c15069",  # pragma: allowlist secret
     "go-containerregistry_Darwin_arm64.tar.gz": "712be73700414edb792c9d7dd07315ff6ef1200decd6b2363e4ab834babb302d",  # pragma: allowlist secret
     "go-containerregistry_Windows_x86_64.tar.gz": "e22e47202cece45d09fe92919bdb683f56f548d360cb96f6a852defd965c935d",  # pragma: allowlist secret
+    # dockle v0.4.15
+    "dockle_0.4.15_Linux-64bit.tar.gz": "28d20c2f148781f7320802624a0decc46826f19cdd1d6756893a85042a2ab68e",  # pragma: allowlist secret
+    "dockle_0.4.15_Linux-ARM64.tar.gz": "2f035cf78cdd8c5ecca06c53a25551bb8dd8698f7774adcfb2fd2f8b45300a14",  # pragma: allowlist secret
+    "dockle_0.4.15_macOS-64bit.tar.gz": "0a6aced2300344dab6212d0a89cd933edb03ff83a8381b5b18701680db4d4f3d",  # pragma: allowlist secret
+    "dockle_0.4.15_macOS-ARM64.tar.gz": "5bdada2d86964623e0998a53822a9b448b581b20ff61f3d36264e17a4606fb65",  # pragma: allowlist secret
     # gitleaks v8.30.1
     "gitleaks_8.30.1_linux_x64.tar.gz": "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509",  # pragma: allowlist secret
     "gitleaks_8.30.1_linux_arm64.tar.gz": "00e91bbe655bd7c47753e8cfe61cb76ea1a5d7e7702fe161ee40102b46b3823b",  # pragma: allowlist secret
@@ -650,6 +679,7 @@ _RELEASE_BASE_URLS: dict[str, str] = {
     "betterleaks": "https://github.com/betterleaks/betterleaks/releases/download",
     "cfn-guard": "https://github.com/aws-cloudformation/cloudformation-guard/releases/download",
     "crane": "https://github.com/google/go-containerregistry/releases/download",
+    "dockle": "https://github.com/goodwithtech/dockle/releases/download",
     "gitleaks": "https://github.com/gitleaks/gitleaks/releases/download",
     "gosec": "https://github.com/securego/gosec/releases/download",
     "grype": "https://github.com/anchore/grype/releases/download",
@@ -666,6 +696,7 @@ _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
     "betterleaks": _BETTERLEAKS_ASSETS,
     "cfn-guard": _CFN_GUARD_ASSETS,
     "crane": _CRANE_ASSETS,
+    "dockle": _DOCKLE_ASSETS,
     "gitleaks": _GITLEAKS_ASSETS,
     "gosec": _GOSEC_ASSETS,
     "grype": _GRYPE_ASSETS,
@@ -1114,6 +1145,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "cfn-guard/LICENSE": "28878a48de57252ed2c9119db71b2fc9766833a0c159d9f5df54cba4dea52dba",  # pragma: allowlist secret
     "cfn-guard/NOTICE": "ba249a48f79f76c72cffea8689eb7a5ce450a4a67ad6b1e44e8ff15a95b2b751",  # pragma: allowlist secret
     "crane commit": "8a72a424fdecb4caa14f2d525e5d2503331442b5",  # pragma: allowlist secret
+    "dockle commit": "54368575d2a0c34a82fb05c904b8207284a64891",  # pragma: allowlist secret
     "ggshield commit": "4cccd600fd3890a7aba07fd0a45e483f3099fe70",  # pragma: allowlist secret
     "gitleaks commit": "83d9cd684c87d95d656c1458ef04895a7f1cbd8e",  # pragma: allowlist secret
     "gosec commit": "5eb1d104ef85ff2c905c877eb600e8c1dee33a22",  # pragma: allowlist secret
@@ -1321,6 +1353,18 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         license="Apache-2.0",
         repository="https://github.com/google/go-containerregistry",
         commit=_THIRD_PARTY_HASHES["crane commit"],
+        files=(LicenseFile("LICENSE"),),
+    ),
+    # The alpha Dockle scanner's tool. The release archive holds the executable, a
+    # README and the Apache-2.0 text as LICENSE, byte-identical across the four pinned
+    # archives and to the repository's LICENSE at the tag's commit, and the file the
+    # scanner's register cites.
+    "dockle": ThirdPartyLicense(
+        tool="dockle",
+        version="v0.4.15",
+        license="Apache-2.0",
+        repository="https://github.com/goodwithtech/dockle",
+        commit=_THIRD_PARTY_HASHES["dockle commit"],
         files=(LicenseFile("LICENSE"),),
     ),
     # CredSweeper (alpha scanner) has NO entry: the table is what the image must

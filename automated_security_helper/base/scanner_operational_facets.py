@@ -351,6 +351,9 @@ TOOL_TYPE_SERVED_BY: dict[ScannerToolType, frozenset[TargetKind]] = {
     ScannerToolType.SBOM: frozenset(
         {TargetKind.PACKAGE_INVENTORY, TargetKind.CONTAINER_IMAGE}
     ),
+    # dockle lints one container image (its configuration and layers), so the
+    # CONTAINER type is served by the container_image kind alone.
+    ScannerToolType.CONTAINER: frozenset({TargetKind.CONTAINER_IMAGE}),
 }
 
 

@@ -137,6 +137,7 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
     "credsweeper": ScannerToolType.SECRETS.value,
     "dependency-check": ScannerToolType.SCA.value,
     "detect-secrets": ScannerToolType.SECRETS.value,
+    "dockle": ScannerToolType.CONTAINER.value,
     "betterleaks": ScannerToolType.SECRETS.value,
     "ferret-scan": ScannerToolType.SECRETS.value,
     "ggshield": ScannerToolType.SECRETS.value,

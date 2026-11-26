@@ -9,6 +9,7 @@ This section covers the alpha plugins for ASH: the opt-in scanner packages (`ash
 - **[Betterleaks Plugin](betterleaks-plugin.md)** (`ash_betterleaks_plugins`) - Secret detection with Betterleaks, the successor to gitleaks written by its author
 - **[CredSweeper Plugin](credsweeper-plugin.md)** (`ash_credsweeper_plugins`) - Credential detection with Samsung's CredSweeper
 - **[Dependency-Check Plugin](dependency_check-plugin.md)** (`ash_dependency_check_plugins`) - Dependency vulnerability analysis with OWASP Dependency-Check
+- **[Dockle Plugin](dockle-plugin.md)** (`ash_dockle_plugins`) - Container image linting against the CIS Docker Benchmark and image best practices with Dockle
 - **[Ferret Scan Plugin](ferret-scan-plugin.md)** - Integrates Ferret Scan for comprehensive sensitive data detection (credit cards, passports, SSNs, API keys, secrets, and more)
 - **[ggshield Plugin](ggshield-plugin.md)** (`ash_ggshield_plugins`) - Secret detection with GitGuardian's ggshield
 - **[gosec Plugin](gosec-plugin.md)** (`ash_gosec_plugins`) - Go source security analysis with gosec
@@ -21,7 +22,7 @@ This section covers the alpha plugins for ASH: the opt-in scanner packages (`ash
 - **[Snyk Code Plugin](snyk-plugin.md)** - Integrates Snyk Code for static application security testing (SAST) of source code vulnerabilities
 - **[Trivy Plugin](trivy-plugin.md)** - Integrates Aquasec's Trivy for vulnerability, misconfiguration, secret, and license scanning
 
-These fourteen ship inside ASH. Each takes part in a scan only when that scan names its
+These fifteen ship inside ASH. Each takes part in a scan only when that scan names its
 plugin module in `ash_plugin_modules` or `--ash-plugin-modules`, as its page shows.
 The MCP `list_scanners` tool reports them either way; listing one does not add it to
 any scan.

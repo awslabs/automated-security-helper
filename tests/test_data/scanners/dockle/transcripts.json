@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": [
+        "dockle",
+        "--format=sarif",
+        "--output=positive.sarif",
+        "--no-color",
+        "--input=positive-image.tar"
+      ],
+      "env_allowlist": [
+        "DOCKER_HOST",
+        "HOME",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "PATH",
+        "TMPDIR"
+      ],
+      "exit_code": 0,
+      "fixture_tree": {
+        "paths": [
+          "captured/positive-image.tar"
+        ],
+        "sha256": "a6623957a3f2800a1960b944cf0ea96c6859e927fa3a33a473658bd4ff6cc78c"
+      },
+      "id": "dockle-0.4.15-positive-sarif",
+      "live_input": false,
+      "note": "run in captured/ with no network and no Docker daemon (DOCKER_HOST names a missing socket, the proxies a closed port); it wrote these bytes and printed nothing on stdout or stderr. The saved image is built by captured/build_fixture_image.py",
+      "observable": true,
+      "pin_stamp": {
+        "tool": "dockle",
+        "version": "v0.4.15"
+      },
+      "provenance": "captured",
+      "reason": null,
+      "recorded_on": "2026-11-26",
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/positive.sarif",
+          "sha256": "cb46c113cd6d4ba45077e2d5b2336df47624120317520fca031bbcccad7b0b9c"
+        }
+      ],
+      "retention": "current",
+      "scanner": "dockle",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "dockle",
+        "version": "0.4.15"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": [
+        "dockle",
+        "--format=sarif",
+        "--output=negative.sarif",
+        "--no-color",
+        "--input=negative-image.tar"
+      ],
+      "env_allowlist": [
+        "DOCKER_HOST",
+        "HOME",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "PATH",
+        "TMPDIR"
+      ],
+      "exit_code": 0,
+      "fixture_tree": {
+        "paths": [
+          "captured/negative-image.tar"
+        ],
+        "sha256": "3634272707064bf09a89f091a2509dcf157d8c645be84d4dbfa16403fc9f8b56"
+      },
+      "id": "dockle-0.4.15-negative-sarif",
+      "live_input": false,
+      "note": "run in captured/ with no network and no Docker daemon (DOCKER_HOST names a missing socket, the proxies a closed port); it wrote these bytes and printed nothing on stdout or stderr. The saved image is built by captured/build_fixture_image.py",
+      "observable": true,
+      "pin_stamp": {
+        "tool": "dockle",
+        "version": "v0.4.15"
+      },
+      "provenance": "captured",
+      "reason": null,
+      "recorded_on": "2026-11-26",
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/negative.sarif",
+          "sha256": "3ece210b00bfdf3d94c2fe519668c67aa6b9172e198c01e76dccb2c4264d59ab"
+        }
+      ],
+      "retention": "current",
+      "scanner": "dockle",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "dockle",
+        "version": "0.4.15"
+      }
+    }
+  ],
+  "unrecorded": []
+}
