@@ -769,7 +769,10 @@ def verify_plugins(
                 )
             )
         except PluginLoadError as error:
-            load_errors.append((manifest.name, str(error)))
+            # error_text, not str(error): the text is redacted with the values the
+            # error carries, as this module's other error sites redact theirs. The
+            # print below shows it on one line; --json writes it as a JSON string.
+            load_errors.append((manifest.name, error_text(error)))
     if as_json:
         echo_raw(
             json.dumps(

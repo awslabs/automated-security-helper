@@ -408,3 +408,40 @@ def test_a_load_errors_free_text_is_shown_on_one_line(
         "cannot be loaded" in line and "a forged error line" in line
         for line in result.output.splitlines()
     )
+
+
+#: A secret-shaped value, in two halves so no whole token is written in the source.
+_CARRIED_HEAD = "canary-Vb3Qd8Jw"
+_CARRIED_TAIL = "Hs5Ty1Ke-canary"
+
+
+def test_a_load_error_is_redacted_as_this_commands_other_errors_are(
+    one_scanner, monkeypatch, transcripts_copy
+) -> None:
+    """The load error is recorded with error_text, as this module's other error
+    sites record theirs, so a value the failing run read from the environment and
+    the error carries is hidden: on the error line, and in the --json record.
+    Recorded with str(error), the value was printed whole in both."""
+    from automated_security_helper.core import plugin_conformance as pc
+    from automated_security_helper.utils.error_text import carry_environment_values
+
+    value = _CARRIED_HEAD + _CARRIED_TAIL
+
+    def refused(manifest, root, **kwargs):
+        error = pc.PluginLoadError(
+            f"fixture-lint's scanner entry point cannot be loaded ({value})"
+        )
+        carry_environment_values(error, [value])
+        raise error
+
+    monkeypatch.setattr(pc, "verify_plugin", refused)
+    text = _verify(transcripts_copy, "fixture-lint")
+    as_json = _verify(transcripts_copy, "fixture-lint", "--json")
+    assert text.exit_code == 2, text.output
+    assert as_json.exit_code == 2, as_json.output
+    assert "cannot be loaded" in text.stderr, text.output
+    (record,) = json.loads(as_json.stdout)
+    assert "cannot be loaded" in record["error"], record
+    for result in (text, as_json):
+        assert _CARRIED_HEAD not in result.output, result.output
+        assert _CARRIED_TAIL not in result.output, result.output
