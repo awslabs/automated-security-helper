@@ -326,14 +326,34 @@ class TestTrivyImageArgv:
         assert IMAGE_REF not in argv
         assert not any(value.startswith("--image-src") for value in argv)
 
-    def test_a_layout_is_a_reported_clean_skip(self, tmp_path):
+    def test_a_layout_is_repacked_and_goes_through_input(self, monkeypatch, tmp_path):
+        from tests.utils.image_archive_fixture import (
+            archive_to_layout,
+            build_secret_image_archive,
+        )
+
+        _no_engine(monkeypatch, tmp_path)
+        layout = archive_to_layout(
+            build_secret_image_archive(tmp_path / "saved.tar"), tmp_path / "real-layout"
+        )
         scanner = self._scanner(tmp_path)
-        layout = _layout(tmp_path)
-        reason = scanner._unsupported_image_shape_reason(
+        argv, results_file, _env = scanner._execute_image_scan(
             ImageLocator(oci_layout=layout)
         )
-        assert reason is not None
-        assert "OCI image-layout" in reason
+        repacked = results_file.parent / "layout-repacked.tar"
+        assert repacked.is_file()
+        assert f"--input={repacked.absolute().as_posix()}" in argv
+        assert argv[:2] == ["trivy", "image"]
+        assert not any(token.startswith("--image-src") for token in argv)
+
+    def test_a_layout_is_no_longer_a_clean_skip(self, tmp_path):
+        scanner = self._scanner(tmp_path)
+        assert (
+            scanner._unsupported_image_shape_reason(
+                ImageLocator(oci_layout=_layout(tmp_path))
+            )
+            is None
+        )
 
     def test_the_filesystem_subcommand_is_unchanged(self, monkeypatch, tmp_path):
         _no_engine(monkeypatch, tmp_path)

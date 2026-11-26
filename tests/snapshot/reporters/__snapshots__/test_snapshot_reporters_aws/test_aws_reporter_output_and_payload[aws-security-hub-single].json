@@ -428,7 +428,8 @@
         "ash/file": "app/app.py",
         "ash/startLine": "5",
         "ash/endLine": "5",
-        "ash/suppressionJustification": "(ASH) Suppressing finding for rule 'SECRET-SECRET-KEYWORD' in 'app/app.py' with reason: Fixture placeholder credential, not a real secret"
+        "ash/suppressionJustification": "(ASH) Suppressing finding for rule 'SECRET-SECRET-KEYWORD' in 'app/app.py' with reason: Fixture placeholder credential, not a real secret",
+        "ash/correlationId": "secret/febaf0e11ce2f3b0e97c5eee80659e09f319bf333ab709c47cdc3f58e96474cb"
       },
       "ProductName": "Automated Security Helper",
       "CompanyName": "AWS Labs",
