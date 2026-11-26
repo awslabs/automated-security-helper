@@ -90,8 +90,9 @@ def _runs_from_files(files: list[Path]) -> tuple[list[TrendRun], str]:
     # Unless every run names such an id, the order given is kept, and the
     # output says which of the two happened (``ordered_by``).
     keys = [run_order_key(run.report_id) for run in runs]
-    if all(key is not None for key in keys):
-        runs = [run for _, run in sorted(zip(keys, runs), key=lambda pair: pair[0])]
+    sortable = [(key, run) for key, run in zip(keys, runs) if key is not None]
+    if len(sortable) == len(runs):
+        runs = [run for _, run in sorted(sortable, key=lambda pair: pair[0])]
         return runs, "report_id"
     return runs, "given"
 

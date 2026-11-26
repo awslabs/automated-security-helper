@@ -1956,10 +1956,10 @@ def install_dependencies(
                 f"{escape(error_text(e))}[/bold red]"
             )
             raise typer.Exit(EXIT_INSTALL_FAILED)
-        for name, forced in sorted(forced_by_plugin.items()):
+        for name, binary in sorted(forced_by_plugin.items()):
             print(
-                f"Forced binary for {escape(name)}: {escape(str(forced.path))} "
-                f"(sha256 {forced.sha256}); recorded in {escape(str(record_path))}"
+                f"Forced binary for {escape(name)}: {escape(str(binary.path))} "
+                f"(sha256 {binary.sha256}); recorded in {escape(str(record_path))}"
             )
 
     # A virtualenv a setup step prepared is only read, for the Python version each

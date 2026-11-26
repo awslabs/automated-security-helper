@@ -275,7 +275,7 @@ class AshLock:
             entry.scopes.sort()
         return entry
 
-    def refresh(self, key: str) -> Tuple[Optional[str], Optional[str]]:
+    def refresh(self, key: str) -> Tuple[str, Optional[str]]:
         """Re-hash one locked file. Returns ``(old, new)``; ``new`` is None when
         the file can no longer be hashed (the entry is left as it was)."""
         entry = self.entries[key]
