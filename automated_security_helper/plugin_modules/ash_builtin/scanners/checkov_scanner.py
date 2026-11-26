@@ -967,8 +967,8 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             state=FacetState.NA,
             reason="the side report has a fixed_definition key and it is null "
             "on every record read: 34 of 34 across terraform, cloudformation, "
-            "kubernetes and dockerfile (checkov 3.4.5, an offline desk run "
-            "beside the committed fixture), so no run ASH makes has shown "
+            "kubernetes and dockerfile (checkov 3.4.5, an offline run beside "
+            "the committed fixture), so no run ASH makes has shown "
             "a fix state to map; a populated record would redeclare it",
         ),
         remediation_text=FacetDecl(
@@ -1031,15 +1031,21 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                     "--skip-download; utils/content_databases.py "
                     "SCANNERS_WITHOUT_CONTENT_DATABASE['checkov']"
                 ),
-                #: Design E5, measured 2026-11-24 on a desk lane: checkov 3.4.7 (the
-                #: pinned version) on one two-resource Terraform fixture, env -i, no
-                #: platform API key, the desk online. With --skip-download and without
-                #: it, both runs reported the same 10 failed checks (same check ids and
-                #: resources, empty set difference both ways), so the sandbox/online
-                #: difference named in sandbox_tension did not show for this fixture
-                #: and configuration. Not measured: why (the fetch path was not
-                #: traced), a run with a platform API key, other frameworks.
-                unconfirmed=None,
+                #: Design E5, measured 2026-11-24: checkov 3.4.7 (the pinned version)
+                #: on one two-resource Terraform fixture, both runs unsandboxed under
+                #: env -i, with network access and no platform API key. With
+                #: --skip-download and without it, both runs reported the same 10
+                #: failed checks (same check ids and resources, empty set difference
+                #: both ways), so without a key the difference named in
+                #: sandbox_tension did not show for this fixture and configuration.
+                #: Not measured: why (the fetch path was not traced), other
+                #: frameworks, and a run with a platform API key, which is the open
+                #: question below.
+                unconfirmed=(
+                    "with a platform API key set, whether a sandboxed and an "
+                    "unsandboxed online run differ; one differential run with a key "
+                    "settles it (design E5)"
+                ),
             ),
             output=opsf.OutputFacet(
                 native_formats=(opsf.OutputFormat.SARIF,),
