@@ -12,3 +12,7 @@ pinning `time 0.1.43` and `atty 0.2.14`, with the RustSec advisory database at c
 | `positive.sarif` | What `convert_cargo_audit_report` writes for `positive.json` with the lockfile at the root of the scanned tree (`Cargo.lock`), inside the run `CargoAuditScanner` reports. Regenerate it with the test `test_the_committed_sarif_is_what_the_converter_writes`. |
 
 The SARIF file is the corpus the facets register's consistency gate reads.
+`../transcripts.json` records the run for `ash plugin verify` (the argv shape, exit code
+1, the date, and both files by SHA256), so the verify harness and the consistency gate
+judge the facets register over the same results. A change to either file needs its
+digest updated there.

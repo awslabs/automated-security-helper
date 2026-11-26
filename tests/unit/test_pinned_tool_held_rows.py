@@ -276,7 +276,9 @@ class TestEnumerationRefusals:
 @pytest.mark.unit
 class TestMainOverTheRealPins:
     def _run(self, monkeypatch, capsys, latest_for, argv):
-        def lookup(project: str) -> str:
+        def lookup(project: str, tag_prefix: str = "") -> str:
+            # A tool tagged under a prefix (cargo-audit) is asked with its prefix,
+            # and the answer is its version without it.
             return latest_for(project)
 
         monkeypatch.setattr(

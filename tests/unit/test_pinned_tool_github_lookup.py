@@ -19,6 +19,12 @@ no token, and the PyPI and RubyGems lookups. They also pin where the token may g
 redirect carries it only to the same origin, and a redirect off the allowlisted https
 hosts is refused before it is followed.
 
+A repository that releases several tools tags each one's releases under its own prefix,
+and its ``releases/latest`` is then any of its tools' release, under a tag that is not a
+version. The lookup for such a tool reads the release list instead; the tests of that
+answer ``releases/latest`` the way GitHub does, as the weekly-run fake below now does
+for every pin.
+
 ``tests/unit/test_pinned_tool_version_check.py`` covers the rest of the script. No
 test here touches the network. The fake sits at the HTTPS transport, beneath urllib's
 own redirect and error handling, so those run for real; anything the test did not
@@ -536,6 +542,161 @@ class TestTheTokenGoesWithARedirectOnlyToItsOrigin:
         assert "refused on the hop" in err
 
 
+_RUSTSEC = "rustsec/rustsec"
+_RUSTSEC_LATEST = f"https://api.github.com/repos/{_RUSTSEC}/releases/latest"
+
+
+def _rustsec_page(page: int) -> str:
+    return f"https://api.github.com/repos/{_RUSTSEC}/releases?per_page=100&page={page}"
+
+
+def _release(tag: str, *, draft: bool = False, prerelease: bool = False) -> dict:
+    return {"tag_name": tag, "draft": draft, "prerelease": prerelease}
+
+
+#: rustsec/rustsec's release list as GitHub served it on 2026-11-26, in its order, cut
+#: to the releases around cargo-audit's newest: the first release listed is another
+#: crate's, and cargo-audit/v0.21.0-rc.0 is published as a full release.
+_RUSTSEC_RELEASES = [
+    _release("rustsec/v0.34.1"),
+    _release("rustsec/v0.34.0"),
+    _release("platforms/v4.3.0"),
+    _release("cargo-audit/v0.23.0"),
+    _release("platforms/v4.2.1"),
+    _release("cvss/v3.0.0"),
+    _release("cargo-audit/v0.22.2"),
+    _release("cargo-audit/v0.21.0-rc.0"),
+    _release("cargo-audit/v0.21.0"),
+]
+
+
+def _cargo_audit_pin(version: str = "v0.23.0"):
+    return checker.Pin(
+        tool="cargo-audit",
+        version=version,
+        ecosystem=checker.GITHUB,
+        project=_RUSTSEC,
+        pinned_in=("Dockerfile ARG CARGO_AUDIT_VERSION", "THIRD_PARTY_LICENSES"),
+        kind=checker.DOCKERFILE_ARG,
+        tag_prefix="cargo-audit/",
+    )
+
+
+class TestAToolItsRepositoryTagsUnderAPrefix:
+    """A monorepo's latest release is any of its tools', and not a version.
+
+    rustsec/rustsec releases cargo-audit, rustsec, cvss, platforms and other crates,
+    each tagged under its own prefix. Its ``releases/latest`` answered
+    ``cargo-audit/v0.23.0`` on 2026-11-26, a tag ``parse_version`` refuses, so the
+    cargo-audit pin read as a lookup error (the weekly run exits 2) and could never be
+    reported outdated. The transport here answers ``releases/latest`` the way GitHub
+    did, so a lookup that asks it for a tag-prefixed tool fails these tests.
+    """
+
+    def _answers(self, *pages: list) -> Callable[[str, dict[str, str]], Answer]:
+        listed = {_rustsec_page(n): page for n, page in enumerate(pages, start=1)}
+
+        def answer(url: str, headers: dict[str, str]) -> Answer:
+            if url == _RUSTSEC_LATEST:
+                return (200, {"tag_name": "cargo-audit/v0.23.0"})
+            assert url in listed, f"a request the test did not script: {url}"
+            return (200, listed[url])
+
+        return answer
+
+    def _check(self, monkeypatch, *pages: list):
+        _without_token(monkeypatch)
+        opener = _install(monkeypatch, _FakeTransport(self._answers(*pages)))
+        (result,) = checker.check([_cargo_audit_pin()])
+        return result, [url for url, _headers in opener.requests]
+
+    def test_the_repositorys_latest_tag_is_not_a_version(self):
+        """Why the latest release cannot be read for such a tool, in one line."""
+        with pytest.raises(ValueError, match="not a version"):
+            checker.compare("v0.23.0", "cargo-audit/v0.23.0")
+
+    def test_the_pin_at_the_tools_newest_release_is_current(self, monkeypatch):
+        result, requested = self._check(monkeypatch, _RUSTSEC_RELEASES)
+        assert (result.status, result.latest) == ("current", "v0.23.0"), result
+        assert requested == [_rustsec_page(1)]
+
+    def test_a_newer_release_of_the_tool_is_outdated(self, monkeypatch):
+        releases = [_release("cargo-audit/v0.24.0"), *_RUSTSEC_RELEASES]
+        result, _ = self._check(monkeypatch, releases)
+        assert (result.status, result.latest) == ("outdated", "v0.24.0"), result
+        assert checker.exit_code([result], fail_on_outdated=True) == (
+            checker.EXIT_OUTDATED
+        )
+
+    def test_a_newer_release_of_another_tool_is_not_the_tools(self, monkeypatch):
+        releases = [
+            _release("rustsec/v9.0.0"),
+            _release("cargo-lock/v99.0.0"),
+            *_RUSTSEC_RELEASES,
+        ]
+        result, _ = self._check(monkeypatch, releases)
+        assert (result.status, result.latest) == ("current", "v0.23.0"), result
+
+    def test_drafts_and_pre_releases_are_passed_over(self, monkeypatch):
+        releases = [
+            _release("cargo-audit/v0.26.0", draft=True),
+            _release("cargo-audit/v0.25.0", prerelease=True),
+            # Published as a full release, as cargo-audit/v0.21.0-rc.0 is.
+            _release("cargo-audit/v0.24.0-rc.1"),
+            *_RUSTSEC_RELEASES,
+        ]
+        result, _ = self._check(monkeypatch, releases)
+        assert (result.status, result.latest) == ("current", "v0.23.0"), result
+
+    def test_the_newest_is_the_highest_version_whatever_the_order(self, monkeypatch):
+        releases = [*_RUSTSEC_RELEASES, _release("cargo-audit/v0.23.1")]
+        result, _ = self._check(monkeypatch, releases)
+        assert (result.status, result.latest) == ("outdated", "v0.23.1"), result
+
+    def test_a_release_on_a_later_page_is_read(self, monkeypatch):
+        first = [_release(f"platforms/v1.{n}.0") for n in range(100)]
+        second = [_release("cargo-audit/v0.24.0"), *_RUSTSEC_RELEASES]
+        result, requested = self._check(monkeypatch, first, second)
+        assert (result.status, result.latest) == ("outdated", "v0.24.0"), result
+        assert requested == [_rustsec_page(1), _rustsec_page(2)]
+
+    def test_more_releases_than_the_pages_read_is_a_lookup_error(self, monkeypatch):
+        full = [_release(f"platforms/v1.{n}.0") for n in range(100)]
+        result, requested = self._check(
+            monkeypatch, *([full] * checker._RELEASE_PAGE_LIMIT)
+        )
+        assert result.status == "error", result
+        assert "more than 1000 releases" in result.detail
+        assert len(requested) == checker._RELEASE_PAGE_LIMIT
+
+    def test_no_release_of_the_tool_is_a_lookup_error(self, monkeypatch):
+        others = [
+            r for r in _RUSTSEC_RELEASES if not r["tag_name"].startswith("cargo-audit/")
+        ]
+        result, _ = self._check(monkeypatch, others)
+        assert result.status == "error", result
+        assert "no final release is tagged cargo-audit/<version>" in result.detail
+        assert checker.exit_code([result], fail_on_outdated=False) == (
+            checker.EXIT_ERROR
+        )
+
+    def test_a_tag_under_the_prefix_that_is_not_a_version_is_refused(self, monkeypatch):
+        releases = [_release("cargo-audit/v0.24.0;id"), *_RUSTSEC_RELEASES]
+        result, _ = self._check(monkeypatch, releases)
+        assert result.status == "error", result
+        assert "not a version" in result.detail
+
+    def test_a_tool_without_a_prefix_still_reads_the_latest_release(self, monkeypatch):
+        """Control: a repository that releases one tool is asked for its latest."""
+        _without_token(monkeypatch)
+        opener = _install(
+            monkeypatch, _FakeTransport(_in_order((200, {"tag_name": "v0.75.0"})))
+        )
+        (result,) = checker.check([_trivy_pin()])
+        assert (result.status, result.latest) == ("current", "v0.75.0"), result
+        assert [url for url, _headers in opener.requests] == [_TRIVY_LATEST]
+
+
 class TestTheWeeklyRunWhenOneRepositoryRefusesTheToken:
     """Every real pin, with GitHub refusing the token for trivy alone.
 
@@ -546,12 +707,28 @@ class TestTheWeeklyRunWhenOneRepositoryRefusesTheToken:
     """
 
     def _upstreams(self, pins, refuse: Callable[[str, dict[str, str]], bool]):
-        """Every upstream answers with the pinned version, unless ``refuse`` says 403."""
+        """Every upstream answers with the pinned release, unless ``refuse`` says 403.
+
+        A GitHub release is answered with its tag as the repository spells it, so a
+        tool its repository tags under a prefix of its own (cargo-audit's
+        ``cargo-audit/v0.23.0`` in rustsec/rustsec) is answered with that tag, and with
+        the release list its lookup reads. Answering every pin with its bare version
+        is how a lookup that could only fail for such a tool passed here.
+        """
         answers: dict[str, Any] = {}
         for pin in pins:
             if pin.ecosystem == checker.GITHUB:
+                tag = f"{pin.tag_prefix}{pin.version}"
                 url = f"https://api.github.com/repos/{pin.project}/releases/latest"
-                answers[url] = {"tag_name": pin.version}
+                answers[url] = {"tag_name": tag}
+                if pin.tag_prefix:
+                    listed = (
+                        f"https://api.github.com/repos/{pin.project}/releases"
+                        "?per_page=100&page=1"
+                    )
+                    answers.setdefault(listed, []).append(
+                        {"tag_name": tag, "draft": False, "prerelease": False}
+                    )
             elif pin.ecosystem == checker.PYPI:
                 url = f"https://pypi.org/pypi/{pin.project}/json"
                 answers[url] = {"info": {"version": pin.version}}

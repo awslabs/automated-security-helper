@@ -7,13 +7,16 @@ The subprocess is replaced by a fake, so these run on every platform without the
 binary. The JSON documents are written by hand from the rustsec ``Report`` types
 (``vulnerabilities.list[]`` and ``warnings.<kind>[]``, each with ``advisory`` and
 ``package``); they are not captures of a real run, and the advisory ids and crate
-names are made up. The real-report oracle (checklist rows 18, 21, 24) is
-``test_cargo_audit_captured_report.py``, over a capture from cargo-audit 0.23.0.
+names are made up. The converter is checked against a real report in
+``test_cargo_audit_captured_report.py``, over a capture from cargo-audit 0.23.0. The
+exit codes and their stderr lines here are the ones cargo-audit 0.23.0's source writes
+(``commands/audit.rs`` and ``auditor.rs``).
 """
 
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -310,6 +313,29 @@ class TestInvocation:
         _run(_scanner(tree, tmp_path), fake, monkeypatch)
         assert not any("/target/" in c["argv"][-1] for c in fake.calls)
 
+    @pytest.mark.parametrize("ancestor", ["target", ".git"])
+    def test_a_tree_inside_a_directory_with_a_skipped_name_is_scanned(
+        self, ancestor, tmp_path, on_path, monkeypatch
+    ):
+        """Only the directories below the scanned one are judged.
+
+        The scan set names files by absolute path, so a tree at
+        ``<somewhere>/target/app`` lost every lockfile to the build-directory rule,
+        and the scanner reported that there was nothing to scan. Its own ``target/``
+        below the tree is still skipped.
+        """
+        src = tmp_path / ancestor / "app"
+        (src / "target" / "debug").mkdir(parents=True)
+        (src / "Cargo.lock").write_text("version = 3\n")
+        (src / "target" / "debug" / "Cargo.lock").write_text("version = 3\n")
+        scanner = _scanner(src, tmp_path)
+        assert scanner.nothing_to_scan_reason() is None
+        fake = FakeCargoAudit(stdout=json.dumps(NEGATIVE), exit_code=0)
+        _run(scanner, fake, monkeypatch)
+        assert [c["argv"][-1] for c in fake.calls] == [
+            f"--file={src.absolute().as_posix()}/Cargo.lock"
+        ]
+
     def test_the_tool_runs_where_a_tree_supplied_audit_toml_is_not_read(
         self, tree, tmp_path, on_path, monkeypatch
     ):
@@ -455,13 +481,105 @@ class TestExitStatusAndFailures:
         fake = FakeCargoAudit(stdout=json.dumps(NEGATIVE), exit_code=code)
         assert _run(_scanner(tree, tmp_path), fake, monkeypatch) is not False
 
-    @pytest.mark.parametrize("code", [2, 101, 126, 137])
+    @pytest.mark.parametrize(
+        "code,stderr",
+        [
+            # 2: the lockfile could not be located, or the audit failed.
+            (2, "error: Couldn't load /src/Cargo.lock: parse error"),
+            # 101: a Rust panic.
+            (101, "thread 'main' panicked at src/auditor.rs:1:1"),
+            (126, ""),
+            (137, ""),
+        ],
+    )
     def test_other_codes_fail_even_with_a_report_on_stdout(
-        self, code, tree, tmp_path, on_path, monkeypatch
+        self, code, stderr, tree, tmp_path, on_path, monkeypatch
     ):
-        fake = FakeCargoAudit(exit_code=code, stderr="Error: database not found")
-        with pytest.raises(ScannerError, match=f"exited {code}"):
+        fake = FakeCargoAudit(exit_code=code, stderr=stderr)
+        with pytest.raises(ScannerError, match=f"exited {code}") as raised:
             _run(_scanner(tree, tmp_path), fake, monkeypatch)
+        if stderr:
+            assert stderr in str(raised.value)
+
+    @pytest.mark.parametrize(
+        "stderr,reason",
+        [
+            # update_db in auditor.rs: a fetch that failed, the network case.
+            (
+                (
+                    "error: couldn't fetch advisory database: git operation failed: "
+                    "failed to connect to github.com"
+                ),
+                "failed to connect to github.com",
+            ),
+            # Repository::fetch refuses a database whose newest commit is over 90
+            # days old, and update_db turns that into exit 1.
+            (
+                (
+                    "error: couldn't fetch advisory database: repository is stale "
+                    "(last commit: 2026-01-01T00:00:00Z)"
+                ),
+                "repository is stale",
+            ),
+            # The database lock still held when the wait ended.
+            (
+                (
+                    "warning: directory /home/u/.cargo/advisory-db is locked, waiting "
+                    "for up to 300 seconds for it to become available\nerror: "
+                    "couldn't fetch advisory database: lock timeout"
+                ),
+                "lock timeout",
+            ),
+            # update_db again: the fetched database could not be loaded.
+            (
+                "error: error loading advisory database: parse error",
+                "error loading advisory database",
+            ),
+        ],
+    )
+    def test_exit_1_with_no_report_is_a_failed_database_fetch_with_its_reason(
+        self, stderr, reason, tree, tmp_path, on_path, monkeypatch
+    ):
+        """1 is also cargo-audit's exit for a database it could not fetch or load.
+
+        Auditor::new opens the database before any audit, and update_db exits 1 on
+        every failure there, with nothing on stdout. Read as the "vulnerabilities
+        found" 1, such a run failed only as "wrote no report", and the reason
+        cargo-audit gave was dropped.
+        """
+        fake = FakeCargoAudit(stdout="", exit_code=1, stderr=stderr)
+        scanner = _scanner(tree, tmp_path)
+        with pytest.raises(ScannerError) as raised:
+            _run(scanner, fake, monkeypatch)
+        message = str(raised.value)
+        assert "exited 1 on Cargo.lock with no report on stdout" in message
+        assert "advisory database could not be fetched or loaded" in message
+        assert reason in message
+        # The first lockfile's failure stops the run: the second is never audited.
+        assert len(fake.calls) == 1
+
+    def test_exit_1_with_no_report_and_no_stderr_still_fails_and_says_so(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        fake = FakeCargoAudit(stdout="", exit_code=1, stderr="")
+        with pytest.raises(ScannerError, match="wrote nothing on stderr either"):
+            _run(_scanner(tree, tmp_path), fake, monkeypatch)
+
+    def test_exit_1_with_a_report_is_vulnerabilities_found(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        """Control: the same code with the report on stdout is a complete scan."""
+        fake = FakeCargoAudit(exit_code=1, stderr="Fetching advisory database")
+        report = _run(_scanner(tree, tmp_path), fake, monkeypatch)
+        assert report.get_all_results(), "the findings of the report on stdout"
+
+    def test_exit_0_with_no_report_fails_with_the_stderr(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        fake = FakeCargoAudit(stdout="", exit_code=0, stderr="error: something odd")
+        with pytest.raises(ScannerError, match="wrote no report") as raised:
+            _run(_scanner(tree, tmp_path), fake, monkeypatch)
+        assert "error: something odd" in str(raised.value)
 
     def test_a_timeout_fails_the_scan_and_says_so(
         self, tree, tmp_path, on_path, monkeypatch
@@ -629,6 +747,79 @@ class TestSandboxRequirements:
         policy, _ = self._policy(tmp_path, monkeypatch, offline=True)
         assert policy.network is False
 
+    def test_cargo_home_is_the_declared_cache_variable(self, tmp_path, monkeypatch):
+        """cargo-audit writes its lock, its database and the yanked check's index
+        under cargo's home on every online run, so that is the cache it declares."""
+        assert CargoAuditScanner.sandbox_requirements.cache_env == ("CARGO_HOME",)
+        policy, _ = self._policy(tmp_path, monkeypatch, offline=False)
+        assert "CARGO_HOME" in policy.cache_env
+
+    def _plan(self, name, tmp_path, monkeypatch, overlay=False):
+        from automated_security_helper.utils.sandbox import backends as backends_module
+        from automated_security_helper.utils.sandbox import policy as policy_module
+        from automated_security_helper.utils.sandbox.backends import BACKENDS
+
+        # The passwd entry's home is the HOME set below, as the sandbox's own tests
+        # make it, so no backend reads the home of the account running the tests.
+        for module in (policy_module, backends_module):
+            monkeypatch.setattr(module, "_passwd_home", Path.home, raising=False)
+        monkeypatch.delenv("CARGO_HOME", raising=False)
+        policy, home = self._policy(tmp_path, monkeypatch, offline=False)
+        Path(policy.results_dir).mkdir(parents=True, exist_ok=True)
+        backend = BACKENDS[name]()
+        if hasattr(backend, "_executable"):
+            backend._executable = f"/usr/bin/{name}"
+        if name == "bwrap":
+            backend._overlay = overlay
+        plan = backend.plan(["/usr/bin/true"], {"PATH": "/usr/bin"}, policy)
+        return plan, policy, home
+
+    @pytest.mark.parametrize("name", ["firejail", "landlock", "sandbox-exec", "bwrap"])
+    def test_where_caches_are_read_only_cargo_home_is_private_and_writable(
+        self, name, tmp_path, monkeypatch
+    ):
+        """The backends that cannot discard a write mount the database read-only.
+
+        A fetch into the host's ~/.cargo/advisory-db could not write there, and
+        cargo-audit exited 1 with no report; with CARGO_HOME pointing at a private,
+        empty directory under the results directory, cargo-audit clones the
+        database, takes its lock and caches the index there, and the directory is
+        removed after the run. (bwrap here is bwrap without overlay support.)
+        """
+        plan, policy, home = self._plan(name, tmp_path, monkeypatch, overlay=False)
+        private = Path(plan.env["CARGO_HOME"])
+        assert private.is_dir() and not any(private.iterdir())
+        assert private.parent.name.startswith(".sandbox-cache-")
+        assert private.parent.parent.resolve() == Path(policy.results_dir).resolve()
+        assert not private.resolve().is_relative_to(home.resolve())
+        plan.run_cleanup()
+        assert not private.parent.exists()
+
+    def test_firejail_keeps_the_hosts_database_read_only(self, tmp_path, monkeypatch):
+        """The redirect does not open the host's database to the write instead."""
+        plan, _policy, home = self._plan("firejail", tmp_path, monkeypatch)
+        database = Path(os.path.realpath(home / ".cargo" / "advisory-db")).as_posix()
+        assert f"--read-only={database}" in plan.argv
+        assert f"--read-write={database}" not in plan.argv
+        plan.run_cleanup()
+
+    def test_bwrap_with_an_overlay_leaves_cargo_home_alone(self, tmp_path, monkeypatch):
+        """Control: through the overlay the database is written and the writes are
+        discarded, so cargo's home is not redirected there."""
+        from automated_security_helper.utils.sandbox import backends as backends_module
+
+        # The plan probes the cache's filesystem with the real bwrap; answered here,
+        # as the sandbox's own overlay test does, so the plan's shape is what is read.
+        monkeypatch.setattr(backends_module, "_probe_run", lambda argv, env=None: None)
+        plan, _policy, home = self._plan("bwrap", tmp_path, monkeypatch, overlay=True)
+        database = Path(os.path.realpath(home / ".cargo" / "advisory-db")).as_posix()
+        overlay = ["--overlay-src", database, "--tmp-overlay", database]
+        assert any(plan.argv[i : i + 4] == overlay for i in range(len(plan.argv))), (
+            plan.argv
+        )
+        assert "CARGO_HOME" not in plan.env
+        plan.run_cleanup()
+
 
 class TestFacetRegisters:
     def test_both_registers_are_declared_on_the_class_itself(self):
@@ -660,6 +851,8 @@ class TestFacetRegisters:
         assert ops.exit_codes.success_exit_codes == tuple(
             sorted(CargoAuditScanner.success_exit_codes)
         )
+        # 1 is also the exit of a database that could not be fetched or loaded.
+        assert "1 with no report" in ops.exit_codes.semantics
         assert ops.targets.tool_type is scanner.tool_type is ScannerToolType.SCA
         assert ops.runtime.use_uv_tool is bool(scanner.use_uv_tool)
         assert ops.runtime.python_only is bool(scanner.is_python_only())

@@ -58,22 +58,40 @@ Severity (``issue_severity`` and the SARIF level agree)
 
 Exit status
 -----------
-0: nothing found. 1: vulnerabilities found (the report is complete). 2: the run
-failed (lockfile unreadable, database missing or unreachable). 0 and 1 succeed; any
+As cargo-audit/v0.23.0 sets it (``AuditCommand::run`` in ``commands/audit.rs``,
+``Auditor::new`` and ``update_db`` in ``auditor.rs``): 0, nothing found; 1, either
+vulnerabilities found, with the report on stdout, or an advisory database that could
+not be fetched or loaded, with nothing on stdout and the reason on stderr (the
+database is opened before the audit, and every failure there exits 1: no network, the
+database lock still held after its wait, a stale database refused); 2, the lockfile
+could not be located or the audit itself failed. So 0 and 1 succeed only with a
+report on stdout, and a 1 with none fails the scan with cargo-audit's own reason. Any
 other code fails the scan even if text is on stdout.
 
 Network and sandbox
 -------------------
 Online, cargo-audit fetches the advisory database from GitHub, so the sandbox
-requirement asks for a network and the database directory. cargo-audit refuses a
-database whose newest commit is more than 90 days old when it fetches
-(``Repository::fetch`` with ``ensure_fresh``; ``STALE_AFTER`` in rustsec
-``repository/git/commit.rs`` at cargo-audit/v0.23.0), but with ``--no-fetch`` it
-opens whatever copy is on disk with no age check (``Auditor::new`` in
-``auditor.rs``). ASH holds the content databases it reads offline to a declared age
-bound, and the RustSec database is not one of them yet, so the scanner does not run
-offline (``OfflineStrategy.SKIP_OFFLINE``) rather than report against a database of
-unknown age.
+requirement asks for a network. cargo-audit refuses a database whose newest commit is
+more than 90 days old when it fetches (``Repository::fetch`` with ``ensure_fresh``;
+``STALE_AFTER`` in rustsec ``repository/git/commit.rs`` at cargo-audit/v0.23.0), but
+with ``--no-fetch`` it opens whatever copy is on disk with no age check
+(``Auditor::new`` in ``auditor.rs``). ASH holds the content databases it reads
+offline to a declared age bound, and the RustSec database is not one of them yet, so
+the scanner does not run offline (``OfflineStrategy.SKIP_OFFLINE``) rather than report
+against a database of unknown age.
+
+Every online run writes under cargo's home (``CARGO_HOME``, else ``~/.cargo``):
+``Repository::fetch`` takes a lock beside the database (``advisory-db.lock``) and
+fetches into ``advisory-db``, and the yanked-crate check takes cargo's package lock
+and reads the crates.io index into its cache there (rustsec ``cached_index.rs``).
+The sandbox backends that cannot discard writes (firejail, Landlock, sandbox-exec,
+and bwrap without overlay support) mount a declared cache read-only, so with only the
+database directory declared, a host that already had a database got a fetch that
+could not write into it, and cargo-audit exited 1. So ``CARGO_HOME`` is the declared
+cache variable, which those backends point at a private, empty directory for each
+run (cargo-audit then clones the database there), and the database directory is the
+cache bwrap overlays. Inside the sandbox ``$HOME`` is private, so the operator's
+``~/.cargo/audit.toml`` is not read there.
 """
 
 from __future__ import annotations
@@ -117,7 +135,8 @@ from automated_security_helper.utils.subprocess_utils import find_executable
 
 LOCKFILE_NAME = "Cargo.lock"
 
-#: Directories never searched for a lockfile: build output and VCS data.
+#: Directories below the scanned directory never searched for a lockfile: build
+#: output and VCS data. The directories above it never count (``_in_skipped_dir``).
 _SKIPPED_DIRS = frozenset({"target", ".git"})
 
 #: warning kind -> (ASH severity, SARIF level). Unknown kinds use ``_DEFAULT_WARNING``.
@@ -338,13 +357,22 @@ class CargoAuditScanner(ScannerPluginBase[CargoAuditScannerConfig]):
     # check) nor ASH (no declared content database) holds to an age bound, so the
     # scanner does not run offline. See "Network and sandbox" above.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
-    # 0: clean, 1: vulnerabilities found. 2 means the run failed.
+    # 0: clean, 1: vulnerabilities found, each with the report on stdout. A 1 with
+    # no report is a database that could not be fetched or loaded, and 2 a lockfile
+    # or audit failure (see "Exit status" above); _parse_json fails a run with no
+    # report whatever its code.
     success_exit_codes: ClassVar[Set[int]] = {0, 1}
-    # The advisory database is fetched into ~/.cargo/advisory-db. Not granted
-    # network access under --offline.
+    # Every online run writes under cargo's home: the lock beside the database
+    # (advisory-db.lock), the fetch into advisory-db, and the yanked check's package
+    # lock and index cache. Where the backend mounts a declared cache read-only,
+    # CARGO_HOME names a private, empty directory for the run, which cargo-audit
+    # clones the database into; bwrap overlays ~/.cargo/advisory-db and the writes
+    # are discarded. See "Network and sandbox" above. Not granted network access
+    # under --offline.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,
         cache_paths=("~/.cargo/advisory-db",),
+        cache_env=("CARGO_HOME",),
     )
 
     #: The facets register row (base/scanner_facets.py). The native fields name
@@ -483,8 +511,8 @@ class CargoAuditScanner(ScannerPluginBase[CargoAuditScannerConfig]):
             targets=opsf.TargetsFacet(
                 kinds=(opsf.TargetKind.DEPENDENCY_LOCKFILES,),
                 tool_type=ScannerToolType.SCA,
-                selection="every Cargo.lock in the scan set, outside target/ "
-                "build trees (_lockfiles)",
+                selection="every Cargo.lock in the scan set, outside the target/ "
+                "and .git/ directories below the scanned directory (_lockfiles)",
                 covers_note="a community scanner; it declares no covers display string",
             ),
             runtime=opsf.RuntimeFacet(
@@ -542,8 +570,10 @@ class CargoAuditScanner(ScannerPluginBase[CargoAuditScannerConfig]):
             ),
             exit_codes=opsf.ExitCodesFacet(
                 success_exit_codes=(0, 1),
-                semantics="0 clean, 1 vulnerabilities found (report complete), "
-                "any other code is a failed run",
+                semantics="0 clean and 1 vulnerabilities found, each with the report "
+                "on stdout; 1 with no report is an advisory database that could not "
+                "be fetched or loaded (cargo-audit's stderr says why) and fails the "
+                "scan; 2 a lockfile or audit failure; any other code is a failed run",
             ),
             provenance=opsf.ProvenanceFacet(
                 source=opsf.ProvenanceSource.USER_INSTALLED,
@@ -627,9 +657,10 @@ class CargoAuditScanner(ScannerPluginBase[CargoAuditScannerConfig]):
         """The ``Cargo.lock`` files under *target*, sorted.
 
         Source: ASH's scan set (ignore files already applied). Converted: the work
-        directory. Files in ``target/`` build trees and ASH's output directory are
-        dropped, and a link that resolves outside the tree is skipped, so text
-        from outside the scanned tree never reaches the tool.
+        directory. Files in ``target/`` build trees and ``.git/`` directories below
+        *target*, and in ASH's output directory, are dropped, and a link that
+        resolves outside the tree is skipped, so text from outside the scanned tree
+        never reaches the tool.
         """
         from automated_security_helper.utils.scan_output_dirs import scan_set_of
 
@@ -644,7 +675,7 @@ class CargoAuditScanner(ScannerPluginBase[CargoAuditScannerConfig]):
         for path in candidates:
             if path.name != LOCKFILE_NAME:
                 continue
-            if _SKIPPED_DIRS.intersection(path.parts[:-1]):
+            if self._in_skipped_dir(path, Path(target)):
                 continue
             if target_type == "source" and path.absolute().is_relative_to(output_dir):
                 continue
@@ -668,6 +699,30 @@ class CargoAuditScanner(ScannerPluginBase[CargoAuditScannerConfig]):
                 continue
             selected.append(path)
         return sorted(set(selected))
+
+    @staticmethod
+    def _in_skipped_dir(path: Path, target: Path) -> bool:
+        """Whether a directory of *path* below *target* is a build or VCS directory.
+
+        Only the components below the scanned directory count. The scan set names
+        files by absolute path, so testing every component of a path also tested the
+        directories above the tree: a tree at ``/work/target/app`` lost every
+        lockfile, and the scanner reported that it had nothing to scan. A path not
+        under *target* as spelled is judged below the resolved *target*; one under
+        neither is left to the outside-the-tree check that follows.
+        """
+        pairs = [(path.absolute(), target.absolute())]
+        try:
+            pairs.append((path.resolve(), target.resolve()))
+        except (OSError, RuntimeError):
+            pass
+        for candidate, root in pairs:
+            try:
+                below = candidate.relative_to(root).parts[:-1]
+            except ValueError:
+                continue
+            return bool(_SKIPPED_DIRS.intersection(below))
+        return False
 
     @staticmethod
     def _ignored(
@@ -813,8 +868,13 @@ class CargoAuditScanner(ScannerPluginBase[CargoAuditScannerConfig]):
                 final_args = self._argv(lockfile)
                 response = self._run_until(final_args, results_dir, deadline)
                 responses.append((lockfile, response, self.exit_code))
-                if response.get("timed_out") or self.exit_code not in (
-                    self.success_exit_codes
+                # A run with no report failed whatever its code (a 1 with none is
+                # a database cargo-audit could not fetch or load), and the next
+                # lockfile would meet the same database: stop at the first.
+                if (
+                    response.get("timed_out")
+                    or self.exit_code not in self.success_exit_codes
+                    or not (response.get("stdout") or "").strip()
                 ):
                     break
             self._post_scan(target=target, target_type=target_type)
@@ -895,15 +955,35 @@ class CargoAuditScanner(ScannerPluginBase[CargoAuditScannerConfig]):
                 + (f": {tool_output_excerpt(stderr, 500)}" if stderr else "")
             )
 
-    @staticmethod
-    def _parse_json(response: Dict[str, Any], lockfile: Path) -> Any:
+    def _parse_json(self, response: Dict[str, Any], lockfile: Path) -> Any:
+        """The report on stdout. A run that wrote none failed, whatever its code.
+
+        cargo-audit exits 1 for vulnerabilities found, with the report on stdout,
+        and also when its advisory database cannot be fetched or loaded, with
+        nothing on stdout and the reason on stderr: ``Auditor::new`` opens the
+        database before the audit, and ``update_db`` exits 1 on every failure there
+        (``auditor.rs``). So a 1 with no report is that failure, and cargo-audit's
+        own words are the reason the scan fails with.
+        """
         stdout = response.get("stdout") or ""
+        stderr = (response.get("stderr") or "").strip()
+        why = f": {tool_output_excerpt(stderr, 500)}" if stderr else ""
+        where = self._argv_path(lockfile)
         if not stdout.strip():
-            raise ScannerError(f"cargo-audit wrote no report for {lockfile.name}")
+            if self.exit_code == 1:
+                raise ScannerError(
+                    f"cargo-audit exited 1 on {where} with no report on stdout: its "
+                    "advisory database could not be fetched or loaded"
+                    + (why or " (it wrote nothing on stderr either)")
+                )
+            raise ScannerError(f"cargo-audit wrote no report for {where}{why}")
         try:
             return json.loads(stdout)
         except ValueError as e:
-            raise ScannerError(f"cargo-audit's output is not JSON ({type(e).__name__})")
+            raise ScannerError(
+                f"cargo-audit's output for {where} is not JSON "
+                f"({type(e).__name__}){why}"
+            )
 
     def validate_plugin_dependencies(self) -> bool:
         if self.dependency_unavailable_reason:

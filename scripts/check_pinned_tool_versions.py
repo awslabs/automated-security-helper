@@ -108,6 +108,16 @@ Known limitations
 * "Latest" is each upstream's own notion: GitHub's ``releases/latest`` (which
   skips drafts and pre-releases) and PyPI's ``info.version``. A project that marks a
   release "latest" out of version order is reported as it marks it.
+* A repository that releases several tools tags each tool's releases under its own
+  prefix (rustsec/rustsec tags cargo-audit's ``cargo-audit/v0.23.0``, beside
+  ``rustsec/v0.34.1`` and ``platforms/v4.3.0``). Its ``releases/latest`` is the one
+  release marked latest for the whole repository, of whichever tool, and that tag is
+  not a version. A license entry records such a tag in ``tag``; for a pin whose tag
+  is ``<prefix><version>`` the releases are listed instead (at most
+  ``_RELEASE_PAGE_LIMIT`` pages, refused beyond that), and the latest is the newest
+  final release under the prefix. A draft, a release marked pre-release and a
+  version spelled as one are passed over: cargo-audit published ``v0.21.0-rc.0`` as
+  a full release.
 * A gem is compared with the newest final release for the ``ruby`` platform whose
   required Ruby version admits the Ruby the image installs, read from the
   Dockerfile's ``ruby=`` apt pin, so ``--fail-on-outdated`` fails only when the image
@@ -283,7 +293,10 @@ class Pin:
     ``project`` is ``owner/repo`` for a GitHub release, the distribution name for
     PyPI and the gem name for RubyGems. ``pinned_in`` names the module tables that
     carry this tool's version, which is what a bump has to edit. ``kind`` is one of
-    ``PIN_KINDS``, and decides which steps ``bump_steps`` gives.
+    ``PIN_KINDS``, and decides which steps ``bump_steps`` gives. ``tag_prefix`` is set
+    for a GitHub pin whose repository tags this tool's releases under a prefix of its
+    own (``cargo-audit/`` in rustsec/rustsec): its latest release is looked up among
+    the releases under that prefix, not as the repository's ``releases/latest``.
     """
 
     tool: str
@@ -292,6 +305,7 @@ class Pin:
     project: str
     pinned_in: tuple[str, ...]
     kind: str
+    tag_prefix: str = ""
 
 
 @dataclass(frozen=True)
@@ -361,6 +375,41 @@ def _license_project(tool: str, entry: Any) -> str:
     )
 
 
+# What a per-tool tag prefix may hold: the tool's name in its repository and the
+# separator before the version. The prefix is copied into the bump steps, which a
+# person pastes into a shell, so nothing else is accepted.
+_TAG_PREFIX_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*[/-]")
+
+
+def _tag_prefix(tool: str, entry: Any) -> str:
+    """What the release tags put before the version, read from the entry's ``tag``.
+
+    A repository that releases several tools tags each one's releases under a prefix
+    of its own: rustsec/rustsec tags cargo-audit's ``cargo-audit/v0.23.0``, beside
+    ``rustsec/v0.34.1`` and ``platforms/v4.3.0``. The license entry records the tag,
+    and the prefix is what precedes ``version`` in it. "" for an entry that records
+    no tag, or one spelled like the version.
+
+    Raises:
+        PinEnumerationError: for a recorded tag that is not ``<prefix><version>``:
+            none of the repository's release tags could then be read as a version of
+            this tool, and the commit lookup the bump steps name would resolve no ref.
+            Refused when the pins are read, as ``_license_project`` refuses a host.
+    """
+    tag = getattr(entry, "tag", None) if entry is not None else None
+    if tag is None or tag == entry.version:
+        return ""
+    prefix = tag[: -len(entry.version)] if tag.endswith(entry.version) else ""
+    if not _TAG_PREFIX_RE.fullmatch(prefix):
+        raise PinEnumerationError(
+            f"THIRD_PARTY_LICENSES[{tool!r}].tag is {tag!r}, which is not "
+            f"<prefix>{entry.version} (a tool name and a separator before the "
+            "version), so this script cannot read its upstream's release tags as "
+            "versions of the tool."
+        )
+    return prefix
+
+
 def enumerate_pins(pins: Any, dockerfile: Path = DOCKERFILE) -> list[Pin]:
     """Every pin ``pins`` carries, one per tool, sorted by tool name.
 
@@ -400,6 +449,8 @@ def enumerate_pins(pins: Any, dockerfile: Path = DOCKERFILE) -> list[Pin]:
                     f"pin (distribution {entry.distribution!r}); pick one."
                 )
             _license_project(tool, entry)
+            # PyPI is asked for the version; the tag still names the commit to look up.
+            _tag_prefix(tool, entry)
             result.append(
                 Pin(
                     tool=tool,
@@ -488,6 +539,7 @@ def enumerate_pins(pins: Any, dockerfile: Path = DOCKERFILE) -> list[Pin]:
                 project=project,
                 pinned_in=tuple(pinned_in),
                 kind=kind,
+                tag_prefix=_tag_prefix(tool, entry),
             )
         )
 
@@ -502,6 +554,7 @@ def enumerate_pins(pins: Any, dockerfile: Path = DOCKERFILE) -> list[Pin]:
         gem_entry = licenses.get(gem)
         if gem_entry is not None:
             _license_project(gem, gem_entry)
+            _tag_prefix(gem, gem_entry)
             if gem_entry.version.removeprefix("v") != gem_version.removeprefix("v"):
                 raise PinEnumerationError(
                     f"{gem} is {gem_version} in {name} and {gem_entry.version} in "
@@ -598,6 +651,15 @@ def parse_version(text: str) -> tuple[tuple[int, ...], tuple[int, int, str]]:
 
 # PEP 440's post-release spellings, after the separator is stripped.
 _POST_RELEASE_RE = re.compile(r"^(?:post|rev|r)\d*$", re.IGNORECASE)
+
+
+def _is_pre_release(key: tuple[tuple[int, ...], tuple[int, int, str]]) -> bool:
+    """Whether a ``parse_version`` key is a pre-release: its suffix rank is 0.
+
+    The rank is 0 for a pre-release (``-rc.0``), 1 for the final release and 2 for a
+    post-release, which is how a final release sorts after its pre-releases.
+    """
+    return key[1][0] == 0
 
 
 def compare(pinned: str, latest: str) -> str:
@@ -770,8 +832,90 @@ def _get_github_json(path: str) -> Any:
     return _get_json(url, headers)
 
 
-def latest_github_release(project: str) -> str:
+def latest_github_release(project: str, tag_prefix: str = "") -> str:
+    """The latest release of ``project``: the tag of GitHub's ``releases/latest``.
+
+    With a ``tag_prefix``, the newest final release tagged ``<tag_prefix><version>``,
+    as ``<version>``. A repository that releases several tools, each under its own
+    prefix, marks one release latest for the whole repository, of whichever tool,
+    and that tag is not a version: rustsec/rustsec's was ``cargo-audit/v0.23.0`` on
+    2026-11-26, which ``parse_version`` refuses, and the next release of any of its
+    other crates would take its place.
+    """
+    if tag_prefix:
+        return newest_release_under(
+            github_releases(project), tag_prefix, f"{project} releases"
+        )
     return str(_get_github_json(f"repos/{project}/releases/latest")["tag_name"])
+
+
+# One page of GitHub's release list holds at most 100 releases, and a listing reads
+# this many pages before it refuses. rustsec/rustsec, the one tag-prefixed repository
+# pinned so far, listed 40 releases on 2026-11-26.
+_RELEASES_PER_PAGE = 100
+_RELEASE_PAGE_LIMIT = 10
+
+
+def github_releases(project: str) -> list[Any]:
+    """Every release of ``project``, in the order GitHub's paged release list gives.
+
+    Raises:
+        ValueError: for a page that is not a list, and for a repository with more
+            releases than ``_RELEASE_PAGE_LIMIT`` pages hold, because the newest
+            release under a prefix could be on a page not read: the lookup fails
+            rather than answer from part of the list.
+    """
+    releases: list[Any] = []
+    for page in range(1, _RELEASE_PAGE_LIMIT + 1):
+        batch = _get_github_json(
+            f"repos/{project}/releases?per_page={_RELEASES_PER_PAGE}&page={page}"
+        )
+        if not isinstance(batch, list):
+            raise ValueError(
+                f"page {page} of GitHub's release list for {project} is a "
+                f"{type(batch).__name__}, not a list"
+            )
+        releases.extend(batch)
+        if len(batch) < _RELEASES_PER_PAGE:
+            return releases
+    raise ValueError(
+        f"{project} lists more than {_RELEASE_PAGE_LIMIT * _RELEASES_PER_PAGE} "
+        "releases, more than this script reads; raise _RELEASE_PAGE_LIMIT"
+    )
+
+
+def newest_release_under(releases: Iterable[Any], tag_prefix: str, where: str) -> str:
+    """The newest final release tagged ``<tag_prefix><version>``, as ``<version>``.
+
+    The other tools' releases are left out by their prefix. So are drafts, releases
+    marked pre-release, and a version spelled as a pre-release, since a listing has
+    no "latest" to rely on and cargo-audit published ``v0.21.0-rc.0`` as a full
+    release. The rest are compared with ``parse_version``, so the newest is the
+    highest version, whatever order GitHub listed them in.
+
+    Raises:
+        ValueError: when no final release carries the prefix, and for a release
+            under it whose tag is not a version (``parse_version``'s refusal), since
+            whether that one is newer cannot be told.
+    """
+    newest: tuple[Any, str] | None = None
+    for release in releases:
+        if not isinstance(release, dict):
+            raise ValueError(f"{where}: a release that is not a JSON object")
+        tag = release.get("tag_name")
+        if not isinstance(tag, str) or not tag.startswith(tag_prefix):
+            continue
+        if release.get("draft") or release.get("prerelease"):
+            continue
+        version = tag[len(tag_prefix) :]
+        key = parse_version(version)
+        if _is_pre_release(key):
+            continue
+        if newest is None or key > newest[0]:
+            newest = (key, version)
+    if newest is None:
+        raise ValueError(f"{where}: no final release is tagged {tag_prefix}<version>")
+    return newest[1]
 
 
 def latest_pypi_release(distribution: str) -> str:
@@ -939,7 +1083,9 @@ def newest_installable(
     return target, note
 
 
-Fetchers = dict[str, Callable[[str], Any]]
+# Each fetcher takes the pin's project; the GitHub one also takes the pin's tag prefix
+# when it has one (``latest_github_release``).
+Fetchers = dict[str, Callable[..., Any]]
 
 DEFAULT_FETCHERS: Fetchers = {
     GITHUB: latest_github_release,
@@ -979,7 +1125,12 @@ def check(
             )
             continue
         try:
-            answer = fetchers[pin.ecosystem](pin.project)
+            if pin.ecosystem == GITHUB and pin.tag_prefix:
+                # Looked up under the tool's own prefix: the repository's latest
+                # release may be another of its tools'.
+                answer = fetchers[pin.ecosystem](pin.project, pin.tag_prefix)
+            else:
+                answer = fetchers[pin.ecosystem](pin.project)
             if pin.ecosystem == RUBYGEMS:
                 if ruby is None:
                     ruby = image_ruby(enumerate_apt_pins())
@@ -1065,24 +1216,45 @@ def _spelled_like(current: str, latest: str) -> str:
     return latest
 
 
+def _license_url_at_new_commit(project: str, commit: str, license_file: Any) -> str:
+    """Where a URL-pinned license file is read from once the pinned commit moves.
+
+    The file's own URL with ``<new commit>`` in place of the pinned one, so a file
+    read from a directory of the repository (cargo-audit's crate directory in the
+    rustsec monorepo) is named there and not at the repository root. The root form
+    for a URL that does not carry the commit.
+    """
+    pinned = f"/{commit}/"
+    if license_file.url and pinned in license_file.url:
+        return license_file.url.replace(pinned, "/<new commit>/", 1)
+    return (
+        f"https://raw.githubusercontent.com/{project}/<new commit>/{license_file.name}"
+    )
+
+
 def _license_steps(pins: Any, tool: str, latest: str) -> list[str]:
     entry = pins.THIRD_PARTY_LICENSES.get(tool)
     if entry is None:
         return []
     project = _license_project(tool, entry)
     latest = _spelled_like(entry.version, latest)
-    steps = [
-        f'THIRD_PARTY_LICENSES["{tool}"].version -> {latest}',
-        (
-            f'_THIRD_PARTY_HASHES["{tool} commit"] -> the output of '
-            f"`gh api repos/{project}/commits/{latest} --jq .sha`"
-        ),
-    ]
+    # A tool its repository tags under a prefix of its own is tagged
+    # <prefix><version>, so the entry's tag moves with the version and the commit is
+    # looked up by that tag: by the bare version, rustsec/rustsec answers 422.
+    prefix = _tag_prefix(tool, entry)
+    tag = f"{prefix}{latest}"
+    steps = [f'THIRD_PARTY_LICENSES["{tool}"].version -> {latest}']
+    if prefix:
+        steps.append(f'THIRD_PARTY_LICENSES["{tool}"].tag -> {tag}')
+    steps.append(
+        f'_THIRD_PARTY_HASHES["{tool} commit"] -> the output of '
+        f"`gh api repos/{project}/commits/{tag} --jq .sha`"
+    )
     for f in entry.files:
         if f.url:
             steps.append(
                 f'_THIRD_PARTY_HASHES["{tool}/{f.name}"] -> sha256 of '
-                f"https://raw.githubusercontent.com/{project}/<new commit>/{f.name}"
+                f"{_license_url_at_new_commit(project, entry.commit, f)}"
             )
         else:
             where = "wheel's dist-info" if entry.distribution else "release archive"

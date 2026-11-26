@@ -29,9 +29,13 @@ works as well. The ASH container image installs the pinned release.
 
 Online, cargo-audit fetches the advisory database from GitHub into
 `~/.cargo/advisory-db` and refuses a database whose newest commit is more than 90 days
-old. ASH always passes `--file=<lockfile>`, so cargo-audit never generates a lockfile,
+old. A database it cannot fetch or load makes it exit 1 with no report, the code it
+also uses for vulnerabilities found, and the scanner fails with cargo-audit's message.
+ASH always passes `--file=<lockfile>`, so cargo-audit never generates a lockfile,
 and it runs the tool outside the scanned tree so a repository's `.cargo/audit.toml`
-cannot ignore advisories (`~/.cargo/audit.toml` still applies).
+cannot ignore advisories (`~/.cargo/audit.toml` still applies, outside the scanner
+sandbox). Under a sandbox backend that mounts caches read-only, each run gets a
+private, empty `CARGO_HOME` and clones the database there.
 
 The scanner does not run offline (`--offline`, `ASH_OFFLINE`, or its own
 `options.offline: true`). Without a fetch, cargo-audit reads whatever database is on disk

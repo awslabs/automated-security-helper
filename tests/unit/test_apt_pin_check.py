@@ -381,7 +381,9 @@ class TestMain:
             checker, "APT_INDEX_FETCHER", lambda url: recorded(url, overrides)
         )
 
-        def pinned(project: str) -> str:
+        def pinned(project: str, tag_prefix: str = "") -> str:
+            # A tool tagged under a prefix (cargo-audit) is asked with its prefix,
+            # and the answer is its version without it.
             return {
                 p.project: p.version
                 for p in checker.enumerate_pins(checker.load_pins_module())

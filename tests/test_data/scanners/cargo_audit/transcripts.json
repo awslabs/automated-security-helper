@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": [
+        "cargo-audit",
+        "audit",
+        "--json",
+        "--file=<Cargo.lock>"
+      ],
+      "env_allowlist": [],
+      "exit_code": 1,
+      "fixture_tree": null,
+      "id": "cargo-audit-0.23.0-positive",
+      "live_input": true,
+      "note": "positive.json is the tool's report, re-indented with no value changed, for a lockfile pinning time 0.1.43 and atty 0.2.14 against the RustSec advisory database at commit 10db6998b5d7; positive.sarif is what convert_cargo_audit_report writes for it with the lockfile at the root of the scanned tree, and test_the_committed_sarif_is_what_the_converter_writes keeps the two in step",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": "2026-11-25",
+      "results": [
+        {
+          "format": "json",
+          "path": "captured/positive.json",
+          "sha256": "94b3835281759d764a98aa1732423f180ae99c48354da5aaf1e27ad0c61072dd"
+        },
+        {
+          "format": "sarif",
+          "path": "captured/positive.sarif",
+          "sha256": "b0b1abe109160331ca26b9c68d610808f829fd8d15de8d6477389467d9c92223"
+        }
+      ],
+      "retention": "current",
+      "scanner": "cargo-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cargo-audit",
+        "version": "0.23.0"
+      }
+    }
+  ],
+  "unrecorded": []
+}

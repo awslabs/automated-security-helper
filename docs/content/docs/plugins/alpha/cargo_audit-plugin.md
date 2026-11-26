@@ -36,7 +36,7 @@ A download that does not hash to its pin is refused. On linux/amd64 the statical
 
 ## What is scanned
 
-Every file named `Cargo.lock` in ASH's scan set (so `.gitignore`, `.ignore` and `global_settings.ignore_paths` apply). Lockfiles under a `target/` or `.git/` directory, ASH's own output directory, and links that resolve outside the source directory are skipped. cargo-audit runs once per lockfile, with `--file=<lockfile>`, so it never generates a lockfile for the project. The tool starts in a directory outside the scanned tree, because cargo-audit reads `./.cargo/audit.toml` from its working directory and a repository's own file could ignore advisories; your `~/.cargo/audit.toml` still applies. If there is no `Cargo.lock`, the tool is not run and the scanner reports `SKIPPED`.
+Every file named `Cargo.lock` in ASH's scan set (so `.gitignore`, `.ignore` and `global_settings.ignore_paths` apply). Lockfiles under a `target/` or `.git/` directory inside the scanned tree, ASH's own output directory, and links that resolve outside the source directory are skipped; a directory above the scanned tree with one of those names does not count, so a checkout at `/work/target/app` is scanned. cargo-audit runs once per lockfile, with `--file=<lockfile>`, so it never generates a lockfile for the project. The tool starts in a directory outside the scanned tree, because cargo-audit reads `./.cargo/audit.toml` from its working directory and a repository's own file could ignore advisories; your `~/.cargo/audit.toml` still applies, except under the scanner sandbox (see [Offline use](#offline-use)). If there is no `Cargo.lock`, the tool is not run and the scanner reports `SKIPPED`.
 
 ## Configuration
 
@@ -82,7 +82,9 @@ global_settings:
 
 ## Offline use
 
-Online, cargo-audit fetches the advisory database from GitHub into `~/.cargo/advisory-db`, so the scanner's sandbox requirement asks for a network and that directory. When it fetches, cargo-audit refuses a database whose newest commit is more than 90 days old.
+Online, cargo-audit fetches the advisory database from GitHub into `~/.cargo/advisory-db` (`$CARGO_HOME/advisory-db` when `CARGO_HOME` is set), taking a lock beside it, and it refuses a database whose newest commit is more than 90 days old. When the database cannot be fetched or loaded (no network, the lock still held by another run after cargo-audit's five-minute wait, a stale database), cargo-audit exits 1 with no report, the same code it uses for vulnerabilities found; the scanner then fails with cargo-audit's own message.
+
+With the scanner sandbox on (`sandbox.mode`), the scanner asks for a network and declares cargo's home as a cache it writes. Under bwrap with overlay support it updates `~/.cargo/advisory-db` and the writes are discarded when it exits. firejail, Landlock, sandbox-exec and bwrap without overlay support mount caches read-only, so they give each run a private, empty `CARGO_HOME` instead: cargo-audit clones the database there, and the copy in your home is left as it was. `$HOME` is private in the sandbox, so `~/.cargo/audit.toml` is not read there.
 
 The scanner does not run offline (`--offline`, `ASH_OFFLINE`, or its own `options.offline: true`); it is reported `MISSING` with the reason. Without a fetch, cargo-audit reads whatever database is on disk with no age check, and ASH does not yet hold the RustSec database to an age bound the way it holds its other [content databases](../../../concepts/content-databases.md), so a stale copy would read as a clean scan.
 

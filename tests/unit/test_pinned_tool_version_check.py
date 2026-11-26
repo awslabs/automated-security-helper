@@ -365,7 +365,9 @@ class TestExitCode:
     def _run(self, monkeypatch, capsys, latest_for, argv):
         """Run main() over the real pins with every lookup answered by ``latest_for``."""
 
-        def lookup(project: str) -> str:
+        def lookup(project: str, tag_prefix: str = "") -> str:
+            # A tool tagged under a prefix (cargo-audit) is asked with its prefix,
+            # and the answer is its version without it.
             return latest_for(project)
 
         monkeypatch.setattr(
@@ -631,7 +633,8 @@ class TestGemsAreJudgedByTheImagesRuby:
                 checker,
                 "DEFAULT_FETCHERS",
                 {
-                    checker.GITHUB: versions.__getitem__,
+                    # A tool tagged under a prefix is asked with it too.
+                    checker.GITHUB: lambda project, tag_prefix="": versions[project],
                     checker.PYPI: versions.__getitem__,
                     checker.RUBYGEMS: gem,
                 },
