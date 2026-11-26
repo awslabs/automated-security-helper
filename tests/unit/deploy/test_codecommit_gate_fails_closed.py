@@ -361,6 +361,10 @@ _NARROWING_OPTIONS_WITH_VALUES = [
 #: harmless polarity establishes this variable as the place the setting gets chosen, and the
 #: next edit to it is the harmful one.
 #:
+#: ``--allow-stale-content-db`` and its negation set the content-database staleness
+#: settings that ``--config-overrides`` also reaches: with the first, a scan against a
+#: database older than its declared bound passes instead of failing.
+#:
 #: The last three leave nothing scanned: ``--help``, ``--version`` and
 #: ``--generate-cli-skeleton`` each end ``ash scan`` with exit 0 before any
 #: scanner starts, and exit 0 is the outcome this gate reads as a pass.
@@ -374,6 +378,14 @@ _NARROWING_FLAGS = [
     ("--use-existing", "answers from a prior results file instead of scanning"),
     ("--no-use-existing", "the other polarity of the same option"),
     ("--changed-files-only", "drops findings outside a git diff from the verdict"),
+    (
+        "--allow-stale-content-db",
+        "lets a scan against a content database past its declared bound pass",
+    ),
+    (
+        "--no-allow-stale-content-db",
+        "the other polarity, which overrides the config's staleness settings",
+    ),
     ("--help", "prints the help and exits 0 before any scanner runs"),
     ("--version", "prints the version and exits 0 before any scanner runs"),
     (
@@ -684,6 +696,8 @@ def test_every_option_handled_before_the_scan_runs_is_reserved():
         (["--shard-index", "0"], "shard_index", 0),
         (["--shard-count", "4"], "shard_count", 4),
         (["--use-existing"], "use_existing", True),
+        (["--allow-stale-content-db"], "allow_stale_content_db", True),
+        (["--no-allow-stale-content-db"], "allow_stale_content_db", False),
         (["--version"], "version", True),
         (["--config", "/tmp/none.yaml"], "config", "/tmp/none.yaml"),  # nosec B108
         (["-c", "/tmp/none.yaml"], "config", "/tmp/none.yaml"),  # nosec B108
@@ -756,6 +770,35 @@ def test_a_cli_json_input_document_would_really_have_set_the_selection(tmp_path,
     params = _resolve_scan_params(["ash", "scan", *tail])
 
     assert tuple(params["only_scanners"]) == ("bandit",), params["only_scanners"]
+
+
+@pytest.mark.parametrize(
+    "flag, policy",
+    [("--allow-stale-content-db", "warn"), ("--no-allow-stale-content-db", "fail")],
+)
+def test_the_staleness_flag_would_really_have_set_the_policy(flag, policy):
+    """The positive control for the two staleness flags in ``_NARROWING_FLAGS``.
+
+    ``run_ash_scan_cli_command`` turns the parameter either flag resolves to into
+    ``--config-overrides`` entries through ``content_db_staleness_flag_overrides``,
+    and these are the entries it adds. With ``--allow-stale-content-db`` the policy
+    is "warn", so a database past its bound no longer fails the scan. The negation
+    sets "fail" and empties the per-database exceptions, so it overrides whatever
+    the config chose.
+    """
+    from automated_security_helper.utils.content_databases import (
+        STALENESS_CONFIG_FIELD,
+        STALENESS_OVERRIDES_CONFIG_FIELD,
+        content_db_staleness_flag_overrides,
+    )
+
+    params = _resolve_scan_params(["ash", "scan", flag])
+    overrides = content_db_staleness_flag_overrides(
+        allow_stale=params["allow_stale_content_db"]
+    )
+
+    assert f"{STALENESS_CONFIG_FIELD}={policy}" in overrides, overrides
+    assert f"{STALENESS_OVERRIDES_CONFIG_FIELD}=[]" in overrides, overrides
 
 
 def test_a_benign_extra_arg_is_still_passed_through(gate, monkeypatch, tmp_path):
