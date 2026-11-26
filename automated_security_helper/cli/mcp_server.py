@@ -857,7 +857,7 @@ async def run_ash_scan(
                     return with_exit_code(
                         {
                             "success": False,
-                            "error": message,
+                            "error": raw_controls_on_one_line(message),
                             "error_type": McpErrorType.SOURCE_DELIVERY_BUSY.value,
                             "session_id": session_id,
                         },
@@ -921,12 +921,14 @@ async def run_ash_scan(
         # session-identity guidance tells a client whose id rotates to pass a
         # returned path back in. Accepted here, it holds no source files, so
         # the scan would complete clean having scanned nothing -- the exact
-        # result _resolve_omitted_source_dir exists to prevent.
+        # result _resolve_omitted_source_dir exists to prevent. Only for a
+        # CALLER's path: with scan_asset set, the anchor in source_dir is the
+        # server's own choice two blocks up, the legitimate image-scan shape.
         from automated_security_helper.cli.mcp.source_delivery import (
             is_session_image_scan_dir,
         )
 
-        if is_session_image_scan_dir(source_dir, session_id):
+        if scan_asset is None and is_session_image_scan_dir(source_dir, session_id):
             message = raw_controls_on_one_line(
                 "source_dir names this session's image-scan directory, which "
                 "holds only scan output, never a source tree. To scan the "
@@ -937,7 +939,7 @@ async def run_ash_scan(
             return with_exit_code(
                 {
                     "success": False,
-                    "error": message,
+                    "error": raw_controls_on_one_line(message),
                     "error_type": McpErrorType.SOURCE_DIR_NOT_USABLE.value,
                     "session_id": session_id,
                 },

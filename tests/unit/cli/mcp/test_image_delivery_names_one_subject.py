@@ -42,7 +42,12 @@ def workspace(tmp_path, monkeypatch):
     monkeypatch.setattr(sd, "resolve_workspace_root", lambda: tmp_path)
     # The reference rows are about the delivery, not the registry gate, which
     # admits nothing by default; TestTheRegistryAllowlist clears this again.
-    monkeypatch.setenv("ASH_MCP_IMAGE_ALLOWED_REGISTRIES", "registry.example.com")
+    # The :5000 entry is its own registry under the host[:port] matching, for
+    # the row proving a port-carrying reference still delivers.
+    monkeypatch.setenv(
+        "ASH_MCP_IMAGE_ALLOWED_REGISTRIES",
+        "registry.example.com,registry.example.com:5000",
+    )
     yield tmp_path
     sd.clear_source(_SESSION, workspace_root=tmp_path)
 

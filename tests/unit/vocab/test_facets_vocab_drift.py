@@ -87,7 +87,18 @@ VOCABULARIES: tuple[Vocabulary, ...] = (
         ambiguous=frozenset({"mapped", "n/a", "unconfirmed"}),
     ),
     Vocabulary(ops_register.FetchKind, _OPS_HOME, ambiguous=frozenset({"none"})),
-    Vocabulary(ops_register.Fetched, _OPS_HOME),
+    Vocabulary(
+        ops_register.Fetched,
+        _OPS_HOME,
+        allowlist={
+            "automated_security_helper/models/flat_vulnerability.py": (
+                "IMAGE_ATTRIBUTION_FIELDS names the flat row's own "
+                "'image_digest' COLUMN, that column's wire name on the CSV "
+                "and flat-JSON reports; Fetched.IMAGE_DIGEST names a "
+                "scanner's registry read of a digest"
+            ),
+        },
+    ),
     Vocabulary(ops_register.Prefetch, _OPS_HOME),
     Vocabulary(
         ops_register.OfflineOutcome,

@@ -1327,7 +1327,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             if self.use_uv_tool is False:
                 self.use_uv_tool = True
 
-    def _apply_scan_config(self, config: Any) -> None:
+    def _apply_scan_config(self, config: Any) -> Any:
         """Swap *config* in as this scanner's config where it differs.
 
         A config that says what the current one already says is not swapped
@@ -1343,14 +1343,21 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         options), so deciding the skip against the config being replaced
         could run the tool -- and its registry fetches -- for a caller whose
         config said offline.
+
+        Returns *config* in its dump form (or None as given): ``_pre_scan``'s
+        debug dump prints the GIVEN config through the as-written rewrite,
+        which reads the dict dump -- handed the model, it printed the model
+        repr, and an option read from the environment showed its value
+        instead of the reference the config file wrote.
         """
         if config is None:
-            return
+            return None
         if hasattr(config, "model_dump") and callable(config.model_dump):
             config = config.model_dump(by_alias=True)
         if config != self.config.model_dump(by_alias=True):
             self.config = self.config.__class__.model_validate(config)
             self._reset_dependency_validation()
+        return config
 
     def _pre_scan(
         self,
@@ -1375,8 +1382,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # after the check, which meant the current target was checked against
         # the verdict of the config it was replacing; with the verdict now
         # memoized, it would also have left the memo answering for the old
-        # config on this very target.
-        self._apply_scan_config(config)
+        # config on this very target. The local is the dump form from here on;
+        # the debug dump below prints it through the as-written rewrite.
+        config = self._apply_scan_config(config)
 
         # Honors the setup phase's validation of this instance (memoized above)
         # instead of re-probing per target: the probes ran after start_time, so

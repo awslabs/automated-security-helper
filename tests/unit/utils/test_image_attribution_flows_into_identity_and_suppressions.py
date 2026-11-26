@@ -138,17 +138,24 @@ def test_a_tag_only_ref_names_no_digest():
     assert getattr(run.results[0].properties, IMAGE_DIGEST_PROPERTY, None) is None
 
 
-def test_a_pinned_ref_and_a_tag_of_the_same_image_share_ids_when_the_run_names_the_digest():
-    # The run's repoDigests entry IS the manifest digest a pinned ref states,
-    # so the two readings agree for one real image (an imageID never would:
-    # it is the config digest).
-    repo_digest = [f"registry.example.com/team/app@{DIGEST}"]
+def test_a_pinned_ref_and_a_tag_the_scan_resolved_to_its_digest_share_ids():
+    # The pinned ref states the manifest digest; a tag the SCAN START resolved
+    # to that digest is the same subject on the same basis. A digest only a
+    # RUN names no longer keys anything (a run-named digest in the key gave
+    # one scan's ids two bases: test_a_run_named_digest_is_attribution_never_
+    # the_key below), so a tag the scan could not resolve keys on the tag and
+    # does NOT share ids with the pinned spelling -- the documented
+    # machine-dependence of tag-only references.
     pinned = _stamped(
-        _run(repoDigests=repo_digest),
-        ImageLocator(ref=f"registry.example.com/team/app@{DIGEST}"),
+        _run(), ImageLocator(ref=f"registry.example.com/team/app@{DIGEST}")
     )
-    tagged = _stamped(_run(repoDigests=repo_digest), ImageLocator(ref=REF))
+    tagged = _stamped(_run(), ImageLocator(ref=REF, resolved_digest=DIGEST))
     assert pinned.id == tagged.id
+    unresolved = _stamped(
+        _run(repoDigests=[f"registry.example.com/team/app@{DIGEST}"]),
+        ImageLocator(ref=REF),
+    )
+    assert unresolved.id != pinned.id
 
 
 def test_the_runs_repo_digest_beats_the_locators():
@@ -182,8 +189,12 @@ def test_the_flat_finding_carries_the_attribution_columns():
 
 
 def test_two_ref_spellings_that_resolve_to_one_digest_share_an_id():
-    one = _stamped(_run(imageID=DIGEST), ImageLocator(ref=REF))
-    other = _stamped(_run(imageID=DIGEST), ImageLocator(ref="mirror.local/app:latest"))
+    # Resolved by the SCAN (the locator's digest, stamped as the scope): a
+    # digest a run's own output names is attribution, never the key.
+    one = _stamped(_run(), ImageLocator(ref=REF, resolved_digest=DIGEST))
+    other = _stamped(
+        _run(), ImageLocator(ref="mirror.local/app:latest", resolved_digest=DIGEST)
+    )
     assert one.id == other.id
 
 

@@ -257,6 +257,10 @@ class TestTheScannerRunsTheLayerPass:
 
     def _args(self, scanner, tmp_path):
         scanner._image_layers_json = tmp_path / "layers.json"
+        # An engine's own store serves the tag: one store, read twice within
+        # one scan, so the join is sound and the pass runs. The bare-tag rows
+        # below clear this to pin the guard.
+        scanner._image_engine_socket = "/run/docker.sock"
         return ["trivy", "image", "--format", "sarif", "--output", "/o.sarif", "ref"]
 
     def test_the_second_pass_asks_for_json_and_fills_the_column(
@@ -294,3 +298,41 @@ class TestTheScannerRunsTheLayerPass:
         )
         report = _captured_sarif()
         assert scanner._attach_image_layers(report, self._args(scanner, tmp_path)) == 0
+
+    def test_a_bare_tag_with_no_engine_store_skips_the_pass(
+        self, tmp_path, monkeypatch
+    ):
+        # A tag no local store serves can resolve to a DIFFERENT manifest on
+        # the second pull, and layers joined across two images attribute the
+        # wrong build: the pass is skipped, running nothing.
+        scanner = self._scanner(tmp_path)
+
+        def never(argv, **kwargs):  # pragma: no cover - the assertion
+            raise AssertionError("the skipped pass must not run the tool")
+
+        monkeypatch.setattr(
+            "automated_security_helper.utils.subprocess_utils.spawn_run", never
+        )
+        args = self._args(scanner, tmp_path)
+        scanner._image_engine_socket = None
+        report = _captured_sarif()
+        assert scanner._attach_image_layers(report, args) == 0
+        assert _layer_of(report) == [None]
+
+    def test_a_digest_pinned_reference_runs_without_an_engine(
+        self, tmp_path, monkeypatch
+    ):
+        # A digest names one manifest wherever it is read, so the join is
+        # sound with no local store at all.
+        scanner = self._scanner(tmp_path)
+        document = json.loads(
+            (CAPTURED / "trivy-0.76.2-secret-image.json").read_text(encoding="utf-8")
+        )
+        seen = self._fake_spawn(monkeypatch, document)
+        args = self._args(scanner, tmp_path)
+        scanner._image_engine_socket = None
+        args[-1] = "registry.example.com/team/app@sha256:" + "a" * 64
+        report = _captured_sarif()
+        assert scanner._attach_image_layers(report, args) == 1
+        assert _layer_of(report) == [LAYER]
+        assert seen["argv"][-1] == args[-1]

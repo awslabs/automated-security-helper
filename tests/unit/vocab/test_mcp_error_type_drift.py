@@ -82,6 +82,7 @@ WIRE_SPELLINGS = frozenset(
         "environment_value_in_longer_string",
         "git_checkout_failed",
         "git_clone_failed",
+        "image_registry_not_permitted",
         "invalid_clone_depth",
         "invalid_expiration",
         "invalid_session_id",
