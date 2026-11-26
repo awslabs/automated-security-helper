@@ -20,6 +20,7 @@ from automated_security_helper.core.exceptions import (
     ASHConfigSourceError,
     ASHConfigValidationError,
 )
+from automated_security_helper.utils import scanner_names
 
 pytestmark = pytest.mark.unit
 
@@ -456,3 +457,32 @@ def test_a_single_directory_scan_reads_only_the_config_it_was_given(tmp_path):
     assert orchestrator.config.fail_on_incomplete_scanners is False
     assert orchestrator.config.project_name != "repo"
     assert orchestrator.config.fail_on_findings is True
+
+
+@pytest.fixture
+def retired_oldname(monkeypatch):
+    """One synthetic retirement: ``oldname`` is served by the bandit plugin."""
+    monkeypatch.setitem(scanner_names.SCANNER_NAME_ALIASES, "oldname", "bandit")
+
+
+def test_a_projects_retired_section_does_not_beat_the_operators_canonical_one(
+    tmp_path, retired_oldname
+):
+    """The operator's file is the later document, whichever spelling either uses."""
+    project = _project(tmp_path, {"scanners": {"oldname": {"enabled": False}}})
+    operator = _operator(tmp_path, {"scanners": {"bandit": {"enabled": True}}})
+
+    config = _resolve(tmp_path, project, operator)
+
+    assert config.scanners.bandit.enabled is True
+
+
+def test_an_operators_retired_section_beats_the_projects_canonical_one(
+    tmp_path, retired_oldname
+):
+    project = _project(tmp_path, {"scanners": {"bandit": {"enabled": False}}})
+    operator = _operator(tmp_path, {"scanners": {"oldname": {"enabled": True}}})
+
+    config = _resolve(tmp_path, project, operator)
+
+    assert config.scanners.bandit.enabled is True
