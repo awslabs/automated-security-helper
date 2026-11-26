@@ -322,14 +322,14 @@ def _refuse_unless_a_file(candidate: Path) -> None:
         raise _refuse(f"{label} is not a regular file")
 
 
-def _unreachable_name_schema() -> dict:
+def _unreachable_name_schema() -> dict[str, Any]:
     """The declared column of the frame :func:`ceiling_unreachable_counts` counts."""
     import polars as pl
 
     return {"name": pl.String}
 
 
-def _unreachable_name_frame(names: list):
+def _unreachable_name_frame(names: list[str | None]) -> Any:
     """One row per unreachable finding: its wired scanner name."""
     import polars as pl
 
