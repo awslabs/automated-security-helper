@@ -40,9 +40,11 @@ class ReasonCode:
     RESULTS_NOT_MERGED = "results_not_merged"
     NOT_EVALUATED = "not_evaluated"
     CONTENT_DATABASE_ABSENT = "content_database_absent"
+    CONTENT_DATABASE_STALE = "content_database_stale"
     # What stops a scanner before its tool runs.
     SANDBOX_UNAVAILABLE = "sandbox_unavailable"
     SANDBOX_REFUSED = "sandbox_refused"
+    NO_IMAGE_ASSET = "no_image_asset"
     CONSTRUCTION_FAILED = "construction_failed"
     NAME_REFUSED = "name_refused"
     NAME_TAKEN = "name_taken"
@@ -88,8 +90,12 @@ DEFAULT_SENTENCES: dict[str, str] = {
     ReasonCode.RESULTS_NOT_MERGED: "its results could not be merged",
     ReasonCode.NOT_EVALUATED: "no rule was evaluated against some of its targets",
     ReasonCode.CONTENT_DATABASE_ABSENT: "its content database is absent",
+    ReasonCode.CONTENT_DATABASE_STALE: (
+        "its content database is older than the configured policy allows"
+    ),
     ReasonCode.SANDBOX_UNAVAILABLE: "its sandbox backend is not available",
     ReasonCode.SANDBOX_REFUSED: "its scanner sandbox was refused",
+    ReasonCode.NO_IMAGE_ASSET: "an image scan was queued for it with no image to scan",
     ReasonCode.CONSTRUCTION_FAILED: "it could not be constructed",
     ReasonCode.NAME_REFUSED: "its configured name is refused",
     ReasonCode.NAME_TAKEN: "another scanner already uses its name",

@@ -39,6 +39,8 @@ from automated_security_helper.base.uv_tool_mixin import (
 from automated_security_helper.core.enums import PackageManager
 from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.core.exceptions import (
+    FailureReason,
+    ReasonCode,
     ScannerError,
     ToolNotProvisionableError,
 )
@@ -1140,7 +1142,10 @@ class PluginBase(UVToolMixin, BaseModel):
         """
         context: PluginContext | None = self.context
         if context is None:
-            raise ScannerError(f"No context provided for {self.__class__.__name__}!")
+            raise ScannerError(
+                f"No context provided for {self.__class__.__name__}!",
+                reason=FailureReason(ReasonCode.NO_PLUGIN_CONTEXT),
+            )
         return context
 
     def __init__(self, **data: Any) -> None:
@@ -1452,7 +1457,10 @@ class PluginBase(UVToolMixin, BaseModel):
         """Set up default paths and initialize plugin configuration."""
         # Use context if provided, otherwise fall back to instance attributes
         if self.context is None:
-            raise ScannerError(f"No context provided for {self.__class__.__name__}!")
+            raise ScannerError(
+                f"No context provided for {self.__class__.__name__}!",
+                reason=FailureReason(ReasonCode.NO_PLUGIN_CONTEXT),
+            )
         ASH_LOGGER.trace(f"Using provided context for {self.__class__.__name__}")
         return self
 

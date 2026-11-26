@@ -36,7 +36,12 @@ from automated_security_helper.base.scanner_plugin import (
     plugin_missing_dependency_reason,
 )
 from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
-from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.core.exceptions import (
+    FailureReason,
+    ReasonCode,
+    ScannerError,
+    reason_of,
+)
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerSeverityCount,
@@ -147,11 +152,30 @@ _TERMINAL_SCANNER_STATUSES = frozenset(
 _COMPLETED_RESULT_STATUSES = frozenset({"passed", "completed", "success", "ok"})
 
 
-def _refuse_to_grade(container: ScanResultsContainer, reason: str) -> None:
-    """Make the row ERROR with ``reason``, in its errors and in the log."""
+def _file_reason(container: ScanResultsContainer, reason: FailureReason) -> None:
+    """File *reason* on *container* as why its row is ERROR; the first one filed stays.
+
+    The row's first error is its cause and the first reason filed is that cause's
+    short form, so a later one, which only follows from it, does not replace it
+    (``ScanResultsContainer.record_error_reason``).
+    """
+    container.record_error_reason(reason.code, reason.sentence)
+
+
+def _refuse_to_grade(
+    container: ScanResultsContainer, text: str, *, reason: FailureReason
+) -> None:
+    """Make the row ERROR with ``text`` in its errors and in the log, and say why.
+
+    ``text`` is for the log and for the row's errors, and may name what it has to.
+    ``reason`` is what the reports show for the scanner, a sentence with no path in
+    it. Every caller gives one: a refusal with no reason is a row that says ERROR
+    and nothing else.
+    """
     container.status = ScannerStatus.ERROR
-    ASH_LOGGER.error(reason)
-    container.add_error(reason)
+    ASH_LOGGER.error(text)
+    container.add_error(text)
+    _file_reason(container, reason)
 
 
 def _completed_result_status(status: Any) -> bool:
@@ -625,6 +649,185 @@ def _unfinished_run_reason(
     if flag == "result_rejected":
         return f"{scanner_name}'s result on {target_type} was rejected: {reason}"
     return f"{scanner_name} did not finish on {target_type}: {reason}"
+
+
+def _timeout_reason(
+    scanner_plugin: Any, timed_out_after: float | None, values: Iterable[str]
+) -> FailureReason:
+    """Why a run that timed out ended, as a reason the reports show.
+
+    The limit, written through the token every timeout message prints it with
+    (``timeout_limit_token``: a quoted whole number, or the option's name where an
+    environment value typed to the limit), then how the stop went
+    (``_timeout_ending``: the tool was killed, ASH could not stop it, or a later
+    run's tool could not be stopped). No line of the tool's own output and no
+    path: the sentence has no room for either. The code says whether ASH could
+    not stop the tool, which is the one fact of a timeout an operator has to act
+    on.
+    """
+    values = tuple(values)
+    ending = _timeout_ending(scanner_plugin)
+    limit = (
+        f" after {timeout_limit_token(timed_out_after, values)}"
+        if timed_out_after is not None
+        else ""
+    )
+    code = (
+        ReasonCode.COULD_NOT_STOP
+        if ending == COULD_NOT_STOP_ENDING
+        else ReasonCode.TIMED_OUT
+    )
+    return FailureReason(
+        code, text_without_values(f"it timed out{limit}{ending}", values)
+    )
+
+
+def _kept_flag_reason(
+    kept: Tuple[str, str],
+    scanner_plugin: Any,
+    timed_out_after: float | None,
+    values: Iterable[str],
+) -> FailureReason:
+    """Why a run that kept ``kept``'s flag did not finish, as a reason the reports show.
+
+    The flag names the kind of ending; the reason the run recorded with it is the
+    plugin's own text, which can name a path or a value, so it is not repeated
+    here (``_unfinished_run_reason`` keeps it in the error line).
+    """
+    flag = kept[0]
+    if flag == "timed_out":
+        return _timeout_reason(scanner_plugin, timed_out_after, values)
+    if flag == "cancelled":
+        return FailureReason(ReasonCode.CANCELLED)
+    if flag == "result_rejected":
+        return FailureReason(ReasonCode.RESULT_REJECTED)
+    if flag == "signaled":
+        return FailureReason(
+            ReasonCode.DID_NOT_FINISH,
+            "its tool was ended by a signal ASH did not send",
+        )
+    return FailureReason(ReasonCode.DID_NOT_FINISH)
+
+
+def _rejected_exit_code(scanner_plugin: Any) -> int | None:
+    """The exit code the plugin's tool returned, when its scanner does not accept it.
+
+    For a scan that failed with an error no raise site gave a reason: a scanner
+    that overrides ``scan()`` and reads the results file of a tool that failed
+    raises that file's absence, and the cause is the tool's exit code. It is read
+    as the scanner itself judges whether the code says the tool ran to completion
+    (``_sarif_exit_code_accepted``: the accepted set, widened by a scanner whose
+    tool counts its findings in the exit status, and never the spawn-failure
+    code), so a scanner whose accepted codes are a band is not told its tool
+    failed. Only a real int counts, as for the other plugin attributes read here
+    (a plugin is an arbitrary object and a test double answers every attribute),
+    and 0 never does: it is the value the plugin starts with, and a scan that
+    failed before its tool started reads the same.
+    """
+    code = getattr(scanner_plugin, "exit_code", None)
+    if isinstance(code, bool) or not isinstance(code, int) or code == 0:
+        return None
+    judged = getattr(scanner_plugin, "_sarif_exit_code_accepted", None)
+    if not callable(judged):
+        return None
+    try:
+        completed = judged()
+    except Exception:  # noqa: BLE001 -- a judgment that raises is no judgment
+        return None
+    return code if completed is False else None
+
+
+def _failure_reason(
+    error: BaseException, scanner_plugin: Any, values: Iterable[str]
+) -> FailureReason | None:
+    """Why the scan that raised *error* failed, as a reason the reports show, or None.
+
+    The failure handler's headline leads with the run's recorded cause (a
+    timeout, a tool that never started, a record step that failed) and not with
+    the exception, which is usually what that cause left behind: the results file
+    the killed tool did not write. The reason is read in the same order, so the
+    headline and the reason name one cause:
+
+    1. a recorded timeout;
+    2. a recorded spawn failure;
+    3. an output ASH could not record, when no flag says the run did not finish;
+    4. the reason a raise site recorded on the error or on what it was raised
+       from (``reason_of``), redacted with the run's environment values as every
+       plugin-sourced text is;
+    5. the flag of a run that did not finish;
+    6. an exit code the scanner does not accept;
+    7. a plugin that called ``sys.exit``.
+
+    None when nothing says: the reports then read the failure's first sentence,
+    as they do for an error recorded before reasons existed.
+    """
+    values = tuple(values)
+    timed_out_after = _timed_out_after(scanner_plugin)
+    if timed_out_after is not None:
+        return _timeout_reason(scanner_plugin, timed_out_after, values)
+    if _spawn_failure(scanner_plugin) is not None:
+        return FailureReason(ReasonCode.COULD_NOT_START)
+    kept = _kept_flag(scanner_plugin)
+    if kept is None and _post_run_error(scanner_plugin) is not None:
+        return FailureReason(ReasonCode.OUTPUT_NOT_RECORDED)
+    recorded = reason_of(error)
+    if recorded is not None:
+        return FailureReason(
+            recorded.code, text_without_values(recorded.sentence, values)
+        )
+    if kept is not None:
+        return _kept_flag_reason(kept, scanner_plugin, None, values)
+    exit_code = _rejected_exit_code(scanner_plugin)
+    if exit_code is not None:
+        return FailureReason(
+            ReasonCode.EXIT_CODE_REJECTED,
+            f"its tool exited with code {exit_code}, which this scanner does not "
+            "accept as a completed run, so its results file is not graded",
+        )
+    if isinstance(error, SystemExit):
+        return _scanner_exited()
+    return None
+
+
+def _scanner_exited() -> FailureReason:
+    """The reason of a plugin that called ``sys.exit`` where it should have returned."""
+    return FailureReason(
+        ReasonCode.SCANNER_EXITED, "it called sys.exit instead of returning a result"
+    )
+
+
+def _scanner_failure_reason(
+    error: BaseException, values: Iterable[str]
+) -> FailureReason | None:
+    """Why a scanner failed as a whole, for the container filed in place of its targets'.
+
+    The reason a raise site recorded (``reason_of``), redacted with the run's
+    environment values as :func:`_failure_reason` redacts it. A scan whose
+    targets ran and whose results could not be merged is the scanner's results
+    not merged (``ResultsProcessingFailed``), and a plugin that called
+    ``sys.exit`` has exited. Nothing else is a reason the reports can show, and
+    None leaves them the failure's first sentence.
+    """
+    recorded = reason_of(error)
+    if recorded is not None:
+        return FailureReason(
+            recorded.code, text_without_values(recorded.sentence, tuple(values))
+        )
+    if isinstance(error, ResultsProcessingFailed):
+        return FailureReason(ReasonCode.RESULTS_NOT_MERGED)
+    if isinstance(error, SystemExit):
+        return _scanner_exited()
+    return None
+
+
+def _absent_database_reason(count: int) -> FailureReason:
+    """Why a scan whose tool reports *count* absent content databases is ERROR."""
+    if count == 1:
+        return FailureReason(ReasonCode.CONTENT_DATABASE_ABSENT)
+    return FailureReason(
+        ReasonCode.CONTENT_DATABASE_ABSENT,
+        f"{count} of its content databases are absent",
+    )
 
 
 def _dependencies_recorded_unavailable(scanner_plugin: Any) -> bool:
@@ -1258,6 +1461,11 @@ class ScannerExecutor:
         fresh.could_not_stop = failure_container.could_not_stop
         fresh.status = ScannerStatus.ERROR
         fresh.raw_results = failure_container.raw_results
+        # The why the refiled row was given, so the fresh row's report says it too.
+        fresh.record_error_reason(
+            failure_container.error_reason_code or "",
+            failure_container.error_reason or "",
+        )
         try:
             return self._process_results_fn(fresh, aggregated_results)
         except Exception as process_error:
@@ -1304,6 +1512,10 @@ class ScannerExecutor:
             container.add_error(f"{row_head}: {described}")
             container.set_exception(later, environment_values)
             container.status = ScannerStatus.ERROR
+            # Its own target's row, so a reason it already holds stays.
+            failure_reason = _scanner_failure_reason(later, environment_values)
+            if failure_reason is not None:
+                _file_reason(container, failure_reason)
             container.raw_results = {
                 "errors": [home_as_tilde(f"{row_head}: {described}")],
                 "status": "failed",
@@ -1518,6 +1730,9 @@ class ScannerExecutor:
                                 # scan() is never called, so the carry-over below
                                 # does not reach this row: it takes the code here.
                                 container.exit_code = SPAWN_FAILURE_RETURNCODE
+                                refusal_reason = FailureReason(
+                                    ReasonCode.SANDBOX_UNAVAILABLE
+                                )
                             else:
                                 # Refused for a reason that is not availability:
                                 # nothing is missing, and no tool started, so the
@@ -1527,8 +1742,15 @@ class ScannerExecutor:
                                     f"was refused: {reason}"
                                 )
                                 scanner_plugin.exit_code = None
+                                refusal_reason = FailureReason(
+                                    ReasonCode.SANDBOX_REFUSED
+                                )
                             ASH_LOGGER.error(text, extra=NO_MARKUP)
                             container.add_error(text)
+                            # The refusal's own text names what it must and can
+                            # hold a path or a value: the row's reason is the
+                            # kind of refusal.
+                            _file_reason(container, refusal_reason)
                             # A failed dict, not the False of the MISSING branch:
                             # the finally below grades it ERROR, with no
                             # missing_reason, and the scanner never runs.
@@ -1629,7 +1851,10 @@ class ScannerExecutor:
                                                 raise ScannerError(
                                                     "an image task was queued "
                                                     "with no image asset on the "
-                                                    "plugin context"
+                                                    "plugin context",
+                                                    reason=FailureReason(
+                                                        ReasonCode.NO_IMAGE_ASSET
+                                                    ),
                                                 )
                                             raw_results = scanner_plugin.scan_image(
                                                 image=image_locator,
@@ -1654,7 +1879,10 @@ class ScannerExecutor:
                                     if spawn_failure is not None:
                                         raise ScannerError(
                                             f"{scanner_config_name} could not start its "
-                                            f"tool on {target_type}: {spawn_failure}"
+                                            f"tool on {target_type}: {spawn_failure}",
+                                            reason=FailureReason(
+                                                ReasonCode.COULD_NOT_START
+                                            ),
                                         )
                                     # Next, a run whose response kept a flag that says
                                     # it did not finish: a timeout (or a stop that did
@@ -1690,16 +1918,24 @@ class ScannerExecutor:
                                         )
                                         kept_timeout = kept
                                     elif kept is not None:
+                                        kept_values = self._plugin_environment_values(
+                                            scanner_plugin
+                                        )
+                                        kept_limit = _timed_out_after(scanner_plugin)
                                         raise ScannerError(
                                             _unfinished_run_reason(
                                                 scanner_config_name,
                                                 target_type,
                                                 kept,
-                                                _timed_out_after(scanner_plugin),
-                                                self._plugin_environment_values(
-                                                    scanner_plugin
-                                                ),
-                                            )
+                                                kept_limit,
+                                                kept_values,
+                                            ),
+                                            reason=_kept_flag_reason(
+                                                kept,
+                                                scanner_plugin,
+                                                kept_limit,
+                                                kept_values,
+                                            ),
                                         )
                                     # And for a tool that ran to completion when ASH
                                     # could not record its output: the exit code is
@@ -1723,7 +1959,10 @@ class ScannerExecutor:
                                         raise ScannerError(
                                             f"{scanner_config_name} ran on {target_type}, "
                                             "but ASH could not record the scanner's "
-                                            f"output: {post_run_error}"
+                                            f"output: {post_run_error}",
+                                            reason=FailureReason(
+                                                ReasonCode.OUTPUT_NOT_RECORDED
+                                            ),
                                         )
                                     # Inside the scope: this runs the scanner's own
                                     # binary (`grype db status`), which is that
@@ -1883,6 +2122,15 @@ class ScannerExecutor:
                     # On the row as well as in raw_results: the row is what says why
                     # it is ERROR (a rejected exit code, a timeout, a missing file).
                     container.add_error(err_str)
+                    # And the short why the reports show, read in the order the
+                    # headline above reads the same facts (_failure_reason). None
+                    # when nothing says, and the reports then read the first
+                    # sentence of the error as they always did.
+                    failure_reason = _failure_reason(
+                        e, scanner_plugin, environment_values
+                    )
+                    if failure_reason is not None:
+                        _file_reason(container, failure_reason)
                     # Persisted failure text: ASH's own message first, then the
                     # tool's recorded lines. Every text line is redacted and
                     # then writes the home directory as a tilde, one decision
@@ -1986,6 +2234,7 @@ class ScannerExecutor:
                         ASH_LOGGER.error(no_result, extra=NO_MARKUP)
                         # On the row too, so the row says why it is ERROR.
                         container.add_error(no_result)
+                        _file_reason(container, FailureReason(ReasonCode.NO_RESULT))
                         raw_results = {
                             "errors": [
                                 (
@@ -2102,6 +2351,11 @@ class ScannerExecutor:
                                     f"{scanner_config_name} returned a result on "
                                     f"{target_type} that holds no SARIF run, so there is "
                                     "nothing to grade",
+                                    reason=FailureReason(
+                                        ReasonCode.RESULT_UNGRADABLE,
+                                        "its SARIF result holds no run, so there is "
+                                        "nothing to grade",
+                                    ),
                                 )
                             # A result that states no level is read at the level
                             # SARIF gives it (the rule's default, else warning)
@@ -2188,6 +2442,8 @@ class ScannerExecutor:
                                     environment_values = (
                                         self._plugin_environment_values(scanner_plugin)
                                     )
+                                    # The reason does not repeat the status: it is
+                                    # the plugin's own text.
                                     _refuse_to_grade(
                                         container,
                                         text_without_values(
@@ -2196,6 +2452,11 @@ class ScannerExecutor:
                                             f"{status!r}, which does not say "
                                             "its tool completed, so it was not graded",
                                             environment_values,
+                                        ),
+                                        reason=FailureReason(
+                                            ReasonCode.RESULT_UNGRADABLE,
+                                            "its result's status does not say its tool "
+                                            "completed, so it was not graded",
                                         ),
                                     )
                                 elif not container.errors and not any(
@@ -2208,6 +2469,11 @@ class ScannerExecutor:
                                         container,
                                         f"{scanner_config_name} reported that its run "
                                         f"on {target_type} failed without saying why",
+                                        reason=FailureReason(
+                                            ReasonCode.RUN_FAILED,
+                                            "it reported that its run failed without "
+                                            "saying why",
+                                        ),
                                     )
                             elif not (
                                 "status" in raw_results
@@ -2223,6 +2489,11 @@ class ScannerExecutor:
                                     f"{target_type} that could not be graded: it is not "
                                     "SARIF and carries no status, severity_counts or "
                                     "findings",
+                                    reason=FailureReason(
+                                        ReasonCode.RESULT_UNGRADABLE,
+                                        "its result is not SARIF and carries no "
+                                        "status, severity_counts or findings",
+                                    ),
                                 )
                             else:
                                 if "severity_counts" in raw_results:
@@ -2283,6 +2554,10 @@ class ScannerExecutor:
                                 f"{target_type} that could not be graded: a "
                                 f"{type(raw_results).__name__}, not SARIF, CycloneDX or "
                                 "a dict",
+                                reason=FailureReason(
+                                    ReasonCode.RESULT_UNGRADABLE,
+                                    "its result is not SARIF, CycloneDX or a dict",
+                                ),
                             )
                     except Exception as grading_error:
                         # Redacted as the per-target handler redacts: the text
@@ -2291,12 +2566,18 @@ class ScannerExecutor:
                             scanner_plugin
                         )
                         described = error_text(grading_error, environment_values)
-                        reason = text_without_values(
+                        refusal = text_without_values(
                             f"{scanner_config_name} returned a result on "
                             f"{target_type} that could not be graded: {described}",
                             environment_values,
                         )
-                        _refuse_to_grade(container, reason)
+                        # The exception's text is not in the reason: it quotes
+                        # what the result held.
+                        _refuse_to_grade(
+                            container,
+                            refusal,
+                            reason=FailureReason(ReasonCode.RESULT_UNGRADABLE),
+                        )
                         if isinstance(
                             container.raw_results, (SarifReport, CycloneDXReport)
                         ):
@@ -2312,7 +2593,7 @@ class ScannerExecutor:
                             # results. Written as the failure handlers write
                             # theirs, so the processor files it the same way.
                             container.raw_results = {
-                                "errors": [home_as_tilde(reason)],
+                                "errors": [home_as_tilde(refusal)],
                                 "status": "failed",
                                 "exception": home_as_tilde(described),
                             }
@@ -2453,6 +2734,10 @@ class ScannerExecutor:
                         container.status = ScannerStatus.ERROR
                         for message in databases_absent:
                             container.add_error(message)
+                        # The messages name the databases; the reason counts them.
+                        _file_reason(
+                            container, _absent_database_reason(len(databases_absent))
+                        )
 
                     # A disabled scanner's row was graded SKIPPED above and is not
                     # re-graded: determine_status knows nothing of the config.
@@ -2503,6 +2788,10 @@ class ScannerExecutor:
                                 ]
                                 for record in enforced:
                                     container.add_error(record.message())
+                                _file_reason(
+                                    container,
+                                    FailureReason(ReasonCode.CONTENT_DATABASE_STALE),
+                                )
                     # A target the scanner's tool never evaluated is not a clean
                     # result either, whatever the failure type: a scanner that
                     # names unevaluated targets keeps the evaluated targets'
@@ -2548,6 +2837,18 @@ class ScannerExecutor:
                             ScannerStatus.SKIPPED,
                         ):
                             container.status = ScannerStatus.ERROR
+                    if unevaluated and container.status == ScannerStatus.ERROR:
+                        # A count and never the names: they are the plugin's own
+                        # text and can be paths. A row already ERROR for another
+                        # cause keeps that cause's reason (the first one filed).
+                        _file_reason(
+                            container,
+                            FailureReason(
+                                ReasonCode.NOT_EVALUATED,
+                                "no rule was evaluated against "
+                                f"{len(unevaluated)} of its target(s)",
+                            ),
+                        )
                     # A tool-level cause recorded for the run is never dropped by
                     # the per-target accounting. A timeout that killed one
                     # target's run among others that rendered used to surface
@@ -2589,6 +2890,12 @@ class ScannerExecutor:
                         )
                         if container.status != ScannerStatus.MISSING:
                             container.status = ScannerStatus.ERROR
+                            _file_reason(
+                                container,
+                                _timeout_reason(
+                                    scanner_plugin, timed_out_after, environment_values
+                                ),
+                            )
                     elif kept_timeout is not None and not cause_recorded:
                         # The run kept its timeout flag and recorded no limit:
                         # the recorder sets the flag before the limit and can
@@ -2615,6 +2922,15 @@ class ScannerExecutor:
                         )
                         if container.status != ScannerStatus.MISSING:
                             container.status = ScannerStatus.ERROR
+                            _file_reason(
+                                container,
+                                _kept_flag_reason(
+                                    kept_timeout,
+                                    scanner_plugin,
+                                    None,
+                                    environment_values,
+                                ),
+                            )
                     if kept_post_run_error is not None:
                         # The run that timed out could not record its output
                         # either; the report stayed, and this is the detail.
@@ -2818,6 +3134,9 @@ class ScannerExecutor:
                 exception=e,
                 values=environment_values,
             )
+            failure_reason = _scanner_failure_reason(e, environment_values)
+            if failure_reason is not None:
+                _file_reason(failure_container, failure_reason)
             failure_container.raw_results = {
                 "errors": [home_as_tilde(error_msg)],
                 "status": "failed",
@@ -2883,6 +3202,7 @@ class ScannerExecutor:
                         scanner_name,
                         errors=[f"Scanner {scanner_name} failed with no results"],
                     )
+                    _file_reason(failure_container, FailureReason(ReasonCode.NO_RESULT))
                     failure_container.raw_results = {
                         "errors": [f"Scanner {scanner_name} failed with no results"],
                         "status": "failed",
@@ -3008,6 +3328,10 @@ class ScannerExecutor:
                         exception=e,
                         values=environment_values,
                     )
+                # A refiled row that holds a reason keeps it (the first one filed).
+                failure_reason = _scanner_failure_reason(e, environment_values)
+                if failure_reason is not None:
+                    _file_reason(failure_container, failure_reason)
                 failure_container.raw_results = {
                     "errors": [
                         home_as_tilde(f"Scanner {scanner_name} failed: {described}")
@@ -3220,6 +3544,9 @@ class ScannerExecutor:
                             scanner_name,
                             errors=[f"Scanner {scanner_name} failed with no results"],
                         )
+                        _file_reason(
+                            failure_container, FailureReason(ReasonCode.NO_RESULT)
+                        )
                         failure_container.raw_results = {
                             "errors": [
                                 f"Scanner {scanner_name} failed with no results"
@@ -3372,6 +3699,10 @@ class ScannerExecutor:
                             exception=e,
                             values=environment_values,
                         )
+                    # As in run_sequential.
+                    failure_reason = _scanner_failure_reason(e, environment_values)
+                    if failure_reason is not None:
+                        _file_reason(failure_container, failure_reason)
                     failure_container.raw_results = {
                         "errors": [
                             home_as_tilde(
