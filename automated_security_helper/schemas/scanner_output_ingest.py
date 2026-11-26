@@ -307,14 +307,15 @@ class IngestRecord:
             phrases.append(f"and {len(ordered) - 3} more kinds")
         return ", ".join(phrases)
 
-    def notifications(self) -> list[dict]:
+    def notifications(self, source: str | None = None) -> list[dict]:
         """The record as SARIF notifications, level ``warning``.
 
         A ``warning`` is not read by the unevaluated-rules gate, which fails a
         run only on ``error``; the repairs say so in the report without failing
-        a scan that kept every finding.
+        a scan that kept every finding. *source* is the scanner's name, as for
+        ``sentence``.
         """
-        sentence = self.sentence()
+        sentence = self.sentence(source)
         if sentence is None:
             return []
         return [
@@ -908,6 +909,7 @@ def _ingest(
     classify: Classifier,
     format_name: str,
     count_results: Callable[[Any], int],
+    names_the_format: Callable[[Any], bool],
 ) -> Any:
     record.format_name = format_name
     try:
@@ -917,6 +919,12 @@ def _ingest(
     else:
         record.results_read += count_results(raw)
         return report
+    if not names_the_format(raw):
+        # Both models make every key optional, so a JSON object that is not this
+        # format at all (a tool's error object, say) holds only keys the model
+        # does not define. Dropping them all would leave an empty report, which a
+        # reader takes for a scan that found nothing.
+        raise last
     try:
         doc = copy.deepcopy(raw)
     except RecursionError:
@@ -960,6 +968,16 @@ def _cyclonedx_component_count(raw: Any) -> int:
     return 0
 
 
+def _is_a_sarif_log(raw: Any) -> bool:
+    """A SARIF log carries ``runs`` or ``version``; the spec requires both."""
+    return isinstance(raw, dict) and ("runs" in raw or "version" in raw)
+
+
+def _is_a_cyclonedx_bom(raw: Any) -> bool:
+    """A CycloneDX BOM carries ``bomFormat`` or ``specVersion``; the spec requires both."""
+    return isinstance(raw, dict) and ("bomFormat" in raw or "specVersion" in raw)
+
+
 def ingest_sarif(raw: Any, record: IngestRecord) -> SarifReport:
     """*raw*, a tool's SARIF as parsed JSON, as a ``SarifReport``.
 
@@ -967,8 +985,9 @@ def ingest_sarif(raw: Any, record: IngestRecord) -> SarifReport:
     record stays empty. A document the model refuses is repaired on a copy, part
     by part, as the module docstring describes, and each repair is noted; a
     document that still cannot be read raises the model's own last
-    ``ValidationError``, naming only the errors that remain. *raw* is not
-    changed.
+    ``ValidationError``, naming only the errors that remain. A JSON object that
+    carries neither ``runs`` nor ``version`` is not a SARIF log and is refused as
+    it is. *raw* is not changed.
     """
     return _ingest(
         raw,
@@ -977,11 +996,16 @@ def ingest_sarif(raw: Any, record: IngestRecord) -> SarifReport:
         classify=_classify_sarif,
         format_name="SARIF",
         count_results=_sarif_result_count,
+        names_the_format=_is_a_sarif_log,
     )
 
 
 def ingest_cyclonedx(raw: Any, record: IngestRecord) -> CycloneDXReport:
-    """:func:`ingest_sarif` for a CycloneDX document, with its own part table."""
+    """:func:`ingest_sarif` for a CycloneDX document, with its own part table.
+
+    A JSON object that carries neither ``bomFormat`` nor ``specVersion`` is not a
+    BOM and is refused as it is.
+    """
     return _ingest(
         raw,
         record,
@@ -989,4 +1013,5 @@ def ingest_cyclonedx(raw: Any, record: IngestRecord) -> CycloneDXReport:
         classify=_classify_cyclonedx,
         format_name="CycloneDX",
         count_results=_cyclonedx_component_count,
+        names_the_format=_is_a_cyclonedx_bom,
     )

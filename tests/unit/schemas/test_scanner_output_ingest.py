@@ -696,6 +696,50 @@ def test_a_document_of_another_shape_is_refused_not_guessed_at():
             ingest_sarif(raw, IngestRecord())
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"not": "sarif"},
+        {"error": "the tool could not read the template", "code": 2},
+        {"$schema": "https://example.com/other.json", "note": "x"},
+        {"results": [{"ruleId": "r"}]},
+    ],
+    ids=["one unknown key", "a tool's error object", "another schema", "a result list"],
+)
+def test_a_json_object_that_is_not_a_sarif_log_is_refused_and_not_repaired_to_an_empty_one(
+    raw,
+):
+    """Every key such a document holds is one the model does not define, so
+    dropping them would leave a report with no run, which a reader takes for a
+    scan that found nothing."""
+    record = IngestRecord()
+
+    with pytest.raises(ValidationError):
+        ingest_sarif(copy.deepcopy(raw), record)
+
+    assert record.is_empty
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"version": "2.1.0", "runs": [], "tool_note": "x"},
+        {"runs": [], "tool_note": "x"},
+        {"version": "2.1.0", "tool_note": "x"},
+    ],
+    ids=["version and runs", "runs only", "version only"],
+)
+def test_a_sarif_log_with_a_key_of_the_tools_own_is_still_repaired(raw):
+    record = IngestRecord()
+
+    report = ingest_sarif(copy.deepcopy(raw), record)
+
+    assert not report.runs
+    assert [(e["action"], e["code"]) for e in record.summary()["elements"]] == [
+        ("dropped", "unknown_key")
+    ]
+
+
 # --------------------------------------------------------------------------- #
 # What the record holds
 # --------------------------------------------------------------------------- #
@@ -1201,6 +1245,22 @@ def test_a_part_of_the_sbom_the_table_does_not_admit_is_refused(mutate):
 
     with pytest.raises(ValidationError):
         ingest_cyclonedx(doc, record)
+
+    assert record.is_empty
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [{"not": "cyclonedx"}, {"error": "no image", "code": 2}, {"results": []}],
+    ids=["one unknown key", "a tool's error object", "a result list"],
+)
+def test_a_json_object_that_is_not_an_sbom_is_refused_and_not_repaired_to_an_empty_one(
+    raw,
+):
+    record = IngestRecord()
+
+    with pytest.raises(ValidationError):
+        ingest_cyclonedx(copy.deepcopy(raw), record)
 
     assert record.is_empty
 

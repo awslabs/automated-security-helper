@@ -31,6 +31,11 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Invocation,
     SarifReport,
 )
+from automated_security_helper.schemas.scanner_output_ingest import (
+    IngestRecord,
+    ingest_sarif,
+    read_json_tolerant,
+)
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.error_text import (
     error_text,
@@ -115,6 +120,18 @@ class _AshInvocation(Invocation):
     """
 
     _tool_said_unsuccessful: bool = PrivateAttr(default=False)
+
+
+def _notification_text(note: Any) -> Optional[str]:
+    """The message text of a notification given as a model or as a mapping."""
+    message = (
+        note.get("message")
+        if isinstance(note, dict)
+        else getattr(note, "message", None)
+    )
+    if isinstance(message, dict):
+        return message.get("text")
+    return getattr(getattr(message, "root", message), "text", None)
 
 
 def _error_notifications(results_file: Path, values: Iterable[str] = ()) -> str:
@@ -581,6 +598,11 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     _scan_launch: Optional[Tuple[Optional[str], Optional[str]]] = PrivateAttr(
         default=None
     )
+    #: What reading this target's report changed (parts of it repaired so the
+    #: model could hold it). Started again by ``scan()`` and ``scan_image()``,
+    #: and by a scanner that reads its output in its own ``scan()``; read through
+    #: :attr:`output_ingest_record`. Holds no value from the report.
+    _ingest_record: IngestRecord = PrivateAttr(default_factory=IngestRecord)
 
     # --- Suppression-scope hooks (utils/suppression_scope_registry.py) ---
     # A suppression's scope.engines block for this scanner is opaque to ASH's
@@ -1944,6 +1966,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 tool_said_unsuccessful = True
         if tool_notifications and "toolExecutionNotifications" not in extras:
             extras = {**extras, "toolExecutionNotifications": tool_notifications}
+        # What reading the tool's report repaired, said in the report itself as a
+        # warning (the unevaluated-rules gate reads only an error).
+        extras = self._with_the_ingest_note(extras)
         ash_record = _AshInvocation(  # type: ignore[call-arg]
             commandLine=command_line,
             arguments=recorded_arguments,
@@ -2029,6 +2054,11 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
         Subclasses may override to add their own empty-file detection or
         alternative parsing, but must preserve the missing-file raise.
+
+        A byte-order mark, bytes that are not UTF-8 and a control character
+        inside a string no longer refuse the file: each is read as the tool
+        meant it and noted on :attr:`output_ingest_record`
+        (``schemas.scanner_output_ingest``). Any other JSON error is raised.
         """
         # Under fs_guard's reader semantics (``read_bytes_at_most``): no link is
         # followed at the name, a FIFO left there cannot block the open or the
@@ -2045,10 +2075,58 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 f"its results file is larger than {_RESULTS_FILE_READ_LIMIT} bytes, "
                 "the most this scanner reads, so it is not graded"
             )
-        content = data.decode("utf-8")
-        if not content or content.strip() == "":
-            return None
-        return json.loads(content)
+        return read_json_tolerant(data, self._ingest_record)
+
+    @property
+    def output_ingest_record(self) -> Optional[dict]:
+        """What reading this target's report repaired, as plain JSON.
+
+        ``None`` when nothing was changed. The counts and the named elements
+        carry no value from the report and no path, host or user name (see
+        ``schemas.scanner_output_ingest``), so the record is safe to put in a
+        results file. It describes the last target this instance scanned.
+        """
+        return self._ingest_record.summary()
+
+    def _start_ingest_record(self) -> None:
+        """Start a new record for the target about to be scanned.
+
+        ``scan()`` and ``scan_image()`` call it first. A scanner that reads its
+        output in its own ``scan()`` calls it where that method starts, so the
+        record never carries the previous target's repairs.
+        """
+        self._ingest_record = IngestRecord()
+
+    def _ingest_source_name(self) -> str:
+        """The scanner's name as the record's sentence says it."""
+        if self.config is not None and getattr(self.config, "name", None):
+            return str(self.config.name)
+        return self.__class__.__name__
+
+    def _say_what_the_ingest_repaired(self, target_type: Any) -> None:
+        """Log what reading the report repaired, once, at WARNING; nothing if
+        nothing was repaired. The line carries counts and kinds only."""
+        sentence = self._ingest_record.sentence(self._ingest_source_name())
+        if sentence is not None:
+            self._plugin_log(sentence, target_type=target_type, level=logging.WARNING)
+
+    def _with_the_ingest_note(self, extras: Dict[str, Any]) -> Dict[str, Any]:
+        """*extras* with the warning for what reading the report repaired.
+
+        Added after the scanner's own extras, so a scanner that names its own
+        ``toolExecutionNotifications`` cannot drop it, and added once: when
+        ``_inject_invocation`` runs again on a report, ASH's earlier record
+        already carries it.
+        """
+        notes = self._ingest_record.notifications(self._ingest_source_name())
+        if not notes:
+            return extras
+        carried = list(extras.get("toolExecutionNotifications") or [])
+        said = {_notification_text(note) for note in carried}
+        added = [note for note in notes if _notification_text(note) not in said]
+        if not added:
+            return extras
+        return {**extras, "toolExecutionNotifications": [*carried, *added]}
 
     def _handle_empty_results(self) -> SarifReport:
         """Decide what an empty results file means, after an accepted exit code.
@@ -2423,6 +2501,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self.output = []
         # The record of which of the error lines are ASH's own goes with them.
         self._reset_errors()
+        # And what reading this target's report repairs: an empty tree or a
+        # skipped scan must not report the previous target's repairs.
+        self._start_ingest_record()
 
         if self._target_is_empty(target):
             self._plugin_log(
@@ -2603,7 +2684,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 return self._post_process_sarif(report, final_args, target)
 
             try:
-                sarif_report: SarifReport = SarifReport.model_validate(raw)
+                sarif_report: SarifReport = ingest_sarif(raw, self._ingest_record)
             except Exception as e:
                 # Not returned as it is: the executor would grade a dict without a
                 # verdict on its zero findings, which is how a clean scan reads.
@@ -2611,6 +2692,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                     f"its results file is not SARIF ASH can read, so its findings "
                     f"could not be graded: {error_text(e)}"
                 )
+            self._say_what_the_ingest_repaired(target_type)
             if not sarif_report.runs:
                 # Every field of a SARIF log is optional, so `{}` validates. No run
                 # is no scan; see _handle_empty_results. Checked on the report as
@@ -2773,6 +2855,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self.end_time = None
         self.output = []
         self._reset_errors()
+        self._start_ingest_record()
         self._staged_scan_files = None
         self._staged_all_filtered = False
         self._nothing_scanned_reason = None
@@ -2849,12 +2932,13 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 return self._post_process_sarif(report, final_args, anchor)
 
             try:
-                sarif_report: SarifReport = SarifReport.model_validate(raw)
+                sarif_report: SarifReport = ingest_sarif(raw, self._ingest_record)
             except Exception as e:
                 raise ScannerError(
                     f"its results file is not SARIF ASH can read, so its findings "
                     f"could not be graded: {error_text(e)}"
                 )
+            self._say_what_the_ingest_repaired(image_target_type)
             if not sarif_report.runs:
                 raise ScannerError(
                     "its results file holds no SARIF run, so there is nothing to grade"
