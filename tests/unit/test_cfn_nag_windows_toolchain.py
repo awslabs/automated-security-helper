@@ -64,7 +64,7 @@ Git for Windows ships the same shell, being MSYS2-derived, so promoting Git Bash
 is not a fix either.
 
 Measured on ``scan (python-local, windows-latest)`` at 1c492f28, and identically
-on the ``- Community Plugins`` cell, which is itself the evidence that the cause
+on the ``- Alpha Plugins`` cell, which is itself the evidence that the cause
 is environmental rather than config-specific::
 
     .../msys64/usr/bin/ash: 0: Illegal option --          <- ash --version
@@ -118,10 +118,10 @@ WINDOWS_SCAN_STEP = "Validate ASH using Python Local (Windows)"
 PROMOTE_STEP = "Put ASH's entry point ahead of the MSYS2 toolchain (Windows)"
 
 # A command invocation of ASH, anchored at the start of a line so that a path
-# argument such as `--config .ash/.ash_community_plugins.yaml` is not counted, and
-# allowing pwsh's call operator so `& ashx report` is. Both names count: `ashx` is
-# the canonical command, and the deprecated `ash` alias is the one MSYS2 shadows,
-# so a step still calling it is exactly what these tests exist to find.
+# argument such as `--config .ash/.ash_alpha_plugins.yaml` is not counted, and
+# allowing pwsh's call operator so `& ashx results report` is. Both names count:
+# `ashx` is the canonical command, and the deprecated `ash` alias is the one MSYS2
+# shadows, so a step still calling it is exactly what these tests exist to find.
 ASH_INVOCATION = re.compile(r"^\s*(?:&\s*)?ashx?\s", re.MULTILINE)
 
 
@@ -233,7 +233,16 @@ def _runs_on_python_local(step: dict) -> bool:
     # Only a top-level conjunct can exclude the leg; an `||` could re-admit it.
     if "inputs.method != 'python-local'" in condition and "||" not in condition:
         return False
-    for method in ("python-container", "bash", "powershell", "sh-helper"):
+    other_methods = ("python-container", "bash", "powershell", "sh-helper")
+    if "||" in condition:
+        # A disjunction leaves python-local out only when every alternative is a
+        # method equality for another method; `a || python-local` stays in scope.
+        alternatives = [part.strip() for part in condition.split("||")]
+        return not all(
+            any(part == f"inputs.method == '{method}'" for method in other_methods)
+            for part in alternatives
+        )
+    for method in other_methods:
         if f"inputs.method == '{method}'" in condition:
             return False
     return True
@@ -321,7 +330,7 @@ def test_every_windows_ash_invocation_follows_the_promotion(steps):
     # Control: the steps this is protecting must actually be found by the same
     # detector, or the test above would pass by matching nothing at all. The three
     # in-window pwsh steps call `ash` (the scan, the plugin-error check and the
-    # community hadolint check), so the count is three.
+    # alpha hadolint check), so the count is three.
     callers = [
         step.get("name")
         for step in steps[promote + 1 :]
@@ -436,3 +445,18 @@ def test_the_unix_setup_ruby_step_still_excludes_windows(steps):
     ]
     assert len(unix) == 1, f"expected one non-Windows setup-ruby step, got {len(unix)}"
     assert "runner.os != 'Windows'" in unix[0]["if"]
+
+
+@pytest.mark.parametrize(
+    "condition,in_scope",
+    [
+        ("inputs.method == 'bash' || inputs.method == 'sh-helper'", False),
+        ("inputs.method == 'sh-helper' || inputs.method == 'python-local'", True),
+        ("inputs.method == 'bash' || always()", True),
+        ("inputs.method == 'bash'", False),
+        ("inputs.method != 'python-local'", False),
+    ],
+)
+def test_runs_on_python_local_reads_a_disjunction_whole(condition, in_scope):
+    """A disjunction is out of scope only when every alternative names another method."""
+    assert _runs_on_python_local({"if": condition}) is in_scope

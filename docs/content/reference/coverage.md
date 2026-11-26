@@ -6,12 +6,12 @@ reports `SKIPPED` or `PASSED` with no findings. [Scanners](scanners.md) lists ea
 scanner's tool, version, and options, and [Choose scanners](../how-to/choose-scanners.md)
 shows how to turn them on and off.
 
-Community plugins run only when you load their module with `ash_plugin_modules` or
-`--ash-plugin-modules`; see [Community plugins](../docs/plugins/community/index.md).
+Alpha plugins run only when you load their module with `ash_plugin_modules` or
+`--ash-plugin-modules`; see [Alpha plugins](../docs/plugins/alpha/index.md).
 
 ## By stack {#by-stack}
 
-| What your repository has | Built-in scanners | Community plugins |
+| What your repository has | Built-in scanners | Alpha plugins |
 |---|---|---|
 | Python code | bandit, opengrep | snyk-code |
 | JavaScript and TypeScript code | opengrep | snyk-code |
@@ -30,6 +30,7 @@ Community plugins run only when you load their module with `ash_plugin_modules` 
 | Composite actions (`action.yml`) | zizmor | guarddog |
 | Secrets, in any file | detect-secrets, gitleaks | betterleaks, ferret-scan (sensitive data), trivy-repo |
 | A software bill of materials | syft | |
+| MCP server config files (`.mcp.json`, `.cursor/mcp.json`, `.codex/config.toml` and the others the [MCP config page](../docs/plugins/builtin/mcp-config.md) lists) | mcp-config, semgrep, opengrep (semgrep and opengrep on the shell scripts the converter writes for them) | |
 | Jupyter notebooks | bandit, detect-secrets, gitleaks (on the converted script, bandit only for a Python notebook; see [Converted files](#converted-files)) | |
 | `.zip`, `.tar`, and `.gz` archives | detect-secrets, gitleaks (on every extracted file; see [Converted files](#converted-files)) | |
 
@@ -68,6 +69,7 @@ them to the tool.
 | detect-secrets | Secrets | Selected files: every file in the scan set except generated lockfiles | yes | yes |
 | gitleaks | Secrets | Whole directory: the files on disk, not git history | no | no |
 | grype | SCA | Whole directory: the packages it catalogs from manifests and lockfiles | no | no |
+| mcp-config | SAST | Selected files: the repo-local MCP server config files (`.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `.codex/config.toml` and the others the [MCP config page](../docs/plugins/builtin/mcp-config.md) lists), read in process | yes | no |
 | npm-audit | SCA | Selected files: each `package.json` that has a lockfile beside it | no | yes |
 | opengrep | SAST | Whole directory, with ASH's bundled rules and the `p/ci` ruleset | no | no |
 | syft | SBOM | Whole directory: builds an SBOM and reports no findings | no | no |
@@ -75,7 +77,7 @@ them to the tool.
 | zizmor | SAST | Selected files: GitHub Actions workflows and composite actions | yes | no |
 | betterleaks | Secrets | Whole directory: the files on disk, not git history | no | no |
 | ferret-scan | Secrets | Whole directory, including files `.gitignore` excludes | no | no |
-| guarddog | SCA | Selected files: for each directory that holds a package manifest (`setup.py`, `package.json`, `go.mod`, `action.yml`, a `*.gemspec`, `Cargo.toml`, and the others the [GuardDog page](../docs/plugins/community/guarddog-plugin.md) lists), a temporary copy of the files in the scan set under it | yes | no |
+| guarddog | SCA | Selected files: for each directory that holds a package manifest (`setup.py`, `package.json`, `go.mod`, `action.yml`, a `*.gemspec`, `Cargo.toml`, and the others the [GuardDog page](../docs/plugins/alpha/guarddog-plugin.md) lists), a temporary copy of the files in the scan set under it | yes | no |
 | hadolint | IaC | Selected files: Dockerfiles, named `Dockerfile`, `Containerfile`, `*.Dockerfile`, or `Dockerfile.*`, with that exact capitalization | no | no |
 | snyk-code | SAST | Whole directory, sent to Snyk's service | no | no |
 | trivy-repo | SCA | Whole directory: `trivy repository` with the vulnerability, secret, misconfiguration, and license scanners | no | no |

@@ -36,7 +36,7 @@ def root(tmp_path, monkeypatch):
 
 @pytest.fixture
 def config_path(tmp_path):
-    return tmp_path / ".ash" / ".ash.yaml"
+    return tmp_path / ".ash.yaml"
 
 
 def _unfolded(output: str) -> str:
@@ -210,8 +210,8 @@ class TestWizardCommand:
         raw = config_path.read_text()
         assert "ASH_OFFLINE" not in raw
 
-    def test_wizard_adds_community_plugin_modules(self, cli_runner, config_path):
-        """New community plugin modules are written to the config.
+    def test_wizard_adds_alpha_plugin_modules(self, cli_runner, config_path):
+        """New alpha plugin modules are written to the config.
 
         The typed module's top-level package ends in ``_ash_plugins``, which puts
         it inside ASH's plugin namespace (plugins/loader.py's rule): the wizard
@@ -382,7 +382,7 @@ class TestWizardCommand:
         """The count survives a space in the path: the comparison unfolds the
         searched path as it unfolds the output, so a name whitespace sits in
         is still found in both panels rather than counted 0."""
-        config_path = tmp_path / "has space" / ".ash" / ".ash.yaml"
+        config_path = tmp_path / "has space" / ".ash.yaml"
         config_path.parent.mkdir(parents=True)
         config_path.write_text(yaml.dump({"project_name": "seed-project"}))
 

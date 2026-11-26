@@ -477,7 +477,7 @@ def test_scanner_facets_check_can_fail(gate, tmp_path, monkeypatch):
 def test_scanner_check_passes_on_the_generated_page_and_fails_without_a_real_row(
     gate, tmp_path, monkeypatch
 ):
-    """Against the committed page. The community scanners are rows there and are not
+    """Against the committed page. The alpha scanners are rows there and are not
     fields of ScannerConfigSegment, so the code side must include them: deleting
     trivy-repo's row must fail, and the page as generated must pass."""
     assert gate.check_scanners() == []

@@ -75,6 +75,16 @@ class SandboxRequirements:
             and read by every later run. For a tool that would otherwise reach for
             a shared cache that backend keeps out of reach: cdk-nag turns jsii's
             package cache (``~/Library/Caches/com.amazonaws.jsii``) off.
+        sandbox_exec_cache_env: Variables that, under sandbox-exec only, point at a
+            private, empty directory for the spawn, for a tool that derives a
+            writable cache location from them and offers no setting of its own.
+            Go's ``os.UserCacheDir`` reads ``HOME`` alone on macOS and ignores
+            ``XDG_CACHE_HOME``, so betterleaks' regular-expression engine
+            (go-re2 over wazero) keeps its compilation cache under
+            ``$HOME/Library/Caches/com.github.wasilibs``, a place the profile
+            denies; the engine then crashes instead of running without a cache.
+            The other backends already give the tool a home it can write, or an
+            overlay, and leave the variable alone.
         unpack_dir_env: The tool unpacks itself and runs what it unpacked, at a
             location this environment variable decides (opengrep's macOS binary,
             built with Nuitka's onefile mode, unpacks to
@@ -84,6 +94,16 @@ class SandboxRequirements:
             executable for it alone and removed afterwards, so nothing it unpacks
             reaches another run. Other backends give the tool a private home
             directory and do not restrict exec, and leave the variable alone.
+        git_safe_directory: The tool runs ``git`` itself on the directory it scans
+            and fails when git refuses a directory another user owns (opengrep's
+            ``git ls-files``). ``build_scanner_policy`` computes the directories git
+            should trust from the scan target (``safe_directories_for``: the target,
+            and the top of its checkout when that ``.git`` has the target's owner),
+            and ``filter_env`` turns them into ``GIT_CONFIG_*`` entries for that
+            child alone. No other ``GIT_CONFIG_*`` variable passes, so the child
+            never gets a ``safe.directory`` ASH did not name, and never ``*``; an
+            environment list that names a ``GIT_CONFIG_*`` variable is refused for
+            this tool.
         read_paths_require_grant: ``read_paths`` and ``cache_paths`` follow the
             scanner's options, which the scanned repository can write (a rules
             file or baseline path, for example). ``read_paths`` are mounted only
@@ -120,7 +140,9 @@ class SandboxRequirements:
     network_requires_grant: bool = False
     system_trust_roots: bool = False
     sandbox_exec_env: Tuple[Tuple[str, str], ...] = ()
+    sandbox_exec_cache_env: Tuple[str, ...] = ()
     unpack_dir_env: Optional[str] = None
+    git_safe_directory: bool = False
     read_paths_require_grant: bool = False
     env_requires_grant: bool = False
     read_path_env: Tuple[str, ...] = ()
@@ -187,6 +209,99 @@ CREDENTIAL_MARKERS = (
 #: A URL value that carries a user name and password before its host is a
 #: credential whatever the variable is called.
 _URL_USERINFO = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://[^/@\s]*@")
+
+#: Every ``GIT_CONFIG``-prefixed variable, and bare ``GIT_CONFIG``: the block
+#: (COUNT/KEY_n/VALUE_n), ``GIT_CONFIG_PARAMETERS`` (git's ``-c`` channel, the
+#: highest-precedence config), and ``GIT_CONFIG_GLOBAL``/``_SYSTEM``/``_NOSYSTEM``.
+_GIT_CONFIG_NAME = re.compile(r"^GIT_CONFIG(_|$)")
+
+
+def _usable_safe_directory(entry: object) -> bool:
+    """An absolute path that names one directory: no glob, no filesystem root."""
+    if not isinstance(entry, str) or not entry or "\x00" in entry or "\n" in entry:
+        return False
+    if entry.strip() == "*" or "*" in entry or not os.path.isabs(entry):
+        return False
+    return Path(entry).parent != Path(entry)  # not a filesystem root
+
+
+def safe_directories_for(target: Path) -> List[str]:
+    """The directories git may trust for a scan of ``target``, validated.
+
+    The real path of ``target``, and, when it sits in a checkout, the checkout's top:
+    the first parent holding a ``.git`` (a directory, or the file a linked work tree
+    and a submodule have). The top is named only when that ``.git`` entry belongs to
+    the user who owns ``target`` or to the effective uid (``os.lstat``, so a link
+    is not followed) and the
+    parent is a directory ``_usable_safe_directory`` admits, which a filesystem root
+    never is. A ``.git`` that fails either test ends the walk: git takes the first
+    ``.git`` it meets as the top, so a parent above it is not the checkout's. No
+    ``.git`` above ``target`` names nothing more, the conservative reading.
+
+    The one list both spawn paths read: ``build_scanner_policy`` stores it on the
+    sandbox policy, and the scanner's unsandboxed spawn calls this function itself.
+    """
+    real = Path(os.path.realpath(target))
+    named = [str(real)] if _usable_safe_directory(str(real)) else []
+    try:
+        owner = os.lstat(real).st_uid
+    except OSError:
+        return named
+    start = real if real.is_dir() else real.parent
+    for parent in (start, *start.parents):
+        git = parent / ".git"
+        if not os.path.lexists(git):
+            continue
+        try:
+            git_owner: int | None = os.lstat(git).st_uid
+            same_owner = git_owner in (owner, os.geteuid())
+        except OSError:
+            git_owner = None
+            same_owner = False
+        top = str(parent)
+        if same_owner and _usable_safe_directory(top) and top not in named:
+            named.append(top)
+        elif not same_owner:
+            from automated_security_helper.utils.log import ASH_LOGGER
+
+            ASH_LOGGER.debug(
+                "safe_directories_for: not naming %s: %s is owned by uid %s "
+                "(target owner %s, effective uid %s)",
+                top,
+                str(git),
+                git_owner,
+                owner,
+                os.geteuid(),
+            )
+        break
+    return named
+
+
+def git_config_env(
+    base: Mapping[str, str], safe_directories: Sequence[str]
+) -> Dict[str, str]:
+    """``GIT_CONFIG_*`` entries that keep ``base``'s block and add ``safe.directory``.
+
+    The block in ``base`` is kept whole when it is coherent (a numeric count and a
+    key and a value at every index below it) and the new entries follow it. A block
+    that is not coherent is dropped and the new entries start at index 0, so the
+    count never covers an index with nothing at it, which git refuses outright.
+    """
+    count = base.get("GIT_CONFIG_COUNT", "0")
+    index = int(count) if count.isascii() and count.isdigit() else 0
+    if not all(
+        f"GIT_CONFIG_KEY_{i}" in base and f"GIT_CONFIG_VALUE_{i}" in base
+        for i in range(index)
+    ):
+        index = 0
+    out: Dict[str, str] = {}
+    for directory in safe_directories:
+        out[f"GIT_CONFIG_KEY_{index}"] = "safe.directory"
+        out[f"GIT_CONFIG_VALUE_{index}"] = directory
+        index += 1
+    out["GIT_CONFIG_COUNT"] = str(index)
+    return out
+
 
 #: Proxy settings only matter, and are only passed, when the scanner has a network.
 #: ALL_PROXY too: curl, Go's net/http and Python's urllib read it where no
@@ -417,6 +532,12 @@ class SandboxPolicy:
     env_prefixes: Tuple[str, ...] = ()
     env_names: Tuple[str, ...] = ()
     extra_env: Dict[str, str] = field(default_factory=dict)
+    #: The scanner runs git on the directory it scans; see
+    #: ``SandboxRequirements.git_safe_directory``. ``safe_directories`` is the
+    #: validated list ``build_scanner_policy`` computed from the scan target
+    #: (``safe_directories_for``); ``filter_env`` writes it as ``GIT_CONFIG_*``.
+    git_safe_directory: bool = False
+    safe_directories: Tuple[str, ...] = ()
     #: Variables a backend points at a private writable directory when it mounts
     #: ``cache`` read-only, which is everywhere but bwrap's throwaway overlay.
     cache_env: Tuple[str, ...] = ()
@@ -424,6 +545,8 @@ class SandboxPolicy:
     scan_data: Tuple[Path, ...] = ()
     system_trust_roots: bool = False
     sandbox_exec_env: Dict[str, str] = field(default_factory=dict)
+    #: See ``SandboxRequirements.sandbox_exec_cache_env``.
+    sandbox_exec_cache_env: Tuple[str, ...] = ()
     unpack_dir_env: Optional[str] = None
     #: uv's tools-directory lock file, which ``uv tool run`` opens read-write before
     #: it looks for an installed tool. The file, not the directory. uv keeps nothing
@@ -460,6 +583,19 @@ class SandboxPolicy:
             parse_environment(self.environment)
         except ValueError as refused:
             raise SandboxUnavailable(str(refused)) from None
+        if self.git_safe_directory:
+            # The scanner's ``GIT_CONFIG_*`` block is written by ``filter_env`` from
+            # ``safe_directories``; a listed entry would be dropped silently or, with
+            # a value, contradict "no other GIT_CONFIG_* variable passes".
+            names, values = parse_environment(self.environment)
+            for name in (*names, *values):
+                if _GIT_CONFIG_NAME.match(name):
+                    raise SandboxUnavailable(
+                        f"the environment list names {name}, which {self.scanner_name} "
+                        "does not take: it runs git on the directory it scans, so ASH "
+                        "writes that scanner's GIT_CONFIG_* block itself. Remove the "
+                        "entry from the environment list."
+                    )
 
     @property
     def results_dir(self) -> Path:
@@ -477,6 +613,13 @@ class SandboxPolicy:
         # held to the same rules as a value the caller has.
         for key, value in {**env, **listed_values}.items():
             if key in DROPPED_ENV_NAMES:
+                continue
+            if self.git_safe_directory and _GIT_CONFIG_NAME.match(key):
+                # The caller's block, and the entries the scanner merged into it
+                # against that block, are not passed: the block is rebuilt below
+                # from the directories the policy names, so its count and indices
+                # agree with what the child receives. (The environment list may not
+                # name one of these for this scanner; ``__post_init__``.)
                 continue
             if key == "PYTHONPATH":
                 # Passed through for the workers ASH starts with its own
@@ -503,6 +646,8 @@ class SandboxPolicy:
             if _URL_USERINFO.match(value or ""):
                 continue
             kept[key] = value
+        if self.git_safe_directory and self.safe_directories:
+            kept.update(git_config_env(kept, self.safe_directories))
         kept["HOME"] = self.home.as_posix()
         kept.update(self.extra_env)
         return kept
@@ -1953,11 +2098,18 @@ def build_scanner_policy(
         env_prefixes=tuple(declared_prefixes),
         env_names=tuple(declared_names),
         extra_env=extra_env,
+        git_safe_directory=requirements.git_safe_directory,
+        safe_directories=(
+            tuple(safe_directories_for(scan_target))
+            if requirements.git_safe_directory and scan_target is not None
+            else ()
+        ),
         cache_env=cache_env,
         executable=tuple(executable),
         scan_data=tuple(scan_data),
         system_trust_roots=requirements.system_trust_roots,
         sandbox_exec_env=dict(requirements.sandbox_exec_env),
+        sandbox_exec_cache_env=requirements.sandbox_exec_cache_env,
         unpack_dir_env=requirements.unpack_dir_env,
         uv_tool_locks=tuple(_uv_tool_locks(uv_data)),
         unread=tuple(unread),

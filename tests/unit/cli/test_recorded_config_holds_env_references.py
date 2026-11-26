@@ -115,9 +115,9 @@ def _scan_args(debug: bool) -> List[str]:
 
 
 def _tree(root: Path, config: str) -> Path:
-    (root / "src" / ".ash").mkdir(parents=True)
+    (root / "src").mkdir(parents=True)
     (root / "src" / "app.py").write_text("print('hello')\n", encoding="utf-8")
-    (root / "src" / ".ash" / ".ash.yaml").write_text(config, encoding="utf-8")
+    (root / "src" / ".ash.yaml").write_text(config, encoding="utf-8")
     return root
 
 

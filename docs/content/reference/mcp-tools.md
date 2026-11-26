@@ -9,7 +9,7 @@
 
 This page is generated from the tools and resources the ASH MCP server registers, with editorial notes kept in the generator by `scripts/generate_mcp_tool_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-The ASH MCP server exposes twenty-two tools and five resources.
+The ASH MCP server exposes twenty-five tools and five resources.
 
 ## run_ash_scan
 
@@ -57,7 +57,7 @@ A refused config keeps its own `error_type`. The scan does not start, and the re
 
 The target and source checks have their own `error_type` values too (`scan_target_not_permitted`, `output_dir_not_permitted`, `no_source_delivered`, `session_source_mismatch`, `delivered_source_missing`, `invalid_session_id`). A directory that already has a scan is refused with `error_type: MCPResourceError` and `error_category: resource_exhausted`; `error` says the directory `already has an active scan`, or, for a scan that was cancelled or stopped at its timeout and has not finished stopping, `has a scan that is still stopping`. That `error_type` is the exception's class name, and an unexpected error while the scan is being started arrives as `MCPResourceError` too, with `error_category: unexpected_error`, so `MCPResourceError` alone does not prove a deliberate refusal: branch on `error_category`. The server's `max_concurrent_scans` limit is refused the same way (`resource_exhausted`); its `context` holds `max_concurrent_scans`: wait for a running scan to finish, then retry. The busy-directory refusal's `context` names the running scan's `scan_id` only when the scan is this session's: poll `get_scan_progress` with it, or `cancel_scan` it if it is no longer needed (`list_active_scans` lists this session's scans). Without a `scan_id`, another session's scan holds the directory and the server does not name it: wait and retry, or scan another directory. After a `cancel_scan` of that directory the refusal repeats until the scan has stopped (see `cancel_scan`): retry after a few seconds. Four more refusals carry their own `error_type`: `committed_output_files` (a file git tracks in `.ash/ash_output` where the scan writes, or that check could not finish), `session_identity_required` (the caller has no session the server issued, so a scan it could neither follow nor stop is not started), `session_scan_limit` (this session is already running `max_concurrent_scans_per_session` scans: retry once one has finished, or `cancel_scan` one) and `source_delivery_busy` (the session's delivered source is being changed: retry after the change finishes). Any other reason the scan could not be started returns `error_type: scan_start_failure`, and an unexpected error returns the exception's class name. Branch on `error_type` and `error_category`, never on the text of `error`.
 
-On failure, `error_type` is one of `bound_profile_unavailable`, `committed_output_files`, `config_check_failed`, `config_env_not_resolved`, `config_field_denied`, `config_input_not_permitted`, `config_policy_unreadable`, `delivered_source_missing`, `invalid_session_id`, `no_source_delivered`, `output_dir_not_permitted`, `output_dir_not_usable`, `scan_start_failure`, `scan_target_not_permitted`, `session_identity_required`, `session_scan_limit`, `session_source_mismatch`, `session_workspace_busy`, `source_delivery_busy` and `source_dir_not_usable`, or the class name of an exception.
+On failure, `error_type` is one of `bound_profile_unavailable`, `committed_output_files`, `config_check_failed`, `config_env_not_resolved`, `config_field_denied`, `config_input_not_permitted`, `config_policy_unreadable`, `delivered_image_missing`, `delivered_source_missing`, `invalid_session_id`, `no_source_delivered`, `output_dir_not_permitted`, `output_dir_not_usable`, `scan_start_failure`, `scan_target_not_permitted`, `session_identity_required`, `session_scan_limit`, `session_source_mismatch`, `session_workspace_busy`, `session_workspace_unavailable`, `source_delivery_busy` and `source_dir_not_usable`, or the class name of an exception.
 
 ## get_scan_progress
 
@@ -343,6 +343,43 @@ A refusal or a git failure returns `success: false` with an `error_type`: `clone
 A re-delivery needs room for both trees at once, because the new clone is made beside the delivered source, which is deleted only after it. When the disk is short, call `clear_source` first to free the delivered one. A clone, fetch or checkout that fails for want of space returns `git_clone_failed` or `git_checkout_failed` with git's own message, and that advice added when the session has a delivered source to free.
 
 On failure, `error_type` is one of `clone_host_not_permitted`, `clone_ref_not_permitted`, `clone_timed_out`, `clone_too_large`, `clone_tree_unreadable`, `clone_url_not_permitted`, `git_checkout_failed`, `git_clone_failed`, `invalid_clone_depth`, `invalid_session_id`, `local_clone_source_refused`, `session_identity_required`, `session_workspace_unavailable`, `source_delivery_busy` and `ssh_key_not_registered`, or the class name of an exception.
+
+## set_source_image
+
+Record a container image reference as this session's scan subject.
+
+<!-- doctest: options of=mcp.set_source_image -->
+| Param | Type | Notes |
+|-------|------|-------|
+| `image_ref` | string | The image reference. For an archive you hold the bytes of, use set_source_image_archive_chunk/-finalize instead, which needs no engine and no network. |
+
+On failure, `error_type` is one of `invalid_session_id`, `session_identity_required` and `source_delivery_busy`, or the class name of an exception.
+
+## set_source_image_archive_chunk
+
+Upload one base64 chunk of a saved container image (docker save tar).
+
+<!-- doctest: options of=mcp.set_source_image_archive_chunk -->
+| Param | Type | Notes |
+|-------|------|-------|
+| `upload_id` | string | Identifier you choose, scoping this one upload. |
+| `sequence` | integer | Zero-based ordinal of this chunk. |
+| `data_b64` | string | Base64-encoded chunk payload. |
+| `last` | boolean | True on the final chunk. |
+
+On failure, `error_type` is one of `invalid_session_id`, `session_identity_required`, `session_workspace_busy` and `session_workspace_unavailable`, or the class name of an exception.
+
+## set_source_image_archive_finalize
+
+Verify an uploaded image archive and record it as this session's subject.
+
+<!-- doctest: options of=mcp.set_source_image_archive_finalize -->
+| Param | Type | Notes |
+|-------|------|-------|
+| `upload_id` | string | Identifier matching the prior chunk calls. |
+| `expected_sha256` | string | Hex sha256 the assembled archive must hash to. |
+
+On failure, `error_type` is one of `invalid_session_id`, `session_identity_required`, `session_workspace_unavailable` and `source_delivery_busy`, or the class name of an exception.
 
 ## set_source_zip_chunk
 

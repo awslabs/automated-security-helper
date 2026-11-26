@@ -115,14 +115,38 @@ _RECORDS = [
 class TestFramesAgreeWithTheRecordFunctions:
     def test_package_frame_rows_are_the_extracted_tuples_in_order(self):
         frame = package_identity_frame(_RECORDS)
-        assert frame.columns == ["name", "version", "path"]
+        # Named for the property-bag keys they are read from, not the bare
+        # name/version/path, which read as three other model fields.
+        assert frame.columns == [
+            PACKAGE_NAME_KEY,
+            PACKAGE_VERSION_KEY,
+            PACKAGE_PATH_KEY,
+        ]
         assert frame.schema == {
-            "name": pl.String,
-            "version": pl.String,
-            "path": pl.String,
+            PACKAGE_NAME_KEY: pl.String,
+            PACKAGE_VERSION_KEY: pl.String,
+            PACKAGE_PATH_KEY: pl.String,
         }
         assert package_identities_from_frame(frame) == [
             extract_package_identity(record) for record in _RECORDS
+        ]
+
+    def test_the_columns_bear_the_model_field_names_they_fill(self):
+        # One vocabulary: the frame columns are the SARIF property keys, which
+        # are the FlatVulnerability fields these values fill. A rename on either
+        # side fails here until the other follows.
+        from automated_security_helper.models.flat_vulnerability import (
+            FlatVulnerability,
+        )
+
+        for column in (
+            package_identity_frame([]).columns + resource_identity_frame([]).columns
+        ):
+            assert column in FlatVulnerability.model_fields, column
+        assert package_identity_frame([]).columns == [
+            PACKAGE_NAME_KEY,
+            PACKAGE_VERSION_KEY,
+            PACKAGE_PATH_KEY,
         ]
 
     def test_resource_frame_rows_are_the_extracted_tuples_in_order(self):
@@ -144,9 +168,9 @@ class TestFramesAgreeWithTheRecordFunctions:
         resources = resource_identity_frame(iter(()))
         assert packages.height == 0 and resources.height == 0
         assert packages.schema == {
-            "name": pl.String,
-            "version": pl.String,
-            "path": pl.String,
+            PACKAGE_NAME_KEY: pl.String,
+            PACKAGE_VERSION_KEY: pl.String,
+            PACKAGE_PATH_KEY: pl.String,
         }
         assert identity_properties_from_frame(packages) == []
         assert package_identities_from_frame(packages) == []
@@ -158,9 +182,36 @@ class TestFramesAgreeWithTheRecordFunctions:
             {PACKAGE_NAME_KEY: "xÿ"},
         ]
         frame = package_identity_frame(records)
-        names = frame["name"].to_list()
+        names = frame[PACKAGE_NAME_KEY].to_list()
         assert names[0] == names[1] != names[2]
-        assert frame["name"].n_unique() == 2
+        assert frame[PACKAGE_NAME_KEY].n_unique() == 2
+
+    def test_each_cell_lands_in_the_column_named_for_it(self):
+        """Three different values in one record: a version in the name column, or a
+        path in the version column, is a swapped cell the row-equality tests above
+        would also pass if both sides were swapped alike."""
+        frame = package_identity_frame(
+            [
+                {
+                    PACKAGE_NAME_KEY: "the-name",
+                    PACKAGE_VERSION_KEY: "the-version",
+                    PACKAGE_PATH_KEY: "the/path",
+                }
+            ]
+        )
+        assert frame.to_dicts() == [
+            {
+                PACKAGE_NAME_KEY: "the-name",
+                PACKAGE_VERSION_KEY: "the-version",
+                PACKAGE_PATH_KEY: "the/path",
+            }
+        ]
+        resources = resource_identity_frame(
+            [{ASH_RESOURCE_ID_KEY: "the-id", ASH_RESOURCE_TYPE_KEY: "the-type"}]
+        )
+        assert resources.to_dicts() == [
+            {"resource_id": "the-id", "resource_type": "the-type"}
+        ]
 
     def test_a_generator_of_records_is_read_once(self):
         frame = package_identity_frame(({PACKAGE_NAME_KEY: str(n)} for n in range(3)))

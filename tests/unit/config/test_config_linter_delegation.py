@@ -171,19 +171,22 @@ class TestLinterDoesNotDuplicateValidatorErrors:
         the location of the entry."""
         (tmp_path / "vendor").mkdir()
         cfg = tmp_path / "ash.yml"
+        # "**/vendor" draws the directory advice; a glob-free "vendor" matches
+        # the files below the directory (the bare-directory rule, issue #894)
+        # and gets none.
         cfg.write_text(
             textwrap.dedent("""\
             project_name: test
             global_settings:
               ignore_paths:
-                - path: vendor
+                - path: "**/vendor"
                   reason: third-party code
             """)
         )
 
         result = ConfigLinter.lint(cfg)
 
-        vendor_issues = [i for i in result.issues if "'vendor'" in i.message]
+        vendor_issues = [i for i in result.issues if "'**/vendor'" in i.message]
         assert len(vendor_issues) == 1, [str(i) for i in vendor_issues]
         assert vendor_issues[0].path == "global_settings.ignore_paths[0].path"
 
@@ -195,7 +198,7 @@ class TestLinterDoesNotDuplicateValidatorErrors:
             textwrap.dedent("""\
             global_settings:
               ignore_paths:
-                - path: vendor
+                - path: "**/vendor"
                   reason: third-party code
             """)
         )
@@ -204,7 +207,7 @@ class TestLinterDoesNotDuplicateValidatorErrors:
 
         result = ConfigLinter.lint(cfg)
 
-        vendor_issues = [i for i in result.issues if "'vendor'" in i.message]
+        vendor_issues = [i for i in result.issues if "'**/vendor'" in i.message]
         assert len(vendor_issues) == 1, [str(i) for i in vendor_issues]
 
     def test_invalid_top_level_field_reported_once(self, tmp_path):

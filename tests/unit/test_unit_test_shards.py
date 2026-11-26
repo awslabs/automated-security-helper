@@ -2574,7 +2574,6 @@ class TestTheCombineCommandRequiresTheTier:
     """
 
     def _main(self, monkeypatch, results: Path, *extra: str) -> int:
-        monkeypatch.setenv("RUNNER_ARCH", "X64")
         return COMBINE.main(
             [
                 "--results-dir",
@@ -2979,7 +2978,6 @@ class TestTheCombineGate:
         for name in list(os.environ):
             if name.startswith(("COV_CORE_", "COVERAGE_")):
                 monkeypatch.delenv(name)
-        monkeypatch.setenv("RUNNER_ARCH", "X64")
         monkeypatch.chdir(tmp_path)
         return COMBINE.main(
             [
@@ -3132,7 +3130,9 @@ class TestTheCombineGateReadsEveryOsAtOnce:
             data.write()
         return results
 
-    def _gate(self, tmp_path, monkeypatch, results, os_list=None) -> int:
+    def _gate(
+        self, tmp_path, monkeypatch, results, os_list=None, *, summary=None
+    ) -> int:
         for name in list(os.environ):
             if name.startswith(("COV_CORE_", "COVERAGE_")):
                 monkeypatch.delenv(name)
@@ -3149,8 +3149,112 @@ class TestTheCombineGateReadsEveryOsAtOnce:
                 "unit",
                 "--fail-under",
                 "100",
+                *(["--summary", str(summary)] if summary else []),
             ]
         )
+
+    def test_the_summary_reports_each_operating_systems_own_total_without_gating(
+        self, tmp_path, monkeypatch
+    ):
+        """The union is the gate; each image's own combined figure is only reported.
+
+        The legs run 5, 3 and 2 of the module's ten statements. The union meets the
+        100 percent gate, so the exit status is 0 although two images alone read far
+        below it: the per-image table is information, and nothing in it gates.
+        """
+        rc = (REPO_ROOT / ".coveragerc").read_text(encoding="utf-8")
+        results = self._plant(tmp_path, rc)
+        summary = tmp_path / "summary.md"
+        assert self._gate(tmp_path, monkeypatch, results, summary=summary) == 0
+        text = summary.read_text(encoding="utf-8")
+        assert "Per-OS combined totals (not gated)" in text, text
+        assert "| ubuntu-24.04-arm | 50% |" in text, text
+        assert "| macos-15 | 30% |" in text, text
+        assert "| windows-latest | 20% |" in text, text
+
+    @staticmethod
+    def _folded_files(tmp_path: Path, rc_text: str, source: str) -> list[str]:
+        """The files one leg's data holds after ``coverage combine`` under ``rc_text``."""
+        from coverage import CoverageData
+
+        work = tmp_path / "fold"
+        (work / "automated_security_helper").mkdir(parents=True)
+        # coverage.py applies an alias only when the file it maps to exists.
+        (work / "automated_security_helper" / "mod.py").write_text(
+            "a = 1\nb = 2\n", encoding="utf-8"
+        )
+        (work / "in").mkdir()
+        (work / ".coveragerc").write_text(rc_text, encoding="utf-8")
+        data = CoverageData(basename=str(work / "in" / "leg.data"))
+        data.add_lines({source: [1, 2]})
+        data.write()
+        out = work / "out.data"
+        done = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "coverage",
+                "combine",
+                "--keep",
+                f"--data-file={out}",
+                str(work / "in" / "leg.data"),
+            ],
+            cwd=work,
+            env={
+                k: v
+                for k, v in os.environ.items()
+                if not k.startswith(("COV_CORE_", "COVERAGE_"))
+            },
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        assert done.returncode == 0, done.stdout + done.stderr
+        folded = CoverageData(basename=str(out))
+        folded.read()
+        return sorted(folded.measured_files())
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "D:\\a\\ash\\ash\\automated_security_helper\\mod.py",
+            "/home/runner/work/ash/ash/automated_security_helper/mod.py",
+            "/Users/runner/work/ash/ash/automated_security_helper/mod.py",
+        ],
+    )
+    def test_the_two_forward_slash_aliases_fold_every_runners_path(
+        self, tmp_path, source
+    ):
+        """The Windows alias that uses backslashes adds nothing to these two.
+
+        coverage.py's glob-to-regex treats a backslash like a slash, and a slash matches
+        either separator, so ``*/automated_security_helper/`` already maps the Windows
+        layout. The control is the same data with no [paths] at all, which leaves the
+        runner's own path in place.
+        """
+        rc = (REPO_ROOT / ".coveragerc").read_text(encoding="utf-8")
+        head, _, tail = rc.partition("[paths]")
+        assert tail, "no [paths] section"
+        two_aliases = (
+            head
+            + "[paths]\nsource =\n    automated_security_helper/\n"
+            + "    */automated_security_helper/\n"
+        )
+        folded = self._folded_files(tmp_path, two_aliases, source)
+        assert len(folded) == 1, folded
+        # Windows writes the folded path with backslashes, so compare the posix form.
+        assert (
+            Path(folded[0]).as_posix().endswith("automated_security_helper/mod.py")
+        ), folded
+        # The fold lands on the file in the checkout the data is combined in. Comparing
+        # against a runner prefix would fail whenever pytest's own temporary directory
+        # sits under /home/runner, which is where a hosted runner puts it.
+        assert os.path.samefile(
+            folded[0], tmp_path / "fold" / "automated_security_helper" / "mod.py"
+        ), folded
+        assert folded[0] != source, folded
+        unfolded = self._folded_files(tmp_path / "control", head, source)
+        assert unfolded == [source], unfolded
 
     def test_three_operating_systems_combine_into_one_file_and_meet_the_gate(
         self, tmp_path, monkeypatch
@@ -3233,3 +3337,48 @@ class TestTheDiscoveryHelpers:
             [],
             [],
         )
+
+    @pytest.mark.parametrize(
+        ("short", "short_label", "long", "long_label"),
+        [
+            ("ubuntu-24.04", "x86_64", "ubuntu-24.04-arm", "arm64"),
+            ("macos-15", "arm64", "macos-15-intel", "x86_64"),
+        ],
+    )
+    def test_one_image_that_is_a_dash_prefix_of_another_reads_only_its_own_artifacts(
+        self, tmp_path, short, short_label, long, long_label
+    ):
+        """The architecture label is one known label, never a wildcard.
+
+        With ``test-results-<os>-*-py...`` the shorter image's glob also matched the
+        longer image's artifacts, whose stem then failed the fit and failed the gate on
+        every run once a unit matrix held both images.
+        """
+        for image, label in ((short, short_label), (long, long_label)):
+            (tmp_path / f"test-results-{image}-{label}-py3.12-unit-shard1of1").mkdir()
+        assert COMBINE.discover_labels(tmp_path, short, "3.12", "unit") == (
+            [short_label],
+            [],
+        )
+        assert COMBINE.discover_labels(tmp_path, long, "3.12", "unit") == (
+            [long_label],
+            [],
+        )
+
+    def test_a_name_that_fits_no_known_label_is_not_read_as_a_set(self, tmp_path):
+        (tmp_path / "test-results-ubuntu-24.04-riscv-py3.12-unit-shard1of1").mkdir()
+        assert COMBINE.discover_labels(tmp_path, "ubuntu-24.04", "3.12", "unit") == (
+            [],
+            [],
+        )
+
+    def test_a_name_with_a_bad_shard_suffix_under_a_label_is_a_problem(self, tmp_path):
+        (tmp_path / "test-results-ubuntu-24.04-x86_64-py3.12-unit-shardjunk").mkdir()
+        labels, problems = COMBINE.discover_labels(
+            tmp_path, "ubuntu-24.04", "3.12", "unit"
+        )
+        assert labels == [] and len(problems) == 1, (labels, problems)
+
+    def test_the_self_test_exercises_the_discovery_path(self):
+        """Positive control: the pre-gate self-test fails when discovery is wrong."""
+        assert COMBINE.self_test() == []

@@ -7,7 +7,7 @@ ASH's converters, scanners, and reporters are plugins, and so are event subscrib
 | Source | Loaded | What it provides |
 |---|---|---|
 | Built in: `automated_security_helper.plugin_modules.ash_builtin` | on every run | the default scanners, reporters, and converters, and two event subscribers, listed in the [scanner](../reference/scanners.md), [reporter](../reference/reporters.md), and [converter](../reference/converters.md) references |
-| Plugin modules that ship with ASH, under `automated_security_helper.plugin_modules` | when a module list names them (for the MCP server, see [What a plugin can do](#what-a-plugin-can-do)) | the [community plugins](../docs/plugins/community/index.md) (`betterleaks`, `ferret-scan`, `guarddog`, `hadolint`, `snyk-code`, and `trivy-repo`) and the [AWS reporters](aws.md) |
+| Plugin modules that ship with ASH, under `automated_security_helper.plugin_modules` | when a module list names them (for the MCP server, see [What a plugin can do](#what-a-plugin-can-do)) | the [alpha plugins](../docs/plugins/alpha/index.md) (`betterleaks`, `ferret-scan`, `guarddog`, `hadolint`, `snyk-code`, and `trivy-repo`) and the [AWS reporters](aws.md) |
 | Third-party packages | when a module list names them | anything you or someone else writes, installed in the same Python environment as ASH |
 
 ASH has no automatic discovery. Installing a package does nothing until a module list names it, and `ashx scan` imports none of the optional modules that ship with ASH unless a module list names them.
@@ -36,7 +36,7 @@ To check what a module provides before you scan with it, list the plugins with t
 ashx plugin list --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins
 ```
 
-The plugins in the modules that ship with ASH are enabled as soon as their module is loaded, so loading one adds its scanners to a default scan; set `enabled: false` for a plugin in your config to turn it off. The exceptions are the four AWS reporters, which stay off until the operator turns each one on ([AWS reporters](aws.md#enable)). A third-party plugin's config class sets its own default. ASH imports the names from every source together, in order, and a name given twice is imported once. Every source splits an entry on commas, so `"a_ash_plugins, b_ash_plugins"` names two modules. This lists the scanners of two community modules named in one value:
+The plugins in the modules that ship with ASH are enabled as soon as their module is loaded, so loading one adds its scanners to a default scan; set `enabled: false` for a plugin in your config to turn it off. The exceptions are the four AWS reporters, which stay off until the operator turns each one on ([AWS reporters](aws.md#enable)). A third-party plugin's config class sets its own default. ASH imports the names from every source together, in order, and a name given twice is imported once. Every source splits an entry on commas, so `"a_ash_plugins, b_ash_plugins"` names two modules. This lists the scanners of two alpha modules named in one value:
 
 ```bash
 ashx plugin list \
@@ -56,7 +56,7 @@ trivy-repo
 ASH sorts configuration by who controls it, as the [Configuration trust model](../concepts/trust-model.md#tiers) describes, and module loading follows the same tiers:
 
 - You, the operator, may name any plugin module, wherever it is installed: with `--ash-plugin-modules`, `ASH_PLUGIN_MODULES`, `--config-overrides`, a config file outside every git checkout and the scanned directory, or the Python API.
-- A config file inside a git checkout or the scanned directory (a repository's own `.ash/.ash.yaml`, for example, or a config kept in an ops repository), or a file an MCP client delivered, may add only ASH's own plugin modules and modules installed outside every git checkout and the scanned directory. A third-party package in a virtual environment inside a checkout counts as inside it. Such a file may never add `ash_aws_plugins` or `ash_snyk_plugins`, or any module inside either, such as `automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter`, because their plugins send findings or the scanned source to a remote service with your credentials.
+- A config file inside a git checkout or the scanned directory (a repository's own `.ash.yaml`, for example, or a config kept in an ops repository), or a file an MCP client delivered, may add only ASH's own plugin modules and modules installed outside every git checkout and the scanned directory. A third-party package in a virtual environment inside a checkout counts as inside it. Such a file may never add `ash_aws_plugins` or `ash_snyk_plugins`, or any module inside either, such as `automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter`, because their plugins send findings or the scanned source to a remote service with your credentials.
 
 Every source, yours included, is held to ASH's plugin namespace: a module path that starts with `automated_security_helper.` or `ash_plugins`, or whose top-level package ends in `_ash_plugins`. A name outside it, ASH's plugin root itself, a namespace package, or a name that is not a dotted path of Python identifiers stops the scan with exit code 3 before anything is scanned, whatever its source, and so does a module you name that fails to import. A scan uses only the modules it names.
 

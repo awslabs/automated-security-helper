@@ -36,7 +36,7 @@ import pytest
 
 from automated_security_helper.utils import content_db_staleness as staleness
 from automated_security_helper.utils.content_databases import (
-    STALENESS_FAIL,
+    StalenessPolicy,
     get,
 )
 
@@ -57,7 +57,7 @@ def _record(**overrides) -> staleness.ContentDbAgeRecord:
         "measured_by": "a probe",
         "max_age": timedelta(hours=120),
         "measured_at": NOW,
-        "policy": STALENESS_FAIL,
+        "policy": StalenessPolicy.FAIL,
         "bound_source": "the test",
         "bound_is_tool_default": True,
         "refresh": "run the refresh",
@@ -95,7 +95,7 @@ def test_an_overrides_reason_is_cleaned_before_it_is_logged(caplog):
     )
     with caplog.at_level(logging.INFO):
         chosen, _ = staleness._policy_for(
-            get("grype-db"), STALENESS_FAIL, [override], NOW
+            get("grype-db"), StalenessPolicy.FAIL, [override], NOW
         )
     assert chosen == "warn"
     logged = "\n".join(record.getMessage() for record in caplog.records)
@@ -197,7 +197,7 @@ def test_a_probe_context_of_none_is_named_in_the_record():
         content_database_probe_context=lambda: None,
     )
     report = SimpleNamespace(runs=[])
-    records = staleness.assess_scanner(scanner, report, STALENESS_FAIL, now=NOW)
+    records = staleness.assess_scanner(scanner, report, StalenessPolicy.FAIL, now=NOW)
     assert len(records) == 1
     assert records[0].stale is True
     assert "returned None" in (records[0].error or "")
@@ -329,3 +329,17 @@ def test_an_error_beyond_the_rejected_databases_is_not_stale_only(report, stale_
     unevaluated target or a timeout (one more error line), and a scanner that
     could not be halted (its flag)."""
     assert staleness._error_only_for_a_stale_database(report) is stale_only
+
+
+def test_a_policy_assigned_as_text_after_construction_still_gates():
+    """The policy is a mutable field: ``__post_init__`` converts what the
+    constructor was given, but a later assignment of the text ("fail") must
+    neither defeat the stale-database gate nor make the record unserializable."""
+    record = _record(policy=StalenessPolicy.WARN)
+    assert record.enforced is False
+
+    record.policy = "fail"
+
+    assert record.enforced is True
+    assert record.to_dict()["policy"] == "fail"
+    assert "The scan fails" in record.message()

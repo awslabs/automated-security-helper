@@ -12,13 +12,15 @@
 
 This page is generated from the converter plugins in the ASH source code by `scripts/generate_converter_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH ships 2 converters. Converters run in the `convert` phase, before the `scan` phase, and write what they produce under `<output directory>/converted/<converter name>/`.
+ASH ships 4 converters. Converters run in the `convert` phase, before the `scan` phase, and write what they produce under `<output directory>/converted/<converter name>/`.
 
 <!-- doctest: options of=converters -->
 | Converter | Enabled by default | Provided by | Command | Runs with `--python-only` |
 |-----------|--------------------|-------------|---------|---------------------------|
 | [`archive`](#archive) | yes | built in | none (runs in the ASH process) | yes |
 | [`jupyter`](#jupyter) | yes | built in | `jupyter-nbconvert` | yes |
+| [`mcp_config`](#mcp_config) | yes | built in | none (runs in the ASH process) | yes |
+| [`sdist-lock-harvester`](#sdist-lock-harvester) | yes | built in | none (runs in the ASH process) | yes |
 
 ## `archive`
 
@@ -57,3 +59,27 @@ Options, under `converters.jupyter.options`. An option not listed here refuses t
 |--------|------|---------|-------------|
 | <a id="converters.jupyter.options.tool_version"></a>`tool_version` | string or null | `">=7.16.0,<8.0.0"` | Version constraint for nbconvert tool installation (e.g., '&gt;=7.16.0'). If not specified, the latest version will be installed. |
 | <a id="converters.jupyter.options.install_timeout"></a>`install_timeout` | integer | `300` | Timeout in seconds for tool installation (default: 300) |
+
+## `mcp_config`
+
+Converter implementation for repo-local MCP server config files.
+
+- Class: `automated_security_helper.plugin_modules.ash_builtin.converters.mcp_config_converter.McpConfigConverter`
+- Provided by: built in, loaded on every scan
+- Enabled by default: yes
+- Command: none (runs in the ASH process)
+- Install: none declared
+
+This plugin has no options.
+
+## `sdist-lock-harvester`
+
+Harvests cross-toolchain lockfiles from the sdists the tree's lockfiles pin.
+
+- Class: `automated_security_helper.plugin_modules.ash_builtin.converters.sdist_lock_harvester.SdistLockHarvester`
+- Provided by: built in, loaded on every scan
+- Enabled by default: yes
+- Command: none (runs in the ASH process)
+- Install: none declared
+
+This plugin has no options.

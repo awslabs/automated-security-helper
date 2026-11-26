@@ -5,7 +5,7 @@
 
 The behavior these tests hold
 -----------------------------
-``mcp_list_scanners()`` reports every scanner ASH ships, including the community
+``mcp_list_scanners()`` reports every scanner ASH ships, including the alpha
 scanners in ``plugin_modules/ash_*_plugins`` that ``load_internal_plugins()`` does
 not load. Reporting them must not make them part of a later scan. A scan's
 scanners are the built-in set plus the modules that scan's own resolved
@@ -20,7 +20,7 @@ listing and the order of listing and scanning are what is under test. A pytest
 worker has an unknown history, so each sequence runs in its own subprocess, the
 way one MCP server process would see it.
 
-Why the community tools are fakes
+Why the alpha tools are fakes
 ---------------------------------
 ``snyk``, ``trivy`` and ``ferret-scan`` on PATH are recorders that write their
 argv and cwd to a log and talk to no network. HOME is a temporary directory and
@@ -32,8 +32,8 @@ whose argv names the scanned directory or whose cwd is inside it; a version prob
 is neither, and is allowed.
 
 The built-in scanners are excluded from every scan so that nothing else runs,
-which keeps each case to a few seconds. The community set is not hard-coded: it
-is whatever ``mcp_list_scanners()`` reports beyond the built-ins, so a community
+which keeps each case to a few seconds. The alpha set is not hard-coded: it
+is whatever ``mcp_list_scanners()`` reports beyond the built-ins, so an alpha
 package added later is covered without editing this file.
 """
 
@@ -186,7 +186,7 @@ print("SCAN-SELECTION-REPORT " + json.dumps(report), flush=True)
 """
 )
 
-#: Body of each fake community tool. Records the call and answers a version probe;
+#: Body of each fake alpha tool. Records the call and answers a version probe;
 #: ``snyk`` also writes an empty SARIF log where ASH asked for one.
 _RECORDER = r"""
 import json
@@ -357,7 +357,7 @@ def _norm(name: str) -> str:
     return name.replace("-", "_").lower()
 
 
-def _community(report: dict) -> set:
+def _alpha(report: dict) -> set:
     """Scanners ``mcp_list_scanners()`` reported beyond the built-in set."""
     builtins = {_norm(name) for name in report["builtins"]}
     listed = {_norm(name) for names in report["lists"] for name in names}
@@ -369,18 +369,18 @@ def _selected(scan: dict) -> set:
     return {_norm(name) for name in scan["scanners"]}
 
 
-def _assert_lists_the_community_scanners(report: dict) -> set:
-    community = _community(report)
-    assert "snyk_code" in community, (
-        "mcp_list_scanners() must keep reporting the community scanners ASH ships; "
-        f"beyond the built-ins it reported {sorted(community)}"
+def _assert_lists_the_alpha_scanners(report: dict) -> set:
+    alpha = _alpha(report)
+    assert "snyk_code" in alpha, (
+        "mcp_list_scanners() must keep reporting the alpha scanners ASH ships; "
+        f"beyond the built-ins it reported {sorted(alpha)}"
     )
-    return community
+    return alpha
 
 
 class TestListScannersDoesNotSelectScanners:
-    def test_a_scan_after_list_scanners_selects_no_community_scanner(self, tmp_path):
-        """list_scanners, then a default scan: no community scanner takes part."""
+    def test_a_scan_after_list_scanners_selects_no_alpha_scanner(self, tmp_path):
+        """list_scanners, then a default scan: no alpha scanner takes part."""
         seq = _Sequence(tmp_path)
         tree = _source(tmp_path, "tree")
         report = seq.run(
@@ -394,15 +394,15 @@ class TestListScannersDoesNotSelectScanners:
             ]
         )
 
-        community = _assert_lists_the_community_scanners(report)
+        alpha = _assert_lists_the_alpha_scanners(report)
         selected = _selected(report["scans"][0])
-        assert not selected & community, (
-            f"listing made {sorted(selected & community)} part of a scan that named "
+        assert not selected & alpha, (
+            f"listing made {sorted(selected & alpha)} part of a scan that named "
             "no plugin module"
         )
         assert seq.started_against(tree) == []
 
-    def test_scan_then_list_then_scan_selects_no_community_scanner(self, tmp_path):
+    def test_scan_then_list_then_scan_selects_no_alpha_scanner(self, tmp_path):
         """The other order: a scan, list_scanners, another scan. Neither scan has one."""
         seq = _Sequence(tmp_path)
         first = _source(tmp_path, "first")
@@ -423,13 +423,13 @@ class TestListScannersDoesNotSelectScanners:
             ]
         )
 
-        community = _assert_lists_the_community_scanners(report)
+        alpha = _assert_lists_the_alpha_scanners(report)
         for scan in report["scans"]:
-            assert not _selected(scan) & community, scan
+            assert not _selected(scan) & alpha, scan
         assert seq.started_against(first) == []
         assert seq.started_against(second) == []
 
-    def test_an_mcp_scan_after_list_scanners_starts_no_community_tool(self, tmp_path):
+    def test_an_mcp_scan_after_list_scanners_starts_no_alpha_tool(self, tmp_path):
         """The reported path end to end: the MCP list tool, then the MCP scan tool."""
         seq = _Sequence(tmp_path)
         tree = _source(tmp_path, "tree")
@@ -444,18 +444,18 @@ class TestListScannersDoesNotSelectScanners:
             ]
         )
 
-        community = _assert_lists_the_community_scanners(report)
+        alpha = _assert_lists_the_alpha_scanners(report)
         scan = report["scans"][0]
         assert scan["started"], scan
-        assert not _selected(scan) & community, (
-            f"an MCP scan ran {sorted(_selected(scan) & community)} after list_scanners"
+        assert not _selected(scan) & alpha, (
+            f"an MCP scan ran {sorted(_selected(scan) & alpha)} after list_scanners"
         )
         assert seq.started_against(tree) == [], (
-            "a community tool was started on the scanned tree: "
+            "an alpha tool was started on the scanned tree: "
             f"{seq.started_against(tree)}"
         )
 
-    def test_a_workspace_scan_after_list_scanners_selects_no_community_scanner(
+    def test_a_workspace_scan_after_list_scanners_selects_no_alpha_scanner(
         self, tmp_path
     ):
         """Workspace mode pre-warms the registry once; listing must not feed it."""
@@ -463,8 +463,7 @@ class TestListScannersDoesNotSelectScanners:
         workspace = tmp_path / "ws"
         projects = [_source(workspace, key) for key in ("api", "web")]
         for project in projects:
-            (project / ".ash").mkdir()
-            (project / ".ash" / ".ash.yaml").write_text(
+            (project / ".ash.yaml").write_text(
                 f"project_name: {project.name}\n", encoding="utf-8"
             )
         workspace_file = workspace / "dev.code-workspace"
@@ -483,10 +482,10 @@ class TestListScannersDoesNotSelectScanners:
             ]
         )
 
-        community = _assert_lists_the_community_scanners(report)
+        alpha = _assert_lists_the_alpha_scanners(report)
         selected = _selected(report["scans"][0])
-        assert not selected & community, (
-            f"a workspace scan ran {sorted(selected & community)} after list_scanners"
+        assert not selected & alpha, (
+            f"a workspace scan ran {sorted(selected & alpha)} after list_scanners"
         )
         for project in projects:
             assert seq.started_against(project) == [], project.name
@@ -515,7 +514,7 @@ class TestSelectionFollowsTheScansOwnModules:
             ]
         )
 
-        _assert_lists_the_community_scanners(report)
+        _assert_lists_the_alpha_scanners(report)
         named, unnamed = report["scans"]
         assert "snyk_code" in _selected(named), named
         assert "snyk_code" not in _selected(unnamed), (

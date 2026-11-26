@@ -230,9 +230,8 @@ class TestBuiltInSections:
 class TestOtherEntryPoints:
     @staticmethod
     def _project_config(project):
-        ash_dir = project / ".ash"
-        ash_dir.mkdir(parents=True)
-        (ash_dir / "ash.yaml").write_text(
+        project.mkdir(parents=True, exist_ok=True)
+        (project / ".ash.yaml").write_text(
             "scanners:\n  bandit:\n    enabled: true\n    severity_threshold: HIGH\n",
             encoding="utf-8",
         )
@@ -254,7 +253,7 @@ class TestOtherEntryPoints:
 
         self._project_config(tmp_path)
         # An error result, as the tool answers every refusal; the error escaped it.
-        result = mcp_get_config(config_path=str(tmp_path / ".ash" / "ash.yaml"))
+        result = mcp_get_config(config_path=str(tmp_path / ".ash.yaml"))
         assert result.get("success") is False, result
         assert "severity_threshold" in result["error"], result
 
@@ -428,8 +427,8 @@ class TestStoredResults:
         assert located, warnings
         assert not [w for w in warnings if "severity_threshold" in w], warnings
 
-    def test_a_community_plugin_section_in_results_loads_without_warnings(self):
-        """A results file cannot know a community plugin's own config class, so
+    def test_an_alpha_plugin_section_in_results_loads_without_warnings(self):
+        """A results file cannot know an alpha plugin's own config class, so
         its section is read against the generic base, which declares only the
         shared keys. A key the plugin itself declares must not be reported as
         unknown because the stand-in does not declare it."""

@@ -119,12 +119,11 @@ def test_a_sigterm_to_ash_stops_the_scanner_tool_and_exits_terminated(tmp_path):
     source = tmp_path / "src"
     source.mkdir()
     (source / "app.py").write_text("print('hello')\n")
-    (source / ".ash").mkdir()
     # No ash_plugin_modules entry: the scanned tree's own config cannot select
     # plugin modules (config/plugin_module_trust.py ignores its entries with a
     # warning), so the fixture module is named on the command line below, the
     # operator's route the warning itself points at.
-    (source / ".ash" / ".ash.yaml").write_text("project_name: sigterm-stop\n")
+    (source / ".ash.yaml").write_text("project_name: sigterm-stop\n")
     output = tmp_path / "out"
     pid_file = tmp_path / "blocker.pid"
     env = {

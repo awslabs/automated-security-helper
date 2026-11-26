@@ -37,7 +37,7 @@ def test_config_init_writes_default_config(
 
     assert run.exit_code == 0, run.output
     # The name discovery treats as current (ASH_DEFAULT_CONFIG_FILE_NAME).
-    written = project_dir / ".ashrc.yaml"
+    written = project_dir / ".ash.yaml"
     assert written.is_file()
     assert not (project_dir / ".ash" / ".ash.yaml").exists()
     assert text_snapshot("txt")(name="stdout") == run.document

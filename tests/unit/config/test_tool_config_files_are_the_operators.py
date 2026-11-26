@@ -29,11 +29,12 @@ SCANNERS = ["bandit", "grype", "syft"]
 
 
 def _repo(tmp_path: Path, scanners: Dict[str, Any]) -> Path:
-    """A checkout whose own .ash/.ash.yaml sets ``scanners``."""
+    """A checkout whose own .ash.yaml sets ``scanners``."""
     repo = tmp_path / "repo"
+    # The tool config paths named below live under .ash/, so the directory stays.
     (repo / ".ash").mkdir(parents=True)
     mark_git_checkout(repo)
-    (repo / ".ash" / ".ash.yaml").write_text(
+    (repo / ".ash.yaml").write_text(
         yaml.safe_dump({"scanners": scanners}), encoding="utf-8"
     )
     return repo

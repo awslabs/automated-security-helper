@@ -53,12 +53,11 @@ def _yaml(honor: bool, **extra: str) -> str:
 
 
 def _repo(tmp_path: Path, config: str | None = None) -> Path:
-    """A checkout, with its own config at .ash/.ash.yaml when ``config`` is given."""
+    """A checkout, with its own config at .ash.yaml when ``config`` is given."""
     source = tmp_path / "repo"
     (source / ".git").mkdir(parents=True)
     if config is not None:
-        (source / ".ash").mkdir()
-        (source / ".ash" / ".ash.yaml").write_text(config)
+        (source / ".ash.yaml").write_text(config)
     return source
 
 

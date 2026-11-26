@@ -111,7 +111,7 @@ class TestValidate:
     def test_prints_the_resolved_source_chain(self, runner, tmp_path, monkeypatch):
         _write(tmp_path / "org.yaml", "project_name: org\n")
         _write(tmp_path / "team.yaml", "extends: org.yaml\n")
-        _write(tmp_path / ".ash" / ".ash.yaml", "extends: ../team.yaml\n")
+        _write(tmp_path / ".ash.yaml", "extends: team.yaml\n")
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(config_app, ["validate"])
         assert result.exit_code == 0, result.output

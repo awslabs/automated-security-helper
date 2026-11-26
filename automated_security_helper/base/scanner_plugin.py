@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import functools
 import json
 import logging
 import os
@@ -16,12 +17,14 @@ from automated_security_helper.base.plugin_config import (
     config_validated_by_declared_model,
 )
 from automated_security_helper.base.uv_tool_mixin import (
+    _tool_name,
     guarded_values,
     guarded_values_read,
 )
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -66,7 +69,6 @@ from typing import (
     Generic,
     Iterable,
     List,
-    Literal,
     Optional,
     Sequence,
     Set,
@@ -76,6 +78,7 @@ from typing import (
 from abc import abstractmethod
 
 if TYPE_CHECKING:
+    from automated_security_helper.core.asset import ImageLocator
     from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
 # Pattern for valid CLI flag keys: one or two leading dashes followed by
@@ -405,14 +408,44 @@ class ScannerPluginConfigBase(PluginConfigBase):
 T = TypeVar("T", bound=ScannerPluginConfigBase)
 
 
+#: Marks a ``validate_plugin_dependencies`` that already runs the forced-binary
+#: record read first, so ``__pydantic_init_subclass__`` never wraps one twice.
+_FORCED_RECORD_PREFIX_MARK = "_ash_reads_forced_binary_record"
+
+
 class ScannerPluginBase(PluginBase, Generic[T]):
     """Base class for all scanner plugins.
 
     Plugin implementations
     """
 
-    config: T | ScannerPluginConfigBase | None = None
+    if TYPE_CHECKING:
+        # Every concrete scanner fills its config in ``model_post_init`` when
+        # none was given, so the methods read it as the plugin's own config
+        # type; the runtime field below still accepts None until then.
+        # The ``= None`` keeps both optional in the constructor the checker
+        # sees; this branch is never evaluated.
+        config: T = None  # ty: ignore[invalid-assignment]
+        # The scanner's own results directory, set by ``_pre_scan`` before the
+        # scan runs.
+        results_dir: Path = None  # ty: ignore[invalid-assignment]
+    else:
+        config: T | ScannerPluginConfigBase | None = None
     dependencies_satisfied: bool = False
+
+    def _require_results_dir(self) -> Path:
+        """The scanner's results directory, or a ``ScannerError`` naming the
+        scanner when ``_pre_scan`` has not set one.
+
+        The field is typed as always set for the methods that run after
+        ``_pre_scan``; a scanner reached without it stops here with a named
+        error rather than a ``TypeError`` or ``AttributeError`` on ``None``
+        further down.
+        """
+        results_dir: Path | None = self.results_dir
+        if results_dir is None:
+            raise ScannerError(f"{self.__class__.__name__} has no results directory")
+        return Path(results_dir)
 
     #: Human-readable target coverage ("Terraform", "Python"), for the docs graphics.
     #: Supplements the by-stack prose of the coverage page; it never replaces it.
@@ -505,6 +538,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     #: class's: cfn-nag and cdk-nag set it when they passed over a candidate they could
     #: not parse, and reset it at the top of each scan(). Read before the class value.
     _nothing_scanned_reason: Optional[str] = PrivateAttr(default=None)
+    #: The ignore paths of the image scan this scanner is running, set by
+    #: ``scan_image`` (and by a scanner that overrides it) and read by the
+    #: image argv resolution (``_image_exclude_globs``). Empty for any other scan.
+    _image_ignore_paths: List[Any] = PrivateAttr(default_factory=list)
     #: What this scanner scans, as fnmatch globs over source-relative POSIX paths
     #: and base names, read only under ``--mode precommit --staged`` and only by
     #: scanners that run through the template ``scan()``. With a staged scope in
@@ -652,6 +689,16 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             cls, ScannerPluginConfigBase, value, handler, info
         )
 
+    def tool_type_tag(self) -> str:
+        """The ``tool_type::<TYPE>`` tag a scanner puts on its results.
+
+        Written from the member's value: ``f"{member}"`` is the value on Python
+        3.10 and 3.11 and ``ClassName.MEMBER`` on 3.12, and the tag is a wire
+        spelling that readers (``utils/scanner_tool_types``) normalize from.
+        """
+        tool_type = self.tool_type or ScannerToolType.UNKNOWN
+        return f"tool_type::{getattr(tool_type, 'value', tool_type)}"
+
     def model_post_init(self, context):
         if self.config is None:
             raise ScannerError(
@@ -752,6 +799,103 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             at=("scanners", str(getattr(self.config, "name", "") or "")),
         )
 
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        """Make the ``--binary-path`` record read a prefix of EVERY dependency check.
+
+        ``ash dependencies install --binary-path <scanner>=<path>`` records the
+        forced path "for dependency validation", and the docs promise the scanners'
+        dependency validation resolves the scanner to the forced path before any
+        PATH or uv lookup. The read used to live only in the base
+        ``validate_plugin_dependencies``, so every scanner that overrides without
+        chaining (checkov, bandit, cfn-lint, zizmor, cfn-guard, actionlint, the
+        grep family, guarddog, npm-audit, ...) never reached it. Adding the read to
+        each override is the shape this repository has already paid for
+        (``GrepScannerBase._validate_tool_dependencies``: "would work today and
+        break on the third scanner"), and adding it to the call sites leaks the
+        same way -- the method is called from the scan phase, the engine phase, the
+        inventory, the installer and the workspace report. So the prefix is affixed
+        here, where every subclass passes exactly once: an override defined by the
+        class being created is wrapped so ``_forced_binary_satisfies`` runs first,
+        and an inherited or already-wrapped method is left alone. What the force
+        may not outvote is expressed in ``_forced_binary_satisfies`` and the
+        ``_forced_binary_precluded_reason`` hook, never by skipping the wrap.
+        """
+        super().__pydantic_init_subclass__(**kwargs)
+        override = cls.__dict__.get("validate_plugin_dependencies")
+        if override is None or not callable(override):
+            return
+        if getattr(override, _FORCED_RECORD_PREFIX_MARK, False):
+            return
+
+        @functools.wraps(override)
+        def validate_with_forced_record(self, *args, **kw):
+            if self._forced_binary_satisfies():
+                return True
+            return override(self, *args, **kw)
+
+        setattr(validate_with_forced_record, _FORCED_RECORD_PREFIX_MARK, True)
+        cls.validate_plugin_dependencies = validate_with_forced_record  # type: ignore[method-assign]
+
+    def _forced_binary_precluded_reason(self) -> Optional[str]:
+        """Why a recorded ``--binary-path`` force cannot satisfy this scanner, or None.
+
+        The force answers one question: where the scanner's own binary is. A
+        scanner whose dependency check also answers a different question gives
+        that question's refusal here, so the record never outvotes it: npm-audit
+        refuses to run offline (npm prints a clean audit offline, so a bypass is a
+        silent false clean), snyk-code refuses offline, trivy needs its offline
+        vulnerability database, cfn-guard its rules files, actionlint its
+        configured integrations -- and cdk-nag, detect-secrets and mcp-config run
+        Python libraries rather than one binary, so for them a forced path can
+        satisfy nothing and the reason is constant.
+
+        Consulted by ``_forced_binary_satisfies`` only; returning a reason does
+        not record it and does not fail validation, it only sends the check down
+        the scanner's own route. The default is None: for a scanner whose
+        dependency is its binary's presence, the operator's force is the answer.
+        A scanner that adds a semantic gate to its override must mirror it here,
+        or the force bypasses the gate.
+        """
+        return None
+
+    def _forced_binary_satisfies(self) -> bool:
+        """Whether the recorded ``--binary-path`` force satisfies validation now.
+
+        True only when no construction-time refusal is recorded
+        (``dependency_unavailable_reason`` is consulted first, as the base check
+        consults it: a force is a binary-presence answer and must not outvote an
+        offline-mode or sandbox verdict), nothing precludes the force
+        (``_forced_binary_precluded_reason``), and the record still holds: the
+        file is re-checked and re-hashed on every read
+        (``recorded_forced_binary``), never executed. The record is looked up
+        under the name the installer wrote it under: the config's name, or the
+        class name when the config carries none, exactly as
+        ``ash dependencies install`` keys it.
+        """
+        if self.dependency_unavailable_reason:
+            return False
+        precluded = self._forced_binary_precluded_reason()
+        name = str(getattr(self.config, "name", "") or "") or type(self).__name__
+        if precluded:
+            ASH_LOGGER.debug(
+                f"{name}: a forced --binary-path record cannot satisfy this "
+                f"scanner: {precluded}"
+            )
+            return False
+        from automated_security_helper.utils.install_providers import (
+            recorded_forced_binary,
+        )
+
+        forced = recorded_forced_binary(name)
+        if forced is None:
+            return False
+        ASH_LOGGER.debug(
+            f"{name}: satisfied by the forced binary recorded by "
+            f"--binary-path at {forced.path}"
+        )
+        return True
+
     def validate_plugin_dependencies(self) -> bool:
         """Check whether the scanner's command is available on PATH.
 
@@ -782,8 +926,23 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """
         if self.dependency_unavailable_reason:
             return False
-        found = find_executable(self.command)
-        if found is None and self.command:
+        # A binary the operator forced with `ash dependencies install
+        # --binary-path <scanner>=<path>` satisfies the dependency first: the
+        # record is what that flag's "recorded for dependency validation"
+        # promises, judged afresh by a file check and the recorded SHA-256
+        # (the file is read, never executed). No record, or one whose file went
+        # stale, falls through to the PATH probe unchanged. Overriding scanners
+        # get the same read as a prefix: ``__pydantic_init_subclass__`` wraps
+        # every override of this method with ``_forced_binary_satisfies``, so
+        # the check here serves only the instances that run the base method.
+        if self._forced_binary_satisfies():
+            return True
+        if not self.command:
+            # No tool to look for: nothing can be found, and an empty name is
+            # never handed to the lookup.
+            return False
+        found = find_executable(_tool_name(self))
+        if found is None:
             # A copy inside the scanned tree was refused: say so in the MISSING row,
             # with the path and how to allow it, rather than "not installed".
             refusal = in_tree_refusal(self.command)
@@ -926,9 +1085,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         file is written when the arguments are resolved, so building a scanner
         writes nothing.
         """
-        if self.results_dir is None:
-            raise ScannerError(f"{self.__class__.__name__} has no results directory")
-        path = (Path(self.results_dir).absolute() / name).as_posix()
+        path = (self._require_results_dir().absolute() / name).as_posix()
         self._neutral_files[path] = content
         return path
 
@@ -943,7 +1100,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 handle.write(content)
 
     def _staged_scope_paths(
-        self, target: str | Path, target_type: str
+        self, target: str | Path, target_type: TargetType
     ) -> Optional[List[Path]]:
         """The staged files this scanner would scan under ``target``, or None.
 
@@ -960,7 +1117,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         directory scan's and every suppression and ignore path resolves as in a
         whole-repository run.
         """
-        if target_type != "source":
+        if target_type != TargetType.SOURCE:
             return None
         if self.staged_scope_patterns is None and self.staged_target_style is None:
             return None
@@ -1285,7 +1442,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def _pre_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         config: Optional[ScannerPluginConfigBase] = None,
         *args,
         **kwargs,
@@ -1297,7 +1454,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             options: Optional scanner-specific options
         """
         self.start_time = datetime.now(timezone.utc)
-        self.results_dir.mkdir(parents=True, exist_ok=True)
+        if self.results_dir is not None:
+            self.results_dir.mkdir(parents=True, exist_ok=True)
 
         # The config swap FIRST, before the dependency check reads anything the
         # config decides (tool_version builds the requirement). It used to sit
@@ -1428,7 +1586,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def _post_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
     ) -> None:
         """Perform pre-scan setup.
 
@@ -1691,7 +1849,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         sarif_report: SarifReport,
         final_args: List[str],
         target: "Path",
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Return additional Invocation kwargs (e.g. ``properties``).
 
         Default returns an empty dict. Override to attach scanner-specific
@@ -1804,7 +1962,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             exitCode=self.exit_code,
             exitCodeDescription="\n".join(self.errors) if self.errors else "",
             workingDirectory=working_dir,
-            **extras,
+            # A scanner's extras name Invocation fields by key (properties,
+            # toolExecutionNotifications, ...); a dict unpack is checked against
+            # every typed field at once, which no value type satisfies.
+            **extras,  # ty: ignore[invalid-argument-type]
         )
         ash_record._tool_said_unsuccessful = tool_said_unsuccessful
         sarif_report.runs[0].invocations = [
@@ -1929,7 +2090,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def _execute_scan(
         self,
         target: "Path",
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], "Path", Optional[dict]]:
         """Run the scanner tool and return (final_args, results_file, subprocess_env).
@@ -2226,7 +2387,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def scan(
         self,
         target: "Path",
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: "T | ScannerPluginConfigBase | None" = None,
         *args,
@@ -2491,6 +2652,223 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         except OSError:
             return False
 
+    # ------------------------------------------------------------------
+    # Container-image dispatch: a separate method, not a widened scan().
+    #
+    # The design's C5 row: a scanner that claims TargetKind.CONTAINER_IMAGE on
+    # its operational-facets row overrides _execute_image_scan (the iff-test in
+    # tests/unit/plugin_modules pins the equivalence), and scan_image drives it
+    # through the same bounded subprocess, exit-code and results readings the
+    # filesystem template uses -- shared hooks, called in the same order, so
+    # the two dispatches cannot drift on what a flagged run or a rejected exit
+    # code means. scan() keeps its Literal["source","converted"] signature and
+    # every filesystem scanner is untouched.
+    # ------------------------------------------------------------------
+
+    def _execute_image_scan(
+        self, image: "ImageLocator"
+    ) -> Tuple[List[str], "Path", Optional[Dict[str, str]]]:
+        """Resolve (argv, results file, env) for an image scan of *image*.
+
+        Abstract image-template hook, as :meth:`_execute_scan` is for the
+        filesystem template. The default raises: an undeclared scanner is
+        never handed an image by the scan phase's routing, so reaching this
+        means a register row claims container images while the class wires
+        none -- the drift the iff-test exists to catch, reported as itself.
+        """
+        raise ScannerError(
+            f"{self.__class__.__name__} declares container_image targets but "
+            "does not implement _execute_image_scan(); the register row and "
+            "the wiring must travel together"
+        )
+
+    def _unsupported_image_shape_reason(self, image: "ImageLocator") -> Optional[str]:
+        """Why this scanner cannot read *image*'s locator SHAPE, or None.
+
+        A scanner that claims the container_image kind but reads only some of
+        the three locator shapes (trivy takes a reference or a saved archive,
+        not an OCI layout directory) answers with one sentence; the scan is
+        then a reported clean skip, not a tool failure. None, the default,
+        means every shape is readable.
+        """
+        return None
+
+    def _image_not_scanned_reason(self, image: "ImageLocator") -> Optional[str]:
+        """Why *image* cannot be scanned by this scanner at all, or None.
+
+        Two reasons exist today, checked in order: the locator shape
+        (:meth:`_unsupported_image_shape_reason`), and a reference that
+        nothing can resolve -- no container engine detected and the scanner
+        offline, so neither a daemon nor the tool's own registry client may
+        fetch (the design's C6 skip row). A direct payload needs no engine,
+        which is why only the ref shape has the second reason.
+        """
+        shape_reason = self._unsupported_image_shape_reason(image)
+        if shape_reason is not None:
+            return shape_reason
+        if image.ref is not None and self._scanner_offline():
+            from automated_security_helper.core.container_engine import (
+                ContainerEngine,
+                detect_container_engine,
+            )
+
+            if detect_container_engine() == ContainerEngine.NONE:
+                return (
+                    f"container image {image.shown()} was not scanned: no "
+                    "container engine was detected and network fetching is "
+                    "unavailable (offline mode)"
+                )
+        return None
+
+    def _image_exclude_globs(self) -> List[str]:
+        """The in-image exclude globs this scan's ignore paths translate to.
+
+        What a tool is handed so it leaves those paths unread
+        (``utils/image_ignore_paths``); the report filter still applies every
+        ignore path after the scan, so this is only the work the tool is saved.
+        One INFO line names how many entries only the filter applies.
+        """
+        from automated_security_helper.utils.image_ignore_paths import (
+            image_exclude_globs,
+        )
+
+        excludes = image_exclude_globs(self._image_ignore_paths)
+        if excludes.left_to_the_filter:
+            self._plugin_log(
+                f"{len(excludes.left_to_the_filter)} ignore path(s) cannot be "
+                f"given to {self.command or 'the tool'} as an exclude (a relative "
+                "path, a glob ending in '/', or more than the tool is handed) and "
+                "are applied to its findings after the scan.",
+                level=logging.INFO,
+                target_type=TargetType.IMAGE,
+            )
+        return excludes.globs
+
+    def scan_image(
+        self,
+        image: "ImageLocator",
+        config: "T | ScannerPluginConfigBase | None" = None,
+        *args,
+        global_ignore_paths: "List[IgnorePathWithReason] | None" = None,
+        **kwargs,
+    ) -> Any | SarifReport:
+        """Image template: preamble → _execute_image_scan → the scan() tail.
+
+        The per-target resets, the pre-scan, the bounded subprocess, the
+        flagged-response and exit-code readings, the results reading and the
+        invocation injection are the filesystem template's own hooks in the
+        filesystem template's order; what differs is the argv resolution
+        (:meth:`_execute_image_scan`) and that an image has no empty-target
+        probe and no staged scope -- there are no files to probe. The anchor
+        the shared hooks are given for their labels and invocation record is
+        the context's source directory, which an image scan uses as its
+        working anchor, never as its subject.
+        """
+        image_target_type = TargetType.IMAGE
+        anchor = Path(getattr(self.context, "source_dir", None) or Path.cwd())
+
+        # Per target, exactly as scan() resets them, and for the same reasons.
+        self.exit_code = 0
+        self.start_time = None
+        self.end_time = None
+        self.output = []
+        self._reset_errors()
+        self._staged_scan_files = None
+        self._staged_all_filtered = False
+        self._nothing_scanned_reason = None
+        self._image_ignore_paths = list(global_ignore_paths or [])
+
+        not_scanned = self._image_not_scanned_reason(image)
+        if not_scanned is not None:
+            # The clean-skip shape of the staged and empty-target skips: the
+            # tool is not started, and the row reads SKIPPED with this reason
+            # rather than as a clean scan of the image.
+            self._nothing_scanned_reason = not_scanned
+            self._plugin_log(
+                f"{not_scanned}. Not running the tool.",
+                target_type=image_target_type,
+                level=logging.INFO,
+                append_to_stream="stderr",
+            )
+            self._post_scan(target=anchor, target_type=image_target_type)
+            return True
+
+        try:
+            validated = self._pre_scan(
+                target=anchor,
+                target_type=image_target_type,
+                config=config,
+            )
+        except BaseException:
+            if self.end_time is None:
+                self.end_time = datetime.now(timezone.utc)
+            raise
+        if not validated:
+            self._post_scan(target=anchor, target_type=image_target_type)
+            return False
+        if not self.dependencies_satisfied:
+            self._post_scan(target=anchor, target_type=image_target_type)
+            return False
+
+        results_file = None
+        tool_started = False
+        self.exit_code = None
+
+        try:
+            final_args, results_file, subprocess_env = self._execute_image_scan(image)
+
+            effective_timeout = self._effective_scan_timeout()
+            results_dir = results_file.parent
+            tool_cwd = self._subprocess_cwd(results_dir)
+            tool_started = True
+            response = self._run_subprocess(
+                command=final_args,
+                results_dir=results_dir,
+                cwd=tool_cwd,
+                env=subprocess_env,
+                timeout=effective_timeout,
+            )
+
+            self._post_scan(target=anchor, target_type=image_target_type)
+
+            self._refuse_flagged_response(response, effective_timeout)
+            self._record_target_exit_code(response)
+            self._refuse_rejected_exit_code(results_file)
+
+            raw = self._read_results_file(results_file)
+            if raw is None:
+                report = self._handle_empty_results()
+                if not isinstance(report, SarifReport):
+                    return report
+                if not report.runs:
+                    raise ScannerError(
+                        "the report its empty-results hook returned holds no "
+                        "SARIF run, so there is nothing to grade"
+                    )
+                self._inject_invocation(report, final_args, anchor)
+                return self._post_process_sarif(report, final_args, anchor)
+
+            try:
+                sarif_report: SarifReport = SarifReport.model_validate(raw)
+            except Exception as e:
+                raise ScannerError(
+                    f"its results file is not SARIF ASH can read, so its findings "
+                    f"could not be graded: {error_text(e)}"
+                )
+            if not sarif_report.runs:
+                raise ScannerError(
+                    "its results file holds no SARIF run, so there is nothing to grade"
+                )
+            self._inject_invocation(sarif_report, final_args, anchor)
+            return self._post_process_sarif(sarif_report, final_args, anchor)
+
+        except Exception as e:
+            if self.end_time is None:
+                self.end_time = datetime.now(timezone.utc)
+            raise ScannerError(
+                self._describe_scan_failure(e, results_file, tool_started=tool_started)
+            )
+
     def _refuse_flagged_response(self, response: Any, timeout: float | None) -> None:
         """Raise for a run the subprocess layer flagged, before its file is read.
 
@@ -2613,7 +2991,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                     text,
                     read.values,
                     plugin_inputs=self._uv_run_inputs_for_records(),
-                    tool_name=self.command,
+                    tool_name=_tool_name(self),
                     limit=None,
                 )
             except Exception:  # noqa: BLE001 -- the error being reported outranks it
@@ -2881,7 +3259,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                             raw,
                             values,
                             plugin_inputs=inputs,
-                            tool_name=self.command,
+                            tool_name=_tool_name(self),
                             limit=None,
                         )
                 else:
@@ -3070,7 +3448,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def safe_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: T | ScannerPluginConfigBase | None = None,
         *args,
@@ -3096,12 +3474,14 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if global_ignore_paths is None:
             global_ignore_paths = []
         try:
+            # Passed by keyword: a scan override reads them by name, and an
+            # extra positional would collide with ``target``.
             return self.scan(
                 target=target,
                 target_type=target_type,
                 global_ignore_paths=global_ignore_paths,
                 config=config,
-                *args,
+                *args,  # ty: ignore[parameter-already-assigned]
                 **kwargs,
             )
         except Exception as e:

@@ -59,7 +59,7 @@ def cli_runner():
 @pytest.fixture
 def valid_config(tmp_path):
     """Create a valid config file."""
-    config_path = tmp_path / ".ash" / ".ash.yaml"
+    config_path = tmp_path / ".ash.yaml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_data = {
         "project_name": "test-project",
@@ -85,7 +85,7 @@ def config_with_internal_fields(tmp_path):
     different value can be a pin the operator meant, which lint --fix leaves in
     place.
     """
-    config_path = tmp_path / ".ash" / ".ash.yaml"
+    config_path = tmp_path / ".ash.yaml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_data = {
         "project_name": "test-project",
@@ -122,7 +122,7 @@ def config_with_internal_fields(tmp_path):
 @pytest.fixture
 def config_with_suppression_issues(tmp_path):
     """Create a config with suppression issues."""
-    config_path = tmp_path / ".ash" / ".ash.yaml"
+    config_path = tmp_path / ".ash.yaml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_data = {
         "project_name": "test-project",
@@ -162,7 +162,7 @@ def config_with_suppression_issues(tmp_path):
 @pytest.fixture
 def config_with_unused_suppressions(tmp_path):
     """Create a config with suppressions and a corresponding unused report."""
-    config_path = tmp_path / ".ash" / ".ash.yaml"
+    config_path = tmp_path / ".ash.yaml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_data = {
         "project_name": "test-project",
@@ -266,7 +266,7 @@ class TestConfigLinterUnit:
 
     def test_lint_detects_mcp_resource_management(self, tmp_path):
         """mcp-resource-management is a valid user-configurable field."""
-        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         # Users can configure MCP resource management in their configs
         config_content = """project_name: my-project
@@ -298,7 +298,7 @@ scanners:
         A scan reads it as that key (the model accepts both spellings), so it
         is not an unknown field; lint says only the hyphenated key is documented.
         """
-        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_content = """project_name: my-project
 mcp_resource_management:
@@ -319,7 +319,7 @@ scanners:
 
     def test_fix_removes_build_but_keeps_mcp(self, tmp_path):
         """--fix should remove 'build' but keep 'mcp-resource-management'."""
-        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_content = """project_name: my-project
 build:
@@ -850,7 +850,7 @@ scanners:
 
     def test_fix_multiple_expired_suppressions(self, tmp_path):
         """Fix should correctly remove multiple expired suppressions (index shifting)."""
-        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_data = {
             "project_name": "test-project",
@@ -946,7 +946,7 @@ scanners:
 
     def test_old_report_warning(self, tmp_path):
         """Should warn when the unused suppressions report is too old."""
-        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_data = {
             "project_name": "test-project",
@@ -1019,7 +1019,7 @@ scanners:
 
     def test_lint_detects_snake_form_of_kebab_alias(self, tmp_path):
         """`scanners.cdk_nag` should be flagged — alias is `cdk-nag`."""
-        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
             "project_name: t\nscanners:\n  cdk_nag:\n    enabled: true\n"
@@ -1038,7 +1038,7 @@ scanners:
 
     def test_lint_passes_kebab_alias_form(self, tmp_path):
         """`scanners.cdk-nag` (canonical) should NOT be flagged."""
-        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
             "project_name: t\nscanners:\n  cdk-nag:\n    enabled: true\n"
@@ -1053,7 +1053,7 @@ scanners:
 
     def test_lint_passes_third_party_plugin_name(self, tmp_path):
         """Third-party scanner names (no built-in collision) pass through."""
-        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
             "project_name: t\nscanners:\n  my-org-custom-scanner:\n    enabled: true\n"
@@ -1068,7 +1068,7 @@ scanners:
 
     def test_lint_detects_multiple_legacy_variants(self, tmp_path):
         """All snake-form variants of kebab built-ins flagged."""
-        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
             "project_name: t\n"
@@ -1097,7 +1097,7 @@ scanners:
 
     def test_lint_detects_legacy_variants_in_reporters(self, tmp_path):
         """Reporter snake-form variants also flagged."""
-        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
             "project_name: t\nreporters:\n  gitlab_cyclonedx:\n    enabled: true\n"
@@ -1122,7 +1122,7 @@ scanners:
         are merged and which spelling wins. The fixer must still refuse to touch
         the file in this case (data loss otherwise), so the issue is not fixable.
         """
-        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
             "project_name: t\n"
@@ -1154,7 +1154,7 @@ scanners:
 
         Pre-fix verification: data loss prevention.
         """
-        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
             "project_name: t\n"
@@ -1189,7 +1189,7 @@ scanners:
 
     def test_fix_renames_snake_to_kebab(self, tmp_path):
         """--fix renames `cdk_nag` → `cdk-nag` preserving the value."""
-        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
             "project_name: t\n"
@@ -1283,8 +1283,7 @@ class TestConfigLintCLI:
         self, cli_runner, tmp_path
     ):
         """An internal field is a warning: a scan accepts it, so lint exits 0."""
-        config_path = tmp_path / ".ash" / ".ash.yaml"
-        config_path.parent.mkdir(parents=True)
+        config_path = tmp_path / ".ash.yaml"
         config_path.write_text(
             "project_name: demo\nscanners:\n  bandit:\n    name: bandit\n"
         )
@@ -1298,8 +1297,7 @@ class TestConfigLintCLI:
         self, cli_runner, tmp_path
     ):
         """--fix fixes what it can; what is left a scan accepts, so exit 0."""
-        config_path = tmp_path / ".ash" / ".ash.yaml"
-        config_path.parent.mkdir(parents=True)
+        config_path = tmp_path / ".ash.yaml"
         # npm_audit next to npm-audit is a warning --fix leaves for a person.
         config_path.write_text(
             "project_name: demo\n"
@@ -1388,8 +1386,7 @@ class TestConfigLintCLI:
     )
     def test_lint_after_fix_reports_nothing(self, cli_runner, tmp_path, category):
         """For each fixable category: lint names it, --fix removes it, a re-lint is empty."""
-        config_path = tmp_path / ".ash" / ".ash.yaml"
-        config_path.parent.mkdir(parents=True)
+        config_path = tmp_path / ".ash.yaml"
         config_path.write_text(FIXABLE_ONLY_CONFIGS[category], encoding="utf-8")
 
         before = ConfigLinter.lint(config_path)
@@ -1474,8 +1471,7 @@ class TestConfigLintCLI:
         file unchanged, instead of printing that there was nothing to comment
         out (exit 1, since the operator asked for an edit that could not be
         made)."""
-        config_path = tmp_path / ".ash" / ".ash.yaml"
-        config_path.parent.mkdir(parents=True)
+        config_path = tmp_path / ".ash.yaml"
         config_text = (
             "project_name: demo\n"
             "global_settings:\n"
@@ -1574,7 +1570,7 @@ class TestConfigLintCLI:
         fix_description, so the "Fixing N issue(s)" list printed a bare bullet
         for each one.
         """
-        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
             "project_name: t\nscanners:\n  cdk_nag:\n    enabled: true\n"
@@ -1670,8 +1666,7 @@ def test_fix_unused_of_every_suppression_leaves_a_config_a_scan_loads(
     """
     from automated_security_helper.config.resolve_config import resolve_config
 
-    config_path = tmp_path / ".ash" / ".ash.yaml"
-    config_path.parent.mkdir(parents=True)
+    config_path = tmp_path / ".ash.yaml"
     config_path.write_text(
         f"project_name: demo\nglobal_settings:\n{indent}severity_threshold: MEDIUM\n"
         + _suppressions_block(indent, indentless, bare_dash),
@@ -1714,8 +1709,7 @@ def test_fix_unused_of_some_suppressions_keeps_the_rest_and_the_sibling(
     """With an indentless list, only the unused entry is commented out."""
     from automated_security_helper.config.resolve_config import resolve_config
 
-    config_path = tmp_path / ".ash" / ".ash.yaml"
-    config_path.parent.mkdir(parents=True)
+    config_path = tmp_path / ".ash.yaml"
     config_path.write_text(
         "project_name: demo\nglobal_settings:\n"
         + _suppressions_block("  ", True, bare_dash),
@@ -1753,8 +1747,7 @@ def test_fix_unused_does_not_count_a_dash_inside_a_reason_as_an_entry(
     that line instead."""
     from automated_security_helper.config.resolve_config import resolve_config
 
-    config_path = tmp_path / ".ash" / ".ash.yaml"
-    config_path.parent.mkdir(parents=True)
+    config_path = tmp_path / ".ash.yaml"
     config_path.write_text(
         "project_name: demo\nglobal_settings:\n  suppressions:\n"
         "    - path: src/a.py\n      rule_id: B101\n      reason: |\n"

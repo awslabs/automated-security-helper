@@ -31,6 +31,7 @@ Corepack's cache path in the stack traces is rewritten to the image's.
 
 import json
 import logging
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -44,6 +45,7 @@ from automated_security_helper.core.phases.scanner_executor import ScannerExecut
 from automated_security_helper.plugin_modules.ash_builtin.scanners import (
     npm_audit_scanner,
 )
+from automated_security_helper.utils import package_manager_child
 from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
     NpmAuditScanner,
     NpmAuditScannerConfig,
@@ -117,6 +119,29 @@ WIDENING_FLAGS = {"--all"}
 
 def _as_captured(command):
     return [part for part in command if part not in WIDENING_FLAGS]
+
+
+@pytest.fixture(autouse=True)
+def yarn_runs_from_its_private_copy(monkeypatch, tmp_path):
+    """The audit is recorded as the private-copy form, whatever the host's layout.
+
+    utils/package_manager_child.py runs yarn from a private copy of the lockfile's
+    directory and passes a candidate location over when it is under the system
+    temporary directory or below a directory another account can write. tmp_path
+    is under the system temporary directory, so on a host whose cache and runtime
+    directories are not usable too, yarn 1 runs in place with ``--no-default-rc``
+    added, and the recorded argv and working directory depend on the host. Standing
+    the placement checks down (tests/unit/utils/test_package_manager_child.py reads
+    them on their own) pins the contract this module is about: the argv is the
+    tool's own, and the child's working directory is the copy.
+    """
+    system_tmp = tmp_path / "system-tmp"
+    system_tmp.mkdir()
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(system_tmp))
+    monkeypatch.setattr(package_manager_child, "_untrusted_ancestor", lambda path: None)
+    monkeypatch.setattr(
+        package_manager_child, "_settings_file_ancestor", lambda path: None
+    )
 
 
 @pytest.fixture
@@ -342,10 +367,7 @@ def test_yarn_findings_carry_the_npm_result_shape(plugin_context):
     props = critical.properties.model_extra
     assert critical.level == "error"
     location = critical.locations[0].model_dump(by_alias=True, exclude_none=True)
-    assert (
-        location["physicalLocation"]["artifactLocation"]["uri"]
-        == "node_modules/minimist/package.json"
-    )
+    assert location["physicalLocation"]["artifactLocation"]["uri"] == "yarn.lock"
     assert props["package_name"] == "minimist"
     assert props["package_version"] == "0.0.8"
     assert props["severity"] == "critical"

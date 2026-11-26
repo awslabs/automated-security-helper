@@ -9,11 +9,21 @@ import logging
 import os
 import platform
 import shlex
+import shutil
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath, PureWindowsPath
-from typing import Annotated, Any, Iterable, List, NoReturn, Optional, Tuple
+from typing import (
+    Annotated,
+    Any,
+    Dict,
+    Iterable,
+    List,
+    NoReturn,
+    Optional,
+    Tuple,
+)
 
 import typer
 
@@ -60,6 +70,7 @@ from automated_security_helper.core.constants import (
     is_blank_bin_path,
     usable_home,
 )
+from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.core.exceptions import (
     ASHConfigFileNotFoundError,
     ASHConfigValidationError,
@@ -74,6 +85,7 @@ from automated_security_helper.plugins.loader import (
 from automated_security_helper.utils.download_utils import (
     NO_BIN_DIRECTORY,
     NO_RECEIPT_STORE,
+    pinned_command_without_system_tools,
     pinned_install_already_satisfied,
 )
 from automated_security_helper.utils.error_text import error_text, text_without_values
@@ -104,6 +116,31 @@ from automated_security_helper.utils.subprocess_utils import (
     shown_arguments,
 )
 from automated_security_helper.utils.uv_tool_runner import UV_NO_CONFIG
+from automated_security_helper.utils.install_providers import (
+    KNOWN_PROVIDERS,
+    CommandKind,
+    EnvOptions,
+    ForcedBinary,
+    Refusal,
+    Refused,
+    RouteContext,
+    classify_install_command,
+    forced_binary_still_usable,
+    in_tree_path_refusal,
+    is_virtualenv,
+    joined_runtime_request,
+    parse_binary_path_entries,
+    parse_providers,
+    pyvenv_cfg_version,
+    read_forced_binaries,
+    record_forced_binaries,
+    recorded_forced_binary,
+    request_satisfied,
+    route_install,
+    validate_forced_binary,
+    venue_for_virtualenv,
+    venv_scripts_dir,
+)
 
 #: How long one install command may run. A package manager or a download that
 #: stalls held the whole installer for ever: with no timeout, run_command waited on
@@ -173,7 +210,7 @@ UNKNOWN_TOOLS_SETTING = "ASH_DEPENDENCIES_UNKNOWN_TOOLS"
 # the only bundled plugin in the second group, so it was selected as
 # `ArchiveConverter`; it is now `archive`, like its config key. Every other bundled
 # converter, scanner and reporter, including those in ash_aws_plugins and the
-# community modules, kept its name: the two commits' `Available:` lists were
+# alpha modules, kept its name: the two commits' `Available:` lists were
 # compared for each plugin type with every bundled plugin module loaded.
 #
 # The old spelling keeps working so that scripts and docs written against it do not
@@ -184,19 +221,20 @@ DEPRECATED_TOOL_ALIASES: dict[str, str] = {
 
 #: The plugin types --plugin-type selects, each the plugin manager's own name for
 #: that kind of plugin.
-PLUGIN_KINDS = ("converter", "scanner", "reporter")
+PLUGIN_KINDS = PluginKind.values()
 
 
-def _plugin_kind(plugin_type: str) -> str:
+def _plugin_kind(plugin_type: str) -> PluginKind:
     """The registry kind a --plugin-type value selects.
 
     install_dependencies refuses a value that is not one of PLUGIN_KINDS before
     anything is selected, so a value reaching here is one of them; any other is a
     programming error, not a kind to guess.
     """
-    if plugin_type not in PLUGIN_KINDS:
+    kind = PluginKind.coerce(plugin_type)
+    if kind is None:
         raise ValueError(f"not a plugin type: {plugin_type!r}")
-    return plugin_type
+    return kind
 
 
 def _selection_key(name: str) -> str:
@@ -475,6 +513,16 @@ class PluginInstallOutcome:
     # Pinned installs not run because a byte-identical copy of the pinned binary was
     # already present; see download_utils.find_verified_pinned_executable.
     commands_satisfied: int = 0
+    # Commands no permitted ``--providers`` entry could serve; each is also in
+    # ``errors`` with the refusal text, so the run fails and says why.
+    commands_refused: int = 0
+    # Install commands not run because ``--binary-path`` forced this scanner's
+    # binary; ``forced_binary`` is the path it forced.
+    commands_forced: int = 0
+    forced_binary: Optional[str] = None
+    # The force came from the record an earlier --binary-path run wrote, not from
+    # this run's flags; the status row says which.
+    forced_recorded: bool = False
     errors: List[str] = field(default_factory=list)
     executable: Optional[str] = None
     # Run through `uv tool run`, so present when uv lists it even with uv's tool
@@ -534,6 +582,7 @@ class PluginInstallOutcome:
         return (
             self.commands_attempted == 0
             and self.commands_satisfied == 0
+            and self.commands_forced == 0
             and not self.errors
         )
 
@@ -563,6 +612,8 @@ class PluginInstallOutcome:
 
     @property
     def status(self) -> str:
+        if self.commands_refused:
+            return "REFUSED BY PROVIDER"
         if self.errors or self.commands_failed:
             return "FAILED"
         # A tool named with --tool is counted (see _report_and_exit), so its row
@@ -578,6 +629,12 @@ class PluginInstallOutcome:
         return self._status()
 
     def _status(self) -> str:
+        if self.commands_forced and not self.commands_succeeded:
+            if self.executable:
+                if self.forced_recorded:
+                    return "FORCED (recorded --binary-path)"
+                return "FORCED (--binary-path)"
+            return "FORCED (binary not usable)"
         if self.commands_succeeded:
             if not self.needs_external_tool:
                 # Nothing to look for on PATH: the install put a Python package
@@ -993,6 +1050,16 @@ def _run_install_command(cmd: List[str], shell: bool = False) -> int:
     return code
 
 
+def _run_declared_install_command(cmd: List[str], shell: bool) -> int:
+    """Run one install command with the shell flag its CustomCommand declared.
+
+    The one call that forwards the operator's own declaration, kept in a
+    definition of its own so the self-scan's B604 suppression covers this call
+    and nothing else in the install loop.
+    """
+    return _run_install_command(cmd, shell=shell)  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
+
+
 def _consoles_that_no_color_turns_off() -> tuple:
     """The consoles ``--no-color`` turns color off on: the panels' and the table's,
     the error one and the shared one the ``print()`` lines are written through."""
@@ -1046,7 +1113,7 @@ def install_dependencies(
         metavar="<path>",
     ),
     plugin_types: List[str] = typer.Option(
-        ["converter", "scanner", "reporter"],
+        list(PluginKind.values()),
         "--plugin-type",
         "-t",
         help="Plugin types to install dependencies for",
@@ -1077,6 +1144,86 @@ def install_dependencies(
         typer.Option(
             "--config-overrides",
             help="Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2')",
+        ),
+    ] = [],
+    inherit_system_tools: Annotated[
+        bool,
+        typer.Option(
+            "--inherit-system-tools/--no-inherit-system-tools",
+            help=(
+                "Whether a tool found on PATH or in a system directory satisfies a "
+                "dependency during install. The default (--inherit-system-tools) is "
+                "what the installer has always done: a tool already there is "
+                "accepted as present. With --no-inherit-system-tools a global copy, "
+                "for example a system checkov, is ignored: the managed install "
+                "still runs and the result counts only what ASH, uv or "
+                "--virtualenv-path put in place. Programs ASH never installs, such "
+                "as Node.js for cdk-nag, are still found on PATH either way. "
+                "Install time only; a scan finds tools as before."
+            ),
+        ),
+    ] = True,
+    providers: Annotated[
+        Optional[str],
+        typer.Option(
+            "--providers",
+            metavar="<provider>[,<provider>...]",
+            help=(
+                "The install providers this run may use, in order of preference "
+                "(comma-separated). Only the listed providers may install anything, "
+                "and the first one that can serve a tool wins; a provider that "
+                "cannot is skipped with its reason printed, and when none can the "
+                "tool is refused. Without the flag every provider is permitted and "
+                "each tool is installed the way its plugin declares. "
+                f"Known providers: {', '.join(KNOWN_PROVIDERS)}."
+            ),
+        ),
+    ] = None,
+    virtualenv_path: Annotated[
+        Optional[str],
+        typer.Option(
+            "--virtualenv-path",
+            metavar="<path>",
+            help=(
+                "Install Python tools into the virtualenv at this path through the "
+                "selected provider, instead of into per-tool environments. The "
+                "virtualenv must already exist (for example one a node or CI setup "
+                "step prepared) unless --create-virtualenv lets ASH create it."
+            ),
+        ),
+    ] = None,
+    create_virtualenv: Annotated[
+        bool,
+        typer.Option(
+            "--create-virtualenv/--no-create-virtualenv",
+            help=(
+                "Let ASH create the virtualenv at --virtualenv-path when it does not "
+                "exist (--create-virtualenv), or refuse when it does not "
+                "(--no-create-virtualenv, the default). A path that exists and is "
+                "not a virtualenv is never overwritten."
+            ),
+        ),
+    ] = False,
+    binary_paths: Annotated[
+        List[str],
+        typer.Option(
+            "--binary-path",
+            metavar="<scanner>=<path>",
+            help=(
+                "Force this binary for the named scanner (repeatable, one per "
+                "scanner): its install commands are skipped, binary detection is "
+                "bypassed, and the path is recorded for dependency validation -- "
+                "the scanners' dependency checks and later install runs read the "
+                "record, re-checking the file and its SHA-256 each time. The "
+                "path must be absolute, exist, and be an executable regular file "
+                "outside the scanned tree. ASH checks the file and never runs it. "
+                "The record resolves the scanner's own binary only: a scanner's "
+                "other requirements (npm-audit's offline refusal, trivy's offline "
+                "database, cfn-guard's rules, actionlint's integrations) still "
+                "apply, and cdk-nag, detect-secrets and mcp-config run Python "
+                "libraries rather than one binary, so they never consult it. "
+                "'<scanner>=' with an empty path removes the recorded entry."
+            ),
         ),
     ] = [],
     verbose: Annotated[
@@ -1128,6 +1275,18 @@ def install_dependencies(
     # scanner` built and installed every scanner twice.
     plugin_types = list(dict.fromkeys(plugin_types))
 
+    # The install-environment flags, refused with the same codes and the same panel
+    # as the selection refusals above, before anything is resolved, built or made.
+    # They are the operator's alone: no config field and no environment variable
+    # supplies one, so a tree being scanned cannot steer the installer.
+    provider_names, providers_error = parse_providers(providers)
+    if providers_error is not None:
+        _refuse_flags(providers_error)
+    virtualenv_target = _validated_virtualenv(
+        ctx, virtualenv_path, create_virtualenv, provider_names
+    )
+    forced_entries, forced_erase = _forced_binary_flags(binary_paths)
+
     # A named config file that is not there is refused before the bin directory is
     # made, the environment is changed or any plugin is resolved: resolve_config
     # would answer it with the default configuration, and the installs that follow
@@ -1150,7 +1309,7 @@ def install_dependencies(
     # The default when no bin path was given, or a blank one, from the option or
     # from a whitespace-only ASH_BIN_PATH that click passes through as given.
     target_bin_path: Optional[Path]
-    if is_blank_bin_path(bin_path):
+    if bin_path is None or is_blank_bin_path(bin_path):
         target_bin_path = ASH_BIN_PATH
     elif (
         from_environment(ctx, "bin_path")
@@ -1256,7 +1415,7 @@ def install_dependencies(
     work_dir = output_dir.joinpath(ASH_WORK_DIR_NAME)
     # config_path is what makes --config/ASH_CONFIG mean anything here. Omitting it
     # made the option accept a path and then quietly ignore it, so
-    # `ashx dependencies install --config .ash/.ash_community_plugins.yaml` resolved
+    # `ashx dependencies install --config .ash/.ash_alpha_plugins.yaml` resolved
     # the default config instead and installed dependencies for the wrong set of
     # plugins.
     try:
@@ -1276,7 +1435,7 @@ def install_dependencies(
     # `--config` previously resolved the config's *values* and stopped there. The
     # scanners a config adds through `ash_plugin_modules` were never imported, so
     # their plugin classes never registered, so
-    # `ashx dependencies install --config .ash/.ash_community_plugins.yaml` installed
+    # `ashx dependencies install --config .ash/.ash_alpha_plugins.yaml` installed
     # dependencies for the built-in set and reported success -- and trivy, snyk and
     # ferret had to be installed by hand in CI before the scan.
     #
@@ -1523,7 +1682,7 @@ def install_dependencies(
             # construct is unrelated to a `--tool` request for a different one --
             # so folding it in unconditionally made
             # `ash dependencies install --tool trivy-repo` exit 1 because some
-            # other community plugin would not import, and name that other plugin
+            # other alpha plugin would not import, and name that other plugin
             # in the failure panel.
             # A plugin its configuration disables is one a scan never runs, so
             # its error does not decide a full run's exit code (the documented
@@ -1692,31 +1851,30 @@ def install_dependencies(
                     + escape(", ".join(sorted(o.name for o in failed_to_load)))
                 )
             )
-            # A community scanner that ships with ASH is not a typo when its module
-            # is simply not loaded: say which module to add.
-            from automated_security_helper.core.community_scanners import (
-                community_module_for,
+            # A scanner that ships with ASH is not a typo when its module is
+            # simply not loaded: say which module to add.
+            from automated_security_helper.plugin_manifests import (
+                opt_in_module_for,
             )
 
-            community = {
-                name: module
-                for name in unknown
-                if (module := community_module_for(name))
+            unloaded = {
+                name: module for name in unknown if (module := opt_in_module_for(name))
             }
-            community_note = "".join(
-                f"\n[yellow]{escape(name)}[/yellow] is a community plugin scanner: "
+            unloaded_note = "".join(
+                f"\n[yellow]{escape(name)}[/yellow] is provided by a plugin "
+                "module this run did not load: "
                 + escape(
                     f"load {module} with --config (ash_plugin_modules) or "
                     f'--config-overrides "ash_plugin_modules+=[{module}]".'
                 )
-                for name, module in sorted(community.items())
+                for name, module in sorted(unloaded.items())
             )
             console.print(
                 Panel(
                     f"[bold red]Unknown tool(s): "
                     f"{escape(', '.join(sorted(unknown)))}[/bold red]\n"
                     f"[cyan]Available:[/cyan] {escape(', '.join(available))}"
-                    f"{community_note}{broken_note}",
+                    f"{unloaded_note}{broken_note}",
                     title="Nothing installed",
                     expand=False,
                 )
@@ -1761,6 +1919,19 @@ def install_dependencies(
         outcomes.extend(construction_failures)
         selected = discovered
 
+    # --binary-path entries are checked once the plugins they name are known, and
+    # before anything is made: a refusal lists every bad entry (exit 2) and installs
+    # nothing. The files are read and hashed, never run.
+    forced_by_plugin = _resolve_forced_binaries(forced_entries, selected, source_dir)
+    # Erase keys are resolved the way record keys were written, so an alias or a
+    # case variant erases the record it names.
+    forced_erase = _canonical_erase_keys(forced_erase, selected)
+    # The record earlier --binary-path runs wrote is read here, which is what
+    # recording it promises: a plugin not re-forced or erased this run keeps its
+    # recorded force, judged afresh by a file check and the recorded SHA-256.
+    recorded_forces = _recorded_forces(selected, forced_by_plugin, forced_erase)
+    all_forced = {**recorded_forces, **forced_by_plugin}
+
     # The bin directory is made here, after every refusal above (a --config that is
     # not there, a configuration a scan refuses, a plugin module that does not
     # load, an unknown --tool or --plugin-type): made first, a refused run that
@@ -1775,12 +1946,65 @@ def install_dependencies(
     except OSError as e:
         _refuse_bin_directory(target_bin_path, error_text(e))
 
+    env_options = EnvOptions(
+        inherit_system_tools=inherit_system_tools,
+        virtualenv_path=virtualenv_target,
+        create_virtualenv=create_virtualenv,
+        forced_binaries={name: f.path for name, f in all_forced.items()},
+    )
+    route_context = RouteContext(
+        platform_name=platform_name,
+        arch=arch,
+        bin_dir=absolute_bin_path,
+        is_root=hasattr(os, "geteuid") and os.geteuid() == 0,
+        explicit=provider_names is not None,
+    )
+
+    # Recorded where the dependency validation reads install records, before any
+    # install runs; a --binary-path <scanner>= with no path removes its record.
+    if forced_by_plugin or forced_erase:
+        try:
+            record_path = record_forced_binaries(
+                forced_by_plugin.values(), erase=forced_erase
+            )
+        except Exception as e:
+            print(
+                "[bold red]Could not record the forced binaries: "
+                f"{escape(error_text(e))}[/bold red]"
+            )
+            raise typer.Exit(EXIT_INSTALL_FAILED)
+        for name, forced in sorted(forced_by_plugin.items()):
+            print(
+                f"Forced binary for {escape(name)}: {escape(str(forced.path))} "
+                f"(sha256 {forced.sha256}); recorded in {escape(str(record_path))}"
+            )
+
+    # A virtualenv a setup step prepared is only read, for the Python version each
+    # tool's interpreter request is checked against. One ASH vends is made first
+    # thing in the install below.
+    venv_version: Optional[str] = (
+        pyvenv_cfg_version(virtualenv_target)
+        if virtualenv_target is not None and is_virtualenv(virtualenv_target)
+        else None
+    )
+    joined_request: Optional[str] = None
+    if virtualenv_target is not None and not is_virtualenv(virtualenv_target):
+        joined_request, join_error = joined_runtime_request(
+            _plugin_runtime_requests(selected, platform_name, arch, all_forced)
+        )
+        if join_error is not None:
+            _refuse_flags(f"--create-virtualenv: {join_error}")
+
+    realized_once: set = set()
     ash_environment_requirements: List[str] = []
     # For run_command's lines about each child; reset once the installs are done.
     # Through the one normalizer every redaction reads values with, so a lone
     # string is one value, never its characters.
     install_values = _INSTALL_VALUES.set(value_tuple(environment_values))
     try:
+        if virtualenv_target is not None and not is_virtualenv(virtualenv_target):
+            _create_virtualenv(virtualenv_target, provider_names, joined_request)
+            venv_version = pyvenv_cfg_version(virtualenv_target)
         for plugin_type, plugin_name, plugin_instance in selected:
             outcome = PluginInstallOutcome(
                 name=plugin_name,
@@ -1833,6 +2057,39 @@ def install_dependencies(
                 outcome.errors.append(error_text(e, environment_values))
                 continue
 
+            # --binary-path forces this scanner's binary -- from this run's flag,
+            # or from the record an earlier run wrote: nothing is installed for
+            # it, and the sweep below resolves it to the forced file by a file
+            # check. The forced binary is never run.
+            forced = all_forced.get(plugin_name)
+            if forced is not None:
+                outcome.commands_forced = len(commands) or 1
+                outcome.forced_binary = str(forced.path)
+                outcome.forced_recorded = plugin_name not in forced_by_plugin
+                recorded_note = (
+                    " (recorded by an earlier --binary-path run)"
+                    if outcome.forced_recorded
+                    else ""
+                )
+                print(
+                    f"Forced binary for {escape(plugin_name)}{recorded_note}: "
+                    f"{escape(str(forced.path))}; its {outcome.commands_forced} "
+                    "install command(s) are not run"
+                )
+                continue
+
+            commands = _routed_commands(
+                commands,
+                plugin_name=plugin_name,
+                tool_key=getattr(plugin_instance, "command", None),
+                outcome=outcome,
+                env_options=env_options,
+                provider_names=provider_names,
+                context=route_context,
+                realized=realized_once,
+                venv_version=venv_version,
+            )
+
             for cmd, shell in commands:
                 # An empty argv is not a command. These reached run_command before
                 # this change, failed, and pushed the run's exit code to 1 -- which
@@ -1857,7 +2114,9 @@ def install_dependencies(
                 # stage. Decided by the bytes, never the name: a same-named binary
                 # that does not hash to the pinned executable digest is installed
                 # over as before.
-                present = pinned_install_already_satisfied(cmd)
+                present = pinned_install_already_satisfied(
+                    cmd, inherit_system_tools=inherit_system_tools
+                )
                 if present is not None:
                     print(
                         f"Already present: {escape(present.tool)} "
@@ -1867,6 +2126,14 @@ def install_dependencies(
                     )
                     outcome.commands_satisfied += 1
                     continue
+                if not inherit_system_tools and not shell:
+                    # The parent declined to skip; the pinned install runs in a
+                    # CHILD python whose own already-present re-check
+                    # (install_pinned_tool) would still accept a byte-identical
+                    # PATH copy and install nothing, failing the sweep below. The
+                    # command is retold so the child honors the flag too; any
+                    # other argv comes back unchanged.
+                    cmd = pinned_command_without_system_tools(cmd)
 
                 # An argv routinely carries brackets -- `pip install ash[sarif,toml]`
                 # -- and rich would read `[sarif,toml]` as a tag and drop it from the
@@ -1883,7 +2150,7 @@ def install_dependencies(
                 outcome.commands_attempted += 1
                 # A CustomCommand declared with shell=True runs through the shell,
                 # as declared; the flag was dropped before the installer saw it.
-                cmd_exit_code = _run_install_command(cmd, shell=shell)  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
+                cmd_exit_code = _run_declared_install_command(cmd, shell)
                 if cmd_exit_code != 0:
                     print(f"Command failed with exit code: {cmd_exit_code}")
                     outcome.commands_failed += 1
@@ -1923,9 +2190,36 @@ def install_dependencies(
             for name in outcome.external_executables
             if not find_executable_for_scan(name, source_dir)
         ]
-        if outcome.needs_external_tool:
+        forced = all_forced.get(outcome.name)
+        if outcome.needs_external_tool and forced is not None:
+            # A forced binary is judged by a file check alone: still a regular,
+            # executable file. It is never run, and the plugin's own check (which
+            # could run it) is not asked.
+            outcome.executable = (
+                str(forced.path) if forced_binary_still_usable(forced) else None
+            )
+        elif outcome.needs_external_tool and not inherit_system_tools:
+            # Only what ASH or its providers manage counts; a copy on PATH or in a
+            # system directory is named and set aside, so the operator sees what
+            # the flag excluded. The plugin's own check is not asked either: its
+            # base answer is the same PATH probe.
+            outcome.executable = _managed_executable(
+                outcome, virtualenv_target, absolute_bin_path
+            )
+            if outcome.command is not None:
+                system_copy = find_executable_for_scan(outcome.command, source_dir)
+                if system_copy and system_copy != outcome.executable:
+                    print(
+                        f"Ignoring {escape(system_copy)}: --no-inherit-system-tools "
+                        "(a system tool does not satisfy this dependency)"
+                    )
+        elif outcome.needs_external_tool:
             outcome.executable = _resolved_executable(outcome, source_dir)
-            if outcome.executable is None and outcome.uv_managed:
+            if (
+                outcome.executable is None
+                and outcome.uv_managed
+                and outcome.command is not None
+            ):
                 outcome.executable = _uv_tool_executable(outcome.command)
             # Last, and only for a plugin the verdict counts (see
             # _report_and_exit) that declares its check can start the tool off
@@ -2033,6 +2327,8 @@ def _resolved_executable(
     """
     if outcome.runs_in_ash_interpreter and os.path.isabs(sys.executable or ""):
         return sys.executable
+    if outcome.command is None:
+        return None
     return find_executable_for_scan(outcome.command, source_dir)
 
 
@@ -2115,6 +2411,407 @@ def _well_formed_commands(declared: Any) -> List[Tuple[List[str], bool]]:
             text_argv.append(item)
         commands.append((text_argv, shell))
     return commands
+
+
+def _refuse_flags(text: str, code: int = EXIT_BAD_SELECTION) -> NoReturn:
+    """Refuse an environment-flag problem: the panel the selection refusals use,
+    nothing installed, nothing created."""
+    console.print(
+        Panel(
+            f"[bold red]{escape(text)}[/bold red]",
+            title="Nothing installed",
+            expand=False,
+        )
+    )
+    raise typer.Exit(code)
+
+
+def _given_on_command_line(ctx: typer.Context, name: str) -> bool:
+    """Whether the operator typed the option (and did not leave its default)."""
+    try:
+        source = ctx.get_parameter_source(name)
+    except Exception:
+        return False
+    return source is not None and source.name == "COMMANDLINE"
+
+
+def _validated_virtualenv(
+    ctx: typer.Context,
+    virtualenv_path: Optional[str],
+    create_virtualenv: bool,
+    provider_names: Optional[List[str]],
+) -> Optional[Path]:
+    """The absolute ``--virtualenv-path``, or None, after the flag matrix's refusals.
+
+    ============== ===================== ==========================================
+    path           create flag           result
+    ============== ===================== ==========================================
+    absent         absent                today's behavior
+    absent         either, typed         refused (exit 2): the flag is dead without it
+    ``P``          absent / no-create    ``P`` must be a virtualenv, else exit 3
+    ``P``          ``--create-virtualenv`` vend when missing, reuse a virtualenv,
+                                         refuse a path that is not one (exit 3)
+    ============== ===================== ==========================================
+
+    Everything here reads the filesystem and creates nothing; the virtualenv itself
+    is made later, once every other refusal has had its turn.
+
+    A path inside the scanned source tree (the working directory) is refused first,
+    existing or not, with ``--binary-path``'s words and opt-in (exit 3): the
+    virtualenv's interpreter is EXECUTED by the install commands built around it
+    (uv probes ``--python``, pip is run as ``<venv python> -m pip``), so a
+    tree-supplied virtualenv is a tree-supplied program. A relative path resolves
+    against the working directory, which is that tree.
+    """
+    typed_create = create_virtualenv or _given_on_command_line(ctx, "create_virtualenv")
+    if virtualenv_path is None:
+        if typed_create:
+            _refuse_flags(
+                "--create-virtualenv and --no-create-virtualenv need "
+                "--virtualenv-path. Name the virtualenv to create or use."
+            )
+        return None
+    if not virtualenv_path.strip():
+        _refuse_flags("--virtualenv-path is empty. Name the virtualenv's directory.")
+    try:
+        path = Path(os.path.abspath(Path(virtualenv_path).expanduser()))
+    except (RuntimeError, OSError, ValueError) as e:
+        _refuse_flags(
+            f"--virtualenv-path {virtualenv_path} cannot be expanded: {error_text(e)}",
+            EXIT_INVALID_CONFIG,
+        )
+    try:
+        scanned_tree: Optional[Path] = Path.cwd()
+    except OSError:
+        # The deleted working directory is refused once, later, as a usage error.
+        scanned_tree = None
+    in_tree = in_tree_path_refusal(f"--virtualenv-path {path}", path, scanned_tree)
+    if in_tree is not None:
+        _refuse_flags(in_tree, EXIT_INVALID_CONFIG)
+    exists = os.path.lexists(path)
+    if exists and not is_virtualenv(path):
+        _refuse_flags(
+            f"--virtualenv-path {path} exists and is not a virtualenv (it has no "
+            "pyvenv.cfg). ASH never overwrites or deletes a path it did not create: "
+            "name a virtualenv, or a path that does not exist together with "
+            "--create-virtualenv.",
+            EXIT_INVALID_CONFIG,
+        )
+    if not exists and not create_virtualenv:
+        _refuse_flags(
+            f"--virtualenv-path {path} does not exist. Prepare it first, or add "
+            "--create-virtualenv to have ASH create it there.",
+            EXIT_INVALID_CONFIG,
+        )
+    if exists and pyvenv_cfg_version(path) is None:
+        _refuse_flags(
+            f"--virtualenv-path {path} has a pyvenv.cfg that records no readable "
+            "Python version, so no tool's interpreter request can be checked against "
+            "it. Recreate the virtualenv, or name another.",
+            EXIT_INVALID_CONFIG,
+        )
+    if not exists:
+        provider, skipped = venue_for_virtualenv(provider_names)
+        if provider is None:
+            _refuse_flags(
+                "--create-virtualenv: no permitted provider can create a "
+                "virtualenv.\n"
+                + "\n".join(f"  {name}: {reason}" for name, reason in skipped)
+                + "\nNothing was created.",
+            )
+    return path
+
+
+def _forced_binary_flags(
+    binary_paths: List[str],
+) -> Tuple[Dict[str, str], List[str]]:
+    """``({scanner: path}, [scanner to erase])`` from the raw --binary-path values,
+    refusing a malformed entry (exit 2) with every bad entry listed together."""
+    parsed, errors = parse_binary_path_entries(binary_paths)
+    if errors:
+        _refuse_flags("\n".join(errors))
+    erase = [key for key, value in parsed.items() if value == ""]
+    return {key: value for key, value in parsed.items() if value}, erase
+
+
+def _resolve_forced_binaries(
+    entries: Dict[str, str], selected: List[tuple], source_dir: Path
+) -> Dict[str, ForcedBinary]:
+    """Each --binary-path entry validated, keyed by the plugin name it forces.
+
+    The scanner key is read the way ``--tool`` names are (aliases, then the scan's
+    selection key). Every bad entry is listed in one refusal (exit 2) and nothing
+    is installed. The files are checked and hashed here, never executed.
+    """
+    names = [name for _, name, _ in selected]
+    aliased = _resolve_tool_aliases(list(entries))
+    errors: List[str] = []
+    resolved: Dict[str, ForcedBinary] = {}
+    for key, path_text in entries.items():
+        shown = f"--binary-path {key}={path_text}"
+        try:
+            plugin_name = _canonical_tool_name(aliased.get(key, key), names)
+        except AmbiguousToolName as e:
+            errors.append(f"{shown}: {e}")
+            continue
+        plugin = next((entry[2] for entry in selected if entry[1] == plugin_name), None)
+        if plugin is None:
+            errors.append(
+                f"{shown}: {key} is not a plugin this run installs for. "
+                f"Selected: {', '.join(sorted(names)) or 'none'}"
+            )
+            continue
+        if not getattr(plugin, "command", None):
+            errors.append(
+                f"{shown}: {plugin_name} runs no external program, so there is no "
+                "binary to force"
+            )
+            continue
+        if plugin_name in resolved:
+            errors.append(f"{shown}: {plugin_name} is already forced by another entry")
+            continue
+        result = validate_forced_binary(plugin_name, path_text, source_dir)
+        if isinstance(result, str):
+            errors.append(result)
+            continue
+        resolved[plugin_name] = result
+    if errors:
+        _refuse_flags("\n".join(errors))
+    return resolved
+
+
+def _canonical_erase_keys(erase: List[str], selected: List[tuple]) -> List[str]:
+    """Erase keys resolved the way record keys are written, with the raw keys kept.
+
+    Records are written under the canonical plugin name (aliases resolved, then the
+    scan's selection key), so ``--binary-path Checkov=`` typed raw erased nothing,
+    silently. Erasing is permissive -- an entry that is not there is already erased
+    -- so a key that resolves to no selected plugin, or ambiguously, is kept as
+    typed rather than refused, and the raw spellings stay in the list too, for a
+    record an older run wrote under one.
+    """
+    names = [name for _, name, _ in selected]
+    aliased = _resolve_tool_aliases(list(erase))
+    keys: List[str] = list(erase)
+    for key in erase:
+        try:
+            keys.append(_canonical_tool_name(aliased.get(key, key), names))
+        except AmbiguousToolName:
+            continue
+    return list(dict.fromkeys(keys))
+
+
+def _recorded_forces(
+    selected: List[tuple],
+    forced_by_plugin: Dict[str, ForcedBinary],
+    erase: Iterable[str],
+) -> Dict[str, ForcedBinary]:
+    """The forces an earlier ``--binary-path`` run recorded, for this run's plugins.
+
+    The reader the record exists for: a selected plugin not re-forced or erased by
+    this run's flags keeps its recorded force, judged afresh by the file check and
+    the recorded SHA-256 (``recorded_forced_binary``), so a later flag-less
+    ``ash dependencies install`` resolves the scanner to the forced path instead
+    of PATH or uv. A record whose file is no longer the validated one is named, so
+    the operator learns the force went stale rather than watching detection
+    quietly fall back to PATH.
+    """
+    recorded: Dict[str, ForcedBinary] = {}
+    erased = set(erase)
+    on_record = read_forced_binaries()
+    for _, name, _ in selected:
+        if name in forced_by_plugin or name in erased or name not in on_record:
+            continue
+        binary = recorded_forced_binary(name)
+        if binary is None:
+            print(
+                f"[yellow]Ignoring the recorded forced binary for {escape(name)}: "
+                "the file is no longer the one --binary-path validated (moved, not "
+                "an executable regular file, or its content changed). Re-run "
+                f"--binary-path {escape(name)}=<path>, or erase the record with "
+                f"--binary-path {escape(name)}=.[/yellow]"
+            )
+            continue
+        recorded[name] = binary
+    return recorded
+
+
+def _plugin_runtime_requests(
+    selected: List[tuple], platform_name: str, arch: str, skip: Iterable[str]
+) -> List[Optional[str]]:
+    """The interpreter request each selected plugin's python tool install carries.
+
+    Read to choose the interpreter of a virtualenv this run creates, before any
+    install runs. A plugin that cannot produce its commands contributes nothing here;
+    the install loop reports it.
+    """
+    requests: List[Optional[str]] = []
+    skipped = set(skip)
+    for _, name, instance in selected:
+        if name in skipped:
+            continue
+        try:
+            commands = _well_formed_commands(
+                instance.get_installation_commands(platform_name, arch)
+            )
+        except Exception:
+            continue
+        for cmd, shell in commands:
+            request = classify_install_command(
+                cmd, shell, getattr(instance, "command", None)
+            )
+            if request.kind == CommandKind.PYTHON_TOOL:
+                requests.append(request.runtime_request)
+    return requests
+
+
+def _create_virtualenv(
+    path: Path,
+    provider_names: Optional[List[str]],
+    runtime_request: Optional[str],
+) -> None:
+    """Create the virtualenv with the first permitted provider that can, or exit.
+
+    Run first, as one counted command, before any tool install. A refusal exits 2
+    (nothing was created); a failed or incomplete creation exits 1.
+    """
+    provider, skipped = venue_for_virtualenv(provider_names)
+    if provider is None:
+        _refuse_flags(
+            "--create-virtualenv: no permitted provider can create a virtualenv.\n"
+            + "\n".join(f"  {name}: {reason}" for name, reason in skipped)
+        )
+    built = provider.venv_create_command(path, runtime_request)
+    if isinstance(built, Refusal):
+        _refuse_flags(f"--create-virtualenv: {built.text}")
+    for name, reason in skipped:
+        print(
+            f"[yellow]Skipped {escape(name)} to create the virtualenv:[/yellow] {escape(reason)}"
+        )
+    print(
+        f"Creating the virtualenv at {escape(str(path))} with {escape(provider.name)}"
+    )
+    console.print(
+        f"Running command: {escape(_shown_command(built, _INSTALL_VALUES.get()))}",
+        soft_wrap=True,
+    )
+    code = _run_install_command(list(built))
+    if code != 0 or not is_virtualenv(path):
+        print(
+            "[bold red]The virtualenv at "
+            f"{escape(str(path))} was not created (exit code {code}); nothing was "
+            "installed.[/bold red]"
+        )
+        raise typer.Exit(EXIT_INSTALL_FAILED)
+    print(f"Command succeeded with exit code: {code}")
+
+
+def _routed_commands(
+    commands: List[Tuple[List[str], bool]],
+    *,
+    plugin_name: str,
+    tool_key: Optional[str],
+    outcome: "PluginInstallOutcome",
+    env_options: EnvOptions,
+    provider_names: Optional[List[str]],
+    context: RouteContext,
+    realized: set,
+    venv_version: Optional[str],
+) -> List[Tuple[List[str], bool]]:
+    """Each declared command mapped through its provider, refusals counted.
+
+    With ``--providers`` absent and no virtualenv, every command is built by the
+    provider it was declared for and comes back unchanged, so a default run installs
+    exactly what the plugins declared. A command no permitted provider can serve is
+    not run: it is counted in ``outcome.commands_refused`` with the refusal text in
+    ``outcome.errors``, and nothing is substituted.
+    """
+    routed: List[Tuple[List[str], bool]] = []
+    for cmd, shell in commands:
+        if not cmd:
+            routed.append((cmd, shell))
+            continue
+        request = classify_install_command(cmd, shell, tool_key)
+        venv = env_options.virtualenv_path
+        if (
+            venv is not None
+            and venv_version
+            and request.kind == CommandKind.PYTHON_TOOL
+            and request.runtime_request
+        ):
+            satisfied = request_satisfied(request.runtime_request, venv_version)
+            if satisfied is not True:
+                judged = (
+                    "does not meet"
+                    if satisfied is False
+                    else "cannot be judged against"
+                )
+                text = (
+                    f"{request.subject} needs Python {request.runtime_request}, which "
+                    f"{judged} the Python {venv_version} of the virtualenv at {venv}. "
+                    "Nothing was installed for it."
+                )
+                print(f"[bold red]{escape(text)}[/bold red]")
+                outcome.commands_refused += 1
+                outcome.errors.append(text)
+                continue
+        route = route_install(
+            request, env_options, providers=provider_names, context=context
+        )
+        if isinstance(route, Refused):
+            print(f"[bold red]{escape(route.text)}[/bold red]")
+            outcome.commands_refused += 1
+            outcome.errors.append(route.text.replace("\n", " "))
+            continue
+        for skipped_name, reason in route.skipped:
+            print(
+                f"[yellow]Skipped provider {escape(skipped_name)} for "
+                f"{escape(plugin_name)}:[/yellow] {escape(reason)}"
+            )
+        for caveat in route.caveats:
+            print(f"[yellow]Note ({escape(route.provider)}):[/yellow] {escape(caveat)}")
+        if route.run_once_key is not None:
+            if route.run_once_key in realized:
+                print(
+                    f"Already realized by {escape(route.provider)} earlier in this "
+                    f"run: {escape(plugin_name)}"
+                )
+                outcome.commands_satisfied += 1
+                continue
+            realized.add(route.run_once_key)
+        for built in route.commands:
+            built_argv = list(built)
+            routed.append((built_argv, shell and built_argv == list(cmd)))
+    return routed
+
+
+def _managed_executable(
+    outcome: "PluginInstallOutcome", virtualenv: Optional[Path], bin_dir: Path
+) -> Optional[str]:
+    """What runs ``outcome.command`` among the locations ASH or its providers manage.
+
+    The ``--no-inherit-system-tools`` lookup. In order: ASH's own interpreter for a
+    plugin that runs inside it, uv's tool listing, the virtualenv's scripts
+    directory, ASH's own environment directories, and the ASH bin directory. Never a
+    bare PATH search and never ``/usr/local/bin``: a system copy does not stand in
+    for what this run was asked to install.
+    """
+    from automated_security_helper.utils.subprocess_utils import own_environment_dirs
+
+    if outcome.runs_in_ash_interpreter and os.path.isabs(sys.executable or ""):
+        return sys.executable
+    if outcome.command is None:
+        return None
+    if outcome.uv_managed:
+        listed = _uv_tool_executable(outcome.command)
+        if listed is not None:
+            return listed
+    directories: List[str] = []
+    if virtualenv is not None:
+        directories.append(str(venv_scripts_dir(virtualenv)))
+    directories.extend(str(d) for d in own_environment_dirs())
+    directories.append(str(bin_dir))
+    return shutil.which(outcome.command, path=os.pathsep.join(directories))
 
 
 def _uv_tool_executable(command: str) -> Optional[str]:

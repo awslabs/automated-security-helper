@@ -58,7 +58,7 @@ class Case:
     scan_accepts: bool
     # Text validate must print. For a refused config these name the fields.
     validate_mentions: List[str] = field(default_factory=list)
-    file_name: str = ".ash/.ash.yaml"
+    file_name: str = ".ash.yaml"
     overrides: List[str] = field(default_factory=list)
     # Other files the case needs, by path relative to the project.
     extra_files: Dict[str, str] = field(default_factory=dict)
@@ -253,7 +253,7 @@ CASES = [
         id="extends-missing-base",
         text=_dedent(
             """
-            extends: ../no-such-base.yaml
+            extends: no-such-base.yaml
             project_name: demo
             """
         ),
@@ -461,6 +461,10 @@ CASES = [
         scan_accepts=True,
     ),
     Case(
+        # A bare directory name matches the directory's subtree (the
+        # bare-directory rule, issue #894), so the scan and the checks accept
+        # it with no advice; "**/vendor" still matches no file and draws the
+        # directory advice.
         id="directory-ignore-path-without-glob",
         text=_dedent(
             """
@@ -469,10 +473,13 @@ CASES = [
               ignore_paths:
                 - path: vendor
                   reason: third-party code
+                - path: "**/vendor"
+                  reason: third-party code at depth
             """
         ),
         scan_accepts=True,
-        validate_mentions=["Use 'vendor/'"],
+        validate_mentions=["Use '**/vendor/'"],
+        validate_absent=["Use 'vendor/'"],
         extra_files={"vendor/lib.py": ""},
     ),
     Case(
@@ -747,8 +754,7 @@ def test_a_refusal_ending_in_a_period_reads_as_one_sentence_before_the_hint(
     project: Path, monkeypatch
 ):
     """A model message that ends with a period is not followed by a second one."""
-    (project / ".ash").mkdir()
-    (project / ".ash" / ".ash.yaml").write_text(
+    (project / ".ash.yaml").write_text(
         "project_name: demo\nscanners:\n  bandit:\n    severity_threshold: HIGH\n",
         encoding="utf-8",
     )
@@ -782,8 +788,7 @@ def test_a_refusal_in_the_shared_loader_reaches_every_command(
     """
     refused_name = "refused.yaml"
     if where == "discovered":
-        (project / ".ash").mkdir()
-        refused = project / ".ash" / ".ash.yaml"
+        refused = project / ".ash.yaml"
         refused_name = refused.name
         config_args: List[str] = []
     else:
@@ -1266,8 +1271,7 @@ def test_unparseable_file_is_invalid(
 ):
     """A file that does not parse is invalid: exit 3, as `config get` exits, and
     as a scan refuses it. The messages say the scan refuses the file."""
-    (project / ".ash").mkdir()
-    (project / ".ash" / ".ash.yaml").write_bytes(content)
+    (project / ".ash.yaml").write_bytes(content)
     assert _scan_verdict(project, [], monkeypatch) is False
     runner = CliRunner()
 
@@ -1345,8 +1349,8 @@ def test_a_refusal_names_a_command_that_explains_it(
         (project / "configs" / "bad.yaml").write_text(bad, encoding="utf-8")
         args = [*command, "--config", "configs/bad.yaml"]
     elif where == "source-dir":
-        (project / "other" / ".ash").mkdir(parents=True)
-        (project / "other" / ".ash" / ".ash.yaml").write_text(bad, encoding="utf-8")
+        (project / "other").mkdir(parents=True)
+        (project / "other" / ".ash.yaml").write_text(bad, encoding="utf-8")
         args = [*command, "--source-dir", "other", "--output-dir", "out"]
     else:
         # A repository outside the working directory, whose config extends a
@@ -1432,19 +1436,19 @@ def test_a_refusal_names_a_command_that_explains_it(
             id="plain",
         ),
         pytest.param(
-            "/srv/repo/.ash/.ash.yaml",
+            "/srv/repo/.ash.yaml",
             "/srv/repo",
-            "Run: ashx config lint --config /srv/repo/.ash/.ash.yaml --source-dir /srv/repo",
+            "Run: ashx config lint --config /srv/repo/.ash.yaml --source-dir /srv/repo",
             id="source-dir",
         ),
         pytest.param(
-            "/srv/my repo/.ash/.ash.yaml",
+            "/srv/my repo/.ash.yaml",
             None,
             "Run: ashx config lint --config <the file named above>",
             id="space",
         ),
         pytest.param(
-            "/srv/x & calc & y/.ash/.ash.yaml",
+            "/srv/x & calc & y/.ash.yaml",
             "/srv/x & calc & y",
             "Run: ashx config lint --config <the file named above> "
             "--source-dir <the directory the scan scanned>",
@@ -1500,8 +1504,8 @@ def test_source_dir_selects_the_config_each_command_checks(
 ):
     """`--source-dir other` (or ASH_SOURCE_DIR) checks other's config, as a scan
     of other does, and not the working directory's valid one."""
-    (project / "other" / ".ash").mkdir(parents=True)
-    (project / "other" / ".ash" / ".ash.yaml").write_text(
+    (project / "other").mkdir(parents=True)
+    (project / "other" / ".ash.yaml").write_text(
         "project_name: demo\nfail_on_findings: sometimes\n", encoding="utf-8"
     )
     (project / ".ashrc.yaml").write_text("project_name: demo\n", encoding="utf-8")
@@ -1601,8 +1605,7 @@ def test_an_in_tree_entry_the_scan_drops_is_not_an_error_for_validate(
     validate agrees with exit 0. The name is inside the plugin namespace: a
     name outside it is kept for the scan's exit-3 namespace refusal wherever
     the file sits (the previous test's case)."""
-    config = project / ".ash" / ".ash.yaml"
-    config.parent.mkdir(parents=True)
+    config = project / ".ash.yaml"
     config.write_text(
         "project_name: demo\nash_plugin_modules:\n  - missing_ash_plugins\n",
         encoding="utf-8",
@@ -1654,8 +1657,7 @@ def test_a_module_the_ash_config_base_trusts_is_invalid_for_validate_too(
         "project_name: op\nash_plugin_modules:\n  - outside_module\n",
         encoding="utf-8",
     )
-    config = project / ".ash" / ".ash.yaml"
-    config.parent.mkdir(parents=True)
+    config = project / ".ash.yaml"
     config.write_text(
         "project_name: demo\nash_plugin_modules:\n  - outside_module\n",
         encoding="utf-8",

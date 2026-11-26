@@ -49,6 +49,13 @@ the first class whose required columns it carries:
     the location class knows neither the advisory nor the package). Overlap is not transitive, so a cluster is a connected component
     of the overlap relation; a chain A-B-C joins A and C even when they do not
     overlap one another. That is order independent, which a sweep is not.
+    The chaining is bounded by a split guard: two rows of one scanner and
+    rule id are one finding only when they overlap each other directly, so a
+    cluster never folds two findings of the same scanner and rule id that are
+    connected only through a bridge row (a wide multi-CWE row spanning both).
+    Such a component splits: the bridge rows cluster with nothing and the
+    rest re-cluster; a chain with no single bridge leaves the two findings
+    standing alone instead. Fail closed, as for the package class.
 
 A class with only one matching row makes no cluster. Secrets (no CWE, a
 masked value) never cluster.
@@ -244,6 +251,60 @@ def _location_groups(
     return groups
 
 
+def _overlaps(
+    spans: Dict[int, Tuple[str, int, int, frozenset[str]]], a: int, b: int
+) -> bool:
+    """Whether two rows of one file overlap directly and share a CWE."""
+    _, a_start, a_end, a_cwes = spans[a]
+    _, b_start, b_end, b_cwes = spans[b]
+    return a_start <= b_end and b_start <= a_end and bool(a_cwes & b_cwes)
+
+
+def _location_split_guard(
+    rows: Sequence[FlatVulnerability],
+    spans: Dict[int, Tuple[str, int, int, frozenset[str]]],
+    members: List[int],
+) -> List[List[int]]:
+    """Bound the chaining: the clusters one connected component yields.
+
+    Two rows of one scanner and rule id are one finding only when they overlap
+    each other directly; a wide multi-CWE row can bridge two separate findings
+    into one component, and folding them would hide one. A component with such
+    a pair splits: the bridge rows (each directly connected to both sides of a
+    pair) cluster with nothing, the rest re-cluster, and this guard runs again
+    on each part. A chain with no single bridge leaves the pair's rows standing
+    alone instead. A missing scanner or rule id compares equal to another
+    missing one, failing closed. A component with no such pair is returned
+    whole, so the documented A-B-C chaining is otherwise unchanged.
+    """
+    by_key: Dict[Tuple[str, str], List[int]] = {}
+    for i in members:
+        key = (rows[i].scanner or "", rows[i].rule_id or "")
+        by_key.setdefault(key, []).append(i)
+    violations = [
+        (a, b)
+        for same in by_key.values()
+        for position, a in enumerate(same)
+        for b in same[position + 1 :]
+        if not _overlaps(spans, a, b)
+    ]
+    if not violations:
+        return [members]
+    bridges = {
+        w
+        for w in members
+        for a, b in violations
+        if w != a and w != b and _overlaps(spans, w, a) and _overlaps(spans, w, b)
+    }
+    removed = bridges or {i for pair in violations for i in pair}
+    rest = {i: spans[i] for i in members if i not in removed}
+    return [
+        part
+        for group in _location_groups(rest)
+        for part in _location_split_guard(rows, spans, group)
+    ]
+
+
 def _primary(rows: Sequence[FlatVulnerability], members: Iterable[int]) -> int:
     members = list(members)
     live = [i for i in members if not rows[i].is_suppressed]
@@ -260,7 +321,12 @@ def _primary(rows: Sequence[FlatVulnerability], members: Iterable[int]) -> int:
 
 
 def _cluster_id(finding_class: str, rows: Sequence[FlatVulnerability]) -> str:
-    material = "\x1f".join([finding_class, *sorted(r.id or "" for r in rows)])
+    # The members' project is part of the id: clusters never span projects, and
+    # identity-derived finding ids already embed theirs, but a plugin-supplied
+    # id on an identity-less finding can repeat across two projects of one
+    # workspace, and two different clusters must never share an id.
+    project = next((r.workspace_project for r in rows), None) or ""
+    material = "\x1f".join([finding_class, project, *sorted(r.id or "" for r in rows)])
     return "dup-" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
 
 
@@ -325,9 +391,10 @@ def cluster_findings(rows: Sequence[FlatVulnerability]) -> List[FindingCluster]:
         for copy in copies:
             if len(copy) > 1:
                 clusters.append(_build(rows, key[0], copy))
-    for members in _location_groups(unclaimed):
-        if len(members) > 1:
-            clusters.append(_build(rows, CLASS_LOCATION, members))
+    for group in _location_groups(unclaimed):
+        for members in _location_split_guard(rows, unclaimed, group):
+            if len(members) > 1:
+                clusters.append(_build(rows, CLASS_LOCATION, members))
     clusters.sort(key=lambda c: c.members[0])
     return clusters
 
@@ -453,6 +520,7 @@ def fold_positions(
     rows: Sequence[FlatVulnerability],
     clusters: Sequence[FindingCluster],
     shown: Sequence[int],
+    prefer: Iterable[int] = (),
 ) -> List[Tuple[int, Tuple[int, ...]]]:
     """The rows of a view, one per foldable cluster, each with what it stands for.
 
@@ -461,15 +529,22 @@ def fold_positions(
     position that stays in the view and the positions folded under it, ascending;
     a row in no foldable cluster stays alone. The order of *shown* is kept.
 
-    Two rules keep a fold honest. Only the members that are in the view fold, so
-    a cluster half hidden by a filter folds what is left of it, and its
+    Three rules keep a fold honest. Only the members that are in the view fold,
+    so a cluster half hidden by a filter folds what is left of it, and its
     representative is the cluster's primary when that is in the view, else the
-    best of the rest by the primary's own ranking. And suppressed and live
-    members never fold together: a suppressed duplicate is not hidden under a live
-    row, and a live row is not hidden under a suppressed one. Clusters that do not
-    fold (``foldable`` False, the IaC class) leave every row in place.
+    best of the rest by the primary's own ranking. Suppressed and live members
+    never fold together: a suppressed duplicate is not hidden under a live row,
+    and a live row is not hidden under a suppressed one. And *prefer*, when
+    given, names the positions a representative is chosen among while any of
+    them is present: the report emitter passes its actionable rows, because the
+    gate is per scanner, so a cluster can hold an actionable row and a
+    higher-severity row another scanner's threshold leaves below it, and the
+    severity ranking alone then hid the actionable finding under a card the
+    default view does not show. Clusters that do not fold (``foldable`` False,
+    the IaC class) leave every row in place.
     """
     in_view = set(shown)
+    preferred = set(prefer)
     stands_for: Dict[int, Tuple[int, ...]] = {}
     folded_away: set[int] = set()
     for cluster in clusters:
@@ -483,10 +558,11 @@ def fold_positions(
             ]
             if len(present) < 2:
                 continue
+            candidates = [m for m in present if m in preferred] or present
             representative = (
                 cluster.primary
-                if cluster.primary in present
-                else _primary(rows, present)
+                if cluster.primary in candidates
+                else _primary(rows, candidates)
             )
             others = tuple(m for m in present if m != representative)
             stands_for[representative] = others

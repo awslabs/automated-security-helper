@@ -15,6 +15,8 @@ from automated_security_helper.models.flat_vulnerability import (
 )
 from automated_security_helper.schemas.sarif_schema_model import Result
 from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.models.vocab import Disposition
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
@@ -25,6 +27,9 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_se
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+    SUMMARY_BELOW_THRESHOLD,
+    SUMMARY_POLICY_NOT_GATING,
+    OutcomeTone,
     ReportContentEmitter,
     coverage_shortfall_text,
     deduplicated_summary_text,
@@ -46,6 +51,15 @@ from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
 
 #: Most severe first, for the "Findings by Severity" list.
 _SEVERITY_ORDER = {name: index for index, name in enumerate(SEVERITIES)}
+
+#: The label a finding card shows for each disposition. The card's
+#: ``data-status`` is the member's value, the token ``ash-report.js`` compares.
+DISPOSITION_LABELS: Dict[Disposition, str] = {
+    Disposition.ACTIONABLE: "Actionable",
+    Disposition.SUPPRESSED: "Suppressed",
+    Disposition.BELOW_THRESHOLD: "Below threshold",
+    Disposition.POLICY_NOT_GATING: "Not gating (workspace policy)",
+}
 
 
 def _has_controls(text: str, allowed: str = "") -> bool:
@@ -189,7 +203,9 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         emitter = ReportContentEmitter(model, human_presentation=True)
         metadata = emitter.get_metadata()
         summary = emitter.get_scan_summary()
-        assets = resources.files(__package__).joinpath("assets")
+        assets = resources.files(__package__ or __name__.rpartition(".")[0]).joinpath(
+            "assets"
+        )
         font_faces = []
         for family, filename, license_name in (
             ("Open Sans", "open-sans.woff2", "open-sans-OFL.txt"),
@@ -249,16 +265,14 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
                 encoding="utf-8"
             ),
             "tone": summary["tone"],
-            "outcome_symbol": {"danger": "!", "warning": "!", "success": "✓"}[
-                summary["tone"]
-            ],
+            "outcome_symbol": OutcomeTone(summary["tone"]).symbol,
             "outcome_title": summary["title"],
             "outcome_description": summary["description"],
             "next_step": summary["next_step"],
             "actionable": summary["actionable"],
-            "below_threshold": summary["below_threshold"],
+            "below_threshold": summary[SUMMARY_BELOW_THRESHOLD],
             "policy_not_gating_tile": self._format_policy_not_gating_tile(
-                summary.get("policy_not_gating", 0)
+                summary.get(SUMMARY_POLICY_NOT_GATING, 0)
             ),
             "suppressed": summary["suppressed"],
             "completed": summary["completed"],
@@ -443,7 +457,6 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
 
     @staticmethod
     def _format_finding_cards(emitter: ReportContentEmitter) -> str:
-        order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
         # With the fold on, one card per duplicate cluster, the others named in
         # its note; off, every finding has its card.
         shown, notes = emitter.fold_findings(emitter.flat_vulns)
@@ -451,7 +464,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             shown,
             key=lambda finding: (
                 finding.is_suppressed,
-                order.get(finding.severity.upper(), 5),
+                _SEVERITY_ORDER.get(finding.severity.upper(), len(_SEVERITY_ORDER)),
                 finding.file_path or "",
                 finding.line_start or 0,
                 finding.rule_id or "",
@@ -462,18 +475,14 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         cards = []
         for index, finding in enumerate(findings, 1):
             severity = finding.severity.upper()
-            severity_class = severity.lower() if severity in order else "unknown"
-            if finding.is_suppressed:
-                status, label = "suppressed", "Suppressed"
-            elif emitter.is_policy_not_gating(finding):
-                # Left out of the project's outcome by where it came from, at
-                # any severity: its own status, shown by the default view,
-                # never "Below threshold".
-                status, label = "policy-not-gating", "Not gating (workspace policy)"
-            elif emitter.is_finding_actionable(finding):
-                status, label = "actionable", "Actionable"
-            else:
-                status, label = "below-threshold", "Below threshold"
+            severity_class = (
+                severity.lower() if severity in _SEVERITY_ORDER else "unknown"
+            )
+            # A finding left out of the project's outcome by where it came from
+            # has its own disposition at any severity: shown by the default
+            # view, never "Below threshold".
+            disposition = emitter.disposition(finding)
+            status, label = disposition.value, DISPOSITION_LABELS[disposition]
             location = finding.file_path or "N/A"
             # A line number locates a file; with no file it would read "N/A:12".
             if finding.file_path and finding.line_start is not None:
@@ -601,7 +610,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             status = result.get("status", "UNKNOWN")
             status_class = (
                 f"status-{status.lower()}"
-                if status in {"PASSED", "FAILED", "MISSING", "SKIPPED", "ERROR"}
+                if status in {member.value for member in ScannerStatus}
                 else "status-unknown"
             )
 

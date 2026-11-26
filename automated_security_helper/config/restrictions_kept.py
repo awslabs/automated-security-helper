@@ -68,9 +68,7 @@ from automated_security_helper.config.tool_config_trust import (
     _set,
     _wrote,
 )
-from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
-    EXTRACTION_LIMIT_OPTIONS,
-)
+from automated_security_helper.base.extraction_limits import EXTRACTION_LIMIT_OPTIONS
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig

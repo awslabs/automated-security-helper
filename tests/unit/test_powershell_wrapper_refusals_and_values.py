@@ -1246,22 +1246,19 @@ def test_an_ash_config_file_reached_through_a_link_out_of_the_checkout_is_refuse
 def test_an_ash_config_file_inside_the_source_is_read_through_src_with_no_mount(
     pwsh, recording_docker, checkout, tmp_path
 ):
-    (checkout / "svc" / ".ash").mkdir()
-    (checkout / "svc" / ".ash" / "ash.yaml").write_text(
-        "project_name: p\n", encoding="utf-8"
-    )
+    (checkout / "svc" / ".ash.yaml").write_text("project_name: p\n", encoding="utf-8")
 
     result = _invoke(
         pwsh,
         tmp_path,
         recording_docker,
         "-SourceDir repo/svc -OutputDir out",
-        {"ASH_CONFIG": "repo/svc/.ash/ash.yaml"},
+        {"ASH_CONFIG": "repo/svc/.ash.yaml"},
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
     args = _recorded(tmp_path)
-    assert _values_of(args, "--config") == ["/src/.ash/ash.yaml"]
+    assert _values_of(args, "--config") == ["/src/.ash.yaml"]
     assert sorted(_mount_destinations(args)) == ["/out", "/src"]
     assert SCANNED_CHAIN_FLAG not in args
     assert SCANNED_FILE_FLAG not in args
@@ -1348,9 +1345,8 @@ def _plant_an_explicit_config(shape: str, checkout: Path, tmp_path: Path) -> str
         (checkout / "ci" / "ash.yaml").write_text(plain, encoding="utf-8")
         return "repo/ci/ash.yaml"
     if shape == "inside-the-source":
-        (checkout / "svc" / ".ash").mkdir()
-        (checkout / "svc" / ".ash" / "ash.yaml").write_text(plain, encoding="utf-8")
-        return "repo/svc/.ash/ash.yaml"
+        (checkout / "svc" / ".ash.yaml").write_text(plain, encoding="utf-8")
+        return "repo/svc/.ash.yaml"
     if shape == "link-in-the-source-out-of-the-tree":
         (operator / "ash.yaml").write_text(plain, encoding="utf-8")
         (checkout / "svc" / "ash.yaml").symlink_to(operator / "ash.yaml")

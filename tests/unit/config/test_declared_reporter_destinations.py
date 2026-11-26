@@ -253,7 +253,7 @@ def _ignoring(warnings: List[str], key: str) -> List[str]:
 @pytest.mark.integration
 def test_an_in_tree_config_does_not_choose_a_declared_destination(tmp_path, site):
     _write(
-        tmp_path / "repo" / ".ash" / ".ash.yaml",
+        tmp_path / "repo" / ".ash.yaml",
         {"reporters": _reporters(REPO_ENDPOINT)},
     )
 
@@ -270,7 +270,7 @@ def test_the_warning_is_the_one_a_built_in_reporter_gets(tmp_path, site):
     """Same values and the same message as config/reporter_trust.py gives for S3."""
     s3_key = "reporters.s3.options.bucket_name"
     _write(
-        tmp_path / "repo" / ".ash" / ".ash.yaml",
+        tmp_path / "repo" / ".ash.yaml",
         {
             "reporters": _reporters(
                 REPO_ENDPOINT, s3={"options": {"bucket_name": "repo-bucket"}}
@@ -293,7 +293,7 @@ def test_a_project_config_replacing_the_operators_keeps_the_operators_value(
 ):
     """Workspace mode: the in-tree project config replaces the operator's default."""
     project = _write(
-        tmp_path / "repo" / ".ash" / ".ash.yaml",
+        tmp_path / "repo" / ".ash.yaml",
         {"reporters": _reporters(REPO_ENDPOINT)},
     )
     operator = _write(
@@ -316,9 +316,7 @@ def test_a_project_config_replacing_the_operators_keeps_the_operators_value(
 def test_a_project_config_without_the_section_keeps_the_operators_value(tmp_path, site):
     """The project config replaces the operator's, so leaving the section out
     would send to the default endpoint rather than the operator's."""
-    project = _write(
-        tmp_path / "repo" / ".ash" / ".ash.yaml", {"project_name": "scanned"}
-    )
+    project = _write(tmp_path / "repo" / ".ash.yaml", {"project_name": "scanned"})
     operator = _write(
         tmp_path / "operator" / "ash.yaml",
         {"reporters": {REPORTER: {"options": {"endpoint": OPERATOR_ENDPOINT}}}},
@@ -342,8 +340,8 @@ def test_a_base_the_tree_extends_does_not_choose_it_either(tmp_path, site):
         {"reporters": _reporters(REPO_ENDPOINT)},
     )
     _write(
-        tmp_path / "repo" / ".ash" / ".ash.yaml",
-        {"project_name": "scanned", "extends": "../shared/base.yaml"},
+        tmp_path / "repo" / ".ash.yaml",
+        {"project_name": "scanned", "extends": "shared/base.yaml"},
     )
 
     result = _scan(tmp_path, site)
@@ -357,7 +355,7 @@ def test_an_in_tree_config_that_loads_the_plugin_itself_does_not_choose_it(
 ):
     """The tree may add an installed module outside it, and still not point it."""
     _write(
-        tmp_path / "repo" / ".ash" / ".ash.yaml",
+        tmp_path / "repo" / ".ash.yaml",
         {"ash_plugin_modules": [PLUGIN], "reporters": _reporters(REPO_ENDPOINT)},
     )
 
@@ -373,7 +371,7 @@ def test_a_project_config_does_not_turn_on_a_reporter_the_operator_turned_off(
     """A reporter that declares a destination sends findings somewhere, so whether
     it runs is the operator's choice, as for the built-in AWS reporters."""
     project = _write(
-        tmp_path / "repo" / ".ash" / ".ash.yaml",
+        tmp_path / "repo" / ".ash.yaml",
         {"reporters": {REPORTER: {"enabled": True}}},
     )
     operator = _write(
@@ -400,7 +398,7 @@ def test_a_section_without_enabled_does_not_turn_on_a_reporter_the_operator_has_
     """Built from its own default, the reporter would be on: the operator's off
     holds, and since the section wrote no ``enabled``, nothing about it is warned."""
     project = _write(
-        tmp_path / "repo" / ".ash" / ".ash.yaml",
+        tmp_path / "repo" / ".ash.yaml",
         {"reporters": {REPORTER: {"options": {"title": "repo title"}}}},
     )
     operator = _write(
@@ -425,9 +423,7 @@ def test_a_section_without_enabled_does_not_turn_on_a_reporter_the_operator_has_
 def test_a_null_section_in_a_project_config_reads_as_an_empty_one(tmp_path, site, on):
     """Left null, the section would build the reporter from its defaults: on, and
     sending to the default endpoint rather than the operator's."""
-    project = _write(
-        tmp_path / "repo" / ".ash" / ".ash.yaml", {"reporters": {REPORTER: None}}
-    )
+    project = _write(tmp_path / "repo" / ".ash.yaml", {"reporters": {REPORTER: None}})
     operator = _write(
         tmp_path / "operator" / "ash.yaml",
         {
@@ -458,7 +454,7 @@ def test_a_null_section_in_a_project_config_reads_as_an_empty_one(tmp_path, site
 @pytest.mark.integration
 def test_config_overrides_set_it(tmp_path, site):
     _write(
-        tmp_path / "repo" / ".ash" / ".ash.yaml",
+        tmp_path / "repo" / ".ash.yaml",
         {"reporters": _reporters(REPO_ENDPOINT)},
     )
 
@@ -471,7 +467,7 @@ def test_config_overrides_set_it(tmp_path, site):
 @pytest.mark.integration
 def test_an_operator_config_outside_the_tree_sets_it(tmp_path, site):
     _write(
-        tmp_path / "repo" / ".ash" / ".ash.yaml",
+        tmp_path / "repo" / ".ash.yaml",
         {"reporters": _reporters(REPO_ENDPOINT)},
     )
     operator = _write(
@@ -544,7 +540,7 @@ def test_an_mcp_clients_upload_does_not_choose_it(tmp_path, site, mcp_server, ov
 def test_a_delivered_trees_own_config_does_not_choose_it(tmp_path, site, mcp_server):
     source = mcp_server["root"] / "session-a" / "source"
     _write(
-        source / ".ash" / ".ash.yaml",
+        source / ".ash.yaml",
         {"ash_plugin_modules": [PLUGIN], "reporters": _reporters(CLIENT_ENDPOINT)},
     )
 
@@ -602,7 +598,7 @@ def test_an_operator_can_have_such_a_file_refused_with_denied_paths(tmp_path):
 def test_ash_report_does_not_take_it_from_an_in_tree_config(tmp_path, site):
     repo = tmp_path / "repo"
     config = _write(
-        repo / ".ash" / ".ash.yaml",
+        repo / ".ash.yaml",
         {"ash_plugin_modules": [PLUGIN], "reporters": _reporters(REPO_ENDPOINT)},
     )
     output = repo / ".ash" / "ash_output"
@@ -632,7 +628,7 @@ def test_ash_report_does_not_take_it_from_an_in_tree_config(tmp_path, site):
 @pytest.mark.integration
 def test_the_built_in_reporters_are_confined_once_and_unchanged(tmp_path, site):
     _write(
-        tmp_path / "repo" / ".ash" / ".ash.yaml",
+        tmp_path / "repo" / ".ash.yaml",
         {
             "reporters": _reporters(
                 REPO_ENDPOINT,
@@ -710,7 +706,7 @@ def test_an_aliased_option_is_covered_under_its_alias(tmp_path, ash_log):
 
     source = tmp_path / "repo"
     _write(
-        source / ".ash" / ".ash.yaml",
+        source / ".ash.yaml",
         {
             "reporters": {
                 "aliased-reporter": {
@@ -769,7 +765,7 @@ def _operator_turns_off(tmp_path: Path, project_section: Dict[str, Any] | None):
     reporters: Dict[str, Any] = {"markdown": {"enabled": True}}
     if project_section is not None:
         reporters["aliased-reporter"] = project_section
-    project = _write(source / ".ash" / ".ash.yaml", {"reporters": reporters})
+    project = _write(source / ".ash.yaml", {"reporters": reporters})
     return resolve_config(
         config_path=project, source_dir=source, trusted_config_path=operator
     )
@@ -824,7 +820,7 @@ def test_a_tree_cannot_turn_a_declared_reporter_off(tmp_path, ash_log):
 
     source = tmp_path / "repo"
     _write(
-        source / ".ash" / ".ash.yaml",
+        source / ".ash.yaml",
         {"reporters": {"aliased-reporter": {"enabled": False}}},
     )
     config = resolve_config(source_dir=source)

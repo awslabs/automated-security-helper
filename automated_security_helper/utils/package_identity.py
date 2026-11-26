@@ -76,8 +76,10 @@ ASH_RESOURCE_TYPE_KEY = "ash_resource_type"
 ROOT_ADVISORIES_KEY = "root_advisories"
 """Property on an npm-audit transitive result: the direct findings it stems from.
 
-A list of ``{"rule_id", "package_path", "uri"}`` dicts, ``package_path`` only
-when known. See :func:`extract_root_advisories`.
+A list of ``{"rule_id", "uri"}`` dicts, each also carrying ``package_path``
+when the lockfile gives the root copy an install path, or ``package_name`` for
+a path-less root (an entry npm lists no node for), whose shared lockfile URI
+alone no longer names one result. See :func:`extract_root_advisories`.
 """
 
 NPM_LOCKFILE_NAMES = frozenset({"package-lock.json", "npm-shrinkwrap.json"})
@@ -454,7 +456,9 @@ def extract_root_advisories(properties: Any) -> List[Dict[str, str]]:
     for item in raw:
         ref: Dict[str, str] = {}
         if isinstance(item, dict) and isinstance(item.get("rule_id"), str):
-            for key in ("rule_id", "package_path", "uri"):
+            # package_name names a path-less root (an entry npm lists no node
+            # for), whose lockfile URI alone no longer tells packages apart.
+            for key in ("rule_id", "package_path", "package_name", "uri"):
                 value = item.get(key)
                 if isinstance(value, str) and value:
                     ref[key] = value
@@ -473,14 +477,23 @@ def extract_root_advisories(properties: Any) -> List[Dict[str, str]]:
 # package or resource identity (a suppression's package and resource scope) takes.
 # Text goes into a String column through ``frame_text.wire``, so a name or a path
 # that carries a lone surrogate is held, not refused, and comes back unchanged.
+#
+# The column names are the one vocabulary these values already have everywhere
+# else: the SARIF property keys above, which are also the FlatVulnerability
+# field names these values fill (package_name/package_version/package_path and
+# resource_id/resource_type). A column that projects a model field bears that
+# field's name, so a join on these columns reads the same as the model it
+# joins against (tests/unit/utils/test_package_identity_frames.py pins the
+# correspondence).
 # ---------------------------------------------------------------------------
 
-_PACKAGE_COLUMNS = ("name", "version", "path")
+_PACKAGE_COLUMNS = (PACKAGE_NAME_KEY, PACKAGE_VERSION_KEY, PACKAGE_PATH_KEY)
 _RESOURCE_COLUMNS = ("resource_id", "resource_type")
 
 
 def package_identity_frame(properties: Iterable[Any]) -> "pl.DataFrame":
-    """One row per record of *properties*: ``name``, ``version``, ``path``.
+    """One row per record of *properties*: ``package_name``, ``package_version``,
+    ``package_path``.
 
     A row is what :func:`extract_package_identity` reads from that record, so a
     key the record does not carry (or carries as something other than a
@@ -533,8 +546,8 @@ def package_identities_from_frame(
 ) -> List[Tuple[Optional[str], Optional[str], Optional[str]]]:
     """The ``(name, version, path)`` tuples a :func:`package_identity_frame` holds."""
     return [
-        tuple(unwire_cell(cell) for cell in row)  # type: ignore[misc]
-        for row in frame.select(*_PACKAGE_COLUMNS).iter_rows()
+        (unwire_cell(name), unwire_cell(version), unwire_cell(path))
+        for name, version, path in frame.select(*_PACKAGE_COLUMNS).iter_rows()
     ]
 
 
@@ -543,6 +556,6 @@ def resource_identities_from_frame(
 ) -> List[Tuple[Optional[str], Optional[str]]]:
     """The ``(resource_id, resource_type)`` tuples a :func:`resource_identity_frame` holds."""
     return [
-        tuple(unwire_cell(cell) for cell in row)  # type: ignore[misc]
-        for row in frame.select(*_RESOURCE_COLUMNS).iter_rows()
+        (unwire_cell(resource_id), unwire_cell(resource_type))
+        for resource_id, resource_type in frame.select(*_RESOURCE_COLUMNS).iter_rows()
     ]

@@ -460,16 +460,16 @@
               relative:   api
               config:     ASH default config
               threshold:  MEDIUM
-              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, syft, trivy, zizmor
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, mcp-config, npm-audit, opengrep, syft, trivy, zizmor
               pins:       bandit >=1.7.8,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           2. web
               label:      web
               path:       <TMP>/allowed/work/web
               relative:   web
-              config:     <TMP>/allowed/work/web/.ash/.ash.yaml
+              config:     <TMP>/allowed/work/web/.ash.yaml
               threshold:  HIGH
-              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, syft, trivy, zizmor
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, mcp-config, npm-audit, opengrep, syft, trivy, zizmor
               pins:       bandit >=1.7.8,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           3. gone
@@ -478,7 +478,7 @@
               relative:   gone
               config:     ASH default config
               threshold:  MEDIUM
-              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, syft, trivy, zizmor
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, mcp-config, npm-audit, opengrep, syft, trivy, zizmor
               pins:       bandit >=1.7.8,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
         Nothing has been scanned. This is a resolution and validation pass only.
@@ -506,6 +506,7 @@
             'detect-secrets',
             'gitleaks',
             'grype',
+            'mcp-config',
             'npm-audit',
             'opengrep',
             'syft',
@@ -519,7 +520,7 @@
           'threshold_tightened_by_policy': False,
         }),
         dict({
-          'config_source': '<TMP>/allowed/work/web/.ash/.ash.yaml',
+          'config_source': '<TMP>/allowed/work/web/.ash.yaml',
           'display_label': 'web',
           'effective_severity_threshold': 'HIGH',
           'operator_config': None,
@@ -539,6 +540,7 @@
             'detect-secrets',
             'gitleaks',
             'grype',
+            'mcp-config',
             'npm-audit',
             'opengrep',
             'syft',
@@ -572,6 +574,7 @@
             'detect-secrets',
             'gitleaks',
             'grype',
+            'mcp-config',
             'npm-audit',
             'opengrep',
             'syft',
@@ -624,16 +627,16 @@
               relative:   api
               config:     ASH default config
               threshold:  MEDIUM
-              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, syft, trivy, zizmor
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, mcp-config, npm-audit, opengrep, syft, trivy, zizmor
               pins:       bandit >=1.7.8,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           2. web
               label:      web
               path:       <TMP>/allowed/work/web
               relative:   web
-              config:     <TMP>/allowed/work/web/.ash/.ash.yaml
+              config:     <TMP>/allowed/work/web/.ash.yaml
               threshold:  HIGH
-              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, syft, trivy, zizmor
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, mcp-config, npm-audit, opengrep, syft, trivy, zizmor
               pins:       bandit >=1.7.8,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           3. gone  [skipped: error]
@@ -667,6 +670,7 @@
             'detect-secrets',
             'gitleaks',
             'grype',
+            'mcp-config',
             'npm-audit',
             'opengrep',
             'syft',
@@ -680,7 +684,7 @@
           'threshold_tightened_by_policy': False,
         }),
         dict({
-          'config_source': '<TMP>/allowed/work/web/.ash/.ash.yaml',
+          'config_source': '<TMP>/allowed/work/web/.ash.yaml',
           'display_label': 'web',
           'effective_severity_threshold': 'HIGH',
           'operator_config': None,
@@ -700,6 +704,7 @@
             'detect-secrets',
             'gitleaks',
             'grype',
+            'mcp-config',
             'npm-audit',
             'opengrep',
             'syft',
@@ -1300,11 +1305,11 @@
     'client_messages': list([
       list([
         'error',
-        "No source has been delivered under this session id, so there is nothing to scan. Deliver a tree first with set_source_git or set_source_zip_chunk/set_source_zip_finalize, or pass source_dir explicitly. Refusing to scan: falling back to the server's working directory holds none of your code, and would complete with no findings and no error.",
+        "No source has been delivered under this session id, so there is nothing to scan. Deliver a tree first with set_source_git or set_source_zip_chunk/set_source_zip_finalize, or an image with set_source_image or set_source_image_archive_chunk/set_source_image_archive_finalize, or pass source_dir explicitly. Refusing to scan: falling back to the server's working directory holds none of your code, and would complete with no findings and no error.",
       ]),
     ]),
     'result': dict({
-      'error': "No source has been delivered under this session id, so there is nothing to scan. Deliver a tree first with set_source_git or set_source_zip_chunk/set_source_zip_finalize, or pass source_dir explicitly. Refusing to scan: falling back to the server's working directory holds none of your code, and would complete with no findings and no error.",
+      'error': "No source has been delivered under this session id, so there is nothing to scan. Deliver a tree first with set_source_git or set_source_zip_chunk/set_source_zip_finalize, or an image with set_source_image or set_source_image_archive_chunk/set_source_image_archive_finalize, or pass source_dir explicitly. Refusing to scan: falling back to the server's working directory holds none of your code, and would complete with no findings and no error.",
       'error_type': 'no_source_delivered',
       'exit_code': 5,
       'exit_code_meaning': 'usage error',

@@ -148,10 +148,8 @@ def _spawn_plan_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> List[s
     monkeypatch.setattr(scope_module, "scope_shown_text", recorder)
 
     source = tmp_path / "repo"
-    (source / ".ash").mkdir(parents=True)
-    (source / ".ash" / ".ash.yaml").write_text(
-        "project_name: sample\nsandbox:\n  mode: bwrap\n"
-    )
+    source.mkdir(parents=True)
+    (source / ".ash.yaml").write_text("project_name: sample\nsandbox:\n  mode: bwrap\n")
     config = resolve_config(source_dir=source)
     context = SimpleNamespace(
         config=config, source_dir=source, output_dir=tmp_path / "out"

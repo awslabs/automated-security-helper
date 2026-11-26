@@ -13,7 +13,7 @@ Each test is red on the tree that carried the defect:
 * A self-cancelling selection passed straight to the phase ran zero scanners, a
   misspelled exclusion said nothing, and ``--python-only`` could leave nothing of
   an allowlist to run with no word.
-* A refusal for an unloaded community scanner dropped the misspelled names beside it.
+* A refusal for an unloaded alpha scanner dropped the misspelled names beside it.
 * A platform reason was not redacted, a nothing-to-scan reason carried the home
   directory, and an in-tree refusal replaced the scanner's own words.
 * One scanner's failed results write ended the phase from the reconciliation loop.
@@ -681,21 +681,21 @@ class TestSelectionRefusals:
 
         assert isinstance(results, AshAggregatedResults)
 
-    def test_the_community_refusal_keeps_the_misspelled_names(self, ctx):
+    def test_the_alpha_refusal_keeps_the_misspelled_names(self, ctx):
         phase = _phase(ctx, [_scanner_class("bandit")])
 
         def module_for(name):
-            return "ash_community.fake_module" if name == "comm-scanner" else None
+            return "ash_alpha.fake_module" if name == "comm-scanner" else None
 
         with patch(
-            "automated_security_helper.core.community_scanners.community_module_for",
+            "automated_security_helper.plugins.enablement.opt_in_module_for",
             module_for,
         ):
             with pytest.raises(ScannerSelectionError) as raised:
                 _run(phase, enabled_scanners=["comm-scanner", "bandti"])
 
         message = str(raised.value)
-        assert "ash_community.fake_module" in message
+        assert "ash_alpha.fake_module" in message
         # Red at the base: only the hint, the misspelling dropped.
         assert "bandti" in message
 

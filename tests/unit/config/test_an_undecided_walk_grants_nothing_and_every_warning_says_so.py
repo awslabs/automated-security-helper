@@ -1017,10 +1017,7 @@ class TestTheWarningsForATrustedChainWhoseWalkStopped:
         document, marker = _DROPPED_CHAIN_VOICES[voice]
         repo = tmp_path / "repo"
         mark_git_checkout(repo)
-        (repo / ".ash").mkdir()
-        (repo / ".ash" / ".ash.yaml").write_text(
-            "project_name: repo\n", encoding="utf-8"
-        )
+        (repo / ".ash.yaml").write_text("project_name: repo\n", encoding="utf-8")
         mark_git_checkout(tmp_path / "ops")
         trusted = tmp_path / "ops" / "ash.yaml"
         trusted.write_text(
@@ -1212,7 +1209,7 @@ class TestConfineToTrustedBaseGivesTheSameSource:
     def test_control_a_file_in_the_tree_keeps_its_text(self, tmp_path, ash_log, voice):
         repo = tmp_path / "repo"
         mark_git_checkout(repo)
-        file = repo / ".ash" / ".ash.yaml"
+        file = repo / ".ash.yaml"
 
         resolve_config_module.confine_to_trusted_base(
             self._config_for(voice), AshConfig(), [], repo, [file]

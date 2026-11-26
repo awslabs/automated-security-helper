@@ -106,11 +106,11 @@ def _recording_native_exit_hooks() -> Iterator[None]:
             _NATIVE_EXIT_HOOKS.append(func)
         return original(func, *args, **kwargs)
 
-    atexit.register = register
+    setattr(atexit, "register", register)
     try:
         yield
     finally:
-        atexit.register = original
+        setattr(atexit, "register", original)
 
 
 def _run_exit_hooks_in_child() -> None:
@@ -666,11 +666,13 @@ class ExpressDaemon:
         if request is None:
             raise runtime.ExpressProtocolError("connection ended before any request")
         op = request.get("op")
-        if op == "status":
+        # ``op`` is the peer's own text: compared with the members, never
+        # coerced to one, so a verb from a newer client takes the refusal below.
+        if op == runtime.ExpressOp.STATUS:
             runtime.send_frame(connection.sock, self._status())
             connection.close()
             return
-        if op == "stop":
+        if op == runtime.ExpressOp.STOP:
             # The pid is in the answer so the stopper can wait for this
             # process to actually exit instead of guessing with a timer.
             runtime.send_frame(
@@ -679,7 +681,7 @@ class ExpressDaemon:
             connection.close()
             self.stopping = True
             return
-        if op != "scan":
+        if op != runtime.ExpressOp.SCAN:
             runtime.send_frame(
                 connection.sock, {"ok": False, "reason": f"unknown op {op!r}"}
             )
@@ -791,7 +793,7 @@ class ExpressDaemon:
             _log(f"client went away before the scan started ({exc}); not forking")
             self._discard(connection, kill=False)
             return
-        if not isinstance(go, dict) or go.get("op") != "go":
+        if not isinstance(go, dict) or go.get("op") != runtime.ExpressOp.GO:
             _log("client never sent go after the ok; not forking")
             self._discard(connection, kill=False)
             return
@@ -1078,7 +1080,7 @@ class ExpressDaemon:
             # is told to stop rather than left running unowned.
             self._discard(connection, kill=True)
             return
-        if frame.get("op") == "signal":
+        if frame.get("op") == runtime.ExpressOp.SIGNAL:
             signum = frame.get("signum")
             if connection.child_pid is not None and signum in (
                 int(signal.SIGINT),

@@ -37,10 +37,19 @@ sandbox:
 """
 
 
-def _repo(tmp_path: Path, config: str = REPO_CONFIG) -> Path:
+def _repo(tmp_path: Path, config: str = REPO_CONFIG, legacy: bool = False) -> Path:
+    """A tree whose own config is ``<root>/.ash.yaml``.
+
+    With ``legacy=True`` the config sits at the deprecated ``.ash/.ash.yaml``
+    location instead, for the tests whose subject is that path.
+    """
     source = tmp_path / "repo"
-    (source / ".ash").mkdir(parents=True)
-    (source / ".ash" / ".ash.yaml").write_text(config)
+    if legacy:
+        (source / ".ash").mkdir(parents=True)
+        (source / ".ash" / ".ash.yaml").write_text(config)
+    else:
+        source.mkdir(parents=True)
+        (source / ".ash.yaml").write_text(config)
     return source
 
 
@@ -109,7 +118,7 @@ def test_grants_from_an_explicit_config_inside_the_tree_are_ignored(tmp_path):
 
 def test_grants_from_a_config_in_a_nested_directory_are_ignored(tmp_path):
     source = tmp_path / "repo"
-    nested = source / "src" / "sub" / ".ash"
+    nested = source / "src" / "sub"
     nested.mkdir(parents=True)
     (nested / ".ash.yaml").write_text(REPO_CONFIG)
     sandbox = resolve_config(
@@ -406,6 +415,8 @@ def test_ash_config_keeps_its_own_grants_when_its_base_is_in_a_checkout(
 
 
 def test_a_base_the_repository_links_elsewhere_is_judged_by_its_link(tmp_path, caplog):
+    # Legacy location: this test's subject is a link at the deprecated
+    # .ash/.ash.yaml path.
     # The operator's config extends the repository's config, and the repository
     # makes that file a symlink to another config the operator keeps beside theirs.
     # Judged by the file it reaches, the base would be outside every checkout and
@@ -431,7 +442,11 @@ def test_a_base_the_repository_links_elsewhere_is_judged_by_its_link(tmp_path, c
 
 
 def _repository_links_its_config_to(tmp_path: Path, target: Path) -> Path:
-    """A checkout whose .ash/.ash.yaml the repository made a link to ``target``."""
+    """A checkout whose .ash/.ash.yaml the repository made a link to ``target``.
+
+    Legacy location: the subject of every test that uses this is the deprecated
+    .ash/.ash.yaml path and the .ash directory.
+    """
     source = tmp_path / "repo"
     mark_git_checkout(source)
     (source / ".ash").mkdir()
@@ -557,7 +572,8 @@ def test_an_operator_config_in_a_checkout_keeps_no_grants_of_its_own(tmp_path):
 
 
 def test_a_symlinked_source_dir_does_not_hide_the_config(tmp_path):
-    real = _repo(tmp_path)
+    """Legacy location: the paths tried are under the deprecated .ash/ directory."""
+    real = _repo(tmp_path, legacy=True)
     link = tmp_path / "link"
     _symlink(link, real)
     for config_path in (None, link / ".ash" / ".ash.yaml", real / ".ash" / ".ash.yaml"):
@@ -567,7 +583,8 @@ def test_a_symlinked_source_dir_does_not_hide_the_config(tmp_path):
 
 
 def test_a_symlink_outside_the_tree_to_a_config_inside_it_is_inside(tmp_path):
-    source = _repo(tmp_path)
+    """Legacy location: the link points at the deprecated .ash/.ash.yaml path."""
+    source = _repo(tmp_path, legacy=True)
     outside = tmp_path / "looks-trusted.yaml"
     _symlink(outside, source / ".ash" / ".ash.yaml")
     sandbox = resolve_config(config_path=outside, source_dir=source).sandbox
@@ -576,7 +593,8 @@ def test_a_symlink_outside_the_tree_to_a_config_inside_it_is_inside(tmp_path):
 
 
 def test_dot_dot_segments_do_not_hide_the_config(tmp_path):
-    source = _repo(tmp_path)
+    """Legacy location: the detour runs through the deprecated .ash/ directory."""
+    source = _repo(tmp_path, legacy=True)
     detour = source / ".ash" / ".." / ".ash" / ".ash.yaml"
     sandbox = resolve_config(config_path=detour, source_dir=source / "..").sandbox
     assert sandbox.network_scanners is None
@@ -587,7 +605,8 @@ def test_dot_dot_segments_do_not_hide_the_config(tmp_path):
 
 
 def test_a_case_only_difference_does_not_hide_the_config(tmp_path, monkeypatch):
-    source = _repo(tmp_path)
+    """Legacy location: the config compared is the deprecated .ash/.ash.yaml."""
+    source = _repo(tmp_path, legacy=True)
     variant = tmp_path / "REPO" / ".ash" / ".ash.yaml"
     if not variant.exists():
         # A case-sensitive filesystem (Linux): emulate a case-insensitive one, where
@@ -906,8 +925,8 @@ def test_a_repository_config_cannot_turn_off_a_sandbox_ash_config_turns_on(
         "project_name: x\nsandbox:\n  mode: 'off'\n",
     ):
         source = tmp_path / f"repo-{len(repo_config)}"
-        (source / ".ash").mkdir(parents=True)
-        (source / ".ash" / ".ash.yaml").write_text(repo_config)
+        source.mkdir(parents=True)
+        (source / ".ash.yaml").write_text(repo_config)
         sandbox = resolve_config(source_dir=source).sandbox
         assert sandbox.mode == "bwrap", repo_config
         assert sandbox.network_scanners == ["checkov"], repo_config
@@ -939,8 +958,8 @@ def test_workspace_mode_takes_the_sandbox_from_the_operators_config(tmp_path):
     operator.write_text(TRUSTED_BWRAP)
     workspace = tmp_path / "workspace"
     project_dir = workspace / "api"
-    (project_dir / ".ash").mkdir(parents=True)
-    own = project_dir / ".ash" / ".ash.yaml"
+    project_dir.mkdir(parents=True)
+    own = project_dir / ".ash.yaml"
     own.write_text("project_name: api\nsandbox:\n  mode: 'off'\n")
     project = ProjectPlan(
         key="api",
@@ -1069,8 +1088,8 @@ def test_an_operator_config_inside_a_checkout_still_sets_the_mode_floor(
     operator.parent.mkdir()
     operator.write_text(TRUSTED_BWRAP)
     target = top / "targets" / "thirdparty"
-    (target / ".ash").mkdir(parents=True)
-    (target / ".ash" / ".ash.yaml").write_text(REPO_OFF)
+    target.mkdir(parents=True)
+    (target / ".ash.yaml").write_text(REPO_OFF)
     monkeypatch.setenv("ASH_CONFIG", str(operator))
     caplog.set_level("WARNING")
     sandbox = resolve_config(source_dir=target).sandbox
@@ -1085,8 +1104,8 @@ def test_the_sandbox_flag_still_turns_off_an_operator_floor(tmp_path, monkeypatc
     operator = top / "operator.yaml"
     operator.write_text(TRUSTED_BWRAP)
     target = top / "thirdparty"
-    (target / ".ash").mkdir(parents=True)
-    (target / ".ash" / ".ash.yaml").write_text("project_name: x\n")
+    target.mkdir(parents=True)
+    (target / ".ash.yaml").write_text("project_name: x\n")
     monkeypatch.setenv("ASH_CONFIG", str(operator))
     sandbox = resolve_config(
         source_dir=target, config_overrides=["sandbox.mode=off"]
@@ -1103,8 +1122,8 @@ def _workspace_project(workspace: Path, own_config: str, operator: Path):
     from automated_security_helper.workspace.plan import ProjectPlan
 
     project_dir = workspace / "api"
-    (project_dir / ".ash").mkdir(parents=True)
-    own = project_dir / ".ash" / ".ash.yaml"
+    project_dir.mkdir(parents=True)
+    own = project_dir / ".ash.yaml"
     own.write_text(own_config)
     return ProjectPlan(
         key="api",
@@ -1363,8 +1382,8 @@ def test_ash_config_in_a_checkout_found_only_through_the_resolved_root(
     (checkout / ".ash").mkdir()
     rogue = checkout / ".ash" / "rogue.yaml"
     rogue.write_text(REPO_CONFIG)
-    (checkout / "src" / ".ash").mkdir(parents=True)
-    (checkout / "src" / ".ash" / ".ash.yaml").write_text("project_name: src\n")
+    (checkout / "src").mkdir(parents=True)
+    (checkout / "src" / ".ash.yaml").write_text("project_name: src\n")
     link = tmp_path / "link"
     _symlink(link, checkout / "src")
     monkeypatch.setenv("ASH_CONFIG", str(rogue))
@@ -1430,8 +1449,8 @@ def test_a_fresh_pwd_does_not_replace_the_resolved_path(tmp_path, monkeypatch):
     (checkout / ".ash").mkdir()
     rogue = checkout / ".ash" / "rogue.yaml"
     rogue.write_text(REPO_CONFIG)
-    (checkout / "src" / ".ash").mkdir(parents=True)
-    (checkout / "src" / ".ash" / ".ash.yaml").write_text("project_name: src\n")
+    (checkout / "src").mkdir(parents=True)
+    (checkout / "src" / ".ash.yaml").write_text("project_name: src\n")
     work = tmp_path / "work"
     work.mkdir()
     _symlink(work / "link", checkout / "src")
@@ -1540,8 +1559,8 @@ def test_a_checkout_config_found_only_by_its_own_name(tmp_path):
 def test_a_target_outside_every_checkout_still_confines_its_own_config(tmp_path):
     # An extracted archive: no .git anywhere, so the scan root's names decide.
     extract = tmp_path / "pkg-1.0"
-    (extract / ".ash").mkdir(parents=True)
-    (extract / ".ash" / ".ash.yaml").write_text(REPO_CONFIG)
+    extract.mkdir(parents=True)
+    (extract / ".ash.yaml").write_text(REPO_CONFIG)
     assert _confined(resolve_config(source_dir=extract).sandbox)
 
 
@@ -1551,8 +1570,8 @@ def test_a_symlinked_target_outside_every_checkout_confines_its_config(
     # No .git anywhere. The scan root is a symlink to the extract, so its config is
     # inside the root only by the root's resolved name or by $PWD.
     extract = tmp_path / "pkg-1.0"
-    (extract / ".ash").mkdir(parents=True)
-    (extract / ".ash" / ".ash.yaml").write_text(REPO_CONFIG)
+    extract.mkdir(parents=True)
+    (extract / ".ash.yaml").write_text(REPO_CONFIG)
     link = tmp_path / "pkg"
     _symlink(link, extract)
     assert _confined(resolve_config(source_dir=link).sandbox)
@@ -1733,6 +1752,8 @@ def test_read_and_environment_grants_reach_the_policy_of_a_real_spawn(
 def test_a_config_symlinked_out_of_a_target_outside_every_checkout_is_inside(
     tmp_path,
 ):
+    # Legacy location: this test's subject is a link at the deprecated
+    # .ash/.ash.yaml path.
     # No .git anywhere: the discovered config's own name is in the scan root, even
     # though the file it resolves to sits beside it.
     pkg = tmp_path / "pkg"
@@ -1747,6 +1768,7 @@ def test_a_config_symlinked_out_of_a_target_outside_every_checkout_is_inside(
 def test_a_subdirectory_config_symlinked_elsewhere_in_the_repository_is_inside(
     tmp_path,
 ):
+    """Legacy location: the link sits at the deprecated .ash/.ash.yaml path."""
     repo = tmp_path / "repo"
     api = repo / "services" / "api"
     (api / ".ash").mkdir(parents=True)
@@ -1758,6 +1780,8 @@ def test_a_subdirectory_config_symlinked_elsewhere_in_the_repository_is_inside(
 
 
 def test_the_workspace_plan_keeps_a_project_configs_own_name(tmp_path):
+    """Legacy location: the project's config is a link at the deprecated
+    .ash/.ash.yaml path."""
     import json
 
     from automated_security_helper.workspace.execution import (
@@ -1836,8 +1860,7 @@ def test_ash_config_named_inside_a_checkout_cannot_grant(tmp_path, monkeypatch):
     assert _confined(resolve_config(source_dir=target).sandbox)
     # With a config of the target's own in the tree, ASH_CONFIG is the trusted
     # base, and its lexical name keeps it from granting there too.
-    (target / ".ash").mkdir()
-    (target / ".ash" / ".ash.yaml").write_text("project_name: t\n")
+    (target / ".ash.yaml").write_text("project_name: t\n")
     assert _confined(resolve_config(source_dir=target).sandbox)
 
 
@@ -2121,6 +2144,8 @@ def test_a_plugin_renamed_through_its_config_dict_is_not_sandboxed(
 
 
 def test_a_scan_root_spelled_through_a_link_and_dot_dot_still_counts(tmp_path):
+    # Legacy location: this test's subject is a link at the deprecated
+    # .ash/.ash.yaml path.
     # No .git. "top/link/../api" names data/api: the kernel follows link before the
     # "..", which a lexical fold of the path would not.
     data = tmp_path / "data"
@@ -2226,6 +2251,8 @@ def test_option_paths_are_carried_resolved_and_contained_in_extra_entries(tmp_pa
 
 
 def test_a_config_named_through_an_alias_of_the_scan_root_is_inside(tmp_path):
+    # Legacy location: this test's subject is a link at the deprecated
+    # .ash/.ash.yaml path.
     # No .git. The config is passed through an alias of the scan root, and is
     # itself a link out of it: only comparing files, not spellings, catches it.
     pkg = tmp_path / "pkg"

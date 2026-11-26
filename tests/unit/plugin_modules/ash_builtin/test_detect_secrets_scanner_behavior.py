@@ -592,14 +592,12 @@ def test_processing_options_again_forgets_an_earlier_baseline_decision(
     read."""
     monkeypatch.chdir(tmp_path)
     source = tmp_path / "repo"
-    (source / ".ash").mkdir(parents=True)
+    source.mkdir(parents=True)
     # The repository writes a config of its own. Without one no operator view
     # is recorded, and operator_wrote_value then reads every value as the
     # operator's (config/operator_only_options.py), so a derived work product
     # named by the configured value would not be refused.
-    (source / ".ash" / ".ash.yaml").write_text(
-        "project_name: repository\n", encoding="utf-8"
-    )
+    (source / ".ash.yaml").write_text("project_name: repository\n", encoding="utf-8")
     output = tmp_path / "out"
     work = output / ASH_WORK_DIR_NAME
     work.mkdir(parents=True)
@@ -898,6 +896,8 @@ def test_a_planted_credential_becomes_a_sarif_result(scanner):
     assert "detect-secrets" in tags
     assert "secret" in tags
     assert "tool_name::detect-secrets" in tags
+    # The enum's value, never "ScannerToolType.SECRETS" (what str() of it reads).
+    assert "tool_type::SECRETS" in tags
 
 
 @pytest.mark.integration

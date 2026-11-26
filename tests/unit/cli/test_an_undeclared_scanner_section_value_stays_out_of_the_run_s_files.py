@@ -5,7 +5,7 @@
 in a file the run writes.
 
 The config model types only the scanner sections it declares. A section for a
-plugin it does not declare (a community plugin that this run does not load) is
+plugin it does not declare (an alpha plugin that this run does not load) is
 kept as a plain mapping, so the reference walker never sees its options and the
 option check leaves a section no loaded plugin reads alone. That is by design;
 what must hold regardless is that the VALUE of ``${ASH_X}`` written at one of
@@ -39,7 +39,7 @@ pytestmark = pytest.mark.e2e
 
 VARIABLE = "ASH_UNDECLARED_SECTION_CANARY"
 CANARY = "ash-canary-6d1f-8842907"
-SECTION = "community-demo-scanner"
+SECTION = "alpha-demo-scanner"
 RUN_SECONDS = 600
 
 
@@ -69,9 +69,9 @@ def test_the_value_read_at_an_undeclared_section_is_in_none_of_the_runs_files(
     home = tmp_path / "home"
     home.mkdir()
     source = tmp_path / "src"
-    (source / ".ash").mkdir(parents=True)
+    source.mkdir(parents=True)
     (source / "app.py").write_text("print('hello')\n")
-    config_file = source / ".ash" / ".ash.yaml"
+    config_file = source / ".ash.yaml"
     config_file.write_text(
         "project_name: undeclared-section\n"
         "scanners:\n"

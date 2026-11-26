@@ -42,6 +42,7 @@ from automated_security_helper.utils.redacted_model import value_tuple
 
 from automated_security_helper.utils.subprocess_utils import (
     _STARTED_CHILD_ATTRIBUTE,
+    OutputPreference,
     _timeout_token,
     signal_death,
     spawn_run,
@@ -2559,12 +2560,12 @@ class UVToolRunner:
         capture_output: bool = True,
         text: bool = True,
         check: bool = False,
-        timeout: Optional[int] = None,
+        timeout: Optional[float] = None,
         package_extras: Optional[List[str]] = None,
         version_constraint: Optional[str] = None,
         results_dir: Optional[Path] = None,
-        stdout_preference: str = "write",
-        stderr_preference: str = "write",
+        stdout_preference: OutputPreference = "write",
+        stderr_preference: OutputPreference = "write",
         class_name: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
         quiet: bool = False,

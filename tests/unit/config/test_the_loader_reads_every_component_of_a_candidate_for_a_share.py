@@ -200,6 +200,9 @@ def _relative_link_through_vendor(
 ):
     """``scan/.ash/ash.yaml`` links to ``target``, a relative spelling with ``..``.
 
+    Legacy location: this test's subject is the deprecated .ash/ash.yaml path.
+    The ``..`` step is taken from the ``.ash`` directory the link sits in.
+
     ``scan/vendor`` is a link which Windows would read as leading to a share; on
     disk it leads to ``real_vendor``, which holds the file, so that a lookup of
     the collapsed target as a whole finds a plain file under the link.
@@ -237,7 +240,10 @@ def test_a_relative_hop_whose_collapsed_parent_is_a_link_to_a_share_is_refused(
 def test_a_relative_hop_through_a_local_directory_is_followed_and_judged(
     tmp_path: Path, on_windows: None
 ) -> None:
-    """The control: the same shape with a plain directory is admitted."""
+    """The control: the same shape with a plain directory is admitted.
+
+    Legacy location: this test's subject is the deprecated .ash/ash.yaml path.
+    """
     (tmp_path / "scan" / ".ash").mkdir(parents=True)
     (tmp_path / "scan" / "vendor").mkdir()
     cfg = tmp_path / "scan" / "vendor" / "cfg.yaml"

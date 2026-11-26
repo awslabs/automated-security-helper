@@ -10,7 +10,7 @@
       INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
       INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Building image automated-security-helper:non-root -- this may take a few minutes during the first build...
-      Error building ASH image: Command '/nonexistent/ash-test/docker build --build-arg UID=1000 --build-arg GID=1000 --tag automated-security-helper:non-root --target non-root --file <REPO>/Dockerfile --build-arg INSTALL_ASH_REVISION=LOCAL --build-arg OFFLINE=NO --build-arg OFFLINE_RULESETS=p/ci --build-arg BUILD_DATE_EPOCH=1768435200 <REPO>' returned non-zero exit status 1.
+      Error building ASH image: Command '/nonexistent/ash-test/docker build --build-arg UID=1000 --build-arg GID=1000 --tag automated-security-helper:non-root --target non-root --file <REPO>/Dockerfile --build-arg INSTALL_ASH_REVISION=LOCAL --build-arg OFFLINE=NO --build-arg OFFLINE_SEMGREP_RULESETS=p/ci --build-arg BUILD_DATE_EPOCH=<epoch> <REPO>' returned non-zero exit status 1.
   
     ''',
   })
@@ -39,7 +39,7 @@
       INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
       INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Building image automated-security-helper:non-root -- this may take a few minutes during the first build...
-      Error building ASH image: Command '/nonexistent/ash-test/docker build --build-arg UID=1000 --build-arg GID=1000 --tag automated-security-helper:non-root --target non-root --file <REPO>/Dockerfile --build-arg INSTALL_ASH_REVISION=LOCAL --build-arg OFFLINE=NO --build-arg OFFLINE_RULESETS=p/ci --build-arg BUILD_DATE_EPOCH=1768435200 <REPO>' returned non-zero exit status 1.
+      Error building ASH image: Command '/nonexistent/ash-test/docker build --build-arg UID=1000 --build-arg GID=1000 --tag automated-security-helper:non-root --target non-root --file <REPO>/Dockerfile --build-arg INSTALL_ASH_REVISION=LOCAL --build-arg OFFLINE=NO --build-arg OFFLINE_SEMGREP_RULESETS=p/ci --build-arg BUILD_DATE_EPOCH=<epoch> <REPO>' returned non-zero exit status 1.
   
     ''',
   })

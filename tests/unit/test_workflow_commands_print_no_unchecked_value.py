@@ -144,7 +144,7 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
         "tag_id": FIXED_FORM,
     },
     (_PREPULL, _COMPOSITE, INPUT_CHECK_NAME): {"1": LITERAL},
-    (_SCAN_TEST, _COMPOSITE, "Install Community Plugin Tools"): {
+    (_SCAN_TEST, _COMPOSITE, "Install Alpha Plugin Tools"): {
         "*": OWN_TREE,
         "attempts": NUMBER,
         "n": NUMBER,
@@ -170,7 +170,7 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
         "ReportExit": NUMBER
     },
     # The same Get-Command path as "Validate ASH using Python Local (Windows)" above.
-    (_SCAN_TEST, _COMPOSITE, "Validate community hadolint (Python Local Windows)"): {
+    (_SCAN_TEST, _COMPOSITE, "Validate alpha hadolint (Python Local Windows)"): {
         "AshPath": RUNNER
     },
     (
@@ -199,7 +199,12 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
     (
         ".github/actions/validate-container/action.yml",
         _COMPOSITE,
-        "Scan with the image's hadolint (community plugin)",
+        "Scan with the image's hadolint (alpha plugin)",
+    ): {"rc": NUMBER},
+    (
+        ".github/actions/validate-container/action.yml",
+        _COMPOSITE,
+        "Scan with the image's betterleaks (alpha plugin)",
     ): {"rc": NUMBER},
     (
         ".github/actions/validate-container/action.yml",

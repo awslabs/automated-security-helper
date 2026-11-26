@@ -108,20 +108,23 @@
 │                                                              By default, ASH looks for the       │
 │                                                              following config file names in the  │
 │                                                              source directory of a scan:         │
-│                                                              ['.ash.yml', '.ash.yaml',           │
-│                                                              '.ash.json', 'ash.yml', 'ash.yaml', │
-│                                                              'ash.json'] (each at the root, then │
-│                                                              in .ash/), then ['.ashrc.toml',     │
-│                                                              '.ashrc.yaml', '.ashrc.yml',        │
-│                                                              '.ashrc.json', 'ashrc.toml',        │
-│                                                              'ashrc.yaml', 'ashrc.yml',          │
-│                                                              'ashrc.json'] at the root, then the │
-│                                                              tool.ash table of pyproject.toml at │
-│                                                              the root; the first found is used.  │
-│                                                              Alternatively, the full path to a   │
-│                                                              config file can be provided by      │
-│                                                              setting the ASH_CONFIG environment  │
-│                                                              variable before running ASH.        │
+│                                                              .ash.yaml at the root, then the     │
+│                                                              deprecated ['.ash.yml',             │
+│                                                              '.ash.yaml', '.ash.json',           │
+│                                                              'ash.yml', 'ash.yaml', 'ash.json']  │
+│                                                              (each at the root, then in .ash/;   │
+│                                                              .ash.yaml only in .ash/), then      │
+│                                                              ['.ashrc.toml', '.ashrc.yaml',      │
+│                                                              '.ashrc.yml', '.ashrc.json',        │
+│                                                              'ashrc.toml', 'ashrc.yaml',         │
+│                                                              'ashrc.yml', 'ashrc.json'] at the   │
+│                                                              root, then the tool.ash table of    │
+│                                                              pyproject.toml at the root; the     │
+│                                                              first found is used. Alternatively, │
+│                                                              the full path to a config file can  │
+│                                                              be provided by setting the          │
+│                                                              ASH_CONFIG environment variable     │
+│                                                              before running ASH.                 │
 │                                                              [env var: ASH_CONFIG]               │
 │ --staged                                                     With --mode precommit only: scan    │
 │                                                              the staged files (git diff          │
@@ -147,6 +150,38 @@
 │                                                              (exit 5). Planned to become the     │
 │                                                              precommit default in ASH v4.        │
 │                                                              [env var: ASH_STAGED]               │
+│ --image                     <str>                            Scan a container image named by     │
+│                                                              reference (registry/repo[:tag])     │
+│                                                              instead of a source directory. ASH  │
+│                                                              fetches nothing itself: the image   │
+│                                                              is prepared by a container engine   │
+│                                                              or the scanner tools' own registry  │
+│                                                              clients. Repeat it, or give a comma │
+│                                                              list, to scan several images: each  │
+│                                                              is its own scan, with its own       │
+│                                                              reports under                       │
+│                                                              <output-dir>/<NN>-<image>-<hash>/,  │
+│                                                              and the exit code is the worst of   │
+│                                                              theirs. Exclusive with              │
+│                                                              --source-dir, --image-archive and   │
+│                                                              --image-layout; scanners that do    │
+│                                                              not declare container_image targets │
+│                                                              are reported SKIPPED.               │
+│ --image-archive             <str>                            Scan a saved container image (an    │
+│                                                              uncompressed docker save / OCI      │
+│                                                              archive tarball) instead of a       │
+│                                                              source directory. Needs no          │
+│                                                              container engine. Exclusive with    │
+│                                                              --source-dir, --image and           │
+│                                                              --image-layout.                     │
+│ --image-layout              <str>                            Scan a container image from an OCI  │
+│                                                              image-layout directory (the         │
+│                                                              directory holding the oci-layout    │
+│                                                              marker file) instead of a source    │
+│                                                              directory. Needs no container       │
+│                                                              engine. Exclusive with              │
+│                                                              --source-dir, --image and           │
+│                                                              --image-archive.                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Reports ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --output-dir                                              <str>  The directory to output results │
@@ -205,14 +240,19 @@
 │                                                                  by default. Sets                │
 │                                                                  `global_settings.deduplication… │
 │ --fold-duplicates                                                Show one row per duplicate      │
-│                                                                  cluster in the HTML, Markdown   │
-│                                                                  and text reports, with a note   │
-│                                                                  naming the other scanners that  │
-│                                                                  reported it, and add            │
-│                                                                  deduplicated counts beside the  │
-│                                                                  per-scanner counts. Only the    │
-│                                                                  same CVE and package, or the    │
-│                                                                  same line and CWE, fold.        │
+│                                                                  cluster in the human-readable   │
+│                                                                  reports (HTML, Markdown, text,  │
+│                                                                  and the Bedrock summary), with  │
+│                                                                  a note naming the other         │
+│                                                                  scanners that reported it, and  │
+│                                                                  add deduplicated counts beside  │
+│                                                                  the per-scanner counts.         │
+│                                                                  Findings fold when they share a │
+│                                                                  CVE and package, or when        │
+│                                                                  overlapping lines share a CWE;  │
+│                                                                  line overlaps chain, so two     │
+│                                                                  findings can fold through a     │
+│                                                                  third that overlaps both.       │
 │                                                                  Finding ids, SARIF, per-scanner │
 │                                                                  counts, suppressions,           │
 │                                                                  baselines, the CSV, flat-JSON   │
@@ -634,18 +674,16 @@
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
 │ scan             Scan code, infrastructure, secrets, and dependencies.                           │
-│ build-image      Builds the ASH container image, then scans the current directory with it unless │
-│                  --no-run is given.                                                              │
-│ report           Generate a report from ASH scan results using the specified reporter plugin.    │
-│ diff             Compare the findings in two saved ASH scans without running a scan.             │
-│ trend            Show new, carried and fixed findings over a series of saved ASH scans.          │
-│ merge            Merges the results of a sharded scan into one unified report.                   │
+│ results          Read, compare and combine the results of saved ASH scans: report, diff, trend,  │
+│                  merge and inspect. None of them runs a scan.                                    │
 │ mcp              Start the ASH MCP server (Model Context Protocol)                               │
 │ get-genai-guide  Write the ASH GenAI Integration Guide for AI assistants and LLMs to a file.     │
+│ container        Work with the ASH container image.                                              │
 │ config           ASH configuration management                                                    │
 │ dependencies     Check or install dependencies for ASH plugins                                   │
-│ inspect          Inspect and analyze ASH outputs and reports                                     │
 │ plugin           Manage ASH plugins                                                              │
+│ suppress         Create symbol suppressions and keep their content-hash lock (.ash.lock)         │
+│                  current.                                                                        │
 │ express          Manage the express daemon: a resident warm ASH process that removes startup     │
 │                  cost from every scan. Unix only; scans fall back to ordinary cold runs wherever │
 │                  the daemon is unavailable.                                                      │

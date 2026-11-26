@@ -137,7 +137,9 @@ if [ "${BLOCK_REGISTRIES:-false}" = "true" ]; then
   for host in "${hosts[@]}"; do
     block+="0.0.0.0 ${host}"$'\n'":: ${host}"$'\n'
   done
-  if ! printf '%s' "${block}" | sudo tee -a /etc/hosts > /dev/null; then
+  # The elevated write is the point: /etc/hosts is root-owned, and appending the
+  # null entries is what enforces the zero-contact assertion this block documents.
+  if ! printf '%s' "${block}" | sudo tee -a /etc/hosts > /dev/null; then # nosemgrep: sudo-in-shell-script
     echo "::error::could not block the registry hosts in /etc/hosts"
     exit 1
   fi

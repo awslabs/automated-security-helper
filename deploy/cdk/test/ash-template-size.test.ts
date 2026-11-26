@@ -182,7 +182,7 @@
  *
  * The em-dash fix went with it, for the same defect class rather than for size.
  * cdk-nag base64-encodes any reason containing a non-ASCII character, which spends 4
- * bytes per 3 and reaches the adopter as an opaque blob. `.ash/.ash.yaml` records the
+ * bytes per 3 and reaches the adopter as an opaque blob. `.ash.yaml` records the
  * empty population from the other side.
  *
  * THERE WAS A SIX-ROW BYTE TABLE HERE AND IT WENT STALE, five of six rows wrong against

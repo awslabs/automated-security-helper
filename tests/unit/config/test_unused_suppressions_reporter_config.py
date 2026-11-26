@@ -115,10 +115,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 # Listed rather than globbed: a glob under the repository root can descend into
 # another xdist worker's scratch tree (see tests/unit/test_repo_walkers_skip_scratch.py).
 SHIPPED_CONFIGS = [
-    ".ash/.ash.yaml",
-    ".ash/.ash_community_plugins.yaml",
+    ".ash.yaml",
+    ".ash/.ash_alpha_plugins.yaml",
     ".ash/.ash_no_ignore.yaml",
-    "examples/ash_plugins_example/.ash/.ash.yaml",
+    "examples/ash_plugins_example/.ash.yaml",
 ]
 
 

@@ -157,7 +157,7 @@ class TestUnparseableDockerfiles:
         assert _findings(report) == []
 
 
-class TestCommunityPlugin:
+class TestAlphaPlugin:
     def test_scanner_is_on_by_default_once_its_module_is_listed(self):
         assert HadolintScannerConfig().enabled is True
         assert HadolintScannerConfig().name == "hadolint"
@@ -375,7 +375,7 @@ def _scanner(
     config = get_default_config()
     record_provenance(
         config,
-        in_tree=[] if operator else [source / ".ash" / ".ash.yaml"],
+        in_tree=[] if operator else [source / ".ash.yaml"],
         trusted=AshConfig(),
     )
     return HadolintScanner(

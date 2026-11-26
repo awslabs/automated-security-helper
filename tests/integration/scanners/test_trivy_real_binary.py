@@ -116,7 +116,7 @@ def _scan_direct(
     config = AshConfig()
     record_provenance(
         config,
-        in_tree=[] if operator else [source / ".ash" / ".ash.yaml"],
+        in_tree=[] if operator else [source / ".ash.yaml"],
         trusted=AshConfig(),
         config_overrides=list(overrides),
     )

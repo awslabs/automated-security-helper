@@ -86,11 +86,15 @@ class TestMcpReExportsSharedSymbolsByIdentity:
             is scanner_inventory._loaded_scanner_classes
         )
 
-    def test_vendored_packages_tuple_is_shared(self):
-        assert (
-            mcp_tools._VENDORED_SCANNER_PLUGIN_PACKAGES
-            is scanner_inventory._VENDORED_SCANNER_PLUGIN_PACKAGES
+    def test_the_shipped_opt_in_set_is_the_manifests_declaration(self):
+        from automated_security_helper.plugin_manifests import scanner_manifests
+        from automated_security_helper.plugins.enablement import (
+            modules_needing_naming,
         )
+
+        assert set(modules_needing_naming()) == {
+            m.plugin_module for m in scanner_manifests() if not m.default_enabled
+        }
 
     def test_pure_helpers_are_shared(self):
         assert (

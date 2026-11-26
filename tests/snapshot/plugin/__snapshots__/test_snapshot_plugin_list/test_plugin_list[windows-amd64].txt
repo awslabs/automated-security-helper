@@ -1,5 +1,5 @@
 $ ash plugin list
-INFO     Loaded 2 converters, 15 scanners, and 16 reporters
+INFO     Loaded 4 converters, 16 scanners, and 16 reporters
 WARNING  cfn-nag cannot be installed here: RubyGems (`gem`) is not on PATH, no Ruby DevKit
          (RI_DEVKIT is unset), and cfn-nag's `psych` dependency publishes no precompiled gem for
          this Ruby ABI, so it has to build from source. It will be reported as having no install
@@ -28,6 +28,8 @@ ASH Scanners
 ├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
 │ grype          │ True    │ GrypeScanner         │ automated_security_helper.plu… │               │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
+│ mcp-config     │ True    │ McpConfigScanner     │ automated_security_helper.plu… │               │
+├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
 │ npm-audit      │ True    │ NpmAuditScanner      │ automated_security_helper.plu… │               │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
 │ opengrep       │ False   │ OpengrepScanner      │ automated_security_helper.plu… │               │
@@ -39,13 +41,17 @@ ASH Scanners
 │ zizmor         │ True    │ ZizmorScanner        │ automated_security_helper.plu… │               │
 └────────────────┴─────────┴──────────────────────┴────────────────────────────────┴───────────────┘
 ASH Converters
-┏━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
-┃ Name    ┃ Enabled ┃ Class            ┃ Module                                    ┃ Plugin Config ┃
-┡━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
-│ archive │ True    │ ArchiveConverter │ automated_security_helper.plugin_modules… │               │
-├─────────┼─────────┼──────────────────┼───────────────────────────────────────────┼───────────────┤
-│ jupyter │ True    │ JupyterConverter │ automated_security_helper.plugin_modules… │               │
-└─────────┴─────────┴──────────────────┴───────────────────────────────────────────┴───────────────┘
+┏━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+┃ Name                 ┃ Enabled ┃ Class              ┃ Module                     ┃ Plugin Config ┃
+┡━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│ archive              │ True    │ ArchiveConverter   │ automated_security_helper… │               │
+├──────────────────────┼─────────┼────────────────────┼────────────────────────────┼───────────────┤
+│ jupyter              │ True    │ JupyterConverter   │ automated_security_helper… │               │
+├──────────────────────┼─────────┼────────────────────┼────────────────────────────┼───────────────┤
+│ mcp_config           │ True    │ McpConfigConverter │ automated_security_helper… │               │
+├──────────────────────┼─────────┼────────────────────┼────────────────────────────┼───────────────┤
+│ sdist-lock-harvester │ True    │ SdistLockHarvester │ automated_security_helper… │               │
+└──────────────────────┴─────────┴────────────────────┴────────────────────────────┴───────────────┘
 ASH Reporters
 ┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
 ┃ Name                ┃ Enabled ┃ Class                  ┃ Module                  ┃ Plugin Config ┃

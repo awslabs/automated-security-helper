@@ -60,6 +60,7 @@ AIDLC_PAGE = "how-to/aidlc-workflows.md"
 EXPRESS_PAGE = "how-to/express-mode.md"
 GITLEAKS_PAGE = "docs/plugins/builtin/gitleaks.md"
 ZIZMOR_PAGE = "docs/plugins/builtin/zizmor.md"
+SYFT_PAGE = "docs/plugins/builtin/syft.md"
 
 CDK_TEMPLATES = REPO_ROOT / "deploy" / "cdk" / "templates"
 TERRAFORM_MODULES = REPO_ROOT / "deploy" / "terraform" / "modules"
@@ -601,3 +602,71 @@ def test_the_zizmor_severity_table_is_the_mapping_the_scanner_applies():
         assert map_zizmor_severity(severity, "Medium", None) == confident, severity
         assert map_zizmor_severity(severity, "Low", None) == low_confidence, severity
         assert "CRITICAL" not in (confident, low_confidence)
+
+
+def test_both_deduplication_switches_are_off_by_default_and_independent():
+    assert_on_page(
+        "how-to/deduplicate-findings.md",
+        "Both are off by default, and they are independent: `fold` does not need "
+        "`annotate`.",
+    )
+    from automated_security_helper.config.ash_config import AshDeduplicationConfig
+
+    default = AshDeduplicationConfig()
+    assert (default.annotate, default.fold) == (False, False)
+    assert AshDeduplicationConfig(fold=True).annotate is False
+    assert AshDeduplicationConfig(annotate=True).fold is False
+
+
+# --------------------------------------------------------------------------- #
+# docs/plugins/builtin/syft.md
+# --------------------------------------------------------------------------- #
+
+
+def test_the_syft_harvest_options_default_as_the_page_shows():
+    assert_on_page(
+        SYFT_PAGE,
+        "A resolved Python dependency whose wheels carry a platform tag ships compiled "
+        "native extensions",
+    )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
+        SdistHarvestOptions,
+    )
+
+    text = (CONTENT / SYFT_PAGE).read_text(encoding="utf-8")
+    block = re.search(r"```yaml\n(scanners:\n  syft:.*?)```", text, re.DOTALL)
+    assert block, "the page no longer shows the sdist_harvest options block"
+    shown = yaml.safe_load(block.group(1))["scanners"]["syft"]["options"][
+        "sdist_harvest"
+    ]
+    defaults = SdistHarvestOptions()
+    assert shown == {
+        "enabled": defaults.enabled,
+        "ecosystems": defaults.ecosystems,
+        "max_sdist_mb": defaults.max_sdist_mb,
+        "cache_dir": defaults.cache_dir,
+        "lockfiles": defaults.lockfiles,
+    }
+    assert defaults.cache_dir is None
+
+
+def test_the_syft_harvest_stamps_the_three_provenance_properties_the_page_lists():
+    assert_on_page(
+        SYFT_PAGE,
+        "Every SBOM component located under a harvest directory carries three "
+        "CycloneDX properties",
+    )
+    from automated_security_helper.utils import sdist_harvest
+
+    page = (CONTENT / SYFT_PAGE).read_text(encoding="utf-8")
+    properties = (
+        sdist_harvest.PROPERTY_SDIST_SHA256,
+        sdist_harvest.PROPERTY_PARENT_PURL,
+        sdist_harvest.PROPERTY_SOURCE_URL,
+    )
+    for name in properties:
+        assert f'"name": "{name}"' in page, name
+    assert sdist_harvest.HARVEST_DIR_NAME == "sdist-locks"
+    assert f"{sdist_harvest.HARVEST_DIR_NAME}/<package>/<version>/" in page
+    assert sdist_harvest.HARVEST_SKIPPED_RULE == "ash-sbom-harvest-skipped"
+    assert f"`{sdist_harvest.HARVEST_SKIPPED_RULE}`" in page

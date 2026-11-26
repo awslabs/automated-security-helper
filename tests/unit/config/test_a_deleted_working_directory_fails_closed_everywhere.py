@@ -179,8 +179,7 @@ def _named_checkout_file(tmp_path, monkeypatch):
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     checkout = tmp_path / "named-checkout"
     mark_git_checkout(checkout)
-    named = checkout / ".ash" / ".ash.yaml"
-    named.parent.mkdir(parents=True, exist_ok=True)
+    named = checkout / ".ash.yaml"
     named.write_text("project_name: named\n" + _PLANTED, encoding="utf-8")
     return checkout, named
 
@@ -208,7 +207,7 @@ def test_control_a_live_cwd_inside_the_checkout_confines_the_named_file(
 
 
 def _chain_through_a_checkout(tmp_path, monkeypatch):
-    """operator.yaml (outside every checkout) extends checkout/.ash/.ash.yaml,
+    """operator.yaml (outside every checkout) extends checkout/.ash.yaml,
     which extends outside/base.yaml (outside every checkout) holding the
     planted writes: the base is reached THROUGH a repository file."""
     monkeypatch.delenv("ASH_CONFIG", raising=False)
@@ -218,8 +217,7 @@ def _chain_through_a_checkout(tmp_path, monkeypatch):
     base.write_text("project_name: base\n" + _PLANTED, encoding="utf-8")
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    middle = checkout / ".ash" / ".ash.yaml"
-    middle.parent.mkdir(parents=True, exist_ok=True)
+    middle = checkout / ".ash.yaml"
     middle.write_text(f"extends: {base.as_posix()}\n", encoding="utf-8")
     operator = tmp_path / "operator.yaml"
     operator.write_text(
@@ -255,8 +253,7 @@ def test_control_with_a_source_dir_the_base_reached_through_the_checkout_is_conf
 def _ash_config_checkout_file(tmp_path, monkeypatch):
     checkout = tmp_path / "env-checkout"
     mark_git_checkout(checkout)
-    env_cfg = checkout / ".ash" / ".ash.yaml"
-    env_cfg.parent.mkdir(parents=True, exist_ok=True)
+    env_cfg = checkout / ".ash.yaml"
     env_cfg.write_text("project_name: env\n" + _PLANTED, encoding="utf-8")
     monkeypatch.setenv("ASH_CONFIG", str(env_cfg))
     return checkout
@@ -423,8 +420,7 @@ def test_the_left_out_selected_chain_limit_is_warned_with_no_cwd(
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    base = checkout / ".ash" / ".ash.yaml"
-    base.parent.mkdir(parents=True, exist_ok=True)
+    base = checkout / ".ash.yaml"
     base.write_text(
         "project_name: base\nscanners:\n  detect-secrets:\n    options:\n"
         "      max_worker_output_mib: 1024\n",
@@ -496,8 +492,7 @@ def test_a_named_checkout_file_s_checkout_importable_module_drops_with_no_cwd(
     module = checkout / "zz_checkout_mod_ash_plugins.py"
     module.write_text("VALUE = 1\n", encoding="utf-8")
     monkeypatch.syspath_prepend(str(checkout))
-    named = checkout / ".ash" / ".ash.yaml"
-    named.parent.mkdir(parents=True, exist_ok=True)
+    named = checkout / ".ash.yaml"
     named.write_text(
         "project_name: named\nash_plugin_modules:\n  - zz_checkout_mod_ash_plugins\n",
         encoding="utf-8",
@@ -540,8 +535,7 @@ def test_an_ash_config_checkout_file_is_no_trusted_base_with_no_cwd(
     no-tree load may not grant more."""
     checkout = tmp_path / "env-checkout"
     mark_git_checkout(checkout)
-    env_cfg = checkout / ".ash" / ".ash.yaml"
-    env_cfg.parent.mkdir(parents=True, exist_ok=True)
+    env_cfg = checkout / ".ash.yaml"
     env_cfg.write_text("project_name: env\n" + _PLANTED, encoding="utf-8")
     monkeypatch.setenv("ASH_CONFIG", str(env_cfg))
     named = tmp_path / "operator.yaml"
@@ -808,8 +802,7 @@ def test_a_vanished_client_path_leaves_the_operator_chain_the_operator_s(
     module = checkout / "zz_vanish_mod_ash_plugins.py"
     module.write_text("VALUE = 1\n", encoding="utf-8")
     monkeypatch.syspath_prepend(str(checkout))
-    env_cfg = checkout / ".ash" / ".ash.yaml"
-    env_cfg.parent.mkdir(parents=True, exist_ok=True)
+    env_cfg = checkout / ".ash.yaml"
     env_cfg.write_text(
         "project_name: env\nash_plugin_modules:\n  - zz_vanish_mod_ash_plugins\n",
         encoding="utf-8",
@@ -1007,8 +1000,7 @@ def test_a_rooted_drop_is_worded_by_the_rule_that_made_it(tmp_path, monkeypatch)
     mark_git_checkout(delivered)
     (delivered / "zz9_in_tree_mod.py").write_text("VALUE = 1\n", encoding="utf-8")
     monkeypatch.syspath_prepend(str(delivered))
-    upload = delivered / ".ash" / ".ash.yaml"
-    upload.parent.mkdir(parents=True, exist_ok=True)
+    upload = delivered / ".ash.yaml"
     upload.write_text(
         "project_name: delivered\nash_plugin_modules:\n"
         "  - zz9_in_tree_mod\n  - zz9_foreign_mod\n",
@@ -1047,8 +1039,7 @@ def test_an_installed_module_outside_every_checkout_is_kept_on_the_fallback(
         "VALUE = 1\n", encoding="utf-8"
     )
     monkeypatch.syspath_prepend(str(checkout))
-    env_cfg = checkout / ".ash" / ".ash.yaml"
-    env_cfg.parent.mkdir(parents=True, exist_ok=True)
+    env_cfg = checkout / ".ash.yaml"
     env_cfg.write_text(
         "project_name: env\nash_plugin_modules:\n"
         "  - zz9_outside_mod_ash_plugins\n  - zz9_inside_mod_ash_plugins\n",
@@ -1103,8 +1094,7 @@ def test_a_given_root_judges_client_modules_as_a_scan_of_it_would(
     module = delivered / "zz_delivered_mod.py"
     module.write_text("VALUE = 1\n", encoding="utf-8")
     monkeypatch.syspath_prepend(str(delivered))
-    upload = delivered / ".ash" / ".ash.yaml"
-    upload.parent.mkdir(parents=True, exist_ok=True)
+    upload = delivered / ".ash.yaml"
     upload.write_text(
         "project_name: delivered\nash_plugin_modules:\n"
         f"  - zz_delivered_mod\n  - {outside}\n",
@@ -1596,8 +1586,7 @@ def test_a_file_in_no_checkout_is_never_said_to_be_in_one(
     module = plain / "zz_plain_mod_ash_plugins.py"
     module.write_text("VALUE = 1\n", encoding="utf-8")
     monkeypatch.syspath_prepend(str(plain))
-    named = plain / ".ash" / ".ash.yaml"
-    named.parent.mkdir(parents=True)
+    named = plain / ".ash.yaml"
     named.write_text(
         "project_name: plain\n"
         "sandbox:\n  extra_read_paths:\n    - /zz-plain-read\n"
@@ -2657,8 +2646,7 @@ def test_control_a_nested_checkouts_chain_file_keeps_one_voice(
         "sandbox:\n  extra_read_paths:\n    - /zz-mixed-read\n",
         encoding="utf-8",
     )
-    named = plain / ".ash" / ".ash.yaml"
-    named.parent.mkdir(parents=True)
+    named = plain / ".ash.yaml"
     named.write_text(
         f"extends:\n  - {base.as_posix()}\n"
         "project_name: mixed\n"
@@ -2705,8 +2693,7 @@ def test_an_in_tree_files_module_drop_under_a_given_root_speaks_that_root(
     module = source / "zz_tree_kept_mod_ash_plugins.py"
     module.write_text("VALUE = 1\n", encoding="utf-8")
     monkeypatch.syspath_prepend(str(source))
-    named = source / ".ash" / ".ash.yaml"
-    named.parent.mkdir(parents=True, exist_ok=True)
+    named = source / ".ash.yaml"
     named.write_text(
         "project_name: named\nash_plugin_modules:\n  - zz_tree_kept_mod_ash_plugins\n",
         encoding="utf-8",
@@ -2747,8 +2734,7 @@ def test_control_a_real_scans_module_drop_keeps_the_tree_wording(
     module = source / "zz_real_scan_mod_ash_plugins.py"
     module.write_text("VALUE = 1\n", encoding="utf-8")
     monkeypatch.syspath_prepend(str(source))
-    named = source / ".ash" / ".ash.yaml"
-    named.parent.mkdir(parents=True, exist_ok=True)
+    named = source / ".ash.yaml"
     named.write_text(
         "project_name: named\nash_plugin_modules:\n  - zz_real_scan_mod_ash_plugins\n",
         encoding="utf-8",
@@ -2790,8 +2776,7 @@ def test_a_load_whose_trees_come_from_also_scanned_speaks_those_trees(
     mark_git_checkout(repo)
     (repo / "zz_also_mod_ash_plugins.py").write_text("VALUE = 1\n", encoding="utf-8")
     monkeypatch.syspath_prepend(str(repo))
-    named = repo / ".ash" / ".ash.yaml"
-    named.parent.mkdir(parents=True)
+    named = repo / ".ash.yaml"
     named.write_text(
         "sandbox:\n  extra_read_paths:\n    - /zz-also-read\n"
         "ash_plugin_modules:\n  - zz_also_mod_ash_plugins\n"
@@ -2833,7 +2818,7 @@ _LINKED_ENV_CONFIG_TEXT = (
 
 
 def _linked_env_config(
-    tmp_path, through_link, text=_LINKED_ENV_CONFIG_TEXT, link_at=".ash/ash.yaml"
+    tmp_path, through_link, text=_LINKED_ENV_CONFIG_TEXT, link_at=".ash.yaml"
 ):
     """A checkout plus an ASH_CONFIG target outside it that writes a sandbox
     grant and an off-host reporter (or the given text); named through an
@@ -3109,7 +3094,7 @@ def test_an_ash_config_link_at_a_plain_name_with_no_discovered_config_stays_out(
     checkout, named = _linked_env_config(
         tmp_path, through_link=True, text=_LINKED_NETWORK_TEXT, link_at="cfg.yaml"
     )
-    assert not (checkout / ".ash" / "ash.yaml").exists()
+    assert not (checkout / ".ash.yaml").exists()
     monkeypatch.setenv("ASH_CONFIG", str(named))
 
     config = resolve_config(source_dir=checkout)
@@ -3283,8 +3268,7 @@ def test_the_selected_branch_never_reresolves_the_default_chain(tmp_path, monkey
 
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    named = checkout / ".ash" / ".ash.yaml"
-    named.parent.mkdir(parents=True, exist_ok=True)
+    named = checkout / ".ash.yaml"
     named.write_text("project_name: named\n", encoding="utf-8")
     env_file = tmp_path / "ops" / "ash-config.yaml"
     env_file.parent.mkdir()

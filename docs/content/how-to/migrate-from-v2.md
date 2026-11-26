@@ -9,7 +9,7 @@ lists what changes for a v2 user and what to do about each.
 |---|---|---|
 | Install | clone the repository and add it to `PATH` | install from GitHub with uv, pipx, pip, or Homebrew ([Install ASH](install.md)) |
 | Where scanners run | always in a container built on each run | on your machine, or in a container with `ashx --mode container` |
-| Configuration | none | a config file, `.ashrc.yaml` in a new project, with ignore paths, suppressions, thresholds, and scanner settings |
+| Configuration | none | a config file, `.ash.yaml` at the project root, with ignore paths, suppressions, thresholds, and scanner settings |
 | Output | `ash_output/aggregated_results.txt` | `.ash/ash_output/`, with a JSON results file and a `reports/` directory |
 | Exit code | the highest exit code of any scanner | 0, 1, 2, 3, 4, or 5, each with one meaning |
 | Requirements | a container runtime | Python 3.11 to 3.14, plus scanner tools or a container runtime |
@@ -71,12 +71,12 @@ uncommitted and untracked files that are not ignored are scanned too. Expect fin
 files v2 never saw. Neither version reads a `.ashignore` file.
 
 Everything else is set in a configuration file. `ashx config init` writes a starting
-file, `.ashrc.yaml`, in the current directory:
+file, `.ash.yaml`, in the current directory:
 
 <!-- doctest: run -->
 ```bash
 ashx config init
-head -n 3 .ashrc.yaml
+head -n 3 .ash.yaml
 ```
 
 In it you can:

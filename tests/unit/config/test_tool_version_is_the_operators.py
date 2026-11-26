@@ -141,10 +141,10 @@ def _section(plugin: Plugin, pin: Optional[str]) -> Dict[str, Any]:
 
 
 def _repo(tmp_path: Path, plugin: Plugin, pin: Optional[str]) -> Path:
-    """A checkout whose own .ash/.ash.yaml sets the plugin's ``tool_version``."""
+    """A checkout whose own .ash.yaml sets the plugin's ``tool_version``."""
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
-    _write(repo / ".ash" / ".ash.yaml", _section(plugin, pin))
+    _write(repo / ".ash.yaml", _section(plugin, pin))
     return repo
 
 
@@ -223,7 +223,7 @@ def test_a_workspace_projects_config_does_not_choose_the_tool_version(
     operator = _operator(tmp_path, plugin, None)
 
     config = resolve_config(
-        config_path=repo / ".ash" / ".ash.yaml",
+        config_path=repo / ".ash.yaml",
         source_dir=repo,
         trusted_config_path=operator,
         overlay_config_path=operator,
@@ -241,7 +241,7 @@ def test_a_workspace_project_repeating_the_operators_value_is_kept(
     operator = _operator(tmp_path, plugin, plugin.pin)
 
     config = resolve_config(
-        config_path=repo / ".ash" / ".ash.yaml",
+        config_path=repo / ".ash.yaml",
         source_dir=repo,
         trusted_config_path=operator,
         overlay_config_path=operator,
@@ -257,7 +257,7 @@ def test_a_workspace_names_the_project_and_the_key_it_ignored(
     """Through resolve_workspace: the warning names the project's own config file."""
     for key, pin in (("api", "==1.7.9"), ("web", ">=1.8.0")):
         _write(
-            tmp_path / key / ".ash" / "ash.yaml",
+            tmp_path / key / ".ash.yaml",
             {"scanners": {"bandit": {"options": {"tool_version": pin}}}},
         )
     workspace = tmp_path / "dev.code-workspace"
@@ -278,7 +278,7 @@ def test_a_workspace_names_the_project_and_the_key_it_ignored(
             for message in _warnings_naming(
                 ash_log, "scanners.bandit.options.tool_version"
             )
-            if f"/{key}/.ash/ash.yaml" in message
+            if f"/{key}/.ash.yaml" in message
         ]
         assert named, f"no warning names project {key}'s config"
 
@@ -288,7 +288,7 @@ def test_the_repositorys_other_options_still_apply(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
     _write(
-        repo / ".ash" / ".ash.yaml",
+        repo / ".ash.yaml",
         {
             "scanners": {
                 "bandit": {

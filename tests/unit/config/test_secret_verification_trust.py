@@ -103,7 +103,7 @@ def test_other_filters_are_not_taken_for_it(path):
 
 
 def test_a_repository_config_cannot_turn_verification_on(repo):
-    _config_file(repo / ".ash" / ".ash.yaml", VERIFYING_SETTINGS)
+    _config_file(repo / ".ash.yaml", VERIFYING_SETTINGS)
 
     config = resolve_config(source_dir=repo)
 
@@ -115,7 +115,7 @@ def test_a_repository_config_cannot_turn_verification_on(repo):
 
 def test_a_repository_config_is_refused_even_without_the_filter(repo):
     """The record also covers baselines the config leads the scanner to."""
-    _config_file(repo / ".ash" / ".ash.yaml", None)
+    _config_file(repo / ".ash.yaml", None)
 
     config = resolve_config(source_dir=repo)
 
@@ -153,7 +153,7 @@ def test_no_config_file_at_all_is_the_operators(repo):
 def test_config_overrides_are_the_operators(repo):
     """--config-overrides can turn it on over a repository config, as it can grant
     sandbox access over one."""
-    _config_file(repo / ".ash" / ".ash.yaml", VERIFYING_SETTINGS)
+    _config_file(repo / ".ash.yaml", VERIFYING_SETTINGS)
 
     config = resolve_config(source_dir=repo, config_overrides=[VERIFICATION_OVERRIDE])
 
@@ -162,7 +162,7 @@ def test_config_overrides_are_the_operators(repo):
 
 
 def test_an_unrelated_override_does_not_turn_it_on(repo):
-    _config_file(repo / ".ash" / ".ash.yaml", VERIFYING_SETTINGS)
+    _config_file(repo / ".ash.yaml", VERIFYING_SETTINGS)
 
     config = resolve_config(
         source_dir=repo,
@@ -176,7 +176,7 @@ def test_an_unrelated_override_does_not_turn_it_on(repo):
 def test_the_operators_default_config_decides_for_a_projects_own_config(repo, tmp_path):
     """Workspace mode: a project's own config replaces the operator's default config,
     which still decides, as it does for the sandbox grants."""
-    project_config = _config_file(repo / ".ash" / ".ash.yaml", VERIFYING_SETTINGS)
+    project_config = _config_file(repo / ".ash.yaml", VERIFYING_SETTINGS)
     operator_default = _config_file(
         tmp_path / "operator" / "default.yaml", VERIFYING_SETTINGS
     )
@@ -192,7 +192,7 @@ def test_the_operators_default_config_decides_for_a_projects_own_config(repo, tm
 
 
 def test_an_operator_default_config_without_the_filter_refuses_it(repo, tmp_path):
-    project_config = _config_file(repo / ".ash" / ".ash.yaml", VERIFYING_SETTINGS)
+    project_config = _config_file(repo / ".ash.yaml", VERIFYING_SETTINGS)
     operator_default = _config_file(tmp_path / "operator" / "default.yaml", None)
 
     config = resolve_config(
@@ -206,7 +206,7 @@ def test_an_operator_default_config_without_the_filter_refuses_it(repo, tmp_path
 
 
 def test_an_override_naming_a_baseline_records_it_as_the_operators(repo, tmp_path):
-    _config_file(repo / ".ash" / ".ash.yaml", None)
+    _config_file(repo / ".ash.yaml", None)
     outside = tmp_path / "shared" / "verifying.baseline"
 
     config = resolve_config(
@@ -239,7 +239,7 @@ def _file_paths(config):
 
 
 def test_a_repository_config_names_no_plugin_or_filter_file(repo):
-    _config_file(repo / ".ash" / ".ash.yaml", FILE_SETTINGS)
+    _config_file(repo / ".ash.yaml", FILE_SETTINGS)
 
     config = resolve_config(source_dir=repo)
 
@@ -249,13 +249,13 @@ def test_a_repository_config_names_no_plugin_or_filter_file(repo):
 
 
 def test_a_file_the_operator_names_too_is_kept(repo, tmp_path):
-    _config_file(repo / ".ash" / ".ash.yaml", FILE_SETTINGS)
+    _config_file(repo / ".ash.yaml", FILE_SETTINGS)
     operator_default = _config_file(
         tmp_path / "operator" / "default.yaml", FILE_SETTINGS
     )
 
     config = resolve_config(
-        config_path=repo / ".ash" / ".ash.yaml",
+        config_path=repo / ".ash.yaml",
         source_dir=repo,
         trusted_config_path=operator_default,
     )

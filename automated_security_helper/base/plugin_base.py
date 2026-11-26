@@ -11,6 +11,7 @@ import re
 import threading
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Annotated,
     Any,
     Callable,
@@ -31,10 +32,12 @@ from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.uv_tool_mixin import (
     UVToolMixin,
+    _tool_name,
     guarded_values,
     guarded_values_read,
 )
 from automated_security_helper.core.enums import PackageManager
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.core.exceptions import (
     ScannerError,
     ToolNotProvisionableError,
@@ -55,6 +58,9 @@ from automated_security_helper.utils.uv_tool_runner import (
 from automated_security_helper.utils.log import ASH_LOGGER, MARKUP, escape_markup
 from automated_security_helper.utils.offline_tool_env import (
     with_offline_tool_environment,
+)
+from automated_security_helper.utils.runtime_compat_env import (
+    with_runtime_compat_environment,
 )
 from automated_security_helper.utils.redacted_model import (
     NO_RICH_REPR,
@@ -735,6 +741,39 @@ def _could_not_stop_run_key(response: Dict) -> str:
     return "unflagged"
 
 
+#: Prefix of the ``scan_could_not_stop_runs`` key a SIDE run's failed stop is filed
+#: under (``_run_unrecorded``). A side run is a second launch of the tool whose
+#: result only adds to a report already read; its stop failing is as serious as
+#: any other (the process may still be writing), so the entry is kept, but under
+#: its own key: ``timed_out`` in the record means the SCAN's timeout could not be
+#: stopped, which is what the timeout headline reads it to say.
+SIDE_RUN_KEY_PREFIX = "side_run:"
+
+#: Exception types that mean a defect in ASH's own code, never a condition of the
+#: run. A best-effort guard around a side run lets these through, so a defect
+#: fails loudly instead of leaving a scan quietly without what the side run
+#: should have added. The same set the express client uses for the same purpose.
+PROGRAMMING_ERRORS = (AttributeError, TypeError, NameError, AssertionError)
+
+
+def side_run_skip_reason(response: Any) -> str | None:
+    """Why a side run's response says the run did not finish, or None.
+
+    Read from the response's own flags (the run was stopped at its timeout, was
+    cancelled, or its tool could not be stopped), because a run that never
+    produced an exit code has nothing to report as ``exited <code>``.
+    """
+    if not isinstance(response, dict):
+        return None
+    if response_could_not_stop(response):
+        return "the second run could not be stopped"
+    if response.get("timed_out") is True:
+        return "the second run timed out"
+    if response.get("cancelled") is True:
+        return "the second run was cancelled"
+    return None
+
+
 def worse_exit_code(current: int | None, new: int) -> int:
     """The worse of two runs' exit codes, for a plugin's accumulated ``exit_code``.
 
@@ -956,14 +995,22 @@ class PluginBase(UVToolMixin, BaseModel):
     model_config = ConfigDict(
         extra="allow",
         arbitrary_types_allowed=True,
-        use_enum_values=True,
         # A phase builds a plugin from its config section, which a config model
         # may not type (a plugin module's section), so the plugin's own error is
         # the one raised. A refused value can be a secret read from the
         # environment, and an error's text goes wherever the error is shown.
         hide_input_in_errors=True,
     )
-    context: PluginContext | None = None
+    if TYPE_CHECKING:
+        # A phase hands every plugin its context before any method that reads
+        # a directory from it runs; the few that can be reached without one
+        # check ``is None`` first. The runtime field below accepts None so a
+        # plugin can still be built on its own.
+        # The ``= None`` keeps it optional in the constructor the checker
+        # sees; this branch is never evaluated.
+        context: PluginContext = None  # ty: ignore[invalid-assignment]
+    else:
+        context: PluginContext | None = None
     config: PluginConfigBase | None = None
 
     output: List[str] = []
@@ -1062,6 +1109,12 @@ class PluginBase(UVToolMixin, BaseModel):
     # two apart. ``errors`` still holds both. See ``_tool_error_lines``.
     _plugin_log_lines: List[str] = PrivateAttr(default_factory=list)
 
+    # True while ``_run_unrecorded`` has a side run in flight: ``_plugin_log``
+    # then keeps an ERROR note out of the operator's view, because the run's
+    # record is put back afterwards and a scan that passes should not carry an
+    # ERROR line for a run that did not count.
+    _side_run_active: bool = PrivateAttr(default=False)
+
     # Whether this plugin's configuration was read from its context's resolved
     # configuration (a section ``AshConfig.get_plugin_config`` answered, as a
     # scan hands it over) rather than built by the embedding caller as a typed
@@ -1075,6 +1128,20 @@ class PluginBase(UVToolMixin, BaseModel):
     _config_from_context: bool = PrivateAttr(
         default_factory=lambda: _CONFIG_FROM_CONTEXT.get()
     )
+
+    def _require_context(self) -> PluginContext:
+        """The plugin's context, or a ``ScannerError`` naming the plugin when it
+        was built without one.
+
+        The field is typed as always set for the methods that run under a phase,
+        which hands every plugin its context first; a plugin built on its own
+        can still reach one of those methods without it, and this is where that
+        stops with a named error rather than an ``AttributeError`` on ``None``.
+        """
+        context: PluginContext | None = self.context
+        if context is None:
+            raise ScannerError(f"No context provided for {self.__class__.__name__}!")
+        return context
 
     def __init__(self, **data: Any) -> None:
         # The caller's own declaration wins over the type inference: a dict
@@ -1249,7 +1316,7 @@ class PluginBase(UVToolMixin, BaseModel):
         self,
         *msg: str,
         level: int = 15,
-        target_type: str | None = "source",
+        target_type: TargetType | None = TargetType.SOURCE,
         append_to_stream: Literal["stderr", "stdout", "none"] = "none",
     ):
         """Log a message to the plugin's log file.
@@ -1264,6 +1331,11 @@ class PluginBase(UVToolMixin, BaseModel):
         tt = ""
         if target_type is not None:
             tt = f" @ [magenta]{escape_markup(target_type)}[/magenta]"
+        if level >= logging.ERROR and getattr(self, "_side_run_active", False):
+            # A side run's own failure notes (a timeout, a spawn failure) are
+            # put back with the rest of its record; shown at ERROR they would
+            # read as a failure of a scan that is reported as it would have been.
+            level = logging.DEBUG
 
         # The prefix is styled, so the record asks for markup, and everything
         # interpolated is escaped: the message is the plugin's, and it often names a
@@ -1561,7 +1633,7 @@ class PluginBase(UVToolMixin, BaseModel):
                         stderr_text,
                         values,
                         plugin_inputs=plugin_inputs,
-                        tool_name=self.command,
+                        tool_name=_tool_name(self),
                         limit=None,
                     )
                 else:
@@ -1896,6 +1968,14 @@ class PluginBase(UVToolMixin, BaseModel):
         self._scan_could_not_stop_runs = {}
         self._scan_could_not_stop_history = []
 
+    def _could_not_stop_key_for(self, response: Dict) -> str:
+        """The ``scan_could_not_stop_runs`` key for ``response``: its run key, under
+        :data:`SIDE_RUN_KEY_PREFIX` while a side run is in flight."""
+        key = _could_not_stop_run_key(response)
+        if getattr(self, "_side_run_active", False):
+            return SIDE_RUN_KEY_PREFIX + key
+        return key
+
     def _could_not_stop_state(self, response: Dict) -> None:
         """Set the could-not-stop state from ``response``: state only, shared with
         _run_subprocess's handler like the other pure state steps.
@@ -1926,7 +2006,7 @@ class PluginBase(UVToolMixin, BaseModel):
         self._scan_could_not_stop = recorded
         # Kept per run as well, under the flag this run ended with, so a reader
         # can tell which run's stop failed when scan() launched more than once.
-        run_key = _could_not_stop_run_key(response)
+        run_key = self._could_not_stop_key_for(response)
         self._scan_could_not_stop_runs[run_key] = recorded
         self._scan_could_not_stop_history.append((run_key, recorded))
 
@@ -2118,19 +2198,28 @@ class PluginBase(UVToolMixin, BaseModel):
             level=logging.ERROR,
         )
 
-    #: What a run leaves on the plugin: the output and error lines, the exit code
-    #: and the per-run flags the recorders set (``_record_response``).
+    #: What a run leaves on the plugin that a side run puts back: the output and
+    #: error lines, ASH's own notes among them (``_plugin_log_lines``, which
+    #: ``_plugin_log`` writes beside ``errors`` and ``_reset_errors`` clears with
+    #: it), the exit code and the per-run flags the recorders set
+    #: (``_record_response``).
+    #:
+    #: Left out on purpose: the could-not-stop record (``_scan_could_not_stop``
+    #: and its two per-run forms). It says a tool ASH could not kill may still be
+    #: writing into the output directory, which stays true whichever run left it
+    #: there, so a side run adds to it and never erases it. A side run's entry is
+    #: filed under :data:`SIDE_RUN_KEY_PREFIX` so a reader of the per-run record
+    #: can tell it from the scan's own run: any entry fails the run, but only the
+    #: scan's own ``timed_out`` entry says the scan's timed-out tool survived.
     _RUN_RECORD_ATTRIBUTES: ClassVar[Tuple[str, ...]] = (
         "output",
         "errors",
         "exit_code",
+        "_plugin_log_lines",
         "_scan_timed_out_after",
         "_scan_spawn_failure",
         "_scan_post_run_error",
         "_scan_kept_flag",
-        "_scan_could_not_stop",
-        "_scan_could_not_stop_runs",
-        "_scan_could_not_stop_history",
         "_unevaluated_targets",
     )
 
@@ -2150,17 +2239,61 @@ class PluginBase(UVToolMixin, BaseModel):
         failed, or only wrote to stderr, must not fail or annotate a scan whose
         main run was fine, so those attributes are put back to what they were.
         Its response is returned for the caller to read; nothing of it is kept.
+
+        One record is not put back: a tool ASH could not stop (the could-not-stop
+        state, see :data:`_RUN_RECORD_ATTRIBUTES`). That ending means a process
+        may still be running and writing into the output directory after the
+        report is read, so ``run_ash_scan`` fails the run on it whichever run
+        left it.
+
+        The put-back is a save and a restore of this plugin's own attributes, so
+        it must not run beside another run on the same plugin: that run's
+        record would be overwritten when this one ends. Both callers run their
+        side run after the main run's response is read, one at a time.
         """
         saved: Dict[str, Any] = {}
         for name in self._RUN_RECORD_ATTRIBUTES:
             if hasattr(self, name):
                 value = getattr(self, name)
                 saved[name] = copy.copy(value)
+        was_active = self._side_run_active
+        history_before = len(self._scan_could_not_stop_history)
+        self._side_run_active = True
         try:
             return run(command, **kwargs)
         finally:
+            self._side_run_active = was_active
             for name, value in saved.items():
                 setattr(self, name, value)
+            self._log_side_run_could_not_stop(history_before)
+
+    def _log_side_run_could_not_stop(self, history_before: int) -> None:
+        """Say once, at ERROR, that a side run left a tool ASH could not stop.
+
+        ``_plugin_log`` lowers a side run's own ERROR notes to DEBUG, because
+        its record is put back and the scan is reported as it would have been.
+        A could-not-stop entry is the one thing that is not put back: it fails
+        the run, so the line that says which scanner and why is written here,
+        after the put-back, where it stays with the scan's error lines.
+        """
+        new = self._scan_could_not_stop_history[history_before:]
+        if not new:
+            return
+        keys = ", ".join(dict.fromkeys(key for key, _ in new))
+        reasons = "; ".join(dict.fromkeys(reason for _, reason in new))
+        name = getattr(self.config, "name", "<scanner>")
+        hint = (
+            f" Raise scanners.{name}.options.scan_timeout if this target "
+            "legitimately needs longer."
+            if any(key.endswith("timed_out") for key, _ in new)
+            else ""
+        )
+        self._plugin_log(
+            f"a second run of the tool ({keys}) could not be stopped: {reasons}. "
+            "The scan is failed on it, because the process may still be writing "
+            f"into the output directory.{hint}",
+            level=logging.ERROR,
+        )
 
     def _run_subprocess(
         self,
@@ -2204,7 +2337,7 @@ class PluginBase(UVToolMixin, BaseModel):
 
         # Set once a run returned a response, so the handler below can tell an
         # exception from before the command ran from one while reading its result.
-        response: Dict | None = None
+        response: Optional[Dict] = None
         # The recorders already run for this response (_record_response), so none
         # runs twice, in the handler below included.
         invoked: Set[str] = set()
@@ -2219,7 +2352,8 @@ class PluginBase(UVToolMixin, BaseModel):
         stderr_log_before = _log_identity(stderr_log)
         try:
             # Use provided cwd or fall back to context.source_dir
-            working_dir = cwd if cwd is not None else Path(self.context.source_dir)
+            source_dir = self._require_context().source_dir
+            working_dir = Path(cwd if cwd is not None else source_dir)
 
             # Offline, the tool's own update, version and telemetry checks are
             # turned off in the environment it gets (utils/offline_tool_env.py).
@@ -2229,6 +2363,11 @@ class PluginBase(UVToolMixin, BaseModel):
             env = with_offline_tool_environment(
                 env, scanner_offline() if callable(scanner_offline) else None
             )
+
+            # A POLYFILL row of the scanner's runtime-compat facet puts its shim
+            # directory on the child's PYTHONPATH (utils/runtime_compat_env.py);
+            # a scanner with no such row gets its environment back unchanged.
+            env = with_runtime_compat_environment(env, self)
 
             # A uv command started in the scanned tree (`uv pip ...`, `uv run ...`)
             # runs the tree's .venv python and builds its project unless told not
@@ -2248,7 +2387,7 @@ class PluginBase(UVToolMixin, BaseModel):
             # this process's) is not known to be the operator's alone. Such a
             # UV_PYTHON is dropped before the choice is read, so ASH's
             # interpreter is set in its place.
-            if _uv_interpreter_inside(env, working_dir, Path(self.context.source_dir)):
+            if _uv_interpreter_inside(env, working_dir, Path(source_dir)):
                 # Said once per plugin, as a warning: the operator or the scan's
                 # config set a variable that is not honored, and one line per
                 # tool run would repeat it for every run. The value is not shown.
@@ -2545,7 +2684,7 @@ class PluginBase(UVToolMixin, BaseModel):
             # key, so an earlier run's record does not stand in for it.
             if (
                 self._scan_could_not_stop is None
-                or _could_not_stop_run_key(post_run)
+                or self._could_not_stop_key_for(post_run)
                 not in self._scan_could_not_stop_runs
             ):
                 self._could_not_stop_state(post_run)

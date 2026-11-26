@@ -67,7 +67,7 @@ def _config_disabling_cdk_nag() -> AshConfig:
 
 
 def _config_with_a_non_default_nag_pack() -> AshConfig:
-    """The shape ASH's own `.ash/.ash.yaml` uses.
+    """The shape ASH's own `.ash.yaml` uses.
 
     `PCIDSS321Checks` defaults to False, so a config that sets it True is
     carrying a value only the operator could have put there.

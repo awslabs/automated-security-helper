@@ -25,6 +25,8 @@ from automated_security_helper.utils.terminal_text import (
 )
 from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+    SUMMARY_BELOW_THRESHOLD,
+    SUMMARY_POLICY_NOT_GATING,
     ReportContentEmitter,
     coverage_shortfall_text,
     deduplicated_summary_text,
@@ -209,12 +211,12 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 summary["title"].upper(),
                 summary["description"],
                 (
-                    f"{summary['actionable']} actionable | {summary['below_threshold']} below threshold | "
+                    f"{summary['actionable']} actionable | {summary[SUMMARY_BELOW_THRESHOLD]} below threshold | "
                     # Findings the project's outcome left out are counted apart
                     # from the ones the threshold sets aside, only when present.
                     + (
-                        f"{summary['policy_not_gating']} not gating (workspace policy) | "
-                        if summary.get("policy_not_gating")
+                        f"{summary[SUMMARY_POLICY_NOT_GATING]} not gating (workspace policy) | "
+                        if summary.get(SUMMARY_POLICY_NOT_GATING)
                         else ""
                     )
                     + f"{summary['suppressed']} suppressed | {summary['completed']}/{summary['scanners']} scanners completed"
@@ -496,22 +498,27 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
             )
             # A limit of 0 lists none of them, yet the summary still counts
             # them, so the section and the note follow the count.
-            if summary["policy_not_gating"]:
+            if summary[SUMMARY_POLICY_NOT_GATING]:
+                # The folded count, as the list itself is folded: the summary's
+                # unfolded figure read as a truncation when the fold was on,
+                # and the note then claimed the HTML lists the rest though the
+                # HTML folds the same way.
+                not_gating_total = emitter.policy_not_gating_count()
                 text_parts.append("NOT GATING (WORKSPACE POLICY)")
                 text_parts.append("-----------------------------")
                 if left_out:
                     text_parts.append(
-                        f"Showing {len(left_out)} of {summary['policy_not_gating']} "
+                        f"Showing {len(left_out)} of {not_gating_total} "
                         "findings reported and left out of the outcome because "
                         "policy_scanners_gate is off."
                     )
                     text_parts.extend(_findings_table(left_out))
                 # The list stops at the same limit as the one above, so say
                 # where the rest is, as that list does.
-                if len(left_out) < summary["policy_not_gating"]:
+                if len(left_out) < not_gating_total:
                     text_parts.append("")
                     text_parts.append(
-                        f"Note: Showing {len(left_out)} of {summary['policy_not_gating']} "
+                        f"Note: Showing {len(left_out)} of {not_gating_total} "
                         "findings left out of the outcome. The HTML report lists "
                         "the rest under its 'Not gating' scope. "
                         "Configure 'max_detailed_findings' to adjust this limit."

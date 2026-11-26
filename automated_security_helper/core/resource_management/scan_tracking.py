@@ -18,6 +18,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple, Set, cast
 
+from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.core.resource_management.error_handling import (
     _NotARegularFile,
     _read_regular_file_text,
@@ -29,6 +30,7 @@ from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     warning_of_dropped_keys,
 )
+from automated_security_helper.models.vocab import SEVERITY_BUCKETS as _LADDER_BUCKETS
 from automated_security_helper.utils.error_text import (
     error_text,
     log_unexpected_error,
@@ -37,7 +39,10 @@ from automated_security_helper.utils.error_text import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.scanner_tool_types import result_scanner_name
-from automated_security_helper.utils.severity_ladder import result_severity
+from automated_security_helper.utils.severity_ladder import (
+    SUPPRESSED_COUNT_KEY,
+    result_severity,
+)
 from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
 
 # Configure module logger
@@ -63,18 +68,18 @@ _logger = ASH_LOGGER
 # canonical per-scanner counts in the aggregated results file are typed by
 # ScannerTargetStatusInfo and have a fixed field set; this constant governs only
 # the MCP progress and summary views assembled in this module.
-SEVERITY_BUCKETS = ("critical", "high", "medium", "low", "info", "suppressed")
+SEVERITY_TALLY_BUCKETS = (*_LADDER_BUCKETS, SUPPRESSED_COUNT_KEY)
 UNKNOWN_SEVERITY = "unknown"
 
 
 def empty_severity_counts() -> Dict[str, int]:
     """A zeroed severity breakdown, including the catch-all bucket."""
-    counts = dict.fromkeys(SEVERITY_BUCKETS, 0)
+    counts = dict.fromkeys(SEVERITY_TALLY_BUCKETS, 0)
     counts[UNKNOWN_SEVERITY] = 0
     return counts
 
 
-class MCScannerStatus(Enum):
+class MCScannerStatus(str, Enum):
     """Status of an individual scanner."""
 
     PENDING = "pending"
@@ -85,16 +90,15 @@ class MCScannerStatus(Enum):
 
 
 #: ``core.enums.ScannerStatus`` value -> the ``MCScannerStatus`` it means here.
-#: Keyed on the string rather than on the enum member, matching
-#: :func:`summarize_scanner_statuses`, which reads the same field out of the same
-#: document and also compares strings -- the value arrives from JSON, so it is a
-#: string by the time either function sees it.
+#: Keyed on the enum members; the value arrives from JSON as a string, so
+#: :func:`scanner_status_from_results` is the ingest that turns the text into a
+#: member before the lookup.
 _SCANNER_STATUS_MAP = {
-    "PASSED": MCScannerStatus.COMPLETED,
-    "FAILED": MCScannerStatus.FAILED,
-    "ERROR": MCScannerStatus.FAILED,
-    "MISSING": MCScannerStatus.SKIPPED,
-    "SKIPPED": MCScannerStatus.SKIPPED,
+    ScannerStatus.PASSED: MCScannerStatus.COMPLETED,
+    ScannerStatus.FAILED: MCScannerStatus.FAILED,
+    ScannerStatus.ERROR: MCScannerStatus.FAILED,
+    ScannerStatus.MISSING: MCScannerStatus.SKIPPED,
+    ScannerStatus.SKIPPED: MCScannerStatus.SKIPPED,
 }
 
 
@@ -120,7 +124,10 @@ def scanner_status_from_results(status: Any) -> MCScannerStatus:
     rather than as a routine skip.
     """
     if isinstance(status, str):
-        return _SCANNER_STATUS_MAP.get(status.upper(), MCScannerStatus.FAILED)
+        try:
+            return _SCANNER_STATUS_MAP[ScannerStatus(status.upper())]
+        except ValueError:
+            return MCScannerStatus.FAILED
     return MCScannerStatus.FAILED
 
 
@@ -190,14 +197,7 @@ class ScannerProgress:
         self.severity_counts = (
             dict(severity_counts)
             if severity_counts
-            else {
-                "critical": 0,
-                "high": 0,
-                "medium": 0,
-                "low": 0,
-                "info": 0,
-                "suppressed": 0,
-            }
+            else dict.fromkeys(SEVERITY_TALLY_BUCKETS, 0)
         )
         self.start_time: Optional[datetime] = None
         self.end_time: Optional[datetime] = None
@@ -1161,7 +1161,10 @@ def summarize_scanner_statuses(
 
         # FAILED and ERROR are deliberately not included. Those scanners ran;
         # reporting them as skipped would send a user looking for a missing tool.
-        if recorded_status not in ("MISSING", "SKIPPED"):
+        if recorded_status not in (
+            ScannerStatus.MISSING.value,
+            ScannerStatus.SKIPPED.value,
+        ):
             continue
 
         if not dependencies_satisfied:
@@ -1317,9 +1320,10 @@ def assess_coverage(results: AshAggregatedResults) -> Tuple[bool, Dict[str, Any]
         scan_incompleteness,
     )
 
-    gate = _resolve_fail_on_incomplete_scanners(
-        results, SimpleNamespace(fail_on_incomplete_scanners=None), None
-    )
+    # The resolver reads one attribute of its options argument, so a bare
+    # namespace stands in for the CLI's ScanOptions here.
+    no_options: Any = SimpleNamespace(fail_on_incomplete_scanners=None)
+    gate = _resolve_fail_on_incomplete_scanners(results, no_options, None)
     gated = scan_incompleteness(results, gate=gate)
     facts = scan_incompleteness(results, gate=True)
     return bool(gated), facts.to_payload()
@@ -1439,7 +1443,7 @@ def _add_aggregated_scanner_progress(
         # document recorded rather than assuming success. The results model reads a
         # status that is absent as PASSED, and so does this.
         mapped_status = scanner_status_from_results(
-            scanner_info.get("status", "PASSED")
+            scanner_info.get("status", ScannerStatus.PASSED.value)
         )
         source_progress = ScannerProgress(
             scanner_name=scanner_name,
@@ -1740,7 +1744,7 @@ def get_scan_progress_info(
     every SARIF result it rose by the suppressed count the moment the scan
     completed.
     ``findings_summary`` has one shape in every state: the severity buckets
-    (``SEVERITY_BUCKETS`` and ``unknown``). For a completed scan they are
+    (``SEVERITY_TALLY_BUCKETS`` and ``unknown``). For a completed scan they are
     ``metadata.summary_stats``' counts, or, with no summary stats, the SARIF
     results graded by ``result_severity``, a suppressed result counted in
     ``suppressed`` and not by its severity, so the buckets other than
@@ -1835,8 +1839,10 @@ def get_scan_progress_info(
                     scanner_results if isinstance(scanner_results, dict) else {}
                 ).items()
                 if isinstance(info, dict)
-                and _recorded_status_word(info.get("status", "PASSED"))
-                in ("PASSED", "FAILED")
+                and _recorded_status_word(
+                    info.get("status", ScannerStatus.PASSED.value)
+                )
+                in (ScannerStatus.PASSED.value, ScannerStatus.FAILED.value)
             ]
 
             metadata = results.get("metadata")
@@ -2017,7 +2023,7 @@ def extract_findings_summary(findings: List[Dict[str, Any]]) -> Dict[str, int]:
 
     Returns:
         Dictionary mapping severity levels to counts, keyed by the lowercase
-        buckets in SEVERITY_BUCKETS plus UNKNOWN_SEVERITY. A finding whose
+        buckets in SEVERITY_TALLY_BUCKETS plus UNKNOWN_SEVERITY. A finding whose
         severity is missing or is not one of the named buckets counts under
         UNKNOWN_SEVERITY, so ``sum(result.values()) == len(findings)``.
     """
@@ -2181,7 +2187,9 @@ def get_scan_results(
         # Validating first also means a structurally wrong document is reported
         # as invalid_format with the field named, rather than as the
         # unexpected_error that model construction would raise.
-        is_valid, validation_error = validate_result_structure(int_results_dict)
+        # No parsed document reads as an empty one, which fails the check below
+        # with the missing fields named.
+        is_valid, validation_error = validate_result_structure(int_results_dict or {})
         if not is_valid:
             raise MCPResourceError(
                 f"Invalid result structure: {validation_error}",
@@ -2235,7 +2243,10 @@ def get_scan_results(
         for scanner_name, scanner_results in results_dict.get(
             "scanner_results", {}
         ).items():
-            if scanner_results.get("status", "UNKNOWN") in ["PASSED", "FAILED"]:
+            if scanner_results.get("status", "UNKNOWN") in (
+                ScannerStatus.PASSED,
+                ScannerStatus.FAILED,
+            ):
                 scanners_completed.append(scanner_name)
 
         # Minted unconditionally. This used to read
@@ -2342,7 +2353,7 @@ def extract_scan_summary(results: Dict[str, Any]) -> Dict[str, Any]:
         "scanners_completed": results.get("scanners_completed", []),
         "scanner_summaries": scanner_summaries,
         # extract_findings_summary keys its counts by the lowercase buckets in
-        # SEVERITY_BUCKETS; read with uppercase keys these were always False.
+        # SEVERITY_TALLY_BUCKETS; read with uppercase keys these were always False.
         "has_critical": severity_counts.get("critical", 0) > 0,
         "has_high": severity_counts.get("high", 0) > 0,
         "completion_time": results.get("completion_time"),

@@ -1,4 +1,4 @@
-$ ashx report --format spdx --log-level ERROR
+$ ashx results report --format spdx --log-level ERROR
 [exit 0]
 {
   "spdxVersion": "SPDX-2.3",

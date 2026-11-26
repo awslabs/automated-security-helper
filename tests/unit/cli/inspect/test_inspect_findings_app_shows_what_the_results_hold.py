@@ -353,9 +353,9 @@ def test_the_suppression_config_is_found_from_the_scanned_directory(
     tmp_path, monkeypatch
 ):
     scanned = tmp_path / "project"
-    # A discovered name under .ash/ (ASH_CONFIG_FILE_NAMES are read at the root
-    # and in .ash/; the ashrc names only at the root).
-    config = scanned / ".ash" / ".ash.yaml"
+    # A name discovery reads but the no-config fallback never produces (that
+    # is .ash.yaml), so only a found file can give this answer.
+    config = scanned / ".ash.yml"
     config.parent.mkdir(parents=True)
     config.write_text("project_name: p\n", encoding="utf-8")
     elsewhere = tmp_path / "elsewhere"

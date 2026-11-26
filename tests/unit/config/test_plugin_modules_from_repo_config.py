@@ -65,9 +65,8 @@ def _tree(tmp_path: Path, monkeypatch, modules: List[str]) -> Path:
     package = source / STANDIN
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("STANDIN_LOADED = True\n")
-    (source / ".ash").mkdir()
     listed = "".join(f"  - {name}\n" for name in modules)
-    (source / ".ash" / ".ash.yaml").write_text(
+    (source / ".ash.yaml").write_text(
         f"project_name: scanned\nash_plugin_modules:\n{listed}"
     )
     monkeypatch.syspath_prepend(str(source))
@@ -125,13 +124,13 @@ def test_an_installed_module_named_by_an_in_tree_config_is_kept(tmp_path, monkey
     assert config.ash_plugin_modules == [INSTALLED]
 
 
-def test_ash_community_plugins_config_keeps_its_modules(tmp_path, monkeypatch):
+def test_ash_alpha_plugins_config_keeps_its_modules(tmp_path, monkeypatch):
     repo_config = (
-        Path(__file__).resolve().parents[3] / ".ash" / ".ash_community_plugins.yaml"
+        Path(__file__).resolve().parents[3] / ".ash" / ".ash_alpha_plugins.yaml"
     )
     source = tmp_path / "repo"
     (source / ".ash").mkdir(parents=True)
-    copied = source / ".ash" / ".ash_community_plugins.yaml"
+    copied = source / ".ash" / ".ash_alpha_plugins.yaml"
     copied.write_text(repo_config.read_text())
     expected = resolve_config(config_path=repo_config, source_dir=tmp_path / "x")
     config = resolve_config(config_path=copied, source_dir=source)
@@ -165,8 +164,8 @@ def test_a_workspace_project_cannot_add_a_module_from_elsewhere_in_the_workspace
 
     workspace = tmp_path / "ws"
     project = workspace / "app"
-    (project / ".ash").mkdir(parents=True)
-    (project / ".ash" / ".ash.yaml").write_text(
+    project.mkdir(parents=True)
+    (project / ".ash.yaml").write_text(
         f"project_name: app\nash_plugin_modules:\n  - {STANDIN}\n"
     )
     shared = workspace / "shared"

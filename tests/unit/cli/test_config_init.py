@@ -17,7 +17,7 @@ def cli_runner():
 
 @pytest.fixture
 def config_path(tmp_path):
-    return tmp_path / ".ash" / ".ash.yaml"
+    return tmp_path / ".ash.yaml"
 
 
 class TestConfigInitValidation:

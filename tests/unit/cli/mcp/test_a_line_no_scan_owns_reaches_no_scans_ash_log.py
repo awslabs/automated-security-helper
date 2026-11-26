@@ -339,9 +339,9 @@ def layout(tmp_path_factory) -> Path:
         )
     # A one-project workspace whose project runs no scanner.
     workspace = root / "allowed" / "ws"
-    (workspace / "api" / ".ash").mkdir(parents=True)
+    (workspace / "api").mkdir(parents=True)
     (workspace / "api" / "app.py").write_text("x = 1\n", encoding="utf-8")
-    (workspace / "api" / ".ash" / ".ash.yaml").write_text(
+    (workspace / "api" / ".ash.yaml").write_text(
         "project_name: api\nscanners:\n%s" % disabled, encoding="utf-8"
     )
     (workspace / "dev.code-workspace").write_text(

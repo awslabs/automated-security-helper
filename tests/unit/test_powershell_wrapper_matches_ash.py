@@ -51,12 +51,37 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tests.utils.pwsh_env import inherited_env, scratch_home
+# The fake-runner helpers live in tests/utils/pwsh_env.py, shared with the snapshot
+# module that runs Invoke-ASH against the same stand-ins; the names here are the ones
+# this module's tests and its importers have always used.
+from tests.utils.pwsh_env import (  # noqa: F401
+    GUARD_EXIT as _GUARD_EXIT,
+    GUARD_MESSAGE as _GUARD_MESSAGE,
+    HELPERS,
+    PWSH,
+    REPO_ROOT,
+    RUNNER_VARIABLES as _RUNNER_VARIABLES,
+    RUNNERS,
+    SCRIPT_RUN as _SCRIPT_RUN,
+    build_call as _build_call,
+    require_pwsh,
+    clean_env as _clean_env,
+    env_guard as _env_guard,
+    guard_dir as _guard_dir,
+    invoke as _invoke,
+    inherited_env,
+    ps_single_quoted as _ps_single_quoted,
+    pwsh as _pwsh,
+    pwsh_argv as _pwsh_argv,
+    run_call as _run_call,
+    run_env as _run_env,
+    run_script as _run_script,
+    runner_calls as _calls,
+    scratch_home,
+    stub_runners as _stub_runners,
+)
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-HELPERS = REPO_ROOT / "utils" / "ash_helpers.ps1"
 RUN_SCAN_TEST = REPO_ROOT / ".github" / "actions" / "run-scan-test" / "action.yml"
-PWSH = shutil.which("pwsh")
 
 # The root ./ash script was deleted by a533dd6531a (absorbed into the ash CLI), so the
 # tests that run it beside Invoke-ASH have nothing to compare and skip. They run again
@@ -65,10 +90,6 @@ _NEEDS_ASH_SCRIPT = pytest.mark.skipif(
     not (REPO_ROOT / "ash").is_file(),
     reason="root ./ash script removed by a533dd6531a (absorbed into the ash CLI)",
 )
-
-RUNNERS = ("finch", "docker", "nerdctl", "podman")
-_GUARD_EXIT = 97
-_GUARD_MESSAGE = "REAL-RUNNER-GUARD"
 
 # Flags whose defaults belong to ash and its configuration, not to the wrapper.
 _DEFAULTED_BY_ASH = {
@@ -96,216 +117,7 @@ _WITHOUT_PWSH = frozenset(
 def _require_pwsh(in_ci: bool, request: pytest.FixtureRequest):
     if request.node.name in _WITHOUT_PWSH:
         return
-    if PWSH is None:
-        if in_ci:
-            pytest.fail("pwsh is not on PATH; CI runners must run these tests")
-        pytest.skip("pwsh is not on PATH (local run only; CI fails instead)")
-
-
-def _stub_runners(build_exit: int = 0) -> str:
-    """PowerShell defining a recording stand-in for every OCI runner name.
-
-    The guard after the definitions stops the script before Invoke-ASH runs if any
-    runner name would still resolve to something other than its stand-in. A stand-in
-    sets $LASTEXITCODE to ``build_exit`` for a build and to 0 for anything else.
-    """
-    lines = []
-    for name in RUNNERS:
-        lines.append(
-            f"function global:{name} {{ "
-            f"Add-Content -LiteralPath $env:RUNNER_LOG -Value "
-            f"(ConvertTo-Json -Compress -InputObject (@('{name}') + @($args | ForEach-Object {{ [string]$_ }}))); "
-            f"$global:LASTEXITCODE = $(if ($args[0] -eq 'build') {{ {build_exit} }} else {{ 0 }}) }}"
-        )
-    names = ", ".join(f"'{name}'" for name in RUNNERS)
-    lines.append(
-        f"foreach ($n in @({names})) {{ "
-        "if ((Get-Command $n).CommandType -ne 'Function') { "
-        f'Write-Host "{_GUARD_MESSAGE}: $n is not the stand-in"; exit {_GUARD_EXIT} }} }}'
-    )
-    return "\n".join(lines) + "\n"
-
-
-def _guard_dir(tmp_path: Path) -> Path:
-    """Programs named like the runners that fail the test, for the front of PATH."""
-    guard = tmp_path / "runner-guard"
-    guard.mkdir(exist_ok=True)
-    for name in RUNNERS:
-        if os.name == "nt":
-            (guard / f"{name}.cmd").write_text(
-                f"@echo {_GUARD_MESSAGE}: {name} %* 1>&2\r\n@exit /b {_GUARD_EXIT}\r\n",
-                encoding="utf-8",
-            )
-        else:
-            program = guard / name
-            program.write_text(
-                # To stderr, which `$rc = Invoke-ASH ...` does not capture.
-                f"#!/bin/sh\necho '{_GUARD_MESSAGE}: {name}' \"$@\" >&2\nexit {_GUARD_EXIT}\n",
-                encoding="utf-8",
-            )
-            program.chmod(0o755)
-    return guard
-
-
-_RUNNER_VARIABLES = ("OCI_RUNNER", "ASH_OCI_RUNNER", "OCI_RUNNER_WRAPPER")
-
-
-def _clean_env(tmp_path: Path, **overrides: str) -> dict[str, str]:
-    env = inherited_env(*_RUNNER_VARIABLES, "ASH_CONFIG")
-    guard = _guard_dir(tmp_path)
-    env["PATH"] = os.pathsep.join([str(guard), env.get("PATH", "")])
-    for name in RUNNERS:
-        found = shutil.which(name, path=env["PATH"])
-        if found is None or Path(found).parent != guard:
-            pytest.fail(f"{name} on the test PATH resolves to {found}, not the guard")
-    env["RUNNER_LOG"] = str(tmp_path / "runner.log")
-    env.update(scratch_home(tmp_path))
-    env.update(overrides)
-    return env
-
-
-def _ps_single_quoted(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
-
-
-def _env_guard(env: dict[str, str]) -> str:
-    """PowerShell that stops the script unless each runner variable is what the test
-    passed in ``env``, or is unset when the test passed none."""
-    lines = []
-    for name in _RUNNER_VARIABLES:
-        expected = env.get(name)
-        if expected:
-            wrong = f"$env:{name} -cne {_ps_single_quoted(expected)}"
-        else:
-            wrong = f"-not [string]::IsNullOrEmpty($env:{name})"
-        lines.append(
-            f"if ({wrong}) {{ Write-Host "
-            f'"{_GUARD_MESSAGE}: {name} is not what the test set"; exit {_GUARD_EXIT} }}'
-        )
-    return "\n".join(lines) + "\n"
-
-
-_SCRIPT_RUN = ("-NoProfile", "-NonInteractive", "-File")
-
-
-def _pwsh(
-    script: str,
-    cwd: Path,
-    env: dict[str, str],
-    launch: tuple[str, ...] = _SCRIPT_RUN,
-    stdin: str | None = None,
-    interpreter: str | None = None,
-) -> subprocess.CompletedProcess:
-    """Run ``script`` with pwsh started as ``launch`` and then the script.
-
-    The script goes in a file when ``launch`` ends with a -File spelling, and inline
-    otherwise (after -Command). ``stdin`` is what a session started with -NoExit reads
-    as its next commands. ``interpreter`` replaces pwsh (powershell.exe, say).
-    """
-    if launch[-1].lower().startswith(("-f", "/f")):
-        script_file = cwd / "invoke.ps1"
-        script_file.write_text(script, encoding="utf-8")
-        target = str(script_file)
-    else:
-        target = script
-    return _pwsh_argv([*launch, target], cwd, env, stdin=stdin, interpreter=interpreter)
-
-
-def _pwsh_argv(
-    arguments: list[str],
-    cwd: Path,
-    env: dict[str, str],
-    stdin: str | None = None,
-    interpreter: str | None = None,
-) -> subprocess.CompletedProcess:
-    program = interpreter or PWSH
-    assert program is not None
-    result = subprocess.run(  # nosec B603 - fixed interpreter, script built here
-        [program, *arguments],
-        cwd=cwd,
-        env=env,
-        input=stdin,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=120,
-        check=False,
-    )
-    if _GUARD_MESSAGE in result.stdout + result.stderr:
-        pytest.fail(
-            "a real OCI runner could have been run (the runner guard stopped it):\n"
-            + result.stdout
-            + result.stderr
-        )
-    return result
-
-
-def _calls(tmp_path: Path) -> list[list[str]]:
-    log = tmp_path / "runner.log"
-    if not log.exists():
-        return []
-    return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
-
-
-def _run_script(
-    tmp_path: Path,
-    body: str,
-    preamble: str = "",
-    build_exit: int = 0,
-    launch: tuple[str, ...] = _SCRIPT_RUN,
-    stdin: str | None = None,
-    env_preamble: str = "",
-    interpreter: str | None = None,
-    **env: str,
-) -> tuple[subprocess.CompletedProcess, list[list[str]]]:
-    """Run ``body`` after the stand-ins, ``preamble`` and the helpers.
-
-    ``env_preamble`` runs before the check of the runner variables, as something that
-    changed them before the script started would; only the guard's own test uses it.
-    """
-    (tmp_path / "src").mkdir(exist_ok=True)
-    run_env = _clean_env(tmp_path, **env)
-    script = (
-        "$ErrorActionPreference = 'Stop'\n"
-        + env_preamble
-        + _env_guard(run_env)
-        + _stub_runners(build_exit)
-        + preamble
-        + f". '{HELPERS.as_posix()}'\n"
-        + body
-    )
-    result = _pwsh(
-        script,
-        tmp_path,
-        run_env,
-        launch=launch,
-        stdin=stdin,
-        interpreter=interpreter,
-    )
-    return result, _calls(tmp_path)
-
-
-def _invoke(
-    tmp_path: Path, invocation: str, preamble: str = "", **env: str
-) -> tuple[subprocess.CompletedProcess, list[list[str]]]:
-    return _run_script(
-        tmp_path,
-        f"$rc = {invocation}\nexit [int]$LASTEXITCODE\n",
-        preamble=preamble,
-        **env,
-    )
-
-
-def _run_call(result, calls) -> list[str]:
-    runs = [call for call in calls if len(call) > 1 and call[1] == "run"]
-    assert len(runs) == 1, (calls, result.stdout, result.stderr)
-    return runs[0]
-
-
-def _build_call(result, calls) -> list[str]:
-    builds = [call for call in calls if len(call) > 1 and call[1] == "build"]
-    assert len(builds) == 1, (calls, result.stdout, result.stderr)
-    return builds[0]
+    require_pwsh(in_ci)
 
 
 def _inner_ash_args(run_call: list[str]) -> list[str]:
@@ -320,17 +132,6 @@ def _inner_ash_args(run_call: list[str]) -> list[str]:
 #: tests/unit/test_sandbox_refused_by_every_container_entrypoint.py covers why and
 #: where it goes.
 SANDBOX_OFF = ["--sandbox", "off"]
-
-
-def _run_env(run_call: list[str]) -> dict[str, str]:
-    """The ``-e NAME=value`` pairs before the image name."""
-    before_image = run_call[: run_call.index("ashx")]
-    pairs = [
-        before_image[i + 1]
-        for i, arg in enumerate(before_image[:-1])
-        if arg == "-e" and "=" in before_image[i + 1]
-    ]
-    return dict(pair.split("=", 1) for pair in pairs)
 
 
 @pytest.mark.integration
@@ -2371,7 +2172,7 @@ _WRAPME = (
 
 def _run_environment_words(run_call: list[str]) -> list[str]:
     """The word after each ``-e`` before the image name: ``NAME`` or ``NAME=value``."""
-    before_image = run_call[: run_call.index("ash")]
+    before_image = run_call[: run_call.index("ashx")]
     return [
         before_image[i + 1] for i, arg in enumerate(before_image[:-1]) if arg == "-e"
     ]
@@ -3215,7 +3016,7 @@ def test_the_ci_powershell_step_names_only_declared_parameters(tmp_path):
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("config_file", ["default", "community"])
+@pytest.mark.parametrize("config_file", ["default", "alpha"])
 def test_the_ci_powershell_step_reaches_the_container_as_written(tmp_path, config_file):
     # The step dot-sources ./utils/ash_helpers.ps1 and scans $PWD, so it runs here in a
     # scratch directory holding a copy of the wrapper and a Dockerfile for it to name,
@@ -3243,8 +3044,8 @@ def test_the_ci_powershell_step_reaches_the_container_as_written(tmp_path, confi
     run = _run_call(result, _calls(tmp_path))
     assert run[0] == "docker", run
     inner = _inner_ash_args(run)
-    if config_file == "community":
-        assert inner[inner.index("--config") + 1] == ".ash/.ash_community_plugins.yaml"
+    if config_file == "alpha":
+        assert inner[inner.index("--config") + 1] == ".ash/.ash_alpha_plugins.yaml"
     else:
         assert "--config" not in inner, inner
 

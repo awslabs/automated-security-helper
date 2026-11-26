@@ -5,7 +5,7 @@
 The S3, CloudWatch Logs and Security Hub reporters send findings to an AWS
 destination with the host's credentials, so whether one runs, and where it
 sends, is the operator's choice (``config/reporter_trust.py``). Each test scans a
-git checkout whose ``.ash/.ash.yaml`` sets a cloud reporter's section, with the
+git checkout whose ``.ash.yaml`` sets a cloud reporter's section, with the
 AWS plugin module loaded by the operator and every destination the reporter
 needs also available from the operator's environment, and checks that:
 
@@ -340,10 +340,10 @@ def _git_checkout(path: Path, files: Dict[str, str]) -> Path:
 
 
 def _scanned_checkout(tmp_path: Path, reporters: Dict[str, Any]) -> Path:
-    """The scanned repository: a git checkout whose ``.ash/.ash.yaml`` sets ``reporters``."""
+    """The scanned repository: a git checkout whose ``.ash.yaml`` sets ``reporters``."""
     files = {"app.py": "value = 1\n"}
     if reporters:
-        files[".ash/.ash.yaml"] = yaml.safe_dump({"reporters": reporters})
+        files[".ash.yaml"] = yaml.safe_dump({"reporters": reporters})
     return _git_checkout(tmp_path / "checkout", files)
 
 

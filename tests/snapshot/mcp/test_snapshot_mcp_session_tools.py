@@ -447,8 +447,7 @@ async def test_workspace_tools(
     root = allowed / "work"
     for project in ("api", "web"):
         (root / project).mkdir(parents=True)
-    (root / "web" / ".ash").mkdir()
-    (root / "web" / ".ash" / ".ash.yaml").write_text(
+    (root / "web" / ".ash.yaml").write_text(
         "project_name: web\nglobal_settings:\n  severity_threshold: HIGH\n",
         encoding="utf-8",
     )

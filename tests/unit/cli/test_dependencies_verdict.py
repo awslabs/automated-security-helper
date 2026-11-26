@@ -289,7 +289,7 @@ class TestEmptyArgvIsSkipped:
 
     def _run(self, tmp_path, monkeypatch, commands):
         monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
-        # The command reads the working directory's .ash/.ash.yaml.
+        # The command reads the working directory's .ash.yaml.
         monkeypatch.chdir(tmp_path)
         fake = MagicMock()
         fake.config = SimpleNamespace(name="fake-scanner")
@@ -349,14 +349,14 @@ class TestToolSelectionScopesFailures:
     The discovery loop records a failure for every plugin whose constructor raises,
     and that happens before the --tool filter. Folding those into the verdict
     unconditionally meant
-    `ashx dependencies install --config .ash/.ash_community_plugins.yaml --tool
+    `ashx dependencies install --config .ash/.ash_alpha_plugins.yaml --tool
     trivy-repo` -- the command this change adds to CI -- exited 1 whenever any other
-    community plugin failed to import, and named that other plugin in the panel.
+    alpha plugin failed to import, and named that other plugin in the panel.
     """
 
     def _invoke(self, tmp_path, monkeypatch, args):
         monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
-        # The command reads the working directory's .ash/.ash.yaml.
+        # The command reads the working directory's .ash.yaml.
         monkeypatch.chdir(tmp_path)
         good = MagicMock()
         good.config = SimpleNamespace(name="good-scanner")
@@ -585,7 +585,7 @@ class TestToolSelection:
     @pytest.fixture(autouse=True)
     def _isolate(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
-        # The command reads the working directory's .ash/.ash.yaml.
+        # The command reads the working directory's .ash.yaml.
         monkeypatch.chdir(tmp_path)
         self.bin_args = ["--bin-path", str(tmp_path / "bin")]
         # width, so Rich does not wrap a string an assertion looks for across two
@@ -915,7 +915,7 @@ def _install_fake_scanners(
     is listed as itself, so the command constructs it.
 
     Run from ``tmp_path``: from any other working directory the command reads
-    that directory's ``.ash/.ash.yaml``, so a cell's verdict would depend on
+    that directory's ``.ash.yaml``, so a cell's verdict would depend on
     where pytest was started. The installer's console is pinned to a buffer this
     helper owns, folded into the returned ``output``: CliRunner's capture can
     lose what the command prints after a worker's first log record (see
@@ -1756,9 +1756,9 @@ class TestTheCellsRunFromTheirOwnDirectory:
 
     def test_a_config_in_the_callers_directory_is_not_read(self, tmp_path, monkeypatch):
         elsewhere = tmp_path / "elsewhere"
-        (elsewhere / ".ash").mkdir(parents=True)
+        elsewhere.mkdir(parents=True)
         # A configuration file that does not parse refuses any run that reads it.
-        (elsewhere / ".ash" / ".ash.yaml").write_text(
+        (elsewhere / ".ash.yaml").write_text(
             "project_name: [unclosed\n", encoding="utf-8"
         )
         monkeypatch.chdir(elsewhere)

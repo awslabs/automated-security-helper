@@ -23,10 +23,11 @@ import signal
 import stat
 import types
 from pathlib import Path
-from typing import Annotated, Callable, Dict, List, Optional
+from typing import Annotated, Any, Callable, Dict, List, Optional
 import typer
 
 from automated_security_helper.cli.params import ColorOption
+from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.cli.mcp.http_sessions import (
     DEFAULT_SESSION_WORKSPACE_TTL_SECONDS,
     MODE_SSE,
@@ -35,7 +36,7 @@ from automated_security_helper.cli.mcp.http_sessions import (
     SessionBoundary,
     _handshake_protocol_versions,
 )
-from automated_security_helper.cli.mcp.profile_registry import (
+from automated_security_helper.config.session_profiles import (
     register_profiles,
     set_profile_registry,
 )
@@ -43,7 +44,13 @@ from automated_security_helper.core.constants import (
     ASH_EXIT_INTERRUPTED,
     ASH_EXIT_USAGE_ERROR,
 )
-from automated_security_helper.core.enums import AshLogLevel
+from automated_security_helper.core.enums import (
+    DEFAULT_TRANSPORT,
+    TRANSPORT_HELP,
+    TRANSPORT_VALUES,
+    AshLogLevel,
+    Transport,
+)
 from automated_security_helper.core.exceptions import ASHValidationError
 from automated_security_helper.utils.ash_install import ash_reinstall_command
 from automated_security_helper.utils.console import ash_console
@@ -74,9 +81,13 @@ _logger = ASH_LOGGER
 # paths never did. --quiet still controls *whether* to write, not where.
 _stderr = ash_console(stderr=True)
 
-# Valid --transport values. Kept as a tuple so typer can render help cleanly
-# without forcing an Enum class on the public CLI surface.
-_VALID_TRANSPORTS = ("stdio", "streamable-http", "sse")
+# The valid --transport values are the members of ``Transport``. The typer
+# parameter stays a plain ``str``, and ``mcp_command`` turns it into a member
+# itself, for two reasons measured on typer 0.27.2: an enum-typed option renders
+# its metavar as <stdio|streamable-http|sse> where the option has always shown
+# <str>, and click rejects an unknown value with exit 2 before this command runs,
+# where the documented contract is ``ASH_EXIT_USAGE_ERROR`` (5) and the message
+# below.
 
 #: Exit code for an invocation the server can't run with: a usage error, apart
 #: from 3, which reports a config that can't be used. An unknown
@@ -399,7 +410,7 @@ def _validate_auth_options(
         raise ASHValidationError(_AUTH_VALUE_NOT_LATIN_1)
 
 
-def _validate_stateless_http(transport: str, stateless_http: bool) -> None:
+def _validate_stateless_http(transport: Transport, stateless_http: bool) -> None:
     """Reject ``--stateless-http`` on a transport that has no sessions to skip.
 
     Refused rather than ignored. An operator who passes it expects a server that
@@ -414,7 +425,7 @@ def _validate_stateless_http(transport: str, stateless_http: bool) -> None:
     Raises:
         ASHValidationError: if stateless_http is set on a non-streamable transport.
     """
-    if stateless_http and transport != "streamable-http":
+    if stateless_http and transport != Transport.STREAMABLE_HTTP:
         raise ASHValidationError(
             f"--stateless-http only applies to '--transport streamable-http', but "
             f"transport is '{transport}'. stdio has a single implicit session and "
@@ -424,7 +435,7 @@ def _validate_stateless_http(transport: str, stateless_http: bool) -> None:
 
 
 def _validate_trust_upstream_session_id(
-    transport: str, stateless_http: bool, trust_upstream_session_id: bool
+    transport: Transport, stateless_http: bool, trust_upstream_session_id: bool
 ) -> None:
     """Reject ``--trust-upstream-session-id`` where the server issues the session.
 
@@ -438,7 +449,7 @@ def _validate_trust_upstream_session_id(
             streamable-HTTP.
     """
     if trust_upstream_session_id and not (
-        transport == "streamable-http" and stateless_http
+        transport == Transport.STREAMABLE_HTTP and stateless_http
     ):
         raise ASHValidationError(
             "--trust-upstream-session-id only applies to '--transport "
@@ -768,7 +779,7 @@ def build_streamable_http_app(
     # `ValueError: "Settings" object has no field "streamable_http_path"`.
     # Passing it per call is also better behaved: the previous form mutated a
     # module-level singleton's settings as a side effect.
-    app_kwargs = {
+    app_kwargs: dict[str, Any] = {
         "streamable_http_path": mount_path,
         "stateless_http": stateless_http,
         "host": host,
@@ -841,7 +852,7 @@ def build_sse_app(
     ``--host 0.0.0.0`` never mentions ``--allowed-host`` and so trips no
     validation, and their server still refuses every proxied request. sse being
     deprecated upstream is an argument against giving it new capabilities, not
-    against making a transport ASH still advertises in ``_VALID_TRANSPORTS``
+    against making a transport ASH still advertises in :class:`Transport`
     work at the address the operator asked for.
 
     Returns:
@@ -873,7 +884,7 @@ def build_sse_app(
 
     # Same v2 change as the streamable-HTTP path above: sse_path is a keyword
     # argument on sse_app() rather than a Settings field.
-    app_kwargs = {"sse_path": mount_path, "host": host}
+    app_kwargs: dict[str, Any] = {"sse_path": mount_path, "host": host}
     app_kwargs["transport_security"] = security
     app = _mcp_instance.sse_app(**app_kwargs)
     # The session of an sse request is the one the server issued for its event
@@ -1380,9 +1391,9 @@ def mcp_command(
         str,
         typer.Option(
             "--transport",
-            help="Transport: 'stdio' (default), 'streamable-http', or 'sse'.",
+            help=TRANSPORT_HELP,
         ),
-    ] = "stdio",
+    ] = DEFAULT_TRANSPORT.value,
     host: Annotated[
         str,
         typer.Option("--host", help="Host to bind for HTTP transports."),
@@ -1540,7 +1551,7 @@ def mcp_command(
         _stderr.print(
             "If the issue persists, check your Python environment and ASH installation."
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
     # If we reach here, MCP dependencies are available
     if not quiet:
@@ -1582,7 +1593,7 @@ def mcp_command(
     # Before the --transport check: the container entrypoint (ash-mcp-serve)
     # passes this variable's value as --transport too, and the variable is the
     # operator's mistake to report.
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         ASH_MCP_TRANSPORT_ENV,
         KNOWN_TRANSPORTS,
         unknown_transport_override,
@@ -1592,7 +1603,8 @@ def mcp_command(
     if unknown is not None:
         _stderr.print(
             f"[red]Validation Error: {ASH_MCP_TRANSPORT_ENV}={escape_markup(repr(unknown))} "
-            f"names no transport; use one of {sorted(KNOWN_TRANSPORTS)} (any case), "
+            f"names no transport; use one of "
+            f"{sorted(known.value for known in KNOWN_TRANSPORTS)} (any case), "
             f"or unset it.[/red]",
             highlight=False,
         )
@@ -1600,9 +1612,12 @@ def mcp_command(
 
     # Each value below is the operator's or an error's, printed to a console that
     # reads markup, so it is escaped once: a "[/x]" in it raised MarkupError.
-    if transport not in _VALID_TRANSPORTS:
+    # The one place the plain string becomes a member; every comparison below is
+    # against members.
+    selected = Transport.parse(transport)
+    if selected is None:
         _stderr.print(
-            f"[red]Validation Error: --transport must be one of {_VALID_TRANSPORTS}, "
+            f"[red]Validation Error: --transport must be one of {TRANSPORT_VALUES}, "
             f"got '{escape_markup(transport)}'.[/red]"
         )
         raise typer.Exit(ASH_EXIT_USAGE_ERROR)
@@ -1617,17 +1632,17 @@ def mcp_command(
             f"with the built-in default.[/red]",
             highlight=False,
         )
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
 
     # After the transport check, not with the auth options above: an unknown
     # transport combined with --stateless-http should be reported as an unknown
     # transport, which is the operator's actual mistake.
     try:
-        _validate_stateless_http(transport, stateless_http)
+        _validate_stateless_http(selected, stateless_http)
         _validate_trust_upstream_session_id(
-            transport, stateless_http, trust_upstream_session_id
+            selected, stateless_http, trust_upstream_session_id
         )
-        if transport == "stdio":
+        if selected is Transport.STDIO:
             if trust_upstream_host_check:
                 raise ASHValidationError(
                     "--trust-upstream-host-check only applies to the HTTP "
@@ -1676,7 +1691,7 @@ def mcp_command(
             _stderr.print(
                 f"[red]Validation Error: {escape_markup(error_text(e))}[/red]"
             )
-            raise typer.Exit(3)
+            raise typer.Exit(AshExitCode.INVALID_CONFIG)
         if not quiet:
             _stderr.print(
                 f"[green]Registered {len(profile)} config profile(s).[/green]"
@@ -1693,7 +1708,7 @@ def mcp_command(
 
     # Log the command execution
     _logger.info(
-        f"Starting MCP server with transport={transport}, log level={log_level_value}"
+        f"Starting MCP server with transport={selected.value}, log level={log_level_value}"
     )
 
     # Before any transport starts: MCP scans never run a tool from inside a scanned
@@ -1710,20 +1725,20 @@ def mcp_command(
     # Initialize and start the MCP server with comprehensive error handling
     listen_socket = None
     try:
-        if transport != "stdio" and port == 0:
+        if selected is not Transport.STDIO and port == 0:
             # A loopback app accepts only its own port, so it is built for the
             # port the system chose: bind first. The bind is checked before
             # anything is bound.
             _validate_bind(host, allowed_host, trust_upstream_host_check)
             listen_socket = _bind_listen_socket(host)
             port = listen_socket.getsockname()[1]
-        if transport == "stdio":
+        if selected is Transport.STDIO:
             # Import and run the stdio MCP server implementation here to avoid
             # circular imports.
             from automated_security_helper.cli.mcp_server import run_mcp_server
 
             run_mcp_server()
-        elif transport == "streamable-http":
+        elif selected is Transport.STREAMABLE_HTTP:
             app = build_streamable_http_app(
                 mount_path=mount_path,
                 auth_header_name=auth_header_name,
@@ -1751,7 +1766,7 @@ def mcp_command(
                 log_level=log_level_value,
                 listen_socket=listen_socket,
             )
-        elif transport == "sse":
+        elif selected is Transport.SSE:
             # The mount-path default is /mcp, but SSE conventionally lives at
             # /sse. Honor whatever the user passed; only override if they kept
             # the streamable-HTTP default.
@@ -1805,7 +1820,7 @@ def mcp_command(
         # the reason the process stopped.
         _logger.error(error_text(e))
         _stderr.print(f"[red]{escape_markup(error_text(e))}[/red]", highlight=False)
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     except PresenceLockError as e:
         # The error's own message carries the fix (set ASH_MCP_WORKSPACE_ROOT),
         # so print it alone: a traceback and a "check system resources" hint
@@ -1813,7 +1828,7 @@ def mcp_command(
         _logger.error(str(e))
         if not quiet:
             _stderr.print(f"[red]{escape_markup(str(e))}[/red]", highlight=False)
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     except Exception as e:
         # Also what run_mcp_server raises when the stdio server fails while it
         # serves. The line naming the error is printed even with --quiet, which
@@ -1827,7 +1842,7 @@ def mcp_command(
             _stderr.print(
                 "[yellow]Please check system resources and ASH installation.[/yellow]"
             )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     finally:
         if listen_socket is not None:
             listen_socket.close()

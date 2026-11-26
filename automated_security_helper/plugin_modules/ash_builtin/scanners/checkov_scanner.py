@@ -16,7 +16,6 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
-    get_args,
 )
 from urllib.parse import quote, unquote
 
@@ -39,7 +38,9 @@ from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
 )
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.base.uv_tool_mixin import _tool_name
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
@@ -115,11 +116,17 @@ CheckFrameworks = Literal[
 # cwd rather than scanning repository files. They are skipped unless explicitly
 # requested (_process_config_options), and their remote fetches are disabled
 # for offline scans (_execute_scan). Rather than hardcoding the vendor list,
-# the set and its environment variables are derived from the frameworks
-# mirrored in ``CheckFrameworks`` by checkov's own naming rule
-# (checkov_vcs_frameworks has the rule, its measurements and its drift gates).
+# the environment variables are derived from the skip set by checkov's naming
+# rule (checkov_vcs_frameworks has the rule and its measurements).
+#
+# The skip set is the measured floor and does NOT follow the CheckFrameworks
+# mirror: the mirror tracks the newest checkov, while checkov ends the run with
+# parser.error on a --skip-framework value it does not know, and the
+# >=3.2.0,<4.0.0 constraint admits releases that predate a newer name. Adding a
+# VCS framework to the skip set is an explicit decision that also raises the
+# constraint's lower bound to the first release that has it.
 _VCS_CONFIGURATION_FRAMEWORKS: Tuple[str, ...] = (
-    checkov_vcs_frameworks.vcs_configuration_frameworks(get_args(CheckFrameworks))
+    checkov_vcs_frameworks.KNOWN_VCS_CONFIGURATION_FRAMEWORKS
 )
 
 _VCS_CONFIG_FETCH_ENV_VARS: Tuple[str, ...] = (
@@ -142,10 +149,9 @@ _CHECKOV_UNSAFE_SKIP_PATH_CHARS = frozenset("()")
 # directory avoided. Each directory goes under the scanner's results directory
 # instead, unless the operator named one. checkov joins the value to its
 # working directory with ``os.path.join``, so an absolute path is used as it
-# is. Rather than hardcoding the vendors, the variables and their default
-# directory names are derived from the frameworks mirrored in
-# ``CheckFrameworks`` by checkov's own naming rule (checkov_vcs_frameworks has
-# the rule, its measurements and its drift gates).
+# is. The variables and their default directory names are derived from the
+# skip set above by checkov's naming rule (checkov_vcs_frameworks has the rule
+# and its measurements).
 _CHECKOV_VCS_CONF_DIR_ENV = dict(
     checkov_vcs_frameworks.vcs_conf_dir_env_vars(_VCS_CONFIGURATION_FRAMEWORKS)
 )
@@ -527,7 +533,14 @@ def _record_key(record: Any) -> Optional[_RecordKey]:
         start, end = (int(line) or 1 for line in lines)
     except (TypeError, ValueError):
         return None
-    return check_id, quote(repo_file_path.lstrip("/")), start, end
+    # surrogateescape, as _uri and _absolute: json.load reads the escape of a
+    # name that is not UTF-8 as a lone surrogate, which strict encoding rejects.
+    return (
+        check_id,
+        quote(repo_file_path.lstrip("/"), errors="surrogateescape"),
+        start,
+        end,
+    )
 
 
 def _result_key(result: Any) -> Optional[_RecordKey]:
@@ -596,7 +609,7 @@ def checkov_guidelines(json_report: Any) -> dict[_RecordKey, List[Optional[str]]
 
 
 def _record_values(
-    json_report: Any, value_of: Callable[[dict, bool], Optional[str]]
+    json_report: Any, value_of: Callable[[dict[str, Any], bool], Optional[str]]
 ) -> dict[_RecordKey, List[Optional[str]]]:
     """``value_of(record, in_a_resource_framework)`` for every record, by key."""
     found: dict[_RecordKey, List[Optional[str]]] = {}
@@ -607,7 +620,9 @@ def _record_values(
         results = report.get("results")
         if not isinstance(results, dict):
             continue
-        named = report.get("check_type") in _RESOURCE_FRAMEWORKS
+        check_type = report.get("check_type")
+        # A list or dict is not hashable: only a string can be a framework.
+        named = isinstance(check_type, str) and check_type in _RESOURCE_FRAMEWORKS
         for kind in ("failed_checks", "skipped_checks"):
             records = results.get(kind)
             for record in records if isinstance(records, list) else []:
@@ -769,7 +784,9 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
             description=(
                 "List of additional formats to output. Defaults to including "
                 "CycloneDX JSON. checkov's JSON report is written whatever this "
-                "lists: ASH reads the resource of each finding from it."
+                "lists: ASH reads the resource of each finding from it, and "
+                "rewrites its paths to the source-relative form the SARIF "
+                "uses."
             )
         ),
     ] = ["cyclonedx_json"]
@@ -852,12 +869,22 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
 
     #: The facets register row (base/scanner_facets.py), declaration only.
-    #: The record read is the committed side report (tests/test_data/scanners/
+    #: The records read are the committed side report (tests/test_data/scanners/
     #: checkov/src.test.yaml.json, failed_checks[] keys check_id, file_path,
     #: file_line_range, check_name, resource, guideline, fixed_definition,
-    #: code_block); no checkov SARIF golden is committed, so the cells that
-    #: live only in the SARIF are n/a with the UNCONFIRMED reason the register
-    #: uses for an unread source. resource_id is MAPPED:
+    #: code_block), the committed checkov-3.4.6 SARIF capture, and the SARIF
+    #: checkov 3.4.6 writes: the capture under
+    #: tests/test_data/scanners/checkov/resources/results_sarif.sarif holds
+    #: only ruleId, URI and line range (its README says the messages, snippets
+    #: and rules were left out), so the SARIF cells below are settled from
+    #: checkov's own writer, checkov/common/output/sarif.py ``_create_results``
+    #: (3.4.6): each result has ``level``, ``message.text``, ``attachments``
+    #: and ``locations[0].physicalLocation`` with ``region.startLine``,
+    #: ``region.endLine`` and ``region.snippet.text`` (the record's code_block
+    #: joined), and no column, contextRegion, fingerprint or property bag.
+    #: A cell the capture settles carries its evidence (MAPPED, or n/a with
+    #: the reason read off the capture); a cell neither source settles is
+    #: UNCONFIRMED, never n/a. resource_id is MAPPED:
     #: :func:`attach_checkov_resources` copies each record's ``resource`` from
     #: the JSON report onto its SARIF result under ``ash_resource_id``, and only
     #: for the frameworks in :data:`_RESOURCE_FRAMEWORKS` (the per-framework
@@ -884,9 +911,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         ),
         column=FacetDecl(
             state=FacetState.NA,
-            reason="UNCONFIRMED: the side report carries a line range only "
-            "and no checkov SARIF golden is committed; one SARIF run settles "
-            "whether a column is emitted",
+            reason="the committed checkov-3.4.6 capture's six SARIF regions "
+            "carry startLine, endLine and snippet only, and the side report "
+            "carries a line range only",
         ),
         message=FacetDecl(
             state=FacetState.MAPPED,
@@ -932,8 +959,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         ),
         fingerprints=FacetDecl(
             state=FacetState.NA,
-            reason="UNCONFIRMED: the side report carries no fingerprint and "
-            "no checkov SARIF golden is committed; one SARIF run settles it",
+            reason="none of the committed checkov-3.4.6 capture's six SARIF "
+            "results carries fingerprints or partialFingerprints, and the "
+            "side report carries no fingerprint",
         ),
         fix_available=FacetDecl(
             state=FacetState.NA,
@@ -970,9 +998,8 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         ),
         extras=FacetDecl(
             state=FacetState.NA,
-            reason="UNCONFIRMED: no checkov SARIF golden is committed, so "
-            "whether results carry a property bag is open; one SARIF run "
-            "settles it",
+            reason="none of the committed checkov-3.4.6 capture's six SARIF "
+            "results carries a properties bag",
         ),
     )
 
@@ -1046,6 +1073,49 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 python_only=True,
                 use_uv_tool=True,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(
+                rows=(
+                    opsf.RuntimeCompatRow(
+                        runtime=opsf.RuntimeName.PYTHON,
+                        # No checkov release is known to fix this, so the tool
+                        # side is open: the row applies at every checkov
+                        # version until an upstream release passes array_hook.
+                        tool_versions="",
+                        # >=3.10 is checkov's own floor; <3.15 is the proved
+                        # upper bound (3.14.9 parses, 3.15.0 raises).
+                        runtime_request=">=3.10,<3.15",
+                        resolution=opsf.CompatResolution.PIN,
+                        reason=(
+                            "CPython 3.15 made array_hook a required argument "
+                            "of json.decoder.JSONArray (signature 3.14.9: "
+                            "(s_and_end, scan_once, _w, _ws); 3.15.0: "
+                            "(s_and_end, scan_once, array_hook, _w, _ws)); "
+                            "checkov's Decoder.json_array "
+                            "(checkov/common/parsers/json/decoder.py) calls it "
+                            "without one, so every JSON document that holds an "
+                            "array fails to parse, and on a large tree the "
+                            "parallel runner can wait indefinitely on the worker "
+                            "error; reported against checkov 3.4.3 and 3.4.0 on "
+                            "3.15.0; a fix is proposed upstream in "
+                            "bridgecrewio/checkov#7778 and not merged"
+                        ),
+                        upstream_issue=(
+                            "https://github.com/bridgecrewio/checkov/issues/7777"
+                        ),
+                        # Unsolved upstream: re-read whenever the checkov
+                        # version constraint moves. The re-check is the
+                        # recorded default constraint below -- the consistency
+                        # gate reds the moment _get_tool_version_constraint's
+                        # default no longer equals it (the bump that follows an
+                        # upstream fix), and the fix then drops the upper bound
+                        # and closes the row.
+                        open_ended=True,
+                        # _get_tool_version_constraint's default, as of this
+                        # row's writing.
+                        recorded_default_constraint=">=3.2.0,<4.0.0",
+                    ),
+                ),
+            ),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="a PyPI package run through uv; platform support is the package's and was not read here",
@@ -1087,7 +1157,6 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 semantics="0 clean, 1 findings: the native-tool convention",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=("options.frameworks", "options.skip_frameworks"),
                 upstream_license=(
@@ -1290,7 +1359,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             # call of the mixin does: without it a scanner offline by its
             # options probed PyPI online while its run and install were offline.
             resolved = get_uv_tool_command(
-                self.command,
+                _tool_name(self),
                 from_spec=self._uv_probe_from_spec(),
                 offline=self._is_offline_mode(),
             )
@@ -1330,7 +1399,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # scan went through uv, whose install had just failed. And a dependency
         # declared satisfied is recorded as such, as the branches above record it.
         resolved = get_uv_tool_command(
-            self.command,
+            _tool_name(self),
             from_spec=self._uv_probe_from_spec(),
             offline=self._is_offline_mode(),
         )
@@ -1360,7 +1429,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         executable = resolved[0]
         checked = verify_pre_installed_tool(
             executable,
-            self.command,
+            _tool_name(self),
             None,
             self._get_tool_version_constraint(),
             uv_executable=None,
@@ -1546,12 +1615,24 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             frameworks = list(file_frameworks)
         for item in frameworks:
             self.args.extra_args.append(ToolExtraArg(key="--framework", value=item))
-        skip_frameworks = list(self.config.options.skip_frameworks)
+        skip_frameworks: list[str] = list(self.config.options.skip_frameworks)
+        file_skip_frameworks = file_values.get("skip-framework")
+        if isinstance(file_skip_frameworks, str):
+            file_skip_frameworks = [file_skip_frameworks]
+        for item in (
+            file_skip_frameworks if isinstance(file_skip_frameworks, list) else []
+        ):
+            # Passed on the command line too, since the command line's
+            # --skip-framework list replaces the file's whole, and this scanner
+            # passes one on almost every run (the VCS frameworks below).
+            if isinstance(item, str) and item.strip() and item not in skip_frameworks:
+                skip_frameworks.append(item)
         if "all" in frameworks:
             # Checkov's "all" includes VCS server-configuration frameworks that
             # audit remote server settings over the network rather than files in
             # the scanned tree. Skip them unless explicitly requested via
-            # frameworks (or an external checkov config file's framework key).
+            # frameworks (or an external checkov config file's framework key),
+            # including beside "all".
             for vcs_framework in _VCS_CONFIGURATION_FRAMEWORKS:
                 if vcs_framework in frameworks or vcs_framework in skip_frameworks:
                     continue
@@ -1615,7 +1696,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ):
         """Resolve final argv and results path for Checkov.
@@ -1933,7 +2014,8 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     def _read_results_file(self, results_file: Path) -> Optional[dict[str, Any]]:
         """Read checkov's SARIF with its paths made relative to the source directory.
 
-        The JSON report is rewritten the same way so it matches. CycloneDX
+        The JSON report checkov always writes is rewritten the same way, whatever
+        ``additional_formats`` lists, so it matches. CycloneDX
         carries no such path. Each result is first given the resource the JSON
         report names for it (:func:`attach_checkov_resources`).
         """
@@ -1956,8 +2038,27 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 with open(json_report, encoding="utf-8") as handle:
                     document = json.load(handle)
                 # Before the paths are rewritten: the keys are checkov's spelling.
-                resources = checkov_resources(document)
-                guidelines = checkov_guidelines(document)
+                # Each read has its own guard: a failure reading the resources
+                # or the guidelines costs only those, never the rewrite below.
+                try:
+                    resources = checkov_resources(document)
+                except (TypeError, ValueError, RuntimeError) as error:
+                    ASH_LOGGER.warning(
+                        f"Could not read the resources in {json_report}: {error}. "
+                        "Its results name no resource.",
+                        extra=NO_MARKUP,
+                    )
+                try:
+                    guidelines = checkov_guidelines(document)
+                except (TypeError, ValueError, RuntimeError) as error:
+                    ASH_LOGGER.warning(
+                        f"Could not read the guidelines in {json_report}: {error}. "
+                        "Its results carry no guideline.",
+                        extra=NO_MARKUP,
+                    )
+                # Always: checkov writes this report whatever additional_formats
+                # lists, so leaving it unrewritten would leave a file in the
+                # output directory whose paths no longer match the SARIF.
                 rewrite_checkov_paths(
                     document,
                     ran_in=ran_in,
@@ -1975,10 +2076,14 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                     json.dump(document, handle, indent=4)
             except (OSError, ValueError) as error:
                 # A WARNING, not DEBUG: the report is left with checkov's
-                # root-relative paths, which no suppression matches.
+                # root-relative paths, which no suppression matches, and its
+                # findings get no ash_resource_id, so suppressions scoped to a
+                # resource stop matching and the findings they hid come back.
                 ASH_LOGGER.warning(
                     f"Could not rewrite the paths in {json_report}: {error}. "
-                    "Its paths stay as checkov wrote them.",
+                    "Its paths stay as checkov wrote them, and its findings "
+                    "carry no resource id, so suppressions scoped to a "
+                    "resource no longer match them.",
                     extra=NO_MARKUP,
                 )
         raw = super()._read_results_file(results_file)

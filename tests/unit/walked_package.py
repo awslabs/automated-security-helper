@@ -31,6 +31,7 @@ PACKAGE_DIRS = frozenset(
     {
         "",
         "assets",
+        "assets/polyfills/checkov_json_array_hook",
         "base",
         "cli",
         "cli/inspect",
@@ -42,6 +43,7 @@ PACKAGE_DIRS = frozenset(
         "express",
         "interactions",
         "models",
+        "plugin_manifests",
         "plugin_modules",
         "plugin_modules/ash_aws_plugins",
         "plugin_modules/ash_betterleaks_plugins",
@@ -57,6 +59,7 @@ PACKAGE_DIRS = frozenset(
         "plugin_modules/ash_trivy_plugins",
         "plugins",
         "schemas",
+        "utils/mcp_config",
         "schemas/cyclonedx_bom_1_6_schema",
         "schemas/gitlab",
         "schemas/ocsf",

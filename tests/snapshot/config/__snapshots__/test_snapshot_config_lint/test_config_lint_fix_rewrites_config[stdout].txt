@@ -1,5 +1,5 @@
 $ ash config lint --fix --non-interactive
-Linting configuration file: <TMP>/demo-project/.ash/.ash.yaml
+Linting configuration file: <TMP>/demo-project/.ash.yaml
 
 Found 20 issue(s):
   ❌ Invalid value at 'global_settings.suppressions[2].symbol': Value error, symbol must be a dotted qualified name such as 'MyClass.my_method' (identifiers joined by '.', no spaces, wildcards or call syntax) [blocks the scan]
@@ -18,7 +18,7 @@ Found 20 issue(s):
   ⚠️  Suppression has expired (expiration: 2020-01-31) at 'global_settings.suppressions[1]' [auto-fixable]
   ℹ️  Suppression is written with the deprecated 'expiration' spelling; write 'expires'. The alias is removed in ASH v4; `ashx config lint --fix` does not rename it at 'global_settings.suppressions[3]'
   ⚠️  Suppression sets 'symbol' but its path 'src/app.rb' only matches '.rb' files, which ASH has no symbol grammar for (supported: .cjs, .cts, .java, .js, .jsx, .mjs, .mts, .py, .pyi, .ts, .tsx), so it never matches at 'global_settings.suppressions[4]'
-  ⚠️  Path 'vendor' points to a directory but matches no file in it. Use 'vendor/' to ignore every file inside the directory. at 'global_settings.ignore_paths[0].path'
+  ⚠️  Path '**/vendor' points to a directory but matches no file in it. Use '**/vendor/' to ignore every file inside the directory. at 'global_settings.ignore_paths[0].path'
   ⚠️  scanners.'cdk_nag' uses the legacy snake/kebab variant; canonical form is 'cdk-nag'. ASH reads it as 'cdk-nag', but only the canonical form is documented. at 'scanners.cdk_nag' [auto-fixable]
   ⚠️  'scanners.npm_audit' (the legacy form) and 'scanners.npm-audit' are both set; a scan merges them key by key, and where both set a key 'npm-audit' wins, so a key only 'npm_audit' sets still applies. Remove or merge one of them by hand: `ashx config lint --fix` does not rename it
   ℹ️  The options of scanners.trivy-repo are not checked here: no built-in plugin is configured under that name, and the plugins named in ash_plugin_modules are not loaded here, so what they declare is unknown. A scan checks the options of every section a loaded plugin reads when it loads the plugins, and refuses an unknown or invalid one with exit code 3.
@@ -37,7 +37,7 @@ Found 20 issue(s):
   • Remove expired suppression
   • Rename scanners.'cdk_nag' to the canonical form 'cdk-nag'
 
-✅ Fixed 8 issue(s) in <TMP>/demo-project/.ash/.ash.yaml
+✅ Fixed 8 issue(s) in <TMP>/demo-project/.ash.yaml
 
 Remaining after the fixes:
   ❌ Invalid value at 'global_settings.suppressions[1].symbol': Value error, symbol must be a dotted qualified name such as 'MyClass.my_method' (identifiers joined by '.', no spaces, wildcards or call syntax) [blocks the scan]
@@ -47,7 +47,7 @@ Remaining after the fixes:
   ⚠️  Unknown top-level field 'legacy_option' - a scan ignores it
   ℹ️  Suppression is written with the deprecated 'expiration' spelling; write 'expires'. The alias is removed in ASH v4; `ashx config lint --fix` does not rename it at 'global_settings.suppressions[2]'
   ⚠️  Suppression sets 'symbol' but its path 'src/app.rb' only matches '.rb' files, which ASH has no symbol grammar for (supported: .cjs, .cts, .java, .js, .jsx, .mjs, .mts, .py, .pyi, .ts, .tsx), so it never matches at 'global_settings.suppressions[3]'
-  ⚠️  Path 'vendor' points to a directory but matches no file in it. Use 'vendor/' to ignore every file inside the directory. at 'global_settings.ignore_paths[0].path'
+  ⚠️  Path '**/vendor' points to a directory but matches no file in it. Use '**/vendor/' to ignore every file inside the directory. at 'global_settings.ignore_paths[0].path'
   ⚠️  'scanners.npm_audit' (the legacy form) and 'scanners.npm-audit' are both set; a scan merges them key by key, and where both set a key 'npm-audit' wins, so a key only 'npm_audit' sets still applies. Remove or merge one of them by hand: `ashx config lint --fix` does not rename it
   ℹ️  The options of scanners.trivy-repo are not checked here: no built-in plugin is configured under that name, and the plugins named in ash_plugin_modules are not loaded here, so what they declare is unknown. A scan checks the options of every section a loaded plugin reads when it loads the plugins, and refuses an unknown or invalid one with exit code 3.
 

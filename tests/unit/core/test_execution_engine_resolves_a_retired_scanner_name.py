@@ -13,10 +13,10 @@ alias table, so the three checks agree with ScanPhase.
 import pytest
 
 from automated_security_helper.core.scanner_selection import (
-    community_scanner_refusal,
     exclusions_matching_no_scanner,
     refuse_selection_matching_no_scanner,
 )
+from automated_security_helper.plugins.enablement import unloaded_opt_in_refusal
 
 pytestmark = pytest.mark.unit
 
@@ -45,11 +45,11 @@ def test_an_exclusion_by_the_retired_name_is_not_reported_as_unmatched():
     ]
 
 
-def test_the_community_refusal_does_not_apply_to_the_retired_name():
+def test_the_opt_in_refusal_does_not_apply_to_the_retired_name():
     class _Scanner:
         pass
 
-    assert community_scanner_refusal(["semgrep"], REGISTERED, [_Scanner]) == ""
+    assert unloaded_opt_in_refusal(["semgrep"], REGISTERED, [_Scanner]) == ""
 
 
 def test_the_engine_accepts_a_selection_of_only_the_retired_name(tmp_path):

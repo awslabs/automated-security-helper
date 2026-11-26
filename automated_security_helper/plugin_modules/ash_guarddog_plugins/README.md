@@ -13,7 +13,7 @@ local source needs no network.
 This plugin ships with ASH and is loaded only when its module is listed. An `ash scan` that does not list it is unchanged.
 
 ```yaml
-# .ash/.ash.yaml
+# .ash.yaml
 ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_guarddog_plugins
 ```
@@ -60,4 +60,4 @@ scanners:
 
 ## Documentation
 
-Severity mapping, suppressions, offline use and every option: [the GuardDog plugin page](https://awslabs.github.io/automated-security-helper/docs/plugins/community/guarddog-plugin/).
+Severity mapping, suppressions, offline use and every option: [the GuardDog plugin page](https://awslabs.github.io/automated-security-helper/docs/plugins/alpha/guarddog-plugin/).

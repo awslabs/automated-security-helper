@@ -49,6 +49,7 @@ from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.tool_config_dir import TOOL_CONFIG_DIR_PREFIX
+from tests.unit.base.scanner_support import is_resource_run
 
 pytestmark = pytest.mark.unit
 
@@ -125,10 +126,10 @@ def _scanner(
     """
     config = get_default_config()
     # operator=True: built from no file in the scanned tree. Otherwise from the
-    # tree's .ash/.ash.yaml, judged against the defaults plus ``overrides``.
+    # tree's .ash.yaml, judged against the defaults plus ``overrides``.
     record_provenance(
         config,
-        in_tree=[] if operator else [repo / ".ash" / ".ash.yaml"],
+        in_tree=[] if operator else [repo / ".ash.yaml"],
         trusted=AshConfig(),
         config_overrides=list(overrides),
     )
@@ -161,7 +162,13 @@ class FakeCfnLint:
     absolute URI).
     """
 
-    def __init__(self, captured_by_template: dict, returncode=6, extra=None):
+    def __init__(
+        self,
+        captured_by_template: dict,
+        returncode=6,
+        extra=None,
+        resource_for=None,
+    ):
         self.captured_by_template = captured_by_template
         self.returncode = returncode
         self.extra = extra or {}
@@ -170,14 +177,44 @@ class FakeCfnLint:
         #: The JSON runs the scanner makes to name each result's resource
         #: (``_attach_resources``); a scan's own invocations are ``calls``.
         self.resource_calls: list = []
+        #: When given, the logical id the JSON report names for a SARIF result
+        #: dict; the JSON report then lists every result the scan run produced.
+        self.resource_for = resource_for
+        self._last_results: list = []
+
+    def _resource_report(self) -> str:
+        entries = []
+        for result in self._last_results:
+            physical = result["locations"][0]["physicalLocation"]
+            region = physical["region"]
+            entries.append(
+                {
+                    "Rule": {"Id": result["ruleId"]},
+                    "Filename": physical["artifactLocation"]["uri"],
+                    "Message": result["message"]["text"],
+                    "Location": {
+                        "Start": {
+                            "LineNumber": region["startLine"],
+                            "ColumnNumber": region["startColumn"],
+                        },
+                        "End": {
+                            "LineNumber": region["endLine"],
+                            "ColumnNumber": region["endColumn"],
+                        },
+                        "Path": ["Resources", self.resource_for(result), "Type"],
+                    },
+                }
+            )
+        return json.dumps(entries)
 
     def __call__(self, command, **kwargs):
-        if command[1:3] == ["--format", "json"]:
+        if is_resource_run(command):
             self.resource_calls.append(list(command))
             output = next(
                 a.split("=", 1)[1] for a in command if a.startswith("--output-file=")
             )
-            Path(output).write_text("[]", encoding="utf-8")
+            document = self._resource_report() if self.resource_for else "[]"
+            Path(output).write_text(document, encoding="utf-8")
             return {"stdout": "", "stderr": "", "returncode": self.returncode}
         self.calls.append(list(command))
         self.cwds.append(kwargs.get("cwd"))
@@ -205,6 +242,7 @@ class FakeCfnLint:
             merged["runs"][0]["results"] = [
                 r for run in runs for r in run.get("results", [])
             ]
+            self._last_results = merged["runs"][0]["results"]
             Path(output).write_text(json.dumps(merged), encoding="utf-8")
         response = {"stdout": "", "stderr": "", "returncode": self.returncode}
         response.update(self.extra)
@@ -406,6 +444,27 @@ class TestScan:
         assert scanner.targets_attempted == 2 and scanner.targets_failed == 0
         _assert_parses_to(report, EXPECTED_INSECURE)
 
+    def test_a_scan_names_the_resource_of_each_result_from_one_second_run(self, repo):
+        """End to end: scan() makes the second run over the batch's files and the
+        report it gets names each result's resource, line by line."""
+        by_rule = {"W2001": "BucketW", "E3002": "BucketE3", "E2533": "BucketE2"}
+        fake = FakeCfnLint(
+            {"templates/insecure.yaml": CAPTURED_INSECURE},
+            resource_for=lambda result: by_rule[result["ruleId"]],
+        )
+        report = self._run(_scanner(repo), fake)
+        named = {
+            result.locations[0].physicalLocation.root.region.startLine: (
+                result.properties.model_dump().get("ash_resource_id")
+            )
+            for result in report.runs[0].results
+        }
+        assert named == {4: "BucketW", 10: "BucketE3", 14: "BucketE2"}
+        (resource_call,) = fake.resource_calls
+        (scan_call,) = fake.calls
+        files = lambda argv: argv[argv.index("--") + 1 :]  # noqa: E731
+        assert files(resource_call) == files(scan_call)
+
     def test_no_location_refers_to_a_uri_base_the_report_does_not_define(self, repo):
         """cfn-lint tags every location with ``uriBaseId: EXECUTIONROOT``.
 
@@ -453,23 +512,24 @@ class TestScan:
         the scanned tree, only this user can enter it, and it is removed
         afterwards. A relative path then names nothing."""
         seen = []
+        resource_seen = []
         fake = FakeCfnLint({"templates/insecure.yaml": CAPTURED_INSECURE})
 
         def cfn_lint(command, **kwargs):
             cwd = Path(kwargs["cwd"])
-            # the scan's own runs; the resource run is checked with them below
-            if command[1:3] != ["--format", "json"]:
-                seen.append(
-                    (cwd, cwd.is_dir() and not any(cwd.iterdir()), cwd.stat().st_mode)
-                )
-            else:
-                assert cwd.is_dir() and not any(cwd.iterdir()), "private cwd reused"
+            state = (cwd, cwd.is_dir() and not any(cwd.iterdir()), cwd.stat().st_mode)
+            # recorded for both kinds of run and checked after the scans: an
+            # assert here would be raised inside the scanner's own best-effort
+            # handling and could be swallowed
+            (resource_seen if is_resource_run(command) else seen).append(state)
             return fake(command, **kwargs)
 
         scanner = _scanner(repo)
         _assert_parses_to(self._run(scanner, cfn_lint), EXPECTED_INSECURE)
         self._run(scanner, cfn_lint)
 
+        assert resource_seen, "the resource run was made, so its directory was read"
+        assert all(empty for _, empty, _ in resource_seen), "private cwd reused"
         (first, first_empty, first_mode), (second, second_empty, _) = seen
         assert first != Path(first.anchor), "cfn-lint ran in the filesystem root"
         assert first_empty and second_empty
@@ -1249,12 +1309,14 @@ def test_each_target_starts_from_a_clean_exit_code(repo, monkeypatch):
             FakeCfnLint({}, returncode=0),
         ]
     )
-    resource_runs = FakeCfnLint({}, returncode=0)
+    # a code that would break the exitCode assertions below if the side run's
+    # record leaked onto the scan's
+    resource_runs = FakeCfnLint({}, returncode=32)
 
     def route(command, **_):
         # the scanner's second run (names each result's resource) is not one of
         # the scan's own runs
-        if command[1:3] == ["--format", "json"]:
+        if is_resource_run(command):
             return resource_runs(command)
         return next(runs)(command)
 

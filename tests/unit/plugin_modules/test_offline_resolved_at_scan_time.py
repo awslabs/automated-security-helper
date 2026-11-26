@@ -131,7 +131,7 @@ CASES = {
         TrivyScanner,
         TrivyScannerConfig,
         TrivyScannerConfigOptions,
-        "",  # community plugin: not a declared ScannerConfigSegment field
+        "",  # alpha plugin: not a declared ScannerConfigSegment field
         lambda s: (
             "--offline-scan" in _arg_keys(s) and "--skip-db-update" in _arg_keys(s)
         ),
@@ -140,7 +140,7 @@ CASES = {
         TrivyRepoScanner,
         TrivyRepoScannerConfig,
         TrivyRepoScannerConfigOptions,
-        "",  # community plugin: not a declared ScannerConfigSegment field
+        "",  # alpha plugin: not a declared ScannerConfigSegment field
         lambda s: (
             "--offline-scan" in _arg_keys(s) and "--skip-db-update" in _arg_keys(s)
         ),
@@ -148,7 +148,7 @@ CASES = {
 }
 
 params = pytest.mark.parametrize("case", list(CASES.values()), ids=list(CASES))
-# trivy and trivy-repo are community plugins, so ScannerConfigSegment has no field
+# trivy and trivy-repo are alpha plugins, so ScannerConfigSegment has no field
 # for them.
 SEGMENT_CASES = {k: c for k, c in CASES.items() if c.segment_field}
 segment_params = pytest.mark.parametrize(
@@ -334,7 +334,7 @@ def _scanner_options_with_offline() -> set:
 
 
 def test_every_scanner_with_an_offline_option_is_covered():
-    """A scanner, builtin or community, that grows an ``offline`` option needs a case."""
+    """A scanner, builtin or alpha, that grows an ``offline`` option needs a case."""
     from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
         NpmAuditScannerConfigOptions,
     )

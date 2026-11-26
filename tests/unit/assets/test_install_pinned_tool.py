@@ -92,8 +92,14 @@ def _pins_dir(tmp_path: Path, digest_overrides: dict | None = None) -> Path:
     root = tmp_path / "pins"
     (root / "utils").mkdir(parents=True)
     (root / "core").mkdir(parents=True)
+    (root / "base").mkdir(parents=True)
     (root / "core" / "exceptions.py").write_text(
         (REPO_ROOT / "automated_security_helper" / "core" / "exceptions.py").read_text()
+    )
+    (root / "base" / "plugin_provisioning.py").write_text(
+        (
+            REPO_ROOT / "automated_security_helper" / "base" / "plugin_provisioning.py"
+        ).read_text()
     )
     source = (
         REPO_ROOT / "automated_security_helper" / "utils" / "tool_downloads.py"

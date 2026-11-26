@@ -112,8 +112,7 @@ def _resolve(
     path.write_text(operator_text, encoding="utf-8")
     repository = tmp_path / "repo"
     mark_git_checkout(repository)
-    (repository / ".ash").mkdir()
-    (repository / ".ash" / ".ash.yaml").write_text(repository_text, encoding="utf-8")
+    (repository / ".ash.yaml").write_text(repository_text, encoding="utf-8")
     if route == "ASH_CONFIG":
         monkeypatch.setenv("ASH_CONFIG", str(path))
         return resolve_config(source_dir=repository)

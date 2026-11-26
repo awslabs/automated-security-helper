@@ -363,6 +363,7 @@ class TestDefaults:
         assert "/fail_on_findings" in denied
         assert "/global_settings/ignore_paths" in denied
         assert "/global_settings/suppressions" in denied
+        assert "/global_settings/exclusions" in denied
         assert "/reporters/bedrock-summary-reporter/options/aws_*" in denied
         assert "/reporters/cloudwatch-logs/**" in denied
 
@@ -761,6 +762,47 @@ class TestDenyListIsSubtreeClosed:
                 "write at /global_settings was permitted; it installed "
                 f"suppressions={result.global_settings.suppressions!r}"
             )
+
+    def test_exclusions_cannot_be_appended_by_a_runtime_patch(self) -> None:
+        """`/global_settings/exclusions` drops findings outright, so the shipped
+        denylist refuses a patch at it and below it (`/-`) alike (#894)."""
+        base = _base_config()
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/global_settings/**"],
+            denied_paths=_shipped_denied_paths(),
+        )
+        blanket = {"rule_id": "*", "path": "**", "reason": "drop everything"}
+        for ops in (
+            [{"op": "add", "path": "/global_settings/exclusions/-", "value": blanket}],
+            [{"op": "add", "path": "/global_settings/exclusions", "value": [blanket]}],
+        ):
+            with pytest.raises(RuntimePatchDeniedError):
+                apply_runtime_patch(base, ops, allowlist=allowlist)
+
+    def test_the_run_history_cannot_be_changed_by_a_runtime_patch(self) -> None:
+        """`/global_settings/history` is the shipped denylist's: `enabled` turns
+        on writes beside the output, and `keep_runs` bounds what pruning may
+        delete (`keep_runs: 1` prunes a kept history down to one record)."""
+        base = _base_config()
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/global_settings/**"],
+            denied_paths=_shipped_denied_paths(),
+        )
+        for ops in (
+            [{"op": "add", "path": "/global_settings/history/enabled", "value": True}],
+            [{"op": "add", "path": "/global_settings/history/keep_runs", "value": 1}],
+            [
+                {
+                    "op": "add",
+                    "path": "/global_settings/history",
+                    "value": {"enabled": True, "keep_runs": 1},
+                }
+            ],
+        ):
+            with pytest.raises(RuntimePatchDeniedError):
+                apply_runtime_patch(base, ops, allowlist=allowlist)
 
     def test_root_swap_cannot_flip_fail_on_findings(self) -> None:
         """Same mechanism at the top: a whole-config swap sets `fail_on_findings`

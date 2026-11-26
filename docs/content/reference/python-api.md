@@ -140,7 +140,7 @@ Every parameter is optional and can be passed by keyword. Unless the table says 
 | `fail_on_findings` | `None` | `None` takes the value from the config, else `True`. |
 | `fail_on_incomplete_scanners` | `None` | `None` takes the value from the config, else `True`. |
 | `ignore_suppressions` | `False` |  |
-| `min_severity` | `'low'` |  |
+| `min_severity` | `MinSeverity.LOW.value` | The string `'low'`. |
 | `changed_files_only` | `False` |  |
 | `base_ref` | `'origin/main'` |  |
 | `shard_index` | `None` |  |

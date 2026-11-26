@@ -43,7 +43,7 @@ def _plain(text: str) -> str:
 def _patch_one_plugin(monkeypatch, tmp_path, commands):
     monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
     monkeypatch.setenv("COLUMNS", "200")
-    # The command reads the working directory's .ash/.ash.yaml.
+    # The command reads the working directory's .ash.yaml.
     monkeypatch.chdir(tmp_path)
     fake = MagicMock()
     fake.config = SimpleNamespace(name="fake-scanner")
@@ -131,7 +131,7 @@ def test_error_line_keeps_the_failed_command(monkeypatch, capsys):
     assert "no such extra [toml]" in out
 
 
-def test_an_unloaded_community_scanner_names_its_module(tmp_path, monkeypatch):
+def test_an_unloaded_alpha_scanner_names_its_module(tmp_path, monkeypatch):
     """`--tool snyk-code` without its module loaded is not a typo; say what to add."""
     _patch_one_plugin(monkeypatch, tmp_path, [])
 
@@ -149,7 +149,7 @@ def test_an_unloaded_community_scanner_names_its_module(tmp_path, monkeypatch):
 
     output = _plain(result.output)
     assert result.exit_code == EXIT_BAD_SELECTION
-    assert "snyk-code is a community plugin scanner" in output
+    assert "snyk-code is provided by a plugin module this run did not load" in output
     # Brackets survive rich: the override is printed as typed (COLUMNS=200).
     assert (
         "ash_plugin_modules+=[automated_security_helper.plugin_modules."
@@ -158,12 +158,12 @@ def test_an_unloaded_community_scanner_names_its_module(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("typed", ["Snyk-Code", " snyk-code ", "SNYK-CODE"])
-def test_an_unloaded_community_scanner_in_another_spelling_names_its_module(
+def test_an_unloaded_alpha_scanner_in_another_spelling_names_its_module(
     tmp_path, monkeypatch, typed
 ):
     """The hint is looked up by the spelling typed, and the lookup lowers and
     strips it as the scan selects names, so a name in another case or with
-    blanks around it is no less a community scanner than `snyk-code` is."""
+    blanks around it is no less an alpha scanner than `snyk-code` is."""
     _patch_one_plugin(monkeypatch, tmp_path, [])
 
     result = runner.invoke(
@@ -180,14 +180,17 @@ def test_an_unloaded_community_scanner_in_another_spelling_names_its_module(
 
     output = " ".join(_plain(result.output).split())
     assert result.exit_code == EXIT_BAD_SELECTION
-    assert f"{typed.strip()} is a community plugin scanner" in output, output
+    assert (
+        f"{typed.strip()} is provided by a plugin module this run did not load"
+        in output
+    ), output
     assert (
         "ash_plugin_modules+=[automated_security_helper.plugin_modules."
         "ash_snyk_plugins]" in output
     ), output
 
 
-def test_a_plain_typo_gets_no_community_hint(tmp_path, monkeypatch):
+def test_a_plain_typo_gets_no_alpha_hint(tmp_path, monkeypatch):
     _patch_one_plugin(monkeypatch, tmp_path, [])
 
     result = runner.invoke(
@@ -203,4 +206,4 @@ def test_a_plain_typo_gets_no_community_hint(tmp_path, monkeypatch):
     )
 
     assert result.exit_code == EXIT_BAD_SELECTION
-    assert "community plugin scanner" not in _plain(result.output)
+    assert "alpha plugin scanner" not in _plain(result.output)

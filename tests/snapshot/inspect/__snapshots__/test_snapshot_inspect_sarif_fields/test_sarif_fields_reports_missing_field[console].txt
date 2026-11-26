@@ -1,4 +1,4 @@
-$ ash inspect sarif-fields --sarif-dir <SARIF_INPUT> --output-dir <INSPECT_OUT>
+$ ash results inspect sarif-fields --sarif-dir <SARIF_INPUT> --output-dir <INSPECT_OUT>
 Found 2 SARIF files
 Analyzing <SARIF_INPUT>/reports/ash.sarif
 Analyzing <SARIF_INPUT>/scanners/bandit/source/bandit.sarif

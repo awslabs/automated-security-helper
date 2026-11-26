@@ -21,7 +21,7 @@ actually be executed.
 
 ``find_executable`` searched the bare name and ``.exe`` and nothing else, so in ASH's own
 bin directory -- deliberately not on PATH, see the comment on "Install trivy through ASH
-for the community plugin legs" in .github/actions/run-scan-test/action.yml -- the
+for the alpha plugin legs" in .github/actions/run-scan-test/action.yml -- the
 directory probe found the binstub and returned it. The bug was not that the wrapper was
 missing; it was that the one unexecutable file was reached first.
 

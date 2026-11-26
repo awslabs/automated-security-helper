@@ -57,7 +57,9 @@ from tests.unit.config.suppression_scope_baseline import (
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CONFIGS = (".ash/.ash.yaml", ".ash/.ash_community_plugins.yaml")
+# main moved the repository config to the root (.ash.yaml, #1112) and renamed the
+# community tier to alpha (#1044); the baselines are keyed by the new paths.
+CONFIGS = (".ash.yaml", ".ash/.ash_alpha_plugins.yaml")
 SCOPE_FIELDS = (
     "line_start",
     "line_end",

@@ -113,8 +113,7 @@ def test_the_markdown_copy_says_nothing_was_evaluated(tmp_path):
 
 
 def _config_with_report(tmp_path, report: dict):
-    config_path = tmp_path / ".ash" / ".ash.yaml"
-    config_path.parent.mkdir(parents=True)
+    config_path = tmp_path / ".ash.yaml"
     config_path.write_text(
         "project_name: demo\n"
         "global_settings:\n"

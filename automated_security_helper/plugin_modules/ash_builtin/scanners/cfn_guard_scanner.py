@@ -96,6 +96,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -180,8 +181,8 @@ DEFAULT_RULE_SET = "wa-Security-Pillar"
 #: level is ``error`` to match, and ``issue_severity`` is set as well, because ASH's
 #: two severity readers disagree on a bare ``error`` (the gate reads CRITICAL, the
 #: flat reporters HIGH) and both honor ``issue_severity``, so every reader says HIGH.
-VIOLATION_SEVERITY = "HIGH"
-VIOLATION_LEVEL = "error"
+VIOLATION_SEVERITY = Severity.HIGH.value
+VIOLATION_LEVEL = Level.error.value
 
 _SUCCESS_EXIT_CODES = frozenset({0, 19})
 
@@ -526,6 +527,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=opsf.PLATFORMS_ALL,
                 note="asset table lists all six platform/arch pairs",
@@ -558,7 +560,6 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                 semantics="19 means at least one rule failed (findings)",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=("options.rule_sets", "options.rules_paths"),
                 upstream_license=(
@@ -881,7 +882,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
 
         A narrower set drops findings before ASH sees them, so they are neither
         reported nor counted as suppressed: ``rule_sets: [wa-Reliability-Pillar]``
-        in the scanned tree's ``.ash/.ash.yaml`` turned 24 findings on the fixture
+        in the scanned tree's ``.ash.yaml`` turned 24 findings on the fixture
         into 9, losing every S3 public-access, encryption and logging finding. A
         value from a config inside a git checkout or the scanned directory, or from
         an MCP client, is replaced by the operator's own choice (the trusted base
@@ -958,6 +959,26 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             arguments.append(f"--rules={path.as_posix()}")
         return arguments
 
+    def _forced_binary_precluded_reason(self) -> Optional[str]:
+        """Without its rules files, a forced cfn-guard must not satisfy validation.
+
+        The rules gate below is about what the scan evaluates, not where the
+        binary is, so a ``--binary-path`` record has no say in it. The same
+        ``rule_files`` read ``validate_plugin_dependencies`` makes, with the same
+        two catches; the reason is returned rather than recorded, so the check
+        falls through to the scanner's own route and its wording.
+        """
+        try:
+            self.rule_files()
+        except RulesBundleUnavailable as exc:
+            return str(exc)
+        except OSError as exc:
+            return (
+                "cfn-guard rules could not be checked: "
+                f"{type(exc).__name__}: {exc.strerror or exc}"
+            )
+        return None
+
     def validate_plugin_dependencies(self) -> bool:
         """The binary on PATH, and every selected rules file present and verified."""
         if self.dependency_unavailable_reason:
@@ -1006,7 +1027,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Optional[Dict[str, Any]]]:
         """Abstract stub; cfn-guard overrides scan() to run once per template."""
@@ -1114,7 +1135,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: ScannerPluginConfigBase | None = None,
         *args: Any,

@@ -235,8 +235,7 @@ def _unresolvable_on_the_host(project: Path) -> Path:
     the entry is relative, and an in-source config's chain is the scan's own to
     resolve.
     """
-    (project / ".ash").mkdir()
-    config = project / ".ash" / ".ash.yaml"
+    config = project / ".ash.yaml"
     config.write_text(
         "extends: never-written-base.yaml\nproject_name: repo\n", encoding="utf-8"
     )
@@ -319,8 +318,7 @@ class TestAnExplicitSandboxIsRefused:
 @pytest.mark.integration
 class TestTheDroppedSandboxIsReported:
     def test_a_config_file_in_the_source_directory(self, tmp_path, stand_in, project):
-        (project / ".ash").mkdir()
-        (project / ".ash" / ".ash.yaml").write_text(
+        (project / ".ash.yaml").write_text(
             "project_name: sandboxed\nsandbox:\n  mode: auto\n", encoding="utf-8"
         )
 
@@ -381,8 +379,7 @@ class TestTheDroppedSandboxIsReported:
         for key in ("api", "web"):
             (root / key).mkdir(parents=True)
             (root / key / "main.py").write_text("print(1)\n", encoding="utf-8")
-        (root / "api" / ".ash").mkdir()
-        (root / "api" / ".ash" / ".ash.yaml").write_text(
+        (root / "api" / ".ash.yaml").write_text(
             "project_name: api\nsandbox:\n  mode: landlock\n", encoding="utf-8"
         )
         workspace = root / "dev.code-workspace"
@@ -422,15 +419,13 @@ class TestTheDroppedSandboxIsReported:
     ):
         """The operator's mode is a floor for a project's in-tree config."""
         root = tmp_path / "ws"
-        (root / "api" / ".ash").mkdir(parents=True)
+        (root / "api").mkdir(parents=True)
         operator = tmp_path / "operator-ash.yaml"
         operator.write_text(
             "project_name: operator\nsandbox:\n  mode: bwrap\n", encoding="utf-8"
         )
         (root / "api" / "main.py").write_text("print(1)\n", encoding="utf-8")
-        (root / "api" / ".ash" / ".ash.yaml").write_text(
-            "project_name: api\n", encoding="utf-8"
-        )
+        (root / "api" / ".ash.yaml").write_text("project_name: api\n", encoding="utf-8")
         workspace = root / "dev.code-workspace"
         workspace.write_text(json.dumps({"folders": [{"path": "api"}]}), "utf-8")
 
@@ -455,8 +450,7 @@ class TestTheDroppedSandboxIsReported:
         operator.write_text(
             "project_name: operator\nsandbox:\n  mode: landlock\n", encoding="utf-8"
         )
-        in_tree = project / ".ash" / ".ash.yaml"
-        in_tree.parent.mkdir()
+        in_tree = project / ".ash.yaml"
         in_tree.write_text("project_name: repo\n", encoding="utf-8")
 
         output, _ = _scan(
@@ -613,8 +607,7 @@ class TestNothingToReport:
         """
         outside = tmp_path / "outside.yaml"
         outside.write_text("project_name: outside\n", encoding="utf-8")
-        (project / ".ash").mkdir()
-        (project / ".ash" / ".ash.yaml").write_text(
+        (project / ".ash.yaml").write_text(
             f"project_name: repo\nextends: {outside.as_posix()}\n", encoding="utf-8"
         )
 
@@ -709,8 +702,7 @@ class TestNothingToReport:
     def test_the_flag_turning_a_config_files_sandbox_off(
         self, tmp_path, stand_in, project
     ):
-        (project / ".ash").mkdir()
-        (project / ".ash" / ".ash.yaml").write_text(
+        (project / ".ash.yaml").write_text(
             "project_name: sandboxed\nsandbox:\n  mode: auto\n", encoding="utf-8"
         )
 
@@ -781,8 +773,7 @@ class TestSchemaDependentInvalidsAreTheImagesToJudge:
         # The wrapper forwards these runner markers when set (RUNNER_MARKERS_ON_ARGV).
         for marker in ("GITHUB_ACTIONS", "TF_BUILD", "TEAMCITY_VERSION"):
             monkeypatch.delenv(marker, raising=False)
-        (project / ".ash").mkdir()
-        (project / ".ash" / ".ash.yaml").write_text(
+        (project / ".ash.yaml").write_text(
             'project_name: repo\nsandbox:\n  mode: "bwrap"\n', encoding="utf-8"
         )
 
@@ -859,8 +850,7 @@ class TestSchemaDependentInvalidsAreTheImagesToJudge:
         # forwarded argv does not depend on the configured mode, so the argv is
         # captured with no config; the refused one is written after it.
         _, run_args = _scan(tmp_path, stand_in, "--source-dir", str(project))
-        (project / ".ash").mkdir()
-        (project / ".ash" / ".ash.yaml").write_text(
+        (project / ".ash.yaml").write_text(
             "project_name: repo\nsandbox:\n  mode: not-a-mode\n", encoding="utf-8"
         )
         inner = run_args[run_args.index(DEFAULT_IMAGE) + 1 :]
@@ -921,8 +911,7 @@ class TestSchemaDependentInvalidsAreTheImagesToJudge:
         never reaches the handoff: the host's gate refuses it with exit 3
         first, ``--no-build`` included."""
         if mode is not None:
-            (project / ".ash").mkdir()
-            (project / ".ash" / ".ash.yaml").write_text(
+            (project / ".ash.yaml").write_text(
                 f'project_name: repo\nsandbox:\n  mode: "{mode}"\n', encoding="utf-8"
             )
 
@@ -1259,7 +1248,7 @@ class TestTheFloorWithoutTheConfig:
         monkeypatch.setenv(
             "ASH_CONFIG", str(_operator_config(tmp_path / "env", "landlock"))
         )
-        repository_config = source / ".ash" / ".ash.yaml"
+        repository_config = source / ".ash.yaml"
         repository_config.write_text("project_name: repo\n", encoding="utf-8")
 
         resolved = resolve_config(
@@ -1308,8 +1297,7 @@ class TestTheFloorWithoutTheConfig:
         monkeypatch.setenv(
             "ASH_CONFIG", str(_operator_config(source / "env", "landlock"))
         )
-        repository_config = source / ".ash" / ".ash.yaml"
-        repository_config.parent.mkdir(parents=True)
+        repository_config = source / ".ash.yaml"
         repository_config.write_text("project_name: repo\n", encoding="utf-8")
 
         resolved = resolve_config(
@@ -1531,8 +1519,8 @@ def test_the_fallbacks_override_selection_matches_resolve_config(
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     project = tmp_path / "repo"
-    (project / ".ash").mkdir(parents=True)
-    config = project / ".ash" / ".ash.yaml"
+    project.mkdir(parents=True)
+    config = project / ".ash.yaml"
     config.write_text(
         'project_name: repo\nsandbox:\n  extra_read_paths: ["/in/tree"]\n',
         encoding="utf-8",
@@ -1560,8 +1548,8 @@ def test_a_respelled_sandbox_segment_is_refused_and_not_selected(tmp_path, monke
     spelling = 'Sandbox.extra_read_paths=["/opt/rules"]'
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     project = tmp_path / "repo"
-    (project / ".ash").mkdir(parents=True)
-    config = project / ".ash" / ".ash.yaml"
+    project.mkdir(parents=True)
+    config = project / ".ash.yaml"
     config.write_text("project_name: repo\n", encoding="utf-8")
 
     with pytest.raises(ASHConfigValidationError) as refused:
@@ -1592,8 +1580,8 @@ def test_an_explicit_empty_config_is_a_selection_not_a_fall_through(
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     project = tmp_path / "repo"
-    (project / ".ash").mkdir(parents=True)
-    (project / ".ash" / ".ash.yaml").write_text(
+    project.mkdir(parents=True)
+    (project / ".ash.yaml").write_text(
         "project_name: repo\nsandbox:\n  mode: landlock\n", encoding="utf-8"
     )
 
@@ -1625,8 +1613,8 @@ def test_a_spaced_sandbox_override_is_refused_and_not_selected(
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     project = tmp_path / "repo"
-    (project / ".ash").mkdir(parents=True)
-    config = project / ".ash" / ".ash.yaml"
+    project.mkdir(parents=True)
+    config = project / ".ash.yaml"
     config.write_text("project_name: repo\n", encoding="utf-8")
 
     with pytest.raises(ASHConfigValidationError, match="whitespace"):
@@ -1756,8 +1744,8 @@ def test_a_scan_that_leaves_the_overrides_at_none_still_reports_its_files_sandbo
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     project = tmp_path / "repo"
-    (project / ".ash").mkdir(parents=True)
-    (project / ".ash" / ".ash.yaml").write_text(
+    project.mkdir(parents=True)
+    (project / ".ash.yaml").write_text(
         "project_name: repo\nsandbox:\n  mode: landlock\n", encoding="utf-8"
     )
 

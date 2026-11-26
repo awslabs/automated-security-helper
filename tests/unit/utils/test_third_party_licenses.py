@@ -552,24 +552,26 @@ class TestThePythonTools:
         assert (
             text.count('RUN pins="$(install-pinned-tool --uv-tool-pins)" && \\\n') == 2
         )
-        # Both load the community modules that bring tools of their own, so those
-        # tools are installed and pinned too.
+        # Both load the alpha modules that bring tools of their own, so those
+        # tools are installed and pinned too. The ${modules} value comes from the
+        # __UNSET__ sentinel dance that tests/unit/
+        # test_community_spellings_stay_aliases_of_the_alpha_tier.py owns.
         assert (
             text.count(
-                '    --config-overrides "ash_plugin_modules+=[${ASH_COMMUNITY_PLUGIN_MODULES}]"; \\\n'
+                '    --config-overrides "ash_plugin_modules+=[${modules}]"; \\\n'
             )
             == 2
         )
         declared = re.findall(
-            r'^ARG ASH_COMMUNITY_PLUGIN_MODULES="([^"]+)"$', text, re.MULTILINE
+            r'^ARG ASH_ALPHA_PLUGIN_MODULES="([^"]+)"$', text, re.MULTILINE
         )
         assert len(declared) == 2 and declared[0] == declared[1], declared
-        from automated_security_helper.core.community_scanners import (
-            community_scanner_modules,
+        from automated_security_helper.plugin_manifests import (
+            opt_in_scanner_modules,
         )
 
         expected = sorted(
-            set(community_scanner_modules().values())
+            set(opt_in_scanner_modules().values())
             - {
                 "automated_security_helper.plugin_modules.ash_ferret_plugins",
                 "automated_security_helper.plugin_modules.ash_snyk_plugins",
@@ -615,9 +617,7 @@ class TestTheHashBlock:
             i + 1 for i, line in enumerate(source[opens:], opens) if line == "}"
         )
         config = yaml.safe_load(
-            (REPO_ROOT / ".ash" / ".ash_community_plugins.yaml").read_text(
-                encoding="utf-8"
-            )
+            (REPO_ROOT / ".ash" / ".ash_alpha_plugins.yaml").read_text(encoding="utf-8")
         )
         entries = [
             s

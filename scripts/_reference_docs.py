@@ -452,6 +452,8 @@ _CLI_SUBCOMMANDS = (
     "merge",
     "build-image",
     "get-genai-guide",
+    "container",
+    "results",
 )
 _V3_COMMAND = re.compile(
     r"(?:^|(?<=[\s`(&;|]))ash (?=(?:" + "|".join(_CLI_SUBCOMMANDS) + r")(?:[\s`]|$))",

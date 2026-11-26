@@ -33,6 +33,7 @@ from typing import (
 )
 
 import yaml
+from pydantic import BaseModel
 from pydantic_core import core_schema as _core_schema
 
 from automated_security_helper.config.ash_config import (
@@ -55,6 +56,7 @@ from automated_security_helper.config.plugin_section_names import (
     fold_known_plugin_sections,
     folded_section_name,
 )
+from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.config.config_sources import (
     EXTENDS_KEY,
     PATCH_KEY,
@@ -105,8 +107,11 @@ def directory_path_advice(path_pattern: str, *, ignore_path: bool) -> str:
     """The warning for a path that names an existing directory and no file in it.
 
     Shared by ``ash config validate`` and ``ash config lint``, and spelled as
-    ``path_matching.directory_spelling`` spells it, as the warning after the scan
-    does: ``<dir>/`` for an ignore path, ``<dir>/**/*`` for a suppression path.
+    ``path_matching.directory_spelling`` spells it: ``<dir>/`` for an ignore
+    path, ``<dir>/**/*`` for a suppression path. Since the bare-directory rule
+    (issue #894) a glob-free pattern matches the files below the directory it
+    names, so only a ``**`` pattern whose last component names a directory gets
+    this advice.
     """
     spelling = directory_spelling(path_pattern, ignore_path=ignore_path)
     action = (
@@ -259,8 +264,11 @@ def path_pattern_advice(
       without it, with a directory spelled as ``directory_path_advice`` spells it;
     - a pattern whose leading names the tree holds only in another case is named
       with the tree's spelling;
-    - a path that names an existing directory and no file in it gets
-      ``directory_path_advice``.
+    - a ``**`` pattern whose glob-free last component names a directory the tree
+      holds somewhere below the root gets ``directory_path_advice``. A pattern
+      ending in ``/`` never does: under the bare-directory rule (issue #894) it
+      already names the directory and matches the files below it, and it is the
+      spelling the advice itself recommends.
 
     The message names the pattern as ``shown_pattern``, with any part read from
     the environment shown as such, and then quotes neither the pattern nor the
@@ -333,9 +341,14 @@ def path_pattern_advice(
             )
         return f"Path '{shown}' matches '{spelled}' {CASE_ONLY_PROBLEM}."
 
-    # An ignore path ending in / names the directory and what is in it.
-    if ignore_path and form.endswith("/"):
+    # Under the bare-directory rule (issue #894) a trailing '/' names the
+    # directory and matches the files below it, in ignore paths and
+    # suppressions alike, so a pattern already spelled that way is the very
+    # spelling directory_path_advice recommends: '**/node_modules/' must not
+    # be advised to become '**/node_modules/'.
+    if form.endswith("/"):
         return None
+
     clean_path = form.rstrip("/")
     # A glob in the last component matches files.
     from pathlib import PurePosixPath
@@ -347,12 +360,12 @@ def path_pattern_advice(
         # '**' matches any run of directories, and the last component then
         # names a path exactly: '**/node_modules' is a file of that name, and
         # the files inside a directory of that name do not match. Advised only
-        # for a directory the tree holds somewhere, by a bounded walk.
+        # for a directory the tree holds somewhere, by a bounded walk. A
+        # glob-free pattern gets no such advice: under the bare-directory rule
+        # (issue #894) it names the directory and matches the files below it,
+        # in ignore paths and suppressions alike.
         if basename != "**" and _names_a_directory_below(basename, project_root):
             return directory_path_advice(shown, ignore_path=ignore_path)
-        return None
-    if _names_a_directory(project_root / clean_path):
-        return directory_path_advice(shown, ignore_path=ignore_path)
     return None
 
 
@@ -2053,7 +2066,8 @@ def _shown_at(
     the path leaves ``data``.
     """
     steps: List[Any] = []
-    node, shown_node = data, shown
+    node: Any = data
+    shown_node: Any = shown
     for step in location:
         if isinstance(node, dict) and step in node:
             index = list(node).index(step)
@@ -2062,9 +2076,13 @@ def _shown_at(
             continue
         if isinstance(node, list) and isinstance(step, int) and 0 <= step < len(node):
             steps.append(step)
-            aligned = isinstance(shown_node, list) and len(shown_node) == len(node)
+            shown_items = (
+                shown_node
+                if isinstance(shown_node, list) and len(shown_node) == len(node)
+                else None
+            )
             node = node[step]
-            shown_node = shown_node[step] if aligned else _ALL_SHOWN
+            shown_node = shown_items[step] if shown_items is not None else _ALL_SHOWN
             continue
         steps.append(step)
     return steps, node, shown_node
@@ -2093,12 +2111,16 @@ def _strings_read_from_the_environment(item: Any, shown: Any) -> List[str]:
             found += _strings_read_from_the_environment(value, shown_value)
         return found
     if isinstance(item, (list, tuple)):
-        aligned = isinstance(shown, (list, tuple)) and len(shown) == len(item)
+        shown_items = (
+            shown
+            if isinstance(shown, (list, tuple)) and len(shown) == len(item)
+            else None
+        )
         return [
             text
             for index, value in enumerate(item)
             for text in _strings_read_from_the_environment(
-                value, shown[index] if aligned else _ALL_SHOWN
+                value, shown_items[index] if shown_items is not None else _ALL_SHOWN
             )
         ]
     if isinstance(item, str) and shown != item:
@@ -3603,7 +3625,7 @@ _MISSING_OPTION: Any = object()
 
 
 @functools.lru_cache(maxsize=None)
-def _built_in_section_classes(segment_name: str) -> Dict[str, type]:
+def _built_in_section_classes(segment_name: str) -> Dict[str, type[BaseModel]]:
     """Each built-in plugin's config class in a segment, by the keys the model reads.
 
     The field name and its alias (``cdk_nag`` and ``cdk-nag``): the spellings the
@@ -3620,12 +3642,12 @@ def _built_in_section_classes(segment_name: str) -> Dict[str, type]:
     )
 
     segments: Dict[str, type[BaseModel]] = {
-        "scanners": ScannerConfigSegment,
-        "reporters": ReporterConfigSegment,
-        "converters": ConverterConfigSegment,
+        PluginKind.SCANNER.section: ScannerConfigSegment,
+        PluginKind.REPORTER.section: ReporterConfigSegment,
+        PluginKind.CONVERTER.section: ConverterConfigSegment,
     }
     segment_cls = segments[segment_name]
-    classes: Dict[str, type] = {}
+    classes: Dict[str, type[BaseModel]] = {}
     for field_name, info in segment_cls.model_fields.items():
         config_class = next(
             (
@@ -3819,11 +3841,13 @@ class ConfigValidator:
 
     # Fields that should NOT appear in user configs (internal-only). The model
     # refuses those a section does not declare (utils/unknown_keys.py).
-    INTERNAL_SCANNER_FIELDS = set(INTERNAL_SECTION_FIELDS["scanners"])
+    INTERNAL_SCANNER_FIELDS = set(INTERNAL_SECTION_FIELDS[PluginKind.SCANNER.section])
 
-    INTERNAL_REPORTER_FIELDS = set(INTERNAL_SECTION_FIELDS["reporters"])
+    INTERNAL_REPORTER_FIELDS = set(INTERNAL_SECTION_FIELDS[PluginKind.REPORTER.section])
 
-    INTERNAL_CONVERTER_FIELDS = set(INTERNAL_SECTION_FIELDS["converters"])
+    INTERNAL_CONVERTER_FIELDS = set(
+        INTERNAL_SECTION_FIELDS[PluginKind.CONVERTER.section]
+    )
 
     # Top-level fields that should NOT appear in user configs
     INVALID_TOP_LEVEL_FIELDS = {
@@ -3851,10 +3875,9 @@ class ConfigValidator:
         "ash_plugin_modules",
         "external_reports_to_include",
         "global_settings",
-        "scanners",
-        "reporters",
+        # The three plugin sections: scanners, reporters and converters.
+        *PluginKind.sections(),
         "output_formats",
-        "converters",
         # The alias, and the field name, which a scan reads as the alias.
         "mcp-resource-management",
         "mcp_resource_management",
@@ -4327,6 +4350,41 @@ class ConfigValidator:
             result.errors.extend(result.redact(m) for m in module_errors)
             if module_check_failure is not None:
                 result.warnings.append(module_check_failure)
+
+        # A symbol-scoped suppression needs a recorded entry in .ash.lock, as a
+        # scan requires (core/orchestrator.resolve_scan_config). Judged on the
+        # config the model built, relative to the directory a scan would scan.
+        # Without a source_dir (MCP validate_config, validate_and_raise) the
+        # lock root falls back to the root the config's location implies, as
+        # _structure_warnings resolves paths: skipping the check answered
+        # ``valid: True`` for a config a scan refuses.
+        if refused is None and built is not None:
+            from automated_security_helper.core.exceptions import (
+                ASHConfigValidationError as _LockRefusal,
+            )
+            from automated_security_helper.utils.ash_lock import (
+                refuse_unlocked_symbol_suppressions,
+            )
+
+            if source_dir is not None:
+                lock_root = Path(source_dir)
+            else:
+                config_parent = Path(config_path).resolve().parent
+                lock_root = (
+                    config_parent.parent
+                    if config_parent.name == ".ash"
+                    else config_parent
+                )
+            try:
+                refuse_unlocked_symbol_suppressions(
+                    getattr(
+                        getattr(built, "global_settings", None), "suppressions", None
+                    )
+                    or [],
+                    lock_root,
+                )
+            except _LockRefusal as e:
+                result.errors.append(result.redact(str(e)))
 
         # The checks that read the merged result read it as the scan builds
         # it: with --config-overrides applied. A missing project_name an
@@ -4967,9 +5025,9 @@ class ConfigValidator:
             shown = config_data
         found: List[Tuple[Tuple[str, str, str], Tuple[str, str, str]]] = []
         for segment_name, internal in (
-            ("scanners", cls.INTERNAL_SCANNER_FIELDS),
-            ("reporters", cls.INTERNAL_REPORTER_FIELDS),
-            ("converters", cls.INTERNAL_CONVERTER_FIELDS),
+            (PluginKind.SCANNER.section, cls.INTERNAL_SCANNER_FIELDS),
+            (PluginKind.REPORTER.section, cls.INTERNAL_REPORTER_FIELDS),
+            (PluginKind.CONVERTER.section, cls.INTERNAL_CONVERTER_FIELDS),
         ):
             segment = config_data.get(segment_name)
             if not isinstance(segment, dict):
@@ -5498,12 +5556,15 @@ class ConfigValidator:
         environment_paths: Collection[Path] = frozenset(),
         path_patterns: Optional[List[Tuple[str, str]]] = None,
     ) -> List[str]:
-        """Check ignore_paths and suppression paths for directory-without-glob issues.
+        """Check ignore_paths and suppression paths against the tree
+        (``path_pattern_advice``).
 
-        Returns a list of warning messages for paths that point to existing
-        directories and so match no file inside them, each with the spelling that
-        does (``directory_path_advice``). Only warns when the path actually exists
-        as a directory in the repo.
+        Returns a list of warning messages for paths that match nothing as
+        written -- a ``./`` prefix, a case-only mismatch with the tree, a ``**``
+        pattern whose glob-free last component names a directory the tree holds
+        (``directory_path_advice``) -- each with the spelling to write instead.
+        A glob-free path, with or without a trailing ``/``, names a file and the
+        directory of that name (issue #894) and gets no directory advice.
 
         ``config_data`` is the merged config. ``layers`` are the files of its
         ``extends`` chain with what each holds itself, in merge order; a warning
@@ -5633,9 +5694,9 @@ class ConfigValidator:
         path is fine (``path_pattern_advice``, shared with ``ash config lint``),
         after ``absolute_path_warning`` for an absolute one.
 
-        An ignore path ending in ``/`` names the directory and matches what is in
-        it, so it is fine; a suppression path ending in ``/`` is literal and is
-        not. The message names the path as ``shown_pattern``, with any part read
+        A path ending in ``/`` names the directory and matches what is in it
+        (issue #894), in ignore paths and suppressions alike, so it is fine.
+        The message names the path as ``shown_pattern``, with any part read
         from the environment shown as ``<value>``; None names it as it is.
         """
         # A path that is not a string is a model error, reported as one.

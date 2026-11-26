@@ -157,7 +157,7 @@ virtual environment inside the project show as MISSING. See
 | Extra | Adds | Needed for |
 |---|---|---|
 | `cdk` | `aws-cdk-lib`, `cdk-nag`, `constructs` | the cdk-nag scanner, which also needs Node.js |
-| `symbols` | tree-sitter grammars for Python, JavaScript, TypeScript, and Java | `symbol` in suppressions; see [Suppress findings](suppress-findings.md) |
+| `symbols` | tree-sitter grammars for Python, JavaScript, TypeScript, and Java | `symbol` in suppressions; see [Suppress findings](suppress-findings.md) and [Symbol resolution](../reference/symbol-resolution.md) |
 
 To install an extra from git, use the direct-reference form `name[extra] @ URL`, as
 the commands on this page do. List several extras with commas, as in
@@ -171,6 +171,104 @@ them, so installing the extra with ASH is simpler.
 The `symbols` extra is in `main` and not in releases up to 3.7.x. Its tree-sitter
 packages publish no wheels for Linux on arm64 with musl (Alpine), so on that platform
 the install needs a C compiler.
+
+## Choose how scanner tools are installed
+
+`ashx dependencies install` installs each scanner's tool the way its plugin declares
+it: Python tools with `uv tool install`, native tools from pinned, digest-verified
+release downloads, and a few through `gem` or the system package manager. Five options
+change where tools come from. They are options of the command only; no configuration
+file or environment variable sets them, so a repository you scan cannot steer the
+installer. Each is listed in the [`ashx dependencies install` reference](../reference/cli.md#dependencies-install).
+
+### Providers
+
+`--providers uv,pipx,brew` names the install providers this run may use, in order of
+preference. The list is both a permission boundary and an order: only the listed
+providers may install anything, and for each tool the first listed provider that can
+install it wins. A provider that cannot serve a tool is skipped, with its reason
+printed. When none of them can, the tool is refused with every reason, nothing runs for
+it, and the run exits 1. ASH never substitutes a provider you did not list.
+
+Without `--providers` every provider is permitted and each tool is installed the way
+its plugin declares, which is what the command did before the option existed.
+
+| Provider | What it installs |
+|---|---|
+| `uv` | Python tools in `uv tool` environments, packages into a Python environment, and `uv venv` virtualenvs |
+| `pipx` | Python tools in pipx environments. It cannot install into a named virtualenv, and `pipx install --python` takes an executable, a version, or a path, so a version-range request such as `>=3.10,<3.14` is refused |
+| `pip` | Packages into one interpreter, or into the virtualenv named by `--virtualenv-path`; `python -m venv` creates it |
+| `release-download` | ASH's pinned release downloads for the tools that have one |
+| `nix` | The toolchain the repository flake pins, by realizing the dev shell that `--mode nix` runs. One realization serves every tool in the run, and it takes no interpreter request or exact version pin. The realized tools live in the Nix store and are not placed on `PATH` or in the bin directory, so the post-install verdict can read a nix-only tool as missing; a `--mode nix` scan finds them |
+| `apt`, `dnf`, `yum`, `zypper`, `brew`, `npm`, `pnpm`, `conda`, `choco`, `gem` | One generic system-package shape: the install command of that manager for the package that provides the tool |
+| `go`, `cargo` | Declared and not implemented; they refuse with "not implemented" |
+| `custom` | A plugin's own shell or download command, run as declared |
+
+A package manager installs a tool from the name the install-package facet declares for
+it. A tool with no declared name for that manager is refused naming the missing row, and
+a package manager installs the version it carries, not the range the plugin declares;
+the command's output says so. `apt`, `dnf`, `yum` and `zypper` are declared as root-only,
+and ASH does not add `sudo`: run as root, or list another provider.
+
+### System tools
+
+`--inherit-system-tools` is the default, and it is the behavior the command has always
+had: a tool already on `PATH` or in a system directory counts as present, and an
+identical copy of a pinned tool skips its download.
+
+`--no-inherit-system-tools` ignores those copies. A global `checkov` on `PATH` does not
+stop the install, and the result counts only what was installed into a location ASH or
+its provider manages: uv's tool listing, the virtualenv you named, ASH's own environment,
+and the ASH bin directory. A system copy that was set aside is named in the output. Programs
+ASH never installs, such as Node.js for cdk-nag, are still found on `PATH`. The option
+affects the install and its report only; a scan finds tools exactly as before.
+
+### Virtualenvs
+
+`--virtualenv-path <dir>` installs Python tools into one virtualenv, through the provider,
+instead of into a separate environment per tool.
+
+| Path | Create flag | Result |
+|---|---|---|
+| none | none | Per-tool environments, as before |
+| none | either flag typed | Refused (exit 2): the flag does nothing without a path |
+| exists, a virtualenv | `--no-create-virtualenv` (default) | Tools install into it. Each tool's interpreter request is checked against the Python version in its `pyvenv.cfg`, and a tool whose request it fails is refused |
+| missing | `--no-create-virtualenv` (default) | Refused (exit 3) |
+| missing | `--create-virtualenv` | ASH creates it first, with one interpreter request that satisfies every tool's, then installs into it |
+| exists, not a virtualenv | either | Refused (exit 3); ASH never overwrites or deletes it |
+
+Use `--no-create-virtualenv` with a virtualenv your own setup step prepared, and
+`--create-virtualenv` to have ASH vend one. Native tools and system packages are not
+installed into a virtualenv, so the options do not change them.
+
+The virtualenv must sit outside the directory being scanned, existing or created: the
+install commands built around it execute its interpreter (`uv pip install --python
+<venv python>`, `<venv python> -m pip`), so a virtualenv the scanned tree supplies is
+refused (exit 3), with the same opt-in as a forced binary (`ASH_ALLOW_IN_TREE_TOOLS=1`).
+Python-environment installs -- packages ASH's own process imports, such as cdk-nag's CDK
+libraries -- stay in the environment running ASH rather than the virtualenv, so what the
+install reports installed is what the next scan can import.
+
+### Forcing a binary
+
+`--binary-path scanner=/absolute/path` forces one binary for one scanner and skips that
+scanner's install commands. Repeat it for each scanner. The path must be absolute, name a
+regular executable file rather than a symlink, and sit outside the directory being
+scanned. ASH reads and hashes the file, records the path and its SHA-256 in its install
+records under `~/.ash`, and never runs it. The record is read back: the scanners'
+dependency validation and later `ashx dependencies install` runs resolve the scanner to
+the forced path before any PATH or uv lookup, re-checking the file and its SHA-256 each
+time, and a record whose file moved or changed is named and set aside rather than
+trusted by its path. `--binary-path scanner=` with an empty path removes the record.
+
+The record answers one question for every scanner, whichever way its dependency check
+probes: where the scanner's own binary is. A scanner's other requirements still hold
+and are checked first, so the force never turns them off: npm-audit and snyk-code
+still refuse to run offline, trivy still needs its offline vulnerability database,
+cfn-guard its rules files, and actionlint its configured integrations. Three scanners
+run Python libraries rather than one binary and never consult the record: cdk-nag
+(aws-cdk-lib and cdk-nag plus Node.js), detect-secrets, and mcp-config -- forcing a
+path for them records it but satisfies nothing.
 
 ## Choose a version to pin
 
@@ -212,7 +310,7 @@ pinned, so the scanner toolchain matches the code.
 
 No ASH image is published. `ash --mode container` builds an image with every scanner
 on your machine and scans inside it; it rebuilds the image on every run unless you
-pass `--no-build`. `ash build-image` builds one to push to your own registry. See
+pass `--no-build`. `ashx container build` builds one to push to your own registry. See
 [Run ASH in a container](run-in-a-container.md).
 
 ## Nix mode
@@ -224,7 +322,7 @@ ASH you started, so install ASH with one of the methods above first.
 
 The Nix shell supplies the tools of every built-in scanner except cdk-nag, which runs on
 the Python environment ASH is installed in, so install ASH with the `cdk` extra for it.
-It does not supply ferret-scan or the Snyk CLI, which two community plugins run.
+It does not supply ferret-scan or the Snyk CLI, which two alpha plugins run.
 
 The scan inside the shell gets your environment, so it reads the file `ASH_CONFIG` names
 first, as a local scan does, and then the file `--config` names. With no `--config`, the

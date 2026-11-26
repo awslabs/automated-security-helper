@@ -1,0 +1,160 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: ASH - Image scan against a live engine and registry
+# Runs `ashx scan --image <tag>` against a real container engine and a real
+# registry, with nothing faked, and requires the report's identity scope to key on
+# the registry's digest.
+#
+# WHY THIS WORKFLOW EXISTS
+#
+# The image scan's engine probe, its engine-delegated argv and its digest ladder
+# (the local engine's inspect, then `crane digest` against the registry) are unit
+# tested with fakes and a fake unix-socket daemon. A fake proves the code follows
+# the protocol its author wrote down, not that the protocol is the engine's. This
+# job is the exercise against the real thing.
+#
+# WHAT IT DOES
+#
+# 1. Builds a tiny image from tests/test_data/images/live-engine/Dockerfile (base
+#    pinned by digest from public.ecr.aws).
+# 2. Starts a local registry container (public.ecr.aws/docker/library/registry,
+#    pinned by digest) on localhost:5000 and pushes the image to it.
+# 3. Scans the image BY TAG while the engine still holds it. The digest ladder's
+#    first rung (the engine's own inspect) must resolve it.
+# 4. Removes the image from the engine, then scans the same tag again. The engine
+#    no longer knows it, so the ladder falls through to its second rung (crane
+#    against the registry), which only a live registry can answer.
+# 5. Requires, for both scans, that the report's `metadata.scan_source` is
+#    `image:<digest the registry holds>`, read independently from the registry.
+#
+# DETERMINISM
+#
+# The only network use is the two pinned pulls from public.ecr.aws and the
+# installer's pinned tool downloads. The scanner is syft, which needs no
+# vulnerability database; nothing here depends on a feed that changes between runs.
+#
+# PINNED IMAGE DIGESTS (public.ecr.aws, read 2026-11-25; the multi-platform index
+# digests, which the engine resolves to the runner's platform):
+#   public.ecr.aws/docker/library/registry:2     sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+#   public.ecr.aws/docker/library/busybox:1.37   sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
+
+on:
+  pull_request:
+    branches:
+      - "**"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  live-engine-image-scan:
+    name: image scan by tag against a live engine and registry
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      REGISTRY_IMAGE: public.ecr.aws/docker/library/registry@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+      IMAGE_TAG: localhost:5000/ash-live-engine:ci
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "false"
+      - name: Install ASH and syft
+        run: |
+          set -euo pipefail
+          pip install .
+          ashx dependencies install --tool syft
+      # crane is not a scanner or reporter plugin, so `ashx dependencies install` does
+      # not know it. The image build installs it with this script from the same pins
+      # (utils/tool_downloads.py), which verifies the archive and the executable digests.
+      - name: Install the pinned crane
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/crane-bin"
+          python3 automated_security_helper/assets/install-pinned-tool.py crane -b "$RUNNER_TEMP/crane-bin"
+          echo "$RUNNER_TEMP/crane-bin" >> "$GITHUB_PATH"
+      - name: Start a local registry
+        run: |
+          set -euo pipefail
+          docker run -d --name ash-live-registry -p 127.0.0.1:5000:5000 "$REGISTRY_IMAGE"
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:5000/v2/ >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          echo "the local registry did not answer" >&2
+          docker logs ash-live-registry >&2
+          exit 1
+      - name: Build and push the fixture image
+        run: |
+          set -euo pipefail
+          docker build -t "$IMAGE_TAG" tests/test_data/images/live-engine
+          docker push "$IMAGE_TAG"
+      - name: Read the digest the registry holds
+        id: digest
+        run: |
+          set -euo pipefail
+          # An independent read: the registry's own answer for the tag, not ASH's.
+          digest="$(curl -fsSI \
+            -H 'Accept: application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json' \
+            http://127.0.0.1:5000/v2/ash-live-engine/manifests/ci \
+            | tr -d '\r' | awk 'tolower($1)=="docker-content-digest:" {print $2}')"
+          case "$digest" in
+            sha256:????????????????????????????????????????????????????????????????) ;;
+            *) echo "no digest read from the registry: '$digest'" >&2; exit 1 ;;
+          esac
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "the registry holds $IMAGE_TAG at $digest"
+      - name: Scan by tag while the engine holds the image (rung 1, the engine)
+        env:
+          EXPECTED_DIGEST: ${{ steps.digest.outputs.digest }}
+        run: |
+          set -euo pipefail
+          ashx scan --image "$IMAGE_TAG" --only-scanners syft --log-level INFO \
+            --output-dir "$RUNNER_TEMP/scan-engine" 2>&1 | tee "$RUNNER_TEMP/scan-engine.log"
+          grep -F "through the local docker engine" "$RUNNER_TEMP/scan-engine.log"
+          python3 .github/scripts/assert-image-scan-scope.py \
+            --output-dir "$RUNNER_TEMP/scan-engine" \
+            --expected-digest "$EXPECTED_DIGEST"
+      - name: Remove the image from the engine
+        run: |
+          set -euo pipefail
+          docker rmi "$IMAGE_TAG"
+          if docker image inspect "$IMAGE_TAG" >/dev/null 2>&1; then
+            echo "the engine still holds $IMAGE_TAG" >&2
+            exit 1
+          fi
+      - name: Scan by tag with the engine empty (rung 2, the registry)
+        env:
+          EXPECTED_DIGEST: ${{ steps.digest.outputs.digest }}
+        run: |
+          set -euo pipefail
+          ashx scan --image "$IMAGE_TAG" --only-scanners syft --log-level INFO \
+            --output-dir "$RUNNER_TEMP/scan-registry" 2>&1 | tee "$RUNNER_TEMP/scan-registry.log"
+          grep -F "through the registry (crane digest)" "$RUNNER_TEMP/scan-registry.log"
+          python3 .github/scripts/assert-image-scan-scope.py \
+            --output-dir "$RUNNER_TEMP/scan-registry" \
+            --expected-digest "$EXPECTED_DIGEST"
+      - name: Collect the scan output
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: live-engine-image-scan
+          path: |
+            ${{ runner.temp }}/scan-engine
+            ${{ runner.temp }}/scan-registry
+            ${{ runner.temp }}/scan-engine.log
+            ${{ runner.temp }}/scan-registry.log
+          retention-days: 7
+          if-no-files-found: warn

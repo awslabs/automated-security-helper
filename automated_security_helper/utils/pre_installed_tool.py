@@ -81,6 +81,7 @@ guessing in either direction.
 from __future__ import annotations
 
 import hashlib
+from enum import Enum
 import json
 import os
 import stat as stat_module
@@ -98,7 +99,6 @@ from typing import (
     Any,
     Dict,
     List,
-    Literal,
     Optional,
     Sequence,
     Tuple,
@@ -111,7 +111,20 @@ from automated_security_helper.utils.process_env import environ_for_parsed_outpu
 
 from automated_security_helper.utils.subprocess_utils import find_executable, spawn_run
 
-Status = Literal["satisfied", "unsatisfied", "unverifiable"]
+
+class ToolInstallStatus(str, Enum):
+    """The verdict of checking a pre-installed tool against its requirement.
+
+    ``SATISFIED`` is the tool meeting it, ``UNSATISFIED`` the tool not meeting
+    it, and ``UNVERIFIABLE`` the check not being able to say (a probe that
+    failed for a reason that is no evidence about the requirement). Only a
+    ``SATISFIED`` verdict is persisted, with this value as its ``status``.
+    """
+
+    SATISFIED = "satisfied"
+    UNSATISFIED = "unsatisfied"
+    UNVERIFIABLE = "unverifiable"
+
 
 # A cold import of checkov takes seconds; this bounds a hung one.
 _VERSION_PROBE_TIMEOUT = 120
@@ -155,7 +168,7 @@ _NIX_MAX_EXEC_HOPS = 4
 
 @dataclass(frozen=True)
 class PreInstalledToolVerdict:
-    status: Status
+    status: ToolInstallStatus
     executable: str
     requirement: Optional[str]
     detail: str
@@ -516,7 +529,7 @@ def _answer_from_the_store(
                 raise ValueError("not a record")
             if record.get("format") != _VERDICT_STORE_FORMAT:
                 raise ValueError("another format")
-            if record.get("status") != "satisfied":
+            if record.get("status") != ToolInstallStatus.SATISFIED.value:
                 raise ValueError("only satisfied verdicts are stored")
             stored_at = record.get("stored_at")
             if not isinstance(stored_at, (int, float)) or isinstance(stored_at, bool):
@@ -552,7 +565,7 @@ def _answer_from_the_store(
             ):
                 raise ValueError("not a record")
             verdict = PreInstalledToolVerdict(
-                "satisfied",
+                ToolInstallStatus.SATISFIED,
                 executable,
                 requirement,
                 detail,
@@ -599,7 +612,7 @@ def _persist_verdict(
     Written beside its final name and renamed into place, so a reader never
     sees half a record; the write also sweeps records past their TTL.
     """
-    if verdict.status != "satisfied":
+    if verdict.status != ToolInstallStatus.SATISFIED:
         return
     named = _store_name(key)
     if named is None:
@@ -617,7 +630,7 @@ def _persist_verdict(
                 if pinned
                 else _UNPINNED_VERDICT_TTL_SECONDS
             ),
-            "status": verdict.status,
+            "status": ToolInstallStatus(verdict.status).value,
             "executable": verdict.executable,
             "requirement": verdict.requirement,
             "detail": verdict.detail,
@@ -853,7 +866,7 @@ def find_nix_python_environment(
     # A program can be wrapped more than once (a makeWrapper around a
     # makeWrapper, as a flake that adds an environment variable to a packaged
     # tool produces): each hop's script execs the next. Only one hop used to be
-    # followed, so a twice-wrapped tool was "unverifiable", and offline a Nix
+    # followed, so a twice-wrapped tool was ToolInstallStatus.UNVERIFIABLE, and offline a Nix
     # tool that cannot be verified is refused.
     hops = 0
     while _python_shebang(text) is None:
@@ -1104,7 +1117,7 @@ def _dry_run(
     requirement: str,
     target: Optional[str] = None,
     no_deps: bool = False,
-) -> Tuple[Status, str]:
+) -> Tuple[ToolInstallStatus, str]:
     command = [
         uv,
         "pip",
@@ -1144,17 +1157,17 @@ def _dry_run(
                 # The staging directory resolves to one the sandbox never grants
                 # (TMPDIR is a home directory, so the directory sits directly in
                 # it). The check cannot run under the sandbox: it answers
-                # "unverifiable", as a staging that could not be done does, not
+                # ToolInstallStatus.UNVERIFIABLE, as a staging that could not be done does, not
                 # with an exception out of the scanner's dependency check.
                 reason = (
                     f"could not grant uv its staging directory to check "
                     f"{requirement!r}: {refusal}"
                 )
-                return "unverifiable", reason
+                return ToolInstallStatus.UNVERIFIABLE, reason
         result = _run(command + [requirement], _UV_DRY_RUN_TIMEOUT)
     if not _ran(result):
         return (
-            "unverifiable",
+            ToolInstallStatus.UNVERIFIABLE,
             f"could not run uv to check {requirement!r}{_probe_cause(result)}",
         )
     # uv colors its output into a pipe when FORCE_COLOR or CLICOLOR_FORCE is
@@ -1177,12 +1190,12 @@ def _dry_run(
         # never provides what the extra brings. Matched for the requested
         # package alone: the same warning about a transitive dependency's
         # extra says nothing about this copy.
-        return "unsatisfied", output
+        return ToolInstallStatus.UNSATISFIED, output
     if result.returncode == 0 and "Would make no changes" in flowed:
-        return "satisfied", ""
+        return ToolInstallStatus.SATISFIED, ""
     if result.returncode == 0 or any(m in flowed for m in _UV_UNSATISFIABLE_MARKERS):
-        return "unsatisfied", output
-    return "unverifiable", output
+        return ToolInstallStatus.UNSATISFIED, output
+    return ToolInstallStatus.UNVERIFIABLE, output
 
 
 # uv's tree glyphs, taken only as a line PREFIX; trailing whitespace is
@@ -1270,7 +1283,7 @@ def verify_pre_installed_tool(
         # Never handed to the dry run below: uv resolves whatever the requirement
         # names, and a path or URL would be built to read its metadata.
         return PreInstalledToolVerdict(
-            "unverifiable",
+            ToolInstallStatus.UNVERIFIABLE,
             executable,
             None,
             str(error),
@@ -1286,7 +1299,7 @@ def verify_pre_installed_tool(
         mtime = os.stat(resolved).st_mtime_ns
     except OSError:
         return PreInstalledToolVerdict(
-            "unverifiable",
+            ToolInstallStatus.UNVERIFIABLE,
             executable,
             requirement,
             f"{executable} does not exist",
@@ -1350,7 +1363,7 @@ def verify_pre_installed_tool(
             )
         except SandboxUnavailable as refusal:
             return PreInstalledToolVerdict(
-                "unverifiable",
+                ToolInstallStatus.UNVERIFIABLE,
                 executable,
                 requirement,
                 f"the scanner sandbox refused the check: {refusal}",
@@ -1397,7 +1410,7 @@ def _verify(
     probe = _run([executable, "--version"], _VERSION_PROBE_TIMEOUT)
     if not _ran(probe):
         return PreInstalledToolVerdict(
-            "unverifiable",
+            ToolInstallStatus.UNVERIFIABLE,
             executable,
             requirement,
             f"could not execute {executable}{_probe_cause(probe)}",
@@ -1428,7 +1441,7 @@ def _verify(
             500,
         )
         return PreInstalledToolVerdict(
-            "unsatisfied",
+            ToolInstallStatus.UNSATISFIED,
             executable,
             requirement,
             f"`{executable} --version` exited {probe.returncode}: {excerpt}",
@@ -1470,7 +1483,7 @@ def _verify(
     if nix_environment is not None:
         if uv is None:
             return PreInstalledToolVerdict(
-                "unverifiable",
+                ToolInstallStatus.UNVERIFIABLE,
                 executable,
                 requirement,
                 "no uv was found beside ASH's interpreter or on PATH",
@@ -1485,7 +1498,7 @@ def _verify(
             with tempfile.TemporaryDirectory(prefix="ash-nix-metadata-") as target:
                 if _stage_nix_metadata(site_dirs, Path(target)) == 0:
                     return PreInstalledToolVerdict(
-                        "unverifiable",
+                        ToolInstallStatus.UNVERIFIABLE,
                         executable,
                         requirement,
                         f"{executable} is a Nix-wrapped Python program, but no "
@@ -1516,7 +1529,7 @@ def _verify(
             # METADATA) could not be done: a verdict, not an exception out of
             # the scanner's dependency check.
             return PreInstalledToolVerdict(
-                "unverifiable",
+                ToolInstallStatus.UNVERIFIABLE,
                 executable,
                 requirement,
                 f"{executable} is a Nix-wrapped Python program whose distribution "
@@ -1530,7 +1543,7 @@ def _verify(
     interpreter = find_tool_interpreter(executable)
     if interpreter is None:
         return PreInstalledToolVerdict(
-            "unverifiable",
+            ToolInstallStatus.UNVERIFIABLE,
             executable,
             requirement,
             f"could not locate the Python environment that provides {executable}",
@@ -1546,7 +1559,7 @@ def _verify(
         # copy read as unsatisfied and, offline, was refused. It cannot be
         # judged from here, which is what "unverifiable" says.
         return PreInstalledToolVerdict(
-            "unverifiable",
+            ToolInstallStatus.UNVERIFIABLE,
             executable,
             requirement,
             f"{executable} is installed in the user site (pip install --user), "
@@ -1558,7 +1571,7 @@ def _verify(
 
     if uv is None:
         return PreInstalledToolVerdict(
-            "unverifiable",
+            ToolInstallStatus.UNVERIFIABLE,
             executable,
             requirement,
             "no uv was found beside ASH's interpreter or on PATH",
@@ -1597,7 +1610,7 @@ def _judge(
 ) -> PreInstalledToolVerdict:
     from_nix = target is not None  # --target is only ever a staged Nix closure
     status, output = _dry_run(uv, interpreter, requirement, target)
-    if status != "unsatisfied":
+    if status != ToolInstallStatus.UNSATISFIED:
         # The unverifiable arm's detail is uv's own output, never routed
         # through the cause extraction, and it reaches the dependency reason
         # and the through-uv log line. It takes the same uv redaction layer
@@ -1619,7 +1632,7 @@ def _judge(
             version=version,
             summary=(
                 ""
-                if status == "satisfied"
+                if status == ToolInstallStatus.SATISFIED
                 else "uv could not verify the requirement in its environment"
             ),
         )
@@ -1633,7 +1646,7 @@ def _judge(
     # the package's own absence) read as every requested extra missing, and the
     # real cause, the resolver's own, was suppressed below.
     package_resolves = not extras or (
-        _dry_run(uv, interpreter, package, target)[0] != "unsatisfied"
+        _dry_run(uv, interpreter, package, target)[0] != ToolInstallStatus.UNSATISFIED
     )
     missing = (
         tuple(
@@ -1642,7 +1655,7 @@ def _judge(
             if _dry_run(
                 uv, interpreter, build_requirement(package, [extra], None), target
             )[0]
-            == "unsatisfied"
+            == ToolInstallStatus.UNSATISFIED
         )
         if package_resolves
         else ()
@@ -1671,7 +1684,7 @@ def _judge(
             target,
             no_deps=True,
         )[0]
-        == "unsatisfied"
+        == ToolInstallStatus.UNSATISFIED
     ):
         reasons.append(f"installed {package} does not satisfy {version_constraint!r}")
         summary_parts.append(
@@ -1681,7 +1694,7 @@ def _judge(
         reasons.append(_first_cause(output, values, requirement, package))
         summary_parts.append("the requirement does not resolve in its environment")
     return PreInstalledToolVerdict(
-        "unsatisfied",
+        ToolInstallStatus.UNSATISFIED,
         executable,
         requirement,
         f"{environment} does not satisfy {requirement!r}: " + "; ".join(reasons),

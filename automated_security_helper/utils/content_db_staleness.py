@@ -123,10 +123,8 @@ from automated_security_helper.utils.content_databases import (
     DEFAULT_STALENESS_POLICY,
     OFFLINE_IMAGE_POLICIES,
     RULESET_FETCHED_AT_FILE,
-    STALENESS_FAIL,
-    STALENESS_POLICIES,
-    STALENESS_WARN,
     ContentDatabase,
+    StalenessPolicy,
     built_offline,
     go_duration,
     is_future_dated,
@@ -177,7 +175,7 @@ class ContentDbAgeRecord:
     measured_by: str
     max_age: timedelta
     measured_at: datetime
-    policy: str
+    policy: StalenessPolicy
     bound_source: str
     bound_is_tool_default: bool
     refresh: str
@@ -213,6 +211,12 @@ class ContentDbAgeRecord:
     #: False, like ``absent``.
     bound_unknown: bool = False
 
+    def __post_init__(self) -> None:
+        # The record's one construction-time ingest: a policy given as its text
+        # (a caller outside this module, a results file) becomes the member, so
+        # every comparison past here is member identity.
+        self.policy = StalenessPolicy(self.policy)
+
     @property
     def age(self) -> Optional[timedelta]:
         if self.recorded_age_seconds is not None:
@@ -238,7 +242,10 @@ class ContentDbAgeRecord:
     @property
     def enforced(self) -> bool:
         """Whether this record fails the scan: stale, under the ``fail`` policy."""
-        return self.stale and self.policy == STALENESS_FAIL
+        # ``==``, not ``is``: the policy is a mutable field, and a text assignment
+        # after construction ("fail") must still gate. The str mixin makes the
+        # member equal to its spelling.
+        return self.stale and self.policy == StalenessPolicy.FAIL
 
     def message(self) -> str:
         if self.absent:
@@ -290,7 +297,7 @@ class ContentDbAgeRecord:
                 f"{self.timestamp_label} {_iso(self.built)}, {format_age(self.age)} old, "
                 f"past its {bound} bound ({whose}); age read from {self.measured_by}."
             )
-        if self.policy == STALENESS_FAIL:
+        if self.policy == StalenessPolicy.FAIL:
             consequence = (
                 "The scan fails: a clean result from a stale database is not evidence of a "
                 "clean target."
@@ -323,7 +330,7 @@ class ContentDbAgeRecord:
             tail = f"To refresh it, {self.refresh}."
             if self.policy_source == offline_image_policy_source(self.name):
                 tail = (
-                    "To refresh it, rebuild the image (`ash build-image --offline`), "
+                    "To refresh it, rebuild the image (`ash container build --offline`), "
                     f"or {self.refresh}."
                 )
         return f"{head} {consequence} {tail}"
@@ -339,7 +346,7 @@ class ContentDbAgeRecord:
             "max_age": go_duration(self.max_age),
             "max_age_seconds": int(self.max_age.total_seconds()),
             "stale": self.stale,
-            "policy": self.policy,
+            "policy": StalenessPolicy(self.policy).value,
             "enforced": self.enforced,
             "measured_by": self.measured_by,
             "measured_at": _iso(self.measured_at),
@@ -363,7 +370,10 @@ class ContentDbAgeRecord:
             measured_by=str(data.get("measured_by", "")),
             max_age=timedelta(seconds=int(data.get("max_age_seconds", 0) or 0)),
             measured_at=parse_timestamp(str(data["measured_at"])),
-            policy=str(data.get("policy", DEFAULT_STALENESS_POLICY)),
+            policy=(
+                StalenessPolicy.from_text(data.get("policy", DEFAULT_STALENESS_POLICY))
+                or DEFAULT_STALENESS_POLICY
+            ),
             bound_source=str(data.get("bound_source", "")),
             bound_is_tool_default=bool(data.get("bound_is_tool_default", False)),
             refresh=str(data.get("refresh", "")),
@@ -432,18 +442,17 @@ def format_age(age: Optional[timedelta]) -> str:
     return f"{days}d {hours}h" if days else f"{hours}h"
 
 
-def resolve_policy(config: Any) -> str:
+def resolve_policy(config: Any) -> StalenessPolicy:
     """The staleness policy a scan runs under: the config field when valid, else ``fail``.
 
     The CLI flag reaches here as a config override (``content_db_staleness=warn``), the same
     way ``--compact-report`` does, so this one read covers local, container, nix and workspace
     mode alike.
     """
-    value = getattr(config, "content_db_staleness", None)
-    value = getattr(value, "value", value)
-    if isinstance(value, str) and value.lower() in STALENESS_POLICIES:
-        return value.lower()
-    return DEFAULT_STALENESS_POLICY
+    return (
+        StalenessPolicy.from_text(getattr(config, "content_db_staleness", None))
+        or DEFAULT_STALENESS_POLICY
+    )
 
 
 def resolve_overrides(config: Any) -> List[Any]:
@@ -480,30 +489,32 @@ def offline_image_policy_source(name: str) -> str:
 
 
 def _default_policy_for(
-    entry: ContentDatabase, policy: str, offline_image: bool
-) -> tuple[str, Optional[str]]:
+    entry: ContentDatabase, policy: StalenessPolicy, offline_image: bool
+) -> tuple[StalenessPolicy, Optional[str]]:
     """The policy a database is held to when no override entry names it, and why."""
+    policy = StalenessPolicy(policy)
     image_policy = OFFLINE_IMAGE_POLICIES.get(entry.name) if offline_image else None
-    if policy == STALENESS_FAIL and image_policy in STALENESS_POLICIES:
-        return str(image_policy), offline_image_policy_source(entry.name)
+    if policy is StalenessPolicy.FAIL and image_policy is not None:
+        return image_policy, offline_image_policy_source(entry.name)
     return policy, None
 
 
 def _policy_for(
     entry: ContentDatabase,
-    policy: str,
+    policy: StalenessPolicy,
     overrides: Sequence[Any],
     now: datetime,
     offline_image: bool = False,
     *,
     log_diagnostics: bool = True,
-) -> tuple[str, Optional[str]]:
+) -> tuple[StalenessPolicy, Optional[str]]:
     """The policy one database is held to, and which override or default chose it, if any."""
+    policy = StalenessPolicy(policy)
     default, default_source = _default_policy_for(entry, policy, offline_image)
     held_to = (
-        f"{default}, the {default_source}"
+        f"{default.value}, the {default_source}"
         if default_source
-        else f"content_db_staleness ({policy})"
+        else f"content_db_staleness ({policy.value})"
     )
     for override in overrides:
         if getattr(override, "database", None) != entry.name:
@@ -517,14 +528,14 @@ def _policy_for(
                     "Remove the entry from the ASH config."
                 )
             break
-        chosen = str(getattr(override.policy, "value", override.policy)).lower()
-        if chosen not in STALENESS_POLICIES:
+        chosen = StalenessPolicy.from_text(override.policy)
+        if chosen is None:
             break
         if log_diagnostics:
             reason = head_and_tail(str(override.reason), 300)
             ASH_LOGGER.info(
                 shown_on_one_line(
-                    f"Content database {entry.name} is held to {chosen} rather than "
+                    f"Content database {entry.name} is held to {chosen.value} rather than "
                     f"{held_to} by a content_db_staleness_overrides entry "
                     f"until {expires}: {reason}"
                 )
@@ -535,15 +546,15 @@ def _policy_for(
         )
     if default_source and log_diagnostics:
         ASH_LOGGER.info(
-            f"Content database {entry.name} is held to {default} rather than "
-            f"content_db_staleness ({policy}): it is the {default_source}."
+            f"Content database {entry.name} is held to {default.value} rather than "
+            f"content_db_staleness ({policy.value}): it is the {default_source}."
         )
     return default, default_source
 
 
 def cache_check_policy(
     entry: ContentDatabase, config: Any, now: datetime, environ: Mapping[str, str]
-) -> tuple[str, Optional[str]]:
+) -> tuple[StalenessPolicy, Optional[str]]:
     return _policy_for(
         entry,
         resolve_policy(config),
@@ -796,7 +807,7 @@ MEASURERS: Dict[str, Callable[[ProbeContext], tuple[datetime, str]]] = {
 def measure(
     entry: ContentDatabase,
     ctx: ProbeContext,
-    policy: str,
+    policy: StalenessPolicy,
     now: Optional[datetime] = None,
     scanner: Optional[str] = None,
 ) -> ContentDbAgeRecord:
@@ -837,7 +848,7 @@ def measure(
 
 def _unmeasured_record(
     entry: ContentDatabase,
-    policy: str,
+    policy: StalenessPolicy,
     now: datetime,
     scanner: Optional[str],
     failure: str,
@@ -882,7 +893,7 @@ def _notification(record: ContentDbAgeRecord) -> "Notification":
     )
 
     return Notification(
-        level=Level.error if record.policy == STALENESS_FAIL else Level.warning,
+        level=(Level.error if record.policy == StalenessPolicy.FAIL else Level.warning),
         message=Message(root=Message1(text=record.message())),
         descriptor=ReportingDescriptorReference(
             root=ReportingDescriptorReference3(id=STALE_NOTIFICATION_ID)
@@ -952,7 +963,7 @@ def attach_records(sarif_report: Any, records: List[ContentDbAgeRecord]) -> None
 def assess_scanner(
     scanner_plugin: Any,
     sarif_report: Any,
-    policy: str,
+    policy: StalenessPolicy,
     now: Optional[datetime] = None,
     overrides: Sequence[Any] = (),
     offline_image: bool = False,
@@ -973,6 +984,10 @@ def assess_scanner(
     databases it did not read. Such a record is unmeasurable, not ``absent``: nothing was
     learned about whether the database exists, so the policy still decides what it does.
     """
+    # The scan-wide policy is config text, so it is read leniently here (any case,
+    # unknown text falls back to the default) rather than raising past "never
+    # raises".
+    policy = StalenessPolicy.from_text(policy) or DEFAULT_STALENESS_POLICY
     scanner_name = str(
         getattr(getattr(scanner_plugin, "config", None), "name", "") or ""
     )
@@ -1005,7 +1020,7 @@ def assess_scanner(
         except Exception as exc:  # noqa: BLE001 - a broken override never relaxes
             ASH_LOGGER.error(
                 f"Could not apply content_db_staleness_overrides to {entry.name}: {exc}; "
-                f"it is held to content_db_staleness ({policy})."
+                f"it is held to content_db_staleness ({policy.value})."
             )
             entry_policy, policy_source = policy, None
         if ctx is None:
@@ -1016,7 +1031,9 @@ def assess_scanner(
         records.append(record)
         if record.stale:
             level = (
-                logging.ERROR if record.policy == STALENESS_FAIL else logging.WARNING
+                logging.ERROR
+                if record.policy == StalenessPolicy.FAIL
+                else logging.WARNING
             )
             ASH_LOGGER.log(level, record.message())
         else:
@@ -1078,7 +1095,7 @@ def _unreadable_record(
         measured_by=str(data.get("measured_by") or ""),
         max_age=timedelta(0),
         measured_at=measured_at or datetime.now(timezone.utc),
-        policy=STALENESS_WARN,
+        policy=StalenessPolicy.WARN,
         bound_source=str(data.get("bound_source") or ""),
         bound_is_tool_default=False,
         refresh=str(data.get("refresh") or ""),
@@ -1134,6 +1151,8 @@ def stale_content_databases(
     nothing in ASH writes -- cannot fail a scan. One per database and scanner, as in
     ``content_db_records``, an enforced one kept over one that only warns.
     """
+    from automated_security_helper.schemas.sarif_schema_model import Level
+
     sarif = getattr(results, "sarif", None)
     found: Dict[Tuple[str, str], ContentDbAgeRecord] = {}
     for run in getattr(sarif, "runs", None) or []:
@@ -1167,7 +1186,11 @@ def stale_content_databases(
                         raw, exc, when if isinstance(when, datetime) else None
                     )
                 # The level is authoritative for whether it fails the scan.
-                record.policy = STALENESS_FAIL if level == "error" else STALENESS_WARN
+                record.policy = (
+                    StalenessPolicy.FAIL
+                    if level == Level.error.value
+                    else StalenessPolicy.WARN
+                )
                 if enforced_only and not record.enforced:
                     continue
                 key = (record.name, record.scanner)

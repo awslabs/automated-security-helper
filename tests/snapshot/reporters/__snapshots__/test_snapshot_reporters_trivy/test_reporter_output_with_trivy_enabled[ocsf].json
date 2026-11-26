@@ -11,6 +11,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
+      "correlation_uid": "dep/c0aab5d484033a6b38349b6cd3866eced545dd7c3dcb299183600e1ee6af62ca",
       "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
@@ -24,6 +25,9 @@
     "status_id": 1,
     "time": 1768478442000,
     "type_uid": 200201,
+    "unmapped": {
+      "ash/correlationId": "dep/c0aab5d484033a6b38349b6cd3866eced545dd7c3dcb299183600e1ee6af62ca"
+    },
     "vulnerabilities": [
       {
         "affected_code": [
@@ -59,6 +63,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
+      "correlation_uid": "dep/2caad0b7530998c9043bfbe6d8bf3da486cd6c54f14ceafe353dbe99cfe3ac6b",
       "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
@@ -72,6 +77,9 @@
     "status_id": 1,
     "time": 1768478442000,
     "type_uid": 200201,
+    "unmapped": {
+      "ash/correlationId": "dep/2caad0b7530998c9043bfbe6d8bf3da486cd6c54f14ceafe353dbe99cfe3ac6b"
+    },
     "vulnerabilities": [
       {
         "affected_code": [
@@ -107,6 +115,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
+      "correlation_uid": "dep/803a96669f6859a0b0a4e5e72c25ab455647ce929704ad0cc82f39fe9f2ff53f",
       "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
@@ -120,6 +129,9 @@
     "status_id": 1,
     "time": 1768478442000,
     "type_uid": 200201,
+    "unmapped": {
+      "ash/correlationId": "dep/803a96669f6859a0b0a4e5e72c25ab455647ce929704ad0cc82f39fe9f2ff53f"
+    },
     "vulnerabilities": [
       {
         "affected_code": [
@@ -155,6 +167,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
+      "correlation_uid": "dep/8432074309bb87c8c4bac37b8429d4a50ed6811fece0250d7118495dfff3d0b0",
       "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
@@ -168,6 +181,9 @@
     "status_id": 1,
     "time": 1768478442000,
     "type_uid": 200201,
+    "unmapped": {
+      "ash/correlationId": "dep/8432074309bb87c8c4bac37b8429d4a50ed6811fece0250d7118495dfff3d0b0"
+    },
     "vulnerabilities": [
       {
         "affected_code": [
@@ -203,6 +219,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
+      "correlation_uid": "dep/acd82e758ae65fc6896a74c2e8c54a41c653b145f3b7c1c2f1d3832330355179",
       "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
@@ -216,6 +233,9 @@
     "status_id": 1,
     "time": 1768478442000,
     "type_uid": 200201,
+    "unmapped": {
+      "ash/correlationId": "dep/acd82e758ae65fc6896a74c2e8c54a41c653b145f3b7c1c2f1d3832330355179"
+    },
     "vulnerabilities": [
       {
         "affected_code": [
@@ -251,6 +271,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
+      "correlation_uid": "dep/cac4ef0da2eb9c7a8ab6d7c5be8721223260666ab36b3270aadc67d836aa2a30",
       "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
@@ -264,6 +285,9 @@
     "status_id": 1,
     "time": 1768478442000,
     "type_uid": 200201,
+    "unmapped": {
+      "ash/correlationId": "dep/cac4ef0da2eb9c7a8ab6d7c5be8721223260666ab36b3270aadc67d836aa2a30"
+    },
     "vulnerabilities": [
       {
         "affected_code": [
@@ -299,6 +323,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
+      "correlation_uid": "dep/f228922fb4e5744ef49c87a76f26e866ea54df3b3c4f0d8b32edd7eb42a68d69",
       "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
@@ -312,6 +337,9 @@
     "status_id": 1,
     "time": 1768478442000,
     "type_uid": 200201,
+    "unmapped": {
+      "ash/correlationId": "dep/f228922fb4e5744ef49c87a76f26e866ea54df3b3c4f0d8b32edd7eb42a68d69"
+    },
     "vulnerabilities": [
       {
         "affected_code": [
@@ -347,6 +375,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
+      "correlation_uid": "dep/4d07c95194284838f09a545aa764ed48718e216159d3a96617b384d893018e51",
       "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
@@ -360,6 +389,9 @@
     "status_id": 1,
     "time": 1768478442000,
     "type_uid": 200201,
+    "unmapped": {
+      "ash/correlationId": "dep/4d07c95194284838f09a545aa764ed48718e216159d3a96617b384d893018e51"
+    },
     "vulnerabilities": [
       {
         "affected_code": [
@@ -395,6 +427,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
+      "correlation_uid": "dep/93a2aba95ed70d827aa614f8379339fff84063432ba6af5cedacb4784c648237",
       "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
@@ -408,6 +441,9 @@
     "status_id": 1,
     "time": 1768478442000,
     "type_uid": 200201,
+    "unmapped": {
+      "ash/correlationId": "dep/93a2aba95ed70d827aa614f8379339fff84063432ba6af5cedacb4784c648237"
+    },
     "vulnerabilities": [
       {
         "affected_code": [
@@ -443,6 +479,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
+      "correlation_uid": "dep/137ed28c1d5ba6833d33f26a51e339dcf60f1bd5fc792e8664e859013573da9e",
       "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
@@ -456,6 +493,9 @@
     "status_id": 1,
     "time": 1768478442000,
     "type_uid": 200201,
+    "unmapped": {
+      "ash/correlationId": "dep/137ed28c1d5ba6833d33f26a51e339dcf60f1bd5fc792e8664e859013573da9e"
+    },
     "vulnerabilities": [
       {
         "affected_code": [

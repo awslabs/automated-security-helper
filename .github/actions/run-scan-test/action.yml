@@ -9,11 +9,11 @@ inputs:
     description: "Runner OS label"
     required: true
   config-file:
-    description: "Config variant: default or community"
+    description: "Config variant: default or alpha"
     required: false
     default: "default"
   snyk-token:
-    description: "Snyk token for community plugin validation"
+    description: "Snyk token for alpha plugin validation"
     required: false
     default: ""
   oci-runner:
@@ -60,6 +60,18 @@ runs:
         refuse_command_text config-file "${IN_CONFIG_FILE}"
         refuse_command_text oci-runner "${IN_OCI_RUNNER}"
         refuse_command_text offline "${IN_OFFLINE}"
+        # Every later branch compares config-file with `alpha` alone, so any other value
+        # would fall through to the default config and the leg would pass without the
+        # alpha scanners. A caller still passing the old `community` value fails here
+        # by name instead. Fail closed, not an alias: this action is internal to the
+        # repository's workflows, so no outside caller needs a grace period.
+        case "${IN_CONFIG_FILE}" in
+          default | alpha) ;;
+          *)
+            echo "::error::config-file must be default or alpha (community was renamed alpha)."
+            exit 1
+            ;;
+        esac
 
     # WHY THE PLATFORM STRING IS DERIVED HERE RATHER THAN PASSED IN
     #
@@ -234,33 +246,33 @@ runs:
     # --config-overrides. A config file inside the scanned tree no longer chooses a
     # scanner's own config file (config/tool_config_trust.py), so the operator has
     # to; without these, bandit would report the asserts .ash/bandit.yaml skips in
-    # tests, and grype would drop .ash/.grype.yaml's only-fixed. The community
-    # legs also set ferret-scan's use_default_config this way: the community
+    # tests, and grype would drop .ash/.grype.yaml's only-fixed. The alpha
+    # legs also set ferret-scan's use_default_config this way: the alpha
     # config's own `use_default_config: false` is ignored for the same reason.
     #
-    # Community plugin tools
+    # Alpha plugin tools
     #
-    # The community legs scan with .ash/.ash_community_plugins.yaml, a config file
+    # The alpha legs scan with .ash/.ash_alpha_plugins.yaml, a config file
     # inside the scanned tree. Such a file cannot load ash_snyk_plugins, whose
     # scanner sends the scanned source to Snyk with the operator's token
-    # (config/plugin_module_trust.py), so every community scan below names it with
+    # (config/plugin_module_trust.py), so every alpha scan below names it with
     # --ash-plugin-modules instead. snyk-code is disabled in that file; loading the
     # module keeps the plugin and its config section exercised.
-    - name: Install Community Plugin Tools
-      if: inputs.config-file == 'community'
+    - name: Install Alpha Plugin Tools
+      if: inputs.config-file == 'alpha'
       shell: bash
       env:
         ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
         SNYK_TOKEN: ${{ inputs.snyk-token }}
       run: |
-        echo "Installing tools needed for community plugins..."
+        echo "Installing tools needed for alpha plugins..."
 
         # Every install below pulls a third-party binary over the network, and none
         # of them had a retry. Observed failure: snyk's npm post-install wrapper hit
         # ECONNRESET part-way through downloading snyk-win.exe, retried the download
         # successfully (shasums matched), then died renaming a temp file the failed
         # attempt had already cleaned up - taking the whole
-        # `scan (python-local, windows-latest) - Community Plugins` job with it,
+        # `scan (python-local, windows-latest) - Alpha Plugins` job with it,
         # before ASH was even invoked.
         retry() {
           local attempts=3 n=1
@@ -310,7 +322,7 @@ runs:
         # that, read from the plugin so there is one source of truth and a missing
         # constant fails loudly instead of reverting to installing latest. Moving it
         # is the plugin's fixture-matrix pass, which also re-pins the line-anchored
-        # suppressions in the community config.
+        # suppressions in the alpha config.
         FERRET_VERSION="$(python -c 'from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import RECOMMENDED_VERSION as v; print(v)')"
         if [ -z "$FERRET_VERSION" ]; then
           echo "::error::Could not read ferret-scan's recommended version from its ASH plugin. Refusing to install an unconstrained version."
@@ -320,24 +332,24 @@ runs:
         retry pip install "ferret-scan==${FERRET_VERSION}"
         ferret-scan --version
 
-    # trivy, hadolint and GuardDog are the community-plugin tools ASH can provision
+    # trivy, hadolint and GuardDog are the alpha-plugin tools ASH can provision
     # itself, so they are installed through ASH against pinned versions and SHA256s
     # (trivy and hadolint as pinned binaries, GuardDog as a uv tool at its declared
     # constraint) rather than by unpinned per-platform installs.
     #
     # --config is required and not decorative: trivy-repo, hadolint and guarddog
-    # arrive through `ash_plugin_modules` in the community config, and without that
+    # arrive through `ash_plugin_modules` in the alpha config, and without that
     # flag the installer only sees the built-in scanners and rejects each `--tool`
     # as an unknown name.
     #
-    # Scoped to these three rather than installing the whole community set, because
+    # Scoped to these three rather than installing the whole alpha set, because
     # snyk arrives through npm and ferret-scan through pip against the constraint
     # its own plugin declares; both are handled in the step above and neither
     # belongs in a binary download path. GuardDog is not requested on Windows: it
     # has no install path there and its scanner reports SKIPPED, and an explicitly
     # requested tool that cannot be installed fails the install.
-    - name: Install trivy, hadolint and GuardDog through ASH for the community plugin legs
-      if: inputs.config-file == 'community' && inputs.method == 'python-local'
+    - name: Install trivy, hadolint and GuardDog through ASH for the alpha plugin legs
+      if: inputs.config-file == 'alpha' && inputs.method == 'python-local'
       shell: bash
       env:
         ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
@@ -349,12 +361,12 @@ runs:
         # would fail for a working install and pass for none.
         if [ "${RUNNER_OS}" = "Windows" ]; then
           ashx dependencies install \
-            --config .ash/.ash_community_plugins.yaml \
+            --config .ash/.ash_alpha_plugins.yaml \
             --tool trivy-repo \
             --tool hadolint
         else
           ashx dependencies install \
-            --config .ash/.ash_community_plugins.yaml \
+            --config .ash/.ash_alpha_plugins.yaml \
             --tool trivy-repo \
             --tool guarddog \
             --tool hadolint
@@ -368,10 +380,10 @@ runs:
         ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
         ASH_TEST_CONFIG_FILE: ${{ inputs.config-file }}
       run: |
-        if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
-          ashx config validate --config .ash/.ash_community_plugins.yaml
+        if [ "${ASH_TEST_CONFIG_FILE}" = "alpha" ]; then
+          ashx config validate --config .ash/.ash_alpha_plugins.yaml
         else
-          ashx config validate --config .ash/.ash.yaml
+          ashx config validate --config .ash.yaml
         fi
 
     # The Windows half of "Set up Ruby for cfn-nag" above, deliberately placed here
@@ -508,8 +520,8 @@ runs:
         fi
         # Teed so the cache report below can count the build steps the layer cache
         # served. pipefail (bash's default here) keeps ash's exit status.
-        if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
-          ashx --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
+        if [ "${ASH_TEST_CONFIG_FILE}" = "alpha" ]; then
+          ashx --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
         else
           ashx --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
         fi
@@ -546,9 +558,9 @@ runs:
         echo "Checking for plugin execution errors..."
         export PATH="$HOME/.local/bin:$PATH"
         if command -v ashx >/dev/null 2>&1; then
-          REPORT_CMD="ashx report --format text"
+          REPORT_CMD="ashx results report --format text"
         else
-          REPORT_CMD="python -m automated_security_helper report --format text"
+          REPORT_CMD="python -m automated_security_helper results report --format text"
         fi
         # Still printed, because it is what a human reads when this step fails.
         # It is no longer what the check is computed from; see the script's module
@@ -607,8 +619,8 @@ runs:
         ashx --help
         ashx dependencies install
         ashx config get
-        if ("$env:ASH_TEST_CONFIG_FILE" -eq "community") {
-          ashx --mode local --build-target ci --verbose --no-progress --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
+        if ("$env:ASH_TEST_CONFIG_FILE" -eq "alpha") {
+          ashx --mode local --build-target ci --verbose --no-progress --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
         } else {
           ashx --mode local --build-target ci --verbose --no-progress --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
         }
@@ -627,18 +639,18 @@ runs:
         # used to be the check, and it is case-insensitive by default, so any
         # report line containing lower-case "error" inflated the count on top of
         # the legend-line offset the other legs carried.
-        & ashx report --format text 2>&1 | Write-Host
+        & ashx results report --format text 2>&1 | Write-Host
         $ReportExit = $LASTEXITCODE
         # This exit code used to be discarded outright (`$null = $LASTEXITCODE`),
         # and that was an exception this leg alone made. The container, Unix and
-        # bash legs run the same `ashx report` under `shell: bash`, which the runner
+        # bash legs run the same `ashx results report` under `shell: bash`, which the runner
         # invokes as `bash --noprofile --norc -eo pipefail {0}` -- so `-e` aborts
         # those steps when the report command fails. `shell: pwsh` is
         # `pwsh -command ". '{0}'"`, which does not abort on a native non-zero
         # exit; it only sets $LASTEXITCODE. Discarding it therefore made a report
         # failure fatal on three legs and invisible on the fourth.
         #
-        # Why that matters here rather than being cosmetic: `ashx report` failing
+        # Why that matters here rather than being cosmetic: `ashx results report` failing
         # means ASH could not load the very results file the counter below is
         # about to reach a verdict from. Measured on run 35137617199 --
         # `Error loading results file: 'charmap' codec can't decode byte 0x9d`,
@@ -653,7 +665,7 @@ runs:
         # and say it *before* the counter runs so the two outcomes cannot be
         # confused in the log.
         if ($ReportExit -ne 0) {
-          Write-Host "::error::'ashx report --format text' exited $ReportExit, so ASH could not load .ash/ash_output/ash_aggregated_results.json. This step cannot evaluate whether a plugin errored -- the result below, whatever it says, is not evidence either way. Fix the report failure printed above first."
+          Write-Host "::error::'ashx results report --format text' exited $ReportExit, so ASH could not load .ash/ash_output/ash_aggregated_results.json. This step cannot evaluate whether a plugin errored -- the result below, whatever it says, is not evidence either way. Fix the report failure printed above first."
           exit $ReportExit
         }
         # setup-python puts `python` on PATH everywhere and `python3` only on
@@ -666,7 +678,7 @@ runs:
     # The same hadolint check on Windows, in pwsh for the reason the Windows scan step
     # above gives: ASH's entry point is put ahead of MSYS2's `ash` only inside a pwsh
     # step, through the promote step's `dirs`, never through GITHUB_PATH.
-    - name: Validate community hadolint (Python Local Windows)
+    - name: Validate alpha hadolint (Python Local Windows)
       if: inputs.method == 'python-local' && inputs.config-file == 'default' && runner.os == 'Windows'
       shell: pwsh
       env:
@@ -690,7 +702,7 @@ runs:
           --scanners hadolint
         $Rc = $LASTEXITCODE
         $Python = if (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } else { "python" }
-        & $Python "${{ github.action_path }}/assert_community_scanner_ran.py" `
+        & $Python "${{ github.action_path }}/assert_alpha_scanner_ran.py" `
           (Join-Path $Out "ash_aggregated_results.json") hadolint `
           --exit-code $Rc --expect-exit 1 --min-findings 12
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -711,8 +723,8 @@ runs:
         ashx --help
         ashx dependencies install
         ashx config get
-        if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
-          ashx --mode local --build-target ci --verbose --no-progress --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
+        if [ "${ASH_TEST_CONFIG_FILE}" = "alpha" ]; then
+          ashx --mode local --build-target ci --verbose --no-progress --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
         else
           ashx --mode local --build-target ci --verbose --no-progress --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
         fi
@@ -727,20 +739,20 @@ runs:
         # Still printed, because it is what a human reads when this step fails.
         # It is no longer what the check is computed from; see the script's module
         # docstring for why counting "ERROR" in rendered prose was off by one.
-        ashx report --format text
+        ashx results report --format text
         python3 "${{ github.action_path }}/count_scanner_errors.py" \
           .ash/ash_output/ash_aggregated_results.json
 
-    # hadolint is a community scanner, so the default scans above, which list no
-    # community module, never run it, and the plain `ashx dependencies install` above
+    # hadolint is an alpha scanner, so the default scans above, which list no
+    # alpha module, never run it, and the plain `ashx dependencies install` above
     # does not install it either: its name is a tool only once its module is loaded.
     # So this installs it with the module loaded and runs that copy on the committed
     # fixture with only hadolint selected, on every OS. The fixture has known findings at every
     # hadolint level, and services/Dockerfile.broken, which hadolint cannot parse.
     # That file is an unevaluated target, so the scan is incomplete and 1 is the
-    # expected exit (#640), not 2; assert_community_scanner_ran.py then checks hadolint
+    # expected exit (#640), not 2; assert_alpha_scanner_ran.py then checks hadolint
     # ran and reported the other files' 12 findings rather than going MISSING.
-    - name: Validate community hadolint (Python Local Unix)
+    - name: Validate alpha hadolint (Python Local Unix)
       if: inputs.method == 'python-local' && inputs.config-file == 'default' && runner.os != 'Windows'
       shell: bash
       env:
@@ -758,7 +770,7 @@ runs:
         rc=$?
         set -e
         PY=python3; command -v python3 >/dev/null 2>&1 || PY=python
-        "$PY" "${{ github.action_path }}/assert_community_scanner_ran.py" \
+        "$PY" "${{ github.action_path }}/assert_alpha_scanner_ran.py" \
           "$out/ash_aggregated_results.json" hadolint --exit-code "$rc" \
           --expect-exit 1 --min-findings 12
 
@@ -767,7 +779,7 @@ runs:
     # 1, so a refusal's 3 would arrive as 1. The custom shell also drops the
     # `$ErrorActionPreference = 'stop'` the built-in one puts first and the
     # `exit $LASTEXITCODE` it puts last, so the script sets both itself.
-    # No matrix cell runs the community config through PowerShell, so this block is
+    # No matrix cell runs the alpha config through PowerShell, so this block is
     # checked by a test instead: tests/unit/test_powershell_wrapper_matches_ash.py
     # runs this block as written.
     - name: Validate ASH using PowerShell
@@ -791,15 +803,15 @@ runs:
         $runner = if ($env:OCI_RUNNER) { $env:OCI_RUNNER } else { "docker" }
         # -Config, the name Invoke-ASH declares. -ConfigFile is not one of its
         # parameters, so PowerShell passed it and the path through $AshArgs and the
-        # scan ran without the community config this leg is named for.
+        # scan ran without the alpha config this leg is named for.
         # A refusal throws with $LASTEXITCODE set (3, or 1 without a runner), and so
         # does any other error Invoke-ASH raises, with a code that is not 0. Uncaught,
         # the step would end with exit 1 whatever the code; the catch writes the error
         # record and exits with the code. The `else { 1 }` covers an error raised
         # before Invoke-ASH sets one, such as a parameter it cannot bind.
         try {
-          if ("$env:ASH_TEST_CONFIG_FILE" -eq "community") {
-            Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner -Config ".ash/.ash_community_plugins.yaml" --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
+          if ("$env:ASH_TEST_CONFIG_FILE" -eq "alpha") {
+            Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner -Config ".ash/.ash_alpha_plugins.yaml" --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
           } else {
             Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
           }
@@ -856,8 +868,8 @@ runs:
       run: |
         echo "Testing ASH using utils/ash_helpers.sh (invoke-ash) on ${ASH_TEST_OS} (${ASH_TEST_PLATFORM}) with config: ${ASH_TEST_CONFIG_FILE}"
         . ./utils/ash_helpers.sh
-        if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
-          invoke-ash --build-target ci --verbose --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
+        if [ "${ASH_TEST_CONFIG_FILE}" = "alpha" ]; then
+          invoke-ash --build-target ci --verbose --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
         else
           invoke-ash --build-target ci --verbose --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
         fi
@@ -876,7 +888,7 @@ runs:
         # Still printed, because it is what a human reads when this step fails.
         # It is no longer what the check is computed from; see the script's module
         # docstring for why counting "ERROR" in rendered prose was off by one.
-        ashx report --format text
+        ashx results report --format text
         python3 "${{ github.action_path }}/count_scanner_errors.py" \
           .ash/ash_output/ash_aggregated_results.json
 
@@ -1015,8 +1027,13 @@ runs:
     # Last, so a snapshot diff never hides one of the scan's own diagnostics above. Runs
     # even when the self-scan failed: that verdict is about this repository's findings, and
     # these snapshots only need the image, which a failed build would fail here too.
+    #
+    # Not on sh-helper: utils/ash_helpers.sh forwards to ./ash, none of these modules
+    # sources it, and every sh-helper row has a bash row on the same OS and runner whose
+    # step compares the same output (tests/unit/test_ci_container_runtime_snapshots_skip_the_sh_helper_legs.py
+    # pins both).
     - name: Snapshot the container-runtime output
-      if: ${{ !cancelled() && inputs.method != 'python-local' }}
+      if: ${{ !cancelled() && inputs.method != 'python-local' && inputs.method != 'sh-helper' }}
       shell: bash
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}

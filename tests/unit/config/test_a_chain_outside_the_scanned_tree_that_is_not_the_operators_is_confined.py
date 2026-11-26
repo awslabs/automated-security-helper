@@ -103,7 +103,7 @@ class Layout:
     def repo_config(self, document: Dict[str, Any] = GRANTS) -> Path:
         """A repository config that writes the same grants, so a trusted base
         built from the file under test would let them through."""
-        return self.write(self.repo / ".ash" / ".ash.yaml", document)
+        return self.write(self.repo / ".ash.yaml", document)
 
 
 @pytest.fixture
@@ -414,8 +414,7 @@ def test_a_link_in_the_tree_to_a_file_elsewhere_is_still_worded_as_the_trees(
     """The link is the repository's, so the sentence names the tree, not the
     outside memberships, though the file it reaches sits outside the tree."""
     host = layout.write(layout.outside / "real.yaml", GRANTS)
-    link = layout.repo / ".ash" / ".ash.yaml"
-    link.parent.mkdir(parents=True)
+    link = layout.repo / ".ash.yaml"
     try:
         link.symlink_to(host)
     except (OSError, NotImplementedError):

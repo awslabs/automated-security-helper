@@ -71,8 +71,7 @@ def _project(root, relative, config=None):
     project = root / relative
     project.mkdir(parents=True, exist_ok=True)
     if config is not None:
-        (project / ".ash").mkdir(exist_ok=True)
-        (project / ".ash" / "ash.yaml").write_text(config, encoding="utf-8")
+        (project / ".ash.yaml").write_text(config, encoding="utf-8")
     return project
 
 

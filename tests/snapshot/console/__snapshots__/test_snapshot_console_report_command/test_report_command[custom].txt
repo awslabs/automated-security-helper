@@ -1,4 +1,4 @@
-$ ashx report --format custom --log-level ERROR
+$ ashx results report --format custom --log-level ERROR
 [exit 5]
 
 [stderr]

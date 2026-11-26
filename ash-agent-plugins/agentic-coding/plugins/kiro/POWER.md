@@ -31,7 +31,7 @@ run_ash_scan(
 )
 ```
 
-Leave `severity_threshold` unset: the scan then uses the config's `global_settings.severity_threshold`. The argument (`ALL | LOW | MEDIUM | HIGH | CRITICAL`) can only tighten that threshold for one scan, never loosen it — pass it (e.g. `"HIGH"`) only when the user asks for a stricter level. For a looser level, lower the setting in `.ash/.ash.yaml` and re-scan.
+Leave `severity_threshold` unset: the scan then uses the config's `global_settings.severity_threshold`. The argument (`ALL | LOW | MEDIUM | HIGH | CRITICAL`) can only tighten that threshold for one scan, never loosen it — pass it (e.g. `"HIGH"`) only when the user asks for a stricter level. For a looser level, lower the setting in `.ash.yaml` and re-scan.
 
 Returns a dict with `scan_id`, `status: "running"`, `directory_path` (the resolved absolute scan root), and an `important.next_steps` block. **Always store the `scan_id`** — every subsequent call needs it.
 
@@ -39,7 +39,7 @@ After `failed` or `cancelled`, `results_available` is false: do not report resul
 
 Poll until `progress['is_complete']` is `true`, as the server's `important.next_steps` block says, and then read `status`; see Step 2.
 
-The MCP server always runs scans in local mode: on the server's own machine, with the scanner tools installed there, and never in a container. For container or precommit modes, use the ASH CLI directly. Scanner selection lives in `.ash/.ash.yaml`, not in tool parameters.
+The MCP server always runs scans in local mode: on the server's own machine, with the scanner tools installed there, and never in a container. For container or precommit modes, use the ASH CLI directly. Scanner selection lives in `.ash.yaml`, not in tool parameters.
 
 ## Read the results
 
@@ -101,7 +101,7 @@ For full parameter details, see [tool-reference.md](#ash-mcp-tool-reference).
 
 ## Choosing scanners
 
-ASH runs all nine scanners by default. To run only a subset, edit `.ash/.ash.yaml` at the project root before scanning — `run_ash_scan` does not accept a scanners argument. To filter results post-scan, use the `scanners` parameter on `get_scan_results`.
+ASH runs all nine scanners by default. To run only a subset, edit `.ash.yaml` at the project root before scanning — `run_ash_scan` does not accept a scanners argument. To filter results post-scan, use the `scanners` parameter on `get_scan_results`.
 
 For result-time filtering by scanner:
 
@@ -124,7 +124,7 @@ The fast checks: scan never starts → run `check_installation` first. Scan retu
      generator (prose and caveats live in its TOOL_NOTES table) and re-run it,
      then `agentic-plugins build` to propagate to every plugin backend. -->
 
-The ASH MCP server exposes twenty-two tools and five resources.
+The ASH MCP server exposes twenty-five tools and five resources.
 
 ## run_ash_scan
 
@@ -172,7 +172,7 @@ Poll `get_scan_progress` until `is_complete` is `true`, then read `status`. `is_
 
 The target and source checks have their own `error_type` values too (`scan_target_not_permitted`, `output_dir_not_permitted`, `no_source_delivered`, `session_source_mismatch`, `delivered_source_missing`, `invalid_session_id`). A directory that already has a scan is refused with `error_type: MCPResourceError` and `error_category: resource_exhausted`; `error` says the directory `already has an active scan`, or, for a scan that was cancelled or stopped at its timeout and has not finished stopping, `has a scan that is still stopping`. That `error_type` is the exception's class name, and an unexpected error while the scan is being started arrives as `MCPResourceError` too, with `error_category: unexpected_error`, so `MCPResourceError` alone does not prove a deliberate refusal: branch on `error_category`. The server's `max_concurrent_scans` limit is refused the same way (`resource_exhausted`); its `context` holds `max_concurrent_scans`: wait for a running scan to finish, then retry. The busy-directory refusal's `context` names the running scan's `scan_id` only when the scan is this session's: poll `get_scan_progress` with it, or `cancel_scan` it if it is no longer needed (`list_active_scans` lists this session's scans). Without a `scan_id`, another session's scan holds the directory and the server does not name it: wait and retry, or scan another directory. After a `cancel_scan` of that directory the refusal repeats until the scan has stopped (see `cancel_scan`): retry after a few seconds. Four more refusals carry their own `error_type`: `committed_output_files` (a file git tracks in `.ash/ash_output` where the scan writes, or that check could not finish), `session_identity_required` (the caller has no session the server issued, so a scan it could neither follow nor stop is not started), `session_scan_limit` (this session is already running `max_concurrent_scans_per_session` scans: retry once one has finished, or `cancel_scan` one) and `source_delivery_busy` (the session's delivered source is being changed: retry after the change finishes). Any other reason the scan could not be started returns `error_type: scan_start_failure`, and an unexpected error returns the exception's class name. Branch on `error_type` and `error_category`, never on the text of `error`.
 
-On failure, `error_type` is one of `bound_profile_unavailable`, `committed_output_files`, `config_check_failed`, `config_env_not_resolved`, `config_field_denied`, `config_input_not_permitted`, `config_policy_unreadable`, `delivered_source_missing`, `invalid_session_id`, `no_source_delivered`, `output_dir_not_permitted`, `output_dir_not_usable`, `scan_start_failure`, `scan_target_not_permitted`, `session_identity_required`, `session_scan_limit`, `session_source_mismatch`, `session_workspace_busy`, `source_delivery_busy` and `source_dir_not_usable`, or the class name of an exception.
+On failure, `error_type` is one of `bound_profile_unavailable`, `committed_output_files`, `config_check_failed`, `config_env_not_resolved`, `config_field_denied`, `config_input_not_permitted`, `config_policy_unreadable`, `delivered_image_missing`, `delivered_source_missing`, `invalid_session_id`, `no_source_delivered`, `output_dir_not_permitted`, `output_dir_not_usable`, `scan_start_failure`, `scan_target_not_permitted`, `session_identity_required`, `session_scan_limit`, `session_source_mismatch`, `session_workspace_busy`, `session_workspace_unavailable`, `source_delivery_busy` and `source_dir_not_usable`, or the class name of an exception.
 
 ## get_scan_progress
 
@@ -459,6 +459,43 @@ A re-delivery needs room for both trees at once, because the new clone is made b
 
 On failure, `error_type` is one of `clone_host_not_permitted`, `clone_ref_not_permitted`, `clone_timed_out`, `clone_too_large`, `clone_tree_unreadable`, `clone_url_not_permitted`, `git_checkout_failed`, `git_clone_failed`, `invalid_clone_depth`, `invalid_session_id`, `local_clone_source_refused`, `session_identity_required`, `session_workspace_unavailable`, `source_delivery_busy` and `ssh_key_not_registered`, or the class name of an exception.
 
+## set_source_image
+
+Record a container image reference as this session's scan subject.
+
+<!-- doctest: options of=mcp.set_source_image -->
+| Param | Type | Notes |
+|-------|------|-------|
+| `image_ref` | string | The image reference. For an archive you hold the bytes of, use set_source_image_archive_chunk/-finalize instead, which needs no engine and no network. |
+
+On failure, `error_type` is one of `invalid_session_id`, `session_identity_required` and `source_delivery_busy`, or the class name of an exception.
+
+## set_source_image_archive_chunk
+
+Upload one base64 chunk of a saved container image (docker save tar).
+
+<!-- doctest: options of=mcp.set_source_image_archive_chunk -->
+| Param | Type | Notes |
+|-------|------|-------|
+| `upload_id` | string | Identifier you choose, scoping this one upload. |
+| `sequence` | integer | Zero-based ordinal of this chunk. |
+| `data_b64` | string | Base64-encoded chunk payload. |
+| `last` | boolean | True on the final chunk. |
+
+On failure, `error_type` is one of `invalid_session_id`, `session_identity_required`, `session_workspace_busy` and `session_workspace_unavailable`, or the class name of an exception.
+
+## set_source_image_archive_finalize
+
+Verify an uploaded image archive and record it as this session's subject.
+
+<!-- doctest: options of=mcp.set_source_image_archive_finalize -->
+| Param | Type | Notes |
+|-------|------|-------|
+| `upload_id` | string | Identifier matching the prior chunk calls. |
+| `expected_sha256` | string | Hex sha256 the assembled archive must hash to. |
+
+On failure, `error_type` is one of `invalid_session_id`, `session_identity_required`, `session_workspace_unavailable` and `source_delivery_busy`, or the class name of an exception.
+
 ## set_source_zip_chunk
 
 Upload one base64 chunk of a zipped source tree.
@@ -578,8 +615,8 @@ When the server starts, it waits for a client; Ctrl+C stops it. If ASH is alread
 ## Scanners are MISSING
 
 **Causes:**
-1. Project too large — the server stops a scan after `scan_timeout_seconds` (default 1800 s) and reports it `failed`. The operator sets that limit in the server's `ASH_CONFIG` file; a repository's `.ash/.ash.yaml` cannot raise it. Ask the operator for a higher limit, or scan a subdirectory.
-2. Stuck scanner — call `cancel_scan(scan_id)`, wait a few seconds, then retry. Until the scan has stopped, `run_ash_scan` for the same directory can be refused as busy with `error_type: MCPResourceError` and `error_category: resource_exhausted`: retry after a few seconds. To isolate which scanner is hanging, narrow the scanner set in `.ash/.ash.yaml` and re-scan.
+1. Project too large — the server stops a scan after `scan_timeout_seconds` (default 1800 s) and reports it `failed`. The operator sets that limit in the server's `ASH_CONFIG` file; a repository's `.ash.yaml` cannot raise it. Ask the operator for a higher limit, or scan a subdirectory.
+2. Stuck scanner — call `cancel_scan(scan_id)`, wait a few seconds, then retry. Until the scan has stopped, `run_ash_scan` for the same directory can be refused as busy with `error_type: MCPResourceError` and `error_category: resource_exhausted`: retry after a few seconds. To isolate which scanner is hanging, narrow the scanner set in `.ash.yaml` and re-scan.
 3. Server-side dependency stalled — restart the MCP server. The previous scan's state is lost, but the next scan will start clean.
 
 ## The scan does not reach a final status
@@ -611,4 +648,4 @@ The server refuses to scan that directory. It always refuses system directories 
 
 `.ash` or `.ash/ash_output` in the project is a symbolic link, and ASH does not write through one. Ask the user to replace it with a directory.
 
-**Fix:** Confirm `.ash/.ash.yaml` exists at the project root and has the right syntax. Read the SARIF or `ash_aggregated_results.json` file that `get_scan_result_paths` names to see ALL findings (including suppressed) and verify the suppression rules match; a `get_scan_results` response lists findings only with `actionable_only=True`, which leaves the suppressed ones out.
+**Fix:** Confirm `.ash.yaml` exists at the project root and has the right syntax. Read the SARIF or `ash_aggregated_results.json` file that `get_scan_result_paths` names to see ALL findings (including suppressed) and verify the suppression rules match; a `get_scan_results` response lists findings only with `actionable_only=True`, which leaves the suppressed ones out.

@@ -23,6 +23,7 @@ import pytest
 import yaml
 
 from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.core.enums import SandboxMode
 from automated_security_helper.core.exceptions import (
     ASHConfigSourceError,
     ASHConfigValidationError,
@@ -710,6 +711,15 @@ def _assert_plain_str(*values) -> None:
     subclass has no SafeDumper representer and prints its class name where a
     message names the mode)."""
     for value in values:
+        # The mode is a SandboxMode member once it passes through the validated
+        # field; what it must never be is the loader's carrier subclass.
+        assert type(value) in (str, SandboxMode), (type(value).__name__, value)
+
+
+def _assert_floor_is_plain_str(*values) -> None:
+    """The floor's answer is annotated ``List[str]``: each entry is exactly a
+    ``str`` (the mode's wire spelling), not a ``SandboxMode`` member."""
+    for value in values:
         assert type(value) is str, (type(value).__name__, value)
 
 
@@ -743,7 +753,8 @@ def test_a_floor_mode_read_from_an_environment_reference_is_a_plain_str(
     floor = _floor(tmp_path, src)
     if (local, floor) != ("firejail", ["firejail"]):
         raise RuntimeError(f"premise: the floor must answer, got {(local, floor)}")
-    _assert_plain_str(local, *floor)
+    _assert_plain_str(local)
+    _assert_floor_is_plain_str(*floor)
 
 
 def test_a_floor_mode_a_patch_sets_from_a_reference_is_a_plain_str(
@@ -782,7 +793,8 @@ def test_a_floor_mode_a_patch_sets_from_a_reference_is_a_plain_str(
     floor = _floor(tmp_path, src)
     if (local, floor) != ("firejail", ["firejail"]):
         raise RuntimeError(f"premise: the floor must answer, got {(local, floor)}")
-    _assert_plain_str(local, *floor)
+    _assert_plain_str(local)
+    _assert_floor_is_plain_str(*floor)
 
 
 def test_an_operators_own_patch_to_off_turns_the_floor_off(tmp_path, monkeypatch):

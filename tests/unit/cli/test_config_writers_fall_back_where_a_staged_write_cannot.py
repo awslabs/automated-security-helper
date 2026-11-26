@@ -250,8 +250,7 @@ def test_lint_fix_reports_a_write_it_cannot_make_without_a_traceback(
     """
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
-    config_path = tmp_path / ".ash" / ".ash.yaml"
-    config_path.parent.mkdir()
+    config_path = tmp_path / ".ash.yaml"
     starting = "project_name: full-disk-probe\nscanners:\n  bandit:\n    name: bandit\n"
     config_path.write_text(starting, encoding="utf-8")
     real_open = io.open

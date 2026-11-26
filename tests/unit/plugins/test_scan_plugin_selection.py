@@ -231,7 +231,7 @@ def _reports(output_dir: Path, extension: str) -> List[str]:
 #: argv[1] is a JSON list of steps. A scan is ``{"source_dir", "output_dir",
 #: "modules"}``, or ``{"workspace_file", "output_dir"}`` for a workspace scan;
 #: ``{"list": true}`` calls the MCP ``list_scanners`` tool function, which imports the
-#: community scanner packages; ``{"subscribe": true}`` subscribes a handler defined in
+#: alpha scanner packages; ``{"subscribe": true}`` subscribes a handler defined in
 #: this program to EXECUTION_START, the way embedding code calls
 #: ``ash_plugin_manager.subscribe``, which writes ``embedded-<tree name>``. Prints one
 #: report line: per scan, the exit code, each scanner row's status, and the scan's
@@ -641,8 +641,7 @@ class TestThePluginRootNamesNoPlugin:
     def test_an_in_tree_config_naming_it_after_list_scanners_refuses(self, tmp_path):
         proc = _Process(tmp_path)
         tree = proc.tree("tree")
-        (tree / ".ash").mkdir()
-        (tree / ".ash" / ".ash.yaml").write_text(
+        (tree / ".ash.yaml").write_text(
             "project_name: tree\nash_plugin_modules:\n"
             "  - automated_security_helper.plugin_modules\n",
             encoding="utf-8",
@@ -837,9 +836,9 @@ class TestReportersFollowTheScansModules:
         workspace.mkdir()
         for key in ("api", "web"):
             project = workspace / key
-            (project / ".ash").mkdir(parents=True)
+            project.mkdir(parents=True)
             (project / "app.py").write_text("x = 1\n", encoding="utf-8")
-            (project / ".ash" / ".ash.yaml").write_text(
+            (project / ".ash.yaml").write_text(
                 f"project_name: {key}\n", encoding="utf-8"
             )
         workspace_file = workspace / "dev.code-workspace"
@@ -886,9 +885,9 @@ class TestReportersFollowTheScansModules:
         workspace = tmp_path / "ws"
         for key in ("api", "web"):
             project = workspace / key
-            (project / ".ash").mkdir(parents=True)
+            project.mkdir(parents=True)
             (project / "app.py").write_text("x = 1\n", encoding="utf-8")
-            (project / ".ash" / ".ash.yaml").write_text(
+            (project / ".ash.yaml").write_text(
                 f"project_name: {key}\n", encoding="utf-8"
             )
         workspace_file = workspace / "dev.code-workspace"

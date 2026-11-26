@@ -17,15 +17,16 @@
 │                                'ash_aggregated_results.json'.                                    │
 │                                [default: ash_aggregated_results.json]                            │
 │ --config       -c      <path>  Path to the configuration file where suppressions should be       │
-│                                saved. By default, ASH searches for ['.ash.yml', '.ash.yaml',     │
-│                                '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the      │
-│                                root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml',         │
+│                                saved. By default, ASH searches for .ash.yaml at the root, then   │
+│                                the deprecated ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml',  │
+│                                'ash.yaml', 'ash.json'] (each at the root, then in .ash/;         │
+│                                .ash.yaml only in .ash/), then ['.ashrc.toml', '.ashrc.yaml',     │
 │                                '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml',          │
 │                                'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table   │
 │                                of pyproject.toml at the root; the first found is used in the     │
 │                                scanned directory (the one holding the results' .ash/ash_output), │
 │                                or in the current directory when the results sit elsewhere. With  │
-│                                none found, suppressions go to a new .ashrc.yaml there.           │
+│                                none found, suppressions go to a new .ash.yaml there.             │
 │                                [env var: ASH_CONFIG]                                             │
 │ --help         -h              Show this message and exit.                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

@@ -574,8 +574,8 @@ class TestIgnoredConfigSources:
 
     @staticmethod
     def _two_sources(src: Path) -> Path:
-        (src / ".ash").mkdir(parents=True)
-        used = src / ".ash" / ".ash.yaml"
+        src.mkdir(parents=True)
+        used = src / ".ash.yaml"
         used.write_text("project_name: used\n", encoding="utf-8")
         (src / ".ashrc.toml").write_text('project_name = "ignored"\n', encoding="utf-8")
         return used
@@ -687,7 +687,7 @@ class TestIgnoredConfigSources:
 
         monkeypatch.delenv("ASH_CONFIG", raising=False)
         src = tmp_path / "src"
-        used = src / ".ash" / ".ash.yaml"
+        used = src / ".ash.yaml"
         used.parent.mkdir(parents=True)
         used.write_text("project_name: used\n", encoding="utf-8")
         (src / "pyproject.toml").symlink_to(tmp_path / "absent.toml")
@@ -755,10 +755,8 @@ class TestIgnoredConfigSources:
     def test_control_a_single_source_adds_no_checkpoint(self, tmp_path, monkeypatch):
         monkeypatch.delenv("ASH_CONFIG", raising=False)
         src = tmp_path / "src"
-        (src / ".ash").mkdir(parents=True)
-        (src / ".ash" / ".ash.yaml").write_text(
-            "project_name: only\n", encoding="utf-8"
-        )
+        src.mkdir(parents=True)
+        (src / ".ash.yaml").write_text("project_name: only\n", encoding="utf-8")
         engine = _EngineStub(phases_result=AshAggregatedResults())
         orch = _bare(src, tmp_path / "out")
 

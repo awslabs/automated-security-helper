@@ -77,7 +77,7 @@ REPOSITORY_CONFIG = (
 )
 
 #: Where the repository's config sits, relative to the working directory.
-REPOSITORY_CONFIG_PATH = ".ash/.ash.yaml"
+REPOSITORY_CONFIG_PATH = ".ash.yaml"
 
 #: How the refusal begins, in every wording the command has had.
 REFUSAL_START = "reporter 's3' sends findings off the host and is not enabled"
@@ -374,7 +374,7 @@ class TestTheRefusalKeepsTheGuardOnConfigFiles:
         layout = _layout(tmp_path, "project_name: from-the-repository\n")
         operator_file = tmp_path / "operator.yaml"
         operator_file.write_text(
-            "extends: work/.ash/.ash.yaml\n"
+            "extends: work/.ash.yaml\n"
             "reporters:\n"
             "  s3:\n"
             "    enabled: true\n"
@@ -464,7 +464,7 @@ class TestWhereItSendsComesFromTheOverrides:
         )
         operator_file = tmp_path / "operator.yaml"
         operator_file.write_text(
-            "extends: work/.ash/.ash.yaml\n"
+            "extends: work/.ash.yaml\n"
             "reporters:\n"
             "  s3:\n"
             "    options:\n"

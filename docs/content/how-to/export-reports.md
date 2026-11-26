@@ -67,7 +67,7 @@ every enabled reporter writes its report. In a workspace scan, a project's
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-cat > .ashrc.yaml <<'EOF'
+cat > .ash.yaml <<'EOF'
 output_formats:
   - sarif
 EOF
@@ -126,7 +126,7 @@ two reports although their IDs differ because the finding changed line, as `befo
 the second report did not record the finding, not that it was fixed; the MCP tool
 `diff_scan_results` returns the same findings under the name `resolved`. Compare full scans of the same project with the same scanner and
 rule configuration. For a workspace, compare results from the same individual
-project; do not mix them with a standalone scan. For a sharded scan, run `ash merge`
+project; do not mix them with a standalone scan. For a sharded scan, run `ashx merge`
 first. Results narrowed by `--changed-files-only` are refused. Incomplete scanner
 coverage, different recorded ignore-file exclusions, or inputs marked unscanned
 produce warnings.
@@ -219,6 +219,36 @@ when you enable the `spdx` reporter.
 - `ash.summary.md` is a Markdown summary for pull request comments. `--compact-report`
   shortens it.
 - `ash.summary.txt` is plain text for logs.
+
+## Correlate one observation across scanners {#correlation}
+
+Two scanners that find the same secret, or the same advisory against the same package,
+report two findings with two ids: finding ids deliberately include the scanner and the
+rule, and ASH never deduplicates. For grouping those findings, carrying reports also
+export a cross-scanner **correlation id**, the same value on every finding of a run that
+reports one observation:
+
+- `secret/<sha256>` on secret detections, keyed by file, start line, and workspace
+  project (plus the converted-tree marker for a converted file) — no scanner, no rule.
+  Two secrets on one line share the id; the per-scanner finding id still tells them apart.
+- `dep/<sha256>` on dependency findings, keyed by the advisory id (upper-cased), the
+  package name, and the installed version — no file or line, because SCA scanners put
+  every package of a lockfile at its line 1.
+- SAST and IaC findings carry none, by design. A location does not say *which* problem
+  two SAST tools flagged, and IaC engines spell one resource differently (template
+  logical ids vs. construct paths), so an id there would promise a correlation it cannot
+  deliver.
+
+Where it appears, always under the same absence rule (a finding with no id carries
+nothing, never an empty value): the ASFF reports' `ProductFields["ash/correlationId"]`,
+the SARIF report's `result.properties["ash/correlationId"]` (kept by the GitHub GHAS
+report too), the OCSF report's `metadata.correlation_uid` and
+`unmapped["ash/correlationId"]`, the GitLab SAST report's `details.ash_correlation_id`,
+the `correlation_id` column of the CSV, and the `correlation_id` key of carrying
+flat-JSON findings.
+
+The id groups findings and identifies none: baselines, suppressions, diffs, and trend
+matching stay keyed by the per-scanner finding id.
 
 ## Before you share a report {#share}
 

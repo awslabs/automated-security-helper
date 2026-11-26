@@ -217,9 +217,21 @@ class TestTheRegistryIsTheOnlySource:
     )
 
     def test_no_file_restates_the_grype_bound(self):
+        # The bound is declared once, in the plugins' provisioning blocks (the
+        # registry derives its table from them and holds the arithmetic). The
+        # flat copy is what hatch_build.py stages beside tool_downloads.py
+        # (gitignored; present in any tree that has been built).
+        single_source = {
+            REGISTRY,
+            REPO_ROOT / "automated_security_helper" / "base" / "plugin_provisioning.py",
+            REPO_ROOT
+            / "automated_security_helper"
+            / "assets"
+            / "plugin_provisioning.py",
+        }
         offenders = []
         for path in _source_files():
-            if path == REGISTRY:
+            if path in single_source:
                 continue
             for number, line in enumerate(
                 path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1
@@ -229,7 +241,8 @@ class TestTheRegistryIsTheOnlySource:
                         f"{path.relative_to(REPO_ROOT)}:{number}: {line.strip()}"
                     )
         assert offenders == [], (
-            "grype's database age bound is declared once, in utils/content_databases.py; "
+            "grype's database age bound is declared once, in the plugins' "
+            "provisioning blocks (derived in utils/content_databases.py); "
             "these lines restate it:\n" + "\n".join(offenders)
         )
 
@@ -672,8 +685,10 @@ class TestARaisingProbeContextHook:
         declared database instead of failing the finished scan. This pins
         the catch assess_scanner's docstring promises, which is why the
         builder itself carries no guard."""
+        from automated_security_helper.utils.content_databases import (
+            StalenessPolicy,
+        )
         from automated_security_helper.utils.content_db_staleness import (
-            STALENESS_FAIL,
             assess_scanner,
         )
 
@@ -689,7 +704,7 @@ class TestARaisingProbeContextHook:
             def content_database_probe_context(self):
                 raise TypeError("hook drift")
 
-        records = assess_scanner(_Scanner(), None, STALENESS_FAIL)
+        records = assess_scanner(_Scanner(), None, StalenessPolicy.FAIL)
 
         assert records, "grype declares a database, so a record must exist"
         for record in records:

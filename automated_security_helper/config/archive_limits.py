@@ -39,10 +39,7 @@ from typing import TYPE_CHECKING, List, Optional, Sequence
 
 from automated_security_helper.config.config_sources import describe_config_path
 from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
-from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
-    EXTRACTION_LIMIT_OPTIONS,
-    ArchiveConverterConfigOptions,
-)
+from automated_security_helper.base.extraction_limits import EXTRACTION_LIMIT_OPTIONS
 from automated_security_helper.utils.log import ASH_LOGGER
 
 if TYPE_CHECKING:
@@ -135,7 +132,9 @@ def confine_archive_limits(
         trusted_config = apply_config_overrides(trusted_config, limit_overrides)
     options = config.converters.archive.options
     trusted = trusted_config.converters.archive.options
-    defaults = ArchiveConverterConfigOptions()
+    # The options model's own defaults, read from the model the section holds
+    # (the converter's class is not imported here).
+    defaults = type(options)()
     # Split by where the capped value came from, so the warning names its source: a
     # value the file wrote is the file's, even when it equals the default; a default
     # the file did not write is the one it took by leaving the option out (it

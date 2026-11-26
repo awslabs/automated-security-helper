@@ -30,6 +30,9 @@ pytestmark = pytest.mark.unit
 REPO = Path(__file__).resolve().parents[2]
 DOCS = REPO / "docs" / "content"
 
+#: The top-level commands, including main's ``container`` and ``results`` groups
+#: (``ashx container build``, ``ashx results report``), so text merged from main
+#: that spells them with v3's name is refused like the older commands.
 SUBCOMMANDS = (
     "scan",
     "config",
@@ -41,6 +44,8 @@ SUBCOMMANDS = (
     "merge",
     "image",
     "get-genai-guide",
+    "container",
+    "results",
 )
 V3_COMMAND = re.compile(
     r"(?:^|(?<=[\s`(&;|]))ash (?:" + "|".join(SUBCOMMANDS) + r")(?=[\s`]|$)",
@@ -80,6 +85,8 @@ def test_no_page_spells_a_command_with_ash():
         "run `ash config lint` first",
         "$(ash report --format yaml)",
         "x | ash dependencies install",
+        "`ash container build --offline`",
+        "ash results report --format html",
     ],
 )
 def test_each_v3_spelling_is_reported(text):

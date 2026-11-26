@@ -11,7 +11,8 @@ The gate clones a pull request and runs ``ash scan`` over it. ASH reads its conf
 file it discovers inside the scanned tree (``_discovered_config_path``,
 interactions/run_ash_scan.py). The Terraform image's entrypoint sets ``ASH_CONFIG`` only
 when a base config was supplied, so the handler always passes ``--config`` naming a file
-outside the clone. A pull request whose own ``.ash/.ash.yaml`` adds
+outside the clone. A pull request whose own ``.ash.yaml`` (or the legacy
+``.ash/.ash.yaml``) adds
 ``global_settings.ignore_paths`` over a failing file still gets the failing verdict,
 whether or not a base config was supplied.
 
@@ -109,7 +110,12 @@ def gate(monkeypatch, tmp_path) -> ModuleType:
 
 
 def _pull_request_tree(tmp_path: pathlib.Path) -> pathlib.Path:
-    """A cloned pull request carrying its own config, in both discovered spellings."""
+    """A cloned pull request carrying its own config, in both discovered spellings.
+
+    Legacy location: the ``.ash/.ash.yaml`` copy is kept on purpose, so a pull
+    request that still plants the deprecated spelling is covered beside the
+    canonical ``.ash.yaml``.
+    """
     source = tmp_path / "ash-gate" / "src"
     (source / ".ash").mkdir(parents=True)
     (source / ".ash" / ".ash.yaml").write_text(PULL_REQUEST_CONFIG, encoding="utf-8")
@@ -209,7 +215,7 @@ def test_without_an_operator_config_ash_reads_the_pull_requests_own_file(tmp_pat
 def test_a_materialized_base_config_is_what_the_scan_reads(gate, monkeypatch, tmp_path):
     """ash-container-init writes the base config and exports ASH_CONFIG; the scan uses it."""
     source = _pull_request_tree(tmp_path)
-    base = tmp_path / "ash-config" / ".ash" / ".ash.yaml"
+    base = tmp_path / "ash-config" / ".ash.yaml"
     base.parent.mkdir(parents=True)
     base.write_text("project_name: operator-base-config\n", encoding="utf-8")
     monkeypatch.setenv("ASH_CONFIG", str(base))
@@ -241,7 +247,7 @@ def test_without_a_base_config_the_scan_names_an_operator_config_outside_the_clo
     call = capture.calls[0]
     assert call["config"] is not None and call["content"] is not None, (
         "ash was given no config file it could read, so it discovers the pull "
-        f"request's own .ash/.ash.yaml. argv={call['argv']}"
+        f"request's own .ash.yaml. argv={call['argv']}"
     )
     assert not _is_inside(call["config"], source), (
         f"the config ash reads, {call['config']}, is inside the cloned pull request"
@@ -368,7 +374,7 @@ def test_a_base_config_that_names_no_file_refuses_the_scan(gate, monkeypatch, tm
 def test_a_base_config_inside_the_clone_refuses_the_scan(gate, monkeypatch, tmp_path):
     """An ASH_CONFIG that resolves into the pull request is the pull request's file."""
     source = _pull_request_tree(tmp_path)
-    monkeypatch.setenv("ASH_CONFIG", str(source / ".ash" / ".ash.yaml"))
+    monkeypatch.setenv("ASH_CONFIG", str(source / ".ash.yaml"))
     capture = _ScanCapture()
     monkeypatch.setattr(gate, "_run", capture)
 
@@ -427,7 +433,7 @@ def test_a_base_config_rewritten_on_disk_does_not_reach_the_next_scan(
     """ash-container-init writes the base config once per sandbox, where the scan's
     own user can rewrite it. The gate reads the parameter again for every scan."""
     source = _pull_request_tree(tmp_path)
-    on_disk = tmp_path / "ash-config" / ".ash" / ".ash.yaml"
+    on_disk = tmp_path / "ash-config" / ".ash.yaml"
     on_disk.parent.mkdir(parents=True)
     on_disk.write_text("project_name: rewritten-by-an-earlier-scan\n", encoding="utf-8")
     monkeypatch.setenv("ASH_CONFIG", str(on_disk))

@@ -7,7 +7,7 @@ ferret-scan (a Go binary) and cdk-nag (which needs Node.js through jsii). Scanne
 answer ``is_python_only`` for themselves; one that does not counts only when it runs
 its tool through uv.
 
-The set is pinned over every built-in and community scanner ASH ships, constructed
+The set is pinned over every built-in and alpha scanner ASH ships, constructed
 for real, and then through ScanPhase, which is what ``--python-only`` reaches.
 """
 
@@ -47,7 +47,14 @@ AshAggregatedResults.model_rebuild()
 #: uv (bandit, cfn-lint, checkov, zizmor) or imports (detect-secrets). zizmor's
 #: wheel carries its native binary. opengrep, which also serves the name `semgrep`,
 #: is a native binary and not a uv tool, so it is not here.
-PYTHON_ONLY = {"bandit", "cfn-lint", "checkov", "detect-secrets", "zizmor"}
+PYTHON_ONLY = {
+    "bandit",
+    "cfn-lint",
+    "checkov",
+    "detect-secrets",
+    "mcp-config",
+    "zizmor",
+}
 NOT_PYTHON_ONLY = {
     "actionlint",  # a native binary, from its pinned release asset
     "cdk-nag",  # Node.js, through jsii

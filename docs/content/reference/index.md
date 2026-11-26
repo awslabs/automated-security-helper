@@ -10,12 +10,14 @@ current for the branch the site is built from. Each generated page names its gen
 | [Configuration](configuration.md) | every config key, its type, default and allowed values, and where ASH looks for config files | `scripts/generate_config_reference.py` |
 | [Environment variables](environment-variables.md) | every environment variable ASH reads, and where | `scripts/generate_env_var_reference.py` |
 | [Scanners](scanners.md) | every scanner, the tool it runs, whether it is on by default, and its options | `scripts/generate_scanner_reference.py` |
+| [Scanner facets](scanner-facets.md) | for every scanner, which facets of the shared vocabulary its native output maps into the shared pipeline, and which it drops | `scripts/generate_facets_reference.py` |
 | [Reporters](reporters.md) | every reporter, the file it writes, and its options | `scripts/generate_reporter_docs.py` |
 | [Converters](converters.md) | every converter and its options | `scripts/generate_converter_reference.py` |
 | [MCP tools](mcp-tools.md) | the MCP server's tools, resources and prompts, with their parameters | `scripts/generate_mcp_tool_reference.py` |
 | [Exit codes](exit-codes.md) | what each exit code means and which wins when several apply | written by hand |
 | [Output files](output-files.md) | the output directory layout and the results file | written by hand |
 | [Coverage by language](coverage.md) | which scanners look at which languages and file types | written by hand |
+| [Symbol resolution](symbol-resolution.md) | how a suppression's `symbol` resolves to line spans: the API, the qualified-name grammar, the fail-closed rules, languages, limits | written by hand |
 | [Python API](python-api.md) | running a scan from Python | written by hand |
 
 To regenerate a page after changing the code, run its script with `uv run python`, for example

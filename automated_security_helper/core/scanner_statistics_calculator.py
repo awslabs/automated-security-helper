@@ -31,8 +31,9 @@ from typing import Dict, Any, Optional, Tuple
 
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
 from automated_security_helper.core import status_order
-from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.core.enums import ScannerStatus, ThresholdSource
 from automated_security_helper.core.status_order import grade as grade_status
+from automated_security_helper.models.vocab import SEVERITY_COUNT_FIELDS, Severity
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerSeverityCount,
@@ -330,17 +331,19 @@ class ScannerStatisticsCalculator:
 
             # Store statistics for this scanner
             scanner_stats[scanner_name] = {
-                "suppressed": suppressed,
-                "critical": critical,
-                "high": high,
-                "medium": medium,
-                "low": low,
-                "info": info,
+                **dict(
+                    zip(
+                        SEVERITY_COUNT_FIELDS,
+                        (suppressed, critical, high, medium, low, info),
+                        strict=True,
+                    )
+                ),
                 "total": total,
                 "actionable": actionable,
                 "duration": duration,
                 "threshold": shown_threshold,
-                "threshold_source": threshold_source,
+                # The wire spelling: this dict feeds every report surface.
+                "threshold_source": threshold_source.value,
                 "threshold_from_env": threshold_from_env,
                 "excluded": excluded,
                 "dependencies_missing": dependencies_missing,
@@ -577,7 +580,7 @@ class ScannerStatisticsCalculator:
         dict_counts = ScannerStatisticsCalculator._dict_result_counts(
             asharp_model, scanner_name
         )
-        for field in ("suppressed", "critical", "high", "medium", "low", "info"):
+        for field in SEVERITY_COUNT_FIELDS:
             setattr(counts, field, getattr(counts, field) + getattr(dict_counts, field))
 
         return (
@@ -638,7 +641,7 @@ class ScannerStatisticsCalculator:
                 counts = ScannerSeverityCount.model_validate(report["severity_counts"])
             except ValueError:
                 continue
-            for field in ("suppressed", "critical", "high", "medium", "low", "info"):
+            for field in SEVERITY_COUNT_FIELDS:
                 setattr(total, field, getattr(total, field) + getattr(counts, field))
         return total
 
@@ -854,22 +857,22 @@ class ScannerStatisticsCalculator:
             Number of actionable findings based on the threshold
         """
         counts = {
-            "CRITICAL": critical,
-            "HIGH": high,
-            "MEDIUM": medium,
-            "LOW": low,
-            "INFO": info,
+            Severity.CRITICAL: critical,
+            Severity.HIGH: high,
+            Severity.MEDIUM: medium,
+            Severity.LOW: low,
+            Severity.INFO: info,
         }
         return sum(
             count
             for severity, count in counts.items()
-            if severity_fails_threshold(severity, threshold)
+            if severity_fails_threshold(severity.value, threshold)
         )
 
     @staticmethod
     def get_scanner_threshold_info(
         asharp_model: AshAggregatedResults, scanner_name: str
-    ) -> Tuple[str, str]:
+    ) -> Tuple[str, ThresholdSource]:
         """Get the threshold and threshold source for a scanner.
 
         This method determines the severity threshold that should be used for a specific scanner
@@ -904,7 +907,7 @@ class ScannerStatisticsCalculator:
     @staticmethod
     def get_scanner_threshold_details(
         asharp_model: AshAggregatedResults, scanner_name: str
-    ) -> Tuple[str, str, str, bool]:
+    ) -> Tuple[str, str, ThresholdSource, bool]:
         """``get_scanner_threshold_info`` plus the shown form and the provenance.
 
         ``(grading value, shown form, source, from env)``, as
@@ -921,7 +924,7 @@ class ScannerStatisticsCalculator:
     @staticmethod
     def _threshold_resolution(
         asharp_model: AshAggregatedResults, scanner_name: str
-    ) -> Tuple[str, str, str, bool]:
+    ) -> Tuple[str, str, ThresholdSource, bool]:
         """(grading value, shown form, source, from env) for one scanner's threshold.
 
         The shown form is what report surfaces print: an external section's
@@ -950,7 +953,7 @@ class ScannerStatisticsCalculator:
             return (
                 ASH_DEFAULT_SEVERITY_LEVEL,
                 ASH_DEFAULT_SEVERITY_LEVEL,
-                "unavailable",
+                ThresholdSource.UNAVAILABLE,
                 False,
             )
 
@@ -966,7 +969,7 @@ class ScannerStatisticsCalculator:
 
         # Initialize scanner_threshold to None
         scanner_threshold = None
-        scanner_threshold_def = "global"
+        scanner_threshold_def = ThresholdSource.GLOBAL
         # The form report surfaces show. None until a branch below finds a
         # spelling that differs from the grading value (today: the written
         # ${VARIABLE} reference of an env-read external threshold).
@@ -977,7 +980,7 @@ class ScannerStatisticsCalculator:
         if (
             scanner_config_entry
             and isinstance(scanner_config_entry, dict)
-            # Only a mapping holds options. A community plugin's section can
+            # Only a mapping holds options. An out-of-tree plugin's section can
             # write ``options: null`` (or a scalar); read as a mapping it raised
             # TypeError here and aborted the metrics after the scan had run.
             and isinstance(scanner_config_entry.get("options"), dict)
@@ -1048,7 +1051,7 @@ class ScannerStatisticsCalculator:
                     # The record holds only a reference whose variable the
                     # load read, so a recorded reference is an environment read.
                     threshold_from_env = shown_threshold is not None
-                scanner_threshold_def = "config"
+                scanner_threshold_def = ThresholdSource.CONFIG
         elif scanner_config_entry and hasattr(scanner_config_entry, "options"):
             if hasattr(scanner_config_entry.options, "severity_threshold"):
                 scanner_threshold_from_config = (
@@ -1056,7 +1059,7 @@ class ScannerStatisticsCalculator:
                 )
                 if scanner_threshold_from_config is not None:
                     scanner_threshold = scanner_threshold_from_config
-                    scanner_threshold_def = "config"
+                    scanner_threshold_def = ThresholdSource.CONFIG
                     # A typed (builtin) section validates an env-read value to
                     # the plain resolved word, so no marker survives here. The
                     # load recorded the read with its written reference, so
@@ -1072,9 +1075,23 @@ class ScannerStatisticsCalculator:
 
         # The scanner's own threshold when it has one, otherwise the global one: the
         # rule ScannerExecutor grades each target's report by, from the same helper.
-        evaluation_threshold, scanner_threshold_def = resolve_scanner_threshold(
+        evaluation_threshold, resolved_source = resolve_scanner_threshold(
             scanner_threshold, ash_conf, scanner_name=scanner_name
         )
+        # The ingest site: the resolver (utils/severity_ladder.py) answers the
+        # source as its wire word.
+        try:
+            scanner_threshold_def = ThresholdSource(resolved_source)
+        except ValueError:
+            # A word that is no source of ASH's must not abort the statistics
+            # pass after the scan ran: this one row reads as the global source,
+            # as an unrecognized status reads as ERROR in unified_metrics.
+            ASH_LOGGER.warning(
+                f"Scanner {scanner_name} has an unrecognized threshold source "
+                f"{resolved_source!r}; its row is written as "
+                f"{ThresholdSource.GLOBAL.value}"
+            )
+            scanner_threshold_def = ThresholdSource.GLOBAL
         # The kept reference form describes where the scanner's own threshold
         # came from. Keep it while the resolver still sources the graded value
         # from that config entry, and show what is graded, with its source,
@@ -1084,7 +1101,7 @@ class ScannerStatisticsCalculator:
         # printing it would put the environment's value in every report. A
         # literal config value has no kept form to drop and shows the graded
         # value either way.
-        if scanner_threshold_def != "config":
+        if scanner_threshold_def is not ThresholdSource.CONFIG:
             shown_threshold = None
             threshold_from_env = False
         # resolve_scanner_threshold answers source "config" for a scanner
@@ -1093,7 +1110,7 @@ class ScannerStatisticsCalculator:
         # global one to ASH_DEFAULT_SEVERITY_LEVEL. So a kept reference form
         # whose value resolved blank was dropped just above with its source, and
         # a kept form is never paired with another source.
-        if shown_threshold is None and scanner_threshold_def == "global":
+        if shown_threshold is None and scanner_threshold_def is ThresholdSource.GLOBAL:
             # The global threshold is a validated field too; same record read.
             shown_threshold = ScannerStatisticsCalculator._recorded_reference_shown(
                 ash_conf, ("global_settings", "severity_threshold")
@@ -1136,10 +1153,10 @@ class ScannerStatisticsCalculator:
                 # its default, which sent the resolution to the global one.
                 shown_threshold = unreadable
                 evaluation_threshold = recorded_level
-                scanner_threshold_def = "config"
+                scanner_threshold_def = ThresholdSource.CONFIG
                 threshold_from_env = True
             elif (
-                scanner_threshold_def == "global"
+                scanner_threshold_def is ThresholdSource.GLOBAL
                 and (
                     unreadable
                     := ScannerStatisticsCalculator._unreadable_reference_shown(
@@ -1308,12 +1325,18 @@ class ScannerStatisticsCalculator:
         dependencies_missing = False
         error = False
 
-        match report.get("status"):
-            case "MISSING":
+        # The ingest point for the row's status text: a member, or None for text that
+        # is no ScannerStatus (the ``case _`` arm).
+        try:
+            recorded = ScannerStatus(report.get("status"))
+        except ValueError:
+            recorded = None
+        match recorded:
+            case ScannerStatus.MISSING:
                 dependencies_missing = True
-            case "ERROR":
+            case ScannerStatus.ERROR:
                 error = True
-            case "SKIPPED" | "FAILED" | "PASSED":
+            case ScannerStatus.SKIPPED | ScannerStatus.FAILED | ScannerStatus.PASSED:
                 # All three are verdicts the scanner reached about its own run, and none of
                 # them says anything about configuration. SKIPPED is in this list rather than
                 # setting ``excluded`` because it reports a fact about the input -- there was
@@ -1969,7 +1992,7 @@ class ScannerStatisticsCalculator:
         )
 
         if error:
-            return "ERROR"
+            return ScannerStatus.ERROR.value
 
         # The same rule get_unified_scanner_metrics applies: stored target counters
         # that cannot be read (a string, a bool, a negative, a failure count with
@@ -1983,7 +2006,7 @@ class ScannerStatisticsCalculator:
         )
 
         if counters_unusable(*target_counts(asharp_model, scanner_name)):
-            return "ERROR"
+            return ScannerStatus.ERROR.value
 
         # Counted before the excluded and dependencies_missing branches, matching the precedence
         # in ``unified_metrics.get_unified_scanner_metrics``. Two functions that answer "what is
@@ -2005,20 +2028,20 @@ class ScannerStatisticsCalculator:
         )
 
         if actionable > 0:
-            return "FAILED"
+            return ScannerStatus.FAILED.value
 
         if excluded:
-            return "SKIPPED"
+            return ScannerStatus.SKIPPED.value
 
         if dependencies_missing:
-            return "MISSING"
+            return ScannerStatus.MISSING.value
 
         if ScannerStatisticsCalculator.scanner_evaluated_nothing(
             asharp_model, scanner_name
         ):
-            return "SKIPPED"
+            return ScannerStatus.SKIPPED.value
 
-        return "PASSED"
+        return ScannerStatus.PASSED.value
 
     @staticmethod
     def get_summary_statistics(asharp_model: AshAggregatedResults) -> Dict[str, Any]:
@@ -2179,8 +2202,7 @@ class ScannerStatisticsCalculator:
                 asharp_model, scanner_name
             )
             dict_finding_count += sum(
-                getattr(dict_counts, field)
-                for field in ("suppressed", "critical", "high", "medium", "low", "info")
+                getattr(dict_counts, field) for field in SEVERITY_COUNT_FIELDS
             )
 
         # Compare counts

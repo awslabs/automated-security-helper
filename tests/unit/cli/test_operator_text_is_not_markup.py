@@ -669,8 +669,7 @@ class TestRepositoryTextIsShownNotObeyed:
         """The refusal shows an OSC 52 and a C1 CSI as escapes and breaks the
         "::add-mask::hidden.yaml" command form, so stdout holds no workflow
         command."""
-        (in_tmp / "src" / ".ash").mkdir()
-        (in_tmp / "src" / ".ash" / ".ash.yaml").write_text(
+        (in_tmp / "src" / ".ash.yaml").write_text(
             'extends: "nope\\e]52;c;ZXZpbA==\\a\\x9b2K\\n::add-mask::hidden.yaml"\n',
             encoding="utf-8",
         )

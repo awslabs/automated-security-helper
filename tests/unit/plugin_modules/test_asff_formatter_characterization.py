@@ -31,7 +31,10 @@ import pytest
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.models.flat_vulnerability import (
+    FlatVulnerability,
+    correlation_id_for,
+)
 from automated_security_helper.plugin_modules.ash_builtin.reporters.asff_formatter import (
     ASFF_SCHEMA_VERSION,
     COMPANY_NAME,
@@ -75,6 +78,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.utils.finding_identity import (
+    correlation_target,
     identity_keys,
     relative_path,
     relative_to_scan_root,
@@ -104,6 +108,7 @@ def _oracle_prepare(
     target: str,
     model_project: str | None,
     source_dir: Any,
+    correlation_scope: str,
 ) -> dict[str, Any]:
     flat = FlatVulnerability.from_sarif_result(result, tool_name, "UNKNOWN")
     identity = flat.identity
@@ -114,6 +119,23 @@ def _oracle_prepare(
             f"finding Id can be derived for it; {formatter.nothing}"
         )
     project = flat.workspace_project or model_project
+    identity = relative_to_scan_root(
+        identity, source_dir, resolve_root=not formatter.offline
+    )
+    # The correlation id: the one deliberate extension of the oracle since it
+    # was frozen, mirrored here the way the package fields were when they were
+    # added. The formatter now reads the flatten-assigned id off the model
+    # (utils/sarif_utils.shared_correlation_ids); the oracle keeps the
+    # per-result spelling, whose value agrees on the differential's inputs
+    # (no run-tag-only secret classification, no secret stored under an
+    # absolute path with a scan root — the two shapes where the per-result
+    # recomputation diverged, pinned in test_correlation_id_surfaces).
+    flat.correlation_id = correlation_id_for(
+        flat,
+        target=correlation_scope,
+        identity=identity,
+        default_project=model_project,
+    )
     return {
         "flat": flat,
         "result": result,
@@ -124,9 +146,7 @@ def _oracle_prepare(
         ),
         "project": project,
         "target_key": _target_key(target, project),
-        "identity": relative_to_scan_root(
-            identity, source_dir, resolve_root=not formatter.offline
-        ),
+        "identity": identity,
         "message": _without_code_blocks(flat.description or ""),
     }
 
@@ -184,6 +204,7 @@ def _oracle_to_asff(
         ),
         "ash/packageName": flat.package_name,
         "ash/packageVersion": flat.package_version,
+        "ash/correlationId": flat.correlation_id,
     }
 
     return {
@@ -230,6 +251,9 @@ def _oracle_build(
     )
     target = formatter.target
     model_project = _model_project(model)
+    correlation_scope = correlation_target(
+        getattr(model.metadata, "project_name", None)
+    )
     prepared: list[dict[str, Any]] = []
     for run in (model.sarif.runs if model.sarif else None) or []:
         tool_name = "unknown"
@@ -244,6 +268,7 @@ def _oracle_build(
                     target=target,
                     model_project=model_project,
                     source_dir=formatter.source_dir,
+                    correlation_scope=correlation_scope,
                 )
             )
     keys = identity_keys(

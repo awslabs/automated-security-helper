@@ -71,14 +71,14 @@ def test_the_note_is_printed_beside_errors(tmp_path):
         "project_name: demo\n"
         "fail_on_findings: banana\n"
         "scanners:\n"
-        "  my-community-scanner:\n"
+        "  my-alpha-scanner:\n"
         "    options:\n"
         "      anything: 1\n",
     )
 
     assert result.exit_code == 3, result.output
     assert NOTE in result.output, result.output
-    assert "scanners.my-community-scanner" in result.output, result.output
+    assert "scanners.my-alpha-scanner" in result.output, result.output
 
 
 def test_control_built_in_sections_only_get_no_note(tmp_path):

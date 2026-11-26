@@ -630,7 +630,7 @@ SARIF upload alone you do not need this option.
 ## Gate on new findings {#baseline}
 
 A full scan of the default branch can be saved as a baseline for later local or
-precommit scans. `ash scan --baseline PATH` removes matched SARIF findings from
+precommit scans. `ashx scan --baseline PATH` removes matched SARIF findings from
 the shared results used by reports, the summary, and the exit code. Additional
 (non-SARIF) report findings are not filtered. It also matches findings that only moved
 lines. The saved results record a SHA-256 digest and match counts, not the path.
@@ -669,7 +669,7 @@ repository; make it available only to trusted jobs.
     fi
     printf '::stop-commands::%s\n' "${token}"
     status=0
-    ash scan --mode local --no-progress \
+    ashx scan --mode local --no-progress \
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
       --baseline "$BASELINE_DIR/ash_aggregated_results.json" 2>&1 || status=$?
     printf '\n::%s::\n' "${token}"

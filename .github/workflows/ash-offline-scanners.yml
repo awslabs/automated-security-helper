@@ -35,7 +35,7 @@ name: ASH - Offline-capable scanners (non-blocking)
 #
 # NOT COVERED: the scanners whose offline outcome is degraded or not-run (grype,
 # trivy, semgrep, opengrep, detect-secrets, checkov, guarddog, npm-audit, snyk) and
-# the community scanners that need extra module loading (betterleaks, hadolint,
+# the alpha scanners that need extra module loading (betterleaks, hadolint,
 # ferret-scan); syft is left to the real-scanner offline tests in ash-unified-ci.yml.
 
 on:
@@ -71,13 +71,13 @@ jobs:
           python-version: "3.12"
           install-ash: "false"
       - name: Set up Ruby for cfn-nag
-        uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
+        uses: ruby/setup-ruby@20eb24b0d509e2b9ed9b6d42ddfeb992915e0564 # v1.341.0
         with:
           ruby-version: "3.3"
       - name: Install ASH with the cdk extra, and every scanner
         run: |
           pip install ".[cdk]"
-          ash dependencies install
+          ashx dependencies install
       # Offline pair only, with every proxy at a closed port. --require makes a
       # scanner that is MISSING, ERROR or SKIPPED unsandboxed a failure, so
       # "completed" means it ran, not that it was absent. --sandbox bwrap needs
@@ -102,7 +102,7 @@ jobs:
           NO_PROXY: ""
         run: |
           python scripts/verify_sandbox_scanner_parity.py \
-            --sandbox bwrap --ash ash \
+            --sandbox bwrap --ash ashx \
             --require bandit,cdk-nag,cfn-nag,cfn-lint,cfn-guard,actionlint,gitleaks,zizmor \
             --report "$PARITY_REPORT"
       - name: Collect the report and scan output

@@ -1,7 +1,7 @@
 # Frequently asked questions
 
 Short answers, each with a link to the page that has the details. The config examples are
-keys to add to your ASH config file. `ashx config init` writes one, `.ashrc.yaml`, in the
+keys to add to your ASH config file. `ashx config init` writes one, `.ash.yaml`, in the
 current directory.
 
 ## Why does my first scan exit 1?
@@ -41,7 +41,7 @@ dependency versions locked in that release's `uv.lock`.
 
 ## Is there a container image?
 
-ASH publishes no image. `ashx build-image` builds one from a release tag, and
+ASH publishes no image. `ashx container build` builds one from a release tag, and
 `ashx --mode container` builds one and runs the scan in it. ASH uses the first of finch,
 docker, nerdctl, and podman that it finds on your `PATH`, or the one you name with
 `--oci-runner`. The default image runs as a non-root user whose UID and GID you can set;
@@ -173,7 +173,7 @@ See [Run ASH in GitHub Actions](how-to/ci/github-actions.md).
 Yes. With `--offline`, ASH runs every scanner in its offline mode and installs nothing,
 except npm-audit, which does not run offline. Some scanners still make requests; only the
 scanner sandbox, or container mode with `--offline`, removes the network itself. The rules and vulnerability databases must be in
-place first; an image built with `ashx build-image --offline` contains them. Each database
+place first; an image built with `ashx container build --offline` contains them. Each database
 has an age bound, from a day to a month, and by default a scan fails when one is past it
 (an image built with `OFFLINE=YES` only warns for trivy's database), so plan to rebuild
 offline images often. See [Run ASH offline](how-to/run-offline.md) and

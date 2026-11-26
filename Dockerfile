@@ -63,7 +63,7 @@ RUN apt-get clean && \
     apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
-    ca-certificates=20*deb12u* \
+    ca-certificates=20* \
     python3-venv=3.11.2-1+b1 \
     git=1:2.39.5-0+deb12u3 \
     tree=2.1.0-1 \
@@ -89,6 +89,7 @@ RUN chmod +x /usr/local/bin/with-retry
 COPY automated_security_helper/assets/install-pinned-tool.py /usr/local/bin/install-pinned-tool
 COPY automated_security_helper/utils/tool_downloads.py /ash-pins/utils/tool_downloads.py
 COPY automated_security_helper/core/exceptions.py /ash-pins/core/exceptions.py
+COPY automated_security_helper/base/plugin_provisioning.py /ash-pins/base/plugin_provisioning.py
 RUN chmod +x /usr/local/bin/install-pinned-tool
 ARG UV_VERSION="0.13.9"
 RUN ASH_PINS_DIR=/ash-pins with-retry 'install-pinned-tool uv -b /root/.local/bin'
@@ -292,7 +293,7 @@ RUN echo "Upgrading OS packages for BUILD_DATE_EPOCH=${BUILD_DATE_EPOCH}" && \
     apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
-    ca-certificates=20*deb12u* \
+    ca-certificates=20* \
     curl=7.88.1-10+deb12u15 \
     git=1:2.39.5-0+deb12u3 \
     gnupg=2.2.40-1.1+deb12u2 \
@@ -434,6 +435,7 @@ ENV PATH="/usr/local/bin:$PATH"
 COPY automated_security_helper/assets/install-pinned-tool.py /usr/local/bin/install-pinned-tool
 COPY automated_security_helper/utils/tool_downloads.py /ash-pins/utils/tool_downloads.py
 COPY automated_security_helper/core/exceptions.py /ash-pins/core/exceptions.py
+COPY automated_security_helper/base/plugin_provisioning.py /ash-pins/base/plugin_provisioning.py
 RUN chmod +x /usr/local/bin/install-pinned-tool
 # Every `install-pinned-tool <tool>` from here on also installs that tool's license and
 # notice files under this directory, read from the release archive it has just
@@ -454,6 +456,12 @@ RUN syft --version
 ARG GRYPE_VERSION="v0.122.1"
 RUN with-retry 'install-pinned-tool grype -b /usr/local/bin'
 RUN grype --version
+
+# crane resolves a tag-only image reference to its digest at scan time, without a
+# container engine (utils/image_digest_resolver.py). Same pinned-asset path as grype.
+ARG CRANE_VERSION="v0.22.1"
+RUN with-retry 'install-pinned-tool crane -b /usr/local/bin'
+RUN crane version
 
 # actionlint backs the builtin actionlint scanner. Same pinned-asset path as syft and
 # grype.
@@ -581,7 +589,7 @@ RUN set -ue; mkdir -p "${TRIVY_CACHE_DIR}"; chmod 755 "${TRIVY_CACHE_DIR}"; \
         echo "offline provisioning verified: trivy database present"; \
     fi
 
-# hadolint, the community Dockerfile linter, from its pinned release asset like the tools
+# hadolint, the alpha Dockerfile linter, from its pinned release asset like the tools
 # above. Its asset is the executable itself rather than an archive; install-pinned-tool
 # handles that through ToolAsset.archive. ASH runs it as a separate process and never
 # links to it. It is GPL-3.0-only, so its entry in THIRD_PARTY_LICENSES gives it, under
@@ -592,7 +600,7 @@ ARG HADOLINT_VERSION="v2.15.1"
 RUN with-retry 'install-pinned-tool hadolint -b /usr/local/bin'
 RUN hadolint --version
 
-# betterleaks, the community secret scanner by gitleaks' author, from its pinned
+# betterleaks, the alpha secret scanner by gitleaks' author, from its pinned
 # release asset (an archive, like gitleaks). ASH runs it as a separate process. It is
 # MIT-licensed, so its entry in THIRD_PARTY_LICENSES installs its LICENSE under
 # ${ASH_THIRD_PARTY_DIR}/betterleaks.
@@ -704,17 +712,31 @@ ENV _ASH_EXEC_MODE="local"
 # that only this install fetches, was never put in place. The build is online either
 # way (it fetched the rulesets and databases above); the finished image keeps the ENV.
 #
-# The community plugin modules that ship with ASH and bring tools of their own are
-# loaded for this install only (ASH_COMMUNITY_PLUGIN_MODULES), so those tools
+# The alpha plugin modules that ship with ASH and bring tools of their own are
+# loaded for this install only (ASH_ALPHA_PLUGIN_MODULES), so those tools
 # (GuardDog's uv tool among them) are installed and pinned too, and the image carries
 # them; a scan in the image still loads a module only when it is listed. trivy-repo,
 # snyk and ferret are not in the list: their tools come another way.
-ARG ASH_COMMUNITY_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
+ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
+# The pre-rename name of the build argument, honored until ASH 3.9.0: a value given
+# for it, an explicitly empty one included, wins over ASH_ALPHA_PLUGIN_MODULES below.
+# The default is a sentinel because an empty-string default cannot tell "not given"
+# from --build-arg ASH_COMMUNITY_PLUGIN_MODULES="". A build that gives the old name
+# warns on stderr.
+ARG ASH_COMMUNITY_PLUGIN_MODULES="__UNSET__"
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     uv_tmp="$(mktemp -d)" && \
+    if [ "${ASH_COMMUNITY_PLUGIN_MODULES}" = "__UNSET__" ]; then \
+        modules="${ASH_ALPHA_PLUGIN_MODULES}"; \
+    else \
+        echo "WARNING: the ASH_COMMUNITY_PLUGIN_MODULES build argument is deprecated:" \
+            "the community tier is now called alpha, so use ASH_ALPHA_PLUGIN_MODULES." \
+            "The old name is accepted until ASH 3.9.0." >&2 && \
+        modules="${ASH_COMMUNITY_PLUGIN_MODULES}"; \
+    fi && \
     { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 ASH_OFFLINE=NO \
     ashx dependencies install --bin-path "${ASH_BIN_PATH}" ${pins} \
-    --config-overrides "ash_plugin_modules+=[${ASH_COMMUNITY_PLUGIN_MODULES}]"; \
+    --config-overrides "ash_plugin_modules+=[${modules}]"; \
     status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
 ENV PATH="${ASH_BIN_PATH}:$PATH"
 
@@ -726,7 +748,7 @@ RUN with-retry 'install-pinned-tool --licenses-only bandit cfn-lint checkov guar
 RUN zizmor --version
 
 #
-# GuardDog (community scanner). Installed by `ash dependencies install` above through
+# GuardDog (alpha scanner). Installed by `ash dependencies install` above through
 # uv, with the version and interpreter the scanner pins
 # (GUARDDOG_DEFAULT_VERSION_CONSTRAINT, GUARDDOG_PYTHON_REQUEST in
 # guarddog_scanner.py). Checked here so a failed install fails the build instead
@@ -851,15 +873,29 @@ ENV ASH_GROUP=${ASH_GROUP}
 
 ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 # Pinned as in the core stage: this user's uv tool directory starts empty, so the
-# Python tools are installed again here and would otherwise float. The same community
+# Python tools are installed again here and would otherwise float. The same alpha
 # modules are loaded for it; an ARG does not reach a stage built FROM another, so it
 # is declared again (a unit test keeps the two equal).
-ARG ASH_COMMUNITY_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
+ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
+# The pre-rename name of the build argument, honored until ASH 3.9.0: a value given
+# for it, an explicitly empty one included, wins over ASH_ALPHA_PLUGIN_MODULES below.
+# The default is a sentinel because an empty-string default cannot tell "not given"
+# from --build-arg ASH_COMMUNITY_PLUGIN_MODULES="". A build that gives the old name
+# warns on stderr.
+ARG ASH_COMMUNITY_PLUGIN_MODULES="__UNSET__"
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     uv_tmp="$(mktemp -d)" && \
+    if [ "${ASH_COMMUNITY_PLUGIN_MODULES}" = "__UNSET__" ]; then \
+        modules="${ASH_ALPHA_PLUGIN_MODULES}"; \
+    else \
+        echo "WARNING: the ASH_COMMUNITY_PLUGIN_MODULES build argument is deprecated:" \
+            "the community tier is now called alpha, so use ASH_ALPHA_PLUGIN_MODULES." \
+            "The old name is accepted until ASH 3.9.0." >&2 && \
+        modules="${ASH_COMMUNITY_PLUGIN_MODULES}"; \
+    fi && \
     { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 ASH_OFFLINE=NO \
     ashx dependencies install --bin-path "${ASH_BIN_PATH}" ${pins} \
-    --config-overrides "ash_plugin_modules+=[${ASH_COMMUNITY_PLUGIN_MODULES}]"; \
+    --config-overrides "ash_plugin_modules+=[${modules}]"; \
     status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
 # GuardDog again, for the non-root user's own uv tool install.
 RUN guarddog --version

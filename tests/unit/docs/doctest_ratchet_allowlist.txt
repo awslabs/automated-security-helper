@@ -15,13 +15,10 @@ contributing/releases.md
 developer-guide/high-end-design-review.md
 developer-guide/interface-design.md
 developer-guide/interface-review.md
+docs/plugins/alpha/guarddog-plugin.md
+docs/plugins/alpha/hadolint-plugin.md
 docs/plugins/builtin/actionlint.md
 docs/plugins/builtin/cfn-lint-and-cfn-guard.md
 docs/plugins/builtin/trivy.md
-docs/plugins/community/guarddog-plugin.md
-docs/plugins/community/hadolint-plugin.md
-docs/plugins/community/index.md
 how-to/agent-plugins.md
-personas/index.md
-reference/index.md
 support.md

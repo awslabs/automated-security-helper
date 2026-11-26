@@ -185,6 +185,9 @@ WHEEL_MOUNT = "/ash-wheel"
 #: The repository the pages install ASH from, at the release tag.
 RELEASE_REPOSITORY = "awslabs/automated-security-helper"
 REQUIREMENT = f"{DISTRIBUTION}[cdk]"
+#: What the scan workflow installs: the pages' requirement plus the ``symbols`` extra the
+#: symbol-based suppression references need.
+SCAN_REQUIREMENT = f"{DISTRIBUTION}[cdk,symbols]"
 
 #: The runners each kind of pipeline block runs under.
 RUNNERS_OF_KIND: Mapping[str, frozenset[str]] = {
@@ -246,7 +249,7 @@ AFTER_THE_SCAN = "${{ !cancelled() }}"
 #: install, from the ``ash-repo`` repository at the ``ash-version`` ref, the two inputs
 #: the block's rewrite sets to the base repository and the head commit.
 CALLED_SCAN_SOURCE = (
-    REQUIREMENT
+    SCAN_REQUIREMENT
     + " @ git+https://github.com/${{ inputs.ash-repo }}@${{ inputs.ash-version }}"
 )
 #: The statements, by the id of the step that holds them, with which the scan workflow
@@ -260,12 +263,12 @@ CALLED_SCAN_SOURCE = (
 #: statement in a step with another id.
 _SOURCE_WRITERS = {
     "ash-source": (
-        f'echo "ASH_UVX_SOURCE={REQUIREMENT} @ '
+        f'echo "ASH_UVX_SOURCE={SCAN_REQUIREMENT} @ '
         'git+https://github.com/${repo}@${version_url}" >> "${GITHUB_ENV}"'
     ),
     "ash-pin": (
         "{\n"
-        f'  echo "ASH_UVX_SOURCE={REQUIREMENT} @ '
+        f'  echo "ASH_UVX_SOURCE={SCAN_REQUIREMENT} @ '
         'git+https://github.com/${ASH_REPO}@${COMMIT}"\n'
         '  echo "ASH_ASSETS_URL=https://raw.githubusercontent.com/'
         '${ASH_REPO}/${COMMIT}/automated_security_helper/assets"\n'

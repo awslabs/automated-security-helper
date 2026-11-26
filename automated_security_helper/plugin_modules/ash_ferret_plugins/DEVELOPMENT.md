@@ -108,8 +108,8 @@ docs/
 └── content/
     └── docs/
         └── plugins/
-            └── community/
-                ├── index.md         # Community plugins index (update when adding)
+            └── alpha/
+                ├── index.md         # Alpha plugins index (update when adding)
                 └── ferret-scan-plugin.md  # Full user documentation
 ```
 
@@ -443,8 +443,8 @@ When making changes to the plugin:
 ### Documentation Locations
 
 - **User docs**: `automated_security_helper/plugin_modules/ash_ferret_plugins/README.md`
-- **Full docs**: `docs/content/docs/plugins/community/ferret-scan-plugin.md`
-- **Community index**: `docs/content/docs/plugins/community/index.md`
+- **Full docs**: `docs/content/docs/plugins/alpha/ferret-scan-plugin.md`
+- **Alpha index**: `docs/content/docs/plugins/alpha/index.md`
 - **Developer docs**: `automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md` (this file)
 
 ## Common Maintenance Tasks
@@ -632,7 +632,7 @@ required for excludes to work.
 What `use_default_config` actually controls is whether the bundled config's *validator and
 profile configuration* (IP `internal_urls`, social-media patterns, the named profiles) is
 loaded at all. Choose `false` when you want only ferret-scan's built-in defaults plus your
-explicit ASH options (as `.ash_community_plugins.yaml` does); choose `true` (the default)
+explicit ASH options (as `.ash_alpha_plugins.yaml` does); choose `true` (the default)
 to pick up the bundled validator patterns. Either way, CLI `ferret-scan --exclude`/`ferret-scan --recursive` win.
 
 Caveat: this reasoning applies to the *bundled* config, whose `defaults` block declares no
@@ -654,7 +654,7 @@ This applies to Python source, YAML config, markdown documentation, and any othe
 scanned file type. The fix is to rename the variable to something neutral (e.g.,
 `SETTING`, `CONFIG_VALUE`, `TEST_PARAM`) in test fixtures and documentation examples.
 If renaming isn't practical (e.g., documentation explaining the problem), add a
-suppression with line number to both `.ash/.ash.yaml` and `.ash/.ash_community_plugins.yaml`.
+suppression with line number to both `.ash.yaml` and `.ash/.ash_alpha_plugins.yaml`.
 
 ## False Positive Suppression and CI
 
@@ -719,7 +719,7 @@ false positives with ASH's own controls:
 1. **`exclude_patterns`** in the ferret scanner block for whole directories that only
    ever produce noise (build output, vendored trees).
 2. **Path-scoped suppressions** (`rule_id: API_KEY_OR_SECRET`) in
-   `.ash/.ash_community_plugins.yaml` for specific FP files/globs.
+   `.ash/.ash_alpha_plugins.yaml` for specific FP files/globs.
 
 **How the suppression behaves.** ASH applies `global_settings.suppressions` during result
 *aggregation*, after ferret-scan runs. ferret-scan still emits the finding into its own
@@ -741,13 +741,13 @@ matched on the *name*, never a real credential:
 | `tests/unit/cli/mcp/test_sessions.py` (2 locals) | Test locals named for session objects. Suppressed by this exact path (not `tests/**`) so a real hardcoded credential added to another test later is not silently hidden. |
 
 **Gotcha — do not quote the offending line in a suppression reason.** The suppression
-`reason` text lives in `.ash/.ash_community_plugins.yaml`, a file ferret-scan also scans
+`reason` text lives in `.ash/.ash_alpha_plugins.yaml`, a file ferret-scan also scans
 (`.ash/` is not excluded). Writing the `keyword` + assignment shape verbatim makes the
 reason itself a new `API_KEY_OR_SECRET` finding. Paraphrase instead (e.g. "a login/session
 object field") — the existing entries do this deliberately.
 
 **Verification (must stay true).** With the suppressions in place:
-`ashx scan --scanners ferret-scan --config .ash/.ash_community_plugins.yaml` reports
+`ashx scan --scanners ferret-scan --config .ash/.ash_alpha_plugins.yaml` reports
 ferret-scan **PASSED with 0 actionable findings** (8 total: 2 PASSPORT + 6
 API_KEY_OR_SECRET, all suppressed). If a future ferret-scan version changes which lines
 trip the detector, re-run that scan, read the new hits, and add/adjust suppressions —
@@ -761,12 +761,12 @@ mechanism.
 ### Suppression Strategy
 
 ASH supports suppressions in the config file under `global_settings.suppressions`.
-Ferret-scan suppressions must be added to **both** `.ash/.ash.yaml` and
-`.ash/.ash_community_plugins.yaml` — the PR scan workflow uses `.ash.yaml`
-while the community validation workflow uses `.ash_community_plugins.yaml`.
-(Exception: ferret-scan is only *enabled* in `.ash_community_plugins.yaml`, so
+Ferret-scan suppressions must be added to **both** `.ash.yaml` and
+`.ash/.ash_alpha_plugins.yaml` — the PR scan workflow uses `.ash.yaml`
+while the alpha validation workflow uses `.ash_alpha_plugins.yaml`.
+(Exception: ferret-scan is only *enabled* in `.ash_alpha_plugins.yaml`, so
 ferret-specific rules like `API_KEY_OR_SECRET` only need to live there. This is
-**load-bearing**: if anyone enables ferret-scan in `.ash/.ash.yaml`, the ferret
+**load-bearing**: if anyone enables ferret-scan in `.ash.yaml`, the ferret
 suppressions above must be copied there too, or PR scans will go red with no coverage.)
 
 Suppressions with `line_start`/`line_end` fields are the preferred approach for
@@ -802,14 +802,14 @@ ids carry no granular qualifier.
 | Situation | Approach |
 |-----------|----------|
 | Test fixtures with secret-like variable names | Rename to neutral names (`SETTING`, `CONFIG_VALUE`, `TEST_PARAM`) |
-| Documentation explaining the detection pattern | Add a suppression with `line_start`/`line_end` to both `.ash/.ash.yaml` and `.ash/.ash_community_plugins.yaml` |
+| Documentation explaining the detection pattern | Add a suppression with `line_start`/`line_end` to both `.ash.yaml` and `.ash/.ash_alpha_plugins.yaml` |
 | Hardcoded PII in test data generators | Use generator functions with `random.seed()` for reproducibility |
 | Hex-like strings that trigger entropy detectors | Generate values at runtime, not as string literals in source |
 
 ### Adding a Suppression
 
-Add entries under `global_settings.suppressions` in **both** `.ash/.ash.yaml` and
-`.ash/.ash_community_plugins.yaml`:
+Add entries under `global_settings.suppressions` in **both** `.ash.yaml` and
+`.ash/.ash_alpha_plugins.yaml`:
 
 ```yaml
 global_settings:
@@ -861,13 +861,13 @@ When editing files that have line-specific suppressions, verify the line numbers
 are still correct in **both** config files. The validation script's check #10
 (`SUPPRESSION-COVERAGE`) does not look at where a range points: it fails a keyword
 hit that only entries without `line_start` cover. For the line-pinned
-`SECRET-SECRET-KEYWORD` entries in `.ash_community_plugins.yaml`,
+`SECRET-SECRET-KEYWORD` entries in `.ash_alpha_plugins.yaml`,
 `tests/unit/test_ci_ferret_self_scan_pins.py` fails when the line an entry was
 written for is outside its range, and names the line to use. A new line-pinned
 entry needs a row in that test, holding a fragment of its line. The test reads only
-`.ash_community_plugins.yaml`; a pinned entry in `.ash/.ash.yaml` is not checked.
+`.ash_alpha_plugins.yaml`; a pinned entry in `.ash.yaml` is not checked.
 `SECRET-SECRET-KEYWORD` is a detect-secrets rule id, and detect-secrets is off in the
-community config, so the test keeps these entries accurate in case it is turned on.
+alpha config, so the test keeps these entries accurate in case it is turned on.
 
 ### Pre-Push Validation Script (`scripts/validate_ferret_plugin.py`)
 
@@ -889,9 +889,9 @@ The script checks for:
 | `TEST-COUNT` | Ensures the unit test count hasn't regressed below 67 |
 | `WINDOWS-PATH` | `str(Path)` instead of `Path.as_posix()` in CLI argument building — backslashes break ferret-scan on Windows |
 | `EXCLUDE-MULTIPLE-ARGS` | Looping over exclude patterns to append individual `ferret-scan --exclude` args instead of joining into one comma-separated value |
-| `FERRET-IN-ASH-YAML` | ferret-scan registered in `.ash.yaml` instead of `.ash_community_plugins.yaml` (it's a community plugin) |
+| `FERRET-IN-ASH-YAML` | ferret-scan registered in `.ash.yaml` instead of `.ash_alpha_plugins.yaml` (it's an alpha plugin) |
 | `CONFIG-OVERRIDE-EXCLUDES` | *(removed 2026-09-14 — false premise; ferret-scan CLI args override the bundled config's defaults, so excludes are honoured regardless of `use_default_config`. See gotcha §10.)* |
-| `SUPPRESSION-COVERAGE` | A SECRET-SECRET-KEYWORD hit in ferret plugin files covered only by `.ash_community_plugins.yaml` entries without `line_start` (it does not check where a pinned range points) |
+| `SUPPRESSION-COVERAGE` | A SECRET-SECRET-KEYWORD hit in ferret plugin files covered only by `.ash_alpha_plugins.yaml` entries without `line_start` (it does not check where a pinned range points) |
 
 These checks mirror what CI's `--ignore-suppressions` scan will flag. Passing this
 script locally means no surprises on the PR.
@@ -947,7 +947,7 @@ by the ASH Pydantic model. The two config layers are completely independent:
 
 | Layer | File / Source | Validated by | Contains |
 |-------|--------------|-------------|----------|
-| ASH plugin options | `.ash/.ash.yaml` → `scanners.ferret-scan.options` | `FerretScannerConfigOptions` (Pydantic) | Plugin behaviour: confidence, checks, recursive, profile, etc. |
+| ASH plugin options | `.ash.yaml` → `scanners.ferret-scan.options` | `FerretScannerConfigOptions` (Pydantic) | Plugin behaviour: confidence, checks, recursive, profile, etc. |
 | ferret-scan tool config | `ferret-config.yaml` (passed via `--config`) | ferret-scan binary | Tool behaviour: validators, patterns, profiles, defaults, redaction, suppressions |
 
 ### Why "unsupported" options in the config file are safe
@@ -1022,7 +1022,7 @@ pip install ferret-scan
 ferret-scan --version
 ```
 
-Ensure the plugin is enabled in `.ash/.ash.yaml`:
+Ensure the plugin is enabled in `.ash.yaml`:
 ```yaml
 ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_ferret_plugins
@@ -1213,7 +1213,7 @@ uv run ashx scan --source-dir tests/test_data/scanners/ferret-scan --scanners fe
 ```bash
 #!/bin/bash
 # Save as test-ferret-plugin.sh
-# Assumes plugin is enabled in .ash/.ash.yaml
+# Assumes plugin is enabled in .ash.yaml
 
 set -e
 
@@ -1270,7 +1270,7 @@ rm -rf .ash/ash_output
 ## Scanner Return Contract
 
 The `scan()` return type convention is not formally documented in ASH but is
-consistent across all built-in and community scanners (surveyed: bandit, cdk-nag,
+consistent across all built-in and alpha scanners (surveyed: bandit, cdk-nag,
 cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft,
 snyk-code, trivy-repo). This plugin follows the same contract.
 
@@ -1340,12 +1340,12 @@ fully scanned — coverage cut short by a timeout/budget, or the file could not 
 ## ASH Integration Registration
 
 When adding this plugin to an ASH installation (or contributing it upstream), three
-files outside the plugin directory must be updated. The Trivy community plugin follows
-this same pattern. The Snyk plugin is not in `.ash/.ash_community_plugins.yaml`: that
+files outside the plugin directory must be updated. The Trivy alpha plugin follows
+this same pattern. The Snyk plugin is not in `.ash/.ash_alpha_plugins.yaml`: that
 file is inside the scanned tree, and such a file cannot load a plugin package that
 sends the scanned source off the host, so CI passes it with `--ash-plugin-modules`.
 
-### 1. Register in `.ash/.ash_community_plugins.yaml`
+### 1. Register in `.ash/.ash_alpha_plugins.yaml`
 
 Add the plugin module to `ash_plugin_modules`:
 
@@ -1381,7 +1381,7 @@ scanners:
 > validator/profile patterns. (It is **not** needed for excludes: CLI `ferret-scan --exclude` and
 > `ferret-scan --recursive` win over the config's defaults regardless; see gotcha 10.)
 >
-> `.ash/.ash_community_plugins.yaml` is inside the scanned tree, and from such a file
+> `.ash/.ash_alpha_plugins.yaml` is inside the scanned tree, and from such a file
 > `use_default_config` and `profile` are ignored with a warning, because they choose
 > which part of ferret-scan's config is used (`config/tool_config_trust.py`). The CI
 > scans therefore also pass
@@ -1395,7 +1395,7 @@ scanners:
 
 ### 2. Update CI workflow (`.github/workflows/ash-repo-scan-validation.yml`)
 
-Add a `pip install ferret-scan` step in the "Install Community Plugin Tools" block,
+Add a `pip install ferret-scan` step in the "Install Alpha Plugin Tools" block,
 alongside the Snyk and Trivy installs:
 
 <!-- doctest: illustrative reason="installs ferret-scan from the network, as one step of a workflow in this repository" -->
@@ -1409,9 +1409,9 @@ ferret-scan --version
 echo "ferret-scan installation completed!"
 ```
 
-### 3. Update community plugin index (`docs/content/docs/plugins/community/index.md`)
+### 3. Update alpha plugin index (`docs/content/docs/plugins/alpha/index.md`)
 
-Add ferret-scan to the "Available Community Plugins" list:
+Add ferret-scan to the "Available Alpha Plugins" list:
 
 ```markdown
 - **[Ferret Scan Plugin](ferret-scan-plugin.md)** - Integrates Ferret Scan for

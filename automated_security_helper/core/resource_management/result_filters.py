@@ -10,9 +10,13 @@ mcp_get_scan_results into smaller, purpose-specific views.
 
 import copy
 from typing import Any, Dict, List, Optional, TypeGuard
+
+from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.models.vocab import SEVERITY_BUCKETS
 from automated_security_helper.utils.scanner_names import selection_key
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_THRESHOLDS,
+    SUPPRESSED_COUNT_KEY,
     result_severity,
 )
 
@@ -24,7 +28,7 @@ ARTIFACT_PATH_PROPERTY = "workspace_artifact_path"
 
 #: The per-severity buckets a summary carries, in the order the summary lists
 #: them. ``suppressed`` is a bucket of its own, as it is in SummaryStats.
-_SEVERITY_KEYS = ("critical", "high", "medium", "low", "info", "suppressed")
+_SEVERITY_KEYS = (*SEVERITY_BUCKETS, SUPPRESSED_COUNT_KEY)
 
 #: The buckets ``total`` counts. SummaryStats.total is "the sum of all
 #: non-suppressed severity counts" (models/asharp_model.py), and the per-scanner
@@ -34,16 +38,12 @@ _SEVERITY_KEYS = ("critical", "high", "medium", "low", "info", "suppressed")
 #: ``finding_count``, the other every bucket including suppressed, so the same
 #: scanner read as 5 findings under a scanners filter and 6 under a severities
 #: filter that selected all six buckets.
-_COUNTED_SEVERITY_KEYS = ("critical", "high", "medium", "low", "info")
+_COUNTED_SEVERITY_KEYS = SEVERITY_BUCKETS
 
 #: ``scanner_results[*].status`` -> the SummaryStats outcome counter it lands in.
-_OUTCOME_COUNTERS = {
-    "PASSED": "passed",
-    "FAILED": "failed",
-    "MISSING": "missing",
-    "SKIPPED": "skipped",
-    "ERROR": "error",
-}
+#: One counter per ScannerStatus member, named by the member's lowercase value (the
+#: counter field names of SummaryStats); a test pins it against the model's fields.
+_OUTCOME_COUNTERS = {member: member.value.lower() for member in ScannerStatus}
 
 
 #: The coverage fields a results document carries beside ``status``: whether the
@@ -94,10 +94,13 @@ def _outcome_counter(data: Dict[str, Any]) -> Optional[str]:
     count a lower bound shown as exact. A status that is not a string, or a
     word the model does not have, feeds no counter.
     """
-    status = data.get("status", "PASSED")
+    status = data.get("status", ScannerStatus.PASSED.value)
     if not isinstance(status, str):
         return None
-    return _OUTCOME_COUNTERS.get(status.upper())
+    try:
+        return _OUTCOME_COUNTERS[ScannerStatus(status.upper())]
+    except ValueError:
+        return None
 
 
 def _records_a_breakdown(severity_counts: Any) -> TypeGuard[Dict[Any, Any]]:
@@ -333,12 +336,7 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
 
     summary["findings_summary"] = {
         "by_severity": {
-            "critical": _severity("critical"),
-            "high": _severity("high"),
-            "medium": _severity("medium"),
-            "low": _severity("low"),
-            "info": _severity("info"),
-            "suppressed": _severity("suppressed"),
+            **{bucket: _severity(bucket) for bucket in _SEVERITY_KEYS},
             "total": _stat("total"),
             "actionable": _stat("actionable"),
         },
@@ -366,7 +364,7 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
         # and _outcome_counter read it: the scan_stats above count it as
         # passed, so the row shown here and the completed count read it the
         # same way instead of calling it "UNKNOWN" and leaving it out.
-        status = scanner_data.get("status", "PASSED")
+        status = scanner_data.get("status", ScannerStatus.PASSED.value)
         severity_counts = scanner_data.get("severity_counts", {})
 
         scanner_info = {
@@ -376,12 +374,7 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
             "suppressed_findings": scanner_data.get("suppressed_finding_count", 0),
             "duration": scanner_data.get("duration", 0),
             "by_severity": {
-                "critical": severity_counts.get("critical", 0),
-                "high": severity_counts.get("high", 0),
-                "medium": severity_counts.get("medium", 0),
-                "low": severity_counts.get("low", 0),
-                "info": severity_counts.get("info", 0),
-                "suppressed": severity_counts.get("suppressed", 0),
+                bucket: severity_counts.get(bucket, 0) for bucket in _SEVERITY_KEYS
             },
         }
 

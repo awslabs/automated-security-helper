@@ -11,7 +11,7 @@ client, such an option is ignored with a warning. The warning gives the reason
 warning ends with, ``confinement_remedy.KEEP_A_SETTING``, rather than one of its
 own, so the advice reads the same wherever the setting was.
 
-Each case writes the option into the scanned repository's ``.ash/.ash.yaml``,
+Each case writes the option into the scanned repository's ``.ash.yaml``,
 resolves the config as a scan does, and asks the scanner for the value.
 """
 
@@ -154,8 +154,7 @@ def _clean_environment(monkeypatch):
 def _repo(tmp_path: Path, name: str, option: str, value: str) -> Path:
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
-    (repo / ".ash").mkdir()
-    (repo / ".ash" / ".ash.yaml").write_text(
+    (repo / ".ash.yaml").write_text(
         "project_name: remedy\n"
         f"scanners:\n  {name}:\n    options:\n      {option}: {value}\n",
         encoding="utf-8",

@@ -4,8 +4,10 @@
  Show new, carried and fixed findings over a series of saved ASH scans.
 
 ┌─ Arguments ─────────────────────────────────────────────────────────────────────────────────────┐
-│   files      <path>  ASH scan results JSON files, one per run. They are put in chronological    │
-│                      order by report id. At least two.                                          │
+│   files      <path>  ASH scan results JSON files, one per run. When every file names one of     │
+│                      ASH's timestamped report ids they are put in chronological order by it;    │
+│                      otherwise they are kept in the order given, which the output says. At      │
+│                      least two.                                                                 │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
 │ --history          <path>       Read the run history recorded under this scan output directory  │

@@ -304,7 +304,6 @@ def _package_sites() -> Counter:
 _ASH = "automated_security_helper"
 _INSTALLER = f"{_ASH}/assets/install-pinned-tool.py"
 _INSTALLS = "the standalone tool installer: the install and staging directories"
-_CONFIG = "the config file the operator names or ASH resolved"
 _DOWNLOADS = "tool installs, download staging and the asset cache under ASH's home"
 _RULES_INSTALLS = (
     "the cfn-guard rules directory beside the tool installs (rules_bundles.rules_root): "
@@ -385,6 +384,10 @@ _CONTAINER_ENV_DIR = (
     "a new mode 0700 mkdtemp directory outside the source and output directories "
     "(the function refuses one inside either), the file created with O_EXCL at 0600"
 )
+_ASH_LOCK = (
+    "the repository's own .ash.lock, written by `ash suppress`: a staging file "
+    "beside it, renamed over it in one step"
+)
 _MCP_SESSION_WORKSPACE = (
     "the MCP server's workspace root: a session's workspace directory, renamed to a "
     "hidden sibling under the registry lock before it is removed; the rename moves "
@@ -394,6 +397,8 @@ _MCP_SESSION_WORKSPACE = (
 #: (module, function, kind) -> (number of such calls, where they write). Each writes
 #: outside every output directory, or is the guarded implementation itself.
 WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
+    (f"{_ASH}/utils/ash_lock.py", "AshLock.save", "write_text"): (1, _ASH_LOCK),
+    (f"{_ASH}/utils/ash_lock.py", "AshLock.save", "os.replace"): (1, _ASH_LOCK),
     # Of the two Path.open calls in `download`, this one writes: the file
     # `target.open("wb")` creates. The other is in NOT_WRITES.
     (_INSTALLER, "download", "Path.open"): (1, _INSTALLS),
@@ -417,6 +422,13 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
     (f"{_ASH}/cli/config.py", "_ensure_output_gitignore", "write_text"): (
         1,
         _PROJECT_ASH_DIR,
+    ),
+    (f"{_ASH}/core/plugin_conformance.py", "_materialized", "shutil.copytree"): (
+        1,
+        (
+            "a fixture template copied into the conformance run's own scratch "
+            "directory, which is empty and outside every output directory"
+        ),
     ),
     (f"{_ASH}/config/ash_config.py", "_staged_beside", "os.open"): (
         1,
@@ -490,7 +502,7 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         "the MCP upload workspace, where a client's source is assembled",
     ),
-    (f"{_ASH}/cli/mcp/session_paths.py", "mark_session_workspace", "touch"): (
+    (f"{_ASH}/config/session_paths.py", "mark_session_workspace", "touch"): (
         1,
         _MCP_SESSIONS,
     ),
@@ -518,7 +530,7 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
     ): (1, _MCP_SESSIONS),
     (f"{_ASH}/cli/mcp/sessions.py", "_a_scan_holds", "open"): (1, _MCP_SESSIONS),
     (
-        f"{_ASH}/cli/mcp/profile_registry.py",
+        f"{_ASH}/config/session_profiles.py",
         "_replace_staged",
         "os.replace",
     ): (1, _MCP_PROFILE_COPY),
@@ -539,6 +551,14 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         "_set_aside_for_removal",
         "os.rename",
     ): (1, _MCP_SESSION_WORKSPACE),
+    # The image-archive finalize moves the assembled upload into the session's
+    # own image directory, after the sha and the same-file check, under the
+    # upload lock: the move of a file the session workspace already holds.
+    (
+        f"{_ASH}/cli/mcp/source_delivery.py",
+        "set_source_image_archive_finalize",
+        "os.replace",
+    ): (1, "the MCP upload workspace, where a client's image archive is assembled"),
     (f"{_ASH}/cli/mcp_tools.py", "mcp_validate_config", "write_text"): (
         1,
         "a TemporaryDirectory of its own",
@@ -797,6 +817,12 @@ NOT_WRITES: Dict[Site, Tuple[int, str]] = {
     (f"{_ASH}/cli/mcp/source_delivery.py", "_finalize_zip_upload", "Path.open"): (
         1,
         "nothing: it reads a member of the uploaded zip",
+    ),
+    # `tarfile.open(archive, "r:")` reads a saved image's member names to pick the
+    # stereoscope scheme; the detector cannot read the mode of a tarfile.open().
+    (f"{_ASH}/utils/image_tool_targets.py", "archive_scheme", "Path.open"): (
+        1,
+        "nothing: it reads the member names of the saved image",
     ),
     (f"{_ASH}/cli/mcp_server.py", "_keep_stdout_off_the_wire", "os.open"): (
         1,

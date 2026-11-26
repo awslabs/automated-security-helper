@@ -8,7 +8,7 @@ reads. To scan against it anyway, pass --allow-stale-content-db or set `content_
   Content database grype-db (grype): the time it was built could not be read (ValueError: grype executable not found),
 so it cannot be shown to be inside its 120h bound (grype's own bound). The scan fails: a clean result from a stale
 database is not evidence of a clean target. To refresh it, run `grype db update` with network access, or rebuild the
-offline image (`ashx build-image --offline`) so it downloads a current database. To scan against it anyway, pass
+offline image (`ashx container build --offline`) so it downloads a current database. To scan against it anyway, pass
 --allow-stale-content-db or set `content_db_staleness: warn` in the ASH config.
 
 ERROR (1) Exiting because the scan was incomplete: 3 selected scanner(s) did not evaluate everything they were given

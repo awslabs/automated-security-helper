@@ -197,7 +197,10 @@ class TestOtherEntryPointsDoNotWarn:
     def test_a_subcommand_emits_no_deprecation(self, capsys):
         from typer.testing import CliRunner
 
-        result = CliRunner().invoke(cli_main.app, ["report", "--help"])
+        # `results report`, not the top-level `report`: the top-level spelling is
+        # itself deprecated (main grouped the results commands under `results`),
+        # and its help says so, which is not the notice this control is about.
+        result = CliRunner().invoke(cli_main.app, ["results", "report", "--help"])
         assert result.exit_code == 0
         assert "deprecated" not in result.output
         assert "deprecated" not in capsys.readouterr().err

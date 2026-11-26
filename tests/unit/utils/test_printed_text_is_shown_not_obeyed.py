@@ -455,6 +455,12 @@ STANDALONE = {
         "the container build runs it by path before ASH or anything ASH depends on "
         "is installed"
     ),
+    "assets/polyfills/checkov_json_array_hook/sitecustomize.py": (
+        "the tool's own interpreter imports it at startup, before any tool code "
+        "and with ASH not importable there; its broken-chain report mirrors "
+        "stock site.execsitecustomize (sys.excepthook under PYTHONVERBOSE, one "
+        "stderr line otherwise)"
+    ),
 }
 #: What exempts one call: a reason, given where the call is.
 _PRAGMA = re.compile(r"#\s*print-ok:\s*\S")
@@ -809,7 +815,10 @@ def test_the_exempted_prints_are_the_ones_listed():
         }
 
     assert exempted == EXEMPTED_CALLS
-    assert set(STANDALONE) == {"assets/install-pinned-tool.py"}
+    assert set(STANDALONE) == {
+        "assets/install-pinned-tool.py",
+        "assets/polyfills/checkov_json_array_hook/sitecustomize.py",
+    }
 
 
 @pytest.mark.unit

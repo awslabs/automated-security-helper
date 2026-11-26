@@ -19,7 +19,7 @@ and push it:
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
 ```bash
 export ASH_IMAGE_NAME=registry.example.com/security/ash:4.0.0
-ash build-image --no-run --oci-runner docker --ash-revision-to-install v4.0.0 \
+ashx container build --no-run --oci-runner docker --ash-revision-to-install v4.0.0 \
   --container-uid 1001 --container-gid 1001
 docker push "$ASH_IMAGE_NAME"
 ```
@@ -114,7 +114,7 @@ config:
 
 <!-- doctest: run fixture=empty expect-exit=0 -->
 ```bash
-printf 'fail_on_findings: false\n' > .ashrc.yaml
+printf 'fail_on_findings: false\n' > .ash.yaml
 ashx scan --scanners detect-secrets
 ```
 
@@ -123,7 +123,7 @@ path, with every symbolic link followed, so the check uses `pwd -P`:
 
 <!-- doctest: run fixture=empty -->
 ```bash
-grep -F "Using ASH configuration from $(pwd -P)/.ashrc.yaml" .ash/ash_output/ash.log
+grep -F "Using ASH configuration from $(pwd -P)/.ash.yaml" .ash/ash_output/ash.log
 ```
 
 The scan exits 0 although the finding is still there. Scan again with your config:
@@ -248,7 +248,7 @@ rebuild the image on a schedule with it:
 
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
 ```bash
-ash build-image --no-run --force --oci-runner docker --ash-revision-to-install v4.0.0 \
+ashx container build --no-run --force --oci-runner docker --ash-revision-to-install v4.0.0 \
   --container-uid 1001 --container-gid 1001
 docker push "$ASH_IMAGE_NAME"
 ```
@@ -261,7 +261,7 @@ findings current. Rebuild online images at least weekly, so the scanner tools ge
 fixes. Keep `content_db_staleness: fail` in the operator config; a repository cannot
 relax it while you pass `--config`. To hold trivy's database to its bound in an
 offline image too, also set `content_db_staleness_offline_image_default: false`. To read the age of the cached grype and trivy databases against those bounds without
-running a scan, use [`ash dependencies check --offline`](../reference/cli.md#dependencies-check)
+running a scan, use [`ashx dependencies check --offline`](../reference/cli.md#dependencies-check)
 ([Check cached database ages](../how-to/run-offline.md#check-caches)). [Run ASH offline](../how-to/run-offline.md) covers air-gapped hosts,
 and [Content databases](../concepts/content-databases.md) lists every bound.
 

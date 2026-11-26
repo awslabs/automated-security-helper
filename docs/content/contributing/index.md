@@ -111,7 +111,7 @@ option is in the [CLI reference](../reference/cli.md).
 
 | Directory | What it holds |
 |-----------|---------------|
-| `automated_security_helper/` | The package: the CLI and MCP server (`cli/`), configuration models (`config/`), the scan phases (`core/`), plugin base classes (`base/`), built-in and community plugins (`plugin_modules/`), result models (`models/`), JSON schemas (`schemas/`), and shared utilities (`utils/`) |
+| `automated_security_helper/` | The package: the CLI and MCP server (`cli/`), configuration models (`config/`), the scan phases (`core/`), plugin base classes (`base/`), built-in and alpha plugins (`plugin_modules/`), result models (`models/`), JSON schemas (`schemas/`), and shared utilities (`utils/`) |
 | `tests/` | Unit, integration, and snapshot tests, test data, and test helpers; see [Test your change](testing.md) |
 | `docs/` | `docs/content/` is this site, built with mkdocs from `mkdocs.yml` |
 | `scripts/` | Generators for the reference pages, the docs checks, the version template manager, and the verification scripts some CI jobs run |
@@ -215,7 +215,7 @@ does not merge.
 | `docs-examples` | every runnable shell and Python block in the docs, one test per page | through `required-checks` |
 | `build-docs` | `mkdocs build --strict`, and `scripts/docs_versions.py check` on the versioned site | through `required-checks` |
 | `converter-integration (<os>)` | the converter integration tests on macOS and Windows | through `required-checks` |
-| `scan (<method>, <os>)` | real scans by every way of running ASH: local, the Python container launcher, `./ash`, PowerShell, each container runtime, offline, and with the community plugins | through `required-checks` |
+| `scan (<method>, <os>)` | real scans by every way of running ASH: local, the Python container launcher, `./ash`, PowerShell, each container runtime, offline, and with the alpha plugins | through `required-checks` |
 | `external-target scan (<os>)`, `multi-project attribution (<os>)` | a scan of a directory outside the repository; a workspace scan that keeps findings with their projects | through `required-checks` |
 | `sandbox escape (<os>)`, `sandbox scanner parity (<sandbox>, <os>)` | the sandbox backends contain a scanner; each scanner gives the same results with and without a sandbox | through `required-checks` |
 | `deploy-tree AWS helpers (moto server)` | the helper scripts in `deploy/`, against a local moto server | through `required-checks` |

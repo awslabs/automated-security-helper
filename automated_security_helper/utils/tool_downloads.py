@@ -88,6 +88,9 @@ Known limitations
 from dataclasses import dataclass
 from typing import Optional
 
+from automated_security_helper.base.plugin_provisioning import (
+    tool_versions as _declared_tool_versions,
+)
 from automated_security_helper.core.exceptions import ToolNotProvisionableError
 
 # Platform/architecture pair, in the vocabulary cli/dependencies.py already uses:
@@ -151,30 +154,17 @@ class ToolAsset:
         return None
 
 
-# Versions are deliberately the same pins the container image already builds with
-# (see the ARG lines in Dockerfile), so a scan run from a container, from nix and
-# from a bare `ashx dependencies install` all execute the same tool versions.
+# The release each tool is pinned to is DECLARED by the plugin that owns the tool (its
+# ``Provisioning.tool_pins`` in ``base/plugin_provisioning.py``, reachable as
+# ``scanner_manifests()[...].provisioning``), and by the engine for the tool no plugin owns
+# (uv). This is the table derived from those declarations; it lists no version itself, so
+# bumping a tool is an edit to its plugin's block. The asset filenames and digests below stay
+# here and are checked against it (``_DIGESTS_TAKEN_AT``, the filename-version check).
 #
-# opengrep is not in the Dockerfile's ARG lines: the image installs it through
-# `ashx dependencies install`, which resolves it from this table. Its version is the
-# default of OpengrepScannerConfigOptions.version, which is also what nix/opengrep.nix
-# pins -- NOT the v1.1.5 default in get_opengrep_url's signature, which no caller
-# reaches because the scanner always passes its configured version.
-TOOL_VERSIONS: dict[str, str] = {
-    "actionlint": "v1.7.12",
-    # The v1 maintenance line. v2.0.0 is a release candidate (2.0.0-rc.9 on
-    # 2026-11-17), and ASH pins no prerelease.
-    "betterleaks": "v1.10.1",
-    "cfn-guard": "3.3.0",
-    "gitleaks": "v8.30.1",
-    "grype": "v0.122.1",
-    "hadolint": "v2.15.1",
-    "opengrep": "v2.0.0",
-    "syft": "v1.57.2",
-    "trivy": "v0.76.2",
-    # Tagged without a leading "v" upstream, so the release URL has none either.
-    "uv": "0.13.9",
-}
+# Versions are deliberately the same pins the container image already builds with (see the
+# ARG lines in Dockerfile), so a scan run from a container, from nix and from a bare
+# `ashx dependencies install` all execute the same tool versions.
+TOOL_VERSIONS: dict[str, str] = _declared_tool_versions()
 
 # The gem version cfn-nag installs at, kept beside the binary pins so there is one
 # place to read ASH's external tool versions from. The authoritative pin for the
@@ -235,6 +225,15 @@ _GITLEAKS_ASSETS: dict[PlatformArch, str] = {
     ("darwin", "arm64"): "gitleaks_8.30.1_darwin_arm64.tar.gz",
     ("windows", "amd64"): "gitleaks_8.30.1_windows_x64.zip",
     ("windows", "arm64"): "gitleaks_8.30.1_windows_arm64.zip",
+}
+
+_CRANE_ASSETS: dict[PlatformArch, str] = {
+    ("linux", "amd64"): "go-containerregistry_Linux_x86_64.tar.gz",
+    ("linux", "arm64"): "go-containerregistry_Linux_arm64.tar.gz",
+    ("darwin", "amd64"): "go-containerregistry_Darwin_x86_64.tar.gz",
+    ("darwin", "arm64"): "go-containerregistry_Darwin_arm64.tar.gz",
+    ("windows", "amd64"): "go-containerregistry_Windows_x86_64.tar.gz",
+    # windows/arm64: the release publishes one; ASH's table does not list it.
 }
 
 _GRYPE_ASSETS: dict[PlatformArch, str] = {
@@ -392,7 +391,7 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # one asset that has any (opengrep's Windows zip).
 #
 # The four tables are adjacent so that one line-pinned suppression covers them (see
-# .ash/.ash_community_plugins.yaml); keep nothing but digests between them.
+# .ash/.ash_alpha_plugins.yaml); keep nothing but digests between them.
 # ---------------------------------------------------------------------------
 
 _DIGESTS: dict[str, str] = {
@@ -419,6 +418,12 @@ _DIGESTS: dict[str, str] = {
     "cfn-guard-v3-aarch64-windows-latest.tar.gz": "1c76d8ddc0de2beb7d37a25babe3cddf7e72b3930a9df6908c119c5b9b3aa35c",  # pragma: allowlist secret
     # aws-guard-rules-registry 1.0.2 (a rules bundle, not a binary; see RULES_BUNDLES)
     "ruleset-build-v1.0.2.zip": "dc21aaad601c673843c299191d864cd9b9db32475b1937d930d6069ddde73296",  # pragma: allowlist secret
+    # crane v0.22.1 (go-containerregistry)
+    "go-containerregistry_Linux_x86_64.tar.gz": "0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0",  # pragma: allowlist secret
+    "go-containerregistry_Linux_arm64.tar.gz": "898c0cff975f898a33e8c4580bdafb0e7c02c7faa33374e946762f97c4ab7110",  # pragma: allowlist secret
+    "go-containerregistry_Darwin_x86_64.tar.gz": "6fedd06a648c11335f0e8b9547e4783002c30e9336047fec292942cd518bb799",  # pragma: allowlist secret
+    "go-containerregistry_Darwin_arm64.tar.gz": "2231fc8df8806d20d680ff1225db44e095a55dd6ac1ae8eced4faf4b278b78fb",  # pragma: allowlist secret
+    "go-containerregistry_Windows_x86_64.tar.gz": "0e073ea8192c3b8442ec8aaf44d53c1050a09084669fae3a6ceb0f2026cf8b21",  # pragma: allowlist secret
     # gitleaks v8.30.1
     "gitleaks_8.30.1_linux_x64.tar.gz": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",  # pragma: allowlist secret
     "gitleaks_8.30.1_linux_arm64.tar.gz": "e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080",  # pragma: allowlist secret
@@ -485,6 +490,12 @@ _EXECUTABLE_DIGESTS: dict[str, str] = {
     "cfn-guard-v3-aarch64-macos-latest.tar.gz": "d6d254eb422edd329658e9da6ec51751efb8038774346a6c28294b73bd203d2b",  # pragma: allowlist secret
     "cfn-guard-v3-x86_64-windows-latest.tar.gz": "1454eb1f5b0d7946fdc732c1776cc1219b24d66d3c7847595415d2debb14f90c",  # pragma: allowlist secret
     "cfn-guard-v3-aarch64-windows-latest.tar.gz": "1385d021ecda3e29fc74ab4003a096c1f5e886d75ec63f888cea1c9c15fbb95a",  # pragma: allowlist secret
+    # crane v0.22.1 (go-containerregistry)
+    "go-containerregistry_Linux_x86_64.tar.gz": "8e75c326adb43b053cfd78b9b987663f8f4fe4557f4d3915905643f25c730992",  # pragma: allowlist secret
+    "go-containerregistry_Linux_arm64.tar.gz": "1799f559c299f068951822a5efe6689ebab6974f2054d5562e60798fa9db6a55",  # pragma: allowlist secret
+    "go-containerregistry_Darwin_x86_64.tar.gz": "ea88e2619c139c69c6022c04bd6fd75692935f16798de281fa30a4fbf5c15069",  # pragma: allowlist secret
+    "go-containerregistry_Darwin_arm64.tar.gz": "712be73700414edb792c9d7dd07315ff6ef1200decd6b2363e4ab834babb302d",  # pragma: allowlist secret
+    "go-containerregistry_Windows_x86_64.tar.gz": "e22e47202cece45d09fe92919bdb683f56f548d360cb96f6a852defd965c935d",  # pragma: allowlist secret
     # gitleaks v8.30.1
     "gitleaks_8.30.1_linux_x64.tar.gz": "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509",  # pragma: allowlist secret
     "gitleaks_8.30.1_linux_arm64.tar.gz": "00e91bbe655bd7c47753e8cfe61cb76ea1a5d7e7702fe161ee40102b46b3823b",  # pragma: allowlist secret
@@ -549,6 +560,9 @@ _COMPANION_DIGESTS: dict[str, dict[str, str]] = {
 # edit. Recording the version here turns it into the same refusal by name instead.
 _DIGESTS_TAKEN_AT: dict[str, str] = {
     "cfn-guard": "3.3.0",
+    # go-containerregistry names its assets for the repository and platform only
+    # (go-containerregistry_Linux_x86_64.tar.gz), the version being in the tag.
+    "crane": "v0.22.1",
     "hadolint": "v2.15.1",
     "opengrep": "v2.0.0",
     "uv": "0.13.9",
@@ -563,6 +577,7 @@ _RELEASE_BASE_URLS: dict[str, str] = {
     "actionlint": "https://github.com/rhysd/actionlint/releases/download",
     "betterleaks": "https://github.com/betterleaks/betterleaks/releases/download",
     "cfn-guard": "https://github.com/aws-cloudformation/cloudformation-guard/releases/download",
+    "crane": "https://github.com/google/go-containerregistry/releases/download",
     "gitleaks": "https://github.com/gitleaks/gitleaks/releases/download",
     "grype": "https://github.com/anchore/grype/releases/download",
     "hadolint": "https://github.com/hadolint/hadolint/releases/download",
@@ -576,6 +591,7 @@ _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
     "actionlint": _ACTIONLINT_ASSETS,
     "betterleaks": _BETTERLEAKS_ASSETS,
     "cfn-guard": _CFN_GUARD_ASSETS,
+    "crane": _CRANE_ASSETS,
     "gitleaks": _GITLEAKS_ASSETS,
     "grype": _GRYPE_ASSETS,
     "hadolint": _HADOLINT_ASSETS,
@@ -999,7 +1015,7 @@ def _source_file(repository: str, commit: str, path: str) -> str:
 
 
 # Every hex value the entries below use, and nothing else, in one block: the
-# community config's ferret-scan suppression is pinned to exactly these lines, and
+# alpha config's ferret-scan suppression is pinned to exactly these lines, and
 # tests/unit/utils/test_third_party_licenses.py keeps the two in step.
 #
 # "<tool> commit" is the commit the release tag points to, from
@@ -1020,6 +1036,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "cfn-guard commit": "db494a17fb6030b365d5a5144a397517c7746797",  # pragma: allowlist secret
     "cfn-guard/LICENSE": "28878a48de57252ed2c9119db71b2fc9766833a0c159d9f5df54cba4dea52dba",  # pragma: allowlist secret
     "cfn-guard/NOTICE": "ba249a48f79f76c72cffea8689eb7a5ce450a4a67ad6b1e44e8ff15a95b2b751",  # pragma: allowlist secret
+    "crane commit": "8a72a424fdecb4caa14f2d525e5d2503331442b5",  # pragma: allowlist secret
     "gitleaks commit": "83d9cd684c87d95d656c1458ef04895a7f1cbd8e",  # pragma: allowlist secret
     "grype commit": "8f3ddeddc4a4ed6314248aaf0a7c510f98db8882",  # pragma: allowlist secret
     "guarddog commit": "3da172679cb58b1c9a780f9f5d640f855be016dc",  # pragma: allowlist secret
@@ -1212,6 +1229,14 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         files=(LicenseFile("LICENSE"),),
         distribution="checkov",
     ),
+    "crane": ThirdPartyLicense(
+        tool="crane",
+        version="v0.22.1",
+        license="Apache-2.0",
+        repository="https://github.com/google/go-containerregistry",
+        commit=_THIRD_PARTY_HASHES["crane commit"],
+        files=(LicenseFile("LICENSE"),),
+    ),
     "gitleaks": ThirdPartyLicense(
         tool="gitleaks",
         version="v8.30.1",
@@ -1228,7 +1253,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         commit=_THIRD_PARTY_HASHES["grype commit"],
         files=(LicenseFile("LICENSE"),),
     ),
-    # The GuardDog community scanner's uv tool. The wheel's dist-info carries
+    # The GuardDog alpha scanner's uv tool. The wheel's dist-info carries
     # licenses/LICENSE, licenses/NOTICE and licenses/LICENSE-3rdparty.csv.
     "guarddog": ThirdPartyLicense(
         tool="guarddog",

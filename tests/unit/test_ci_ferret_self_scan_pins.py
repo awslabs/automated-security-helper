@@ -5,7 +5,7 @@
 
 Why this exists
 ---------------
-``.ash/.ash_community_plugins.yaml`` excuses hits in the ferret plugin's files by line.
+``.ash/.ash_alpha_plugins.yaml`` excuses hits in the ferret plugin's files by line.
 Each entry was written for a line of its file when the plugin was added. The files
 changed after that, the entries did not move, and a pin that points at a blank line, a
 comment or an unrelated statement excuses nothing. It happened to the two
@@ -19,14 +19,13 @@ in the config as one that works.
 
 ``SECRET-SECRET-KEYWORD`` and ``SECRET-HEX-HIGH-ENTROPY-STRING`` are detect-secrets rule
 ids, and detect-secrets is off in that config (``scanners.detect-secrets.enabled:
-false``, as it was when the entries were added), so no scan of that config reads the
-entries for those two rule ids today. This test keeps them accurate in case
-detect-secrets is turned on for the self-scan. It reads only the community-plugins
-config; ``.ash/.ash.yaml`` has no pin of this kind.
+false``), so no scan of that config could read an entry for them. The entries were
+removed, and ``_PIN_MARKERS`` is empty until one returns with detect-secrets. This
+test reads only the alpha-plugins config; ``.ash/.ash.yaml`` has no pin of this kind.
 
 What this checks
 ----------------
-Every ``SECRET-SECRET-KEYWORD`` entry with a line in the community-plugins config, and
+Every ``SECRET-SECRET-KEYWORD`` entry with a line in the alpha-plugins config, and
 every entry with a line for a rule that has a row in ``_RANGED_PIN_MARKERS``, needs both
 ``line_start`` and ``line_end`` as integers. ASH reads a ``line_start`` with no
 ``line_end`` as running to the end of the file (``utils/suppression_matcher.py``), so a
@@ -63,13 +62,16 @@ import yaml
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-COMMUNITY_CONFIG = REPO_ROOT / ".ash" / ".ash_community_plugins.yaml"
+ALPHA_CONFIG = REPO_ROOT / ".ash" / ".ash_alpha_plugins.yaml"
 RULE = "SECRET-SECRET-KEYWORD"
 
 PLUGIN_DIR = "automated_security_helper/plugin_modules/ash_ferret_plugins"
 TEST_DIR = "tests/unit/plugin_modules/ash_ferret_plugins"
 FERRET_SCANNER = f"{PLUGIN_DIR}/ferret_scanner.py"
 DOCX_SCRIPT = "scripts/generate_test_docx.py"
+TOOL_CONFIG_TRUST = "automated_security_helper/config/tool_config_trust.py"
+OPERATIONAL_FACETS = "automated_security_helper/base/scanner_operational_facets.py"
+FINDING_TREND_TEST = "tests/unit/utils/test_finding_trend.py"
 HADOLINT_BEHAVIOR_TEST = (
     "tests/unit/plugin_modules/ash_hadolint_plugins/test_hadolint_scanner_behavior.py"
 )
@@ -96,10 +98,11 @@ class _Marker:
 #: of markers: a path with two pinned entries has two. When a file changes above its
 #: pin, this row is what says which line the pin has to move to. An entry whose path has
 #: no row fails below, and so does a row whose entry is gone.
-_PIN_MARKERS: dict[str, list[_Marker]] = {
-    f"{PLUGIN_DIR}/DEVELOPMENT.md": [_Marker((r"assigned value\. Even",))],
-    f"{TEST_DIR}/conftest.py": [_Marker(('SETTING = "placeholder"',))],
-}
+#: Empty while the alpha-plugins config carries no SECRET-SECRET-KEYWORD pin: that is
+#: a detect-secrets rule id, detect-secrets is off in that config, and its two pins
+#: (the plugin's development notes and its test conftest) were removed because they
+#: could not match.
+_PIN_MARKERS: dict[str, list[_Marker]] = {}
 
 #: The calls to the random module that the docx generator makes.
 _RANDOM_CALL = (
@@ -110,22 +113,38 @@ _RANDOM_CALL = (
 #: The same for the other rules, by rule id and path. A moved pin fails below with the
 #: line to use, and so does a row whose entry is gone. An entry with no row here is not
 #: looked at.
+#: Entries scoped by ``symbol`` instead of a line range have no rows here: the
+#: resolver finds the definition wherever it moves, and
+#: tests/unit/config/test_symbol_migration_record.py holds each one to a symbol
+#: that resolves.
 _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
-    ("B404", FERRET_SCANNER): [_Marker((r"^import subprocess\b",))],
-    # One call carries both markers, so both rules pin the same lines.
-    ("B603", FERRET_SCANNER): [_Marker((r"# nosec B603 B607\b",))],
-    ("B607", FERRET_SCANNER): [_Marker((r"# nosec B603 B607\b",))],
+    # The three ferret_scanner.py bandit pins are gone: the import and the call carry
+    # nosec comments, bandit reports nothing for either, and the pins excused nothing
+    # (test_product_bandit_subprocess_pins.py holds the comments in place).
+    #
+    # The one line the ferret-scan 2.6.1 self-scan reports in tool_config_trust.py: the
+    # row of the scanner-option table that pairs the detect-secrets scanner with its
+    # baseline option. The pattern names the row without spelling it out.
+    ("API_KEY_OR_SECRET", TOOL_CONFIG_TRUST): [
+        _Marker((r'detect-secrets"\W+\(\W*baseline_file',)),
+    ],
+    # The enum member whose name is a token word, one line of the facets module.
+    ("API_KEY_OR_SECRET", OPERATIONAL_FACETS): [
+        _Marker((r"^    AUTH_TOKEN = ",)),
+    ],
+    # The report-id helper's twelve-hex-digit default argument.
+    ("API_KEY_OR_SECRET", FINDING_TREND_TEST): [
+        _Marker((r"^def report_id\(second, token=",)),
+    ],
+    # The two lines of .ash.yaml whose reasons quote a placeholder fixture; they
+    # are the findings the self-scan reports on that file, and each is the one line of
+    # the file that has this shape.
+    ("API_KEY_OR_SECRET", ".ash.yaml"): [
+        _Marker((r'HEAD = "[0-9a-f]{40}" and TOKEN =',)),
+        _Marker((r'`\w+ = "abcdefghijklmnop"` is a fixture',)),
+    ],
     # Every line that draws a value from the random module, as the file was written.
     ("B311", DOCX_SCRIPT): [_Marker((_RANDOM_CALL,), every_line=True)],
-    # The two narrative lines the entry was written for, which the pin takes with the
-    # lines between them. The generator builds the card numbers at run time, and
-    # since the Luhn-valid rewrite the MasterCard line names its last four digits
-    # through a variable too, so neither line holds a number.
-    ("SECRET-HEX-HIGH-ENTROPY-STRING", DOCX_SCRIPT): [
-        _Marker(
-            (r"The MasterCard ending in \{approved_last_four\}", r"Expiration: 12/25")
-        ),
-    ],
     # The two MRZ-style passport lines of the MRZ_LINES tuple, each padded to the TD3
     # length with the "<" filler. The padding call is what no other line of the file
     # has, so the pattern names the two lines without spelling out a passport line.
@@ -152,7 +171,7 @@ _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
 }
 
 
-def _ranged_keyword_pins(config_path: Path = COMMUNITY_CONFIG) -> list[dict[str, Any]]:
+def _ranged_keyword_pins(config_path: Path = ALPHA_CONFIG) -> list[dict[str, Any]]:
     config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     entries = (config.get("global_settings") or {}).get("suppressions") or []
     return [
@@ -164,7 +183,7 @@ def _ranged_keyword_pins(config_path: Path = COMMUNITY_CONFIG) -> list[dict[str,
 
 
 def _ranged_pins_with_rows(
-    config_path: Path = COMMUNITY_CONFIG,
+    config_path: Path = ALPHA_CONFIG,
     rows: dict[tuple[str, str], list[_Marker]] = _RANGED_PIN_MARKERS,
 ) -> list[dict[str, Any]]:
     config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
@@ -284,7 +303,7 @@ def _row_pin_id(entry: dict[str, Any]) -> str:
 
 @pytest.mark.parametrize("entry", _PINS, ids=_pin_id)
 def test_every_ranged_keyword_pin_names_the_line_it_was_written_for(entry):
-    where = f"{COMMUNITY_CONFIG.name}: {RULE} {entry['path']}"
+    where = f"{ALPHA_CONFIG.name}: {RULE} {entry['path']}"
     range_problem = _range_problem(entry)
     assert range_problem is None, f"{where}: {range_problem}"
 
@@ -307,7 +326,7 @@ def test_every_marker_row_still_has_a_pin():
     # collects zero cases above and passes.
     pinned = {entry["path"] for entry in _PINS}
     assert sorted(set(_PIN_MARKERS) - pinned) == [], (
-        f"{COMMUNITY_CONFIG.name} has no line-pinned {RULE} entry for these paths, "
+        f"{ALPHA_CONFIG.name} has no line-pinned {RULE} entry for these paths, "
         "so drop their rows from _PIN_MARKERS"
     )
 
@@ -325,12 +344,12 @@ def test_every_keyword_marker_is_covered_by_exactly_one_pin():
             for problem in _cover_problems(_lines_of(path), ranges, markers)
         ]
 
-    assert problems == [], f"{COMMUNITY_CONFIG.name}: {RULE}: {'; '.join(problems)}"
+    assert problems == [], f"{ALPHA_CONFIG.name}: {RULE}: {'; '.join(problems)}"
 
 
 @pytest.mark.parametrize("entry", _ROW_PINS, ids=_row_pin_id)
 def test_every_ranged_pin_with_a_marker_row_names_the_lines_it_was_written_for(entry):
-    where = f"{COMMUNITY_CONFIG.name}: {entry['rule_id']} {entry['path']}"
+    where = f"{ALPHA_CONFIG.name}: {entry['rule_id']} {entry['path']}"
     range_problem = _range_problem(entry)
     assert range_problem is None, f"{where}: {range_problem}"
 
@@ -350,7 +369,7 @@ def test_every_ranged_pin_row_still_has_an_entry():
     # collects zero cases above and passes.
     pinned = {(entry["rule_id"], entry["path"]) for entry in _ROW_PINS}
     assert sorted(set(_RANGED_PIN_MARKERS) - pinned) == [], (
-        f"{COMMUNITY_CONFIG.name} has no line-pinned entry for these (rule, path) "
+        f"{ALPHA_CONFIG.name} has no line-pinned entry for these (rule, path) "
         "pairs, so drop their rows from _RANGED_PIN_MARKERS"
     )
 
@@ -369,7 +388,7 @@ def test_every_ranged_pin_marker_is_covered_by_exactly_one_pin():
             for problem in _cover_problems(_lines_of(path), ranges, markers)
         ]
 
-    assert problems == [], f"{COMMUNITY_CONFIG.name}: {'; '.join(problems)}"
+    assert problems == [], f"{ALPHA_CONFIG.name}: {'; '.join(problems)}"
 
 
 # Controls: the predicates above, fed input whose verdict is known.
@@ -598,34 +617,35 @@ def test_an_every_line_pattern_that_matches_nothing_is_reported():
     ("key", "hit", "miss"),
     [
         (
-            ("B404", FERRET_SCANNER),
-            "import subprocess  # nosec B404 - the tool is an external CLI",
-            "# import subprocess happens below",
+            ("API_KEY_OR_SECRET", TOOL_CONFIG_TRUST),
+            # Built from two halves so that this file does not hold the flagged row.
+            '    "detect-' + 'secrets": ("baseline_file",),',
+            '    "ferret-scan": ("config_file",),',
         ),
         (
-            ("B603", FERRET_SCANNER),
-            "result = spawn_run(  # nosec B603 B607 - list args",
-            "result = spawn_run(  # nosec B603 - list args",
+            ("API_KEY_OR_SECRET", OPERATIONAL_FACETS),
+            "    AUTH_" + "TOK" + 'EN = "auth_' + "tok" + 'en"',
+            '    AUTH_HEADER = "auth_header"',
         ),
         (
-            ("B607", FERRET_SCANNER),
-            "result = spawn_run(  # nosec B603 B607 - list args",
-            "result = spawn_run(  # nosec B607 - list args",
+            ("API_KEY_OR_SECRET", FINDING_TREND_TEST),
+            "def report_id(second, tok" + "en=" + '"012345678901"):',
+            "def other_id(second, count=3):",
+        ),
+        (
+            ("API_KEY_OR_SECRET", ".ash.yaml"),
+            'HEAD = "' + "0123456789abcdef0123456789abcdef01234567" + '" and TOKEN =',
+            'HEAD = "unset" and nothing else',
+        ),
+        (
+            ("API_KEY_OR_SECRET", ".ash.yaml"),
+            "`sec" + 'ret = "abcdefghijklmnop"` is a fixture fed into',
+            "`value` is a fixture fed into",
         ),
         (
             ("B311", DOCX_SCRIPT),
             "    area = random.randint(900, 999)  # nosec B311",
             "random.seed(42)",
-        ),
-        (
-            ("SECRET-HEX-HIGH-ENTROPY-STRING", DOCX_SCRIPT),
-            'f"The MasterCard ending in {approved_last_four} ({approved_card}) has "',
-            'f"MasterCard: {approved_card}"',
-        ),
-        (
-            ("SECRET-HEX-HIGH-ENTROPY-STRING", DOCX_SCRIPT),
-            'f"AMEX: {card()} - Expiration: 12/25. "',
-            'f"AMEX: {card()}"',
         ),
         (
             ("PASSPORT", DOCX_SCRIPT),
@@ -634,12 +654,12 @@ def test_an_every_line_pattern_that_matches_nothing_is_reported():
         ),
     ],
     ids=[
-        "B404",
-        "B603",
-        "B607",
+        "tool_config_trust",
+        "operational_facets",
+        "finding_trend_test",
+        "ash_yaml_head",
+        "ash_yaml_secret",
         "B311",
-        "SECRET-HEX first line",
-        "SECRET-HEX second line",
         "PASSPORT",
     ],
 )
@@ -682,3 +702,53 @@ def test_only_ranged_entries_that_have_a_row_are_selected(tmp_path):
         ("B404", "pinned.py"),
         ("B404", "open-ended.py"),
     ]
+
+
+# This file is scanned too, and no entry covers it. The docstring promises that none of
+# its patterns has a keyword name beside an assignment, so the test strings that stand
+# for the flagged lines are built from halves, and this reads the file's own text to
+# keep them that way. The keywords are built from halves for the same reason.
+_KEYWORD_NAMES = ("sec" + "ret", "tok" + "en", "pass" + "word", "api" + "_key")
+_KEYWORD_ASSIGNMENT = re.compile(
+    r"(?i)(?:" + "|".join(_KEYWORD_NAMES) + r")\w*\s*=\s*"
+    r"(?:\"[^\"\n]{3,}\"|'[^'\n]{3,}')"
+)
+
+
+def _keyword_assignment_lines(text: str) -> list[str]:
+    return [
+        f"{number}: {line.strip()}"
+        for number, line in enumerate(text.splitlines(), start=1)
+        if _KEYWORD_ASSIGNMENT.search(line)
+    ]
+
+
+def test_this_file_spells_no_keyword_name_beside_an_assignment_with_a_value():
+    own_text = Path(__file__).read_text(encoding="utf-8")
+
+    assert _keyword_assignment_lines(own_text) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "flagged"),
+    [
+        ("sec" + "ret" + ' = "abcdefghijklmnop"', True),
+        ("    AUTH_" + "TOKEN" + ' = "auth_' + "' + 'token\"", True),
+        ("def report_id(second, tok" + "en=" + '" + \'"012345678901"):', True),
+        ("sec" + "ret", False),
+        ("AUTH_" + "TOKEN" + ' = ",', False),
+        ('HEAD = "unset" and nothing else', False),
+    ],
+    ids=[
+        "a quoted value",
+        "a value cut by a concatenation",
+        "an argument default cut by a concatenation",
+        "the bare keyword",
+        "an assignment that ends the string",
+        "no keyword",
+    ],
+)
+def test_the_keyword_assignment_reader_flags_a_flagged_line_and_not_a_near_miss(
+    text, flagged
+):
+    assert bool(_keyword_assignment_lines(text)) is flagged

@@ -211,12 +211,17 @@ def test_the_operators_opt_in_starts_them_with_a_warning(tree, how):
     [
         (".ash/.ash.yaml", "allow_in_tree_tools: true\n"),
         (".ash.yaml", "allow_in_tree_tools: true\n"),
-        (".ash/.ash.yaml", "ASH_ALLOW_IN_TREE_TOOLS: '1'\n"),
+        (".ash.yaml", "ASH_ALLOW_IN_TREE_TOOLS: '1'\n"),
     ],
     ids=["dot-ash-dir", "repository-root", "env-name"],
 )
 def test_the_repositorys_config_cannot_turn_it_on(tree, location, config):
-    """Keys the config schema ignores, so the scan runs with the config read."""
+    """Keys the config schema ignores, so the scan runs with the config read.
+
+    Legacy location: the ``dot-ash-dir`` case keeps the deprecated
+    ``.ash/.ash.yaml`` path, which discovery still reads, beside the canonical
+    root file.
+    """
     root, marks, tools = tree
     (root / location).parent.mkdir(parents=True, exist_ok=True)
     (root / location).write_text(config)

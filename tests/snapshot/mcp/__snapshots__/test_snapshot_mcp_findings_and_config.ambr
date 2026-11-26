@@ -92,6 +92,13 @@
           'dependencies_satisfied': True,
           'enabled': True,
           'installs_on_first_scan': False,
+          'name': 'mcp_config',
+          'version': None,
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
           'name': 'npm_audit',
           'version': None,
         }),
@@ -178,6 +185,7 @@
       'new': list([
         dict({
           'code_snippet': None,
+          'correlation_id': None,
           'cve_id': None,
           'cwe_id': None,
           'description': "Possible hardcoded password: 'h******'",
@@ -210,6 +218,7 @@
       'resolved': list([
         dict({
           'code_snippet': None,
+          'correlation_id': None,
           'cve_id': None,
           'cwe_id': None,
           'description': 'Use of assert detected.',
@@ -240,6 +249,7 @@
         }),
         dict({
           'code_snippet': None,
+          'correlation_id': 'secret/4f4cdfe58f92875d7e4b19f6a3adfba84a428f83de43dc923549b4a6590cea16',
           'cve_id': None,
           'cwe_id': None,
           'description': 'AWS Access Key detected in configuration file.',
@@ -655,6 +665,12 @@
             'tool_version': '>=7.16.0,<8.0.0',
           }),
         }),
+        'mcp_config': dict({
+          'enabled': True,
+          'name': 'mcp_config',
+          'options': dict({
+          }),
+        }),
       }),
       'default_scanners': dict({
         'add': list([
@@ -672,6 +688,8 @@
           'annotate': False,
           'fold': False,
         }),
+        'exclusions': list([
+        ]),
         'history': dict({
           'enabled': False,
           'keep_runs': 50,
@@ -702,8 +720,11 @@
               '/scanners/detect-secrets/options/baseline_file',
               '/global_settings/ignore_paths',
               '/global_settings/suppressions',
+              '/global_settings/exclusions',
               '/global_settings/mcp',
               '/global_settings/mcp/**',
+              '/global_settings/history',
+              '/global_settings/history/**',
               '/scanners/opengrep/options/exclude_rule',
               '/scanners/semgrep/options/exclude_rule',
               '/scanners/bandit/options/confidence_level',
@@ -742,6 +763,7 @@
               '/scanners/ferret-scan/options/config_file',
               '/scanners/grype/options/config_file',
               '/scanners/syft/options/config_file',
+              '/scanners/syft/options/sdist_harvest/**',
               '/scanners/trivy-repo/options/secret_config_file',
               '/scanners/trivy-repo/options/config_file',
               '/scanners/trivy-repo/options/module_dir',
@@ -1161,6 +1183,24 @@
             'severity_threshold': None,
           }),
         }),
+        'mcp_config': dict({
+          'enabled': True,
+          'name': 'mcp-config',
+          'options': dict({
+            'allowed_command_prefixes': list([
+            ]),
+            'flag_env_secrets': True,
+            'forbid_auto_approval': True,
+            'forbid_privilege_escalation': True,
+            'forbid_unpinned_runners': True,
+            'offline': False,
+            'remote_url_prefixes': list([
+            ]),
+            'require_local': False,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
         'npm_audit': dict({
           'enabled': True,
           'name': 'npm-audit',
@@ -1206,6 +1246,19 @@
             ]),
             'offline': False,
             'scan_timeout': 1800,
+            'sdist_harvest': dict({
+              'cache_dir': None,
+              'ecosystems': list([
+                'cargo',
+                'gomod',
+                'npm',
+              ]),
+              'enabled': True,
+              'lockfiles': list([
+                'uv.lock',
+              ]),
+              'max_sdist_mb': 100,
+            }),
             'severity_threshold': None,
           }),
         }),
@@ -1282,6 +1335,12 @@
             'tool_version': '>=7.16.0,<8.0.0',
           }),
         }),
+        'mcp_config': dict({
+          'enabled': True,
+          'name': 'mcp_config',
+          'options': dict({
+          }),
+        }),
       }),
       'default_scanners': dict({
         'add': list([
@@ -1299,6 +1358,8 @@
           'annotate': False,
           'fold': False,
         }),
+        'exclusions': list([
+        ]),
         'history': dict({
           'enabled': False,
           'keep_runs': 50,
@@ -1329,8 +1390,11 @@
               '/scanners/detect-secrets/options/baseline_file',
               '/global_settings/ignore_paths',
               '/global_settings/suppressions',
+              '/global_settings/exclusions',
               '/global_settings/mcp',
               '/global_settings/mcp/**',
+              '/global_settings/history',
+              '/global_settings/history/**',
               '/scanners/opengrep/options/exclude_rule',
               '/scanners/semgrep/options/exclude_rule',
               '/scanners/bandit/options/confidence_level',
@@ -1369,6 +1433,7 @@
               '/scanners/ferret-scan/options/config_file',
               '/scanners/grype/options/config_file',
               '/scanners/syft/options/config_file',
+              '/scanners/syft/options/sdist_harvest/**',
               '/scanners/trivy-repo/options/secret_config_file',
               '/scanners/trivy-repo/options/config_file',
               '/scanners/trivy-repo/options/module_dir',
@@ -1788,6 +1853,24 @@
             'severity_threshold': None,
           }),
         }),
+        'mcp_config': dict({
+          'enabled': True,
+          'name': 'mcp-config',
+          'options': dict({
+            'allowed_command_prefixes': list([
+            ]),
+            'flag_env_secrets': True,
+            'forbid_auto_approval': True,
+            'forbid_privilege_escalation': True,
+            'forbid_unpinned_runners': True,
+            'offline': False,
+            'remote_url_prefixes': list([
+            ]),
+            'require_local': False,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
         'npm_audit': dict({
           'enabled': True,
           'name': 'npm-audit',
@@ -1833,6 +1916,19 @@
             ]),
             'offline': False,
             'scan_timeout': 1800,
+            'sdist_harvest': dict({
+              'cache_dir': None,
+              'ecosystems': list([
+                'cargo',
+                'gomod',
+                'npm',
+              ]),
+              'enabled': True,
+              'lockfiles': list([
+                'uv.lock',
+              ]),
+              'max_sdist_mb': 100,
+            }),
             'severity_threshold': None,
           }),
         }),
@@ -1990,6 +2086,14 @@
         'enabled': True,
         'installs_on_first_scan': False,
         'name': 'hadolint',
+        'offline_strategy': 'bundled',
+        'version': None,
+      }),
+      'mcp_config': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'installs_on_first_scan': False,
+        'name': 'mcp_config',
         'offline_strategy': 'bundled',
         'version': None,
       }),

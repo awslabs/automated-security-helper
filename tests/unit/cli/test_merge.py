@@ -1611,7 +1611,7 @@ class TestMergeCli:
             patch("automated_security_helper.cli.merge.ash_plugin_manager", manager),
             patch("automated_security_helper.cli.merge.load_plugins"),
         ):
-            return CliRunner().invoke(app, ["merge"] + args)
+            return CliRunner().invoke(app, ["results", "merge"] + args)
 
     def test_merge_writes_results_and_reports_and_exits_two(self, tmp_path):
         shard_paths = write_shards(tmp_path / "artifacts", build_shards(3))
@@ -1873,7 +1873,7 @@ class TestMergeCli:
             patch("automated_security_helper.cli.merge.load_plugins"),
             patch.object(securityhub_module.boto3, "Session", Session),
         ):
-            result = CliRunner().invoke(app, ["merge", *args])
+            result = CliRunner().invoke(app, ["results", "merge", *args])
 
         assert result.exit_code == 2, result.output
         assert sent, result.output
@@ -2581,7 +2581,7 @@ class TestShardChosenTextIsShownNotObeyed:
             patch("automated_security_helper.cli.merge.ash_plugin_manager", manager),
             patch("automated_security_helper.cli.merge.load_plugins"),
         ):
-            return CliRunner().invoke(app, ["merge", *args])
+            return CliRunner().invoke(app, ["results", "merge", *args])
 
     def _orphaned(self, tmp_path, status: ScannerStatus) -> List[str]:
         shards = build_shards(3)

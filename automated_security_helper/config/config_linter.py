@@ -1826,8 +1826,9 @@ class ConfigLinter:
                 _SEGMENT_OF_KIND[kind], section_name, field_name, config_data
             )
 
-        # A path pattern that matches nothing (path_pattern_advice: a directory
-        # without its slash, a './' prefix, a path that names no path, a case-only
+        # A path pattern that matches nothing (path_pattern_advice: a '**'
+        # pattern whose last component names a directory, a './' prefix, a path
+        # that names no path, a case-only
         # match), and Path '/x' is absolute, so it matches nothing ...: a warning,
         # as `ash config validate` prints it. The validator checks the merged
         # config, the linter's own check the file's entries (with their
@@ -2292,12 +2293,13 @@ class ConfigLinter:
         (``config_validator.path_pattern_advice``, shared with ``ash config
         validate``), after an absolute one (``absolute_path_warning``).
 
-        A path like 'tests/test_data' that points to an existing directory
-        matches no file inside it; the warning gives the spelling that does:
-        'tests/test_data/' for an ignore path, 'tests/test_data/**/*' for a
-        suppression path. An ignore path that ends in '/' is fine: it names the
-        directory's files (utils/path_matching.ignore_path_pattern). A suppression
-        path that ends in '/' is literal, matches no file, and gets the advice. A
+        A glob-free path such as 'tests/test_data' names a file and the
+        directory of that name (issue #894), with or without a trailing '/',
+        in ignore paths and suppressions alike, so it gets no advice. A '**'
+        pattern whose glob-free last component names a directory the tree holds
+        ('**/node_modules') matches no file inside it and gets the directory
+        advice, unless it already ends in '/', which is the spelling the advice
+        recommends. A
         pattern that starts with './', a bare '.', './', '.\\' or an empty one,
         and one whose leading names the tree holds only in another case, match
         nothing either. ``shown_pattern`` is how the message names the path, with

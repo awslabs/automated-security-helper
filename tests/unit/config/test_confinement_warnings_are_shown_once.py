@@ -81,9 +81,8 @@ def _written(path: Path) -> str:
 def _checkout(tmp_path: Path, config: str, base_name: str, base: str) -> Path:
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    (checkout / ".ash").mkdir()
-    (checkout / ".ash" / ".ash.yaml").write_text(config, encoding="utf-8")
-    (checkout / ".ash" / base_name).write_text(base, encoding="utf-8")
+    (checkout / ".ash.yaml").write_text(config, encoding="utf-8")
+    (checkout / base_name).write_text(base, encoding="utf-8")
     return checkout
 
 
@@ -132,8 +131,8 @@ def test_a_section_keys_controls_are_shown_once_in_ash_log(tmp_path):
     from automated_security_helper.config.resolve_config import resolve_config
 
     checkout = tmp_path / "checkout"
-    (checkout / ".ash").mkdir(parents=True)
-    (checkout / ".ash" / ".ash.yaml").write_text(
+    checkout.mkdir(parents=True)
+    (checkout / ".ash.yaml").write_text(
         "reporters:\n"
         '  "aws-security-hub\\r\\e]\\a":\n'
         "    options:\n"
@@ -199,8 +198,8 @@ def test_a_plugin_module_name_is_shown_once_in_ash_log(tmp_path):
     from automated_security_helper.plugins.loader import PluginModuleNamespaceError
 
     checkout = tmp_path / "checkout"
-    (checkout / ".ash").mkdir(parents=True)
-    (checkout / ".ash" / ".ash.yaml").write_text(
+    checkout.mkdir(parents=True)
+    (checkout / ".ash.yaml").write_text(
         'ash_plugin_modules:\n  - "m\\e]\\a\\nx"\n', encoding="utf-8"
     )
     log = tmp_path / "ash.log"
@@ -292,8 +291,8 @@ def test_the_plugin_module_warning_is_logged_as_text_not_markup(tmp_path):
     from automated_security_helper.plugins.loader import PluginModuleNamespaceError
 
     checkout = tmp_path / "checkout"
-    (checkout / ".ash").mkdir(parents=True)
-    (checkout / ".ash" / ".ash.yaml").write_text(
+    checkout.mkdir(parents=True)
+    (checkout / ".ash.yaml").write_text(
         'ash_plugin_modules:\n  - "m[/x]\\e"\n', encoding="utf-8"
     )
 

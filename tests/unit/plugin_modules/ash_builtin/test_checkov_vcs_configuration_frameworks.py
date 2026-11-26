@@ -146,6 +146,75 @@ class TestVcsConfigurationFrameworkDefaults:
         assert frameworks == ["gitlab_configuration"]
         assert "gitlab_configuration" not in skipped
 
+    @pytest.mark.parametrize("vcs_fw", _VCS_CONFIGURATION_FRAMEWORKS)
+    def test_vcs_framework_requested_beside_all_is_not_skipped(self, tmp_path, vcs_fw):
+        source = tmp_path / "src"
+        source.mkdir()
+        scanner = _scanner(source, tmp_path / "out", frameworks=["all", vcs_fw])
+
+        skipped = _flag_values(scanner.args.extra_args, "--skip-framework")
+
+        assert vcs_fw not in skipped
+        # The other VCS frameworks were not asked for and stay skipped.
+        for other in _VCS_CONFIGURATION_FRAMEWORKS:
+            if other != vcs_fw:
+                assert other in skipped
+
+    def test_config_file_skip_framework_list_is_passed_on_the_command_line(
+        self, tmp_path
+    ):
+        # A --skip-framework list on the command line replaces the config file's
+        # whole, and ASH now always passes one, so the file's entries are
+        # merged into it (as skip-path's are).
+        source = tmp_path / "src"
+        source.mkdir()
+        config_file = tmp_path / "operator" / ".checkov.yaml"
+        config_file.parent.mkdir()
+        config_file.write_text(
+            "skip-framework:\n  - secrets\n  - sca_package\n", encoding="utf-8"
+        )
+
+        scanner = _scanner(source, tmp_path / "out", config_file=str(config_file))
+        skipped = _flag_values(scanner.args.extra_args, "--skip-framework")
+
+        assert "secrets" in skipped
+        assert "sca_package" in skipped
+        for vcs_fw in _VCS_CONFIGURATION_FRAMEWORKS:
+            assert skipped.count(vcs_fw) == 1
+
+    def test_config_file_skip_framework_scalar_and_duplicates(self, tmp_path):
+        source = tmp_path / "src"
+        source.mkdir()
+        config_file = tmp_path / "operator" / ".checkov.yaml"
+        config_file.parent.mkdir()
+        config_file.write_text("skip-framework: secrets\n", encoding="utf-8")
+
+        scanner = _scanner(
+            source,
+            tmp_path / "out",
+            skip_frameworks=["secrets"],
+            config_file=str(config_file),
+        )
+        skipped = _flag_values(scanner.args.extra_args, "--skip-framework")
+
+        assert skipped.count("secrets") == 1
+
+    def test_default_argv_names_all_and_skips_only_the_vcs_frameworks(self, tmp_path):
+        source = tmp_path / "src"
+        source.mkdir()
+        scanner = _scanner(source, tmp_path / "out")
+
+        command, _, _ = scanner._execute_scan(source, "source", [])
+        tokens = list(command)
+
+        def values(flag):
+            return [tokens[i + 1] for i, tok in enumerate(tokens[:-1]) if tok == flag]
+
+        assert values("--framework") == ["all"]
+        assert sorted(values("--skip-framework")) == sorted(
+            _VCS_CONFIGURATION_FRAMEWORKS
+        )
+
 
 class TestVcsConfDirEnvironment:
     def test_execute_scan_points_vcs_conf_dirs_inside_results_dir(
@@ -170,6 +239,20 @@ class TestVcsConfDirEnvironment:
             assert configured == expected_parent / "vcs-config" / conf_subdir
             assert source not in configured.parents
             assert environ_value(var_name) is None
+
+    def test_execute_scan_preserves_operator_vcs_conf_dir_env_var(
+        self, tmp_path, monkeypatch
+    ):
+        custom_dir = str(tmp_path / "custom-gitlab-conf")
+        monkeypatch.setenv("CKV_GITLAB_CONF_DIR_NAME", custom_dir)
+
+        source = tmp_path / "src"
+        source.mkdir()
+        scanner = _scanner(source, tmp_path / "out")
+
+        _, _, env = scanner._execute_scan(source, "source", [])
+        assert env is not None
+        assert env["CKV_GITLAB_CONF_DIR_NAME"] == custom_dir
 
     def test_offline_scan_disables_vcs_config_fetch(self, tmp_path, monkeypatch):
         for fetch_var in _VCS_CONFIG_FETCH_ENV_VARS:

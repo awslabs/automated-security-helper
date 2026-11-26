@@ -5,7 +5,7 @@
 
 A config file inside the scanned tree was written by the repository under scan,
 so the sandbox grants it makes (``extra_read_paths``, ``network_scanners``) are
-dropped. The tree's own ``.ash/.ash.yaml`` can be a symbolic link to a file
+dropped. The tree's own ``.ash.yaml`` can be a symbolic link to a file
 outside it -- a git checkout or an MCP ``set_source_git`` delivery keeps links --
 and judged by its resolved path it looked like an operator file outside the tree,
 so its grants applied. The location of the name decides now, for a discovered
@@ -60,7 +60,7 @@ def _granted(config) -> tuple:
 
 
 def test_a_discovered_config_linked_out_of_the_tree_grants_nothing(scanned, outside):
-    (scanned / ".ash" / ".ash.yaml").symlink_to(outside)
+    (scanned / ".ash.yaml").symlink_to(outside)
 
     assert _granted(resolve_config(source_dir=scanned)) == ([], None)
 
@@ -87,7 +87,7 @@ def test_an_ash_config_link_in_the_tree_is_not_the_trusted_base(
     scanned, outside, monkeypatch
 ):
     """With an in-tree config found as well, ``ASH_CONFIG`` is the trusted base."""
-    (scanned / ".ash" / ".ash.yaml").write_text(GRANTS, encoding="utf-8")
+    (scanned / ".ash.yaml").write_text(GRANTS, encoding="utf-8")
     link = scanned / ".ash" / "env.yaml"
     link.symlink_to(outside)
     monkeypatch.setenv("ASH_CONFIG", str(link))
@@ -98,7 +98,7 @@ def test_an_ash_config_link_in_the_tree_is_not_the_trusted_base(
 def test_control_an_ash_config_outside_the_tree_is_the_trusted_base(
     scanned, outside, monkeypatch
 ):
-    (scanned / ".ash" / ".ash.yaml").write_text(GRANTS, encoding="utf-8")
+    (scanned / ".ash.yaml").write_text(GRANTS, encoding="utf-8")
     monkeypatch.setenv("ASH_CONFIG", str(outside))
 
     assert _granted(resolve_config(source_dir=scanned)) == (["/"], ["bandit"])
@@ -106,7 +106,7 @@ def test_control_an_ash_config_outside_the_tree_is_the_trusted_base(
 
 def test_an_operator_config_link_in_the_tree_is_not_the_trusted_base(scanned, outside):
     """The trusted base an in-tree config's grants are replaced from."""
-    (scanned / ".ash" / ".ash.yaml").write_text(GRANTS, encoding="utf-8")
+    (scanned / ".ash.yaml").write_text(GRANTS, encoding="utf-8")
     profile = scanned / ".ash" / "profile.yaml"
     profile.symlink_to(outside)
 
@@ -116,7 +116,7 @@ def test_an_operator_config_link_in_the_tree_is_not_the_trusted_base(scanned, ou
 
 
 def test_control_a_regular_config_in_the_tree_grants_nothing(scanned):
-    (scanned / ".ash" / ".ash.yaml").write_text(GRANTS, encoding="utf-8")
+    (scanned / ".ash.yaml").write_text(GRANTS, encoding="utf-8")
 
     assert _granted(resolve_config(source_dir=scanned)) == ([], None)
 

@@ -251,8 +251,7 @@ def _attempt(
     # Copied into the source tree: the checkout can sit under $HOME, which the
     # sandbox hides, and the source tree is always readable.
     shutil.copy(PROBE, source / PROBE.name)
-    (source / ".ash").mkdir()
-    (source / ".ash" / ".ash.yaml").write_text("project_name: sandbox-macos-services\n")
+    (source / ".ash.yaml").write_text("project_name: sandbox-macos-services\n")
     output = tmp_path / "out"
     spec_file = tmp_path / "spec.json"
     spec_file.write_text(

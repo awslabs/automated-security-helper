@@ -134,7 +134,7 @@ def _scanner(
     if operator is not None:
         record_provenance(
             config,
-            in_tree=[] if operator else [source_dir / ".ash" / ".ash.yaml"],
+            in_tree=[] if operator else [source_dir / ".ash.yaml"],
             trusted=AshConfig(),
         )
     context = PluginContext(
@@ -714,6 +714,20 @@ def test_inline_ignores_turned_on_from_the_scanned_tree_stay_off(
         )
     assert "--no-ignores" in final_args[: final_args.index("--")]
     assert "scanners.zizmor.options.honor_inline_ignores" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "option", ["online_audits", "honor_inline_ignores"], ids=["online", "ignores"]
+)
+def test_an_operator_gated_option_with_no_plugin_context_raises(repo, option):
+    """No context is a ScannerError, not a quiet fall-back to the safe default."""
+    scanner = _scanner(repo, operator=True, **{option: True})
+    scanner.context = None
+    check = (
+        scanner._online if option == "online_audits" else scanner._honor_inline_ignores
+    )
+    with pytest.raises(ScannerError, match="no plugin context"):
+        check()
 
 
 def test_ash_offline_mode_overrides_online_audits(repo, monkeypatch):

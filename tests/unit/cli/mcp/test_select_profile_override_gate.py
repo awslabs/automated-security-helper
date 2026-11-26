@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from fnmatch import fnmatchcase
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, get_args
+from typing import Any, Dict, List, Tuple
 
 import pytest
 import yaml
@@ -43,8 +43,12 @@ from automated_security_helper.config.ash_config import (
     RuntimeOverridesConfig,
     SandboxConfig,
 )
+from automated_security_helper.core.enums import SandboxMode
 
 pytestmark = pytest.mark.unit
+
+#: The mode the operator profile sets; the gate below tries every other one.
+_PROFILE_MODE = "bwrap"
 
 
 @pytest.fixture(autouse=True)
@@ -77,7 +81,7 @@ def _profile(
     return {
         "project_name": "operator",
         "fail_on_findings": True,
-        "sandbox": {"mode": "bwrap"},
+        "sandbox": {"mode": _PROFILE_MODE},
         "global_settings": {"mcp": {"runtime_overrides": runtime_overrides}},
     }
 
@@ -165,13 +169,29 @@ def test_every_sandbox_field_has_a_case() -> None:
     assert sorted(_SANDBOX_CASES) == sorted(SandboxConfig.model_fields)
 
 
+def test_the_mode_gate_runs_once_per_mode_but_the_profiles_own() -> None:
+    """The mode gate below must not collapse to zero instances.
+
+    ``SandboxConfig.mode`` is the ``SandboxMode`` enum, so ``get_args`` of its
+    annotation is empty: a parametrization built from it collects as one skip and
+    checks nothing. Read the instances pytest will collect and compare them with
+    the enum's members, less the mode the profile itself sets.
+    """
+    (mark,) = [
+        m
+        for m in test_override_yaml_cannot_move_the_sandbox_to_any_other_mode.pytestmark
+        if m.name == "parametrize"
+    ]
+    instances = list(mark.args[1])
+    assert instances, "the mode gate has no instances; it would be skipped"
+    assert sorted(instances) == sorted(
+        m.value for m in SandboxMode if m.value != _PROFILE_MODE
+    )
+
+
 @pytest.mark.parametrize(
     "mode",
-    sorted(
-        m
-        for m in get_args(SandboxConfig.model_fields["mode"].annotation)
-        if m != "bwrap"
-    ),
+    sorted(m.value for m in SandboxMode if m.value != _PROFILE_MODE),
 )
 def test_override_yaml_cannot_move_the_sandbox_to_any_other_mode(
     tmp_path: Path, mode: str
@@ -376,6 +396,23 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
         },
         {"suppressions": [_SUPPRESS_ALL]},
     ),
+    # An exclusion DROPS matching results from SARIF (issue #894), so a runtime
+    # patch adding one would silence findings with no trace; denied like the
+    # suppressions list it sits beside.
+    "/global_settings/exclusions": (
+        {
+            "op": "add",
+            "path": "/global_settings/exclusions/-",
+            "value": {"rule_id": "*", "path": "**", "reason": "silence everything"},
+        },
+        {
+            "global_settings": {
+                "exclusions": [
+                    {"rule_id": "*", "path": "**", "reason": "silence everything"}
+                ]
+            }
+        },
+    ),
     "/global_settings/mcp": (
         {
             "op": "replace",
@@ -397,6 +434,25 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
                 }
             }
         },
+    ),
+    # The run history joined the shipped defaults with the history section
+    # (ash_config.py: enabled turns on writes beside the output on every scan,
+    # and keep_runs bounds what pruning may delete), so each entry gets a case.
+    "/global_settings/history": (
+        {
+            "op": "replace",
+            "path": "/global_settings/history",
+            "value": {"enabled": True, "keep_runs": 50},
+        },
+        {"global_settings": {"history": {"enabled": True, "keep_runs": 50}}},
+    ),
+    "/global_settings/history/**": (
+        {
+            "op": "replace",
+            "path": "/global_settings/history/keep_runs",
+            "value": 1,
+        },
+        {"global_settings": {"history": {"keep_runs": 1}}},
     ),
     "/scanners/opengrep/options/exclude_rule": (
         {
@@ -694,6 +750,10 @@ _POINTED_DENIALS: Dict[str, Tuple[str, Any]] = {
     "/scanners/*/options/offline": (
         "/scanners/npm-audit/options/offline",
         True,
+    ),
+    "/scanners/syft/options/sdist_harvest/**": (
+        "/scanners/syft/options/sdist_harvest/enabled",
+        False,
     ),
     "/scanners/bandit/options/config_file": (
         "/scanners/bandit/options/config_file",

@@ -249,7 +249,7 @@ _VALUES_NAMING_A_SUBCOMMAND = [
         "",
         "--exclude-scanners grype",
         "--mode=local --verbose",
-        "--config .ash/.ash.yaml --exclude-scanners npm-audit",
+        "--config .ash.yaml --exclude-scanners npm-audit",
         *_VALUES_NAMING_A_SUBCOMMAND,
     ],
 )

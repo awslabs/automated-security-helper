@@ -31,6 +31,7 @@ from automated_security_helper.core.cancellation import (
     record_tool_pid,
 )
 from automated_security_helper.core.constants import ASH_REPO_URL
+from automated_security_helper.core.enums import RunMode
 from automated_security_helper.utils.console import echo, secho
 from automated_security_helper.utils.inner_run_outcome import OUTER_RUN_ID_ENV
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -248,12 +249,12 @@ def rewrite_mode_args(argv: List[str]) -> List[str]:
             break
         if arg == "--mode":
             # Two-token form: drop the flag and its value, then emit the replacement.
-            out.extend(["--mode", "local"])
+            out.extend(["--mode", RunMode.local.value])
             saw_mode = True
             skip_next = True
             continue
         if arg.startswith("--mode="):
-            out.append("--mode=local")
+            out.append(f"--mode={RunMode.local.value}")
             saw_mode = True
             continue
         if arg == "--show-summary":
@@ -266,7 +267,7 @@ def rewrite_mode_args(argv: List[str]) -> List[str]:
         # Nix mode can be selected by config file rather than on the command line, in which
         # case argv carries no --mode at all. Without this the inner scan would inherit
         # nix mode from that same config and recurse.
-        out.extend(["--mode", "local"])
+        out.extend(["--mode", RunMode.local.value])
     if _NO_SHOW_SUMMARY not in out:
         out.append(_NO_SHOW_SUMMARY)
 

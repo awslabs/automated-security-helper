@@ -73,6 +73,7 @@ from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
     Vulnerability,
     # Cve,
     Metadata,
+    Object,
     Product,
     FindingInfo,
     ActivityId,
@@ -94,11 +95,13 @@ import polars as pl
 from automated_security_helper.utils.frame_ops import ordered_counts, ordinal_over
 from automated_security_helper.utils.frame_text import wire
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.finding_identity import CORRELATION_ID_PROPERTY
 from automated_security_helper.utils.sarif_utils import (
     is_not_a_finding,
     result_message_text,
     result_rule_id,
     result_scanner_name,
+    shared_correlation_ids,
     shared_finding_ids,
     suppressions_in_effect,
 )
@@ -631,7 +634,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             severity = result_severity(result)
 
             # Create vulnerability object with required fields
-            vuln_dict = {
+            vuln_dict: Dict[str, Any] = {
                 "desc": desc,
                 "title": rule_id,
                 "severity": severity,
@@ -936,6 +939,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         shared_id: Optional[str] = None,
         identity: Optional[str] = None,
         rules: Optional[Dict[str, Any]] = None,
+        correlation_id: Optional[str] = None,
     ) -> VulnerabilityFinding:
         """Build individual VulnerabilityFinding object.
 
@@ -951,6 +955,13 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             identity: see *shared_id*
             rules: rule ids to descriptors (:func:`_rule_descriptors`), for a
                 message given by ``id``
+            correlation_id: the finding's cross-scanner correlation id
+                (``sarif_utils.shared_correlation_ids``), or None. Carried as
+                ``metadata.correlation_uid``, whose OCSF meaning -- grouping
+                related findings -- is exactly this value's, and spelled raw in
+                ``unmapped`` for consumers that grep the bag. The
+                ``finding_info.uid`` stays derived from the scanner-inclusive
+                identity, untouched.
 
         Returns:
             VulnerabilityFinding object for the individual result
@@ -1089,10 +1100,17 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 record_metadata = _metadata_with_labels(
                     record_metadata, DEGRADED_FINDING_LABEL
                 )
+            if correlation_id:
+                # On a copy: _metadata_for_project returns the shared Metadata
+                # unchanged for a single-directory scan, and the correlation id
+                # is per finding.
+                record_metadata = record_metadata.model_copy(
+                    update={"correlation_uid": correlation_id}
+                )
 
             # Create OCSF vulnerability finding
             ASH_LOGGER.debug(f"Creating VulnerabilityFinding object for {rule_id}")
-            vulnerability_finding_dict = {
+            vulnerability_finding_dict: Dict[str, Any] = {
                 "activity_id": ActivityId.integer_1,  # Create
                 "activity_name": ACTIVITY_NAME,
                 "severity_id": severity_id,
@@ -1105,6 +1123,13 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 "finding_info": finding_info,
                 "vulnerabilities": [vulnerability],
             }
+
+            if correlation_id:
+                # The raw spelled key too, for consumers that grep the bag
+                # rather than read the typed field.
+                vulnerability_finding_dict["unmapped"] = Object(
+                    **{CORRELATION_ID_PROPERTY: correlation_id}
+                )
 
             # Add status information if available
             if status_id is not None:
@@ -1152,6 +1177,20 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                     fallback_metadata, DEGRADED_FINDING_LABEL
                 )
 
+                # As the whole record carries it (metadata.correlation_uid plus
+                # the raw spelled key in unmapped): the correlation id was
+                # paired before this record's build began, so a record the
+                # fallback built keeps it, or a finding whose OCSF build failed
+                # correlates in ASFF and not in OCSF.
+                fallback_extra: Dict[str, Any] = {}
+                if correlation_id:
+                    fallback_metadata = fallback_metadata.model_copy(
+                        update={"correlation_uid": correlation_id}
+                    )
+                    fallback_extra["unmapped"] = Object(
+                        **{CORRELATION_ID_PROPERTY: correlation_id}
+                    )
+
                 fallback_vulnerability = Vulnerability(
                     desc=_FALLBACK_VULNERABILITY_DESC,
                     title=rule_id if rule_id != "Unknown Rule" else "Unknown Rule",
@@ -1195,6 +1234,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                     metadata=fallback_metadata,
                     finding_info=fallback_finding_info,
                     vulnerabilities=[fallback_vulnerability],
+                    **fallback_extra,
                 )
                 ASH_LOGGER.debug(f"Created fallback VulnerabilityFinding for {rule_id}")
                 return fallback_finding
@@ -1503,6 +1543,9 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         )
         shared_ids = shared_finding_ids(model, all_results)
         identities = _fallback_identities(all_results, shared_ids)
+        # The cross-scanner correlation ids, by the same pairing as the shared
+        # ids; None at every position a finding carries none.
+        correlation_ids = shared_correlation_ids(model, all_results)
         # The rules every run declares, read once, so a message given by id
         # is described by the string the rule names rather than by the key.
         # Guarded alone, as the read of the results above is: a tool or rules
@@ -1549,6 +1592,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                     shared_id=shared_ids[i],
                     identity=identities[i],
                     rules=rules,
+                    correlation_id=correlation_ids[i],
                 )
                 vulnerability_findings.append(finding)
 

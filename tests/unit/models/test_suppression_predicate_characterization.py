@@ -354,8 +354,9 @@ class TestPath:
             ("tests/**/", "tests", True),
             ("a/**/**/b", "a/b", True),
             ("a/**/**/b", "a/x/y/b", True),
-            # a trailing / on a suppression path names no file
-            ("build/", "build/x.py", False),
+            # a trailing / names the directory (the bare-directory rule, issue
+            # #894): the files below it match, a file of that name does not
+            ("build/", "build/x.py", True),
             ("build/", "build", False),
             ("build/*", "build/x.py", True),
             ("build/**/*", "build/x/y.py", True),
@@ -427,7 +428,9 @@ class TestPath:
             ("vendor/", "other/vendor/x.py", False),
             ("vendor\\", "vendor/x.py", True),
             ("vendor", "vendor", True),
-            ("vendor", "vendor/x.py", False),
+            # the bare-directory rule (issue #894): a glob-free name is the
+            # directory too
+            ("vendor", "vendor/x.py", True),
             ("vendor/**", "vendor/x.py", True),
             ("vendor/*", "vendor/x.py", True),
             ("", "a.py", False),
@@ -1017,11 +1020,14 @@ class TestUnconvertedInputAndActiveIgnorePaths:
 
     def test_it_reads_the_path_as_matches_path_does(self):
         rule = UNCONVERTED_INPUT_RULE
+        # "a/" names the directory and covers what is below it (the
+        # bare-directory rule, issue #894), as matches_path reads it.
+        assert accepting_unconverted_input("a/b.zip", [supp(rule_id=rule, path="a/")])
+        assert accepting_unconverted_input("a/b.zip", [supp(rule_id=rule, path="**")])
         assert (
-            accepting_unconverted_input("a/b.zip", [supp(rule_id=rule, path="a/")])
+            accepting_unconverted_input("a/b.zip", [supp(rule_id=rule, path="c/")])
             is None
         )
-        assert accepting_unconverted_input("a/b.zip", [supp(rule_id=rule, path="**")])
         assert (
             accepting_unconverted_input("a/b.zip", [supp(rule_id=rule, path="c/*")])
             is None

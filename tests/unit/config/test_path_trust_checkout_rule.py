@@ -316,8 +316,7 @@ def _ops_rules(tmp_path: Path) -> Path:
 
 def _scanned_checkout(tmp_path: Path, config: str = "project_name: scanned\n") -> Path:
     target = _checkout(tmp_path / "target")
-    (target / ".ash").mkdir()
-    (target / ".ash" / ".ash.yaml").write_text(config)
+    (target / ".ash.yaml").write_text(config)
     return target
 
 
@@ -389,7 +388,7 @@ def test_a_repository_config_still_cannot_name_a_file_in_another_checkout(
     # repository's config_file (tool_config_trust), naming the config that set
     # it, and the path check refuses the file it names (path_trust), naming the
     # checkout that file is in. Both end with the same remedy.
-    config_file = (target / ".ash" / ".ash.yaml").as_posix()
+    config_file = (target / ".ash.yaml").as_posix()
     assert len(messages) == 2, messages
     assert any(f"from {config_file}:" in message for message in messages), messages
     assert any("inside the git checkout at" in message for message in messages), (
@@ -436,6 +435,7 @@ def test_the_outer_checkout_of_a_submodule_scan_root_is_the_scanned_tree(tmp_pat
 def test_with_a_repository_base_only_the_operator_files_own_value_counts(tmp_path):
     rules = _ops_rules(tmp_path)
     target = _scanned_checkout(tmp_path)
+    (target / ".ash").mkdir()
     (target / ".ash" / "base.yaml").write_text(
         f"project_name: scanned\nscanners:\n  checkov:\n    options:\n"
         f"      config_file: {rules.as_posix()}\n"

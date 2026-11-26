@@ -57,7 +57,7 @@ The set covers every scanner ASH ships, which is the fifteen in
 ``plugin_modules/ash_builtin/scanners`` plus the scanners of the in-tree packages
 that ``load_internal_plugins()`` does not load: the vendored three
 (``ferret-scan``, ``snyk-code``, ``trivy-repo``) and the Betterleaks, GuardDog and
-hadolint community modules. They are included because their results hit the same fallback
+hadolint alpha modules. They are included because their results hit the same fallback
 as a builtin scanner's, and because a gate that passed only by hand-excluding
 shipped scanners would be a weaker gate.
 
@@ -118,6 +118,8 @@ from __future__ import annotations
 import re
 from typing import Dict, FrozenSet, Mapping
 
+from automated_security_helper.core.enums import ScannerToolType
+
 #: The tool type (a ``ScannerToolType`` value) of every scanner ASH ships, by
 #: config name. A scanner sets its ``tool_type`` in ``model_post_init``, so the
 #: class does not carry it, and instantiating a scanner probes its tool version;
@@ -125,27 +127,28 @@ from typing import Dict, FrozenSet, Mapping
 #: tests/unit/utils/test_scanner_tool_types.py checks each entry against the
 #: scanner's own ``tool_type``. Kept sorted so a diff adding one is a single line.
 SCANNER_TOOL_TYPES: Mapping[str, str] = {
-    "actionlint": "IAC",
-    "bandit": "SAST",
-    "cdk-nag": "IAC",
-    "cfn-guard": "IAC",
-    "cfn-lint": "IAC",
-    "cfn-nag": "IAC",
-    "checkov": "IAC",
-    "detect-secrets": "SECRETS",  # pragma: allowlist secret
-    "betterleaks": "SECRETS",
-    "ferret-scan": "SECRETS",
-    "gitleaks": "SECRETS",
-    "grype": "SCA",
-    "guarddog": "SCA",
-    "hadolint": "IAC",
-    "npm-audit": "SCA",
-    "opengrep": "SAST",
-    "snyk-code": "SAST",
-    "syft": "SBOM",
-    "trivy": "SCA",
-    "trivy-repo": "SCA",
-    "zizmor": "SAST",
+    "actionlint": ScannerToolType.IAC.value,
+    "bandit": ScannerToolType.SAST.value,
+    "cdk-nag": ScannerToolType.IAC.value,
+    "cfn-guard": ScannerToolType.IAC.value,
+    "cfn-lint": ScannerToolType.IAC.value,
+    "cfn-nag": ScannerToolType.IAC.value,
+    "checkov": ScannerToolType.IAC.value,
+    "detect-secrets": ScannerToolType.SECRETS.value,
+    "betterleaks": ScannerToolType.SECRETS.value,
+    "ferret-scan": ScannerToolType.SECRETS.value,
+    "gitleaks": ScannerToolType.SECRETS.value,
+    "grype": ScannerToolType.SCA.value,
+    "guarddog": ScannerToolType.SCA.value,
+    "hadolint": ScannerToolType.IAC.value,
+    "mcp-config": ScannerToolType.SAST.value,
+    "npm-audit": ScannerToolType.SCA.value,
+    "opengrep": ScannerToolType.SAST.value,
+    "snyk-code": ScannerToolType.SAST.value,
+    "syft": ScannerToolType.SBOM.value,
+    "trivy": ScannerToolType.SCA.value,
+    "trivy-repo": ScannerToolType.SCA.value,
+    "zizmor": ScannerToolType.SAST.value,
 }
 
 #: Scanner config names for every scanner ASH ships, as they appear in SARIF
@@ -159,10 +162,11 @@ SCANNER_TAG_NAMES: FrozenSet[str] = frozenset(SCANNER_TOOL_TYPES)
 #: Retired scanner names, each mapped to the shipped scanner that serves it.
 #:
 #: The name on the left is accepted everywhere a scanner name is read -- a
-#: ``scanners.<name>`` config section, ``--scanners`` / ``--exclude-scanners`` --
-#: and resolves to the plugin on the right. It is a general table rather than a
-#: per-name special case so the next retirement is one line here plus its fold
-#: in ``config/ash_config.py``.
+#: ``scanners.<name>`` config section, ``--scanners`` / ``--exclude-scanners``,
+#: a ``dependencies install --tool`` name -- and resolves to the plugin on the
+#: right. It is a general table rather than a per-name special case so a
+#: retirement is one line here plus the fold ``config/ash_config.py`` already
+#: carries.
 #:
 #: ``semgrep``: the semgrep scanner plugin was removed in v4. opengrep is a fork
 #: of semgrep with the same rule syntax, ``p/ci`` default ruleset and SARIF
@@ -176,8 +180,8 @@ SCANNER_NAME_ALIASES: Dict[str, str] = {
 
 #: The spellings under which an alias is recognized: ASCII letters, digits and
 #: ``+`` kept, lowered. The same reduction ``AshConfig.get_plugin_config``
-#: applies to a plugin name, restated here because this module imports nothing
-#: from ASH (see the module docstring).
+#: applies to a plugin name, restated here because this module imports almost
+#: nothing from ASH (see the module docstring).
 _NAME_PUNCTUATION = re.compile(r"[^a-zA-Z0-9+]")
 
 
@@ -202,7 +206,7 @@ def selection_key(name: str) -> str:
 
     Lower-cased and stripped, with a retired name resolved to the scanner that
     serves it, so ``" Semgrep "`` and ``"opengrep"`` compare equal. The scan
-    phase, the selection helpers and the MCP result filters all compare names
-    through this one function.
+    phase, the selection helpers, the dependencies tool lookup and the MCP
+    result filters all compare names through this one function.
     """
     return canonical_scanner_name(name.strip()).lower().strip()

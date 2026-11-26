@@ -4,7 +4,7 @@
 """A config file reached through a link the scanned repository holds is the repository's.
 
 A config file is judged by where it resolves to and by the name that reached it
-(config/sandbox_grants.py, ``files_inside``), so a ``.ash/.ash.yaml`` that links
+(config/sandbox_grants.py, ``files_inside``), so a ``.ash.yaml`` that links
 out of the tree is still the tree's. Two more names are judged:
 
 - an ``extends`` base's own name. An operator's config outside the tree that
@@ -101,7 +101,7 @@ def test_an_operator_base_the_repositorys_link_picks_is_no_trusted_base(tmp_path
     _symlink_or_skip(repo / ".ash" / "link.yaml", ops / "other.yaml")
     operator = ops / "ash.yaml"
     operator.write_text("extends: repo/.ash/link.yaml\n", encoding="utf-8")
-    own = repo / ".ash" / ".ash.yaml"
+    own = repo / ".ash.yaml"
     own.write_text("project_name: repo\n", encoding="utf-8")
 
     section = _s3_section(own, repo, trusted=operator)
@@ -153,7 +153,7 @@ def test_control_the_operators_config_outside_the_checkout_is_the_trusted_base(
     ops, repo = _operator_dir_holding_the_checkout(tmp_path)
     operator = ops / "ash.yaml"
     operator.write_text("extends: other.yaml\n", encoding="utf-8")
-    own = repo / ".ash" / ".ash.yaml"
+    own = repo / ".ash.yaml"
     own.write_text("project_name: repo\n", encoding="utf-8")
 
     section = _s3_section(own, repo, trusted=operator)

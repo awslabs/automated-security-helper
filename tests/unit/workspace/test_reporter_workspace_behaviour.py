@@ -159,11 +159,11 @@ class TestEveryReporterDeclaresABehaviour:
     def test_each_declared_behaviour_is_a_member_of_the_enum(self, name):
         """Guards against a string literal drifting from the enum.
 
-        ``PluginBase`` sets ``use_enum_values=True``, so a *field* holding an
-        enum would serialise to its value and compare equal to a typo'd string.
-        ``workspace_behaviour`` is a ClassVar precisely so that does not apply,
-        and this asserts the distinction still holds.
+        Membership is by member, not by ``==`` against a string: the enum is a
+        ``str`` subclass, so ``"MERGED" == ReporterWorkspaceBehaviour.MERGED``
+        and a typo'd string would not be caught by equality alone.
         """
+        assert isinstance(EXPECTED_BEHAVIOURS[name], ReporterWorkspaceBehaviour)
         assert EXPECTED_BEHAVIOURS[name] in set(ReporterWorkspaceBehaviour)
 
 

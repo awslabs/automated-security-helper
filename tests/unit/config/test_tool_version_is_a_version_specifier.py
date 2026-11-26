@@ -128,8 +128,8 @@ _OPTIONS = [
 
 
 def _write_config(source: Path, section: str, name: str, value: str) -> None:
-    (source / ".ash").mkdir(parents=True, exist_ok=True)
-    (source / ".ash" / ".ash.yaml").write_text(
+    source.mkdir(parents=True, exist_ok=True)
+    (source / ".ash.yaml").write_text(
         f"project_name: scanned\n{section}:\n  {name}:\n    options:\n"
         f"      tool_version: {value!r}\n"
     )
@@ -412,8 +412,8 @@ def test_an_opengrep_version_that_is_not_a_release_tag_never_reaches_a_url(
     from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 
     source = tmp_path / "repo"
-    (source / ".ash").mkdir(parents=True)
-    (source / ".ash" / ".ash.yaml").write_text(
+    source.mkdir(parents=True)
+    (source / ".ash.yaml").write_text(
         "project_name: scanned\nscanners:\n  opengrep:\n    options:\n"
         f"      version: {value!r}\n"
     )

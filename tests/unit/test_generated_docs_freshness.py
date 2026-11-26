@@ -127,7 +127,7 @@ OPTIONS_PAGES = {
 }
 #: Where a docs tree keeps per-scanner pages (as in generate_scanner_reference.py).
 BUILTIN_SCANNER_PAGES = Path("docs/content/docs/plugins/builtin")
-COMMUNITY_SCANNER_PAGES = Path("docs/content/docs/plugins/community")
+ALPHA_SCANNER_PAGES = Path("docs/content/docs/plugins/alpha")
 
 #: Set for every generator run. Each one changes a default some page shows when
 #: it leaks: AshConfig.project_name, the severity threshold, the AWS and Bedrock
@@ -317,16 +317,16 @@ def test_docs_root_decides_where_pages_go_and_what_they_link(tmp_path: Path) -> 
     """--docs-root is the tree written to, and the source of per-scanner links.
 
     The planted tree holds a page for one built-in scanner, one page covering two
-    (named with -and-), and a community module's page; the generated page must
+    (named with -and-), and an alpha module's page; the generated page must
     link exactly those four scanners, and land under the planted tree.
     """
     builtin = tmp_path / BUILTIN_SCANNER_PAGES
-    community = tmp_path / COMMUNITY_SCANNER_PAGES
+    alpha = tmp_path / ALPHA_SCANNER_PAGES
     for page in (
         builtin / "bandit.md",
         builtin / "checkov-and-cdk-nag.md",
         builtin / "scanners.md",
-        community / "snyk-plugin.md",
+        alpha / "snyk-plugin.md",
     ):
         page.parent.mkdir(parents=True, exist_ok=True)
         page.write_text("# planted\n", encoding="utf-8")
@@ -348,7 +348,7 @@ def test_docs_root_decides_where_pages_go_and_what_they_link(tmp_path: Path) -> 
         "bandit": "../docs/plugins/builtin/bandit.md",
         "checkov": "../docs/plugins/builtin/checkov-and-cdk-nag.md",
         "cdk-nag": "../docs/plugins/builtin/checkov-and-cdk-nag.md",
-        "snyk-code": "../docs/plugins/community/snyk-plugin.md",
+        "snyk-code": "../docs/plugins/alpha/snyk-plugin.md",
     }
     assert "automated_security_helper" in result.stderr.split("Documenting ", 1)[1]
 
@@ -1979,10 +1979,10 @@ def test_check_installation_notes_list_no_scanners() -> None:
 
 
 @pytest.mark.unit
-def test_community_loading_is_scoped_to_ash_scan() -> None:
+def test_alpha_loading_is_scoped_to_ash_scan() -> None:
     """ "Loaded only when named" is said of ``ash scan``; the MCP server is pointed elsewhere.
 
-    Under ``ash mcp`` a community scanner registered by an earlier call stays
+    Under ``ash mcp`` an alpha scanner registered by an earlier call stays
     registered for later scans, so the unscoped statement is not true there. The
     plugins page says what holds for the MCP server, and this page links to it.
     """
@@ -1990,10 +1990,8 @@ def test_community_loading_is_scoped_to_ash_scan() -> None:
     intro = text.split("\n| Scanner |", 1)[0]
     assert "that `ashx scan` loads only when" in intro
     assert "(../plugins/index.md#what-a-plugin-can-do)" in intro
-    provided = [
-        ln for ln in text.splitlines() if ln.startswith("- Provided by: community")
-    ]
-    assert provided, "no community scanners on the page"
+    provided = [ln for ln in text.splitlines() if ln.startswith("- Provided by: alpha")]
+    assert provided, "no alpha scanners on the page"
     for line in provided:
         assert "which `ashx scan` loads when" in line, line
 

@@ -12,7 +12,7 @@
 
 This page is generated from the scanner plugins in the ASH source code by `scripts/generate_scanner_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH ships 21 scanners. The built-in ones are loaded on every scan. The others are community scanners, each in a plugin module that `ashx scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
+ASH ships 22 scanners. The built-in ones are loaded on every scan. The others are alpha scanners, each in a plugin module that `ashx scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
 
 <!-- doctest: options of=scanners -->
 | Scanner | Tool type | Enabled by default | Provided by | Command | Runs with `--python-only` |
@@ -27,17 +27,18 @@ ASH ships 21 scanners. The built-in ones are loaded on every scan. The others ar
 | [`detect-secrets`](#detect-secrets) | SECRETS | yes | built in | `detect-secrets` | yes |
 | [`gitleaks`](#gitleaks) | SECRETS | yes | built in | `gitleaks` | no |
 | [`grype`](#grype) | SCA | yes | built in | `grype` | no |
+| [`mcp-config`](#mcp-config) | SAST | yes | built in | `ash-mcp-config-scanner` | yes |
 | [`npm-audit`](#npm-audit) | SCA | yes | built in | `npm` | no |
 | [`opengrep`](#opengrep) | SAST | yes on Linux and macOS; no on Windows | built in | `opengrep` | no |
 | [`syft`](#syft) | SBOM | yes | built in | `syft` | no |
 | [`trivy`](#trivy) | SCA | yes | built in | `trivy` | no |
 | [`zizmor`](#zizmor) | SAST | yes | built in | `zizmor` | yes |
-| [`betterleaks`](#betterleaks) | SECRETS | yes | community module `ash_betterleaks_plugins` | `betterleaks` | no |
-| [`ferret-scan`](#ferret-scan) | SECRETS | yes | community module `ash_ferret_plugins` | `ferret-scan` | no |
-| [`guarddog`](#guarddog) | SCA | yes | community module `ash_guarddog_plugins` | `guarddog` | yes |
-| [`hadolint`](#hadolint) | IAC | yes | community module `ash_hadolint_plugins` | `hadolint` | no |
-| [`snyk-code`](#snyk-code) | SAST | yes | community module `ash_snyk_plugins` | `snyk` | no |
-| [`trivy-repo`](#trivy-repo) | SCA | yes | community module `ash_trivy_plugins` | `trivy` | no |
+| [`betterleaks`](#betterleaks) | SECRETS | yes | alpha module `ash_betterleaks_plugins` | `betterleaks` | no |
+| [`ferret-scan`](#ferret-scan) | SECRETS | yes | alpha module `ash_ferret_plugins` | `ferret-scan` | no |
+| [`guarddog`](#guarddog) | SCA | yes | alpha module `ash_guarddog_plugins` | `guarddog` | yes |
+| [`hadolint`](#hadolint) | IAC | yes | alpha module `ash_hadolint_plugins` | `hadolint` | no |
+| [`snyk-code`](#snyk-code) | SAST | yes | alpha module `ash_snyk_plugins` | `snyk` | no |
+| [`trivy-repo`](#trivy-repo) | SCA | yes | alpha module `ash_trivy_plugins` | `trivy` | no |
 
 Tool type is the scanner's own `ScannerToolType`. `--python-only` keeps a scanner when its `is_python_only()` is true: the scanner class's own `python_only` when it states one; otherwise only when the scanner runs its tool through uv, declares no install commands, and has only pip dependencies. A scanner it does not keep is SKIPPED.
 
@@ -97,7 +98,7 @@ Options, under `scanners.bandit.options`. An option not listed here refuses the 
 | <a id="scanners.bandit.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
 | <a id="scanners.bandit.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
 | <a id="scanners.bandit.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to Bandit configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. ASH does not look for one by name. A file named exactly `.bandit` is passed with `bandit --ini`, and any other file with `bandit --configfile`. Unless config_file names a `.bandit` file that exists, ASH passes bandit an empty config file with `bandit --ini`, so bandit does not read a `.bandit` file from the scanned tree. A path that is not a file is logged as a warning and ignored. |
-| <a id="scanners.bandit.options.confidence_level"></a>`confidence_level` | string, matches `^(all|low|medium|high)$` | `all` | Confidence level for bandit scan (all, low, medium, high) |
+| <a id="scanners.bandit.options.confidence_level"></a>`confidence_level` | one of `all`, `low`, `medium`, `high` | `all` | Confidence level for bandit scan (all, low, medium, high) |
 | <a id="scanners.bandit.options.ignore_nosec"></a>`ignore_nosec` | boolean | `false` | Whether to ignore #nosec comments in the code |
 | <a id="scanners.bandit.options.excluded_paths"></a>`excluded_paths` | list of mapping | `[]` | List of paths to exclude from the bandit scan |
 | <a id="scanners.bandit.options.additional_formats"></a>`additional_formats` | list of string | `[]` | Additional output formats (e.g., html, csv, xml). bandit writes one format per run through a single --format option, and ASH needs that run's output to be SARIF, so these formats are not produced: a value here is accepted and logged as a warning. Convert the SARIF results with ASH's reporters instead. |
@@ -214,7 +215,7 @@ Options, under `scanners.cfn-nag.options`. An option not listed here refuses the
 - Enabled by default: yes
 - Tool type: IAC
 - Command: `checkov`
-- Install: `uv tool install` on first use (`checkov>=3.2.0,<4.0.0`)
+- Install: `uv tool install` on first use (`checkov>=3.2.0,<4.0.0` with Python `>=3.10,<3.15`)
 - Offline strategy: `cache_flags`
 - Network in the sandbox, by default: no
 - Environment passed into the sandbox: `CHECKOV_*`, `CKV_*`
@@ -230,7 +231,7 @@ Options, under `scanners.checkov.options`. An option not listed here refuses the
 | <a id="scanners.checkov.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, disabling policy downloads. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 | <a id="scanners.checkov.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to a Checkov configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Only a file the operator names and that lies outside the scanned tree is passed to Checkov; a `.checkov.yaml` or `.checkov.yml` found in the scanned tree is not read, and the scan tells Checkov to read none from its working directory either, because such a file can change what is reported. |
 | <a id="scanners.checkov.options.skip_path"></a>`skip_path` | list of mapping | `[]` | Path (file or directory) to skip, as a regular expression Checkov searches for in each path it walks, and also as a substring of that path. The paths Checkov walks start with the absolute path of the scanned directory. Word boundaries are not implicit: "dir1" skips any directory or subdirectory whose path holds "dir1". An entry whose path is empty is ignored (it would skip every file). Can be specified multiple times. |
-| <a id="scanners.checkov.options.additional_formats"></a>`additional_formats` | list of one of `cli`, `csv`, `cyclonedx`, `cyclonedx_json`, `json`, `junitxml`, `github_failed_only`, `gitlab_sast`, `sarif`, `spdx` | `["cyclonedx_json"]` | List of additional formats to output. Defaults to including CycloneDX JSON. checkov's JSON report is written whatever this lists: ASH reads the resource of each finding from it. |
+| <a id="scanners.checkov.options.additional_formats"></a>`additional_formats` | list of one of `cli`, `csv`, `cyclonedx`, `cyclonedx_json`, `json`, `junitxml`, `github_failed_only`, `gitlab_sast`, `sarif`, `spdx` | `["cyclonedx_json"]` | List of additional formats to output. Defaults to including CycloneDX JSON. checkov's JSON report is written whatever this lists: ASH reads the resource of each finding from it, and rewrites its paths to the source-relative form the SARIF uses. |
 | <a id="scanners.checkov.options.frameworks"></a>`frameworks` | list of one of `all`, `ansible`, `argo_workflows`, `arm`, `azure_pipelines`, `bicep`, `bitbucket_pipelines`, `cdk`, `circleci_pipelines`, `cloudformation`, `dockerfile`, `github_configuration`, `github_actions`, `gitlab_configuration`, `gitlab_ci`, `bitbucket_configuration`, `helm`, `json`, `yaml`, `kubernetes`, `kustomize`, `openapi`, `sca_package`, `sca_image`, `secrets`, `serverless`, `terraform`, `terraform_json`, `terraform_plan`, `sast`, `sast_python`, `sast_java`, `sast_javascript`, `sast_typescript`, `sast_golang`, `3d_policy` | `["all"]` | Specific frameworks to include with Checkov. Defaults to `all`. |
 | <a id="scanners.checkov.options.skip_frameworks"></a>`skip_frameworks` | list of one of `all`, `ansible`, `argo_workflows`, `arm`, `azure_pipelines`, `bicep`, `bitbucket_pipelines`, `cdk`, `circleci_pipelines`, `cloudformation`, `dockerfile`, `github_configuration`, `github_actions`, `gitlab_configuration`, `gitlab_ci`, `bitbucket_configuration`, `helm`, `json`, `yaml`, `kubernetes`, `kustomize`, `openapi`, `sca_package`, `sca_image`, `secrets`, `serverless`, `terraform`, `terraform_json`, `terraform_plan`, `sast`, `sast_python`, `sast_java`, `sast_javascript`, `sast_typescript`, `sast_golang`, `3d_policy` | `[]` | Specific frameworks to exclude with Checkov. Defaults to none. |
 | <a id="scanners.checkov.options.skip_ash_output_dir"></a>`skip_ash_output_dir` | boolean | `true` | Tell Checkov to skip ASH's own output directories inside the scanned directory (this run's output directory and .ash/ash_output), so it does not parse ASH's previous reports. Defaults to true; set to false to let Checkov read them. Either way ASH drops the findings located there after the scan. Has no effect on Windows, where Checkov's --skip-path matching is unreliable. |
@@ -313,6 +314,36 @@ Options, under `scanners.grype.options`. An option not listed here refuses the c
 | <a id="scanners.grype.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, disabling database updates and validation. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 | <a id="scanners.grype.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to Grype configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. ASH does not look for one by name. Without one, grype gets an empty config, so it does not read `.grype.yaml` from the scanned tree. |
 
+## `mcp-config`
+
+- Scanner page: [`mcp-config` scanner page](../docs/plugins/builtin/mcp-config.md)
+- Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.mcp_config_scanner.McpConfigScanner`
+- Provided by: built in, loaded on every scan
+- Enabled by default: yes
+- Tool type: SAST
+- Command: `ash-mcp-config-scanner`
+- Install: none declared
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.mcp-config.options`. An option not listed here refuses the configuration.
+
+<!-- doctest: options of=scanners.mcp-config -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.mcp-config.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.mcp-config.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.mcp-config.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
+| <a id="scanners.mcp-config.options.forbid_privilege_escalation"></a>`forbid_privilege_escalation` | boolean | `true` | Flag sudo, doas, su and pkexec used as the command, or as a whole argument, of a stdio MCP server entry (HIGH). The match is on the whole word, so a name that merely contains one is not flagged. |
+| <a id="scanners.mcp-config.options.forbid_unpinned_runners"></a>`forbid_unpinned_runners` | boolean | `true` | Flag npx, bunx, pnpm dlx, pnpx and uvx entries whose package has no exact version, such as `npx -y pkg` or `uvx pkg` (MEDIUM). `pkg@1.2.3` and `pkg==1.2.3` are pinned; `pkg@latest` and ranges are not. |
+| <a id="scanners.mcp-config.options.forbid_auto_approval"></a>`forbid_auto_approval` | boolean | `true` | Flag settings that approve MCP tool calls without asking (HIGH): gemini `trust: true`, a non-empty kiro `autoApprove` or roo `alwaysAllow`, and codex `approval_mode` of `auto` or `full-auto`. |
+| <a id="scanners.mcp-config.options.require_local"></a>`require_local` | boolean | `false` | Flag every remote (url, httpUrl, serverUrl) entry whose host is not loopback (MEDIUM). `localhost`, `127.0.0.0/8` and `::1` count as local, whichever way the IPv6 address is spelled. |
+| <a id="scanners.mcp-config.options.remote_url_prefixes"></a>`remote_url_prefixes` | list of string | `[]` | When not empty, every remote URL must start with one of these prefixes (MEDIUM), compared on URL boundaries with the scheme and host in lower case, and a remote URL that is not loopback must be https (MEDIUM). Empty turns the check off. |
+| <a id="scanners.mcp-config.options.allowed_command_prefixes"></a>`allowed_command_prefixes` | list of string | `[]` | When not empty, every stdio command must be a path that starts with one of these prefixes (MEDIUM), compared on path boundaries after the command is normalized. A bare command name such as `npx` does not start with a path prefix and is flagged. Empty turns the check off. |
+| <a id="scanners.mcp-config.options.flag_env_secrets"></a>`flag_env_secrets` | boolean | `true` | Flag an `env` entry whose name says key, token, secret or password and whose value is a literal rather than a reference such as `${NAME}` (LOW). The value is never written into the finding. |
+
 ## `npm-audit`
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner.NpmAuditScanner`
@@ -367,6 +398,7 @@ Options, under `scanners.opengrep.options`. An option not listed here refuses th
 
 ## `syft`
 
+- Scanner page: [`syft` scanner page](../docs/plugins/builtin/syft.md)
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner.SyftScanner`
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes
@@ -389,6 +421,7 @@ Options, under `scanners.syft.options`. An option not listed here refuses the co
 | <a id="scanners.syft.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to Syft configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. ASH does not look for one by name. Without one, syft gets an empty config, so it does not read `.syft.yaml` from the scanned tree. |
 | <a id="scanners.syft.options.exclude"></a>`exclude` | list of mapping | `[]` | Paths (files or directories) to skip, each a glob relative to the scanned directory and passed to syft as one --exclude. A glob must start with "./", "\*/" or "\*\*/", and syft fails the scan on any other. "\*" does not match across "/" and "\*\*" does: "./dir1/\*\*" skips the top-level "dir1", and "\*\*/dir1/\*\*" skips every directory named "dir1". |
 | <a id="scanners.syft.options.additional_outputs"></a>`additional_outputs` | list of one of `cyclonedx-json`, `cyclonedx-xml`, `github-json`, `spdx-json`, `spdx-tag-value`, `syft-json`, `syft-table`, `syft-text` | `["syft-table"]` | List of additional formats to output. Defaults to syft-table. |
+| <a id="scanners.syft.options.sdist_harvest"></a>`sdist_harvest` | mapping | see the section | Configure the cross-toolchain sdist lockfile harvest, which completes the SBOM for compiled dependencies whose artifacts carry no audit data. The harvest runs in the convert phase; offline mode disables its fetches whatever these options say. |
 
 ## `trivy`
 
@@ -453,9 +486,9 @@ Options, under `scanners.zizmor.options`. An option not listed here refuses the 
 
 ## `betterleaks`
 
-- Scanner page: [`betterleaks` scanner page](../docs/plugins/community/betterleaks-plugin.md)
+- Scanner page: [`betterleaks` scanner page](../docs/plugins/alpha/betterleaks-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_betterleaks_plugins.betterleaks_scanner.BetterleaksScanner`
-- Provided by: community module `ash_betterleaks_plugins`, which `ashx scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_betterleaks_plugins`
+- Provided by: alpha module `ash_betterleaks_plugins`, which `ashx scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_betterleaks_plugins`
 - Enabled by default: yes
 - Tool type: SECRETS
 - Command: `betterleaks`
@@ -481,9 +514,9 @@ Options, under `scanners.betterleaks.options`. An option not listed here refuses
 
 Ferret Scan is a sensitive data detection tool that scans files for potential sensitive information such as credit card numbers, passport numbers, SSNs, API keys, and other secrets.
 
-- Scanner page: [`ferret-scan` scanner page](../docs/plugins/community/ferret-scan-plugin.md)
+- Scanner page: [`ferret-scan` scanner page](../docs/plugins/alpha/ferret-scan-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.FerretScanScanner`
-- Provided by: community module `ash_ferret_plugins`, which `ashx scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_ferret_plugins`
+- Provided by: alpha module `ash_ferret_plugins`, which `ashx scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_ferret_plugins`
 - Enabled by default: yes
 - Tool type: SECRETS
 - Command: `ferret-scan`
@@ -526,9 +559,9 @@ Options, under `scanners.ferret-scan.options`. An option not listed here refuses
 
 GuardDog detects malicious-package heuristics in PyPI, npm, Go, GitHub Action, RubyGems and crates packages.
 
-- Scanner page: [`guarddog` scanner page](../docs/plugins/community/guarddog-plugin.md)
+- Scanner page: [`guarddog` scanner page](../docs/plugins/alpha/guarddog-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner.GuardDogScanner`
-- Provided by: community module `ash_guarddog_plugins`, which `ashx scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_guarddog_plugins`
+- Provided by: alpha module `ash_guarddog_plugins`, which `ashx scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_guarddog_plugins`
 - Enabled by default: yes
 - Tool type: SCA
 - Command: `guarddog`
@@ -561,9 +594,9 @@ Options, under `scanners.guarddog.options`. An option not listed here refuses th
 
 ## `hadolint`
 
-- Scanner page: [`hadolint` scanner page](../docs/plugins/community/hadolint-plugin.md)
+- Scanner page: [`hadolint` scanner page](../docs/plugins/alpha/hadolint-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_hadolint_plugins.hadolint_scanner.HadolintScanner`
-- Provided by: community module `ash_hadolint_plugins`, which `ashx scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_hadolint_plugins`
+- Provided by: alpha module `ash_hadolint_plugins`, which `ashx scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_hadolint_plugins`
 - Enabled by default: yes
 - Tool type: IAC
 - Command: `hadolint`
@@ -585,9 +618,9 @@ Options, under `scanners.hadolint.options`. An option not listed here refuses th
 
 ## `snyk-code`
 
-- Scanner page: [`snyk-code` scanner page](../docs/plugins/community/snyk-plugin.md)
+- Scanner page: [`snyk-code` scanner page](../docs/plugins/alpha/snyk-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner.SnykCodeScanner`
-- Provided by: community module `ash_snyk_plugins`, which `ashx scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_snyk_plugins`
+- Provided by: alpha module `ash_snyk_plugins`, which `ashx scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_snyk_plugins`
 - Enabled by default: yes
 - Tool type: SAST
 - Command: `snyk`
@@ -609,9 +642,9 @@ Options, under `scanners.snyk-code.options`. An option not listed here refuses t
 
 ## `trivy-repo`
 
-- Scanner page: [`trivy-repo` scanner page](../docs/plugins/community/trivy-plugin.md)
+- Scanner page: [`trivy-repo` scanner page](../docs/plugins/alpha/trivy-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.TrivyRepoScanner`
-- Provided by: community module `ash_trivy_plugins`, which `ashx scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_trivy_plugins`
+- Provided by: alpha module `ash_trivy_plugins`, which `ashx scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_trivy_plugins`
 - Enabled by default: yes
 - Tool type: SCA
 - Command: `trivy`

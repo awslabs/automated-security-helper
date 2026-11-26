@@ -202,7 +202,7 @@ def test_an_uploaded_config_path_setting_a_denied_field_is_refused(_server) -> N
 def test_a_delivered_trees_own_config_setting_a_denied_field_is_refused(
     _server,
 ) -> None:
-    source = _upload({".ash/.ash.yaml": BEDROCK_REGION, "app.py": "x = 1\n"})
+    source = _upload({".ash.yaml": BEDROCK_REGION, "app.py": "x = 1\n"})
     _assert_refused(_scan_resolution(source, None))
 
 
@@ -268,7 +268,7 @@ def test_the_bound_profiles_denials_apply_to_a_delivered_trees_config(
     _server,
 ) -> None:
     _bind_profile(_server["tmp"], _profile_denying("/project_name"))
-    source = _upload({".ash/.ash.yaml": "project_name: delivered\n"})
+    source = _upload({".ash.yaml": "project_name: delivered\n"})
     _assert_refused(_scan_resolution(source, None), key="project_name")
 
 
@@ -348,7 +348,7 @@ def test_sandbox_and_plugin_modules_within_the_servers_scan(_server) -> None:
 
 def test_a_default_value_in_an_upload_is_accepted(_server) -> None:
     """``fail_on_findings: true`` is the default, so it changes nothing."""
-    source = _upload({".ash/.ash.yaml": "fail_on_findings: true\n"})
+    source = _upload({".ash.yaml": "fail_on_findings: true\n"})
     config = _scan_resolution(source, None)
     assert not isinstance(config, Exception), config
 
@@ -359,7 +359,7 @@ _DELIVERED_SUPPRESSION = (
 
 
 def test_a_delivered_trees_own_suppressions_apply_and_are_marked(_server) -> None:
-    source = _upload({".ash/.ash.yaml": _DELIVERED_SUPPRESSION, "app.py": "x = 1\n"})
+    source = _upload({".ash.yaml": _DELIVERED_SUPPRESSION, "app.py": "x = 1\n"})
     config = _scan_resolution(source, None)
     assert not isinstance(config, Exception), config
     [entry] = config.global_settings.suppressions
@@ -368,13 +368,13 @@ def test_a_delivered_trees_own_suppressions_apply_and_are_marked(_server) -> Non
 
 def test_a_profile_that_denies_suppressions_still_refuses_them(_server) -> None:
     _bind_profile(_server["tmp"], _profile_denying("/global_settings/suppressions"))
-    source = _upload({".ash/.ash.yaml": _DELIVERED_SUPPRESSION, "app.py": "x = 1\n"})
+    source = _upload({".ash.yaml": _DELIVERED_SUPPRESSION, "app.py": "x = 1\n"})
     _assert_refused(_scan_resolution(source, None), key="global_settings.suppressions")
 
 
 def test_ashs_own_repository_config_delivered_as_a_tree_scans(_server) -> None:
-    own = Path(__file__).resolve().parents[4] / ".ash" / ".ash.yaml"
-    source = _upload({".ash/.ash.yaml": own.read_text(encoding="utf-8")})
+    own = Path(__file__).resolve().parents[4] / ".ash.yaml"
+    source = _upload({".ash.yaml": own.read_text(encoding="utf-8")})
     config = _scan_resolution(source, None)
     if sys.platform == "win32":
         # Platform contract: opengrep is "Off by default on Windows" (its ``enabled``
@@ -395,9 +395,9 @@ def test_ashs_own_repository_config_delivered_as_a_tree_scans(_server) -> None:
 def test_an_ash_config_init_file_delivered_as_a_tree_scans(_server) -> None:
     from automated_security_helper.cli.config import init
 
-    target = _server["tmp"] / "init" / ".ash" / ".ash.yaml"
+    target = _server["tmp"] / "init" / ".ash.yaml"
     init(config=str(target), color=False)
-    source = _upload({".ash/.ash.yaml": target.read_text(encoding="utf-8")})
+    source = _upload({".ash.yaml": target.read_text(encoding="utf-8")})
     config = _scan_resolution(source, None)
     assert not isinstance(config, Exception), config
 
@@ -766,7 +766,7 @@ def test_a_clients_enabled_false_is_accepted_and_ignored(
     if route == "upload":
         target, named = _server["target"], str(_upload({"ash.yaml": text}) / "ash.yaml")
     elif route == "delivered-tree":
-        target, named = _upload({".ash/.ash.yaml": text, "app.py": "x = 1\n"}), None
+        target, named = _upload({".ash.yaml": text, "app.py": "x = 1\n"}), None
     else:
         other = _server["target"].parent / "other-checkout" / "ash.yaml"
         other.parent.mkdir()
@@ -940,7 +940,7 @@ def test_a_delivered_tree_cannot_turn_on_a_reporter_the_server_turned_off(
         "project_name: operator\nreporters:\n  s3:\n    enabled: false\n",
         encoding="utf-8",
     )
-    source = _upload({".ash/.ash.yaml": "project_name: delivered\n"})
+    source = _upload({".ash.yaml": "project_name: delivered\n"})
     config = _scan_resolution(source, None)
     assert not isinstance(config, Exception), config
     from automated_security_helper.config.reporter_trust import (
@@ -996,7 +996,7 @@ def test_scan_directory_refuses_before_the_scan_starts(_server, named) -> None:
     from automated_security_helper.cli import mcp_tools
 
     if named == "delivered-tree":
-        source = _upload({".ash/.ash.yaml": BEDROCK_REGION})
+        source = _upload({".ash.yaml": BEDROCK_REGION})
         target, config_path = source, None
     elif named == "upload":
         source = _upload({"ash.yaml": BEDROCK_REGION})
@@ -1038,7 +1038,7 @@ def test_get_config_refuses_an_upload_setting_a_denied_field(_server) -> None:
 def test_get_config_refuses_a_discovered_delivered_config(_server) -> None:
     from automated_security_helper.cli.mcp_tools import mcp_get_config
 
-    source = _upload({".ash/.ash.yaml": BEDROCK_REGION})
+    source = _upload({".ash.yaml": BEDROCK_REGION})
     result = mcp_get_config(search_dir=str(source), session_id=SESSION)
     assert result.get("success") is False, result
     assert DENIED_KEY in result["error"], result
@@ -1076,7 +1076,7 @@ def test_a_delivered_workspace_projects_config_is_refused(_server) -> None:
         {
             "dev.code-workspace": json.dumps({"folders": [{"path": "app"}]}),
             "app/main.py": "x = 1\n",
-            "app/.ash/.ash.yaml": BEDROCK_REGION,
+            "app/.ash.yaml": BEDROCK_REGION,
         }
     )
     result = asyncio.run(
@@ -1352,7 +1352,7 @@ def test_an_unregistered_bound_profile_fails_closed(_server) -> None:
 
     _bind_profile(_server["tmp"], "project_name: profile\n")
     clear_profile_registry()
-    source = _upload({".ash/.ash.yaml": "project_name: delivered\n"})
+    source = _upload({".ash.yaml": "project_name: delivered\n"})
     result = asyncio.run(
         mcp_scan_directory(str(source), config_path=None, session_id=SESSION)
     )
@@ -1465,7 +1465,7 @@ def test_a_key_pattern_refuses_a_schema_key_in_an_upload(
             f"      denied_value_patterns:\n        /scanners/**: '{pattern}'\n"
         ),
     )
-    source = _upload({".ash/.ash.yaml": text})
+    source = _upload({".ash.yaml": text})
     _assert_refused(_scan_resolution(source, None), key=key)
 
 
@@ -1528,9 +1528,9 @@ def test_an_init_file_scans_under_a_profile_whose_policy_differs(_server) -> Non
             "      enabled: true\n      allowed_paths: ['/project_name']\n"
         ),
     )
-    target = _server["tmp"] / "init" / ".ash" / ".ash.yaml"
+    target = _server["tmp"] / "init" / ".ash.yaml"
     init(config=str(target), color=False)
-    source = _upload({".ash/.ash.yaml": target.read_text(), "app.py": "x = 1\n"})
+    source = _upload({".ash.yaml": target.read_text(), "app.py": "x = 1\n"})
     config = _scan_resolution(source, None)
     assert not isinstance(config, Exception), config
 
@@ -1541,7 +1541,7 @@ def test_an_init_generated_profile_counts_as_the_default_policy(_server) -> None
     profile = _server["tmp"] / "init-profile" / "profile.yaml"
     init(config=str(profile), color=False)
     _bind_profile(_server["tmp"], profile.read_text())
-    source = _upload({".ash/.ash.yaml": _DELIVERED_SUPPRESSION, "app.py": "x = 1\n"})
+    source = _upload({".ash.yaml": _DELIVERED_SUPPRESSION, "app.py": "x = 1\n"})
     config = _scan_resolution(source, None)
     assert not isinstance(config, Exception), config
     assert _flags(config) == [("app.py", True)]
@@ -1646,7 +1646,7 @@ def test_an_unreadable_policy_refuses_a_delivered_config_with_its_own_type(
 
     _bind_profile(_server["tmp"], "project_name: profile\n")
     clear_profile_registry()
-    source = _upload({".ash/.ash.yaml": "project_name: delivered\n"})
+    source = _upload({".ash.yaml": "project_name: delivered\n"})
     result = asyncio.run(
         mcp_scan_directory(str(source), config_path=None, session_id=SESSION)
     )
@@ -1744,7 +1744,7 @@ def test_a_broken_default_config_refuses_only_a_delivered_config_and_never_hangs
 
     operator = _server["tmp"] / "operator" / "ash.yaml"
     operator.write_text("fail_on_findings: [not, a, bool]\n", encoding="utf-8")
-    source = _upload({".ash/.ash.yaml": "project_name: delivered\n"})
+    source = _upload({".ash.yaml": "project_name: delivered\n"})
 
     refused = asyncio.run(
         mcp_tools.mcp_scan_directory(str(source), config_path=None, session_id=SESSION)
@@ -1791,7 +1791,7 @@ def test_a_policy_that_cannot_be_read_refuses_only_scans_with_a_delivered_config
         ASHConfigPolicyUnreadableError,
     )
 
-    source = _upload({".ash/.ash.yaml": "project_name: delivered\n"})
+    source = _upload({".ash.yaml": "project_name: delivered\n"})
     with patch.object(
         profile_registry, "session_profile_entry", side_effect=OSError("gone")
     ):
@@ -1806,14 +1806,14 @@ def test_a_policy_that_cannot_be_read_refuses_only_scans_with_a_delivered_config
 def test_a_profile_listing_one_more_field_still_refuses_the_defaults(_server) -> None:
     """An edited denied_paths adds to the defaults rather than replacing them."""
     _bind_profile(_server["tmp"], _profile_denying("/project_name"))
-    source = _upload({".ash/.ash.yaml": "fail_on_findings: false\n"})
+    source = _upload({".ash.yaml": "fail_on_findings: false\n"})
     _assert_refused(_scan_resolution(source, None), key="fail_on_findings")
 
 
 def test_a_profile_listing_one_more_field_keeps_delivered_suppressions(_server) -> None:
     """Fields the operator's list does not name keep their rules: applied, marked."""
     _bind_profile(_server["tmp"], _profile_denying("/project_name"))
-    source = _upload({".ash/.ash.yaml": _DELIVERED_SUPPRESSION})
+    source = _upload({".ash.yaml": _DELIVERED_SUPPRESSION})
     config = _scan_resolution(source, None)
     assert not isinstance(config, Exception), config
     assert [s.client_supplied for s in config.global_settings.suppressions] == [True]

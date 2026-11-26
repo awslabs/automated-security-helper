@@ -895,8 +895,7 @@ def _workspace(root, bodies, policy_scanners=(SNYK_CODE,)):
         project = root / key
         (project / "src").mkdir(parents=True)
         (project / "src" / "app.py").write_text("print('x')\n", encoding="utf-8")
-        (project / ".ash").mkdir()
-        (project / ".ash" / "ash.yaml").write_text(body, encoding="utf-8")
+        (project / ".ash.yaml").write_text(body, encoding="utf-8")
     if policy_scanners is not None:
         (root / ".ash").mkdir()
         listed = "".join(f"    - {name}\n" for name in policy_scanners)

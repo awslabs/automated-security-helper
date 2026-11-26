@@ -136,10 +136,20 @@ import re
 import shutil
 import stat
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+)
 from urllib.parse import quote, unquote
 
 from automated_security_helper.core.committed_output import WORKSPACE_SPOOL_DIR_NAME
+from automated_security_helper.core.enums import MinSeverity, ScannerStatus
 from automated_security_helper.core.exceptions import WorkspacePatternError
 from automated_security_helper.models.asharp_model import new_report_id
 from automated_security_helper.models.core import merged_honoring
@@ -149,6 +159,7 @@ from automated_security_helper.models.workspace import (
     ProjectInputNotScanned,
     WorkspaceProjectResult,
     WorkspaceResults,
+    WorkspaceRunStatus,
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -239,23 +250,24 @@ _REPORT_ID_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]+")
 # separate table from the severity ladder because this is the --min-severity
 # scale, which has no "info" and treats critical and high as equal -- SARIF
 # cannot distinguish them.
-_MIN_SEVERITY_RANK: Dict[str, int] = {
-    "critical": 3,
-    "high": 3,
-    "medium": 2,
-    "low": 1,
-    "none": 0,
+_MIN_SEVERITY_RANK: Dict[MinSeverity, int] = {
+    MinSeverity.CRITICAL: 3,
+    MinSeverity.HIGH: 3,
+    MinSeverity.MEDIUM: 2,
+    MinSeverity.LOW: 1,
+    MinSeverity.NONE: 0,
 }
 
-# Worst-first, so the workspace-level rollup can pick a status without ordering
-# assumptions about the enum. ERROR outranks FAILED because FAILED is a verdict
-# and ERROR is the absence of one.
-_SCANNER_STATUS_SEVERITY: Sequence[str] = (
-    "ERROR",
-    "FAILED",
-    "MISSING",
-    "SKIPPED",
-    "PASSED",
+# Worst-first, so the workspace-level rollup picks a status by position here, not
+# by the order the enum declares its members in. ERROR outranks FAILED because
+# FAILED is a verdict and ERROR is the absence of one. Every member is named, and
+# the tuple is pinned against the enum by a test.
+_SCANNER_STATUS_SEVERITY: Sequence[ScannerStatus] = (
+    ScannerStatus.ERROR,
+    ScannerStatus.FAILED,
+    ScannerStatus.MISSING,
+    ScannerStatus.SKIPPED,
+    ScannerStatus.PASSED,
 )
 
 
@@ -993,9 +1005,9 @@ def has_finding_at_min_severity(
     # turned a mistyped --min-severity into the strictest gate short of "none".
     min_rank = _MIN_SEVERITY_RANK.get(min_severity.lower())
     if min_rank is None:
+        accepted = ", ".join(member.value for member in _MIN_SEVERITY_RANK)
         raise ValueError(
-            f"min_severity must be one of {', '.join(_MIN_SEVERITY_RANK)}, "
-            f"not {min_severity!r}"
+            f"min_severity must be one of {accepted}, not {min_severity!r}"
         )
     if min_rank <= 0:
         return True
@@ -1254,8 +1266,8 @@ def _worse_status(left: Optional[str], right: Optional[str]) -> Optional[str]:
     if right is None:
         return left
     for candidate in _SCANNER_STATUS_SEVERITY:
-        if candidate in (left, right):
-            return candidate
+        if candidate.value in (left, right):
+            return candidate.value
     return left
 
 
@@ -1610,7 +1622,7 @@ class WorkspaceAggregator:
         display = self._display_names(outcomes)
         payload: Dict[str, Dict[str, Any]] = {}
         for scanner in sorted(set(self._scanner_status) | set(self._scanner_findings)):
-            status = self._scanner_status.get(scanner) or "PASSED"
+            status = self._scanner_status.get(scanner) or ScannerStatus.PASSED.value
             row: Dict[str, Any] = {
                 "status": status,
                 "finding_count": self._scanner_findings.get(scanner, 0),
@@ -1618,14 +1630,16 @@ class WorkspaceAggregator:
                 # From the rows that carried the flags; a scanner known only from
                 # its findings (no row recorded it) keeps the status-derived answer.
                 "dependencies_satisfied": self._scanner_dependencies.get(
-                    scanner, status != "MISSING"
+                    scanner, status != ScannerStatus.MISSING.value
                 ),
-                "excluded": self._scanner_excluded.get(scanner, status == "SKIPPED"),
+                "excluded": self._scanner_excluded.get(
+                    scanner, status == ScannerStatus.SKIPPED.value
+                ),
                 "exit_code": self._scanner_exit_code.get(
                     scanner, SCANNER_EXIT_CODE_UNRECORDED
                 ),
             }
-            if status in ("SKIPPED", "MISSING"):
+            if status in (ScannerStatus.SKIPPED.value, ScannerStatus.MISSING.value):
                 named = []
                 for outcome in outcomes:
                     for raw_name, raw_status in (outcome.scanners or {}).items():
@@ -1638,7 +1652,9 @@ class WorkspaceAggregator:
                             named.append(f"{outcome.project}: {reason}")
                 if named:
                     field = (
-                        "skipped_reason" if status == "SKIPPED" else "missing_reason"
+                        "skipped_reason"
+                        if status == ScannerStatus.SKIPPED.value
+                        else "missing_reason"
                     )
                     row[field] = "; ".join(named)
             payload[display.get(scanner, scanner)] = row
@@ -1672,7 +1688,7 @@ class WorkspaceAggregator:
         exit_code: int,
         wall_clock_seconds: float,
         *,
-        status: str = "completed",
+        status: WorkspaceRunStatus = WorkspaceRunStatus.COMPLETED,
         max_parallel_projects: Optional[int] = None,
         project_timeout: Optional[float] = None,
     ) -> WorkspaceResults:
@@ -1702,7 +1718,7 @@ class WorkspaceAggregator:
         exit_code: int,
         wall_clock_seconds: float,
         *,
-        status: str = "completed",
+        status: WorkspaceRunStatus = WorkspaceRunStatus.COMPLETED,
         max_parallel_projects: Optional[int] = None,
         project_timeout: Optional[float] = None,
         project_name: Optional[str] = None,

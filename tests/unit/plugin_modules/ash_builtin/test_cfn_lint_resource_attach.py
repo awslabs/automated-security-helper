@@ -21,6 +21,8 @@ from unittest.mock import patch
 
 import pytest
 
+from automated_security_helper.core.cancellation import ScanCancelled
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
     CfnLintScanner,
     attach_cfn_lint_resources,
@@ -54,6 +56,14 @@ def _bag(result) -> dict:
     return result.properties.model_dump(exclude_none=True) if result.properties else {}
 
 
+def _entry_for(resource: str) -> dict:
+    """The captured JSON finding in ``resource``, found by what it names."""
+    (entry,) = [
+        e for e in _json() if e["Location"].get("Path", [None, None])[1:2] == [resource]
+    ]
+    return entry
+
+
 def _by_line(report: SarifReport) -> dict:
     return {
         result.locations[0].physicalLocation.root.region.startLine: _bag(result).get(
@@ -76,17 +86,20 @@ def test_the_captured_pair_names_the_two_buckets_and_nothing_for_the_parameter()
     }
 
 
-def test_the_resource_survives_the_scanners_normalization() -> None:
-    """The scan attaches per batch, then normalize_report relocates the results."""
+def test_the_resource_survives_the_scanners_normalization(scanner) -> None:
+    """The scan attaches per batch, then normalize_report relocates the results.
+
+    Each id stays on the result it was written to: a swap between the two
+    buckets would bind a suppression to the other bucket's finding."""
     report = _sarif()
     attach_cfn_lint_resources(report, cfn_lint_resources(_json()))
-    CfnLintScanner.normalize_report(None, report)  # type: ignore[arg-type]
-    named = {
-        _bag(r)["ash_resource_id"]
-        for r in report.runs[0].results
-        if "ash_resource_id" in _bag(r)
+    scanner.normalize_report(report)
+    assert _by_line(report) == {
+        8: None,
+        9: None,
+        14: "M0FixtureBucketA",
+        18: "M0FixtureBucketB",
     }
-    assert named == {"M0FixtureBucketA", "M0FixtureBucketB"}
 
 
 def test_every_captured_finding_is_matched_to_a_result_key() -> None:
@@ -114,7 +127,7 @@ def test_every_captured_finding_is_matched_to_a_result_key() -> None:
 def test_a_key_that_names_two_resources_names_neither() -> None:
     """Planted must-not-attach: two findings the report cannot tell apart."""
     document = _json()
-    twin = json.loads(json.dumps(document[2]))
+    twin = json.loads(json.dumps(_entry_for("M0FixtureBucketA")))
     twin["Location"]["Path"] = ["Resources", "SomeOtherBucket", "Properties", "X"]
     resources = cfn_lint_resources([*document, twin])
     report = _sarif()
@@ -141,7 +154,7 @@ def test_a_report_of_another_shape_lists_nothing(document) -> None:
     ],
 )
 def test_a_finding_outside_a_resource_is_recorded_as_none(path) -> None:
-    entry = json.loads(json.dumps(_json()[2]))
+    entry = json.loads(json.dumps(_entry_for("M0FixtureBucketA")))
     entry["Location"]["Path"] = path
     (named,) = cfn_lint_resources([entry]).values()
     assert named == {None}
@@ -153,14 +166,23 @@ def test_a_finding_outside_a_resource_is_recorded_as_none(path) -> None:
 
 
 @pytest.fixture
-def scanner(test_plugin_context, tmp_path):
+def scanner(test_plugin_context):
     from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
         CfnLintScannerConfig,
     )
 
     scanner = CfnLintScanner(context=test_plugin_context, config=CfnLintScannerConfig())
-    scanner.exit_code = 0
+    # The scan's own run left a non-zero exit code and an error line, as a batch
+    # with findings does, so a side run that reset the record is told from one
+    # that left it alone.
+    scanner.exit_code = 6
+    scanner.errors = ["earlier line"]
     return scanner
+
+
+def _output_file(command) -> Path:
+    target = [a for a in command if a.startswith("--output-file=")][0]
+    return Path(target.split("=", 1)[1])
 
 
 def _attach(scanner, tmp_path, fake):
@@ -170,12 +192,12 @@ def _attach(scanner, tmp_path, fake):
         double.side_effect = fake
         scanner._attach_resources(
             report,
-            ["/src/t.yaml"],
-            batch_file,
-            ["--regions", "us-east-1"],
-            tmp_path,
-            tmp_path,
-            {},
+            arguments=["/src/t.yaml"],
+            batch_file=batch_file,
+            option_args=["--regions", "us-east-1"],
+            results_dir=tmp_path,
+            cwd=tmp_path,
+            child_env={},
         )
     return report, double
 
@@ -183,23 +205,25 @@ def _attach(scanner, tmp_path, fake):
 def test_the_second_run_names_the_resources_and_leaves_the_record_alone(
     scanner, tmp_path
 ) -> None:
+    written: list[Path] = []
+
     def fake(self, command=None, **kwargs):
-        target = [a for a in command if a.startswith("--output-file=")][0]
-        Path(target.split("=", 1)[1]).write_text(
-            (CAPTURED / f"{STEM}.json").read_text(encoding="utf-8")
-        )
-        self.exit_code = 6  # cfn-lint's own finding bits
+        target = _output_file(command)
+        written.append(target)
+        target.write_text((CAPTURED / f"{STEM}.json").read_text(encoding="utf-8"))
+        self.exit_code = 32  # what a leaking recorder would have kept
         self.errors.append("a stderr line of the side run")
         return {"returncode": 6}
 
     report, double = _attach(scanner, tmp_path, fake)
     assert _by_line(report)[14] == "M0FixtureBucketA"
-    assert scanner.exit_code == 0
-    assert "a stderr line of the side run" not in scanner.errors
+    assert scanner.exit_code == 6
+    assert scanner.errors == ["earlier line"]
     command = double.call_args.args[1]
     assert command[:3] == ["cfn-lint", "--format", "json"]
     assert "--regions" in command and command[-2:] == ["--", "/src/t.yaml"]
-    assert not list(tmp_path.glob("*.resources.json")), "the file is removed"
+    (target,) = written
+    assert not target.exists(), "the file is removed"
 
 
 def test_a_run_that_writes_no_report_names_nothing_and_fails_nothing(
@@ -209,20 +233,170 @@ def test_a_run_that_writes_no_report_names_nothing_and_fails_nothing(
         self.exit_code = 32
         return {"returncode": 32}
 
-    report, _ = _attach(scanner, tmp_path, fake)
+    report, double = _attach(scanner, tmp_path, fake)
+    double.assert_called_once()
     assert set(_by_line(report).values()) == {None}
-    assert scanner.exit_code == 0
+    assert scanner.exit_code == 6
+    assert scanner.errors == ["earlier line"]
 
 
-def test_an_unreadable_report_names_nothing(scanner, tmp_path, caplog) -> None:
+def test_an_unreadable_report_names_nothing_and_is_removed(scanner, tmp_path) -> None:
+    written: list[Path] = []
+
     def fake(self, command=None, **kwargs):
-        target = [a for a in command if a.startswith("--output-file=")][0]
-        Path(target.split("=", 1)[1]).write_text("{ not json")
+        target = _output_file(command)
+        written.append(target)
+        target.write_text("{ not json")
         return {"returncode": 0}
 
-    with caplog.at_level(logging.DEBUG):
+    report, _ = _attach(scanner, tmp_path, fake)
+    assert set(_by_line(report).values()) == {None}
+    assert not written[0].exists()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [RuntimeError("boom"), ScannerError("refused")],
+    ids=["runtime-error", "scanner-error"],
+)
+def test_a_second_run_that_raises_leaves_the_report_as_it_came(
+    scanner, tmp_path, failure
+) -> None:
+    """Best effort: nothing the second run raises can fail a scan whose lint
+    succeeded."""
+
+    def fake(self, command=None, **kwargs):
+        raise failure
+
+    report, _ = _attach(scanner, tmp_path, fake)
+    assert set(_by_line(report).values()) == {None}
+    assert len(report.runs[0].results) == 4
+    assert scanner.exit_code == 6
+
+
+def test_a_cancellation_during_the_second_run_propagates(scanner, tmp_path) -> None:
+    def fake(self, command=None, **kwargs):
+        raise ScanCancelled("cancelled")
+
+    with pytest.raises(ScanCancelled):
+        _attach(scanner, tmp_path, fake)
+
+
+def test_a_skipped_second_run_is_warned_about_once(scanner, tmp_path) -> None:
+    def fake(self, command=None, **kwargs):
+        return {"returncode": 32}
+
+    with patch.object(CfnLintScanner, "_plugin_log", autospec=True) as log:
+        _attach(scanner, tmp_path, fake)
+        _attach(scanner, tmp_path, fake)
+    warnings = [
+        call
+        for call in log.call_args_list
+        if call.kwargs.get("level") == logging.WARNING
+    ]
+    assert len(warnings) == 1
+    assert "32" in warnings[0].args[1]
+
+
+def _warnings(log) -> list:
+    return [
+        call
+        for call in log.call_args_list
+        if call.kwargs.get("level") == logging.WARNING
+    ]
+
+
+@pytest.mark.parametrize(
+    "response, said",
+    [
+        (
+            {
+                "returncode": None,
+                "timed_out": True,
+                "could_not_stop": True,
+                "could_not_stop_pid": 4242,
+            },
+            "could not be stopped",
+        ),
+        ({"returncode": -1, "timed_out": True}, "the second run timed out"),
+        ({"returncode": None, "cancelled": True}, "the second run was cancelled"),
+    ],
+    ids=["could-not-stop", "timed-out", "cancelled"],
+)
+def test_a_second_run_that_did_not_finish_says_so_not_its_exit_code(
+    scanner, tmp_path, response, said
+) -> None:
+    """A run stopped at its timeout, cancelled, or left running has no exit code
+    worth naming: the reason is read from the response's flags."""
+
+    def fake(self, command=None, **kwargs):
+        return dict(response)
+
+    with patch.object(CfnLintScanner, "_plugin_log", autospec=True) as log:
+        _attach(scanner, tmp_path, fake)
+    (warning,) = _warnings(log)
+    assert said in warning.args[1]
+    assert "exited None" not in warning.args[1]
+
+
+def test_a_report_that_names_resources_none_of_which_match_is_warned_about(
+    scanner, tmp_path
+) -> None:
+    """The JSON names resources, but under rule ids the SARIF does not carry, so
+    nothing attaches and nothing else in the run says why."""
+    document = json.loads((CAPTURED / f"{STEM}.json").read_text(encoding="utf-8"))
+    for entry in document:
+        entry["Rule"]["Id"] = "E9999"
+
+    def fake(self, command=None, **kwargs):
+        _output_file(command).write_text(json.dumps(document))
+        return {"returncode": 6}
+
+    with patch.object(CfnLintScanner, "_plugin_log", autospec=True) as log:
         report, _ = _attach(scanner, tmp_path, fake)
     assert set(_by_line(report).values()) == {None}
+    (warning,) = _warnings(log)
+    assert "none matched a result" in warning.args[1]
+
+
+def test_a_report_whose_resources_matched_is_not_warned_about(
+    scanner, tmp_path
+) -> None:
+    """Control for the test above: the unchanged report attaches and says nothing."""
+
+    def fake(self, command=None, **kwargs):
+        _output_file(command).write_text(
+            (CAPTURED / f"{STEM}.json").read_text(encoding="utf-8")
+        )
+        return {"returncode": 6}
+
+    with patch.object(CfnLintScanner, "_plugin_log", autospec=True) as log:
+        report, _ = _attach(scanner, tmp_path, fake)
+    assert _by_line(report)[14] == "M0FixtureBucketA"
+    assert _warnings(log) == []
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        AssertionError("an invariant"),
+        TypeError("a defect"),
+        AttributeError("a defect"),
+        NameError("a defect"),
+    ],
+    ids=["assertion", "type", "attribute", "name"],
+)
+def test_a_defect_in_the_enrichment_is_not_swallowed_as_a_skipped_report(
+    scanner, tmp_path, defect
+) -> None:
+    """The guard keeps a failed second run from costing the scan its report; a
+    programming error is not a failed run and surfaces."""
+
+    def fake(self, command=None, **kwargs):
+        raise defect
+
+    with pytest.raises(type(defect)):
+        _attach(scanner, tmp_path, fake)
 
 
 def test_a_clean_report_costs_no_second_run(scanner, tmp_path) -> None:
@@ -231,6 +405,12 @@ def test_a_clean_report_costs_no_second_run(scanner, tmp_path) -> None:
     )
     with patch.object(CfnLintScanner, "_run_subprocess", autospec=True) as double:
         scanner._attach_resources(
-            report, ["/src/t.yaml"], tmp_path / "b.sarif", [], tmp_path, tmp_path, {}
+            report,
+            arguments=["/src/t.yaml"],
+            batch_file=tmp_path / "b.sarif",
+            option_args=[],
+            results_dir=tmp_path,
+            cwd=tmp_path,
+            child_env={},
         )
     double.assert_not_called()

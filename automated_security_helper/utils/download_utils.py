@@ -35,6 +35,7 @@ from automated_security_helper.core.constants import (
     warn_if_home_unusable,
 )
 from automated_security_helper.core.exceptions import (
+    DownloadTooLargeError,
     ToolDownloadIntegrityError,
     ToolNotProvisionableError,
 )
@@ -169,7 +170,15 @@ def _is_transient_download_error(exc: BaseException) -> bool:
     message by the whole backoff. A TLS error raised past the connection, while
     the body is read (``ssl.SSLError``, an unexpected EOF say), is the same blip
     a reset is, and a socket error naming the network (``EHOSTUNREACH``) too.
+
+    ``DownloadTooLargeError`` is refused by name before anything else. Today it
+    is a plain ``Exception`` subclass and would fall through every class check
+    anyway; the explicit guard pins the contract against a reparenting (onto
+    ``OSError``, say), because a body past the caller's bound is past the bound
+    on every attempt and retrying it only re-downloads what will be refused.
     """
+    if isinstance(exc, DownloadTooLargeError):
+        return False
     if isinstance(exc, urllib.error.HTTPError):
         return exc.code >= 500 or exc.code in _TRANSIENT_HTTP_STATUS
     if isinstance(exc, urllib.error.URLError):
@@ -288,8 +297,18 @@ def _windows_misreads_name(name: str) -> bool:
     )
 
 
-def _copy_whole_body(response, sink, url: str) -> int:
+def _copy_whole_body(response, sink, url: str, max_bytes: Optional[int] = None) -> int:
     """Copy the response body to ``sink``, refusing a body the server cut short.
+
+    ``max_bytes`` bounds the transfer itself: a response that DECLARES a longer
+    body is refused before any byte of it is read, and a body with no usable
+    declared length (chunked, or a server whose header lies) is aborted the
+    moment the copied bytes pass the bound, raising ``DownloadTooLargeError``
+    without writing the over-bound chunk. The bound exists for callers whose
+    size expectation comes from data the other side of a trust boundary wrote
+    (the sdist harvest's ``max_sdist_mb``, where the lockfile's recorded size
+    is the scanned repository's own claim); checking a claim and streaming
+    without a bound would be no limit at all.
 
     ``HTTPResponse.read(amt)`` returns an empty read when the connection closes
     before ``Content-Length`` bytes have arrived (http.client leaves the
@@ -315,10 +334,20 @@ def _copy_whole_body(response, sink, url: str) -> int:
     Returns the number of bytes copied.
     """
     expected = _declared_body_length(response)
+    if max_bytes is not None and expected is not None and expected > max_bytes:
+        raise DownloadTooLargeError(
+            f"{_without_query(url)} declares a body of {expected} bytes, over "
+            f"the caller's bound of {max_bytes}; nothing was read"
+        )
     copied = 0
     for chunk in iter(lambda: response.read(_HASH_CHUNK_BYTES), b""):
-        sink.write(chunk)
         copied += len(chunk)
+        if max_bytes is not None and copied > max_bytes:
+            raise DownloadTooLargeError(
+                f"the transfer of {_without_query(url)} passed the caller's "
+                f"bound of {max_bytes} bytes and was aborted"
+            )
+        sink.write(chunk)
     if expected is not None and copied != expected:
         raise ConnectionError(
             f"the connection closed after {copied} of {expected} bytes of {url}"
@@ -400,6 +429,7 @@ def download_file(
     expected_sha256: Optional[str] = None,
     *,
     mode: int = 0o644,
+    max_bytes: Optional[int] = None,
 ) -> Path:
     """Download a file from a URL to the specified destination.
 
@@ -417,15 +447,24 @@ def download_file(
             bit is then set on the staged file's own descriptor before the rename,
             never by a later chmod of the landed path. Every download used to land
             executable whatever it was; the data default is least privilege.
+        max_bytes: Bound on the transferred body, enforced ON THE WIRE: a
+            response declaring a longer body is refused before any byte of it
+            is read, and an undeclared body is aborted the moment the bound
+            passes (``_copy_whole_body``). For callers whose size expectation
+            comes from the other side of a trust boundary, where checking the
+            claim alone would be no limit at all. When omitted, the transfer
+            is unbounded, as before.
 
     Returns:
         Path to the downloaded file
 
     Raises:
         ToolDownloadIntegrityError: if expected_sha256 is given and does not match
+        DownloadTooLargeError: if max_bytes is given and the body exceeds it;
+            the transfer is aborted at the bound and nothing lands
     """
     landed, _digest = _download_verified(
-        url, destination, rename_to, expected_sha256, mode=mode
+        url, destination, rename_to, expected_sha256, mode=mode, max_bytes=max_bytes
     )
     return landed
 
@@ -437,6 +476,7 @@ def _download_verified(
     expected_sha256: Optional[str] = None,
     *,
     mode: int,
+    max_bytes: Optional[int] = None,
 ) -> "tuple[Path, str]":
     """``download_file``, and also the digest of the bytes that landed.
 
@@ -490,7 +530,7 @@ def _download_verified(
                 try:
                     with _open_url(url, _DOWNLOAD_SOCKET_TIMEOUT_SECONDS) as response:
                         _refuse_a_non_https_landing(url, response)
-                        _copy_whole_body(response, temp_file, url)
+                        _copy_whole_body(response, temp_file, url, max_bytes=max_bytes)
                     break
                 except Exception as exc:
                     # Re-raised unless the error is both transient and there is
@@ -1911,6 +1951,7 @@ def install_pinned_tool(
     arch: str,
     destination: Optional[Path] = None,
     force: bool = False,
+    inherit_system_tools: bool = True,
 ) -> Path:
     """Install one of ASH's pinned scanner binaries, verified against its digest.
 
@@ -1925,6 +1966,13 @@ def install_pinned_tool(
         arch: amd64 or arm64
         destination: Directory to install into; defaults to ASH_BIN_PATH
         force: Re-download even when a matching receipt exists
+        inherit_system_tools: Whether a byte-identical copy found through PATH or
+            a system directory stands in for the install
+            (``find_verified_pinned_executable``). False under
+            ``--no-inherit-system-tools``: this function runs in a child python,
+            so the flag has to reach the child's own already-present re-check,
+            not only the parent's -- otherwise the child accepted a PATH copy and
+            installed nothing, and the run the operator asked for failed.
 
     Returns:
         Path to the installed executable
@@ -1948,8 +1996,10 @@ def install_pinned_tool(
     bin_dir.mkdir(parents=True, exist_ok=True)
     target = bin_dir.joinpath(asset.install_as)
 
-    if not force and _already_installed(
-        bin_dir, asset.install_as, asset.url, asset.sha256
+    if (
+        not force
+        and _already_installed(bin_dir, asset.install_as, asset.url, asset.sha256)
+        and _companions_verified(bin_dir, asset)
     ):
         ASH_LOGGER.info(
             f"{asset.tool} {asset.version} already installed at {target}, "
@@ -1958,7 +2008,13 @@ def install_pinned_tool(
         return target
 
     if not force:
-        present = find_verified_pinned_executable(tool, target_platform, arch, bin_dir)
+        present = find_verified_pinned_executable(
+            tool,
+            target_platform,
+            arch,
+            bin_dir,
+            inherit_system_tools=inherit_system_tools,
+        )
         if present is not None:
             ASH_LOGGER.info(
                 f"{present.tool} {present.version} is already present at "
@@ -2066,6 +2122,35 @@ def _executable_by_caller(candidate: Path, info: os.stat_result) -> bool:
     return bool(info.st_mode & 0o111) and os.access(candidate, os.X_OK)
 
 
+def _companions_verified(directory: Path, asset) -> bool:  # asset: ToolAsset
+    """Whether every pinned companion of ``asset`` sits in ``directory`` with its bytes.
+
+    The install verifies each companion (opengrep's Windows DLLs) before it places
+    the executable; accepting an executable already on disk has to ask the same,
+    or a lone ``opengrep.exe`` -- or one whose DLLs were deleted -- reads as
+    installed and then fails to start. Each file is judged on one open descriptor,
+    as the executable is: not a link, a regular file, hashing to its pin.
+    """
+    for name, digest in asset.companion_sha256:
+        path = Path(directory).joinpath(name)
+        if path.is_symlink():
+            return False
+        try:
+            fd = os.open(path, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY | _O_NONBLOCK)
+        except OSError:
+            return False
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return False
+            if _sha256_of_open_file(fd) != digest.lower():
+                return False
+        except OSError:
+            return False
+        finally:
+            os.close(fd)
+    return True
+
+
 @dataclass(frozen=True)
 class VerifiedPresentTool:
     """A pinned tool found on disk whose bytes hash to its pinned executable digest."""
@@ -2077,7 +2162,12 @@ class VerifiedPresentTool:
 
 
 def find_verified_pinned_executable(
-    tool: str, target_platform: str, arch: str, destination: Path
+    tool: str,
+    target_platform: str,
+    arch: str,
+    destination: Path,
+    *,
+    inherit_system_tools: bool = True,
 ) -> Optional[VerifiedPresentTool]:
     """Find a copy of the pinned ``tool`` that is already installed, by its bytes.
 
@@ -2118,6 +2208,12 @@ def find_verified_pinned_executable(
     consulted, so a binary replaced after a previous run is caught on the next one,
     the same property ``_already_installed`` keeps for receipts.
 
+    ``inherit_system_tools=False`` (``--no-inherit-system-tools``) drops candidate 2:
+    a copy found through PATH or a system directory does not stand in for the
+    install, however well its bytes match. Candidate 1, the file at the install
+    destination, is still judged by its digest, since it is the install's own output
+    and not a system tool.
+
     Returns:
         The verified copy, or None when there is no pinned executable digest for
         this asset, no acceptable candidate, or the candidate's bytes do not match.
@@ -2135,6 +2231,12 @@ def find_verified_pinned_executable(
     at_destination = Path(destination).joinpath(asset.install_as)
     if os.path.lexists(at_destination):
         candidate = at_destination
+    elif not inherit_system_tools:
+        ASH_LOGGER.debug(
+            f"{tool} is not at {at_destination}; --no-inherit-system-tools, so no "
+            "copy found elsewhere stands in for the install"
+        )
+        return None
     else:
         found = subprocess_utils.find_executable(asset.tool)
         if not found:
@@ -2191,6 +2293,12 @@ def find_verified_pinned_executable(
             f"{candidate} is named {asset.install_as} but is not the pinned "
             f"{tool} {asset.version} (SHA256 {actual}, pinned {expected.lower()}); "
             "installing the pinned build"
+        )
+        return None
+    if not _companions_verified(candidate.parent, asset):
+        ASH_LOGGER.debug(
+            f"{candidate} is the pinned {tool} {asset.version}, but a companion "
+            "file it loads is missing or differs from its pin; installing"
         )
         return None
     return VerifiedPresentTool(
@@ -2263,12 +2371,23 @@ _PINNED_TOOL_INSTALL_SCRIPT = (
     "install_pinned_tool(sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4]))"
 )
 
+# The same install, told that no copy found through PATH or a system directory
+# stands in for it (--no-inherit-system-tools). A second constant rather than an
+# extra argument because these commands are recognized by their exact script text.
+_PINNED_TOOL_INSTALL_SCRIPT_NO_INHERIT = (
+    "import sys; from pathlib import Path; "
+    "from automated_security_helper.utils.download_utils import install_pinned_tool; "
+    "install_pinned_tool(sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4]), "
+    "inherit_system_tools=False)"
+)
+
 
 def create_pinned_tool_install_command(
     tool: str,
     target_platform: str,
     arch: str,
     destination: str | None = None,
+    inherit_system_tools: bool = True,
 ) -> CustomCommand:
     """Build the CustomCommand that installs a pinned tool in a subprocess.
 
@@ -2276,6 +2395,11 @@ def create_pinned_tool_install_command(
     configuration pins itself, so the installer keeps one execution model for every
     tool: plugins declare commands, the CLI runs them and counts them. With no
     destination and no bin directory, the command only refuses.
+
+    ``inherit_system_tools=False`` builds the command around
+    ``_PINNED_TOOL_INSTALL_SCRIPT_NO_INHERIT``, so the CHILD's own already-present
+    re-check honors ``--no-inherit-system-tools`` too; see
+    :func:`pinned_command_without_system_tools` for the declared-command rewrite.
     """
     # Absolute either way: the command runs in an empty directory of its own.
     if destination is None:
@@ -2290,7 +2414,9 @@ def create_pinned_tool_install_command(
         args=[
             sys.executable,
             "-c",
-            _PINNED_TOOL_INSTALL_SCRIPT,
+            _PINNED_TOOL_INSTALL_SCRIPT
+            if inherit_system_tools
+            else _PINNED_TOOL_INSTALL_SCRIPT_NO_INHERIT,
             tool,
             target_platform,
             arch,
@@ -2298,6 +2424,25 @@ def create_pinned_tool_install_command(
         ],
         shell=False,
     )
+
+
+def pinned_command_without_system_tools(args: "list[str]") -> "list[str]":
+    """An argv built by ``create_pinned_tool_install_command``, retold so the child
+    accepts no PATH or system-directory copy; any other argv is returned unchanged.
+
+    Plugins declare the pinned command before the installer knows the run's flags,
+    and the install runs in a child python whose ``install_pinned_tool`` re-checks
+    for an already-present copy before downloading. Under
+    ``--no-inherit-system-tools`` the PARENT's pre-check declines to skip -- and
+    without this rewrite the CHILD still accepted a byte-identical PATH copy and
+    installed nothing, so the post-install sweep, which counts only managed copies
+    under the flag, failed the very run the operator asked for.
+    """
+    if len(args) == 7 and args[1] == "-c" and args[2] == _PINNED_TOOL_INSTALL_SCRIPT:
+        rewritten = list(args)
+        rewritten[2] = _PINNED_TOOL_INSTALL_SCRIPT_NO_INHERIT
+        return rewritten
+    return list(args)
 
 
 def _destination_text(path: "Path | str") -> str:
@@ -2313,6 +2458,8 @@ def _destination_text(path: "Path | str") -> str:
 
 def pinned_install_already_satisfied(
     args: "list[str]",
+    *,
+    inherit_system_tools: bool = True,
 ) -> "Optional[VerifiedPresentTool]":
     """For an argv built by ``create_pinned_tool_install_command``: is it a no-op?
 
@@ -2325,14 +2472,25 @@ def pinned_install_already_satisfied(
     Recognized by the exact script text, which only ``create_pinned_tool_install_command``
     produces, rather than by sniffing tool names out of arbitrary commands. Any other
     argv, or one whose tool has no pinned executable digest, returns None and is run
-    as before.
+    as before. A command already retold with the no-inherit script is judged that
+    way whatever the keyword says: the command itself is the stricter record.
     """
-    if len(args) != 7 or args[1] != "-c" or args[2] != _PINNED_TOOL_INSTALL_SCRIPT:
+    if (
+        len(args) != 7
+        or args[1] != "-c"
+        or args[2]
+        not in (_PINNED_TOOL_INSTALL_SCRIPT, _PINNED_TOOL_INSTALL_SCRIPT_NO_INHERIT)
+    ):
         return None
     tool, target_platform, arch, destination = args[3:7]
     try:
         return find_verified_pinned_executable(
-            tool, target_platform, arch, Path(destination)
+            tool,
+            target_platform,
+            arch,
+            Path(destination),
+            inherit_system_tools=inherit_system_tools
+            and args[2] == _PINNED_TOOL_INSTALL_SCRIPT,
         )
     except ToolNotProvisionableError:
         # Let the install command itself report it, with its own message.
@@ -2442,7 +2600,7 @@ def pinned_tool_install_commands(
 
 def get_opengrep_url(
     target_platform: Literal["linux", "darwin", "macos", "windows"],
-    arch: Literal["amd64", "arm64", "x86_64", "aarch64"],
+    arch: str,
     version: str = "v1.1.5",
     linux_type: Literal["musllinux", "manylinux"] = "manylinux",
 ) -> str:

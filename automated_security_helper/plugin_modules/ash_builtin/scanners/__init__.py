@@ -31,6 +31,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scan
 from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
     GrypeScanner,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.mcp_config_scanner import (
+    McpConfigScanner,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
     NpmAuditScanner,
 )
@@ -58,6 +61,7 @@ __all__ = [
     "DetectSecretsScanner",
     "GitleaksScanner",
     "GrypeScanner",
+    "McpConfigScanner",
     "NpmAuditScanner",
     "OpengrepScanner",
     "SyftScanner",

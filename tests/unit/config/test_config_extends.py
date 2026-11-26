@@ -71,11 +71,17 @@ class TestSingleBase:
         assert config.global_settings.severity_threshold == "LOW"
 
     def test_base_path_is_relative_to_the_extending_file(self, tmp_path):
+        """Legacy location: this test's subject is the deprecated .ash/.ash.yaml path."""
         _write(tmp_path / ".ash" / "base.yaml", "project_name: from-dot-ash-base\n")
         _write(tmp_path / ".ash" / ".ash.yaml", "extends: base.yaml\n")
         assert _load(tmp_path).project_name == "from-dot-ash-base"
 
     def test_dotdot_that_stays_inside_the_root_is_allowed(self, tmp_path):
+        """Legacy location: this test's subject is the deprecated .ash/.ash.yaml path.
+
+        The config sits one directory below the root so that ``..`` has a level to
+        climb and still land inside the root.
+        """
         _write(tmp_path / "org" / "base.yaml", "project_name: up-and-over\n")
         _write(tmp_path / ".ash" / ".ash.yaml", "extends: ../org/base.yaml\n")
         assert _load(tmp_path).project_name == "up-and-over"
@@ -697,7 +703,7 @@ class TestExtendsAcrossFormats:
             tmp_path / "pyproject.toml",
             '[project]\nname = "x"\n[tool.ash]\nproject_name = "from-table"\n',
         )
-        _write(tmp_path / ".ash" / ".ash.yaml", "extends: ../pyproject.toml\n")
+        _write(tmp_path / ".ash.yaml", "extends: pyproject.toml\n")
         assert _load(tmp_path).project_name == "from-table"
 
     def test_ashrc_toml_extends_json(self, tmp_path):

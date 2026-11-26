@@ -206,8 +206,7 @@ def test_a_project_name_from_the_environment_is_hidden_by_vpd(project):
 def test_fix_unused_lists_what_it_comments_out_without_the_value(project):
     from automated_security_helper.models.core import suppression_id
 
-    config = project / ".ash" / ".ash.yaml"
-    config.parent.mkdir()
+    config = project / ".ash.yaml"
     config.write_text(
         "project_name: demo\nglobal_settings:\n  suppressions:\n"
         f"    - path: ${{{VARIABLE}:src/a.py}}\n      rule_id: B101\n      reason: r\n",
@@ -292,12 +291,16 @@ def test_a_value_the_file_holds_is_not_quoted_either(project):
 
 
 def test_a_warning_hides_the_value_too(project):
-    """A check a scan accepts quotes the path it warns about; not one from the environment."""
+    """A check a scan accepts quotes the path it warns about; not one from the
+    environment. The vehicle is the './' advice: a bare directory name gets no
+    warning any more (the bare-directory rule, issue #894), while a path read
+    from the environment behind a './' still matches nothing and is warned
+    about by its reference."""
     (project / SECRET).mkdir()
     config = _write(
         project,
         "project_name: demo\nglobal_settings:\n  ignore_paths:\n"
-        f"    - path: ${{{VARIABLE}:vendor}}\n      reason: r\n",
+        f"    - path: ./${{{VARIABLE}:vendor}}\n      reason: r\n",
         {},
     )
     runner = CliRunner()
@@ -307,8 +310,8 @@ def test_a_warning_hides_the_value_too(project):
     mcp = mcp_validate_config(config_path=str(config))
 
     assert validate.exit_code == 0, validate.output
-    assert "points to a directory" in validate.output, validate.output
-    assert "points to a directory" in lint.output, lint.output
+    assert "starts with './' and matches no path" in validate.output, validate.output
+    assert "starts with './' and matches no path" in lint.output, lint.output
     for output in (validate.output, lint.output, json.dumps(mcp)):
         assert SECRET not in output
 
@@ -386,14 +389,15 @@ def test_lint_fix_refuses_a_file_with_references_when_there_is_a_fix(project):
 
 
 def test_a_warning_from_a_base_hides_the_value_too(project):
-    """The values a base reads from the environment are redacted as the root's are."""
+    """The values a base reads from the environment are redacted as the root's
+    are. The './' advice is the vehicle, as in test_a_warning_hides_the_value_too."""
     (project / SECRET).mkdir()
     config = _write(
         project,
         "extends: base.yaml\nproject_name: demo\n",
         {
             "base.yaml": "global_settings:\n  ignore_paths:\n"
-            f"    - path: ${{{VARIABLE}:vendor}}\n      reason: r\n"
+            f"    - path: ./${{{VARIABLE}:vendor}}\n      reason: r\n"
         },
     )
     runner = CliRunner()
@@ -403,12 +407,14 @@ def test_a_warning_from_a_base_hides_the_value_too(project):
     mcp = mcp_validate_config(config_path=str(config))
 
     assert validate.exit_code == 0, validate.output
-    assert "points to a directory" in validate.output, validate.output
-    assert "points to a directory" in lint.output, lint.output
+    assert "starts with './' and matches no path" in validate.output, validate.output
+    assert "starts with './' and matches no path" in lint.output, lint.output
     # A warning, as validate's exit 0 says: validate_config lists warnings apart
     # from its errors (bc242f65e).
     assert mcp["valid"] is True, mcp
-    assert any("points to a directory" in w["message"] for w in mcp["warnings"]), mcp
+    assert any(
+        "starts with './' and matches no path" in w["message"] for w in mcp["warnings"]
+    ), mcp
     for output in (validate.output, lint.output, json.dumps(mcp)):
         assert SECRET not in output, output
 
@@ -693,8 +699,8 @@ def _workspace(project: Path, project_config: str) -> list:
     (project / "team.code-workspace").write_text(
         json.dumps({"folders": [{"path": "svc"}]}), encoding="utf-8"
     )
-    (project / "svc" / ".ash").mkdir(parents=True)
-    (project / "svc" / ".ash" / ".ash.yaml").write_text(
+    (project / "svc").mkdir(parents=True)
+    (project / "svc" / ".ash.yaml").write_text(
         textwrap.dedent(project_config), encoding="utf-8"
     )
     return ["scan", "--no-progress", "--workspace", "team.code-workspace"]

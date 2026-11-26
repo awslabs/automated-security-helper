@@ -18,6 +18,10 @@ The age past which ASH treats a content database as too old to trust: 120 hours 
 
 The single SARIF run that every scanner's results are merged into, written as `reports/ash.sarif`. Findings are appended, not deduplicated. See [How ASH works](how-ash-works.md#findings-are-merged-not-deduplicated).
 
+## Alpha plugin
+
+One of the opt-in scanner packages (`ash_*_plugins`) that ships with ASH but is not built in, such as the trivy-repo, snyk-code, and ferret-scan scanners. Alpha is a maturity label: ASH ships these scanners but does not yet promote them as supported. The `ash_aws_plugins` reporters load the same opt-in way but are not alpha plugins. `ashx scan` loads one only when a plugin module list names it; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do). See [Alpha plugins](../docs/plugins/alpha/index.md).
+
 ## AWS plugins
 
 The `ash_aws_plugins` package, which ships with ASH and holds reporters that send results to AWS services. It loads only when the operator names it in a plugin module list; a repository config cannot. See [AWS reporters](../plugins/aws.md).
@@ -25,10 +29,6 @@ The `ash_aws_plugins` package, which ships with ASH and holds reporters that sen
 ## Client-supplied
 
 The mark ASH puts on a suppression or ignore path set by a config file an MCP client delivered, rather than by the operator. A client-supplied ignore path keeps the finding in the results as a suppressed finding instead of dropping it. See [Configuration trust model](trust-model.md#client-supplied).
-
-## Community plugin
-
-A plugin package that ships with ASH but is not built in, such as the trivy-repo, snyk-code, and ferret-scan scanners. `ashx scan` loads it only when a plugin module list names it; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do). See [Community plugins](../docs/plugins/community/index.md).
 
 ## Content database
 
@@ -112,7 +112,7 @@ A plugin that renders the aggregated results in one format and writes it to the 
 
 ## Repository config
 
-An ASH config file inside a git checkout or inside the scanned directory, such as the `.ash/.ash.yaml` ASH discovers in the repository, or a config kept in an ops repository of its own. It cannot grant sandbox access, load ASH's off-host plugin packages, or choose where ASH's AWS reporters send results. See [Configuration trust model](trust-model.md).
+An ASH config file inside a git checkout or inside the scanned directory, such as the `.ash.yaml` ASH discovers in the repository, or a config kept in an ops repository of its own. It cannot grant sandbox access, load ASH's off-host plugin packages, or choose where ASH's AWS reporters send results. See [Configuration trust model](trust-model.md).
 
 ## Run mode
 

@@ -42,7 +42,10 @@ from automated_security_helper.base.options import (
     ConverterOptionsBase,
     tool_version_constraint,
 )
-from automated_security_helper.base.uv_tool_mixin import deferred_tool_version_probes
+from automated_security_helper.base.uv_tool_mixin import (
+    _tool_name,
+    deferred_tool_version_probes,
+)
 from automated_security_helper.plugins.decorators import ash_converter_plugin
 from automated_security_helper.utils.get_scan_set import (
     honors_ignore_files,
@@ -55,6 +58,7 @@ from automated_security_helper.utils.suppression_matcher import (
     ignore_path_matches,
 )
 from automated_security_helper.core.cancellation import ScanCancelled
+from automated_security_helper.models.vocab import FailureKind
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.sandbox.scope import (
@@ -83,7 +87,10 @@ from automated_security_helper.utils.subprocess_utils import (
     spawn_run_failure_after_the_start,
 )
 from automated_security_helper.utils.error_text import text_without_values
-from automated_security_helper.utils.pre_installed_tool import ANSI_ESCAPE
+from automated_security_helper.utils.pre_installed_tool import (
+    ANSI_ESCAPE,
+    ToolInstallStatus,
+)
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 #: The name nbconvert is given the staged copy under, and the name it writes its
@@ -359,7 +366,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         # might never need. The spec the probe resolves under is _uv_from_spec,
         # the requirement the check reads, so it reports the version that runs.
         with deferred_tool_version_probes():
-            self.tool_version = self._get_uv_tool_version(self.command)
+            self.tool_version = self._get_uv_tool_version(_tool_name(self))
 
     def _probe_scope(self) -> ContextManager[Optional[SandboxUnavailable]]:
         """Sandbox this converter's probes, unless a caller already confined them.
@@ -532,7 +539,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                         ),
                         extra=NO_MARKUP,
                     )
-                    self.tool_version = self._get_uv_tool_version(self.command)
+                    self.tool_version = self._get_uv_tool_version(_tool_name(self))
                     self._nbconvert_route = "uv"
                     return True
                 return self._nbconvert_unavailable(found.reason, found.detail)
@@ -545,7 +552,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             if installation_success:
                 ASH_LOGGER.debug(f"UV tool installation successful for {self.command}")
                 # Update tool version after successful installation
-                self.tool_version = self._get_uv_tool_version(self.command)
+                self.tool_version = self._get_uv_tool_version(_tool_name(self))
                 self._nbconvert_route = "uv"
                 return True
             else:
@@ -641,7 +648,9 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         # the verification gets the constraint itself.
         requirement = self._shown_uv_from_spec()
         if executable is None:
-            executable, refused = lookup_for_scan(self.command, self.context.source_dir)
+            executable, refused = lookup_for_scan(
+                _tool_name(self), self.context.source_dir
+            )
             if executable is None:
                 reason = refused or (
                     f"no {self.command} was found to run {requirement!r} with"
@@ -649,13 +658,13 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                 return _FoundNbconvert(None, reason, reason, None)
         verdict = verify_pre_installed_tool(
             executable,
-            self.uv_tool_package_name,
+            self._uv_package(),
             extras,
             constraint,
             uv_executable=find_uv_or_none(),
             values=self._values_to_redact(),
         )
-        if verdict.status == "satisfied":
+        if verdict.status == ToolInstallStatus.SATISFIED:
             return _FoundNbconvert(
                 executable, None, None, getattr(verdict, "version", None)
             )
@@ -739,7 +748,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             # the command name, which uv refuses.
             requirement = self._uv_from_spec()
             result = uv_runner.run_tool(
-                tool_name=self.command,
+                tool_name=_tool_name(self),
                 package_name=requirement,
                 args=jupyter_args,
                 cwd=cwd,
@@ -1457,7 +1466,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                             ipynb_file,
                             f"it is larger than {_NOTEBOOK_MAX_BYTES} bytes, the "
                             "most ASH reads of a notebook",
-                            kind="input",
+                            kind=FailureKind.INPUT,
                         )
                         continue
                     # An input error, not a tool failure: nothing nbconvert
@@ -1468,7 +1477,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                         self.record_failed_input(
                             ipynb_file,
                             f"not a Jupyter notebook: {problem}",
-                            kind="input",
+                            kind=FailureKind.INPUT,
                         )
                         continue
                     confinement = self._conversion_scope(Path(staging_dir))

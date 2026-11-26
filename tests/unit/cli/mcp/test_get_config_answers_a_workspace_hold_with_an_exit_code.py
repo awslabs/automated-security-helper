@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -89,8 +90,10 @@ def test_the_busy_type_is_the_errors_own() -> None:
     """The answer reads ``error_type`` off the exception it caught, so a type the
     error carries is the type the client is told."""
     from automated_security_helper.cli.mcp.sessions import (
-        SESSION_WORKSPACE_BUSY,
         SessionWorkspaceBusyError,
     )
 
-    assert SessionWorkspaceBusyError("held").error_type == SESSION_WORKSPACE_BUSY
+    assert (
+        SessionWorkspaceBusyError("held").error_type
+        == McpErrorType.SESSION_WORKSPACE_BUSY.value
+    )

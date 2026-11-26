@@ -43,7 +43,7 @@ from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sa
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CONFIG = REPO_ROOT / ".ash" / ".ash_community_plugins.yaml"
+CONFIG = REPO_ROOT / ".ash" / ".ash_alpha_plugins.yaml"
 INSPECTOR_LOCK = "scripts/e2e/inspector/package-lock.json"
 OPERATOR_REQUIREMENTS = "deploy/kubernetes-operator/requirements.txt"
 

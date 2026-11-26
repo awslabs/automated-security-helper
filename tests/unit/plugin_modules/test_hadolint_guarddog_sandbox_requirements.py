@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What the hadolint and GuardDog community scanners get from the scanner sandbox.
+"""What the hadolint and GuardDog alpha scanners get from the scanner sandbox.
 
 Both declare the strict default: no network, the baseline read-only paths, the
 results directory as the only writable place, and the baseline environment

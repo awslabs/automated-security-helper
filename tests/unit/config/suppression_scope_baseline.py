@@ -21,7 +21,7 @@ from __future__ import annotations
 
 # (rule_id, path). A rule_id of None matches every rule on the path.
 MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
-    ".ash/.ash.yaml": (
+    ".ash.yaml": (
         ("CKV_DOCKER_2", "Dockerfile"),
         (
             "B404",
@@ -1227,7 +1227,7 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ("SECRET-SECRET-KEYWORD", "tests/unit/express/test_client_delegation.py"),
         ("generic-api-key", "tests/integration/express/test_express_e2e.py"),
     ),
-    ".ash/.ash_community_plugins.yaml": (
+    ".ash/.ash_alpha_plugins.yaml": (
         ("*:Apache-2.0", "**"),
         ("*:BSD-2-Clause", "**"),
         ("*:BSD-3-Clause", "**"),
@@ -1676,7 +1676,7 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
 
 # (rule_id, path, landed_on).
 PRE_GUARD_BASELINE: dict[str, tuple[tuple[str | None, str, str], ...]] = {
-    ".ash/.ash.yaml": (
+    ".ash.yaml": (
         (
             "CFN_NAG_W12",
             "deploy/cdk/templates/AshEksOperator.template.json",
@@ -1813,7 +1813,7 @@ PRE_GUARD_BASELINE: dict[str, tuple[tuple[str | None, str, str], ...]] = {
             "v4-capabilities",
         ),
     ),
-    ".ash/.ash_community_plugins.yaml": (
+    ".ash/.ash_alpha_plugins.yaml": (
         (
             "KSV-0048",
             "deploy/kubernetes-operator/manifests/rbac.yaml",

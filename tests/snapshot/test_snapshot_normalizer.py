@@ -67,6 +67,22 @@ class TestMasked:
         assert tmp_path.as_posix() not in out
         assert out.count("<TMP>/out/ash.sarif") == 4, out
 
+    def test_the_build_date_epoch_build_argument(self, normalizer):
+        # The day's UTC midnight, written into a build command by the wrappers.
+        assert (
+            normalizer.text("--build-arg BUILD_DATE_EPOCH=1768435200 .")
+            == "--build-arg BUILD_DATE_EPOCH=<epoch> ."
+        )
+        assert normalizer.data(["BUILD_DATE_EPOCH=1768435200"]) == [
+            "BUILD_DATE_EPOCH=<epoch>"
+        ]
+
+    @pytest.mark.parametrize("name", ["COLUMNS", "LINES"])
+    @pytest.mark.parametrize("value", ["100", "50", "-1", ""])
+    def test_the_console_size_a_wrapper_forwards(self, normalizer, name, value):
+        # One whole argument of a command line: the console's size is the machine's.
+        assert normalizer.data([f"{name}={value}"]) == [f"{name}=<size>"]
+
     def test_windows_separators_after_a_token(self):
         n = SnapshotNormalizer()
         n.add_root(
@@ -274,6 +290,18 @@ class TestSurvives:
         for path in ("/etc/ash.yaml", "ash.yaml"):
             with pytest.raises(ValueError):
                 n.add_relative_path(path)
+
+    def test_build_date_epoch_and_console_size_lookalikes(self, normalizer):
+        # Only the exact build argument, and only a whole COLUMNS=/LINES= argument:
+        # a longer name, a non-numeric value, and a line inside prose all stay.
+        text = (
+            "XBUILD_DATE_EPOCH=5\n"
+            "BUILD_DATE_EPOCH=today\n"
+            "MY_COLUMNS=100\n"
+            "COLUMNS=wide\n"
+            "set COLUMNS=100 first"
+        )
+        assert normalizer.text(text) == text
 
     def test_a_date_that_is_not_today(self, timed):
         assert timed.text("expires 2031-01-31") == "expires 2031-01-31"

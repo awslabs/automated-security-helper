@@ -21,6 +21,7 @@ from threading import Event, Lock
 from time import monotonic
 
 from automated_security_helper.core.cancellation import CancelEvent
+from automated_security_helper.models.vocab import SeverityThreshold
 from automated_security_helper.core.constants import ASH_EXIT_CODES
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -74,7 +75,7 @@ def _canonical_directory(directory_path: str) -> Path:
         return Path(directory_path)
 
 
-class MCScanStatus(Enum):
+class MCScanStatus(str, Enum):
     """Status of a scan.
 
     ``INCOMPLETE`` is terminal, like ``COMPLETED``: the run finished and its results
@@ -119,8 +120,10 @@ ENDED = frozenset(
 
 #: The session a scan belongs to when its registrar named none: stdio's single
 #: client and in-process callers. The same value as
-#: ``cli.mcp.profile_registry.DEFAULT_SESSION_ID``, spelled here rather than
-#: imported because this module sits below the MCP CLI package.
+#: ``config.session_profiles.DEFAULT_SESSION_ID``, spelled here rather than
+#: imported because the config layer imports ``core.resource_management``
+#: (``config/mcp_sandbox.py`` takes its error types from it), so importing the
+#: constant from ``config`` here would make the two packages import each other.
 DEFAULT_SCAN_SESSION = "__default__"
 
 
@@ -165,7 +168,7 @@ class ScanRegistryEntry:
         scan_id: str,
         directory_path: str,
         output_directory: str,
-        severity_threshold: Optional[str] = "MEDIUM",
+        severity_threshold: Optional[str] = SeverityThreshold.MEDIUM.value,
         config_path: Optional[str] = None,
         session_id: Optional[str] = None,
         slot: Optional[str] = None,
@@ -616,10 +619,11 @@ def _windows_process_is_running(pid: int, *, if_unasked: bool = False) -> bool:
     still_active = 259
     error_access_denied = 5
     try:
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+        # WinDLL and get_last_error exist on Windows only; this probe runs there.
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
         handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
         if not handle:
-            return ctypes.get_last_error() == error_access_denied  # type: ignore[attr-defined]
+            return ctypes.get_last_error() == error_access_denied  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
         try:
             code = ctypes.c_ulong()
             if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
@@ -907,7 +911,7 @@ class ScanRegistry:
         self,
         directory_path: str,
         output_directory: str,
-        severity_threshold: Optional[str] = "MEDIUM",
+        severity_threshold: Optional[str] = SeverityThreshold.MEDIUM.value,
         config_path: Optional[str] = None,
         scan_id: Optional[str] = None,
         max_active: Optional[int] = None,
@@ -989,7 +993,7 @@ class ScanRegistry:
         self,
         directory_path: str,
         output_directory: str,
-        severity_threshold: Optional[str] = "MEDIUM",
+        severity_threshold: Optional[str] = SeverityThreshold.MEDIUM.value,
         config_path: Optional[str] = None,
         scan_id: Optional[str] = None,
         max_active: Optional[int] = None,

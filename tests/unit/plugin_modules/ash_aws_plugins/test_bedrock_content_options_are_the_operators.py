@@ -223,7 +223,7 @@ def test_a_repository_does_not_choose_which_calls_are_made(
     unconfigured = _calls(
         resolve_config(source_dir=source), test_plugin_context, monkeypatch
     )
-    _shape_only(source / ".ash" / ".ash.yaml")
+    _shape_only(source / ".ash.yaml")
 
     config = resolve_config(source_dir=source)
     calls = _calls(config, test_plugin_context, monkeypatch)
@@ -258,7 +258,7 @@ def test_a_repository_value_never_reaches_the_model_call(
     tmp_path, test_plugin_context, monkeypatch
 ):
     source = tmp_path / "repo"
-    _write(source / ".ash" / ".ash.yaml", CONTENT)
+    _write(source / ".ash.yaml", CONTENT)
 
     config = resolve_config(source_dir=source)
     reporter, sent = _report(config, test_plugin_context, monkeypatch)
@@ -276,7 +276,7 @@ def test_a_hyphenated_repository_value_never_reaches_it_either(
 ):
     source = tmp_path / "repo"
     _write(
-        source / ".ash" / ".ash.yaml",
+        source / ".ash.yaml",
         {name.replace("_", "-"): value for name, value in CONTENT.items()},
     )
 
@@ -306,7 +306,7 @@ def test_a_repository_repeating_the_operators_value_keeps_it(
     tmp_path, test_plugin_context, monkeypatch
 ):
     source = tmp_path / "repo"
-    project = _write(source / ".ash" / ".ash.yaml", CONTENT)
+    project = _write(source / ".ash.yaml", CONTENT)
     operator = _write(tmp_path / "operator" / "ash.yaml", CONTENT)
 
     config = resolve_config(

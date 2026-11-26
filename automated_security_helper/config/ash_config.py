@@ -18,7 +18,9 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from automated_security_helper.models.vocab import PluginKind, SeverityThresholdText
 from typing import (
+    TYPE_CHECKING,
     Annotated,
     Any,
     ClassVar,
@@ -32,10 +34,12 @@ from typing import (
     Optional,
     Set,
     Tuple,
-    get_args,
+    cast,
 )
 
 import yaml
+import yaml.composer
+from pydantic_core import PydanticCustomError
 from automated_security_helper.utils.redacted_model import (
     env_resolved_scalar,
     RedactedSection,
@@ -51,12 +55,11 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
-from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
-    EXTRACTION_LIMIT_OPTIONS,
-    ArchiveConverterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter import (
-    JupyterConverterConfig,
+from automated_security_helper.base.extraction_limits import EXTRACTION_LIMIT_OPTIONS
+from automated_security_helper.config.plugin_sections import build_segment
+from automated_security_helper.config.wire_enum import (
+    wire_enum_validator,
+    wire_value,
 )
 from automated_security_helper.core.constants import (
     ASH_CONFIG_ENV_VAR_ALLOWLIST,
@@ -77,111 +80,20 @@ from automated_security_helper.utils.unknown_keys import (
     UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT,
 )
 from automated_security_helper.core.exceptions import ASHConfigUnsetVariableError
-from automated_security_helper.core.enums import ExportFormat
+from automated_security_helper.core.enums import ExportFormat, SandboxMode
+from automated_security_helper.utils.content_databases import StalenessPolicy
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import (
+    AshExclusion,
     AshSuppression,
     IgnorePathWithReason,
     expiration_date_problem,
     refuse_an_expiration_that_is_not_text,
 )
-from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter import (
-    CSVReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.cyclonedx_reporter import (
-    CycloneDXReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_cyclonedx_reporter import (
-    GitLabCycloneDXReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_sast_reporter import (
-    GitLabSASTReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporter import (
-    HTMLReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.flatjson_reporter import (
-    FlatJSONReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.junitxml_reporter import (
-    JUnitXMLReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_reporter import (
-    MarkdownReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.asff_reporter import (
-    AsffReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporter import (
-    OCSFReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.spdx_reporter import (
-    SPDXReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.text_reporter import (
-    TextReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.yaml_reporter import (
-    YAMLReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.sarif_reporter import (
-    SARIFReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_reporter import (
-    GHASReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
-    UnusedSuppressionsReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
-    ActionlintScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_scanner import (
-    CfnGuardScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
-    CfnLintScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
-    GitleaksScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
-    TrivyScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
-    ZizmorScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
-    BanditScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
-    CdkNagScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner import (
-    CfnNagScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
-    CheckovScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
-    DetectSecretsScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
-    GrypeScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
-    NpmAuditScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
-    OpengrepScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
-    SyftScannerConfig,
-)
 from automated_security_helper.utils.config_trust import ConfigProvenance
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.scanner_names import canonical_scanner_name
 from automated_security_helper.utils.report_yaml import NoCommandLineDumper
+from automated_security_helper.utils.scanner_names import canonical_scanner_name
 
 
 def config_env_var_is_interpolatable(var_name: str) -> bool:
@@ -552,7 +464,9 @@ def load_yaml_config(
             # tagged !ENV and one the file tagged look the same once composed.
             explicit = self.peek_event().tag == "!ENV"
             node = super().compose_scalar_node(anchor)
-            node.ash_explicit_env = explicit
+            # A marker of this loader's own on PyYAML's node, read back by
+            # construct_scalar below; ScalarNode declares no such attribute.
+            setattr(node, "ash_explicit_env", explicit)
             return node
 
         def construct_mapping(self, node, deep=False):
@@ -879,31 +793,33 @@ class _PluginConfigSegment(RedactedSection):
         return data
 
 
-class ConverterConfigSegment(_PluginConfigSegment):
+# The three plugin segments hold one typed section per shipped plugin. The section
+# fields are not written here: each plugin's manifest (scanners) or option-section
+# row (reporters, converters) names its section's class and description, and
+# ``plugin_section_fields`` turns those rows into the field definitions, so this
+# layer names no plugin (see ``config/plugin_sections.py``). A static base holds
+# what is the same for every segment; type checkers see the segment as that base,
+# whose attributes are untyped.
+
+
+class _ConverterConfigSegmentBase(_PluginConfigSegment):
     model_config = ConfigDict(
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
-        use_enum_values=True,
         extra="allow",
     )
 
     __pydantic_extra__: Dict[str, Any | ConverterPluginConfigBase] = {}
 
-    archive: Annotated[
-        ArchiveConverterConfig,
-        Field(description="Configure the options for the ArchiveConverter"),
-    ] = ArchiveConverterConfig()
-    jupyter: Annotated[
-        JupyterConverterConfig,
-        Field(description="Configure the options for the JupyterConverter"),
-    ] = JupyterConverterConfig()
+    if TYPE_CHECKING:
+
+        def __getattr__(self, name: str) -> Any: ...
 
 
-class ScannerConfigSegment(_PluginConfigSegment):
+class _ScannerConfigSegmentBase(_PluginConfigSegment):
     model_config = ConfigDict(
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
-        use_enum_values=True,
         extra="allow",
     )
 
@@ -991,154 +907,51 @@ class ScannerConfigSegment(_PluginConfigSegment):
                 data[canonical] = section
         return data
 
-    actionlint: Annotated[
-        ActionlintScannerConfig,
-        Field(description="Configure the options for actionlint"),
-    ] = ActionlintScannerConfig()
-    bandit: Annotated[
-        BanditScannerConfig, Field(description="Configure the options for Bandit")
-    ] = BanditScannerConfig()
-    cdk_nag: Annotated[
-        CdkNagScannerConfig,
-        Field(description="Configure the options for CdkNag", alias="cdk-nag"),
-    ] = CdkNagScannerConfig()
-    cfn_guard: Annotated[
-        CfnGuardScannerConfig,
-        Field(description="Configure the options for cfn-guard", alias="cfn-guard"),
-    ] = CfnGuardScannerConfig()
-    cfn_lint: Annotated[
-        CfnLintScannerConfig,
-        Field(description="Configure the options for cfn-lint", alias="cfn-lint"),
-    ] = CfnLintScannerConfig()
-    cfn_nag: Annotated[
-        CfnNagScannerConfig,
-        Field(description="Configure the options for CfnNag", alias="cfn-nag"),
-    ] = CfnNagScannerConfig()
-    checkov: Annotated[
-        CheckovScannerConfig, Field(description="Configure the options for Checkov")
-    ] = CheckovScannerConfig()
-    detect_secrets: Annotated[
-        DetectSecretsScannerConfig,
-        Field(
-            description="Configure the options for DetectSecrets",
-            alias="detect-secrets",
-        ),
-    ] = DetectSecretsScannerConfig()
-    gitleaks: Annotated[
-        GitleaksScannerConfig, Field(description="Configure the options for Gitleaks")
-    ] = GitleaksScannerConfig()
-    grype: Annotated[
-        GrypeScannerConfig, Field(description="Configure the options for Grype")
-    ] = GrypeScannerConfig()
-    npm_audit: Annotated[
-        NpmAuditScannerConfig,
-        Field(description="Configure the options for NpmAudit", alias="npm-audit"),
-    ] = NpmAuditScannerConfig()
-    opengrep: Annotated[
-        OpengrepScannerConfig, Field(description="Configure the options for Opengrep")
-    ] = OpengrepScannerConfig()
-    syft: Annotated[
-        SyftScannerConfig, Field(description="Configure the options for Syft")
-    ] = SyftScannerConfig()
-    trivy: Annotated[
-        TrivyScannerConfig,
-        Field(description="Configure the options for Trivy (trivy fs)"),
-    ] = TrivyScannerConfig()
-    zizmor: Annotated[
-        ZizmorScannerConfig, Field(description="Configure the options for zizmor")
-    ] = ZizmorScannerConfig()
+    if TYPE_CHECKING:
+
+        def __getattr__(self, name: str) -> Any: ...
 
 
-class ReporterConfigSegment(_PluginConfigSegment):
+class _ReporterConfigSegmentBase(_PluginConfigSegment):
     model_config = ConfigDict(
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
-        use_enum_values=True,
         extra="allow",
     )
 
     __pydantic_extra__: Dict[str, Any | ReporterPluginConfigBase] = {}
 
-    csv: Annotated[
-        CSVReporterConfig,
-        Field(description="Configure the options for the CSV reporter"),
-    ] = CSVReporterConfig()
-    cyclonedx: Annotated[
-        CycloneDXReporterConfig,
-        Field(description="Configure the options for the CycloneDX reporter"),
-    ] = CycloneDXReporterConfig()
-    gitlab_cyclonedx: Annotated[
-        GitLabCycloneDXReporterConfig,
-        Field(
-            description="Configure the options for the GitLab CycloneDX dependency scanning reporter",
-            alias="gitlab-cyclonedx",
-        ),
-    ] = GitLabCycloneDXReporterConfig()
-    # Do the same for html, json, junitxml, ocsf, sarif, spdx, text, and yaml
-    html: Annotated[
-        HTMLReporterConfig,
-        Field(description="Configure the options for the HTML reporter"),
-    ] = HTMLReporterConfig()
-    flat_json: Annotated[
-        FlatJSONReporterConfig,
-        Field(
-            description="Configure the options for the Flat JSON reporter",
-            alias="flat-json",
-        ),
-    ] = FlatJSONReporterConfig()
-    gitlab_sast: Annotated[
-        GitLabSASTReporterConfig,
-        Field(
-            description="Configure the options for the GitLab SAST reporter",
-            alias="gitlab-sast",
-        ),
-    ] = GitLabSASTReporterConfig()
-    github_ghas: Annotated[
-        GHASReporterConfig,
-        Field(
-            description="Configure the options for the GitHub Advanced Security (GHAS) SARIF reporter",
-            alias="github-ghas",
-        ),
-    ] = GHASReporterConfig()
-    junitxml: Annotated[
-        JUnitXMLReporterConfig,
-        Field(description="Configure the options for the JUnit XML reporter"),
-    ] = JUnitXMLReporterConfig()
-    markdown: Annotated[
-        MarkdownReporterConfig,
-        Field(description="Configure the options for the Markdown reporter"),
-    ] = MarkdownReporterConfig()
-    asff: Annotated[
-        AsffReporterConfig,
-        Field(description="Configure the options for offline ASFF export"),
-    ] = AsffReporterConfig()
-    ocsf: Annotated[
-        OCSFReporterConfig,
-        Field(description="Configure the options for the OCSF reporter"),
-    ] = OCSFReporterConfig()
-    sarif: Annotated[
-        SARIFReporterConfig,
-        Field(description="Configure the options for the SARIF reporter"),
-    ] = SARIFReporterConfig()
-    spdx: Annotated[
-        SPDXReporterConfig,
-        Field(description="Configure the options for the SPDX reporter"),
-    ] = SPDXReporterConfig()
-    text: Annotated[
-        TextReporterConfig,
-        Field(description="Configure the options for the Text reporter"),
-    ] = TextReporterConfig()
-    unused_suppressions: Annotated[
-        UnusedSuppressionsReporterConfig,
-        Field(
-            description="Configure the options for the Unused Suppressions reporter",
-            alias="unused-suppressions",
-        ),
-    ] = UnusedSuppressionsReporterConfig()
-    yaml: Annotated[
-        YAMLReporterConfig,
-        Field(description="Configure the options for the YAML reporter"),
-    ] = YAMLReporterConfig()
+    if TYPE_CHECKING:
+
+        def __getattr__(self, name: str) -> Any: ...
+
+
+if TYPE_CHECKING:
+    ConverterConfigSegment = _ConverterConfigSegmentBase
+    ScannerConfigSegment = _ScannerConfigSegmentBase
+    ReporterConfigSegment = _ReporterConfigSegmentBase
+else:
+    ConverterConfigSegment = build_segment(
+        "ConverterConfigSegment",
+        _ConverterConfigSegmentBase,
+        ConverterPluginConfigBase,
+        PluginKind.CONVERTER.section,
+        __name__,
+    )
+    ScannerConfigSegment = build_segment(
+        "ScannerConfigSegment",
+        _ScannerConfigSegmentBase,
+        ScannerPluginConfigBase,
+        PluginKind.SCANNER.section,
+        __name__,
+    )
+    ReporterConfigSegment = build_segment(
+        "ReporterConfigSegment",
+        _ReporterConfigSegmentBase,
+        ReporterPluginConfigBase,
+        PluginKind.REPORTER.section,
+        __name__,
+    )
 
 
 class MCPResourceManagementConfig(RedactedSection):
@@ -1423,7 +1236,8 @@ class RuntimeOverridesConfig(RedactedSection):
                 "JSON-Pointer glob patterns that are never allowed (denied wins over allowed). "
                 "Each entry starts with '/'. The defaults block the fields that decide "
                 "whether a scan fails, what it runs and reports, where findings are "
-                "sent, the scanner sandbox, and this policy. A list equal to a default "
+                "sent, the scanner sandbox, the run history's recording and "
+                "retention, and this policy. A list equal to a default "
                 "ASH has shipped counts as the current default list. Any other list "
                 "is added to the current defaults, unless replace_default_denied_paths "
                 "is true. When it is added, a list that holds some default entries and "
@@ -1471,13 +1285,19 @@ class RuntimeOverridesConfig(RedactedSection):
         "/scanners/detect-secrets/options/scan_settings/plugins_used",
         "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
         "/scanners/detect-secrets/options/baseline_file",
-        # Suppressions and ignore paths can hide findings outright.
+        # Suppressions, ignore paths and exclusions can hide findings outright.
         "/global_settings/ignore_paths",
         "/global_settings/suppressions",
+        "/global_settings/exclusions",
         # The runtime-override policy itself: a client that could rewrite it
         # through patch_ops could then lift every other entry here.
         "/global_settings/mcp",
         "/global_settings/mcp/**",
+        # The run history: enabled turns on writes beside the output on every
+        # scan, and keep_runs bounds what pruning may delete (keep_runs=1 prunes
+        # a kept history down to one record), so neither is a client's to change.
+        "/global_settings/history",
+        "/global_settings/history/**",
         # Scanner options that drop findings by rule ID, by a baseline, or by a
         # whole category (a framework, a severity, a rule set, a detector, a
         # confidence level, a cap on the number reported) rather than by path. A
@@ -1544,6 +1364,11 @@ class RuntimeOverridesConfig(RedactedSection):
         "/scanners/ferret-scan/options/config_file",
         "/scanners/grype/options/config_file",
         "/scanners/syft/options/config_file",
+        # Whether syft's SBOM is completed from the sdists a lockfile pins, and
+        # how much of each is fetched and where it is cached: the harvest adds
+        # the packages those sdists embed to the findings, so a client's file
+        # may neither turn it off nor widen it.
+        "/scanners/syft/options/sdist_harvest/**",
         "/scanners/trivy-repo/options/secret_config_file",
         # And the builtin scanners' own config files, trivy-repo's config file
         # and modules directory, cfn-guard's rules files, the programs actionlint
@@ -1785,7 +1610,7 @@ def sandbox_mode_from_yaml(value: Any) -> Any:
     if value is False:
         return "off"
     if value is True:
-        modes = get_args(SandboxConfig.model_fields["mode"].annotation)
+        modes = [mode.value for mode in SandboxMode]
         raise ValueError(
             "the value was read as a YAML boolean; write the mode in quotes "
             f"(the modes are {', '.join(modes)})"
@@ -1812,6 +1637,32 @@ def sandbox_mode_in_document(document: Any) -> Any:
     return document
 
 
+SandboxModeName = Literal[
+    "off", "auto", "bwrap", "firejail", "landlock", "sandbox-exec"
+]
+
+
+def _refuse_sandbox_mode(value: Any) -> Any:
+    """The refusal of a ``sandbox.mode`` that names no mode.
+
+    Anything that is no mode, a boolean included, is refused with the error the
+    field's Literal gave before it was an enum (type ``literal_error``, the same
+    text), so a refusal reads as it always has. The value is not quoted.
+    """
+    names = [f"'{mode.value}'" for mode in SandboxMode]
+    raise PydanticCustomError(
+        "literal_error",
+        "Input should be {expected}",
+        {"expected": f"{', '.join(names[:-1])} or {names[-1]}"},
+    )
+
+
+#: ``sandbox.mode``: a name becomes its ``SandboxMode`` (see ``config/wire_enum.py``;
+#: a name read from an environment reference arrives as the loader's carrier
+#: ``str`` subclass and leaves as the plain member).
+_sandbox_mode_name = wire_enum_validator(SandboxMode, _refuse_sandbox_mode)
+
+
 class SandboxConfig(RedactedSection):
     """OS-level sandboxing of scanner subprocesses. Off by default.
 
@@ -1822,7 +1673,8 @@ class SandboxConfig(RedactedSection):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     mode: Annotated[
-        Literal["off", "auto", "bwrap", "firejail", "landlock", "sandbox-exec"],
+        SandboxMode,
+        BeforeValidator(_sandbox_mode_name),
         Field(
             description=(
                 "How scanner subprocesses are confined. 'off' runs them as plain "
@@ -1837,7 +1689,17 @@ class SandboxConfig(RedactedSection):
                 "ASH logs a warning when it is set there."
             )
         ),
-    ] = "off"
+    ] = SandboxMode.off
+
+    @field_serializer("mode")
+    def _sandbox_mode_value(self, v: SandboxMode) -> str:
+        # The name, not the member, in every dump mode, for the reason
+        # ``AshConfig._output_format_values`` gives: a Python-mode dump of a member
+        # is refused by yaml.safe_dump and written by yaml.dump as a tag no later
+        # load reads. A mode assigned as a plain str (the model does not validate
+        # assignment) is written as that text: ``wire_value`` never raises and
+        # never quotes the value, which may have come from the environment.
+        return wire_value(v)
 
     network_scanners: Annotated[
         Optional[List[str]],
@@ -2008,13 +1870,16 @@ class AshDeduplicationConfig(RedactedSection):
         bool,
         Field(
             description=(
-                "When true, the HTML, Markdown and text reports show one row per "
+                "When true, the human-readable reports (HTML, Markdown, text, "
+                "and the Bedrock summary) show one row per "
                 "duplicate cluster (the primary finding, with a note naming the "
                 "other scanners that reported it) in their findings tables, "
                 "detailed findings, finding cards and hotspots, and add "
                 "deduplicated counts beside, never in place of, the per-scanner "
-                "counts. Only clusters of the same CVE and package, or the same "
-                "line and CWE, fold; IaC resource clusters are annotated only. "
+                "counts. Findings fold when they share a CVE and package, or "
+                "when overlapping lines share a CWE; line overlaps chain, so "
+                "two findings can fold through a third that overlaps both. IaC "
+                "resource clusters are annotated only. "
                 "Finding ids, SARIF, per-scanner metrics, suppressions, "
                 "baselines, the CSV, flat-JSON and JUnit reports and the exit "
                 "code are unchanged. Off by default because it changes row "
@@ -2071,7 +1936,7 @@ class AshConfigGlobalSettingsSection(RedactedSection):
     )
 
     severity_threshold: Annotated[
-        Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"],
+        SeverityThresholdText,
         Field(
             description="Global minimum severity level to consider findings as failures across all scanners",
             # The default below is the process environment's. The schema says the
@@ -2080,7 +1945,9 @@ class AshConfigGlobalSettingsSection(RedactedSection):
             # test_schema_bytes_do_not_depend_on_the_host.py).
             json_schema_extra={"default": SHIPPED_SEVERITY_LEVEL},
         ),
-    ] = ASH_DEFAULT_SEVERITY_LEVEL
+        # _resolve_default_severity_level returns one of the threshold names, or the
+        # fallback, so the str it is typed as is one of the field's literals.
+    ] = cast(SeverityThresholdText, ASH_DEFAULT_SEVERITY_LEVEL)
 
     ignore_paths: Annotated[
         List[IgnorePathWithReason],
@@ -2093,6 +1960,20 @@ class AshConfigGlobalSettingsSection(RedactedSection):
         List[AshSuppression],
         Field(
             description="Global list of suppression rules. Each rule specifies findings to suppress based on rule ID, file path, and optional line numbers."
+        ),
+    ] = []
+
+    exclusions: Annotated[
+        List[AshExclusion],
+        Field(
+            description=(
+                "Global list of rule+path exclusions. Each entry names a rule ID "
+                "(glob allowed), a path (matched like a suppression's), an "
+                "optional scanner and a required reason, and DROPS the matching "
+                "results from SARIF instead of keeping them marked suppressed: "
+                "for finding classes that are always benign in a known place, "
+                "such as bandit B101 under tests/."
+            )
         ),
     ] = []
 
@@ -2415,6 +2296,10 @@ class ContentDbStalenessOverride(RedactedSection):
         ),
     ]
     policy: Annotated[
+        # A Literal, not StalenessPolicy: the config models validate strictly
+        # and the loader dumps them with yaml.safe_dump, which cannot write an
+        # enum member. The accepted set is pinned to the enum in
+        # tests/unit/vocab/test_vocab_drift_e7.py.
         Literal["fail", "warn"],
         Field(
             description="The policy this database is held to while the entry is in effect."
@@ -2487,28 +2372,27 @@ class ContentDbStalenessOverride(RedactedSection):
         return (now or datetime.now(timezone.utc)) >= self.expires_at
 
 
-def _export_format_name(item: Any) -> Any:
-    """One ``output_formats`` entry: a name becomes its ``ExportFormat``.
+def _refuse_export_format(item: Any) -> Any:
+    """The refusal of an ``output_formats`` entry that names no format.
 
-    Config files are validated with strict=True, which accepts only an
-    ExportFormat instance for an ExportFormat field, so a name read from YAML
-    would be refused; converting here keeps the enum type. Per entry, so that a
-    refusal is located at the entry and its input is that name alone: ``ash
-    config validate`` replaces every input value in a message with ``<value>``,
-    and with the whole list as the input, a valid name the list also held was
-    replaced in the list of valid formats too.
+    The valid formats, not the entry, which may have been read from the
+    environment; the error's location names the entry. An entry that is not text
+    is left for the field's own type check.
     """
-    if isinstance(item, str) and not isinstance(item, ExportFormat):
-        try:
-            return ExportFormat(item.strip())
-        except ValueError:
-            valid = ", ".join(fmt.value for fmt in ExportFormat)
-            # The valid formats, not the entry, which may have been read from
-            # the environment; the error's location names the entry.
-            raise ValueError(
-                f"the value is not a valid format. Valid formats are: {valid}"
-            ) from None
+    if isinstance(item, str):
+        valid = ", ".join(fmt.value for fmt in ExportFormat)
+        raise ValueError(f"the value is not a valid format. Valid formats are: {valid}")
     return item
+
+
+#: One ``output_formats`` entry: a name becomes its ``ExportFormat`` (see
+#: ``config/wire_enum.py``). Per entry, so that a refusal is located at the entry
+#: and its input is that name alone: ``ash config validate`` replaces every input
+#: value in a message with ``<value>``, and with the whole list as the input, a
+#: valid name the list also held was replaced in the list of valid formats too.
+_export_format_name = wire_enum_validator(
+    ExportFormat, _refuse_export_format, strip=True
+)
 
 
 def _output_formats_schema(schema: Dict[str, Any]) -> None:
@@ -2714,7 +2598,7 @@ class AshConfig(RedactedSection):
     # Those of the files an extends entry chose with a value read from the
     # environment, and every base below each, which the warning names <value>.
     _repository_config_environment_paths: FrozenSet[Path] = PrivateAttr(
-        default_factory=frozenset
+        default=frozenset()
     )
     # Why those files are not the operator's, in the sentence the other
     # confinement warnings give (sandbox_grants.confinement_membership), set with
@@ -2927,6 +2811,7 @@ class AshConfig(RedactedSection):
     ] = SandboxConfig()
 
     content_db_staleness: Annotated[
+        # A Literal for the reason given on ContentDbStalenessOverride.policy.
         Literal["fail", "warn"],
         Field(
             description=(
@@ -2942,7 +2827,7 @@ class AshConfig(RedactedSection):
                 "precedence over this value; --no-allow-stale-content-db sets 'fail'."
             )
         ),
-    ] = "fail"
+    ] = StalenessPolicy.FAIL.value
 
     content_db_staleness_overrides: Annotated[
         List[ContentDbStalenessOverride],
@@ -3127,7 +3012,7 @@ class AshConfig(RedactedSection):
         # !!python/object/apply tags that no later load could read, and refused by
         # yaml.safe_dump (save, the MCP session config). A file that failed to load
         # was then scanned with the default config.
-        return [str(getattr(fmt, "value", fmt)) for fmt in v]
+        return [wire_value(fmt) for fmt in v]
 
     @field_validator("content_db_staleness_overrides")
     @classmethod
@@ -3326,15 +3211,17 @@ class AshConfig(RedactedSection):
 
     def get_plugin_config(
         self,
-        plugin_type: Literal["converter", "scanner", "reporter"],
+        plugin_type: PluginKind | str,
         plugin_name: str,
     ):
-        match plugin_type:
-            case "scanner":
+        # An unknown kind has no section and reads as no config.
+        kind = PluginKind.coerce(plugin_type)
+        match kind:
+            case PluginKind.SCANNER:
                 item_dict = self.scanners.model_dump(by_alias=True)
-            case "reporter":
+            case PluginKind.REPORTER:
                 item_dict = self.reporters.model_dump(by_alias=True)
-            case "converter":
+            case PluginKind.CONVERTER:
                 item_dict = self.converters.model_dump(by_alias=True)
             case _:
                 item_dict = {}

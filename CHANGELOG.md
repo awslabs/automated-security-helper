@@ -46,8 +46,47 @@
 
 ## Unreleased
 
+### Behavior changes
+
+- **npm-audit findings are located at the lockfile they were audited from**
+  (`deploy/cdk/package-lock.json`, say), not at the installed package's
+  `node_modules/<package>/package.json`. A path-scoped suppression for an npm-audit
+  finding must name the lockfile in `path`; one that names the old `node_modules`
+  path matches nothing. Use `package_name` / `package_path` on the entry to scope
+  to a package or an installed copy within the lockfile, as this repository's own
+  `.ash.yaml` entries now do.
+- **`.ash.yaml` at the project root is the canonical config file.** A scan reads it
+  before any other config source, and `ash config init`, `ash config wizard` and
+  `ash inspect findings` create it when no config exists (they wrote `.ashrc.yaml`
+  before). Every location that worked before still loads: `.ash/.ash.yaml`, `.ash.yml`,
+  `ash.yaml` and the other names of the old list, each also under `.ash/`, and the
+  `ashrc` names. A scan that reads one of them prints one warning that names the file
+  as deprecated and gives the path to move it to, and ASH 4.0 stops reading them. When
+  `.ash.yaml` and an older file both exist, `.ash.yaml` is read and the warning names the
+  file it shadowed; for a project that has `.ash.yml` beside `.ash.yaml`, this reverses
+  which of the two is read. `--config` and `ASH_CONFIG` are unchanged and print no
+  warning, and a `pyproject.toml` with a `[tool.ash]` table is still read, after the file
+  names, with no warning. To move a config, run `git mv .ash/.ash.yaml .ash.yaml`
+  (or the same with the file's own name). This repository's own config moved the same
+  way.
+- **A finding moved from an MCP config's generated script back to the config file has a
+  new property name and a new id.** The result property that names the generated script
+  is now `converted_from`; it was `ash/convertedFrom`, so a tool that reads the old name
+  from ASH's SARIF output finds nothing. The generated script's path is now part of the
+  finding's identity, so the id of such a finding (a finding at a line of `.mcp.json`
+  that a scanner reported in the script the MCP config converter wrote) changes, and a
+  baseline or a suppression keyed by that id needs refreshing. A suppression written
+  against the config file's path and lines is not affected. A result that has a line in
+  the generated script with no sidecar row is unchanged.
+
 ### Maintenance
 
+- Removed the four stale `.ash.yaml` suppressions for GHSA-g3hv-75wg-m249 /
+  CVE-2026-118764 (minimatch globparts amplification): they pinned the minimatch
+  10.2.5 copy bundled inside aws-cdk-lib 2.273.0, and the aws-cdk-lib 2.278.0 bump
+  put minimatch 11.0.9 — outside the advisory's vulnerable range (`>= 7.0.0,
+  < 11.0.1`) — inside both deploy lockfiles, so the entries matched no installed
+  copy. A unit test pins that no suppression matches the bundled copy again.
 - Removed the ASH v2 in-container scanner scripts `utils/common.sh`,
   `utils/git-docker-execute.sh`, `utils/grype-docker-execute.sh`,
   `utils/js-docker-execute.sh`, and `utils/yaml-docker-execute.sh`. ASH v3 has not run
@@ -56,10 +95,43 @@
   `utils/ash_helpers.ps1` (`Invoke-ASH`) are unchanged.
 - The subcommand and option tables that `./ash` and `utils/ash_helpers.ps1` carry
   (subcommand names, the root options that take a value, which subcommands take the
-  options a wrapper adds, the OCI runner order) are now generated from the `ash` CLI by
+  options a wrapper adds, the OCI runner order, the CI runner variables passed into the
+  container, the exit codes, and in `Invoke-ASH` the image build targets and the
+  image-name pattern) are now generated from the `ash` CLI by
   `scripts/generate_wrapper_tables.py` into marked blocks, and the lint job and a unit
-  test fail when a block is stale. The generated text is the text the wrappers already
-  held, so no option, exit code or message changes.
+  test fail when a block is stale. `./ash` reads the runner order and the CI variable
+  list from its generated blocks rather than from a second written-out copy. The
+  generated text is the text the wrappers already held, so no option, exit code or
+  message changes. The generator now writes each wrapper back with the line endings it
+  was read with.
+- Module-level string constants that spelled a wire vocabulary are replaced by enum
+  members, so a caller that imported one of them by name must import the member
+  instead. The `error_type` spellings of the MCP tools (`CONFIG_INPUT_NOT_PERMITTED`,
+  `CONFIG_ENV_NOT_RESOLVED`, `CLONE_TOO_LARGE`, `SESSION_WORKSPACE_BUSY` and the other
+  names that `cli/mcp_tools.py`, `cli/mcp/source_delivery.py`, `cli/mcp/sessions.py` and
+  `cli/mcp/session_identity.py` exported) are now `McpErrorType` members in
+  `automated_security_helper/cli/mcp/error_types.py`; use `McpErrorType.X.value` for the
+  text. `DEFAULT_TRANSPORT` in `cli/mcp/sandbox.py` is `core.enums.DEFAULT_TRANSPORT`, a
+  `Transport` member. `STALENESS_FAIL`, `STALENESS_WARN` and `STALENESS_POLICIES` in
+  `utils/content_databases.py` are `StalenessPolicy` members, and the three
+  `*_CHECKPOINT` constants of `utils/inner_run_outcome.py` are `InnerRunRecordType`
+  members. The wire spellings themselves do not change.
+
+### Deprecations
+
+- **The "community" scanner tier is now called "alpha".** The opt-in scanners ASH ships
+  but does not yet promote as supported (Betterleaks, Ferret Scan, GuardDog, hadolint,
+  Snyk Code and Trivy, each an `ash_*_plugins` scanner package; the `ash_aws_plugins`
+  reporters load the same opt-in way but are not alpha) are alpha scanners:
+  the name says maturity, not provenance. Behavior is unchanged. The plugin pages moved
+  from `docs/plugins/community/` to `docs/plugins/alpha/` (the old URLs redirect), the
+  repository's own scan config is now `.ash/.ash_alpha_plugins.yaml`, the register's
+  tier value is `alpha_optin`, and the CI config variant is `alpha`. Two old spellings
+  are accepted for one release: the register tier value `community_optin` (it warns)
+  and the Dockerfile build argument `ASH_COMMUNITY_PLUGIN_MODULES`, now
+  `ASH_ALPHA_PLUGIN_MODULES` (a value given for the old name wins). The docs checks
+  refuse the old `Community plugins` / `Community scanners` column headings and name
+  the new one. ASH 3.9.0 stops accepting the old spellings.
 
 ### Fixes
 
@@ -75,6 +147,35 @@
 
 ### Features
 
+- **Symbol suppressions are bound to their file's content hash in `.ash.lock`.**
+  A symbol-scoped suppression the lock does not record is refused when the config is
+  validated (`ash scan`, a workspace scan handing the orchestrator a resolved config,
+  `ash config validate`, and the MCP `validate_config`, which used to skip the check
+  without a source directory), with a message that names the command to run. The lock
+  records the reviewed `(rule_id, symbol)` scopes beside each file's hash and both are
+  required: locking a file for one rule does not approve a suppression added to the
+  same file later. When a locked file's bytes change, its symbol suppressions stop
+  applying, their findings return, and the scan prints one notice naming the file, the
+  suppressions and `ash suppress refresh`. The new `ash suppress add`, `refresh` and
+  `verify` commands write the suppression and its lock entry together, record a
+  reviewed change, and fail CI when the lock is out of date; `add` resolves `--file`
+  to the key the scan looks up (a path through a symlink locks the real file), a
+  whole-lock refresh is the explicit `refresh --all`, and `refresh --drop-missing`
+  removes the entry of a locked file that is gone. Line-range suppressions are
+  unchanged. This repository's own symbol suppressions are locked in the same change.
+  The lock is the root dotfile `.ash.lock`; a lock still at `.ash/ash.lock` is read
+  with a deprecation warning (deprecated in v3.9, removed in v4.0) that advises
+  `git mv`. See
+  [Lock a symbol suppression to its file](docs/content/how-to/suppress-findings.md#lock).
+- **ASFF findings of one secret carry one `ash/correlationId`.** ASH does not
+  deduplicate, so a secret that two scanners find is two findings with two Ids in
+  Security Hub, and nothing said they were about one secret. Each secret detection now
+  has a `ProductFields` value derived from `findings_scope`, the file, the start line and
+  the workspace project, without the scanner or the rule, so the findings of one secret
+  share it and can be filtered or grouped on it. Every finding is still sent, with the
+  `Id` it had. Only secret detections have the value: for another kind of finding the
+  place alone does not say which problem it is. In the `asff` and `aws-security-hub`
+  reporters.
 - **`default_scanners` sets the default scanners in a trusted config.** `only`
   replaces a mode's default selection in every mode and `add` extends a fixed one such as
   precommit's; a repository config, an MCP client or a patch cannot set it. The command
@@ -130,7 +231,7 @@
   `scanners.betterleaks.options.honor_tree_ignore_files`. The container image ships
   Betterleaks, pinned and digest-verified; `ash dependencies install --tool betterleaks`,
   with the module loaded, installs the same build locally. See
-  [Betterleaks Plugin](docs/content/docs/plugins/community/betterleaks-plugin.md).
+  [Betterleaks Plugin](docs/content/docs/plugins/alpha/betterleaks-plugin.md).
 - **Engine-scoped suppressions for ferret-scan** (`scope.engines.ferret-scan`): a
   suppression entry can now be narrowed to the confidence band ferret-scan reported
   (`confidence_level: low|medium|high`, or a list) and/or the detector that produced
@@ -193,6 +294,9 @@
   documented to reach the project approvals API that checkov's GitLab check reads.
   Name a framework in `frameworks`, with or without `all`, to run it. In an offline
   scan their settings are not fetched.
+- Listed `GIT_CONFIG_*` environment entries are refused for scanners that need
+  git `safe.directory` (opengrep); remove the entry from the environment list to
+  run such a scanner.
 
 ## v3.8.0 (2026-11-12)
 
@@ -547,7 +651,7 @@ The commits below also carry breaking-change notes, listed under BREAKING CHANGE
   gets an explicit `--config`, the operator's `config_file` (from
   `--config-overrides` or a config outside the scanned tree, for a file outside
   it) or an empty one, so a `.hadolint.yaml` in the scanned repository is not read.
-  See [hadolint Plugin](docs/content/docs/plugins/community/hadolint-plugin.md).
+  See [hadolint Plugin](docs/content/docs/plugins/alpha/hadolint-plugin.md).
 - **A GuardDog community plugin, `ash_guarddog_plugins`, pending licensing review.** It
   runs GuardDog 3.2.0
   over every PyPI, npm, Go, GitHub Action, RubyGems and crates package root,
@@ -565,7 +669,7 @@ The commits below also carry breaking-change notes, listed under BREAKING CHANGE
   GuardDog's own CLI in its interpreter with the limit set; from a config in the
   scanned tree it can only raise a rule's limit, since a lower one hides matches.
   See
-  [GuardDog Plugin](docs/content/docs/plugins/community/guarddog-plugin.md).
+  [GuardDog Plugin](docs/content/docs/plugins/alpha/guarddog-plugin.md).
 - **`--scanners` names the module to add for a community scanner that is not loaded.**
   `--scanners snyk-code` without `ash_snyk_plugins` listed is refused with a message
   naming the module, rather than reading as a typo; a selection in which other names
@@ -604,6 +708,17 @@ The commits below also carry breaking-change notes, listed under BREAKING CHANGE
 
 ### Breaking changes
 
+- **`ash container build` is the command that builds the ASH container image;
+  `ash build-image` is its deprecated spelling, removed in ASH v4.** Both take the
+  same options and start the same build. `ash build-image` prints one warning on
+  stderr per run, naming `ash container build`, and then runs; it is hidden from the
+  root `--help`, as the other spellings that moved in 3.9 are. The interrupted and
+  SIGTERM messages of the command read `ASH container build ...`, and the offline
+  hints in scan messages name `ash container build --offline`. `./ash` and
+  `Invoke-ASH` accept `container` as a command word and pass `--quiet`,
+  `--no-color`, `--verbose`, `--debug`, `--offline` and `--config` given before it
+  on to `build`, as they did for `build-image`. Move scripts and CI jobs to the new
+  spelling in this release; the old one stops working in v4.
 - **`expires` is the canonical spelling of a suppression's or ignore path's
   expiration date; `expiration` is a deprecated alias, removed in ASH v4.** The
   swap reverses the earlier shape, where `expiration` was the field and
@@ -3283,7 +3398,7 @@ The commits below also carry breaking-change notes, listed under BREAKING CHANGE
   copy cannot be written, or when `TMPDIR` is inside the scanned or the output
   directory (a CI job that points `TMPDIR` into its workspace hits this on
   upgrade), snyk-code reports ERROR and the scan exits 1 as incomplete. See
-  [What ASH sends to Snyk](docs/content/docs/plugins/community/snyk-plugin.md#what-ash-sends-to-snyk).
+  [What ASH sends to Snyk](docs/content/docs/plugins/alpha/snyk-plugin.md#what-ash-sends-to-snyk).
 
 - **An ignore path names an archive member in the scanned tree's terms.** A
   member was extracted to `archive/<the archive's folded name>/<member>`, and

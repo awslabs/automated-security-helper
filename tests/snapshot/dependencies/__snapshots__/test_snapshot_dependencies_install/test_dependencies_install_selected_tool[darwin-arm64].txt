@@ -6,7 +6,7 @@ $ ash dependencies install --bin-path bin -t scanner --tool grype --tool bandit
 ╰─────────────────────────────╯
 Getting platform and architecture
 Installing dependencies for platform: darwin, architecture: arm64
-INFO     Loaded 2 converters, 15 scanners, and 16 reporters
+INFO     Loaded 4 converters, 16 scanners, and 16 reporters
 Installing dependencies for scanner plugin: bandit
 Running command: uv tool install bandit[sarif,toml]>=1.7.8,<2.0.0
 Command succeeded with exit code: 0

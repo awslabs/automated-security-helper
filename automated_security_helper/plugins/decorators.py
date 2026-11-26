@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
-from typing import Literal
+from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.plugin_manager import without_masked_modules
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -12,22 +12,26 @@ from importlib.metadata import version, PackageNotFoundError
 def ash_plugin(
     cls=None,
     *,
-    plugin_type: Literal["converter", "scanner", "reporter"],
+    plugin_type: PluginKind | str,
     auto_register=True,
 ):
     """Decorator to register a plugin of specified type with ASH
 
     Args:
         cls: The class to decorate
-        plugin_type: Type of plugin ("converter", "scanner", or "reporter")
+        plugin_type: The plugin kind: a ``PluginKind`` member or its spelling
+            ("converter", "scanner", or "reporter")
         auto_register: Whether to automatically register the plugin with the plugin manager
 
     Returns:
         The decorated class
     """
 
+    # An unknown kind stays as given: register_plugin_module says so and drops it.
+    kind = PluginKind.coerce(plugin_type) or plugin_type
+
     def wrap(cls):
-        cls.ash_plugin_type = plugin_type
+        cls.ash_plugin_type = kind
         if auto_register:
             # Get the module path of the class
             module_path = cls.__module__
@@ -37,7 +41,7 @@ def ash_plugin(
             if ASH_LOGGER.isEnabledFor(logging.DEBUG):
                 ASH_LOGGER.debug(
                     without_masked_modules(
-                        f"Auto-registering {plugin_type} plugin {cls.__name__} from {module_path}"
+                        f"Auto-registering {kind} plugin {cls.__name__} from {module_path}"
                     )
                 )
 
@@ -55,7 +59,7 @@ def ash_plugin(
                     plug_mod_ver = getattr(cls, "__version__", None)
 
             ash_plugin_manager.register_plugin_module(
-                plugin_type=plugin_type,
+                plugin_type=kind,
                 plugin_module_class=cls,
                 plugin_module_path=module_path,
                 plugin_module_version=plug_mod_ver,
@@ -82,9 +86,11 @@ def ash_converter_plugin(cls=None, *, auto_register=True):
     """
     if cls is None:
         return lambda c: ash_plugin(
-            c, plugin_type="converter", auto_register=auto_register
+            c, plugin_type=PluginKind.CONVERTER, auto_register=auto_register
         )
-    return ash_plugin(cls, plugin_type="converter", auto_register=auto_register)
+    return ash_plugin(
+        cls, plugin_type=PluginKind.CONVERTER, auto_register=auto_register
+    )
 
 
 def ash_scanner_plugin(cls=None, *, auto_register=True):
@@ -99,9 +105,9 @@ def ash_scanner_plugin(cls=None, *, auto_register=True):
     """
     if cls is None:
         return lambda c: ash_plugin(
-            c, plugin_type="scanner", auto_register=auto_register
+            c, plugin_type=PluginKind.SCANNER, auto_register=auto_register
         )
-    return ash_plugin(cls, plugin_type="scanner", auto_register=auto_register)
+    return ash_plugin(cls, plugin_type=PluginKind.SCANNER, auto_register=auto_register)
 
 
 def ash_reporter_plugin(cls=None, *, auto_register=True):
@@ -116,9 +122,9 @@ def ash_reporter_plugin(cls=None, *, auto_register=True):
     """
     if cls is None:
         return lambda c: ash_plugin(
-            c, plugin_type="reporter", auto_register=auto_register
+            c, plugin_type=PluginKind.REPORTER, auto_register=auto_register
         )
-    return ash_plugin(cls, plugin_type="reporter", auto_register=auto_register)
+    return ash_plugin(cls, plugin_type=PluginKind.REPORTER, auto_register=auto_register)
 
 
 def event_subscriber(event_type):

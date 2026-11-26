@@ -78,6 +78,11 @@ MAIN_REF_FORMS = (
 
 
 def _load_registry():
+    # The registry is derived from the databases each plugin declares, in
+    # automated_security_helper/base/plugin_provisioning.py (standard library only), so
+    # the checkout has to be importable. This script runs with no ASH dependencies installed.
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
     spec = importlib.util.spec_from_file_location("content_databases", REGISTRY_PATH)
     module = importlib.util.module_from_spec(spec)
     if spec is None or spec.loader is None:

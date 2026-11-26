@@ -19,6 +19,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    cast,
 )
 
 from pydantic import Field, PrivateAttr
@@ -45,7 +46,9 @@ from automated_security_helper.base.scanner_facets import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
+from automated_security_helper.base.uv_tool_mixin import _tool_name
 from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.models.vocab import SeverityThreshold, TargetType
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
@@ -55,7 +58,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.link_exclusions import walked_files
 from automated_security_helper.utils.error_text import text_without_values
-from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, VERBOSE_LEVEL
 from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
 from automated_security_helper.utils.scan_output_dirs import (
     PatternSyntax,
@@ -538,8 +541,9 @@ def bandit_exclude_globs(anchor: str, pattern: str) -> List[str]:
 
     Emitted:
 
-    * a literal (``app.py``, ``src/app.py``), which ASH reads as that path
-      only: ``<anchor>/app.p[y]``.
+    * a literal (``app.py``, ``src/app.py``), which ASH reads as that path and
+      the directory of that name (the bare-directory rule, issue #894):
+      ``<anchor>/app.p[y]`` and ``<anchor>/app.py/*``.
     * ``dir/**`` and ``dir/`` (``dir`` literal, any depth of components):
       ``<anchor>/dir/*``.
     * ``**/dir/**`` and ``**/dir/``: ``<anchor>/dir/*`` and ``<anchor>/*/dir/*``.
@@ -550,9 +554,10 @@ def bandit_exclude_globs(anchor: str, pattern: str) -> List[str]:
     included. ASH's matcher compares a path as it is given and drops no ``./``, so
     ``./app.py`` covers no file of the tree and bandit is told to skip none. Nor a
     pattern or anchor holding a line break or a NUL (``_cannot_be_passed``): the
-    argument could not carry it, and the SARIF step applies the ignore path. Nor
-    a literal made only of ``/`` and ``!`` (``_not_a_plain_substring`` has no
-    form for it that is not a plain substring of other paths).
+    argument could not carry it, and the SARIF step applies the ignore path. A
+    literal made only of ``/`` and ``!`` gets its subtree glob only
+    (``_not_a_plain_substring`` has no form for the path itself that is not a
+    plain substring of other paths).
     """
     pattern = pattern.replace("\\", "/")
     if pattern.endswith("/") and pattern.strip("/"):
@@ -582,10 +587,14 @@ def bandit_exclude_globs(anchor: str, pattern: str) -> List[str]:
             return []
         if _GLOB_CHARACTERS & set(pattern):
             return [f"{anchor_glob}/{pattern}"]
+        # A glob-free pattern names the path and the directory of that name
+        # (the bare-directory rule, issue #894), so bandit skips the path
+        # itself and, as for "<dir>/**", everything below it.
+        globs = [f"{anchor_glob}/{pattern}/*"]
         literal = _not_a_plain_substring(pattern)
-        if literal is None:
-            return []
-        return [f"{anchor_glob}/{literal}"]
+        if literal is not None:
+            globs.insert(0, f"{anchor_glob}/{literal}")
+        return globs
     parts = pattern.split("/")
     leading = parts[0] == "**"
     middle = parts[1:-1] if leading else parts[:-1]
@@ -708,6 +717,12 @@ def _spelled_absolute(path: str) -> bool:
     )
 
 
+#: bandit's own ``--confidence-level`` choices, mirrored from its command line
+#: (``all`` plus its three confidence words). A ``Literal`` and not an enum: the set
+#: is bandit's vocabulary, never ASH's, and the option stays text in the config.
+BanditConfidenceLevel = Literal["all", "low", "medium", "high"]
+
+
 class BanditScannerConfigOptions(ScannerOptionsBase):
     config_file: Annotated[
         Path | str | None,
@@ -718,10 +733,9 @@ class BanditScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = None
     confidence_level: Annotated[
-        str,
+        BanditConfidenceLevel,
         Field(
             description="Confidence level for bandit scan (all, low, medium, high)",
-            pattern="^(all|low|medium|high)$",
         ),
     ] = "all"
     ignore_nosec: Annotated[
@@ -887,19 +901,20 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             state=FacetState.MAPPED,
             native_field="results[].locations[].physicalLocation.region."
             "snippet.text (settled by the M0 capture)",
+            reason="mask_secrets_in_sarif runs over the whole report, so a "
+            "snippet holding a secret-shaped value is masked in place; the "
+            "snippet still maps, with the masked text",
         ),
         references=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="tool.driver.rules[].helpUri",
-            reason="rule-level only: the flat reader takes references from "
-            "result relatedLocations, so the help link is discarded today",
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].helpUri, read into the flat "
+            "references when the result carries no relatedLocations",
         ),
         tags=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="tool.driver.rules[].properties.tags",
-            reason="rule-level only: the flat reader takes tags from result "
-            "properties, so the rule tags are discarded today (they still "
-            "feed the CWE read)",
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags, read into the "
+            "flat tags when the result carries none (they also feed the CWE "
+            "read)",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
@@ -940,6 +955,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 python_only=True,
                 use_uv_tool=True,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="a PyPI package run through uv; platform support is the package's and was not read here",
@@ -973,7 +989,6 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 semantics="0 clean, 1 findings: the native-tool convention",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=("options.ignore_nosec",),
                 upstream_license=(
@@ -1065,7 +1080,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # Bandit needs sarif extra for SARIF output format and toml extra for TOML config support
         return ["sarif", "toml"]
 
-    def configure(self, config: ScannerPluginBase | None = None):
+    def configure(self, config: ScannerPluginConfigBase | None = None):
         """Configure the scanner with the provided configuration.
 
         Args:
@@ -1076,7 +1091,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         """
         try:
             if config is not None:
-                self.config = config
+                self.config = cast(BanditScannerConfig, config)
                 self._apply_config()
 
         except Exception as e:
@@ -1108,7 +1123,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     def _pre_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         config: Any = None,
         *args,
         **kwargs,
@@ -1185,7 +1200,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             # scanner held offline on its own, and its memo keyed that answer
             # under the mode the probe ran in, not the one this scanner is in.
             command = get_uv_tool_command(
-                self.command,
+                _tool_name(self),
                 from_spec=self._uv_probe_from_spec(),
                 offline=self._is_offline_mode(),
             )
@@ -1239,7 +1254,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # the scan went back through the uv route that had just failed. The
         # scanner's own offline reading reaches the resolver here as above.
         command = get_uv_tool_command(
-            self.command,
+            _tool_name(self),
             from_spec=self._uv_probe_from_spec(),
             offline=self._is_offline_mode(),
         )
@@ -1284,7 +1299,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # _select_tool_execution builds its requirement: the copy is verified
         # against the requirement the scan runs under, not one named after the
         # executable.
-        package = self.uv_tool_package_name or self.command
+        package = self._uv_package()
         requirement = build_requirement(package, extras, constraint)
         # The constraint and the check's detail can hold a configured value, and a
         # configured value can come from the environment: redacted as the mixin
@@ -1307,7 +1322,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 text,
                 values,
                 plugin_inputs=self._uv_run_inputs_for_records(),
-                tool_name=self.command,
+                tool_name=_tool_name(self),
                 limit=None,
             )
 
@@ -1439,7 +1454,11 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 "run with an empty ini file that ASH writes; no config file is "
                 "discovered from the scanned tree in its place."
             )
-        if configured_path is not None and Path(configured).name == ".bandit":
+        if (
+            configured_path is not None
+            and configured is not None
+            and Path(configured).name == ".bandit"
+        ):
             # The ini-or-config decision follows the name the operator's
             # configuration gave, so a link named .bandit keeps its format.
             self._ini_file = configured_path
@@ -1645,7 +1664,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 [],
                 holding=holding,
                 values=values,
-                level=logging.VERBOSE,
+                level=VERBOSE_LEVEL,
                 applied_after_scan=True,
             )
             if ignore_globs
@@ -1855,12 +1874,12 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
     # Python-only repos commonly have empty target dirs after conversion;
     # log at VERBOSE rather than INFO to keep the user-facing output clean.
-    empty_target_log_level: ClassVar[int] = logging.VERBOSE
+    empty_target_log_level: ClassVar[int] = VERBOSE_LEVEL
 
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: Any = None,
         *args,
@@ -1880,7 +1899,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ):
         """Resolve final argv and results path for Bandit.
@@ -2306,14 +2325,14 @@ if __name__ == "__main__":
         config=BanditScannerConfig(
             options=BanditScannerConfigOptions(
                 confidence_level="all",
-                severity_threshold="ALL",
+                severity_threshold=SeverityThreshold.ALL.value,
                 ignore_nosec=False,
                 excluded_paths=[],
                 additional_formats=[],
             )
         ),
     )
-    report = scanner.scan(target=Path("."), target_type="source")
+    report = scanner.scan(target=Path("."), target_type=TargetType.SOURCE)
 
     if isinstance(report, SarifReport):
         from automated_security_helper.utils.command_safe_stream import (

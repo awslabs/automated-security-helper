@@ -24,7 +24,7 @@ pinned ASH with uv instead
 The same page covers the part that ages: grype and trivy read vulnerability
 databases with age bounds, and ASH fails a scan whose database is stale, so
 image rebuilds go on a schedule rather than waiting for the first failed scan.
-`ash dependencies check --offline` reads the age of the cached databases against
+`ashx dependencies check --offline` reads the age of the cached databases against
 those bounds without running a scan
 ([Check cached database ages](../how-to/run-offline.md#check-caches)).
 

@@ -61,6 +61,8 @@ SUBCOMMANDS = frozenset(
         "merge",
         "image",
         "get-genai-guide",
+        "container",
+        "results",
     }
 )
 

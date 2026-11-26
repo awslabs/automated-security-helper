@@ -1,4 +1,4 @@
-$ ashx report --format html --log-level ERROR
+$ ashx results report --format html --log-level ERROR
 [exit 0]
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">

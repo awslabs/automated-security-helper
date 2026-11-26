@@ -7,5 +7,7 @@
 │ --help  -h        Show this message and exit.                                                   │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Commands ──────────────────────────────────────────────────────────────────────────────────────┐
-│ list  The `plugin list` command lists what a scan with this configuration loads, on or off.     │
+│ list    The `plugin list` command lists what a scan with this configuration loads, on or off.   │
+│ verify  The `plugin verify` command evaluates the alpha-to-supported promotion bar for scanner  │
+│         plugins.                                                                                │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘

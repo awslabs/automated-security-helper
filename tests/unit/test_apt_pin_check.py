@@ -255,7 +255,10 @@ class TestAgainstTheRecordedIndexes:
         pin = {p.package: p for p in checker.enumerate_apt_pins(DOCKERFILE)}[
             "ca-certificates"
         ]
-        assert pin.version == "20*deb12u*"
+        # Not `20*deb12u*`: apt's glob does not match the security archive's
+        # `20250419~deb12u2` (the image build failed with "Version '20*deb12u*' for
+        # 'ca-certificates' was not found"), while `20*` matches it.
+        assert pin.version == "20*"
         assert len(pin.lines) == 2
 
     def _glob_check(self, tmp_path, version: str):

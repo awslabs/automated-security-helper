@@ -83,6 +83,11 @@ def test_update_finds_no_config(run_cli, snapshot):
 
 
 def test_init_refuses_to_overwrite(run_cli, snapshot, in_tmp):
+    """Legacy location: this test's subject is the deprecated .ash/.ash.yaml path.
+
+    ``init`` refuses to write a canonical file beside a legacy one it would leave
+    unread.
+    """
     (in_tmp / ".ash").mkdir()
     (in_tmp / ".ash" / ".ash.yaml").write_text("project_name: x\n", encoding="utf-8")
     assert run_cli(["config", "init"]) == snapshot

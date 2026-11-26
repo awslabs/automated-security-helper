@@ -66,7 +66,7 @@ describe('parameter names are the contract', () => {
     // - `CertificateArn` is RESERVED, as `VpcSubnetIds` was until the gate consumed it. `ash-config.ts` ships a
     //   factory for each, with the type and pattern settled, and no stack calls
     //   either one. They are the opt-in names the `CKV_AWS_117` and
-    //   `CKV_AWS_2`/`CKV_AWS_103` suppressions in `.ash/.ash.yaml` refer to, fixed
+    //   `CKV_AWS_2`/`CKV_AWS_103` suppressions in `.ash.yaml` refer to, fixed
     //   here so the suppression reason and the eventual parameter cannot disagree.
     //   Declaring them in a template before anything reads them would be the exact
     //   defect the "no stack declares a parameter it does not read" test below

@@ -115,9 +115,13 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-# The two files this needs out of the ASH tree, relative to the package root.
+# The three files this needs out of the ASH tree, relative to the package root. The
+# provisioning module holds the release pin of every tool (each plugin declares its own;
+# ``tool_downloads.TOOL_VERSIONS`` is derived from them) and imports only the standard
+# library.
 _PINS_MODULE = ("utils", "tool_downloads.py")
 _EXCEPTIONS_MODULE = ("core", "exceptions.py")
+_PROVISIONING_MODULE = ("base", "plugin_provisioning.py")
 
 # Exit codes. Distinguished so the Dockerfile's `with-retry` wrapper is not the
 # only thing that knows a failure happened, and so an integrity failure is
@@ -186,6 +190,8 @@ def _load_by_path(name: str, path: Path):
 # and therefore the keys it has to put back afterwards.
 _BORROWED_MODULES = (
     "automated_security_helper",
+    "automated_security_helper.base",
+    "automated_security_helper.base.plugin_provisioning",
     "automated_security_helper.core",
     "automated_security_helper.core.exceptions",
     "automated_security_helper.utils.tool_downloads",
@@ -233,6 +239,7 @@ def load_pins(package_root: Path):
             # __init__ -- which is the thing that needs toml.
             for parent in (
                 "automated_security_helper",
+                "automated_security_helper.base",
                 "automated_security_helper.core",
             ):
                 if parent not in sys.modules:
@@ -243,6 +250,10 @@ def load_pins(package_root: Path):
             _load_by_path(
                 "automated_security_helper.core.exceptions",
                 package_root.joinpath(*_EXCEPTIONS_MODULE),
+            )
+            _load_by_path(
+                "automated_security_helper.base.plugin_provisioning",
+                package_root.joinpath(*_PROVISIONING_MODULE),
             )
             return _load_by_path(
                 "automated_security_helper.utils.tool_downloads",
@@ -2029,8 +2040,8 @@ def main(argv: "list[str] | None" = None) -> int:
     parser.add_argument(
         "tool",
         help=(
-            "actionlint, betterleaks, cfn-guard, gitleaks, grype, hadolint, "
-            "opengrep, syft, trivy or uv"
+            "actionlint, betterleaks, cfn-guard, crane, gitleaks, grype, "
+            "hadolint, opengrep, syft, trivy or uv"
         ),
     )
     parser.add_argument(

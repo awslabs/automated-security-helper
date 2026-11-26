@@ -19,12 +19,15 @@ Two facts trivy's SARIF leaves in message prose or leaves out, read at the bytes
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from automated_security_helper.base.plugin_base import PluginBase
+from automated_security_helper.core.cancellation import ScanCancelled
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (
     TrivyScannerBase,
     _misconfig_report_command,
@@ -35,6 +38,7 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
     TrivyRepoScanner,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.utils.subprocess_utils import TIMEOUT_RETURNCODE
 
 pytestmark = pytest.mark.unit
 
@@ -321,7 +325,10 @@ def scanner(mock_plugin_context, tmp_path):
     scanner = TrivyRepoScanner(context=mock_plugin_context)
     scanner.results_dir = tmp_path / "results"
     scanner.results_dir.mkdir()
-    scanner.exit_code = 0
+    # A scan whose own run left a non-zero exit code and an error line, so a side
+    # run that reset the record to a clean one is told from one that left it alone.
+    scanner.exit_code = 6
+    scanner.errors = ["earlier line"]
     return scanner
 
 
@@ -351,8 +358,11 @@ FINAL_ARGS = [
 def test_the_second_run_names_the_resources_and_leaves_the_record_alone(
     scanner,
 ) -> None:
+    written: list[Path] = []
+
     def fake(self, command, **kwargs):
         target = Path(command[command.index("--output") + 1])
+        written.append(target)
         target.write_text((CAPTURED / f"{STEM}.json").read_text(encoding="utf-8"))
         # what the real recorders do to a scan that ran this command
         self.exit_code = 9
@@ -365,8 +375,8 @@ def test_the_second_run_names_the_resources_and_leaves_the_record_alone(
     assert {_bag(r)["ash_resource_id"] for r in report.runs[0].results} == {
         "aws_s3_bucket.m0_fixture_bucket"
     }
-    assert scanner.exit_code == 0
-    assert "a stderr line of the side run" not in scanner.errors
+    assert scanner.exit_code == 6
+    assert scanner.errors == ["earlier line"]
     assert "a stdout line of the side run" not in scanner.output
     assert getattr(scanner, "_scan_timed_out_after", None) is None
     # run once, as JSON, with only the misconfig scanner, and with no stdout read
@@ -375,20 +385,56 @@ def test_the_second_run_names_the_resources_and_leaves_the_record_alone(
     assert command[command.index("--format") + 1] == "json"
     assert "--scanners=misconfig" in command
     assert call.kwargs["stdout_preference"] == "none"
-    assert not list(scanner.results_dir.glob("*misconfig.json")), "the file is removed"
+    (target,) = written
+    assert not target.exists(), "the file is removed"
 
 
-@pytest.mark.parametrize("returncode", [1, 2])
+@pytest.mark.parametrize("returncode", [1, 2, 32])
 def test_a_failed_second_run_names_nothing_and_fails_nothing(
     scanner, returncode
 ) -> None:
+    written: list[Path] = []
+
     def fake(self, command, **kwargs):
+        written.append(Path(command[command.index("--output") + 1]))
         self.exit_code = returncode
         return {"returncode": returncode}
 
     report, _ = _run_side(scanner, FINAL_ARGS, fake)
     assert all("ash_resource_id" not in _bag(r) for r in report.runs[0].results)
-    assert scanner.exit_code == 0
+    assert scanner.exit_code == 6
+    assert scanner.errors == ["earlier line"]
+    assert len(written) == 1, "the second run was made, so the checks above measured it"
+
+
+def test_a_non_zero_exit_with_a_complete_report_names_nothing(scanner) -> None:
+    """Pinned: the report of a run that did not exit 0 is not read."""
+    written: list[Path] = []
+
+    def fake(self, command, **kwargs):
+        target = Path(command[command.index("--output") + 1])
+        written.append(target)
+        target.write_text((CAPTURED / f"{STEM}.json").read_text(encoding="utf-8"))
+        return {"returncode": 5}
+
+    report, _ = _run_side(scanner, FINAL_ARGS, fake)
+    assert all("ash_resource_id" not in _bag(r) for r in report.runs[0].results)
+    assert not written[0].exists()
+
+
+def test_an_unreadable_report_names_nothing_and_is_removed(scanner) -> None:
+    written: list[Path] = []
+
+    def fake(self, command, **kwargs):
+        target = Path(command[command.index("--output") + 1])
+        written.append(target)
+        target.write_text("{ not json")
+        return {"returncode": 0}
+
+    report, _ = _run_side(scanner, FINAL_ARGS, fake)
+    assert all("ash_resource_id" not in _bag(r) for r in report.runs[0].results)
+    assert not written[0].exists()
+    assert scanner.exit_code == 6
 
 
 def test_no_second_run_without_a_resource_naming_type(scanner) -> None:
@@ -400,6 +446,348 @@ def test_no_second_run_without_a_resource_naming_type(scanner) -> None:
             report = _vulnerability_report("1.0")
             scanner._attach_misconfig_resources(report, FINAL_ARGS)
     double.assert_not_called()
+
+
+@pytest.mark.parametrize("kind", ["cloudformation", "kubernetes"])
+def test_no_second_run_for_a_misconfiguration_type_that_names_no_resource(
+    scanner, kind
+) -> None:
+    """The case the type check decides: a misconfiguration, of a type that is not
+    a resource address."""
+    report = _sarif_for()
+    report.runs[0].results[0].message.root.text = f"Artifact: main.tf\nType: {kind}"
+    with patch.object(PluginBase, "_run_subprocess", autospec=True) as double:
+        with patch.object(
+            TrivyRepoScanner, "_effective_scanners", return_value=["misconfig"]
+        ):
+            scanner._attach_misconfig_resources(report, FINAL_ARGS)
+    double.assert_not_called()
+    # control: the same report with a Terraform type does start the run
+    report.runs[0].results[0].message.root.text = "Artifact: main.tf\nType: terraform"
+    with patch.object(PluginBase, "_run_subprocess", autospec=True) as double:
+        double.return_value = {"returncode": 1}
+        with patch.object(
+            TrivyRepoScanner, "_effective_scanners", return_value=["misconfig"]
+        ):
+            scanner._attach_misconfig_resources(report, FINAL_ARGS)
+    double.assert_called_once()
+
+
+def test_no_second_run_offline(scanner) -> None:
+    """Trivy's Terraform checks fetch module sources; offline mode exists to stop
+    that, so the side run is not made."""
+    with (
+        patch.object(TrivyRepoScanner, "_offline", return_value=True),
+        patch.object(
+            TrivyRepoScanner, "_effective_scanners", return_value=["misconfig"]
+        ),
+        patch.object(PluginBase, "_run_subprocess", autospec=True) as double,
+    ):
+        scanner._attach_misconfig_resources(_captured_sarif(), FINAL_ARGS)
+    double.assert_not_called()
+
+
+def test_the_scanner_set_is_read_from_the_command_as_it_ran(scanner) -> None:
+    """ASH can take misconfig out of the --scanners token while the option still
+    names it; the command decides."""
+    args = [*FINAL_ARGS[:2], "--scanners=vuln", *FINAL_ARGS[2:]]
+    with (
+        patch.object(
+            TrivyRepoScanner, "_effective_scanners", return_value=["misconfig"]
+        ),
+        patch.object(PluginBase, "_run_subprocess", autospec=True) as double,
+    ):
+        scanner._attach_misconfig_resources(_captured_sarif(), args)
+    double.assert_not_called()
+    # control: the same token naming misconfig does run
+    args = [*FINAL_ARGS[:2], "--scanners", "vuln,misconfig", *FINAL_ARGS[2:]]
+    with (
+        patch.object(TrivyRepoScanner, "_effective_scanners", return_value=["vuln"]),
+        patch.object(PluginBase, "_run_subprocess", autospec=True) as double,
+    ):
+        double.return_value = {"returncode": 1}
+        scanner._attach_misconfig_resources(_captured_sarif(), args)
+    double.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [RuntimeError("boom"), ScannerError("refused")],
+    ids=["runtime-error", "scanner-error"],
+)
+def test_a_second_run_that_raises_returns_the_report_unchanged(
+    scanner, failure
+) -> None:
+    """The enrichment is best effort: whatever it raises leaves the report read."""
+
+    def fake(self, command, **kwargs):
+        raise failure
+
+    report, _ = _run_side(scanner, FINAL_ARGS, fake)
+    assert all("ash_resource_id" not in _bag(r) for r in report.runs[0].results)
+    assert len(report.runs[0].results) == 8
+    assert scanner.exit_code == 6
+
+
+def test_a_cancellation_during_the_second_run_propagates(scanner) -> None:
+    def fake(self, command, **kwargs):
+        raise ScanCancelled("cancelled")
+
+    with pytest.raises(ScanCancelled):
+        _run_side(scanner, FINAL_ARGS, fake)
+
+
+def test_a_failed_second_run_is_warned_about_once_with_its_exit_code(scanner) -> None:
+    def fake(self, command, **kwargs):
+        return {"returncode": 32}
+
+    with patch.object(TrivyRepoScanner, "_plugin_log", autospec=True) as log:
+        _run_side(scanner, FINAL_ARGS, fake)
+        _run_side(scanner, FINAL_ARGS, fake)
+    warnings = [
+        call
+        for call in log.call_args_list
+        if call.kwargs.get("level") == logging.WARNING
+    ]
+    assert len(warnings) == 1
+    assert "32" in warnings[0].args[1]
+
+
+def _warnings(log) -> list:
+    return [
+        call
+        for call in log.call_args_list
+        if call.kwargs.get("level") == logging.WARNING
+    ]
+
+
+@pytest.mark.parametrize(
+    "response, said",
+    [
+        (
+            {
+                "returncode": None,
+                "timed_out": True,
+                "could_not_stop": True,
+                "could_not_stop_pid": 4242,
+            },
+            "could not be stopped",
+        ),
+        (
+            {"returncode": TIMEOUT_RETURNCODE, "timed_out": True},
+            "the second run timed out",
+        ),
+        ({"returncode": None, "cancelled": True}, "the second run was cancelled"),
+    ],
+    ids=["could-not-stop", "timed-out", "cancelled"],
+)
+def test_a_second_run_that_did_not_finish_says_so_not_its_exit_code(
+    scanner, response, said
+) -> None:
+    """A run stopped at its timeout, cancelled, or left running has no exit code
+    worth naming: the reason is read from the response's flags."""
+
+    def fake(self, command, **kwargs):
+        return dict(response)
+
+    with patch.object(TrivyRepoScanner, "_plugin_log", autospec=True) as log:
+        _run_side(scanner, FINAL_ARGS, fake)
+    (warning,) = _warnings(log)
+    assert said in warning.args[1]
+    assert "exited None" not in warning.args[1]
+
+
+def _changed_rule_ids() -> str:
+    """The captured JSON report with every record's check id changed: it still
+    names the resource, and no key of it is a key of the captured SARIF."""
+    document = json.loads((CAPTURED / f"{STEM}.json").read_text(encoding="utf-8"))
+    for result in document["Results"]:
+        for record in result.get("Misconfigurations") or []:
+            record["ID"] = "NOT-A-RULE"
+    return json.dumps(document)
+
+
+def test_a_report_that_names_resources_none_of_which_match_is_warned_about(
+    scanner,
+) -> None:
+    def fake(self, command, **kwargs):
+        Path(command[command.index("--output") + 1]).write_text(_changed_rule_ids())
+        return {"returncode": 0}
+
+    with patch.object(TrivyRepoScanner, "_plugin_log", autospec=True) as log:
+        report, _ = _run_side(scanner, FINAL_ARGS, fake)
+    assert all("ash_resource_id" not in _bag(r) for r in report.runs[0].results)
+    (warning,) = _warnings(log)
+    assert "none matched a result" in warning.args[1]
+
+
+def test_a_report_whose_resources_matched_is_not_warned_about(scanner) -> None:
+    """Control for the test above: the same run over the unchanged report attaches
+    and says nothing."""
+
+    def fake(self, command, **kwargs):
+        target = Path(command[command.index("--output") + 1])
+        target.write_text((CAPTURED / f"{STEM}.json").read_text(encoding="utf-8"))
+        return {"returncode": 0}
+
+    with patch.object(TrivyRepoScanner, "_plugin_log", autospec=True) as log:
+        report, _ = _run_side(scanner, FINAL_ARGS, fake)
+    assert any("ash_resource_id" in _bag(r) for r in report.runs[0].results)
+    assert _warnings(log) == []
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        AssertionError("an invariant"),
+        TypeError("a defect"),
+        AttributeError("a defect"),
+        NameError("a defect"),
+    ],
+    ids=["assertion", "type", "attribute", "name"],
+)
+def test_a_defect_in_the_enrichment_is_not_swallowed_as_a_skipped_report(
+    scanner, defect
+) -> None:
+    """The guard keeps a failed second run from costing the scan its report; a
+    programming error is not a failed run and surfaces."""
+
+    def fake(self, command, **kwargs):
+        raise defect
+
+    with pytest.raises(type(defect)):
+        _run_side(scanner, FINAL_ARGS, fake)
+
+
+# --------------------------------------------------------------------------
+# Ties between records the two reports cannot tell apart.
+# --------------------------------------------------------------------------
+
+
+def _sarif_with_messages(*messages: str, rule="AWS-0086", lines=(6, 8)) -> SarifReport:
+    report = _sarif_for(rule=rule, lines=lines, count=len(messages))
+    for result, message in zip(report.runs[0].results, messages):
+        result.message.root.text = (
+            f"Artifact: main.tf\nType: terraform\nVulnerability {rule}\n"
+            f"Severity: HIGH\nMessage: {message}\nLink: [{rule}](https://avd)"
+        )
+    return report
+
+
+def _json_with(*records: tuple[str, str]) -> dict:
+    """One FAIL record per (resource, message) pair, on one check and range."""
+    return {
+        "Results": [
+            {
+                "Target": "main.tf",
+                "Type": "terraform",
+                "Misconfigurations": [
+                    {
+                        "ID": "AWS-0086",
+                        "Status": "FAIL",
+                        "Message": message,
+                        "CauseMetadata": {
+                            "Resource": resource,
+                            "StartLine": 6,
+                            "EndLine": 8,
+                        },
+                    }
+                    for resource, message in records
+                ],
+            }
+        ]
+    }
+
+
+def test_a_positive_control_on_the_synthetic_data() -> None:
+    """The negatives above and below use these builders; this one must attach."""
+    resources = trivy_misconfig_resources(_json_report("terraform", "aws_s3_bucket.a"))
+    assert attach_trivy_resources(_sarif_for(), resources) == 1
+
+
+def test_two_instances_of_one_check_on_one_range_attach_nothing() -> None:
+    """A module used twice, or the instances of a count: same check, file, range
+    and message, so no order can say whose is whose."""
+    sarif = _sarif_with_messages("same", "same")
+    resources = trivy_misconfig_resources(
+        _json_with(
+            ("module.b.aws_s3_bucket.x", "same"), ("module.a.aws_s3_bucket.x", "same")
+        )
+    )
+    assert attach_trivy_resources(sarif, resources) == 0
+    assert all("ash_resource_id" not in _bag(r) for r in sarif.runs[0].results)
+
+
+def test_the_tie_attaches_nothing_whichever_order_the_second_run_lists_them() -> None:
+    for order in (("a", "b"), ("b", "a")):
+        sarif = _sarif_with_messages("same", "same")
+        resources = trivy_misconfig_resources(
+            _json_with(*((f"aws_s3_bucket.{name}[0]", "same") for name in order))
+        )
+        assert attach_trivy_resources(sarif, resources) == 0
+
+
+def test_a_tie_that_names_one_resource_throughout_still_attaches() -> None:
+    sarif = _sarif_with_messages("same", "same")
+    resources = trivy_misconfig_resources(
+        _json_with(("aws_s3_bucket.a", "same"), ("aws_s3_bucket.a", "same"))
+    )
+    assert attach_trivy_resources(sarif, resources) == 2
+
+
+def test_records_that_say_different_things_are_told_apart_by_their_message() -> None:
+    """Listed in the other order than the SARIF's, and still attached right."""
+    sarif = _sarif_with_messages("first message", "second message")
+    resources = trivy_misconfig_resources(
+        _json_with(
+            ("aws_s3_bucket.second", "second message"),
+            ("aws_s3_bucket.first", "first message"),
+        )
+    )
+    assert attach_trivy_resources(sarif, resources) == 2
+    assert [_bag(r)["ash_resource_id"] for r in sarif.runs[0].results] == [
+        "aws_s3_bucket.first",
+        "aws_s3_bucket.second",
+    ]
+
+
+# --------------------------------------------------------------------------
+# The message is the repository's text: only the verified Artifact line opens it.
+# --------------------------------------------------------------------------
+
+
+def _result_with(uri: str, text: str):
+    report = _sarif_for()
+    result = report.runs[0].results[0]
+    result.locations[0].physicalLocation.root.artifactLocation.uri = uri
+    result.message.root.text = text
+    return result
+
+
+def test_the_type_is_read_when_the_artifact_line_names_the_results_location() -> None:
+    result = _result_with("main.tf", "Artifact: main.tf\nType: terraform\nx")
+    assert TrivyScannerBase._misconfig_type(result) == "terraform"
+
+
+def test_an_encoded_location_is_compared_decoded() -> None:
+    result = _result_with("a%20b.tf", "Artifact: a b.tf\nType: terraform\nx")
+    assert TrivyScannerBase._misconfig_type(result) == "terraform"
+
+
+def test_a_file_name_with_a_line_break_cannot_write_the_type_line() -> None:
+    """The name ``x`` + newline + ``Type: terraform`` makes trivy write a line the
+    repository chose; the real type, cloudformation, comes a line later."""
+    name = "x\nType: terraform"
+    result = _result_with(
+        "x%0AType%3A%20terraform",
+        f"Artifact: {name}\nType: cloudformation\nVulnerability AWS-0086",
+    )
+    assert TrivyScannerBase._misconfig_type(result) is None
+
+
+def test_a_message_whose_artifact_line_names_another_file_is_not_read() -> None:
+    result = _result_with("main.tf", "Artifact: other.tf\nType: terraform\nx")
+    assert TrivyScannerBase._misconfig_type(result) is None
 
 
 def test_no_second_run_without_the_misconfig_scanner(scanner) -> None:

@@ -258,7 +258,7 @@ def _delivered(case: Case) -> Path:
     }
     return _upload(
         {
-            ".ash/.ash.yaml": yaml.safe_dump(document),
+            ".ash.yaml": yaml.safe_dump(document),
             "client-dir/app.py": "x = 1\n",
             "other/app.py": "x = 1\n",
         }
@@ -443,7 +443,7 @@ def test_a_client_ignore_path_is_marked_once_across_both_passes(tmp_path: Path) 
 
     source = _upload(
         {
-            ".ash/.ash.yaml": yaml.safe_dump(
+            ".ash.yaml": yaml.safe_dump(
                 {
                     "global_settings": {
                         "ignore_paths": [{"path": "client-dir/**", "reason": "client"}]
@@ -567,7 +567,7 @@ def _trivy_delivered(
         "project_name": "delivered",
         "scanners": {scanner: {"options": {"ignore_file": ignore_file}}},
     }
-    return _upload({".ash/.ash.yaml": yaml.safe_dump(document), **files})
+    return _upload({".ash.yaml": yaml.safe_dump(document), **files})
 
 
 def _trivy_options(config: Any, scanner: str = "trivy-repo") -> Dict[str, Any]:
@@ -736,9 +736,7 @@ def test_a_trivy_ignore_file_above_the_delivered_tree_is_not_read(
         "project_name": "delivered",
         "scanners": {"trivy-repo": {"options": {"ignore_file": relative}}},
     }
-    (source / ".ash" / ".ash.yaml").write_text(
-        yaml.safe_dump(document), encoding="utf-8"
-    )
+    (source / ".ash.yaml").write_text(yaml.safe_dump(document), encoding="utf-8")
     config = _scan_resolution(source)
     assert isinstance(config, AshConfig), config
     assert not _trivy_options(config).get("ignore_file")
@@ -832,12 +830,14 @@ def _hides(kind: Any, pattern: str, relative: str) -> bool:
         # ``**`` stands for directories, from the start of the path.
         ("vendor/**", "vendor/lib/a.py", True, True),
         ("**/tests/**", "tests/test_a.py", True, True),
-        # A pattern that names only a directory, a file name or a run of
-        # directories in the path: the glob kind hides the file, and
-        # GuardDog's filter, which reads the whole path, keeps it.
-        ("vendor", "vendor/lib/a.py", True, False),
-        ("src", "src/a.py", True, False),
-        ("a/b", "a/b/c.py", True, False),
+        # A glob-free directory name: both readings hide the files below it
+        # since the bare-directory rule (issue #894) reached file_path_matches,
+        # which GuardDog's candidate filter calls.
+        ("vendor", "vendor/lib/a.py", True, True),
+        ("src", "src/a.py", True, True),
+        ("a/b", "a/b/c.py", True, True),
+        # A file name that is not the path's first component: the glob kind
+        # hides it at any depth; GuardDog's filter, anchored, keeps it.
         ("a.py", "src/a.py", True, False),
         # A ``/`` inside the pattern anchors it at the root for BOTH readings.
         ("vendor/**", "src/vendor/a.py", False, False),
@@ -922,7 +922,7 @@ def test_the_operators_own_entries_are_not_moved(case: Case) -> None:
         "project_name": "delivered",
         "scanners": {case.scanner: {"options": {case.option: [case.operator_entry]}}},
     }
-    source = _upload({".ash/.ash.yaml": yaml.safe_dump(document)})
+    source = _upload({".ash.yaml": yaml.safe_dump(document)})
     config = _scan_resolution(source)
     assert isinstance(config, AshConfig), config
     patterns = _patterns(
@@ -970,7 +970,7 @@ def test_an_off_host_scanners_other_options_are_still_refused(
     document = {"scanners": {scanner: {"options": options}}}
     source = _upload(
         {
-            ".ash/.ash.yaml": yaml.safe_dump(document),
+            ".ash.yaml": yaml.safe_dump(document),
             ".trivyignore": "CVE-2020-0001\n",
         }
     )
@@ -1036,7 +1036,7 @@ def test_a_value_the_move_does_not_take_is_still_refused(
     from automated_security_helper.config.ash_config import AshConfig
 
     document = {"scanners": {scanner: {"options": {option: value}}}}
-    source = _upload({".ash/.ash.yaml": yaml.safe_dump(document)})
+    source = _upload({".ash.yaml": yaml.safe_dump(document)})
     outcome = _scan_resolution(source)
     # Refused, by the floor or by the option's own type, before any scanner runs.
     assert not isinstance(outcome, AshConfig), outcome
@@ -1084,7 +1084,7 @@ def test_a_moved_exclusion_under_another_spelling_reaches_no_scanner(
 
     document = {"scanners": {spelling: {"options": {"exclude": ["client-dir"]}}}}
     source = _upload(
-        {".ash/.ash.yaml": yaml.safe_dump(document), "client-dir/app.py": "x = 1\n"}
+        {".ash.yaml": yaml.safe_dump(document), "client-dir/app.py": "x = 1\n"}
     )
     outcome = _scan_resolution(source)
 
@@ -1114,8 +1114,8 @@ def test_a_cli_config_outside_the_mcp_workspace_is_unchanged(tmp_path: Path) -> 
     from automated_security_helper.config.resolve_config import resolve_config
 
     repo = tmp_path / "repo"
-    (repo / ".ash").mkdir(parents=True)
-    (repo / ".ash" / ".ash.yaml").write_text(
+    repo.mkdir(parents=True)
+    (repo / ".ash.yaml").write_text(
         yaml.safe_dump(
             {
                 "scanners": {
@@ -1285,7 +1285,7 @@ def test_a_delivered_config_may_not_change_a_non_path_exclusion(
 
     assert value != _option_defaults()[(scanner, option)]
     document = {"scanners": {scanner: {"options": {option: value}}}}
-    source = _upload({".ash/.ash.yaml": yaml.safe_dump(document)})
+    source = _upload({".ash.yaml": yaml.safe_dump(document)})
     outcome = _scan_resolution(source)
     assert isinstance(outcome, ASHConfigFieldDeniedError), outcome
     assert f"scanners.{scanner}.options.{option}" in str(outcome)
@@ -1301,7 +1301,7 @@ def test_a_delivered_non_path_option_at_its_default_scans(
 
     default = _option_defaults()[(scanner, option)]
     document = {"scanners": {scanner: {"options": {option: default}}}}
-    source = _upload({".ash/.ash.yaml": yaml.safe_dump(document)})
+    source = _upload({".ash.yaml": yaml.safe_dump(document)})
     outcome = _scan_resolution(source)
     assert isinstance(outcome, AshConfig), outcome
 
@@ -1348,7 +1348,7 @@ def test_a_delivered_config_may_turn_on_more_cdk_nag_packs() -> None:
         "PCIDSS321Checks": True,
     }
     document = {"scanners": {"cdk-nag": {"options": {"nag_packs": packs}}}}
-    source = _upload({".ash/.ash.yaml": yaml.safe_dump(document)})
+    source = _upload({".ash.yaml": yaml.safe_dump(document)})
     assert isinstance(_scan_resolution(source), AshConfig)
 
 
@@ -1611,7 +1611,7 @@ def test_a_delivered_plugin_option_at_its_default_scans(
 
     default = _denied_plugin_option_defaults()[(scanner, option)]
     document = {"scanners": {scanner: {"options": {option: default}}}}
-    source = _upload({".ash/.ash.yaml": yaml.safe_dump(document)})
+    source = _upload({".ash.yaml": yaml.safe_dump(document)})
     outcome = _scan_resolution(source)
     assert isinstance(outcome, AshConfig), outcome
 

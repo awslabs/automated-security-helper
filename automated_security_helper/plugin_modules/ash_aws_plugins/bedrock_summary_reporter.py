@@ -43,6 +43,9 @@ from automated_security_helper.base.reporter_plugin import (
     write_report_file,
 )
 from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.models.flat_vulnerability import (
+    BELOW_THRESHOLD_PROPERTY,
+)
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.error_text import error_text, text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -59,6 +62,7 @@ from automated_security_helper.utils.numeric_text import purely_numeric
 from automated_security_helper.utils.redacted_model import value_tuple
 from automated_security_helper.utils.sarif_utils import _resolve_result_severity
 from automated_security_helper.utils.severity_ladder import (
+    SEVERITY_COUNT_KEYS,
     effective_sarif_level,
     result_severity,
     severity_fails_threshold,
@@ -1827,7 +1831,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             return True
         if finding_dict.get("suppressions"):
             return False
-        if (finding_dict.get("properties") or {}).get("below_threshold"):
+        if (finding_dict.get("properties") or {}).get(BELOW_THRESHOLD_PROPERTY):
             return False
         if threshold is None:
             return True
@@ -2255,7 +2259,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         if "technical_analysis" in included:
             items.append(f"{n}. [Findings by severity](#findings-by-severity)")
             if opts.group_by_severity:
-                for sev in ("critical", "high", "medium", "low", "info"):
+                for sev in SEVERITY_COUNT_KEYS:
                     if any(self._finding_severity(f).lower() == sev for f in findings):
                         items.append(
                             f"   - [{sev.capitalize()} findings](#{sev.lower()}-findings)"

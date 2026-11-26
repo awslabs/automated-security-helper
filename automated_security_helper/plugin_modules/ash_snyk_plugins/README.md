@@ -75,7 +75,7 @@ snyk code test --help
 
 The Snyk Code plugin is not loaded by default. Its scanner sends the scanned source
 to Snyk with your Snyk token, so only the operator running ASH can load it. A config
-file inside the scanned tree, such as the repository's own `.ash/.ash.yaml`, cannot:
+file inside the scanned tree, such as the repository's own `.ash.yaml`, cannot:
 an `ash_plugin_modules` entry there that names the package, or a module inside it,
 is ignored with a warning naming the entry.
 
@@ -101,7 +101,7 @@ ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_snyk_plugins
 ```
 
-The scanner's settings can stay in the repository's `.ash/.ash.yaml`:
+The scanner's settings can stay in the repository's `.ash.yaml`:
 
 ```yaml
 scanners:
@@ -186,7 +186,7 @@ scanners:
 ```
 
 A config file inside the scanned tree, such as the repository's own
-`.ash/.ash.yaml`, or one an MCP client delivered, does not set it.
+`.ash.yaml`, or one an MCP client delivered, does not set it.
 
 ### Advanced Options
 
@@ -228,8 +228,8 @@ scanners:
 # Use Snyk Code alongside other ASH scanners
 uv run ashx --scanners snyk-code,bandit,opengrep --output-dir ../ash_output
 
-# Use with community plugins
-uv run ashx --scanners snyk-code,trivy-repo --output-dir ../ash_output --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
+# Use with alpha plugins
+uv run ashx --scanners snyk-code,trivy-repo --output-dir ../ash_output --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
 ```
 
 ### CI/CD Integration
@@ -437,7 +437,7 @@ Full list of supported languages is available at the [Snyk Documentation](https:
 ## Documentation
 
 For comprehensive documentation and advanced configuration options, see:
-- [ASH Community Plugins Documentation](../../../docs/content/docs/plugins/community/snyk-plugin.md)
+- [ASH Alpha Plugins Documentation](../../../docs/content/docs/plugins/alpha/snyk-plugin.md)
 - [Snyk CLI Documentation](https://docs.snyk.io/cli-ide-and-ci-cd-integrations/snyk-cli)
 - [Snyk Code Documentation](https://docs.snyk.io/products/snyk-code)
 

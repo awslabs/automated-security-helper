@@ -190,6 +190,9 @@ def _flock_within(fd: int, timeout: Optional[float], path: Path) -> None:
     answers the same way every time, and the error says so rather than blaming
     another process. Any other refusal propagates as it is.
     """
+    if fcntl is None:
+        # Windows has no fcntl; its callers take the msvcrt path and never get here.
+        raise OSError("fcntl is not available on this platform")
     if timeout is None:
         fcntl.flock(fd, fcntl.LOCK_EX)
         return

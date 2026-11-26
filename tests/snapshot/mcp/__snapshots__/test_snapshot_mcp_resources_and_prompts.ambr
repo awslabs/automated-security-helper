@@ -378,6 +378,7 @@
         • detect-secrets
         • gitleaks
         • grype
+        • mcp-config
         • npm-audit
         • opengrep
         • syft
@@ -429,6 +430,7 @@
         • detect-secrets
         • gitleaks
         • grype
+        • mcp-config
         • npm-audit
         • opengrep
         • syft

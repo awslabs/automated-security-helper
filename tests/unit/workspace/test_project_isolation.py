@@ -50,7 +50,7 @@ How this version forces the failure it is looking for
   collected zero errors and asserted the absence of something it never produced.
   A barrier that does not trip is a test failure, not a slow pass.
 * The per-project discriminator is a value in each project's own
-  ``.ash/ash.yaml``, read back through ``resolve_config`` and
+  ``.ash.yaml``, read back through ``resolve_config`` and
   ``AshConfig.get_plugin_config``. A leak shows up as the wrong project's value,
   and no fallback inside the test double can supply it.
 
@@ -219,7 +219,7 @@ def _set_rendezvous(parties: int) -> _Rendezvous:
 class RecordingScannerConfig(ScannerPluginConfigBase):
     name: str = "recording"
     enabled: bool = True
-    #: The per-project discriminator, set in each project's own ``.ash/ash.yaml``.
+    #: The per-project discriminator, set in each project's own ``.ash.yaml``.
     #: A plain field rather than something under ``options`` so that a wrong value
     #: is a wrong value and not a missing key.
     marker: str = "no-marker-reached-this-scanner"
@@ -301,12 +301,10 @@ def _write_project(root: Path, relative_path: str, marker: str) -> None:
     project = root / relative_path
     (project / "src").mkdir(parents=True, exist_ok=True)
     (project / "src" / "app.py").write_text("print('x')\n", encoding="utf-8")
-    config_dir = project / ".ash"
-    config_dir.mkdir(parents=True, exist_ok=True)
     # A real config file, loaded by resolve_config, carrying a value only this
     # project declares. This is the whole reason the marker assertion is not
     # vacuous: nothing in the test double can invent this string.
-    config_dir.joinpath("ash.yaml").write_text(
+    project.joinpath(".ash.yaml").write_text(
         "\n".join(
             [
                 f"project_name: {relative_path}",
@@ -615,7 +613,7 @@ class TestProjectsAreIsolatedUnderConcurrency:
     def test_each_project_read_its_own_config(self, tmp_path):
         """The assertion the previous version of this file could not make.
 
-        The marker arrives from the project's own ``.ash/ash.yaml`` by way of
+        The marker arrives from the project's own ``.ash.yaml`` by way of
         ``resolve_config`` and ``AshConfig.get_plugin_config``. Nothing in the
         test double can supply it, so a wrong value means a real leak and a
         missing value means the config never arrived at all.
@@ -825,7 +823,7 @@ class TestAScannerWithNoConfigIsExcluded:
                 source_dir=source_dir,
                 output_dir=output_dir,
                 config=resolve_config(
-                    config_path=source_dir / ".ash" / "ash.yaml",
+                    config_path=source_dir / ".ash.yaml",
                     source_dir=source_dir,
                 ),
             )
@@ -855,7 +853,7 @@ class TestTheScanPhaseDoublesAreTheRealShapes:
                     source_dir=source_dir,
                     output_dir=output_dir,
                     config=resolve_config(
-                        config_path=source_dir / ".ash" / "ash.yaml",
+                        config_path=source_dir / ".ash.yaml",
                         source_dir=source_dir,
                     ),
                 )
@@ -912,7 +910,7 @@ class TestSingleProjectPathsAreUnchanged:
                 source_dir=source_dir,
                 output_dir=output_dir,
                 config=resolve_config(
-                    config_path=source_dir / ".ash" / "ash.yaml",
+                    config_path=source_dir / ".ash.yaml",
                     source_dir=source_dir,
                 ),
             )

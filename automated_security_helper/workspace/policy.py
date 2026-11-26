@@ -128,8 +128,8 @@ import os
 import stat
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+from pathlib import Path, PurePosixPath
+from typing import Any, cast
 
 import yaml
 from pydantic import ValidationError
@@ -921,7 +921,7 @@ def resolve_workspace_policy(
             discovery would run with different policy than the operator named.
         project_config_paths: Each project's own config file, where it has one.
             Used to refuse a policy file that is one of them.
-        permit_base: The MCP session's gate (``cli/mcp/sandbox.config_base_gate``),
+        permit_base: The MCP session's gate (``config.mcp_sandbox.config_base_gate``),
             or None. The file the policy path reaches must be one it permits,
             checked before the file is read, for *explicit* and for every
             candidate discovery finds.
@@ -1020,6 +1020,12 @@ def _push_down(
     as it is pushed into successive projects.
     """
     pushed: list[IgnorePathWithReason] = []
+    # The pattern converter reads a prefix as text or a POSIX path.
+    prefix_for_patterns = (
+        project_prefix
+        if isinstance(project_prefix, str)
+        else PurePosixPath(project_prefix.as_posix())
+    )
     package_applied: list[int] = []
     package_dropped: list[int] = []
     # The one spelling every refusal below shows, the one the policy records
@@ -1028,7 +1034,7 @@ def _push_down(
     shown_prefix = _prefix_text(project_prefix)
     for position, entry in enumerate(entries, start=1):
         try:
-            rewritten = to_project_pattern(entry.path, project_prefix, kind=kind)
+            rewritten = to_project_pattern(entry.path, prefix_for_patterns, kind=kind)
         except WorkspacePatternError as exc:
             if not quote_values:
                 raise _refuse(
@@ -1056,7 +1062,7 @@ def _push_down(
         if package_path is not None:
             try:
                 rewritten_package = to_project_pattern(
-                    package_path, project_prefix, kind=SUPPRESSION
+                    package_path, prefix_for_patterns, kind=SUPPRESSION
                 )
             except WorkspacePatternError as exc:
                 if not quote_values:
@@ -1285,12 +1291,9 @@ def policy_for_project(
         # "" and None are the same value to stricter_of (the gate off), so a
         # project that declared "" under no ceiling is not reported tightened.
         threshold_tightened=effective != (project_threshold or None),
-        suppressions=tuple(
-            # _push_down returns the base type; suppressions keep their own type
-            # because model_copy preserves the class it was called on.
-            entry  # type: ignore[misc]
-            for entry in suppressions.entries
-        ),
+        # _push_down returns the base type; suppressions keep their own type
+        # because model_copy preserves the class it was called on.
+        suppressions=cast(tuple[AshSuppression, ...], suppressions.entries),
         ignore_paths=_push_down(
             policy.ignore_paths,
             project_prefix,

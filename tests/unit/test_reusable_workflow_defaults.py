@@ -200,7 +200,7 @@ class TestTheResolutionStep:
 
         assert result.returncode == 0, result.stderr
         assert (
-            "ASH_UVX_SOURCE=automated-security-helper[cdk] @ "
+            "ASH_UVX_SOURCE=automated-security-helper[cdk,symbols] @ "
             f"git+https://github.com/awslabs/automated-security-helper@{SHA}"
         ) in github_env.splitlines()
         assert f"version={SHA}" in github_output.splitlines()
@@ -219,7 +219,7 @@ class TestTheResolutionStep:
 
         assert result.returncode == 0, result.stderr
         assert (
-            "ASH_UVX_SOURCE=automated-security-helper[cdk] @ "
+            "ASH_UVX_SOURCE=automated-security-helper[cdk,symbols] @ "
             "git+https://github.com/a-fork/automated-security-helper@v4.0.0"
         ) in github_env.splitlines()
 
@@ -265,7 +265,7 @@ class TestTheResolutionStep:
 
         assert result.returncode == 0, result.stdout + result.stderr
         assert (
-            "ASH_UVX_SOURCE=automated-security-helper[cdk] @ "
+            "ASH_UVX_SOURCE=automated-security-helper[cdk,symbols] @ "
             "git+https://github.com/awslabs/automated-security-helper@v4.0.0"
         ) in github_env.splitlines()
 
@@ -464,7 +464,7 @@ class TestTheResolutionStep:
 
         assert result.returncode == 0, result.stdout + result.stderr
         assert (
-            "ASH_UVX_SOURCE=automated-security-helper[cdk] @ "
+            "ASH_UVX_SOURCE=automated-security-helper[cdk,symbols] @ "
             f"git+https://github.com/awslabs/automated-security-helper@{in_url}"
         ) in github_env.splitlines()
         assert f"version-url={in_url}" in github_output.splitlines()
