@@ -40,7 +40,11 @@ from automated_security_helper.base.options import (
 )
 from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.base.uv_tool_mixin import _tool_name
+from automated_security_helper.base.uv_tool_mixin import (
+    _record_direct_route_version,
+    _restore_uv_route,
+    _tool_name,
+)
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
@@ -1405,6 +1409,14 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         )
         if resolved is None:
             return False
+        if resolved[:1] == ["uv"]:
+            _restore_uv_route(self)
+        elif self.use_uv_tool:
+            # Off uv for the resolver's binary, which runs unverified and with no
+            # version read: the uv probe's answer names another environment. A
+            # re-validation already on a direct route keeps the record that route
+            # made.
+            _record_direct_route_version(self, None)
         self.use_uv_tool = resolved[:1] == ["uv"]
         self.dependencies_satisfied = True
         return True
@@ -1423,6 +1435,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         )
 
         if resolved[:1] == ["uv"]:
+            _restore_uv_route(self)
             self.use_uv_tool = True
             self.dependencies_satisfied = True
             return True
@@ -1451,6 +1464,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 f"({checked.detail}); running it anyway.",
                 level=logging.WARNING,
             )
+        _record_direct_route_version(self, getattr(checked, "version", None))
         self.use_uv_tool = False
         self.dependencies_satisfied = True
         return True

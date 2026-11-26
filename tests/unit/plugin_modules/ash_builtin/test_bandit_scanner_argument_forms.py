@@ -638,7 +638,9 @@ def test_a_verified_path_binary_reports_its_own_version(tmp_path, monkeypatch):
     assert scanner.tool_version == "1.8.0"
 
 
-def test_a_path_binary_with_no_version_answer_keeps_the_probes(tmp_path, monkeypatch):
+def test_a_path_binary_with_no_version_answer_does_not_keep_the_probes(
+    tmp_path, monkeypatch
+):
     # The deferred probe answers a fixed version, so the control does not
     # depend on whether this environment has bandit installed.
     monkeypatch.setattr(
@@ -667,7 +669,10 @@ def test_a_path_binary_with_no_version_answer_keeps_the_probes(tmp_path, monkeyp
     # Resolved after the validation, so a validation that cleared the probe
     # (or one a later resolution undid) leaves the version unread.
     scanner.resolve_deferred_tool_version()
-    assert scanner.tool_version == expected
+    # The binary that runs answered no version, so the record is empty instead
+    # of naming the environment the uv probe read; _select_tool_execution
+    # applies the same rule.
+    assert scanner.tool_version is None
 
 
 # ---------------------------------------------------------------------------
