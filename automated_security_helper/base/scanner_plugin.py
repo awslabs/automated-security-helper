@@ -1048,7 +1048,12 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if read.values is None:
             raise RuntimeError(f"the plugin's values hook {read.failure()}")
         cache = self._content_db_cache_dir
-        context = self._require_context()
+        # Checked here rather than through ``_require_context``: the builder reads
+        # only the attributes named in this method, so it also runs on an object
+        # that carries those and is not a plugin.
+        context = self.context
+        if context is None:
+            raise ScannerError(f"No context provided for {self.__class__.__name__}!")
         cwd = cwd_outside_scanned_tree(
             context.source_dir,
             results_dir=self.results_dir or context.output_dir,

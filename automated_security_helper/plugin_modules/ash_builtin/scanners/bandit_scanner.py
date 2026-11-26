@@ -1066,7 +1066,12 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # requirement handed to uv had no version constraint at all (any
         # bandit, the next major version included), unlike semgrep's, which
         # falls back to its default range the same way.
-        configured = self._require_config().options.tool_version
+        # Checked here rather than through ``_require_config``, so that this also
+        # runs on an object that carries only a configuration.
+        config = self.config
+        if config is None:
+            raise ScannerError(f"{self.__class__.__name__} has no configuration")
+        configured = config.options.tool_version
         if configured:
             return configured
         return BanditScannerConfigOptions.model_fields["tool_version"].default
