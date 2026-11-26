@@ -232,6 +232,9 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
     # The committed SARIF is the converter's output for a REAL captured Polaris
     # v10.2.6 run (captured/positive.json); a regeneration test keeps it honest.
     "polaris": CorpusSpec("polaris", sarif=("captured/*.sarif",)),
+    # The committed SARIF is the converter's output for a REAL captured retire.js
+    # 6.1.1 run (captured/positive.json); a regeneration test keeps it honest.
+    "retire-js": CorpusSpec("retire-js", sarif=("captured/*.sarif",)),
     "secretlint": CorpusSpec("secretlint", sarif=("captured/*.sarif",)),
     "semgrep": CorpusSpec("semgrep", sarif=("captured/*.sarif",)),
     # No corpus until a licensed `snyk code test --sarif` run is committed under

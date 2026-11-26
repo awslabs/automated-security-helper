@@ -226,6 +226,14 @@ MANIFESTS = (
         owned=(f"{_DOCS}/polaris-plugin.md", f"{_FIXTURES}/polaris"),
     ),
     _alpha(
+        "retire-js",
+        "ash_retire_js_plugins",
+        "retire_js_scanner",
+        "RetireJsScanner",
+        "RetireJsScannerConfigOptions",
+        owned=(f"{_DOCS}/retire-js-plugin.md", f"{_FIXTURES}/retire-js"),
+    ),
+    _alpha(
         "secretlint",
         "ash_secretlint_plugins",
         "secretlint_scanner",

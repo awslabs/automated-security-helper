@@ -17,11 +17,12 @@ This section covers the alpha plugins for ASH: the opt-in scanner packages (`ash
 - **[KICS Plugin](kics-plugin.md)** (`ash_kics_plugins`) - Infrastructure-as-code misconfiguration scanning with Checkmarx KICS
 - **[Kingfisher Plugin](kingfisher-plugin.md)** (`ash_kingfisher_plugins`) - Secret detection with MongoDB's Kingfisher
 - **[Polaris Plugin](polaris-plugin.md)** (`ash_polaris_plugins`) - Kubernetes manifest best-practice and security checks with Fairwinds Polaris
+- **[retire.js Plugin](retire-js-plugin.md)** (`ash_retire_js_plugins`) - Known-vulnerable JavaScript libraries, such as a copied-in jQuery no lockfile names, found with retire.js
 - **[Secretlint Plugin](secretlint-plugin.md)** (`ash_secretlint_plugins`) - Secret detection with Secretlint
 - **[Snyk Code Plugin](snyk-plugin.md)** - Integrates Snyk Code for static application security testing (SAST) of source code vulnerabilities
 - **[Trivy Plugin](trivy-plugin.md)** - Integrates Aquasec's Trivy for vulnerability, misconfiguration, secret, and license scanning
 
-These fourteen ship inside ASH. Each takes part in a scan only when that scan names its
+These fifteen ship inside ASH. Each takes part in a scan only when that scan names its
 plugin module in `ash_plugin_modules` or `--ash-plugin-modules`, as its page shows.
 The MCP `list_scanners` tool reports them either way; listing one does not add it to
 any scan.

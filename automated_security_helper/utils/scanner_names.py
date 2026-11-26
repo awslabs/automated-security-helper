@@ -151,6 +151,7 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
     "npm-audit": ScannerToolType.SCA.value,
     "opengrep": ScannerToolType.SAST.value,
     "polaris": ScannerToolType.IAC.value,
+    "retire-js": ScannerToolType.SCA.value,
     "secretlint": ScannerToolType.SECRETS.value,
     "semgrep": ScannerToolType.SAST.value,
     "snyk-code": ScannerToolType.SAST.value,
