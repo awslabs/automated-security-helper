@@ -50,7 +50,6 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import json
-import platform
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -134,15 +133,13 @@ def _isolate_process_state(monkeypatch):
 
 
 def _expected_color_system() -> Any:
-    """The one expected value that legitimately depends on the platform.
+    """The expected ``color_system`` for ``color=True``: "auto" on every platform.
 
-    ``color_system`` is forced to ``"windows"`` there regardless of the flag,
-    because Rich needs the legacy console driver. Both arms of the flag are
-    pinned separately in
-    :meth:`TestPlatformAndFlagMappings.test_color_system_follows_the_color_flag`;
-    here the table just needs the value for ``color=True``.
+    Rich detects the color system from the file the console writes to. Both arms
+    of the flag are pinned in
+    :meth:`TestPlatformAndFlagMappings.test_color_system_follows_the_color_flag`.
     """
-    return "windows" if platform.system() == "Windows" else "auto"
+    return "auto"
 
 
 def _opts(tmp_path: Path) -> ScanOptions:
@@ -468,19 +465,6 @@ class TestPlatformAndFlagMappings:
         Passing ``"auto"`` regardless would put them in the output, which for an
         MCP client reading a log means control characters in a JSON string.
         """
-        if platform.system() == "Windows":
-            # Rich needs the legacy driver on Windows whatever the flag says,
-            # so there is only one value to pin there.
-            assert (
-                _builder()(self._opts_with(tmp_path, color=True)).color_system
-                == "windows"
-            )
-            assert (
-                _builder()(self._opts_with(tmp_path, color=False)).color_system
-                == "windows"
-            )
-            return
-
         assert _builder()(self._opts_with(tmp_path, color=True)).color_system == "auto"
         assert _builder()(self._opts_with(tmp_path, color=False)).color_system is None
 

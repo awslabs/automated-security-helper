@@ -135,6 +135,12 @@
 
 ### Fixes
 
+- **On Windows, `--no-color` now turns color off in the scan's progress output.** The
+  scan (and a workspace scan) forced Rich's "windows" color system on every Windows run,
+  so the flag was ignored there and output redirected into a pipe or a file carried
+  escape codes. Both now use "auto" when color is on, as the logger already did, so Rich
+  checks whether the output is a terminal, and no color when `--no-color` is given.
+  Output into a pipe is plain text.
 - **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**
   It passes `GITHUB_ACTIONS`, `TF_BUILD` and `TEAMCITY_VERSION` into the container when
   set (by name, or with their values when `OCI_RUNNER_WRAPPER` is set; a value that holds
