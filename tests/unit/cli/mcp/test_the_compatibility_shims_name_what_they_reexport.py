@@ -28,7 +28,10 @@ SHIMS = {
 
 
 def _type_checking_imports(shim: str):
-    path = Path(importlib.util.find_spec(shim).origin)
+    # By file, not by ``find_spec``: once a shim has been imported its
+    # ``sys.modules`` entry is the moved module, and its spec names that file.
+    package = importlib.import_module("automated_security_helper.cli.mcp")
+    path = Path(package.__path__[0]) / f"{shim.rsplit('.', 1)[-1]}.py"
     tree = ast.parse(path.read_text())
     for node in ast.walk(tree):
         if isinstance(node, ast.If) and "TYPE_CHECKING" in ast.dump(node.test):
