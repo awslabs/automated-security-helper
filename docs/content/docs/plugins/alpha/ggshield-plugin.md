@@ -67,7 +67,7 @@ scanners:
       severity_threshold: null
 ```
 
-The plugin has no option that reads a file from the scanned tree or hides findings, so no option is restricted to the operator.
+The plugin has no option that reads a file from the scanned tree or hides findings. The scan sends the files to GitGuardian, so the whole `scanners.ggshield` section is the operator's: an MCP client's runtime override of any part of it, `enabled` included, is refused whatever the server's `denied_paths` lists.
 
 ## Exit status
 

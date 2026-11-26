@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "transcripts": [],
+  "unrecorded": [
+    {
+      "reason": "the captured/ reports are real KICS v2.1.20 output with no transcript beside them; record one of the pinned tool over fixture_repo/ (argv, exit code, digests and pin stamp)",
+      "scanner": "kics"
+    }
+  ]
+}

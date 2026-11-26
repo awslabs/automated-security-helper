@@ -98,6 +98,28 @@ OFF_HOST: Dict[Plugin, str] = {
         "each candidate secret, to the service that issued it, when the "
         "verification filter is configured (detect_secrets_scanner.py:245-268)"
     ),
+    ("scanners", "pip-audit"): (
+        "each pinned requirement's name and version, to PyPI's JSON API or OSV, the "
+        "service its `vulnerability_service` option names (pip_audit_scanner.py:6-8, "
+        ":321-330; it declares the network at :385-387)"
+    ),
+    ("scanners", "dependency-check"): (
+        "the hash of each jar it finds, to Maven Central, by the lookups its default "
+        "analyzers make (dependency_check_scanner.py module header, Sandbox; "
+        "_build_arguments disables only OSS Index), and the operator's NVD_API_KEY "
+        "to the NVD (_property_file)"
+    ),
+    ("scanners", "ggshield"): (
+        "the content of every file it scans, to the GitGuardian API, with the "
+        "operator's GITGUARDIAN_API_KEY (ggshield_scanner.py:6-15; SERVICE_UPLOAD "
+        "at :345)"
+    ),
+    ("scanners", "kingfisher"): (
+        "each candidate secret, to the provider's live API, when the operator sets "
+        "`validate_credentials` (kingfisher_scanner.py module header, Validation; "
+        "_validate_credentials and _build_arguments, which pass --no-validate "
+        "otherwise)"
+    ),
     ("reporters", "s3"): "the results, to an S3 bucket (s3_reporter.py:230, :305)",
     ("reporters", "aws-security-hub"): (
         "requests to Security Hub and STS with the operator's credentials "
@@ -150,6 +172,29 @@ LOCAL: Dict[Plugin, str] = {
     ("scanners", "hadolint"): (
         "reads the Dockerfiles in the scan set (hadolint_scanner.py:391-448); "
         "declares no network (:284)"
+    ),
+    ("scanners", "credsweeper"): (
+        "reads the files with the rules and model its package ships; declares no "
+        "network and runs no validation (credsweeper_scanner.py module header, "
+        "Sandbox; :313-314, :500)"
+    ),
+    ("scanners", "gosec"): (
+        "reads the Go source and loads its packages through the local Go toolchain; "
+        "declares no network, and ASH runs no `go mod download` (gosec_scanner.py "
+        "module header, Offline and Sandbox; :364)"
+    ),
+    ("scanners", "kics"): (
+        "reads the infrastructure-as-code files; declares no network, so its crash "
+        "reporter, its one network use, cannot reach sentry.io (kics_scanner.py "
+        "module header)"
+    ),
+    ("scanners", "polaris"): (
+        "reads the Kubernetes YAML with `--audit-path`, which makes no network call "
+        "and talks to no cluster (polaris_scanner.py module header, Offline; :393)"
+    ),
+    ("scanners", "secretlint"): (
+        "reads the files with the rules its npm packages ship; declares no network "
+        "(secretlint_scanner.py module header, Offline and Sandbox; :367)"
     ),
     ("reporters", "asff"): "writes a file",
     ("reporters", "csv"): "writes a file",

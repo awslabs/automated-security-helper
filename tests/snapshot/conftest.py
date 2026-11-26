@@ -440,6 +440,9 @@ _PINNED_UV_TOOL_VERSIONS = {
     "cfn-lint": "9.0.4",
     "guarddog": "9.0.5",
     "zizmor": "9.0.6",
+    "credsweeper": "9.0.7",
+    "ggshield": "9.0.8",
+    "pip-audit": "9.1.0",
 }
 _PINNED_UV_TOOL_VERSION_DEFAULT = "9.0.9"
 

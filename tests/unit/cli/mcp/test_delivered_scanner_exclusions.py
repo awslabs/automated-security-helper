@@ -1550,53 +1550,36 @@ def test_every_reviewed_option_is_a_real_one() -> None:
     assert stale == []
 
 
+def _opt_in_manifests() -> List[Any]:
+    """The manifest of every scanner whose plugin does not load by default."""
+    from automated_security_helper.plugin_manifests import scanner_manifests
+
+    return [m for m in scanner_manifests() if not m.default_enabled]
+
+
 def _denied_plugin_option_defaults() -> Dict[tuple, Any]:
     """Each option of a plugin scanner that a default ``denied_paths`` entry covers.
 
-    Mapped to the option's default from the plugin's own model. These scanners
-    have no section in the trusted base, so nothing else says what their
-    default is. Read with the runtime-override matcher, so a glob entry such as
-    ``/scanners/*/options/tool_version`` counts.
+    Mapped to the option's default from the plugin's own model. These are the
+    scanners whose plugin does not load by default: they have no section in the
+    trusted base, so nothing else says what their default is. The scanners and
+    their options models are read from the manifests, so a newly admitted
+    scanner is checked here without an edit. Read with the runtime-override
+    matcher, so a glob entry such as ``/scanners/*/options/tool_version`` counts.
     """
+    from automated_security_helper.base.plugin_manifest import resolve_ref
     from automated_security_helper.config.ash_config import RuntimeOverridesConfig
     from automated_security_helper.config.runtime_patch import (
         _denied_path_reason,
         known_plugin_keys,
     )
-    from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
-        FerretScannerConfigOptions,
-    )
-    from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner import (
-        GuardDogScannerConfigOptions,
-    )
-    from automated_security_helper.plugin_modules.ash_betterleaks_plugins.betterleaks_scanner import (
-        BetterleaksScannerConfigOptions,
-    )
-    from automated_security_helper.plugin_modules.ash_hadolint_plugins.hadolint_scanner import (
-        HadolintScannerConfigOptions,
-    )
-    from automated_security_helper.plugin_modules.ash_pip_audit_plugins.pip_audit_scanner import (
-        PipAuditScannerConfigOptions,
-    )
-    from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
-        SnykCodeScannerConfigOptions,
-    )
-    from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
-        TrivyRepoScannerConfigOptions,
-    )
 
     denied = RuntimeOverridesConfig().denied_paths
     keys = known_plugin_keys(None)
     found: Dict[tuple, Any] = {}
-    for scanner, model in (
-        ("ferret-scan", FerretScannerConfigOptions()),
-        ("guarddog", GuardDogScannerConfigOptions()),
-        ("hadolint", HadolintScannerConfigOptions()),
-        ("betterleaks", BetterleaksScannerConfigOptions()),
-        ("pip-audit", PipAuditScannerConfigOptions()),
-        ("snyk-code", SnykCodeScannerConfigOptions()),
-        ("trivy-repo", TrivyRepoScannerConfigOptions()),
-    ):
+    for manifest in _opt_in_manifests():
+        scanner = manifest.name
+        model = resolve_ref(manifest.options_model)()
         for option in type(model).model_fields:
             pointer = f"/scanners/{scanner}/options/{option}"
             if any(_denied_path_reason(e, pointer, keys) for e in denied):
@@ -1617,6 +1600,12 @@ def test_the_plugin_option_defaults_are_the_plugins() -> None:
 
     expected = _denied_plugin_option_defaults()
     assert ("ferret-scan", "tool_version") in expected, "the glob entry is read"
+    # The ``/scanners/*/options/offline`` glob reaches every scanner's options, so
+    # each opt-in scanner has at least one row; a derivation that read no
+    # manifest, or skipped one, would be missing it here.
+    assert {scanner for scanner, _ in expected} == {
+        manifest.name for manifest in _opt_in_manifests()
+    }
     assert dict(PLUGIN_OPTION_DEFAULTS) == expected
 
 

@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "transcripts": [],
+  "unrecorded": [
+    {
+      "reason": "captured/positive.sarif and captured/negative.sarif are real Kingfisher 2.19.1 output with no transcript beside them and no committed input; commit the inputs and record a transcript of the pinned tool over them (argv, exit code, digests and pin stamp)",
+      "scanner": "kingfisher"
+    }
+  ]
+}

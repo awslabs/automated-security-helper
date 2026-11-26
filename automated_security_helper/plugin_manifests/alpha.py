@@ -41,14 +41,17 @@ _EXCLUSIONS = {
 
 
 #: The default of each option a client-delivered config may not set, per scanner;
-#: see ``ScannerManifest.denied_option_defaults``. snyk-code's and trivy-repo's
-#: whole sections are denied, so every one of their options is listed; for the
-#: others the denied options are the ones named in the default ``denied_paths`` and
-#: the ones its ``/scanners/*/options/offline`` and ``tool_version`` globs reach
-#: (hadolint has no ``tool_version`` option). A list default is compared with
+#: see ``ScannerManifest.denied_option_defaults``. The whole sections of the
+#: scanners that send data off the host (dependency-check, ggshield, kingfisher,
+#: pip-audit, snyk-code and trivy-repo) are denied, so every one of their options is
+#: listed; for the others the denied options are the ones named in the default
+#: ``denied_paths`` and the ones its ``/scanners/*/options/offline`` and
+#: ``tool_version`` globs reach (hadolint, gosec, kics, polaris and secretlint have
+#: no ``tool_version`` option). A list default is compared with
 #: ``==``, so a delivered list holding the same items in another order is not the
 #: default. ``test_the_plugin_option_defaults_are_the_plugins`` derives the rows from
-#: the default ``denied_paths`` and checks each value against the plugin's model.
+#: the default ``denied_paths`` and every alpha manifest's options model, and checks
+#: each value against the plugin's model.
 _DENIED_OPTION_DEFAULTS: dict[str, dict[str, Any]] = {
     "betterleaks": {
         "config_file": None,
@@ -56,7 +59,12 @@ _DENIED_OPTION_DEFAULTS: dict[str, dict[str, Any]] = {
         "honor_tree_ignore_files": False,
         "offline": False,
     },
-    "credsweeper": {"tool_version": None},
+    "credsweeper": {"offline": False, "tool_version": None},
+    "dependency-check": {
+        "offline": False,
+        "scan_timeout": 1800,
+        "severity_threshold": None,
+    },
     "ferret-scan": {
         "checks": "all",
         "confidence_levels": "all",
@@ -73,7 +81,14 @@ _DENIED_OPTION_DEFAULTS: dict[str, dict[str, Any]] = {
         "use_default_config": True,
         "validator_budget": None,
     },
-    "ggshield": {"tool_version": None},
+    "ggshield": {
+        "install_timeout": 300,
+        "offline": False,
+        "scan_timeout": 1800,
+        "severity_threshold": None,
+        "tool_version": None,
+    },
+    "gosec": {"offline": False},
     "guarddog": {
         "ecosystems": ["pypi", "npm", "go", "github_action", "rubygems", "crates"],
         "exclude_rules": [],
@@ -84,7 +99,24 @@ _DENIED_OPTION_DEFAULTS: dict[str, dict[str, Any]] = {
         "verify": False,
     },
     "hadolint": {"config_file": None, "offline": False},
-    "pip-audit": {"offline": False, "tool_version": None},
+    "kics": {"offline": False},
+    "kingfisher": {
+        "offline": False,
+        "scan_timeout": 1800,
+        "severity_threshold": None,
+        "validate_credentials": False,
+    },
+    "pip-audit": {
+        "install_timeout": 300,
+        "offline": False,
+        "request_timeout": 15,
+        "scan_timeout": 1800,
+        "severity_threshold": None,
+        "tool_version": None,
+        "vulnerability_service": "pypi",
+    },
+    "polaris": {"offline": False},
+    "secretlint": {"offline": False},
     "snyk-code": {
         "honor_tree_exclusions": False,
         "offline": False,

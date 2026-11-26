@@ -94,9 +94,18 @@ def test_only_one_scanner_is_deprecated_and_only_one_alias_exists() -> None:
     "scanner,package",
     [
         ("betterleaks", "ash_betterleaks_plugins"),
+        ("credsweeper", "ash_credsweeper_plugins"),
+        ("dependency-check", "ash_dependency_check_plugins"),
         ("ferret-scan", "ash_ferret_plugins"),
+        ("ggshield", "ash_ggshield_plugins"),
+        ("gosec", "ash_gosec_plugins"),
         ("guarddog", "ash_guarddog_plugins"),
         ("hadolint", "ash_hadolint_plugins"),
+        ("kics", "ash_kics_plugins"),
+        ("kingfisher", "ash_kingfisher_plugins"),
+        ("pip-audit", "ash_pip_audit_plugins"),
+        ("polaris", "ash_polaris_plugins"),
+        ("secretlint", "ash_secretlint_plugins"),
         ("snyk-code", "ash_snyk_plugins"),
         ("trivy-repo", "ash_trivy_plugins"),
     ],
@@ -113,7 +122,7 @@ def test_the_opt_in_scan_lists_exactly_the_scanners_that_do_not_load_by_default(
     assert set(opt_in_scanner_modules()) == {
         m.name for m in scanner_manifests() if not m.default_enabled
     }
-    assert len(opt_in_scanner_modules()) == 6
+    assert len(opt_in_scanner_modules()) == 15
     # Today the opt-in scanners are the alpha ones; that is the data, not the
     # rule (test_a_promoted_optin_scanner_keeps_its_hint covers the difference).
     assert {m.name for m in scanner_manifests() if m.tier is PluginTier.ALPHA} == set(

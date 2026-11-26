@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "transcripts": [],
+  "unrecorded": [
+    {
+      "reason": "captured/positive.sarif and captured/negative.sarif are real gosec v2.30.0 output with no transcript beside them; record one of the pinned tool over the positive/ and negative/ modules (argv, exit code, digests and pin stamp)",
+      "scanner": "gosec"
+    }
+  ]
+}

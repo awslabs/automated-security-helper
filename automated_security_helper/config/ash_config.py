@@ -1194,8 +1194,9 @@ ARCHIVE_LIMIT_RUNTIME_PATHS: Tuple[str, ...] = tuple(
 #: section itself; a reporter's ``enabled: false`` is accepted and takes no effect,
 #: see reporter_trust; a workspace scan's ``scanners`` and ``excluded_scanners``
 #: arguments can still leave a scanner out of a run, never add one): the reporters
-#: that send the results, and the scanners that send the source (snyk-code),
-#: dependency lists (npm-audit), candidate secrets (detect-secrets), usage metrics
+#: that send the results, and the scanners that send the source (snyk-code,
+#: ggshield), dependency lists (npm-audit, pip-audit) or the hash of each jar
+#: (dependency-check), candidate secrets (detect-secrets, kingfisher), usage metrics
 #: (semgrep, opengrep) or usage data (trivy, trivy-repo), or that call the GitHub
 #: API with the token in ASH's environment (zizmor's online audits).
 #: tests/unit/config/test_off_host_plugins_are_operator_only.py lists what each one
@@ -1220,9 +1221,13 @@ ALWAYS_DENIED_PATHS = (
     "/reporters/aws-security-hub/**",
     "/reporters/cloudwatch-logs/**",
     "/reporters/bedrock-summary-reporter/**",
+    "/scanners/dependency-check/**",
     "/scanners/detect-secrets/**",
+    "/scanners/ggshield/**",
+    "/scanners/kingfisher/**",
     "/scanners/npm-audit/**",
     "/scanners/opengrep/**",
+    "/scanners/pip-audit/**",
     "/scanners/semgrep/**",
     "/scanners/snyk-code/**",
     "/scanners/trivy-repo/**",
@@ -1278,8 +1283,9 @@ class RuntimeOverridesConfig(RedactedSection):
                 "baseline settings, the archive converter's extraction limits, and the "
                 "sections of the plugins that send data off the host: the s3, "
                 "aws-security-hub, cloudwatch-logs and bedrock-summary-reporter "
-                "reporters and the detect-secrets, npm-audit, opengrep, semgrep, "
-                "snyk-code, trivy, trivy-repo and zizmor scanners) are added to it."
+                "reporters and the dependency-check, detect-secrets, ggshield, "
+                "kingfisher, npm-audit, opengrep, pip-audit, semgrep, snyk-code, "
+                "trivy, trivy-repo and zizmor scanners) are added to it."
             )
         ),
     ] = [
@@ -1479,13 +1485,18 @@ class RuntimeOverridesConfig(RedactedSection):
         # from it (off by default; GHAS's is on by default and off reports more).
         "/reporters/gitlab-sast/options/exclude_suppressed",
         # The scanners that send data off the host, whole, for the same reason: the
-        # source (snyk-code), dependency lists (npm-audit), candidate secrets
-        # (detect-secrets), usage metrics (semgrep, opengrep) or usage data (trivy,
+        # source (snyk-code, ggshield), dependency lists (npm-audit, pip-audit) or
+        # the hash of each jar (dependency-check), candidate secrets (detect-secrets,
+        # kingfisher), usage metrics (semgrep, opengrep) or usage data (trivy,
         # trivy-repo), or the GitHub token (zizmor's online audits). Also in
         # ALWAYS_DENIED_PATHS.
+        "/scanners/dependency-check/**",
         "/scanners/detect-secrets/**",
+        "/scanners/ggshield/**",
+        "/scanners/kingfisher/**",
         "/scanners/npm-audit/**",
         "/scanners/opengrep/**",
+        "/scanners/pip-audit/**",
         "/scanners/semgrep/**",
         "/scanners/snyk-code/**",
         "/scanners/trivy-repo/**",

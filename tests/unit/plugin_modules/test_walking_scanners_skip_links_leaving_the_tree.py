@@ -5,8 +5,8 @@
 
 ASH's scan set leaves out a link to a file whose target leaves the scanned tree, but
 only detect-secrets, cfn-nag, cdk-nag, npm-audit, actionlint, zizmor, cfn-lint,
-cfn-guard, guarddog and hadolint read the scan set. Every other scanner is handed a
-directory and walks it. bandit, checkov and ferret-scan are covered in their own tests
+cfn-guard, guarddog, hadolint and pip-audit read the scan set. Every other scanner is
+handed a directory and walks it. bandit, checkov and ferret-scan are covered in their own tests
 (test_scanners_skip_links_leaving_the_tree.py and the ferret one). This covers the rest, and pins that every registered scanner is one of
 the kinds below, so a new one cannot be added without deciding which:
 
@@ -90,6 +90,10 @@ LINK_HANDLING = {
     # resolves outside the target (hadolint_scanner.py _dockerfiles).
     "guarddog": READS_THE_SCAN_SET,
     "hadolint": READS_THE_SCAN_SET,
+    # Through scan_set_of; pip-audit is handed one requirements file at a time and
+    # drops a requirements path that is a link (pip_audit_scanner.py
+    # _candidate_files).
+    "pip-audit": READS_THE_SCAN_SET,
     # Reads the scan set, then opens each config file under the scanned-tree rule.
     "mcp-config": READS_THE_SCAN_SET,
     "bandit": EXCLUDES_THE_LINK,
@@ -192,6 +196,11 @@ SCANNER_CLASSES = {
         "ash_hadolint_plugins.hadolint_scanner",
         "HadolintScanner",
         "Hadolint",
+    ),
+    "pip-audit": (
+        "ash_pip_audit_plugins.pip_audit_scanner",
+        "PipAuditScanner",
+        "PipAudit",
     ),
     "betterleaks": (
         "ash_betterleaks_plugins.betterleaks_scanner",

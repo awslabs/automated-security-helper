@@ -588,6 +588,38 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
             }
         },
     ),
+    "/scanners/dependency-check/**": (
+        {
+            "op": "add",
+            "path": "/scanners/dependency-check",
+            "value": {"enabled": True, "options": {}},
+        },
+        {"scanners": {"dependency-check": {"enabled": True, "options": {}}}},
+    ),
+    "/scanners/ggshield/**": (
+        {
+            "op": "add",
+            "path": "/scanners/ggshield",
+            "value": {"enabled": True, "options": {}},
+        },
+        {"scanners": {"ggshield": {"enabled": True, "options": {}}}},
+    ),
+    "/scanners/kingfisher/**": (
+        {
+            "op": "add",
+            "path": "/scanners/kingfisher",
+            "value": {"enabled": True, "options": {}},
+        },
+        {"scanners": {"kingfisher": {"enabled": True, "options": {}}}},
+    ),
+    "/scanners/pip-audit/**": (
+        {
+            "op": "add",
+            "path": "/scanners/pip-audit",
+            "value": {"enabled": True, "options": {}},
+        },
+        {"scanners": {"pip-audit": {"enabled": True, "options": {}}}},
+    ),
     "/scanners/trivy/**": (
         {
             "op": "replace",
@@ -1373,18 +1405,18 @@ def test_override_yaml_is_refused_by_every_shipped_denied_path(
     added_section = patch_op["path"] + "/"
     if entry.startswith(added_section):
         covering = first_denied_under(added_section)
-    # The override restates the profile, which configures no ferret-scan,
-    # guarddog, hadolint, snyk-code or trivy-repo section, so its patch adds that
-    # whole section and the first denied entry under it is the one named.
+    # The override restates the profile, which configures no section of a scanner
+    # whose plugin does not load by default, so its patch adds that whole section
+    # and the first denied entry under it is the one named. The sections are read
+    # from the manifests, so a newly admitted scanner is covered without an edit.
+    from automated_security_helper.plugin_manifests import scanner_manifests
+
     section = "/".join(entry.split("/")[:3]) + "/"
-    plugin_section = section in (
-        "/scanners/betterleaks/",
-        "/scanners/ferret-scan/",
-        "/scanners/guarddog/",
-        "/scanners/hadolint/",
-        "/scanners/snyk-code/",
-        "/scanners/trivy-repo/",
-    )
+    plugin_section = section in {
+        f"/scanners/{manifest.name}/"
+        for manifest in scanner_manifests()
+        if not manifest.default_enabled
+    }
     # An entry earlier in the list can cover the same write: the whole section of
     # a plugin that sends data off the host comes after its options, and an op
     # writing scan_settings writes the plugins_used and filters_used under it.

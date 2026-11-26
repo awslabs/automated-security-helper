@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "transcripts": [],
+  "unrecorded": [
+    {
+      "reason": "captured/positive.sarif and captured/negative.sarif come from ggshield 1.56.1's own CLI with its GitGuardian HTTP client stubbed, not from the service; record a run against the GitGuardian API, which needs an API key",
+      "scanner": "ggshield"
+    }
+  ]
+}

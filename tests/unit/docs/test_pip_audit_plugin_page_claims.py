@@ -17,6 +17,11 @@ from pathlib import Path
 
 import pytest
 
+from automated_security_helper.config.ash_config import RuntimeOverridesConfig
+from automated_security_helper.config.runtime_patch import (
+    RuntimePatchDeniedError,
+    check_runtime_ops,
+)
 from automated_security_helper.core.enums import OfflineStrategy
 from automated_security_helper.plugin_modules.ash_pip_audit_plugins.pip_audit_scanner import (
     ADVISORY_LEVEL,
@@ -67,6 +72,43 @@ def test_the_requirements_files_it_audits() -> None:
         assert is_requirements_file(path), path
     # Control: a text file that is not a requirements file is not audited.
     assert not is_requirements_file("notes.txt")
+
+
+def test_the_whole_section_is_the_operators() -> None:
+    assert_on_page(
+        PIP_AUDIT_PAGE,
+        "pip-audit sends each pinned requirement to the vulnerability service, so the "
+        "whole `scanners.pip-audit` section is the operator's, as npm-audit's is: an "
+        "MCP client's runtime override of any part of it, `enabled` and "
+        "`vulnerability_service` included, is refused whatever the server's "
+        "`denied_paths` lists.",
+    )
+    # A profile that allows every path and denies nothing of its own.
+    policy = RuntimeOverridesConfig(
+        enabled=True, allowed_paths=["/**"], denied_paths=[]
+    )
+    for path, value in (
+        ("/scanners/pip-audit/enabled", False),
+        ("/scanners/pip-audit/options/vulnerability_service", "osv"),
+    ):
+        with pytest.raises(RuntimePatchDeniedError):
+            check_runtime_ops(
+                [{"op": "add", "path": path, "value": value}],
+                allowlist=policy,
+                config=None,
+            )
+    # Control: the same policy lets a local scanner's option through.
+    check_runtime_ops(
+        [
+            {
+                "op": "replace",
+                "path": "/scanners/bandit/options/severity_threshold",
+                "value": "HIGH",
+            }
+        ],
+        allowlist=policy,
+        config=None,
+    )
 
 
 def test_every_advisory_is_error_in_sarif_and_high_in_ash() -> None:

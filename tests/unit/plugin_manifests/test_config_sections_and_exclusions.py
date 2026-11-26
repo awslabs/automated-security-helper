@@ -247,7 +247,11 @@ def test_only_plugins_that_do_not_load_by_default_declare_denied_option_defaults
     declaring = {m.name for m in scanner_manifests() if m.denied_option_defaults}
     assert declaring == {m.name for m in scanner_manifests() if not m.default_enabled}
     assert {scanner for scanner, _ in PLUGIN_OPTION_DEFAULTS} == declaring
-    assert len(PLUGIN_OPTION_DEFAULTS) == 42, "control: the table lost rows"
+    # 67: every option of the four whole-section scanners added by the alpha
+    # admissions (dependency-check 3, ggshield 5, kingfisher 4, pip-audit 7) plus the
+    # offline and tool_version rows of credsweeper, gosec, kics, polaris and
+    # secretlint (6), on top of the earlier alpha scanners' 42.
+    assert len(PLUGIN_OPTION_DEFAULTS) == 67, "control: the table lost rows"
     assert PLUGIN_OPTION_DEFAULTS[("trivy-repo", "scanners")] == [
         "vuln",
         "secret",

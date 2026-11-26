@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "transcripts": [],
+  "unrecorded": [
+    {
+      "reason": "captured/template-shaped.sarif is written by hand to the shape of the tool's v13.0.0 SARIF template, not captured; record a real dependency-check --format=SARIF run on a host with a Java runtime and the NVD database",
+      "scanner": "dependency-check"
+    }
+  ]
+}

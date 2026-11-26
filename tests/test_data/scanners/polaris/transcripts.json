@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "transcripts": [],
+  "unrecorded": [
+    {
+      "reason": "the captured/ reports are real polaris audit v10.2.6 output with no transcript beside them; record one of the pinned tool over captured/in/ (argv, exit code, digests and pin stamp)",
+      "scanner": "polaris"
+    }
+  ]
+}

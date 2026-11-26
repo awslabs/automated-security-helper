@@ -76,7 +76,7 @@ scanners:
       install_timeout: 300
 ```
 
-None of these options can hide a finding or point at a file, so none is operator-only. ASH never passes `--ignore-vuln`, `--index-url`, `--extra-index-url`, `--fix` or `--strict`; use [ASH suppressions](../../../concepts/suppressions.md) to accept an advisory.
+None of these options can hide a finding or point at a file. pip-audit sends each pinned requirement to the vulnerability service, so the whole `scanners.pip-audit` section is the operator's, as npm-audit's is: an MCP client's runtime override of any part of it, `enabled` and `vulnerability_service` included, is refused whatever the server's `denied_paths` lists. ASH never passes `--ignore-vuln`, `--index-url`, `--extra-index-url`, `--fix` or `--strict`; use [ASH suppressions](../../../concepts/suppressions.md) to accept an advisory.
 
 ## Severity
 

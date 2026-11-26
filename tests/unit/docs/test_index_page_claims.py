@@ -4,7 +4,7 @@
 """The index pages of the docs site say what is under them, and what they say is true.
 
 Three pages of the site are hubs: ``reference/index.md`` (a table of the reference pages
-and the generator of each), ``docs/plugins/alpha/index.md`` (the six alpha
+and the generator of each), ``docs/plugins/alpha/index.md`` (the fifteen alpha
 plugins that ship inside ASH) and ``personas/index.md`` (the three roles and the pages
 for them). Each lists pages and names things in the code, and none had a mechanism that
 reads the list, so a page added under a hub, or a generator renamed, left the hub
@@ -19,9 +19,9 @@ What is pinned, and what is not:
   maps to that page in ``REFERENCE_PAGES`` of the freshness test, and is the generator
   the page's own banner names; a row that says "written by hand" is a page with no
   banner. Not pinned: the one-line description of what a page lists.
-- alpha/index.md: the six plugins in the list are the six ``alpha`` pages beside
-  it, and the three that name a module (``ash_*_plugins``) name a package that exists
-  under ``automated_security_helper/plugin_modules``. Not pinned: the submission
+- alpha/index.md: the fifteen plugins in the list are the fifteen ``alpha`` pages
+  beside it, and the twelve that name a module (``ash_*_plugins``) name a package that
+  exists under ``automated_security_helper/plugin_modules``. Not pinned: the submission
   guidelines, which are policy, and the tools each plugin runs.
 - personas/index.md: the three roles in the table are the three role pages, and every
   link on the page names a page that exists. Not pinned: the argument about pace of
@@ -173,22 +173,46 @@ def test_every_generated_reference_page_is_in_the_index_and_no_other_is() -> Non
 
 
 def test_the_community_index_lists_the_plugins_that_ship_in_ash() -> None:
-    assert_on_page(COMMUNITY_INDEX, "These six ship inside ASH.")
+    from automated_security_helper.plugin_manifests import opt_in_scanner_modules
+
+    assert_on_page(COMMUNITY_INDEX, "These fifteen ship inside ASH.")
     text = page_text(COMMUNITY_INDEX)
     listed = re.findall(r"^- \*\*\[[^\]]+\]\(([^)]+)\)\*\*", text, re.MULTILINE)
-    assert len(listed) == 6, listed
+    assert len(listed) == 15, listed
+    # The count is the number of opt-in plugin packages the manifests ship.
+    assert len(set(opt_in_scanner_modules().values())) == len(listed), sorted(
+        set(opt_in_scanner_modules().values())
+    )
     community = CONTENT / "docs" / "plugins" / "alpha"
     pages = {p.name for p in community.glob("*-plugin.md")}
     assert set(listed) == pages, (sorted(set(listed) ^ pages), "lists vs pages")
 
 
+#: A list entry that names its plugin module, as
+#: ``- **[Name](page.md)** (`ash_name_plugins`) - ...``. Read from the list entries
+#: only, so a module the page names elsewhere (the AWS reporters) is not counted,
+#: and with ``_`` inside the name (``ash_pip_audit_plugins``).
+_LISTED_MODULE = re.compile(
+    r"^- \*\*\[[^\]]+\]\([^)]+\)\*\* \(`(ash_[a-z_]+_plugins)`\)", re.MULTILINE
+)
+
+
 def test_the_community_index_modules_exist() -> None:
     text = page_text(COMMUNITY_INDEX)
-    modules = re.findall(r"`(ash_[a-z]+_plugins)`", text)
+    modules = _LISTED_MODULE.findall(text)
     assert sorted(modules) == [
         "ash_betterleaks_plugins",
+        "ash_credsweeper_plugins",
+        "ash_dependency_check_plugins",
+        "ash_ggshield_plugins",
+        "ash_gosec_plugins",
         "ash_guarddog_plugins",
         "ash_hadolint_plugins",
+        "ash_kics_plugins",
+        "ash_kingfisher_plugins",
+        "ash_pip_audit_plugins",
+        "ash_polaris_plugins",
+        "ash_secretlint_plugins",
     ]
     for module in modules:
         assert (PLUGIN_MODULES / module / "__init__.py").is_file(), module

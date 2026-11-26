@@ -67,7 +67,7 @@ scanners:
       severity_threshold: null
 ```
 
-Nothing in the options can point the tool at a file or hide a finding, so none is operator-only.
+Nothing in the options can point the tool at a file or hide a finding. The Maven Central lookups send the hash of each jar the tool finds, so the whole `scanners.dependency-check` section is the operator's: an MCP client's runtime override of any part of it, `enabled` included, is refused whatever the server's `denied_paths` lists.
 
 ## Severity
 

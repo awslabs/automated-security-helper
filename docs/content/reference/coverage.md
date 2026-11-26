@@ -15,20 +15,20 @@ Alpha plugins run only when you load their module with `ash_plugin_modules` or
 |---|---|---|
 | Python code | bandit, semgrep, opengrep | snyk-code |
 | JavaScript and TypeScript code | semgrep, opengrep | snyk-code |
-| Java, Go, Ruby, C#, PHP, and other languages | semgrep, opengrep (as far as their rules cover the language) | snyk-code |
-| Python dependencies (`requirements.txt`, lockfiles) | grype, trivy, syft | guarddog, trivy-repo |
-| npm, Yarn, and pnpm dependencies | npm-audit, grype, trivy, syft | guarddog, trivy-repo |
-| Other dependency manifests and lockfiles (`go.mod`, `pom.xml`, and the others grype and trivy recognize) | grype, trivy, syft | guarddog, trivy-repo |
-| CloudFormation templates | cfn-nag, cfn-lint, cfn-guard, cdk-nag, checkov | trivy-repo |
+| Java, Go, Ruby, C#, PHP, and other languages | semgrep, opengrep (as far as their rules cover the language) | snyk-code, gosec (Go only) |
+| Python dependencies (`requirements.txt`, lockfiles) | grype, trivy, syft | guarddog, trivy-repo, pip-audit (requirements files), dependency-check |
+| npm, Yarn, and pnpm dependencies | npm-audit, grype, trivy, syft | guarddog, trivy-repo, dependency-check |
+| Other dependency manifests and lockfiles (`go.mod`, `pom.xml`, and the others grype and trivy recognize) | grype, trivy, syft | guarddog, trivy-repo, dependency-check |
+| CloudFormation templates | cfn-nag, cfn-lint, cfn-guard, cdk-nag, checkov | trivy-repo, kics |
 | AWS CDK apps | cfn-nag, cfn-lint, cfn-guard, cdk-nag, checkov (on the templates `cdk synth` writes to `cdk.out`); bandit, semgrep, opengrep (on the app code; bandit reads only Python) | trivy-repo |
-| Terraform | checkov | trivy-repo |
+| Terraform | checkov | trivy-repo, kics |
 | Terraform plans as JSON (`terraform show -json`) | checkov | |
 | Terragrunt units (`terragrunt.hcl`) | detect-secrets, gitleaks (secrets only; see below) | |
-| Kubernetes manifests and the other formats checkov supports | checkov | trivy-repo |
-| Dockerfiles | checkov | hadolint, trivy-repo |
+| Kubernetes manifests and the other formats checkov supports | checkov | trivy-repo, kics, polaris (Kubernetes YAML) |
+| Dockerfiles | checkov | hadolint, trivy-repo, kics |
 | GitHub Actions workflows | actionlint, zizmor, checkov | |
 | Composite actions (`action.yml`) | zizmor | guarddog |
-| Secrets, in any file | detect-secrets, gitleaks | betterleaks, ferret-scan (sensitive data), trivy-repo |
+| Secrets, in any file | detect-secrets, gitleaks | betterleaks, credsweeper, ferret-scan (sensitive data), ggshield (files sent to GitGuardian), kingfisher, secretlint, trivy-repo |
 | A software bill of materials | syft | |
 | MCP server config files (`.mcp.json`, `.cursor/mcp.json`, `.codex/config.toml` and the others the [MCP config page](../docs/plugins/builtin/mcp-config.md) lists) | mcp-config, semgrep, opengrep (semgrep and opengrep on the shell scripts the converter writes for them) | |
 | Jupyter notebooks | bandit, detect-secrets, gitleaks (on the converted script, bandit only for a Python notebook; see [Converted files](#converted-files)) | |
@@ -77,9 +77,18 @@ them to the tool.
 | trivy | SCA | Whole directory: `trivy fs` with the vulnerability scanner only, by default | no | no |
 | zizmor | SAST | Selected files: GitHub Actions workflows and composite actions | yes | no |
 | betterleaks | Secrets | Whole directory: the files on disk, not git history | no | no |
+| credsweeper | Secrets | Whole directory: credential candidates from its rules, scored by its model | no | no |
+| dependency-check | SCA | Whole directory: the third-party libraries it identifies (Java, .NET, JavaScript, Python, Ruby, Go, and others), matched against known vulnerabilities | no | no |
 | ferret-scan | Secrets | Whole directory, including files `.gitignore` excludes | no | no |
+| ggshield | Secrets | Whole directory, each file sent to the GitGuardian API; off until `scanners.ggshield.enabled` is `true` | no | no |
+| gosec | SAST | Whole directory: the Go packages of a project with a `go.mod` | no | no |
 | guarddog | SCA | Selected files: for each directory that holds a package manifest (`setup.py`, `package.json`, `go.mod`, `action.yml`, a `*.gemspec`, `Cargo.toml`, and the others the [GuardDog page](../docs/plugins/alpha/guarddog-plugin.md) lists), a temporary copy of the files in the scan set under it | yes | no |
 | hadolint | IaC | Selected files: Dockerfiles, named `Dockerfile`, `Containerfile`, `*.Dockerfile`, or `Dockerfile.*`, with that exact capitalization | no | no |
+| kics | IaC | Whole directory: the infrastructure as code KICS recognizes (Terraform, CloudFormation, Kubernetes, Ansible, OpenAPI, Dockerfiles, and others), skipping files `.gitignore` excludes | no | no |
+| kingfisher | Secrets | Whole directory: the files on disk, not git history | no | no |
+| pip-audit | SCA | Selected files: each requirements file in the scan set (`requirements.txt`, `requirements-dev.txt`, and the like, and any `*.txt` in a `requirements/` directory), one pip-audit run per file | yes | no |
+| polaris | IaC | Whole directory: Kubernetes YAML (`*.yaml` and `*.yml`) | no | no |
+| secretlint | Secrets | Whole directory, with Secretlint's recommended rules | no | no |
 | snyk-code | SAST | Whole directory, sent to Snyk's service | no | no |
 | trivy-repo | SCA | Whole directory: `trivy repository` with the vulnerability, secret, misconfiguration, and license scanners | no | no |
 

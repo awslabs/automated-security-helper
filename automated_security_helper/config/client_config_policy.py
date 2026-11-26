@@ -501,6 +501,21 @@ SHIPPED_DEFAULT_DENIED_PATHS = (
     SHIPPED_DEFAULT_DENIED_PATHS[-1]
     | {"/global_settings/history", "/global_settings/history/**"},
 )
+#: The default after the alpha scanners that send data off the host joined the
+#: always-denied sections: dependency-check (the hash of each jar it finds),
+#: ggshield (the scanned files), kingfisher (candidate secrets, when the operator
+#: turns validation on) and pip-audit (the pinned requirements), each whole, as for
+#: npm-audit and snyk-code.
+SHIPPED_DEFAULT_DENIED_PATHS = (
+    *SHIPPED_DEFAULT_DENIED_PATHS,
+    SHIPPED_DEFAULT_DENIED_PATHS[-1]
+    | {
+        "/scanners/dependency-check/**",
+        "/scanners/ggshield/**",
+        "/scanners/kingfisher/**",
+        "/scanners/pip-audit/**",
+    },
+)
 
 
 class _OptionDefaults(Mapping[Tuple[str, str], Any]):
@@ -530,20 +545,22 @@ class _OptionDefaults(Mapping[Tuple[str, str], Any]):
 
 
 #: Defaults of the denied options of scanners that come from a plugin package
-#: (betterleaks, ferret-scan, guarddog, hadolint, snyk-code, trivy-repo). The trusted config
+#: (the alpha scanners). The trusted config
 #: carries a built-in scanner's defaults, so a delivered value equal to one is
 #: accepted as no change; it need not carry a plugin's section at all, so
 #: without this a delivered file that wrote such a default would be refused.
-#: Used only where the trusted config has no value of its own. snyk-code's and
-#: trivy-repo's whole sections are denied (``ALWAYS_DENIED_PATHS``), so every
-#: one of their options is listed. For ferret-scan, guarddog and hadolint the
-#: denied options are listed: those named in the default ``denied_paths`` and
-#: the ones the ``/scanners/*/options/offline`` and ``tool_version`` globs reach
-#: (hadolint has no ``tool_version`` option). A list default is compared with
+#: Used only where the trusted config has no value of its own. The whole sections
+#: of dependency-check, ggshield, kingfisher, pip-audit, snyk-code and trivy-repo
+#: are denied (``ALWAYS_DENIED_PATHS``), so every one of their options is listed.
+#: For the other alpha scanners the denied options are listed: those named in the
+#: default ``denied_paths`` and the ones the ``/scanners/*/options/offline`` and
+#: ``tool_version`` globs reach (hadolint, gosec, kics, polaris and secretlint
+#: have no ``tool_version`` option). A list default is compared with
 #: ``==``, so a delivered list holding the same items in another order is not
 #: the default.
 #: ``test_the_plugin_option_defaults_are_the_plugins`` derives the list from the
-#: default ``denied_paths`` and checks each value against the plugin's model.
+#: default ``denied_paths`` and every alpha manifest's options model, and checks
+#: each value against the plugin's model.
 #: Declared by each such scanner's manifest (``denied_option_defaults``), where the
 #: values sit beside the plugin that owns them, and read here by scanner name and
 #: option. A scanner whose plugin loads by default (``default_enabled``) declares

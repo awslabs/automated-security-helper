@@ -375,29 +375,32 @@ class TestDefaults:
         up to (but not including) the first wildcard segment.
 
         Plugin-provided reporters (`bedrock-summary-reporter`, `cloudwatch-logs`,
-        `aws-security-hub`, `s3`) and scanners (`ferret-scan`, `guarddog`,
-        `hadolint`, `snyk-code`, `trivy-repo`) are NOT present on a default
-        `AshConfig`; we materialize them here via model_validate so the schema
-        check covers extras that real plugins add, from their own models.
+        `aws-security-hub`, `s3`) and scanners (every scanner whose plugin does
+        not load by default, read from the manifests) are NOT present on a
+        default `AshConfig`; we materialize them here via model_validate so the
+        schema check covers extras that real plugins add, from their own models.
         """
-        from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
-            FerretScannerConfig,
-        )
-        from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner import (
-            GuardDogScannerConfig,
-        )
-        from automated_security_helper.plugin_modules.ash_betterleaks_plugins.betterleaks_scanner import (
-            BetterleaksScannerConfig,
-        )
-        from automated_security_helper.plugin_modules.ash_hadolint_plugins.hadolint_scanner import (
-            HadolintScannerConfig,
-        )
-        from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
-            TrivyRepoScannerConfig,
-        )
-        from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
-            SnykCodeScannerConfig,
-        )
+        import typing
+
+        from automated_security_helper.base.plugin_manifest import resolve_ref
+        from automated_security_helper.plugin_manifests import scanner_manifests
+
+        def _config_class(manifest: typing.Any) -> typing.Any:
+            """The scanner's config class, under ``Optional[...]`` if it is one."""
+            scanner = resolve_ref(manifest.entry_points.scanner)
+            annotation = scanner.model_fields["config"].annotation
+            while typing.get_origin(annotation) is not None:
+                annotation = [
+                    a for a in typing.get_args(annotation) if a is not type(None)
+                ][0]
+            return annotation
+
+        plugin_scanners = {
+            manifest.name: _config_class(manifest)().model_dump(by_alias=True)
+            for manifest in scanner_manifests()
+            if not manifest.default_enabled
+        }
+        assert "pip-audit" in plugin_scanners, sorted(plugin_scanners)
 
         from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
             BedrockSummaryReporterConfig,
@@ -425,14 +428,7 @@ class TestDefaults:
                 },
                 # Plugin scanners' sections, from their own models, so an entry
                 # under them has to name an option the plugin really has.
-                "scanners": {
-                    "betterleaks": BetterleaksScannerConfig().model_dump(by_alias=True),
-                    "ferret-scan": FerretScannerConfig().model_dump(by_alias=True),
-                    "guarddog": GuardDogScannerConfig().model_dump(by_alias=True),
-                    "hadolint": HadolintScannerConfig().model_dump(by_alias=True),
-                    "trivy-repo": TrivyRepoScannerConfig().model_dump(by_alias=True),
-                    "snyk-code": SnykCodeScannerConfig().model_dump(by_alias=True),
-                },
+                "scanners": plugin_scanners,
             }
         )
         dumped = cfg.model_dump(by_alias=True)

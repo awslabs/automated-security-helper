@@ -68,7 +68,7 @@ scanners:
 
 Validation is Kingfisher's default: it contacts the issuer of each credential it matched (a cloud provider, a SaaS API) to see whether the credential works. ASH turns it off, because that sends what may be a live secret from the scanned tree to a third party, and the scanned repository must not be able to cause that.
 
-`validate_credentials: true` removes `--no-validate`. Like the options of the other community plugins that widen what a scan does, it is used only when the operator sets it, with `--config-overrides` or in a config file outside every git checkout and the scanned directory. Set in a config inside one, or by an MCP client, it is ignored with a warning and Kingfisher still runs with `--no-validate`. The scanner sandbox grants Kingfisher no network, so validation requests only succeed outside it.
+`validate_credentials: true` removes `--no-validate`. Like the options of the other community plugins that widen what a scan does, it is used only when the operator sets it, with `--config-overrides` or in a config file outside every git checkout and the scanned directory. Set in a config inside one, or by an MCP client, it is ignored with a warning and Kingfisher still runs with `--no-validate`. An MCP client's runtime override of any part of the `scanners.kingfisher` section, this option and `enabled` included, is refused whatever the server's `denied_paths` lists. The scanner sandbox grants Kingfisher no network, so validation requests only succeed outside it.
 
 With validation on, Kingfisher exits 205 when a credential is confirmed live; ASH treats that as a successful scan, as it does 0 (nothing found) and 200 (something found).
 

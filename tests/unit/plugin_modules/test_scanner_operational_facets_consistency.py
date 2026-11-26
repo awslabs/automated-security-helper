@@ -177,21 +177,29 @@ def test_content_database_join_agrees_both_ways(cls) -> None:
         assert cls.offline_strategy is OfflineStrategy.CACHE_FLAGS and not owning
 
 
-def test_the_service_upload_scanner_is_the_one_that_skips_offline() -> None:
-    """E4: snyk-code uploads the source, so its row can never read as a
-    ruleset fetch, and its declared offline outcome is not_run."""
-    uploads = [
+def test_the_service_upload_scanners_are_among_those_that_skip_offline() -> None:
+    """E4: snyk-code and ggshield upload what they scan, so neither row can ever
+    read as a ruleset fetch, and each declares the offline outcome not_run, as the
+    scanners that ask an online service about every dependency do."""
+    uploads = sorted(
         _ops(c).scanner_name
         for c in SCANNER_CLASSES
         if _ops(c).network.fetch_kind is opsf.FetchKind.SERVICE_UPLOAD
-    ]
-    assert uploads == ["snyk-code"], uploads
+    )
+    assert uploads == ["ggshield", "snyk-code"], uploads
     skipped = sorted(
         _ops(c).scanner_name
         for c in SCANNER_CLASSES
         if _ops(c).network.offline_outcome is opsf.OfflineOutcome.NOT_RUN
     )
-    assert skipped == ["npm-audit", "pip-audit", "snyk-code"], skipped
+    assert skipped == [
+        "dependency-check",
+        "ggshield",
+        "npm-audit",
+        "pip-audit",
+        "snyk-code",
+    ], skipped
+    assert set(uploads) <= set(skipped), (uploads, skipped)
 
 
 # ---------------------------------------------------------------------------
