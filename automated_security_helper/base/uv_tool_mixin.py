@@ -279,16 +279,23 @@ def _without_whitespace(requirement: str) -> str:
         return requirement
 
 
-def _tool_name(plugin: Any) -> str:
+def tool_name(plugin: Any) -> str:
     """The tool's executable name, ``""`` for a plugin that sets none.
 
     ``command`` is ``None`` on a plugin that has no tool to run; every uv arm
     in this module is reached only for a plugin that names one, so the empty
     string is the type-level stand-in, never a name that gets looked up. A
     function rather than a method because the arms are also run against
-    duck-typed stand-ins that carry only the plugin's fields.
+    duck-typed stand-ins that carry only the plugin's fields. It lives here,
+    not on ``plugin_base`` (which re-exports it), because ``plugin_base``
+    imports from this module, so this module cannot import it back.
     """
     return plugin.command or ""
+
+
+def _tool_name(plugin: Any) -> str:
+    """Deprecated alias for :func:`tool_name`; use the public name."""
+    return tool_name(plugin)
 
 
 class UVToolMixin:
@@ -368,10 +375,10 @@ class UVToolMixin:
         package = self._uv_package()
         if not package:
             # A plugin with no tool and no package has no spec: the empty
-            # stand-in ``_tool_name`` gives is never handed on as one.
+            # stand-in ``tool_name`` gives is never handed on as one.
             return None
         if not extras and not constraint:
-            return package if package != _tool_name(self) else None
+            return package if package != tool_name(self) else None
         base = f"{package}[{','.join(extras)}]" if extras else package
         return f"{base}{constraint}" if constraint else base
 
@@ -381,7 +388,7 @@ class UVToolMixin:
         built around, and the ``package`` the runner's requirement check holds
         each spec to, so a constraint glued onto the name cannot name another
         package (``checked_requirement``)."""
-        return self.uv_tool_package_name or _tool_name(self)
+        return self.uv_tool_package_name or tool_name(self)
 
     def _uv_probe_from_spec(self) -> Optional[str]:
         """:meth:`_uv_from_spec` as the dependency check hands it to the probe.
@@ -484,7 +491,7 @@ class UVToolMixin:
         ``uv_tool_runner.uv_install_inputs``, instead of this one.
         """
         return (
-            self._uv_from_spec() or _tool_name(self),
+            self._uv_from_spec() or tool_name(self),
             *(self._get_tool_with_dependencies() or []),
         )
 
@@ -798,7 +805,7 @@ class UVToolMixin:
                     f"Executing {self.command} via UV tool run with args: {tool_args}",
                     record_values,
                     plugin_inputs=record_inputs,
-                    tool_name=_tool_name(self),
+                    tool_name=tool_name(self),
                     limit=None,
                 ),
                 level=logging.DEBUG,
@@ -822,10 +829,10 @@ class UVToolMixin:
             # is.
             with (
                 launch.watching(),
-                uv_record_inputs(record_values, record_inputs, _tool_name(self)),
+                uv_record_inputs(record_values, record_inputs, tool_name(self)),
             ):
                 result = uv_runner.run_tool(
-                    tool_name=_tool_name(self),
+                    tool_name=tool_name(self),
                     # The package that provides the command, when it is named
                     # apart from it: the --from spec is built on it, so the
                     # run resolves the package the install named, not one
@@ -969,7 +976,7 @@ class UVToolMixin:
             text,
             record_values,
             plugin_inputs=record_inputs,
-            tool_name=_tool_name(self),
+            tool_name=tool_name(self),
             limit=None,
         )
 
@@ -1413,7 +1420,7 @@ class UVToolMixin:
             repr(requirement),
             values,
             plugin_inputs=inputs,
-            tool_name=_tool_name(self),
+            tool_name=tool_name(self),
             limit=None,
         )
         # Stripped only AFTER the redaction: a whole-text strip first eats
@@ -1423,7 +1430,7 @@ class UVToolMixin:
             stderr,
             values,
             plugin_inputs=inputs,
-            tool_name=_tool_name(self),
+            tool_name=tool_name(self),
             limit=None,
         ).strip()
         head_keep, tail_keep = 500, 300
@@ -1707,7 +1714,7 @@ class UVToolMixin:
             return True
 
         executable = installation_info.get("pre_installed_path") or find_executable(
-            _tool_name(self)
+            tool_name(self)
         )
         if executable is None:
             # Only reachable for source == "uv" offline with nothing on PATH.
@@ -1722,7 +1729,7 @@ class UVToolMixin:
         # The package that provides the command, when named apart from it: the
         # requirement verified against the copy's environment is the one the
         # scan runs under, not one named after the executable.
-        package = self.uv_tool_package_name or _tool_name(self)
+        package = self.uv_tool_package_name or tool_name(self)
         requirement = build_requirement(package, extras, constraint)
         # The values hook is read ONCE, guarded, for the verify and every
         # record below: it is overridable, two reads can disagree with each
@@ -1764,7 +1771,7 @@ class UVToolMixin:
                 text,
                 values,
                 plugin_inputs=self._uv_run_inputs_for_records(),
-                tool_name=_tool_name(self),
+                tool_name=tool_name(self),
                 limit=None,
             )
 
