@@ -48,15 +48,23 @@
 
 ### Breaking changes
 
-- **Bare `ash`, `ash scan` with no subject, and `--source-dir` are deprecated and will
-  be removed in ASH v4.0.** They still run the same scan. Each prints one line to stderr
-  (stdout and the exit code are unchanged) that names the replacement:
+- **Bare `ash`, `ash scan` with no subject, `--source-dir`, the top-level results
+  commands and `ash build-image` are deprecated and will be removed in ASH v4.0.** Each
+  still runs the same command and prints one line to stderr (stdout and the exit code
+  are unchanged) that names its replacement. A scan moves under `ash scan fs`:
   `ash scan --source-dir X` becomes `ash scan fs X`, and `ash --mode container ...`
-  becomes `ash scan fs . --mode container ...`. `ASH_SOURCE_DIR` is not deprecated, and
-  `ash scan --workspace` and `ash --workspace` have no subject to move to yet, so they
-  print nothing. Check `ash-args`, `ASH_SCAN_EXTRA_ARGS` and similar pass-through
-  settings, which are not rewritten for you. ASH's own workflows, actions, pre-commit
-  hooks and docs examples still use the old spellings and move in a later change.
+  becomes `ash scan fs . --mode container ...`. The commands that read saved results
+  move under `ash results`: `ash report`, `ash diff`, `ash trend`, `ash merge` and
+  `ash inspect` become `ash results report`, `ash results diff`, `ash results trend`,
+  `ash results merge` and `ash results inspect`, with the same options. `ash diff` and
+  `ash trend` are new in this release, so use them as `ash results diff` and
+  `ash results trend` from the start. `ash build-image` becomes `ash container build`.
+  The moved commands are hidden from the root `--help`. `ASH_SOURCE_DIR` is not
+  deprecated, and `ash scan --workspace` and `ash --workspace` have no subject to move
+  to yet, so they print nothing. Check `ash-args`, `ASH_SCAN_EXTRA_ARGS` and similar
+  pass-through settings, which are not rewritten for you. ASH's own workflows, actions,
+  pre-commit hooks and the examples on the docs site still use the old spellings and
+  move in a later change.
   `./ash` accepts `scan fs <path>` and reads the path as the directory to mount (a
   second path is refused). `Invoke-ASH` takes the directory as `-SourceDir`, and refuses
   a path after `scan fs`.
@@ -76,8 +84,8 @@
   `.ash.yaml` entries now do.
 - **`.ash.yaml` at the project root is the canonical config file.** A scan reads it
   before any other config source, and `ash config init`, `ash config wizard` and
-  `ash inspect findings` create it when no config exists (they wrote `.ashrc.yaml`
-  before). Every location that worked before still loads: `.ash/.ash.yaml`, `.ash.yml`,
+  `ash results inspect findings` create it when no config exists (they wrote
+  `.ashrc.yaml` before). Every location that worked before still loads: `.ash/.ash.yaml`, `.ash.yml`,
   `ash.yaml` and the other names of the old list, each also under `.ash/`, and the
   `ashrc` names. A scan that reads one of them prints one warning that names the file
   as deprecated and gives the path to move it to, and ASH 4.0 stops reading them. When
@@ -188,6 +196,23 @@
   the working directory), and `--source-dir` and `ASH_SOURCE_DIR` still name it. `fs`
   takes every option `ash scan` took. `ash scan --help` shows `fs`'s help, which ends
   with the list of subjects.
+- **`ash results` holds the commands that read saved scan results.** `ash results
+  report`, `diff`, `trend`, `merge` and `inspect` work on results a scan already wrote,
+  and none of them runs a scan. `report`, `merge` and `inspect` are the commands that
+  were `ash report`, `ash merge` and `ash inspect`, with the same options, output and
+  exit codes; `diff` and `trend` are new in this release. The top-level spellings still
+  run and print one deprecation line on stderr (see Breaking changes).
+- **`ash container build` is the command that builds the ASH container image;
+  `ash build-image` is its deprecated spelling, removed in ASH v4.** Both take the
+  same options and start the same build. `ash build-image` prints one warning on
+  stderr per run, naming `ash container build`, and then runs; it is hidden from the
+  root `--help`, as the other spellings that moved in 3.9 are. The interrupted and
+  SIGTERM messages of the command read `ASH container build ...`, and the offline
+  hints in scan messages name `ash container build --offline`. `./ash` and
+  `Invoke-ASH` accept `container` as a command word and pass `--quiet`,
+  `--no-color`, `--verbose`, `--debug`, `--offline` and `--config` given before it
+  on to `build`, as they did for `build-image`. Move scripts and CI jobs to the new
+  spelling in this release; the old one stops working in v4.
 - **Tab completion is covered for both ways of running ASH.** `ash scan <TAB>` offers
   `fs`, and `fs`'s options complete; `ash --install-completion` and `ash
   --show-completion` are documented. `./ash --show-completion` prints a bash completion
@@ -237,18 +262,19 @@
 - `ash dependencies check --offline` checks the local Grype and Trivy vulnerability
   database metadata against the configured age policy without running either tool.
 
-- **`ash diff BEFORE AFTER` compares two saved scans.** It lists new, absent, moved and
-  changed findings. A finding that only moved lines is paired only when the match is
-  unambiguous. The MCP diff tool uses the same matching, so moved findings are no longer
-  in its new and resolved lists.
+- **`ash results diff BEFORE AFTER` compares two saved scans.** It lists new, absent,
+  moved and changed findings. A finding that only moved lines is paired only when the
+  match is unambiguous. The MCP diff tool uses the same matching, so moved findings are
+  no longer in its new and resolved lists.
 
-- **`ash scan --baseline PATH` gates on new findings.** A trusted full-scan artifact
+- **`ash scan fs --baseline PATH` gates on new findings.** A trusted full-scan artifact
   outside the checkout is matched against the scan, including findings that moved
   lines, and matched SARIF findings are left out of reports, summary counts and the exit
   code. Local and precommit modes support it; Security Hub will not archive absent
   findings from these partial results.
 
-- **`ash --mode precommit --staged` scans the staged files instead of the whole repository.**
+- **`ash scan fs --mode precommit --staged` scans the staged files instead of the whole
+  repository.**
   The list comes from `git diff --cached` (no deletions; a rename is scanned at its new
   path): bandit and checkov are handed the staged files as targets, the scanners that pick
   their own files (detect-secrets, cdk-nag, npm-audit) and the converters read the same
@@ -757,17 +783,6 @@ The commits below also carry breaking-change notes, listed under BREAKING CHANGE
 
 ### Breaking changes
 
-- **`ash container build` is the command that builds the ASH container image;
-  `ash build-image` is its deprecated spelling, removed in ASH v4.** Both take the
-  same options and start the same build. `ash build-image` prints one warning on
-  stderr per run, naming `ash container build`, and then runs; it is hidden from the
-  root `--help`, as the other spellings that moved in 3.9 are. The interrupted and
-  SIGTERM messages of the command read `ASH container build ...`, and the offline
-  hints in scan messages name `ash container build --offline`. `./ash` and
-  `Invoke-ASH` accept `container` as a command word and pass `--quiet`,
-  `--no-color`, `--verbose`, `--debug`, `--offline` and `--config` given before it
-  on to `build`, as they did for `build-image`. Move scripts and CI jobs to the new
-  spelling in this release; the old one stops working in v4.
 - **`expires` is the canonical spelling of a suppression's or ignore path's
   expiration date; `expiration` is a deprecated alias, removed in ASH v4.** The
   swap reverses the earlier shape, where `expiration` was the field and
