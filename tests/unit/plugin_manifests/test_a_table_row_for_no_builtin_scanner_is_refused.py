@@ -82,20 +82,44 @@ def test_a_description_for_no_builtin_scanner_is_refused():
 
 def test_every_manifest_module_calls_the_check(monkeypatch):
     """The check runs when the module is imported, so a stale row stops the
-    import and not only a test that calls the function."""
+    import and not only a test that calls the function.
+
+    The modules come from the same ``pkgutil`` walk the package loads them by,
+    not from a hardcoded list: a third manifest module that skipped
+    ``check_table_rows`` would pass a test that names only ``builtin`` and
+    ``alpha``."""
     import importlib
+    import pkgutil
+
+    import automated_security_helper.plugin_manifests as plugin_manifests
+
+    modules = []
+    for info in sorted(
+        pkgutil.iter_modules(plugin_manifests.__path__), key=lambda m: m.name
+    ):
+        module = importlib.import_module(f"{plugin_manifests.__name__}.{info.name}")
+        if hasattr(module, "MANIFESTS"):
+            modules.append(module)
+    assert modules, "control: the walk finds the shipped manifest modules"
 
     calls = []
     real = check_table_rows
-    monkeypatch.setattr(
-        "automated_security_helper.plugin_manifests.check_table_rows",
-        lambda module, names, **tables: (
-            calls.append(module),
-            real(module, names, **tables),
-        )[1],
-    )
+    try:
+        monkeypatch.setattr(
+            "automated_security_helper.plugin_manifests.check_table_rows",
+            lambda module, names, **tables: (
+                calls.append(module),
+                real(module, names, **tables),
+            )[1],
+        )
+        for module in modules:
+            importlib.reload(module)
+    finally:
+        monkeypatch.undo()
+        # A module reloaded under the patch bound the counting lambda as its own
+        # ``check_table_rows`` (``from ... import``), and undoing the package
+        # attribute does not unbind it; reloading again, unpatched, does.
+        for module in modules:
+            importlib.reload(module)
 
-    importlib.reload(builtin)
-    importlib.reload(alpha)
-
-    assert calls == [builtin.__name__, alpha.__name__]
+    assert sorted(calls) == sorted(module.__name__ for module in modules)

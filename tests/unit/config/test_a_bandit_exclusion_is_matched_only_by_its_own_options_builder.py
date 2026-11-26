@@ -8,8 +8,11 @@ whenever the named option's own declaration was missing, of another kind, or had
 no builder. Another tool's exclude semantics then decided which findings were
 hidden, and the answer could be "hidden" for a finding the named scanner would
 have reported. With both ``scanner`` and ``option`` named the option's own
-bandit builder is required and a ``ScannerError`` names what is missing. A
-caller that names no option keeps the manifest-order fallback.
+bandit builder is required and a ``ScannerError`` names what is missing. One
+name alone is a contract error (``ValueError``): an option name two scanners
+share, or a scanner with two bandit options, would still be matched by another
+declaration in manifest order. A caller that names neither keeps the
+manifest-order fallback.
 """
 
 from __future__ import annotations
@@ -103,28 +106,26 @@ def test_a_caller_that_names_neither_keeps_the_manifest_order_fallback(monkeypat
     assert bandit_would_skip("v", **WHERE) is True
 
 
-def test_a_scanner_alone_is_matched_by_its_own_builder_never_anothers(monkeypatch):
-    """Red at the tip it was found on: a scanner with no bandit option of its own
-    was matched by another tool's builder, and the test that stood here asserted it."""
+def test_a_scanner_alone_is_a_contract_error(monkeypatch):
+    """Half-named, the lookup can still take another declaration in manifest
+    order (a scanner with two bandit options of different builders), so one
+    name alone is refused rather than answered. The tests that stood here
+    asserted the partial modes, which only tests ever used."""
     own = (
         "mine",
         ExclusionOption(option="x", kind="bandit", glob_builder="pkg.own:build"),
     )
     _install(monkeypatch, [OTHER, own])
 
-    assert bandit_would_skip("v", scanner="mine", **WHERE) is False
-
-
-def test_a_scanner_alone_with_no_bandit_option_of_its_own_is_refused(monkeypatch):
-    _install(monkeypatch, [OTHER])
-
-    with pytest.raises(ScannerError, match="mine"):
+    with pytest.raises(ValueError, match="together or not at all.*'mine'"):
         bandit_would_skip("v", scanner="mine", **WHERE)
 
 
-def test_an_option_alone_is_matched_by_the_option_of_that_name_only(monkeypatch):
+def test_an_option_alone_is_a_contract_error(monkeypatch):
+    """Red at the tip it was found on: ``option="o"`` answered True from the
+    first manifest declaring an option of that name, so two scanners sharing an
+    option name with different builders were matched by whichever came first."""
     _install(monkeypatch, [OTHER])
 
-    assert bandit_would_skip("v", option="o", **WHERE) is True
-    with pytest.raises(ScannerError, match="nobody-declares-this"):
-        bandit_would_skip("v", option="nobody-declares-this", **WHERE)
+    with pytest.raises(ValueError, match="together or not at all.*'o'"):
+        bandit_would_skip("v", option="o", **WHERE)

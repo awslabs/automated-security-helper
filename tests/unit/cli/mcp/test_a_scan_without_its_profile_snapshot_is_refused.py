@@ -122,7 +122,9 @@ def _a_session_with_a_bound_profile(tmp_path, monkeypatch, session_id):
 
     def a_rebind_of_the_sessions_profile():
         config = load_config_file_for_run(other / "second.ash.yaml")[1]
-        written = profile_registry.materialize_session_config(session_id, config)
+        written = profile_registry.materialize_session_config(
+            session_id, config, filename=profile_registry.SESSION_CONFIG_FILENAME
+        )
         assert Path(written).resolve() == profile.resolve(), (written, profile)
         profile_registry.bind_session_config(
             session_id, config=config, profile_name="second", config_path=written

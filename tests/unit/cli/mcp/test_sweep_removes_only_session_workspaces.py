@@ -21,6 +21,7 @@ import pytest
 from automated_security_helper.cli.mcp import sessions
 from automated_security_helper.cli.mcp import source_delivery as sd
 from automated_security_helper.cli.mcp.profile_registry import (
+    SESSION_CONFIG_FILENAME,
     clear_all_session_state,
     materialize_session_config,
 )
@@ -73,7 +74,9 @@ def test_every_way_a_workspace_is_created_marks_it(root, how) -> None:
     elif how == "session-registry":
         sessions.get_default_registry().get_or_create(session_id)
     else:
-        materialize_session_config(session_id, AshConfig())
+        materialize_session_config(
+            session_id, AshConfig(), filename=SESSION_CONFIG_FILENAME
+        )
     _age(root / session_id)
 
     removed = sessions.sweep_stale_workspaces(24 * 3600)

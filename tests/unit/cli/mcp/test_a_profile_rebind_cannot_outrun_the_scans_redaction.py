@@ -126,7 +126,9 @@ def test_a_rebind_between_the_runner_start_and_the_scan_load_cannot_leak(
 
     def a_rebind_of_the_sessions_profile():
         config = load_config_file_for_run(other / "second.ash.yaml")[1]
-        written = profile_registry.materialize_session_config(_SID, config)
+        written = profile_registry.materialize_session_config(
+            _SID, config, filename=profile_registry.SESSION_CONFIG_FILENAME
+        )
         # Control: the rebind rewrote the session's own file, the window the
         # snapshot exists to close.
         assert Path(written).resolve() == profile.resolve(), (written, profile)
@@ -296,7 +298,9 @@ def _a_session_whose_profile_is_the_scans_config(tmp_path, monkeypatch, session_
 
     def a_rebind_of_the_sessions_profile():
         config = load_config_file_for_run(other / "second.ash.yaml")[1]
-        written = profile_registry.materialize_session_config(session_id, config)
+        written = profile_registry.materialize_session_config(
+            session_id, config, filename=profile_registry.SESSION_CONFIG_FILENAME
+        )
         assert Path(written).resolve() == profile.resolve(), (written, profile)
         assert "ASH_REBIND_SWAP" in Path(written).read_text(encoding="utf-8")
         profile_registry.bind_session_config(
@@ -653,7 +657,9 @@ def test_a_rebind_while_the_scan_waits_for_the_session_lock_cannot_leak(
         try:
             assert snapshot_taken.wait(timeout=30), "the snapshot was never taken"
             config = load_config_file_for_run(other / "second.ash.yaml")[1]
-            written = profile_registry.materialize_session_config(_QSID, config)
+            written = profile_registry.materialize_session_config(
+                _QSID, config, filename=profile_registry.SESSION_CONFIG_FILENAME
+            )
             # Controls: the rebind rewrote the session's own live file while
             # the scan's snapshot sat beside it, before the lock was free.
             assert Path(written).resolve() == profile.resolve(), (written, profile)

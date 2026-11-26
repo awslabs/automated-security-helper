@@ -48,9 +48,9 @@ from automated_security_helper.base.plugin_manifest import (
 class ManifestRegistryError(ValueError):
     """The shipped manifests contradict each other, or one of them is malformed.
 
-    The second shape is a fault in a single entry: a name that no table of the
-    builtin module knows, a missing description, an options class that cannot
-    yield its section class.
+    The second shape is a fault in a single entry: a table row that names no
+    scanner of its own manifest module (:func:`check_table_rows`), a missing
+    description, an options class that cannot yield its section class.
     """
 
 

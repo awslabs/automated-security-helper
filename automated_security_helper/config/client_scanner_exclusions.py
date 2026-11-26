@@ -425,6 +425,10 @@ def bandit_would_skip(
     relative to the source directory) names no root, so nothing is hidden: that
     finding is reported, never suppressed on a guess.
 
+    ``scanner`` and ``option`` name the entry's own declaration and come
+    together or not at all (``ValueError`` for one alone); a caller that names
+    neither gets the first bandit-kind builder in manifest order.
+
     A backslash in either path is read as a separator only where the platform
     reads it so (``_slashed``). On POSIX it is a character of the file's name:
     rewritten to ``/`` here before, the file ``vendor\\x.py`` was matched as
@@ -436,20 +440,28 @@ def bandit_would_skip(
     #
     # The builder is the one declared on this entry's own option (``scanner`` and
     # ``option``, which the exclusion carries), so two scanners that share the
-    # kind with different builders are each matched by their own. Whatever the
-    # caller names (the scanner, the option, or both) limits the builders
-    # considered to the declarations that match it, and none matching is the
-    # error below: another tool's globs carry another tool's exclude semantics,
-    # and matching with them would decide which findings are hidden. Only a
-    # caller that names neither gets the first bandit-kind builder in manifest
-    # order.
+    # kind with different builders are each matched by their own. The two names
+    # come together or not at all: one alone still took another tool's
+    # declaration in manifest order -- an option name two scanners share, or a
+    # scanner with two bandit options -- which is the cross-tool matching this
+    # lookup exists to prevent. Named, the pair limits the lookup to the entry's
+    # own declaration, and none matching is the error below: another tool's
+    # globs carry another tool's exclude semantics, and matching with them would
+    # decide which findings are hidden. Only a caller that names neither gets
+    # the first bandit-kind builder in manifest order.
     #
     # ``next`` with no default would let a manifest set that declares no bandit
     # builder end this call as a bare ``StopIteration``: PEP 479 turns that into
     # a ``RuntimeError`` inside a generator, and a ``map`` callback or a custom
     # ``__next__`` ends its iteration silently, which drops findings with no
     # error. A missing declaration is a configuration fault, named as one.
-    named = scanner is not None or option is not None
+    if (scanner is None) != (option is None):
+        raise ValueError(
+            "bandit_would_skip takes scanner and option together or not at "
+            f"all; got scanner={scanner!r}, option={option!r}. The builder is "
+            "the one declared on the entry's own option, and one name alone "
+            "can still pick another tool's declaration in manifest order."
+        )
     builder_ref: Optional[str] = next(
         (
             declared.glob_builder
@@ -462,15 +474,18 @@ def bandit_would_skip(
         None,
     )
     if builder_ref is None:
-        where = (
-            f"the exclusion option 'scanners.{scanner or '*'}.options.{option or '*'}'"
-            if named
-            else "any scanner manifest"
-        )
+        if scanner is None:
+            raise ScannerError(
+                "no scanner manifest declares a glob_builder for an exclusion "
+                "option of kind 'bandit', so a client-supplied bandit exclusion "
+                "cannot be matched. Declare one on the option "
+                "(ExclusionOption.glob_builder)."
+            )
         raise ScannerError(
-            f"{where} does not declare a glob_builder for an exclusion option of "
-            "kind 'bandit', so a client-supplied bandit exclusion cannot be "
-            "matched. Declare one on the option (ExclusionOption.glob_builder)."
+            f"scanner {scanner!r} declares no exclusion option {option!r} of "
+            "kind 'bandit' with a glob_builder, so a client-supplied bandit "
+            "exclusion cannot be matched. Declare one on the option "
+            "(ExclusionOption.glob_builder)."
         )
     bandit_excluded_path_globs = resolve_ref(builder_ref)
 

@@ -346,13 +346,16 @@ class TestTheConfigWritesBack:
 
     def test_the_mcp_session_config_round_trips(self, tmp_path, monkeypatch):
         from automated_security_helper.cli.mcp.profile_registry import (
+            SESSION_CONFIG_FILENAME,
             materialize_session_config,
         )
 
         monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp"))
 
         written = materialize_session_config(
-            "session-a", AshConfig.model_validate(self.CONFIG)
+            "session-a",
+            AshConfig.model_validate(self.CONFIG),
+            filename=SESSION_CONFIG_FILENAME,
         )
 
         reloaded = AshConfig.from_file(Path(written))

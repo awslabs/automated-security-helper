@@ -24,6 +24,7 @@ import pytest
 
 from automated_security_helper.cli.mcp import session_identity, sessions
 from automated_security_helper.cli.mcp.profile_registry import (
+    SESSION_CONFIG_FILENAME,
     clear_session_state,
     materialize_session_config,
 )
@@ -70,7 +71,9 @@ def test_the_profile_registry_writes_no_config_for_the_unidentified_caller(
     root,
 ) -> None:
     with pytest.raises(RuntimeError, match="no session the server issued"):
-        materialize_session_config(UNIDENTIFIED_SESSION_ID, AshConfig())
+        materialize_session_config(
+            UNIDENTIFIED_SESSION_ID, AshConfig(), filename=SESSION_CONFIG_FILENAME
+        )
 
     assert list(root.iterdir()) == []
 
@@ -78,7 +81,9 @@ def test_the_profile_registry_writes_no_config_for_the_unidentified_caller(
 def test_the_profile_registry_still_writes_a_config_for_an_issued_session(
     root,
 ) -> None:
-    path = materialize_session_config("issued-1", AshConfig())
+    path = materialize_session_config(
+        "issued-1", AshConfig(), filename=SESSION_CONFIG_FILENAME
+    )
 
     assert Path(path).is_file()
     assert Path(path).resolve().is_relative_to(root.resolve())

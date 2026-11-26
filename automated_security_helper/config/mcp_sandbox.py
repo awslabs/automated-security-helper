@@ -303,7 +303,7 @@ def caller_is_remote(session_id: Optional[str]) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _parse_roots(raw: Optional[str]) -> Tuple[Path, ...]:
+def _parse_roots(raw: Optional[str], *, warn: bool = True) -> Tuple[Path, ...]:
     """Parse an ``os.pathsep``-separated grant into resolved directories.
 
     ``os.pathsep``, not a literal ":". On Windows the separator is ";" and a
@@ -321,7 +321,10 @@ def _parse_roots(raw: Optional[str]) -> Tuple[Path, ...]:
     ``expanduser`` raises it for a ``~`` entry when no home directory can be found
     (an ``OSError`` for what the file system refuses). Raised from here it would
     escape every gate that reads a grant, the refusals included, over one bad
-    entry. Leaving it out narrows the grant, which is the safe side.
+    entry. Leaving it out narrows the grant, which is the safe side. ``warn``
+    False keeps the warning quiet for a value already warned about: every gate
+    parses the scan grant again, and :func:`_scan_grant` names a value's bad
+    entries once, not once per gate.
 
     An empty result therefore does not mean "no grant was set". A caller that must
     tell the two apart asks :func:`_grant_is_configured` about the same raw value:
@@ -340,11 +343,12 @@ def _parse_roots(raw: Optional[str]) -> Tuple[Path, ...]:
         try:
             roots.append(Path(entry).expanduser().resolve())
         except (OSError, RuntimeError) as exc:
-            _logger.warning(
-                "MCP sandbox: a grant entry could not be resolved and grants "
-                "nothing (%s)",
-                type(exc).__name__,
-            )
+            if warn:
+                _logger.warning(
+                    "MCP sandbox: a grant entry could not be resolved and grants "
+                    "nothing (%s)",
+                    type(exc).__name__,
+                )
     return tuple(roots)
 
 
@@ -368,9 +372,20 @@ def operator_scan_roots() -> Tuple[Path, ...]:
     return _scan_grant()[0]
 
 
-#: The raw values of ``ASH_MCP_ALLOWED_ROOTS`` already warned about as set but
-#: unresolved. A value is named once, however many gates read it.
+#: The raw values of ``ASH_MCP_ALLOWED_ROOTS`` already warned about, as set but
+#: unresolved or for the entries of theirs that resolved to nothing. A value is
+#: named once, however many gates read it.
 _WARNED_UNRESOLVED_GRANTS: Set[str] = set()
+
+
+def _reset_unresolved_grant_warnings() -> None:
+    """Forget which grant values were already warned about; tests use it.
+
+    The set is process-wide, so without a reset a test that checks the warning
+    for a fixed (non-``tmp_path``) value depends on which test read it first.
+    """
+
+    _WARNED_UNRESOLVED_GRANTS.clear()
 
 
 def _scan_grant() -> Tuple[Tuple[Path, ...], bool]:
@@ -378,21 +393,30 @@ def _scan_grant() -> Tuple[Tuple[Path, ...], bool]:
 
     The one reader of the variable for a decision, so the grant is parsed and
     resolved once and the answer to "is it configured" cannot come from a
-    different read than the roots. The warning for a grant that is set and
-    resolved to nothing is logged once per distinct value and names no path.
+    different read than the roots. Both warnings -- the per-entry one
+    ``_parse_roots`` logs for an entry that resolved to nothing, and the summary
+    for a grant that is set and resolved to nothing -- are logged once per
+    distinct value and name no path.
     """
 
     raw = os.environ.get(ASH_MCP_ALLOWED_ROOTS_ENV)
-    roots = _parse_roots(raw)
+    key = raw or ""
+    warned = key in _WARNED_UNRESOLVED_GRANTS
+    roots = _parse_roots(raw, warn=not warned)
     unresolved = not roots and _grant_is_configured(raw)
-    if unresolved and raw not in _WARNED_UNRESOLVED_GRANTS:
-        _WARNED_UNRESOLVED_GRANTS.add(raw or "")
-        _logger.warning(
-            "MCP sandbox: %s is set but none of its entries could be resolved, "
-            "so no directory is granted and scans outside the session sandbox "
-            "are refused",
-            ASH_MCP_ALLOWED_ROOTS_ENV,
-        )
+    # Fewer roots than named entries means _parse_roots left one out (and, when
+    # not yet warned about, named it): this value's warnings are spent, whether
+    # or not the whole grant resolved to nothing.
+    named = sum(1 for e in key.split(os.pathsep) if e.strip()) if raw else 0
+    if not warned and len(roots) < named:
+        _WARNED_UNRESOLVED_GRANTS.add(key)
+        if unresolved:
+            _logger.warning(
+                "MCP sandbox: %s is set but none of its entries could be resolved, "
+                "so no directory is granted and scans outside the session sandbox "
+                "are refused",
+                ASH_MCP_ALLOWED_ROOTS_ENV,
+            )
     return roots, unresolved
 
 
