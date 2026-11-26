@@ -138,6 +138,20 @@ class WrapperContract:
     usage_error_exit: int
     #: The runner markers that are passed into the container by name.
     ci_runner_markers: tuple[str, ...]
+    #: ``group:leaf=taker`` for each command under a group whose options the wrapper
+    #: places after the leaf (``results:report=report``, ``container:build=container``).
+    #: ``taker`` is the name the option tables list for what the leaf takes.
+    group_leaf_takers: tuple[str, ...]
+
+    @property
+    def option_groups(self) -> tuple[str, ...]:
+        """The groups in :attr:`group_leaf_takers`, in order."""
+        seen: list[str] = []
+        for pair in self.group_leaf_takers:
+            group = pair.split(":", 1)[0]
+            if group not in seen:
+                seen.append(group)
+        return tuple(seen)
 
     def takers(self, option: str) -> tuple[str, ...]:
         for name, subcommands in self.option_subcommands:
@@ -235,4 +249,29 @@ def contract() -> WrapperContract:
         refusal_exit=rac._WRAPPER_REFUSAL_EXIT,
         usage_error_exit=ASH_EXIT_USAGE_ERROR,
         ci_runner_markers=tuple(rac.RUNNER_MARKERS_ON_ARGV),
+        group_leaf_takers=_group_leaf_takers(commands),
     )
+
+
+def _group_leaf_takers(commands: dict[str, Any]) -> tuple[str, ...]:
+    """``group:leaf=taker`` for every command under a group that has a taker.
+
+    A group in :data:`OPTION_ROUTING_GROUPS` takes what its one command takes, and
+    its table name is the group's own. Any other group's command that is also a
+    top-level command (``results report`` and ``report``) takes what that one does.
+    A group none of whose commands has a taker is left out: the tables give it no
+    options, and the wrapper puts nothing after it.
+    """
+    pairs: list[str] = []
+    for group, command in commands.items():
+        if group == "scan":
+            continue
+        leaves = getattr(command, "commands", None) or {}
+        found: list[str] = []
+        for leaf in leaves:
+            if OPTION_ROUTING_GROUPS.get(group) == leaf:
+                found.append(f"{group}:{leaf}={group}")
+            elif group not in OPTION_ROUTING_GROUPS and leaf in commands:
+                found.append(f"{group}:{leaf}={leaf}")
+        pairs.extend(found)
+    return tuple(pairs)

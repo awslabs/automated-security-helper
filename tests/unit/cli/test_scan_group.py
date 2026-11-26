@@ -81,6 +81,15 @@ def test_a_directory_after_a_double_dash_is_not_a_subject_less_scan_of_it(engine
     assert engine.calls == []
 
 
+def test_a_dashed_directory_after_a_double_dash_is_suggested_with_one(engine):
+    result = _invoke(["scan", "--", "-build"])
+
+    assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+    assert "ash scan fs -- -build" in result.output
+    assert "(subjects: fs)" in result.output
+    assert engine.calls == []
+
+
 def test_fs_help_takes_a_path_argument_and_every_scan_option():
     result = _invoke(["scan", "fs", "--help"])
 

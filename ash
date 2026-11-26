@@ -363,6 +363,14 @@ require_mountable() {
 # BEGIN generated: sh-subcommands (scripts/generate_wrapper_tables.py)
 ASH_SUBCOMMANDS="scan build-image report diff trend merge results mcp get-genai-guide container config dependencies inspect plugin suppress express"
 # END generated: sh-subcommands
+# The groups whose command word decides which options apply (`results report`,
+# `container build`), and the table name each command takes its options under, as
+# group:command=name. The command is the word right after the group, as the CLI reads
+# it.
+# BEGIN generated: sh-option-groups (scripts/generate_wrapper_tables.py)
+ASH_OPTION_GROUPS="results container"
+ASH_GROUP_LEAF_TAKERS="results:report=report results:diff=diff results:trend=trend results:merge=merge results:inspect=inspect container:build=container"
+# END generated: sh-option-groups
 # The subjects `scan` takes (`./ash scan fs [PATH]`). The first word after scan that
 # is not an option or an option's value names one, and the word after that is the
 # directory to scan (forward_word, below). ASH_SCAN_VALUE_OPTIONS are options a
@@ -2138,17 +2146,18 @@ else
       # the words of a --config value, which moves a subcommand that stood after
       # them, and the splice below needs the index in the words the scan is given.
       detect_subcommand
-      # `results report` and its siblings are the commands `report`, `merge` and the
-      # rest under a group, and take what those take: the first word after `results`
-      # that names a command is the one whose options apply. Without this, the
-      # deprecated `./ash --no-color report` kept --no-color and the spelling the
-      # deprecation names, `./ash --no-color results report`, dropped it.
+      # A command under a group (`results report`, `container build`) takes what its
+      # table entry takes (ASH_GROUP_LEAF_TAKERS): the command is the word right after
+      # the group, as the CLI reads it, and one the table does not name takes nothing.
+      # Without this, the deprecated `./ash --no-color report` kept --no-color and the
+      # spelling the deprecation names, `./ash --no-color results report`, dropped it.
       TAKER="${SUBCOMMAND}"
-      if [[ "${SUBCOMMAND}" = "results" ]]; then
-        for ((ASH_WORD_AT = SUBCOMMAND_AT + 1; ASH_WORD_AT < ${#ASH_ARG_WORDS[@]}; ASH_WORD_AT++)); do
-          if [[ "${ASH_ARG_WORDS[ASH_WORD_AT]}" != "results" && " ${ASH_SUBCOMMANDS} " == *" ${ASH_ARG_WORDS[ASH_WORD_AT]} "* ]]; then
-            TAKER="${ASH_ARG_WORDS[ASH_WORD_AT]}"
-            break
+      if [[ -n "${SUBCOMMAND}" && " ${ASH_OPTION_GROUPS} " == *" ${SUBCOMMAND} "* ]]; then
+        TAKER=""
+        GROUP_LEAF="${SUBCOMMAND}:${ASH_ARG_WORDS[SUBCOMMAND_AT + 1]:-}"
+        for GROUP_PAIR in ${ASH_GROUP_LEAF_TAKERS}; do
+          if [[ "${GROUP_PAIR%%=*}" = "${GROUP_LEAF}" ]]; then
+            TAKER="${GROUP_PAIR#*=}"
           fi
         done
       fi

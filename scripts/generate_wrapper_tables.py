@@ -340,6 +340,20 @@ def sh_ci_runner_markers(contract) -> list[str]:
     return [f'ASH_CI_RUNNER_MARKERS="{_sh_words(contract.ci_runner_markers)}"']
 
 
+def sh_option_groups(contract) -> list[str]:
+    return [
+        f'ASH_OPTION_GROUPS="{_sh_words(contract.option_groups)}"',
+        f'ASH_GROUP_LEAF_TAKERS="{_sh_words(contract.group_leaf_takers)}"',
+    ]
+
+
+def ps_option_groups(contract) -> list[str]:
+    return [
+        f"$ashOptionGroups = {_ps_list(contract.option_groups)}",
+        f"$ashGroupLeafTakers = {_ps_list(contract.group_leaf_takers)}",
+    ]
+
+
 Renderer = Callable[..., list[str]]
 
 #: file -> [(block name, renderer)]. The names are the ones written in the markers.
@@ -347,6 +361,7 @@ BLOCKS: dict[str, list[tuple[str, Renderer]]] = {
     POWERSHELL: [
         ("ps1-subcommands", ps_subcommands),
         ("ps1-scan-subjects", ps_scan_subjects),
+        ("ps1-option-groups", ps_option_groups),
         ("ps1-root-value-options", ps_root_value_options),
         ("ps1-option-subcommands", ps_option_subcommands),
         ("ps1-runner-discovery", ps_runner_discovery),
@@ -359,6 +374,7 @@ BLOCKS: dict[str, list[tuple[str, Renderer]]] = {
     ASH: [
         ("sh-subcommands", sh_subcommands),
         ("sh-scan-subjects", sh_scan_subjects),
+        ("sh-option-groups", sh_option_groups),
         ("sh-completion", sh_completion),
         ("sh-dash-o-subcommands", sh_dash_o_subcommands),
         ("sh-root-value-options", sh_root_value_options),

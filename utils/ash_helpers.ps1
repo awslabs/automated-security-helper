@@ -859,6 +859,13 @@ function Invoke-ASH {
         $ashSubcommands = @('scan', 'build-image', 'report', 'diff', 'trend', 'merge', 'results', 'mcp', 'get-genai-guide', 'container', 'config', 'dependencies', 'inspect', 'plugin', 'suppress', 'express')
         $ashTakesSandbox = @('scan')
         # END generated: ps1-subcommands
+        # The groups whose command word decides which options apply (`results report`,
+        # `container build`), and the table name each command takes its options under,
+        # as group:command=name. The command is the word right after the group.
+        # BEGIN generated: ps1-option-groups (scripts/generate_wrapper_tables.py)
+        $ashOptionGroups = @('results', 'container')
+        $ashGroupLeafTakers = @('results:report=report', 'results:diff=diff', 'results:trend=trend', 'results:merge=merge', 'results:inspect=inspect', 'container:build=container')
+        # END generated: ps1-option-groups
         # The subjects `scan` takes. Invoke-ASH names the directory to scan with
         # -SourceDir, mounted for the scan inside, so a directory written after the
         # subject (`scan fs ./src`) would be read inside the container, where the host
@@ -1752,23 +1759,24 @@ function Invoke-ASH {
         }
         else {
             # `container build` and `results report` are a group and the command under
-            # it. The group takes no options (`ash container --offline build` is a
-            # usage error), so what Invoke-ASH adds goes after the command word, and
-            # for `results` the command is what decides which options apply: it takes
-            # what the command of the same name takes (`results merge` takes what
-            # `merge` takes).
+            # it, which is the word right after the group, as the CLI reads it. The
+            # group takes no options (`ash container --offline build` is a usage
+            # error), so what Invoke-ASH adds goes after the command word, and the
+            # command decides which options apply through $ashGroupLeafTakers
+            # (`results merge` takes what `merge` takes). A command the table does not
+            # name takes nothing.
             $insertAfter = $subcommandAt
             $takerName = $subcommand
-            if ($subcommand -ceq 'container' -or $subcommand -ceq 'results') {
-                for ($i = $subcommandAt + 1; $i -lt $forwardedAshArgs.Count; $i++) {
-                    if ($forwardedAshArgs[$i] -clike '-*') {
-                        continue
+            if ($subcommand -cin $ashOptionGroups) {
+                $takerName = ''
+                if ($subcommandAt + 1 -lt $forwardedAshArgs.Count) {
+                    $insertAfter = $subcommandAt + 1
+                    $pairKey = $subcommand + ':' + $forwardedAshArgs[$insertAfter] + '='
+                    foreach ($pair in $ashGroupLeafTakers) {
+                        if ($pair.StartsWith($pairKey, [System.StringComparison]::Ordinal)) {
+                            $takerName = $pair.Substring($pairKey.Length)
+                        }
                     }
-                    $insertAfter = $i
-                    if ($subcommand -ceq 'results') {
-                        $takerName = $forwardedAshArgs[$i]
-                    }
-                    break
                 }
             }
             for ($i = 0; $i -le $insertAfter; $i++) {
@@ -1786,7 +1794,8 @@ function Invoke-ASH {
                 elseif ($option -cnotin @('--quiet', '--no-color')) {
                     # --quiet and --no-color have quieted the build and chosen the
                     # terminal already, so only the others are worth a warning.
-                    Write-Warning "ash $takerName does not take $option, so it is not passed."
+                    $shownCommand = if ($takerName -ne '') { $takerName } else { $subcommand }
+                    Write-Warning "ash $shownCommand does not take $option, so it is not passed."
                 }
             }
             for ($i = $insertAfter + 1; $i -lt $forwardedAshArgs.Count; $i++) {

@@ -175,13 +175,21 @@ def test_the_completer_offers_what_the_wrapper_parses():
     )
 
 
-def test_options_added_for_a_group_go_after_its_command_word():
+def test_the_group_tables_are_the_contracts():
     """`container build` and `results report` take the options Invoke-ASH adds after
-    the command word: `ash container --offline build` is a usage error, and
-    `results merge` takes what `merge` takes. Read from the text, as PowerShell is not
-    run here."""
-    text = _text()
+    the command word (`ash container --offline build` is a usage error), and the
+    command decides which options apply. The groups and their commands are generated,
+    not written in the loop, so they cannot name a group the CLI does not have."""
+    from automated_security_helper.interactions.wrapper_contract import contract
 
-    assert "$insertAfter" in text
-    assert "$subcommand -ceq 'container' -or $subcommand -ceq 'results'" in text
-    assert "-ccontains $takerName" in text
+    spec = contract()
+    assert _ps1_list("ashOptionGroups") == list(spec.option_groups)
+    assert _ps1_list("ashGroupLeafTakers") == list(spec.group_leaf_takers)
+    assert set(spec.option_groups) == {"results", "container"}
+    assert "container:build=container" in spec.group_leaf_takers
+    assert "results:merge=merge" in spec.group_leaf_takers
+    text = _text()
+    # The loop reads the tables, and names no group of its own.
+    assert "$subcommand -cin $ashOptionGroups" in text
+    assert "$ashGroupLeafTakers" in text
+    assert "-ceq 'results'" not in text and "-ceq 'container'" not in text

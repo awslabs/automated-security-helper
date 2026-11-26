@@ -150,6 +150,21 @@
 
 - `trend` is now in the express client's list of commands that are not scans, so
   `ash trend` is no longer sent to an express daemon as a scan.
+- **`./ash --no-color` and `--quiet` now reach the command under `results`.** `./ash
+  --no-color results report` dropped `--no-color` while the older `./ash --no-color
+  report` kept it, so following the deprecation message lost the option. A command under
+  a group takes what its table entry takes, and the groups and their commands are
+  generated into both wrappers.
+- **`Invoke-ASH` puts the options it adds after the command under `container` and
+  `results`.** `Invoke-ASH -Offline -AshArgs 'container build'` ran `ash container
+  --offline build`, which is a usage error (exit 5), and `results merge` dropped `--config`
+  and `--ignore-suppressions` with a warning, which changes what merge gates on.
+- **`./ash scan fs DIR --workspace FILE` is refused as a workspace scan (exit 3), not as
+  an extra argument.** A spaced `--workspace` value is no longer read as a second
+  directory, and a second directory is refused instead of being forwarded to the scan
+  inside, which would have scanned it while the first was mounted.
+- **`ash scan -- DIR` names no subject and is refused.** The message gives the command
+  to run, `ash scan fs -- DIR` when the directory starts with a dash.
 - **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**
   It passes `GITHUB_ACTIONS`, `TF_BUILD` and `TEAMCITY_VERSION` into the container when
   set (by name, or with their values when `OCI_RUNNER_WRAPPER` is set; a value that holds

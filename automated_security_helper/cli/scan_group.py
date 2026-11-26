@@ -91,6 +91,19 @@ def first_positional(args: list[str], params: list[Any]) -> int | None:
     return _read_tokens(args, params)[0]
 
 
+def _not_a_subject(word: str, names: str) -> str:
+    """The refusal for a word that is not a subject, naming the way to scan it.
+
+    A word that starts with a dash is given after ``--``, which is what it needed
+    when it was typed, so the suggested command keeps it.
+    """
+    separator = "-- " if word.startswith("-") else ""
+    return (
+        f"'{word}' is not a scan subject (subjects: {names}). "
+        f"To scan a directory, run 'ash scan {DEFAULT_SUBJECT} {separator}{word}'."
+    )
+
+
 class ScanTyperGroup(TyperGroup):
     """The ``scan`` group: subjects by name, the old no-subject form as an alias.
 
@@ -135,11 +148,7 @@ class ScanTyperGroup(TyperGroup):
         subject = args[index]
         if subject in self.commands:
             return [subject, *args[:index], *args[index + 1 :]]
-        names = ", ".join(self.commands)
-        ctx.fail(
-            f"'{subject}' is not a scan subject (subjects: {names}). "
-            f"To scan a directory, run 'ash scan {DEFAULT_SUBJECT} {subject}'."
-        )
+        ctx.fail(_not_a_subject(subject, ", ".join(self.commands)))
 
 
 def _fs_signature() -> inspect.Signature:
@@ -192,10 +201,7 @@ def run_ash_scan_fs_cli_command(*args: Any, **kwargs: Any) -> Any:
             getattr(ctx.get_parameter_source("path"), "name", None) == "COMMANDLINE"
         )
         if routed_without_subject and path_typed:
-            ctx.fail(
-                f"'{path}' is not a scan subject. "
-                f"To scan a directory, run 'ash scan {DEFAULT_SUBJECT} {path}'."
-            )
+            ctx.fail(_not_a_subject(path, DEFAULT_SUBJECT))
         if from_command_line and kwargs.get("source_dir") != path:
             ctx.fail(
                 "Name the directory once: as the PATH argument or with --source-dir, "
