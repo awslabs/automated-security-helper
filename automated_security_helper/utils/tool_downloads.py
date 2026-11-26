@@ -1108,6 +1108,9 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "aws-guard-rules-registry/NOTICE": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287",  # pragma: allowlist secret
     "bandit commit": "92ae8b82fb422a639f0ed8d99e96cea769594e08",  # pragma: allowlist secret
     "betterleaks commit": "39d5bdcf34db54e944facac5cf6e8b03db5e2b99",  # pragma: allowlist secret
+    "cargo-audit commit": "e3cf3703ed640854af152d019c976ae78211aa22",  # pragma: allowlist secret
+    "cargo-audit/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",  # pragma: allowlist secret
+    "cargo-audit/LICENSE-MIT": "29662666b44dff84977b46e05642cdef910bc3a93a17b5fd86e632bafa59cf21",  # pragma: allowlist secret
     "cfn-lint commit": "720c5cc3d59094baee65a6f5648c111524545061",  # pragma: allowlist secret
     "checkov commit": "2f107f8613830f773b23fa21104b7ac2885c2581",  # pragma: allowlist secret
     "cfn-guard commit": "db494a17fb6030b365d5a5144a397517c7746797",  # pragma: allowlist secret
@@ -1269,6 +1272,41 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         repository="https://github.com/betterleaks/betterleaks",
         commit=_THIRD_PARTY_HASHES["betterleaks commit"],
         files=(LicenseFile("LICENSE"),),
+    ),
+    # The alpha cargo-audit scanner's tool. Pinned and installed by its own module
+    # (``ash_cargo_audit_plugins/cargo_audit_install.py``), not by install-pinned-tool,
+    # so its licenses are staged from the repository at the pinned commit on the
+    # --licenses-only line. The crate lives in the rustsec monorepo, whose root holds
+    # no license file, so both files are read from the crate's own directory; the
+    # linux and macOS release archives carry byte-identical copies (compared on
+    # 2026-11-26). The monorepo tags each crate's releases under its own prefix.
+    "cargo-audit": ThirdPartyLicense(
+        tool="cargo-audit",
+        tag="cargo-audit/v0.23.0",
+        version="v0.23.0",
+        license="Apache-2.0 OR MIT",
+        repository="https://github.com/rustsec/rustsec",
+        commit=_THIRD_PARTY_HASHES["cargo-audit commit"],
+        files=(
+            LicenseFile(
+                "LICENSE-APACHE",
+                url=_source_file(
+                    "https://github.com/rustsec/rustsec",
+                    _THIRD_PARTY_HASHES["cargo-audit commit"],
+                    "cargo-audit/LICENSE-APACHE",
+                ),
+                sha256=_THIRD_PARTY_HASHES["cargo-audit/LICENSE-APACHE"],
+            ),
+            LicenseFile(
+                "LICENSE-MIT",
+                url=_source_file(
+                    "https://github.com/rustsec/rustsec",
+                    _THIRD_PARTY_HASHES["cargo-audit commit"],
+                    "cargo-audit/LICENSE-MIT",
+                ),
+                sha256=_THIRD_PARTY_HASHES["cargo-audit/LICENSE-MIT"],
+            ),
+        ),
     ),
     # The release archive holds the executable and a README, no license file, so
     # both files come from the repository.

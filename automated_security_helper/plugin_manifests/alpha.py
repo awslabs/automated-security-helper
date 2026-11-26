@@ -146,6 +146,14 @@ MANIFESTS = (
         owned=(f"{_DOCS}/betterleaks-plugin.md", f"{_FIXTURES}/betterleaks"),
     ),
     _alpha(
+        "cargo-audit",
+        "ash_cargo_audit_plugins",
+        "cargo_audit_scanner",
+        "CargoAuditScanner",
+        "CargoAuditScannerConfigOptions",
+        owned=(f"{_DOCS}/cargo_audit-plugin.md", f"{_FIXTURES}/cargo_audit"),
+    ),
+    _alpha(
         "credsweeper",
         "ash_credsweeper_plugins",
         "credsweeper_scanner",

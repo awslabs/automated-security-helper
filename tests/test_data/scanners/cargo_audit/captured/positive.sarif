@@ -1,0 +1,108 @@
+{
+  "runs": [
+    {
+      "results": [
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Cargo.lock"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "time 0.1.43 is vulnerable to RUSTSEC-2020-0071 (Potential segfault in the time crate)"
+          },
+          "partialFingerprints": {
+            "cargo-audit/advisory-fingerprint": "RUSTSEC-2020-0071:time:0.1.43"
+          },
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "tags": [
+              "security",
+              "sca",
+              "rust",
+              "vulnerability"
+            ]
+          },
+          "ruleId": "RUSTSEC-2020-0071"
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Cargo.lock"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "atty 0.2.14 has a unmaintained warning: `atty` is unmaintained"
+          },
+          "partialFingerprints": {
+            "cargo-audit/advisory-fingerprint": "RUSTSEC-2024-0375:atty:0.2.14"
+          },
+          "properties": {
+            "issue_severity": "LOW",
+            "tags": [
+              "security",
+              "sca",
+              "rust",
+              "warning"
+            ]
+          },
+          "ruleId": "RUSTSEC-2024-0375"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Cargo.lock"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "atty 0.2.14 has a unsound warning: Potential unaligned read"
+          },
+          "partialFingerprints": {
+            "cargo-audit/advisory-fingerprint": "RUSTSEC-2021-0145:atty:0.2.14"
+          },
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "tags": [
+              "security",
+              "sca",
+              "rust",
+              "warning"
+            ]
+          },
+          "ruleId": "RUSTSEC-2021-0145"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "informationUri": "https://github.com/rustsec/rustsec",
+          "name": "cargo-audit"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

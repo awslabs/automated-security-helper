@@ -70,6 +70,11 @@ installer = _load_installer()
 
 ENTRIES = sorted(THIRD_PARTY_LICENSES)
 
+#: The repository directory a tool's URL-pinned license files are read from, for a tool
+#: whose files are not at the repository root. cargo-audit's crate lives in the rustsec
+#: monorepo, whose root holds no license file. Every other entry reads from the root.
+_LICENSE_DIRECTORY = {"cargo-audit": "cargo-audit/"}
+
 
 def _missing_entries(tool_versions: dict, licenses: dict) -> list:
     """Pinned tools with no license entry, or one recording another version."""
@@ -165,7 +170,7 @@ class TestEntryShape:
                 continue
             assert license_file.url == (
                 f"https://raw.githubusercontent.com/{owner_repo}/{entry.commit}/"
-                f"{license_file.name}"
+                f"{_LICENSE_DIRECTORY.get(tool, '')}{license_file.name}"
             )
             assert re.fullmatch(r"[0-9a-f]{64}", license_file.sha256 or ""), (
                 f"{tool} {license_file.name} has no well-formed SHA256"
@@ -580,7 +585,7 @@ class TestThePythonTools:
     def test_their_licenses_are_staged_between_install_and_verification(self):
         core = _core_stage(DOCKERFILE.read_text())
         staged = core.index(
-            "install-pinned-tool --licenses-only bandit cfn-lint checkov "
+            "install-pinned-tool --licenses-only bandit cargo-audit cfn-lint checkov "
             "ggshield guarddog polaris semgrep zizmor"
         )
         assert core.index('ash dependencies install --bin-path "${ASH_BIN_PATH}"') < (
