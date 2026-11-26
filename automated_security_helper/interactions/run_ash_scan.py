@@ -6,7 +6,6 @@ import inspect
 import json
 import logging
 import os
-import platform
 import shutil
 import stat
 import sys
@@ -5654,13 +5653,9 @@ def _run_local_mode(
             show_progress=final_show_progress,
             simple_mode=opts.simple,
             show_summary=opts.show_summary,
-            color_system=(
-                "windows"
-                if platform.system() == "Windows"
-                else "auto"
-                if opts.color
-                else None
-            ),
+            # "auto" lets Rich read the file the console writes to, on every
+            # platform, as utils/log.py does; None turns color off (--no-color).
+            color_system="auto" if opts.color else None,
             offline=(opts.offline if opts.offline is not None else is_offline_mode()),
             existing_results_path=(
                 Path(opts.existing_results) if opts.existing_results else None
@@ -6097,13 +6092,8 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
         verbose=opts.verbose,
         debug=opts.debug,
         simple=opts.simple,
-        color_system=(
-            "windows"
-            if platform.system() == "Windows"
-            else "auto"
-            if opts.color
-            else None
-        ),
+        # Same rule as the single-directory scan: "auto" when color is on, None off.
+        color_system="auto" if opts.color else None,
         max_parallel_projects=workspace_config.resolved_max_parallel_projects(),
         project_timeout=workspace_config.project_timeout,
         allow_missing_projects=opts.allow_missing_projects,

@@ -168,6 +168,13 @@
 
 ### Fixes
 
+- **On Windows, `--no-color` now turns color off in the scan's progress output.** The
+  scan (and a workspace scan) forced Rich's "windows" color system on every Windows run,
+  so the flag was ignored there and output redirected into a pipe or a file carried
+  escape codes. Both now use "auto" when color is on, as the logger already did, so Rich
+  checks whether the output is a terminal, and no color when `--no-color` is given.
+  Output into a pipe is plain text.
+
 - **A cancelled scan no longer appears in `ash trend`.** The run's history record is
   removed on every path a cancel takes the run's results back: a cancel that lands
   during the final results rewrite or before the MCP server's own check now has the
