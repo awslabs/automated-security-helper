@@ -16,7 +16,7 @@
           "symbol": "version_output"
         }
       ],
-      "sha256": "bc3a2e1873bc84ed9766e42e2ad22d38cfb8825554509836cf133dc2427bfd39"
+      "sha256": "80b46768f7304dac2ce4c94a39d6ab7fb1e70a4b9f91cccffd1043ee9d8d950e"
     },
     "automated_security_helper/cli/dependencies.py": {
       "created": "2026-11-25T17:03:21Z",

@@ -90,3 +90,14 @@ def test_the_digest_tables_agree_on_the_assets():
     for filename in tool_downloads._CRANE_ASSETS.values():
         assert filename in tool_downloads._DIGESTS
         assert filename in tool_downloads._EXECUTABLE_DIGESTS
+
+
+def test_the_image_asks_crane_its_version_with_the_version_subcommand():
+    """crane has no --version flag. The image's license check asked it that way, and
+    every image build stopped there on "Error: unknown flag: --version". Its
+    `version` subcommand prints the release with no leading v (cmd/crane/cmd/version.go
+    and the ldflags in the release's .goreleaser.yml, at the pinned commit), which is
+    what the image's own `RUN crane version` step prints."""
+    assert THIRD_PARTY_LICENSES["crane"].version_args == ("version",)
+    dockerfile = (Path(__file__).resolve().parents[3] / "Dockerfile").read_text()
+    assert "\nRUN crane version\n" in dockerfile
