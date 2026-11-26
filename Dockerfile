@@ -718,7 +718,7 @@ ENV _ASH_EXEC_MODE="local"
 # them; a scan in the image still loads a module only when it is listed. trivy-repo,
 # snyk and ferret are not in the list: their tools come another way.
 ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
-# The pre-rename name of the build argument, honored until ASH 3.9.0: a value given
+# The pre-rename name of the build argument, honored until ASH 4.1.0: a value given
 # for it, an explicitly empty one included, wins over ASH_ALPHA_PLUGIN_MODULES below.
 # The default is a sentinel because an empty-string default cannot tell "not given"
 # from --build-arg ASH_COMMUNITY_PLUGIN_MODULES="". A build that gives the old name
@@ -731,7 +731,7 @@ RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     else \
         echo "WARNING: the ASH_COMMUNITY_PLUGIN_MODULES build argument is deprecated:" \
             "the community tier is now called alpha, so use ASH_ALPHA_PLUGIN_MODULES." \
-            "The old name is accepted until ASH 3.9.0." >&2 && \
+            "The old name is accepted until ASH 4.1.0." >&2 && \
         modules="${ASH_COMMUNITY_PLUGIN_MODULES}"; \
     fi && \
     { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 ASH_OFFLINE=NO \
@@ -877,7 +877,7 @@ ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 # modules are loaded for it; an ARG does not reach a stage built FROM another, so it
 # is declared again (a unit test keeps the two equal).
 ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
-# The pre-rename name of the build argument, honored until ASH 3.9.0: a value given
+# The pre-rename name of the build argument, honored until ASH 4.1.0: a value given
 # for it, an explicitly empty one included, wins over ASH_ALPHA_PLUGIN_MODULES below.
 # The default is a sentinel because an empty-string default cannot tell "not given"
 # from --build-arg ASH_COMMUNITY_PLUGIN_MODULES="". A build that gives the old name
@@ -890,7 +890,7 @@ RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     else \
         echo "WARNING: the ASH_COMMUNITY_PLUGIN_MODULES build argument is deprecated:" \
             "the community tier is now called alpha, so use ASH_ALPHA_PLUGIN_MODULES." \
-            "The old name is accepted until ASH 3.9.0." >&2 && \
+            "The old name is accepted until ASH 4.1.0." >&2 && \
         modules="${ASH_COMMUNITY_PLUGIN_MODULES}"; \
     fi && \
     { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 ASH_OFFLINE=NO \

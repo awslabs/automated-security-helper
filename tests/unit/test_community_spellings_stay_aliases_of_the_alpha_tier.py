@@ -156,7 +156,8 @@ def test_the_new_scanner_column_heading_does_not_warn(tmp_path, warnings_logged)
 
 
 def test_the_alias_window_names_the_next_release():
-    assert plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN == "3.9.0"
+    """The 4.0 line keeps the aliases through 4.0; the 3.x line named 3.9.0."""
+    assert plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN == "4.1.0"
 
 
 def test_the_aliases_are_gone_by_the_release_that_says_it_drops_them():
@@ -184,7 +185,9 @@ def test_the_old_dockerfile_build_argument_still_wins_over_the_new_one():
     An EXPLICITLY EMPTY value wins too (the CHANGELOG says a value given for the
     old name wins), so the default is a sentinel rather than "": a `:-` fallback
     cannot tell `--build-arg ASH_COMMUNITY_PLUGIN_MODULES=""` from the argument
-    not being given. A build that gives the old name warns.
+    not being given. A build that gives the old name warns, and the warning and the
+    comment above it name the release the code drops the aliases in, so moving the
+    window moves the Dockerfile's text with it.
     """
     text = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert text.count('ARG ASH_COMMUNITY_PLUGIN_MODULES="__UNSET__"\n') == 2
@@ -194,6 +197,9 @@ def test_the_old_dockerfile_build_argument_still_wins_over_the_new_one():
         text.count("the ASH_COMMUNITY_PLUGIN_MODULES build argument is deprecated") == 2
     )
     assert "${ASH_COMMUNITY_PLUGIN_MODULES:-" not in text
+    dropped_in = plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN
+    assert text.count(f"The old name is accepted until ASH {dropped_in}.") == 2
+    assert text.count(f"honored until ASH {dropped_in}:") == 2
 
 
 def test_the_renamed_anchors_keep_their_old_ids_for_the_alias_window():
