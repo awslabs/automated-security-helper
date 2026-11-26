@@ -3786,8 +3786,8 @@ global_settings:
         the severity label "LOW". No value is held.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/finding_diff.py
-      line_start: 254
-      line_end: 278
+      line_start: 256
+      line_end: 280
       reason: >-
         False positive. The schema notes map the dropped _secret_detection
         column name to the sentence saying the pair consumer applies it on the
@@ -3795,8 +3795,8 @@ global_settings:
         lines the shipped and in-tree scanners attribute the construct to.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/finding_diff.py
-      line_start: 260
-      line_end: 284
+      line_start: 262
+      line_end: 286
       reason: >-
         False positive. The schema notes map the dropped is_secret_detection
         column name to the sentence saying the diff never joins on it. The

@@ -16,19 +16,19 @@ CSV header, and `fold` changes the number of rows in the human reports.
 
 ## Turn it on
 
-Pass a flag to `ashx scan` or to `ashx report`:
+Pass a flag to `ashx scan` or to `ashx results report`:
 
 <!-- doctest: illustrative reason="needs two scanners that report the same finding, such as grype and trivy" -->
 ```bash
 ashx scan --scanners grype,trivy --annotate-duplicates --fold-duplicates
 ```
 
-`ashx report` applies the same flags to the results of an earlier scan. It only ever turns
+`ashx results report` applies the same flags to the results of an earlier scan. It only ever turns
 a switch on: a scan that recorded the setting keeps it.
 
 <!-- doctest: illustrative reason="needs the output of an earlier scan with findings from two scanners" -->
 ```bash
-ashx report --format csv --annotate-duplicates
+ashx results report --format csv --annotate-duplicates
 ```
 
 Or set the keys in your configuration:

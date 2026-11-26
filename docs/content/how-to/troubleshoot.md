@@ -244,7 +244,7 @@ Fix: check that `--source-dir` names the project, that `ignore_paths`, and the
 repository's `.gitignore` and `.ignore` files, leave the files you mean to scan, and that
 the scanners you selected read them; [Scanner coverage](../reference/coverage.md) lists
 what each scanner reads. To accept such a scan, pass `--no-fail-on-incomplete-scanners`
-or set `fail_on_incomplete_scanners: false`; it then exits 0. `ashx merge` gives the same
+or set `fail_on_incomplete_scanners: false`; it then exits 0. `ashx results merge` gives the same
 verdict over the shards.
 
 ### The scan exits 1 because conversion was incomplete {#the-scan-exits-1-because-conversion-was-incomplete}
@@ -309,7 +309,7 @@ option or argument the command does not take, a value an option does not accept 
 as an invalid `--output-formats`, `--mode`, `--strategy`, or `--min-severity`), a
 `--scanners` list that names no scanner, a `--source-dir` that does not exist or
 cannot be entered, an `--output-dir` that ASH cannot create, enter, or write in,
-`--use-existing` with no results to use, or an `ashx report --format` that no reporter
+`--use-existing` with no results to use, or an `ashx results report --format` that no reporter
 answers to. The code is not 2, so a CI gate does not read a mistyped flag as a scan
 with findings. Two selections exit 2 instead: an `ashx dependencies install --tool` name
 that it has no plugin for, and a `--plugin-type` other than `converter`, `scanner`, or
@@ -320,12 +320,12 @@ that it has no plugin for, and a `--plugin-type` other than `converter`, `scanne
 ashx scan --output-formats nosuch
 ```
 
-`ashx report` with a format no reporter answers to lists the ones it has, whether or not
+`ashx results report` with a format no reporter answers to lists the ones it has, whether or not
 there are results to report:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ashx report --format nosuch
+ashx results report --format nosuch
 ```
 
 ```text
@@ -504,7 +504,7 @@ replace the link with a directory. Turning the sandbox off does not change this.
 
 ### The scan stops because a report file is a link
 
-Symptom: the run exits 1 before any reporter writes, with this message (`ashx merge`
+Symptom: the run exits 1 before any reporter writes, with this message (`ashx results merge`
 prints the same text after `Refusing to write reports:`):
 
 ```text
@@ -513,7 +513,7 @@ ERROR (1) /home/me/out/reports/ash.sarif is a symlink. ASH does not write a repo
 
 Cause: a file a reporter is about to write in `reports/` is a symbolic link or a
 directory junction. A scan clears `reports/` first, so this usually comes from
-`ashx scan --use-existing` or `ashx merge` writing into an output directory that already
+`ashx scan --use-existing` or `ashx results merge` writing into an output directory that already
 holds the link.
 
 Fix: remove the link and run the command again, or write to a new output directory.

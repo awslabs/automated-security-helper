@@ -203,7 +203,7 @@ def test_merge_names_the_entry_by_location(tmp_path, monkeypatch, expiration, de
         _shard_record(expiration), encoding="utf-8"
     )
     merged = tmp_path / "merged"
-    args = ["merge", "--results", str(shard), "--output-dir", str(merged)]
+    args = ["results", "merge", "--results", str(shard), "--output-dir", str(merged)]
     with patch.object(matcher, "ASH_LOGGER", wraps=matcher.ASH_LOGGER) as log:
         result = CliRunner().invoke(
             app, [*args, *(["--debug"] if debug else [])], env={"COLUMNS": "300"}

@@ -434,6 +434,7 @@ def _cli_markdown(output_dir, *extra):
     result = CliRunner().invoke(
         app,
         [
+            "results",
             "report",
             "--format",
             "markdown",

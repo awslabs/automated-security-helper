@@ -1015,7 +1015,7 @@ runs:
         exit $LASTEXITCODE
 
     # Snapshots of what ASH prints when a real runtime runs its image: `ashx --version` and
-    # `ashx build-image --help` inside it, `ashx --mode container` and the PowerShell wrapper scanning
+    # `ashx container build --help` inside it, `ashx --mode container` and the PowerShell wrapper scanning
     # the snapshot fixture, and the exit status each one ends with; and, read from inside
     # the same image, who owns and can write its directories. The unit-test legs have
     # no runtime, so tests/conftest.py deselects these there; the image the scan above just

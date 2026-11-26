@@ -59,6 +59,7 @@ def _report(stdout, results_dir: Path, fmt: str, monkeypatch, *extra: str) -> No
         patched.setattr(sys, "stdout", stdout)
         exit_code = app(
             [
+                "results",
                 "report",
                 "--format",
                 fmt,

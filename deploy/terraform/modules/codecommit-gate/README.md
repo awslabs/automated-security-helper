@@ -70,7 +70,7 @@ outcomes revoke.
 
 **The handler does not compare severities to reach that verdict.** It hands
 `--min-severity` to ASH and reports what ASH decided. `ashx scan` routes its exit
-code through `_compute_exit_code` — the same function `ashx merge` uses — so this
+code through `_compute_exit_code` — the same function `ashx results merge` uses — so this
 gate cannot disagree with a scan, or with the `codepipeline-executor` module, about
 identical findings. A severity table reimplemented here would be another copy of
 the one `automated_security_helper/utils/severity_ladder.py` exists to consolidate,

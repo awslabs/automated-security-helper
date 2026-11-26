@@ -133,7 +133,9 @@ def _invoke(char, *args: str) -> Dict[str, Any]:
 
     char.begin()
     with char.phase("build-image"):
-        result = CliRunner().invoke(app, ["build-image", *args], catch_exceptions=True)
+        result = CliRunner().invoke(
+            app, ["container", "build", *args], catch_exceptions=True
+        )
     exception = result.exception
     if exception is not None and not isinstance(exception, SystemExit):
         raise exception

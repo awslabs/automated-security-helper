@@ -193,6 +193,7 @@ def test_every_report_ash_report_renders_names_the_file(tmp_path):
                 ran = names.ash(
                     tmp_path,
                     [
+                        "results",
                         "report",
                         "--output-dir",
                         str(output),

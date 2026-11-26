@@ -111,7 +111,7 @@ def test_ash_report_drops_the_keys_and_says_so_once(tmp_path, warnings):
     results_file = _write_results(output_dir)
 
     result = CliRunner().invoke(
-        app, ["report", "--format", "yaml", "--output-dir", str(output_dir)]
+        app, ["results", "report", "--format", "yaml", "--output-dir", str(output_dir)]
     )
 
     assert result.exit_code == 0, result.output

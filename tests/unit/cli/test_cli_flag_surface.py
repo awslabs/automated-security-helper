@@ -6,7 +6,7 @@
 The root ``ash`` bash script used to own a parallel flag surface and was deleted
 when the Python CLI absorbed it. These tests pin the v2-era spellings that had
 no Python equivalent, and they pin the two behaviors most easily lost again:
-``scan`` and ``build-image`` must each reject an unknown flag.
+``scan`` and ``container build`` must each reject an unknown flag.
 
 Two measurement traps are handled explicitly rather than assumed away.
 
@@ -56,8 +56,8 @@ USAGE_ERRORS = _usage_error_types()
 
 ROOT = ()
 SCAN = ("scan",)
-REPORT = ("report",)
-BUILD_IMAGE = ("build-image",)
+REPORT = ("results", "report")
+CONTAINER_BUILD = ("container", "build")
 
 
 def _resolve(path):
@@ -159,7 +159,7 @@ class TestProbeIntegrity:
 class TestV2RevisionAliases:
     """``--ash-revision`` and ``-rev`` came from the deleted bash script."""
 
-    @pytest.mark.parametrize("path", [ROOT, SCAN, BUILD_IMAGE])
+    @pytest.mark.parametrize("path", [ROOT, SCAN, CONTAINER_BUILD])
     @pytest.mark.parametrize(
         "spelling", ["--ash-revision-to-install", "--ash-revision", "-rev"]
     )
@@ -167,7 +167,7 @@ class TestV2RevisionAliases:
         params = _parse(path, [spelling, "v3.1.0"])
         assert params["ash_revision_to_install"] == "v3.1.0"
 
-    @pytest.mark.parametrize("path", [ROOT, SCAN, BUILD_IMAGE])
+    @pytest.mark.parametrize("path", [ROOT, SCAN, CONTAINER_BUILD])
     def test_dash_rev_is_one_token_not_three_short_flags(self, path):
         """``-rev`` must not be parsed as ``-r -e -v``.
 
@@ -187,8 +187,8 @@ class TestQuietShortForm:
     def test_q_binds_to_quiet(self):
         assert _parse(ROOT, ["-q"])["quiet"] is True
 
-    def test_build_image_q_binds_to_quiet(self):
-        assert _parse(BUILD_IMAGE, ["-q"])["quiet"] is True
+    def test_container_build_q_binds_to_quiet(self):
+        assert _parse(CONTAINER_BUILD, ["-q"])["quiet"] is True
 
     def test_long_form_still_works(self):
         assert _parse(ROOT, ["--quiet"])["quiet"] is True
@@ -275,7 +275,7 @@ class TestNoColorShortForm:
         at the declaration site, so it is pinned here: a leaked decl shows up as
         a ``/-C`` spelling on the command.
         """
-        for path in (ROOT, SCAN, BUILD_IMAGE):
+        for path in (ROOT, SCAN, CONTAINER_BUILD):
             assert "/-C" not in _spellings(path)
 
     def test_every_command_with_color_offers_the_short_form(self):
@@ -317,7 +317,9 @@ class TestNoColorShortForm:
 class TestHelpShortForm:
     """click injects ``--help`` only; ``-h`` needs ``help_option_names``."""
 
-    @pytest.mark.parametrize("path", [[], ["scan"], ["build-image"], ["report"]])
+    @pytest.mark.parametrize(
+        "path", [[], ["scan"], ["container", "build"], ["results", "report"]]
+    )
     def test_dash_h_shows_help(self, path):
         from typer.testing import CliRunner
 
@@ -359,26 +361,26 @@ class TestUnknownFlagsAreRejected:
         assert params["ash_revision_to_install"] == "v3.1.0"
 
 
-class TestBuildImageRefusesExtraArgs:
-    """``build-image`` takes only the options it declares, like ``scan``.
+class TestContainerBuildRefusesExtraArgs:
+    """``container build`` takes only the options it declares, like ``scan``.
 
     Container mode recomputes the exit code on the host from the host's own
     options, so an argument forwarded to the scan inside the container would change
     what that scan reported and not the exit code. ``ash scan --mode container``
     takes every scan option and applies it on both sides; the contract (see
     tests/unit/cli/test_scan_refuses_unused_arguments.py and
-    docs/content/reference/exit-codes.md) is that ``build-image`` refuses an
+    docs/content/reference/exit-codes.md) is that ``container build`` refuses an
     option it does not define with the usage-error exit code.
     """
 
-    def test_build_image_rejects_an_unknown_flag(self):
-        assert _rejects(BUILD_IMAGE, ["--totally-bogus-flag"])
+    def test_container_build_rejects_an_unknown_flag(self):
+        assert _rejects(CONTAINER_BUILD, ["--totally-bogus-flag"])
 
-    def test_build_image_still_accepts_its_real_flags(self):
+    def test_container_build_still_accepts_its_real_flags(self):
         """Control: the rejection above is not the parser refusing everything."""
-        assert _parse(BUILD_IMAGE, ["--no-run"])["no_run"] is True
+        assert _parse(CONTAINER_BUILD, ["--no-run"])["no_run"] is True
 
-    def test_build_image_context_settings_do_not_allow_extra_args(self):
-        _, cmd = _resolve(BUILD_IMAGE)
+    def test_container_build_context_settings_do_not_allow_extra_args(self):
+        _, cmd = _resolve(CONTAINER_BUILD)
         assert not cmd.context_settings.get("allow_extra_args")
         assert not cmd.context_settings.get("ignore_unknown_options")

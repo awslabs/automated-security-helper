@@ -14,8 +14,8 @@
   What is kept for upload leaves out every symbolic link, every dot entry and every
   secret-shaped name; an ``.ash/ash_output`` directory is kept as ``ash_output``.
 * The result each job of a GitHub workflow should have follows from what it runs: a
-  job that runs ``ash scan``, ``ash merge`` or ``ash`` with options (a scan) without
-  ``--no-fail-on-findings``, or
+  job that runs ``ash scan``, ``ash results merge`` or ``ash`` with options (a scan)
+  without ``--no-fail-on-findings``, or
   the job of the reusable scan workflow when its caller leaves ``fail-on-findings``
   on, fails, because every runnable block runs on a fixture with findings; any other
   job passes. A job that calls a reusable workflow is expected under the job ids of
@@ -94,10 +94,14 @@ def _runs_ash(subcommands: str, space: str = _ASH_SPACE) -> re.Pattern[str]:
 #: A command that runs an ASH scan: ``ash scan``, or ``ash`` followed by an option,
 #: since the scan is the CLI's default command (``ash --source-dir .`` scans).
 RUNS_SCAN = _runs_ash("scan")
-#: A command that runs an ASH scan or ``ash merge``.
-RUNS_SCAN_OR_MERGE = _runs_ash("scan|merge")
+#: A command that runs an ASH scan or a merge: ``ash results merge``, the spelling the
+#: pages use since 4.0 removed the top-level ``ash merge``, or ``ash merge`` itself, so a
+#: page that still writes it gates on findings and fails on its missing verdict line.
+RUNS_SCAN_OR_MERGE = _runs_ash(rf"scan|(?:results{_ASH_SPACE})?merge")
 #: RUNS_SCAN_OR_MERGE for a YAML block that does not parse, read as written.
-RUNS_SCAN_OR_MERGE_ANY_LINE = _runs_ash("scan|merge", _ANY_SPACE)
+RUNS_SCAN_OR_MERGE_ANY_LINE = _runs_ash(
+    rf"scan|(?:results{_ANY_SPACE})?merge", _ANY_SPACE
+)
 _GATES = RUNS_SCAN_OR_MERGE
 _MATRIX = re.compile(r"\$\{\{\s*matrix\.([\w-]+)\s*\}\}")
 _RUNS_ASH = re.compile(r"(?<![\w.-])uvx\b.*?(?<![\w.-])ashx?(?![\w.-])")
@@ -983,11 +987,13 @@ def conditional_steps(
 
 
 def gating_step(workflow: Mapping[str, Any], command: str) -> tuple[str, str] | None:
-    """(job, step name) of the first step that runs ``ash <command>``."""
+    """(job, step name) of the first step that runs ``ash <command>``. The words of a
+    command such as ``results merge`` are separated the way ``ash`` is from its first."""
+    words = _ASH_SPACE.join(re.escape(word) for word in command.split())
     for job_id, job in (workflow.get("jobs") or {}).items():
         for step in (job or {}).get("steps") or []:
             run = str((step or {}).get("run", ""))
-            if re.search(rf"(?<![\w.-])ashx?{_ASH_SPACE}{command}\b", run):
+            if re.search(rf"(?<![\w.-])ashx?{_ASH_SPACE}{words}\b", run):
                 return str(job_id), str(step.get("name") or "")
     return None
 

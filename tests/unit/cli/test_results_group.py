@@ -1,23 +1,21 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ash results {report, diff, trend, merge, inspect}`` and the deprecated spellings.
+"""``ashx results {report, diff, trend, merge, inspect}``, and the spellings 4.0 removed.
 
 The five commands that read, compare and combine saved results moved under one
-noun. Each new spelling runs the same implementation as the old top-level one;
-each old spelling keeps working through 4.0, prints one DeprecationWarning on
-stderr naming its replacement under the v4 entry point ``ashx``, and is removed
-in 4.1.
+noun in 3.9. The old top-level spellings (``ash report`` and the rest) were
+deprecated then, with one DeprecationWarning per run naming the replacement, and
+are removed in 4.0: the root has no such command, so each is a usage error, and
+the new spelling is the only one.
 """
 
 import typer.main
 import pytest
 from typer.testing import CliRunner
 
-from automated_security_helper.cli.main import (
-    DEPRECATED_RESULTS_SPELLINGS,
-    app,
-)
+from automated_security_helper.cli.main import app
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 
 pytestmark = pytest.mark.unit
 
@@ -41,7 +39,7 @@ def _argv(verb: str, tmp_path) -> list[str]:
 
 
 def _run(argv: list[str]):
-    return CliRunner().invoke(app, argv, prog_name="ash")
+    return CliRunner().invoke(app, argv, prog_name="ashx")
 
 
 def _warnings(stderr: str) -> list[str]:
@@ -50,77 +48,40 @@ def _warnings(stderr: str) -> list[str]:
     ]
 
 
-def _options(command) -> set[str]:
-    return {opt for param in command.params for opt in getattr(param, "opts", [])}
-
-
-def test_the_deprecated_set_is_the_five_results_verbs():
-    assert DEPRECATED_RESULTS_SPELLINGS == set(VERBS)
-
-
 def test_results_group_holds_exactly_the_five_verbs():
     root = typer.main.get_command(app)
     assert set(root.commands["results"].commands) == set(VERBS)
 
 
 @pytest.mark.parametrize("verb", VERBS)
-def test_the_new_spelling_runs_the_same_command_as_the_old(verb):
+def test_the_old_spelling_is_not_a_root_command(verb):
     root = typer.main.get_command(app)
-    old, new = root.commands[verb], root.commands["results"].commands[verb]
-    assert _options(new) == _options(old)
-    assert type(new) is type(old)
-    assert new.help == old.help
+    assert verb not in root.commands
 
 
 @pytest.mark.parametrize("verb", VERBS)
-def test_the_new_spelling_does_not_warn(verb, tmp_path):
+def test_the_new_spelling_runs_and_does_not_warn(verb, tmp_path):
     result = _run(["results", *_argv(verb, tmp_path)])
+    assert "No such command" not in result.output
     assert _warnings(result.stderr) == []
 
 
 @pytest.mark.parametrize("verb", VERBS)
-def test_the_old_spelling_warns_once_and_still_works(verb, tmp_path):
-    new = _run(["results", *_argv(verb, tmp_path)])
-    old = _run(_argv(verb, tmp_path))
-    warned = _warnings(old.stderr)
-    assert len(warned) == 1
-    assert f"'ashx {verb}' is deprecated" in warned[0]
-    assert "removed in 4.1" in warned[0]
-    assert f"'ashx results {verb}'" in warned[0]
-    # Same behavior as the new spelling: same verdict, and the command's own
-    # message, when it prints one a spelling-free way, is unchanged.
-    assert old.exit_code == new.exit_code
-    assert old.stdout == new.stdout
-
-
-@pytest.mark.parametrize("verb", ["diff", "trend"])
-def test_the_old_spelling_keeps_the_commands_own_error_text(verb, tmp_path):
-    new = _run(["results", *_argv(verb, tmp_path)])
-    old = _run(_argv(verb, tmp_path))
-    assert [
-        line for line in old.stderr.splitlines() if not line.startswith("Deprecation")
-    ] == (new.stderr.splitlines())
+def test_the_removed_spelling_is_a_usage_error(verb, tmp_path):
+    result = _run(_argv(verb, tmp_path))
+    assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+    assert f"No such command '{verb}'" in result.stderr
+    assert _warnings(result.stderr) == []
 
 
 @pytest.mark.parametrize("verb", VERBS)
-def test_asking_for_help_does_not_warn(verb):
-    result = _run([verb, "--help"])
+def test_asking_for_help_on_the_new_spelling_does_not_warn(verb):
+    result = _run(["results", verb, "--help"])
     assert result.exit_code == 0
     assert _warnings(result.stderr) == []
 
 
-@pytest.mark.parametrize("verb", ["report", "diff", "trend", "merge"])
-def test_printing_the_json_skeleton_does_not_warn(verb):
-    # The skeleton only prints what the command takes; it is not a use of the
-    # deprecated spelling, and the snapshots of it stay the same under both.
-    old = _run([verb, "--generate-cli-skeleton"])
-    new = _run(["results", verb, "--generate-cli-skeleton"])
-    assert old.exit_code == new.exit_code == 0
-    assert _warnings(old.stderr) == []
-    assert old.stdout == new.stdout
-
-
-def test_root_help_lists_results_and_hides_the_old_spellings():
+def test_root_help_lists_results_and_not_the_removed_spellings():
     result = _run(["--help"])
     assert result.exit_code == 0
     names = {
@@ -129,16 +90,7 @@ def test_root_help_lists_results_and_hides_the_old_spellings():
         if line.startswith("│ ") and line[2:3].isalpha()
     }
     assert "results" in names
-    assert not names & DEPRECATED_RESULTS_SPELLINGS
-
-
-def test_the_old_spellings_stay_in_the_command_mapping():
-    # Hidden from --help, not removed: the docs, the wrapper tables and the help
-    # snapshots walk the mapping, and 4.0 is when the entries go.
-    root = typer.main.get_command(app)
-    for verb in VERBS:
-        assert verb in root.commands
-        assert root.commands[verb].hidden is True
+    assert not names & set(VERBS)
 
 
 def test_a_bare_results_group_prints_its_help_and_exits_with_the_usage_code():

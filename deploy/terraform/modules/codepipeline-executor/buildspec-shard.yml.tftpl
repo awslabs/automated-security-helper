@@ -92,7 +92,7 @@ phases:
 
   post_build:
     commands:
-      # No completion marker is written. `ashx merge` establishes shard coverage
+      # No completion marker is written. `ashx results merge` establishes shard coverage
       # from the shard_index and shard_count recorded inside each shard's own
       # results and raises ShardCoverageError when the space is not fully
       # covered, which is stronger than a marker file this buildspec invented:

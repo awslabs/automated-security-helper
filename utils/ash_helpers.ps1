@@ -137,13 +137,13 @@ function Invoke-ASH {
     .PARAMETER RemainingAshArgs
     Arguments after Invoke-ASH's own parameters, handled like those in -AshArgs. Each
     is passed to ASH as one argument. The first of them is -SourceDir, which takes
-    position 0, unless -SourceDir is given: `Invoke-ASH report` takes report as
-    -SourceDir, so it scans a directory named report, and is refused with 5 when
-    there is none. `Invoke-ASH -SourceDir . report` runs `ash report`. PowerShell reads
-    them before Invoke-ASH does: a comma list such as `sarif,html` is rejoined with
-    commas, but a bare `-c` is an ambiguous prefix of -Config, -ContainerUID, and
-    -ContainerGID and is refused by PowerShell, so write it as '-c' or put it in
-    -AshArgs.
+    position 0, unless -SourceDir is given: `Invoke-ASH results` takes results as
+    -SourceDir, so it scans a directory named results, and is refused with 5 when
+    there is none. `Invoke-ASH -SourceDir . results report` runs
+    `ash results report`. PowerShell reads them before Invoke-ASH does: a comma list
+    such as `sarif,html` is rejoined with commas, but a bare `-c` is an ambiguous
+    prefix of -Config, -ContainerUID, and -ContainerGID and is refused by PowerShell,
+    so write it as '-c' or put it in -AshArgs.
 
     .PARAMETER OCIRunner
     Preferred OCI runner CLI tool to use, e.g. `docker`, `finch`, `nerdctl`, or `podman`.
@@ -856,7 +856,7 @@ function Invoke-ASH {
         # tests/unit/test_sandbox_refused_by_every_container_entrypoint.py checks these
         # lists against ./ash's and the real commands and options.
         # BEGIN generated: ps1-subcommands (scripts/generate_wrapper_tables.py)
-        $ashSubcommands = @('scan', 'build-image', 'report', 'diff', 'trend', 'merge', 'results', 'mcp', 'get-genai-guide', 'container', 'config', 'dependencies', 'inspect', 'plugin', 'suppress', 'express')
+        $ashSubcommands = @('scan', 'results', 'mcp', 'get-genai-guide', 'container', 'config', 'dependencies', 'plugin', 'suppress', 'express')
         $ashTakesSandbox = @('scan')
         # END generated: ps1-subcommands
         # The root ash options that take a value, ASH_ROOT_VALUE_OPTIONS in ./ash. A value
@@ -867,21 +867,21 @@ function Invoke-ASH {
         # END generated: ps1-root-value-options
         # BEGIN generated: ps1-option-subcommands (scripts/generate_wrapper_tables.py)
         $ashOptionSubcommands = @{
-            '--quiet'                = 'scan build-image mcp container'
-            '--no-color'             = 'scan build-image report merge mcp container'
+            '--quiet'                = 'scan mcp container'
+            '--no-color'             = 'scan mcp container'
             '--progress'             = 'scan'
             '--no-progress'          = 'scan'
             '--show-summary'         = 'scan'
             '--no-show-summary'      = 'scan'
-            '--fail-on-findings'     = 'scan merge'
-            '--no-fail-on-findings'  = 'scan merge'
-            '--verbose'              = 'scan build-image report merge mcp container'
-            '--debug'                = 'scan build-image report merge mcp container'
-            '--offline'              = 'scan build-image container'
-            '--config'               = 'scan build-image report merge container'
+            '--fail-on-findings'     = 'scan'
+            '--no-fail-on-findings'  = 'scan'
+            '--verbose'              = 'scan mcp container'
+            '--debug'                = 'scan mcp container'
+            '--offline'              = 'scan container'
+            '--config'               = 'scan container'
             '--scanners'             = 'scan'
             '--exclude-scanners'     = 'scan'
-            '--ignore-suppressions'  = 'scan merge'
+            '--ignore-suppressions'  = 'scan'
         }
         # END generated: ps1-option-subcommands
         $subcommandAt = -1
@@ -1723,14 +1723,14 @@ function Invoke-ASH {
             }
         }
 
-        # OCI_RUNNER is what ./ash and the ash CLI read. ASH_OCI_RUNNER, a deprecated name
+        # OCI_RUNNER is what the ashx CLI reads. ASH_OCI_RUNNER, a deprecated name
         # only this function reads, applies when OCI_RUNNER is unset and no -OCIRunner
         # was passed, so a profile that sets it keeps the runner it chose.
         # $ociRunnerSource names the variable the value came from, for the refusal of a
         # relative path below.
         $ociRunnerSource = 'OCI_RUNNER'
         if (-not $PSBoundParameters.ContainsKey('OCIRunner') -and [string]::IsNullOrEmpty($OCIRunner) -and -not [string]::IsNullOrEmpty($env:ASH_OCI_RUNNER)) {
-            Write-Warning "ASH_OCI_RUNNER is deprecated; set OCI_RUNNER instead, which ./ash and the ash CLI also read."
+            Write-Warning "ASH_OCI_RUNNER is deprecated; set OCI_RUNNER instead, which the ashx CLI also reads."
             $OCIRunner = $env:ASH_OCI_RUNNER
             $ociRunnerSource = 'ASH_OCI_RUNNER'
         }

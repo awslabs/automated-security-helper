@@ -413,7 +413,7 @@ export function mergeCommands(
   if (resultsPaths.length === 0) {
     throw new Error('mergeCommands requires at least one results path.');
   }
-  const argv = [ashInvocation(install), 'merge'];
+  const argv = [ashInvocation(install), 'results', 'merge'];
   for (const results of resultsPaths) {
     argv.push('--results', shellArg(results));
   }

@@ -132,7 +132,7 @@ jobs:
           if command -v cygpath >/dev/null 2>&1; then work="$(cygpath -u "$work")"; fi
           bash scripts/e2e/wheel.sh "$work"
 
-  # The container image, built from this commit with `ashx build-image` and driven by a
+  # The container image, built from this commit with `ashx container build` and driven by a
   # host `ashx scan --mode container`, exactly as a user runs it. Never pushed: the image
   # exists only in this runner's docker, under a tag unique to this run, and
   # scripts/e2e/container.sh removes it at the end. assert-no-image-publish fails the job
@@ -177,7 +177,7 @@ jobs:
         with:
           oci-runner: docker
 
-      # container.sh runs `ashx build-image`, which reads the pre-pull's hand-off from
+      # container.sh runs `ashx container build`, which reads the pre-pull's hand-off from
       # the environment. The action returns it as outputs, not through GITHUB_ENV.
       - name: Build, install, scan, upgrade, uninstall
         env:

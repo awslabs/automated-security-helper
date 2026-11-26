@@ -153,7 +153,7 @@ A finding is actionable when its severity is at or above the threshold;
 [Severity thresholds](set-the-gate.md#thresholds) lists the severities each threshold
 includes.
 
-The table, the exit code, `ashx inspect findings`, and every report except
+The table, the exit code, `ashx results inspect findings`, and every report except
 `ash.ghas.sarif` give a finding this same severity. Formats with a scale of their own
 carry it in that scale: GitLab SAST as `Critical` to `Info`, and OCSF as `severity_id` 5
 to 1.
@@ -242,30 +242,28 @@ detect-secrets FAILED 1
 The commands that work on results a scan already wrote, and run no scan themselves, live
 under one noun: `ashx results report`, `ashx results diff`, `ashx results trend`,
 `ashx results merge` and `ashx results inspect`. Each takes the same options and behaves the
-same as the top-level command it replaces.
+same as the top-level command it replaced.
 
-The old top-level spellings (`ashx report`, `ashx diff`, `ashx trend`, `ashx merge` and
-`ashx inspect`) still work in 3.9 and 4.0. Each prints one `DeprecationWarning` line on standard
-error that names its replacement, and all five are removed in 4.1. They no longer appear in
-`ashx --help`. Standard output, exit codes and options are unchanged, so a script that reads
-them keeps working while you move it to the new spelling. The sections below use the
-top-level spelling; add `results` after `ashx` to use the new one.
+The old top-level spellings (`report`, `diff`, `trend`, `merge` and `inspect` directly
+under `ashx`) were deprecated in 3.9 and are removed in 4.0: each is now an unknown command,
+a usage error that exits 5 and runs nothing. Add `results` after `ashx` in a script that
+still uses one.
 
-## Print a report in the terminal with `ashx report`
+## Print a report in the terminal with `ashx results report`
 
-`ashx report` renders a report of the last scan and prints it to standard output. It reads
+`ashx results report` renders a report of the last scan and prints it to standard output. It reads
 `ash_aggregated_results.json` only from `.ash/ash_output` under the current directory, and
 does not write a report file:
 
 ```bash
-ashx report
+ashx results report
 ```
 
 The default format is `markdown`. `--format` takes any reporter name, including reporters
 a scan does not run by default, such as `yaml`:
 
 ```bash
-ashx report --format text
+ashx results report --format text
 ```
 
 To read another output directory, pass `--output-dir`, or set `ASH_OUTPUT_DIR`. ASH looks
@@ -273,14 +271,14 @@ for the results file in `.ash/ash_output` and `ash_output` under that directory,
 directory itself, and reports on the one it finds:
 
 ```bash
-ashx report --output-dir build/ash-results --format sarif > build/ash-report.sarif
+ashx results report --output-dir build/ash-results --format sarif > build/ash-report.sarif
 ```
 
 When more than one of the three holds a results file, ASH prints
 `More than one scan results file found:` with each path, reports on none, and exits 5.
 Point `--output-dir` at the directory that holds the one to report on.
 
-`ashx report` writes its log to standard error, so standard output holds the report
+`ashx results report` writes its log to standard error, so standard output holds the report
 alone. The text, Markdown and HTML reporters neutralize a finding's scanner text as
 they build the document: a control character is written as a visible escape, and a CI
 command form is broken where it stands, so no line of the document is one a CI runner
@@ -308,7 +306,7 @@ A missing results file prints `No scan results found:` with the paths it checked
 exits 1. With `--output-dir` or `ASH_OUTPUT_DIR` the message names the three paths ASH
 looked in (`none of … exists`); otherwise it names
 `.ash/ash_output/ash_aggregated_results.json` under the current directory, in full
-(`… does not exist`). `ashx report` creates nothing then, and an output directory under a
+(`… does not exist`). `ashx results report` creates nothing then, and an output directory under a
 directory it cannot search counts as missing. An output directory that exists but cannot
 be entered is refused with exit 5, `Output directory cannot be entered:` and the path as
 given. So is an output directory that is a file, `Output directory is not a directory:`,
@@ -319,19 +317,19 @@ prints `Error: Reporter plugin '<name>' not found.` and the reporter names, and 
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ashx report --format nosuch
+ashx results report --format nosuch
 ```
 
 The reporters are listed in [Reporters](../reference/reporters.md).
 
-## Explore findings with `ashx inspect findings`
+## Explore findings with `ashx results inspect findings`
 
-`ashx inspect findings` opens an interactive browser of the findings in the terminal. It
+`ashx results inspect findings` opens an interactive browser of the findings in the terminal. It
 reads `ash_aggregated_results.json` from `.ash/ash_output`, or from `--output-dir`:
 
 <!-- doctest: illustrative reason="opens an interactive terminal application" -->
 ```bash
-ashx inspect findings --output-dir build/ash-results
+ashx results inspect findings --output-dir build/ash-results
 ```
 
 | Press | To |
@@ -357,15 +355,15 @@ writes nothing; one that differs, such as another line range for the same rule a
 is added. The suppression applies from the next scan. See
 [Suppress findings](suppress-findings.md) before you suppress from here.
 
-## Check which SARIF fields survive with `ashx inspect sarif-fields`
+## Check which SARIF fields survive with `ashx results inspect sarif-fields`
 
-`ashx inspect sarif-fields` is for plugin authors and for debugging a scanner integration.
+`ashx results inspect sarif-fields` is for plugin authors and for debugging a scanner integration.
 It reads every scanner's own SARIF under `scanners/` and the reports' SARIF under
 `reports/`, and shows which fields each scanner fills in and whether they reach the
 aggregated report:
 
 ```bash
-ashx inspect sarif-fields --sarif-dir .ash/ash_output --output-dir build/sarif-fields
+ashx results inspect sarif-fields --sarif-dir .ash/ash_output --output-dir build/sarif-fields
 ```
 
 It prints a summary and writes `sarif_fields.json`, `sarif_fields.csv`,

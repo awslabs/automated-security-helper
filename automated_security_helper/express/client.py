@@ -62,16 +62,12 @@ from automated_security_helper.utils.terminal_text import shown_not_obeyed
 #: correctly, merely through the daemon; tests pin the list against the app.
 NON_SCAN_SUBCOMMANDS = frozenset(
     {
-        "build-image",
-        "report",
-        "diff",
-        "trend",
-        "merge",
+        "results",
         "mcp",
         "get-genai-guide",
+        "container",
         "config",
         "dependencies",
-        "inspect",
         "plugin",
         "suppress",
         "express",

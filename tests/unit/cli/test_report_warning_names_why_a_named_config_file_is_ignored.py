@@ -107,7 +107,7 @@ def _report(
         encoding="utf-8",
     )
     outside_every_checkout(operator)
-    args = ["report", "--format", REPORTER, "--config", str(operator)]
+    args = ["results", "report", "--format", REPORTER, "--config", str(operator)]
     args += ["--output-dir", str(output)]
     args += ["--config-overrides", f"ash_plugin_modules=[{PLUGIN}]"]
     result = subprocess.run(

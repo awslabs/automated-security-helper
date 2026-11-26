@@ -116,7 +116,7 @@ def _scan(tmp_path, monkeypatch):
 
 
 def _merge_args(tmp_path, config):
-    args = ["merge"]
+    args = ["results", "merge"]
     for path in write_shards(tmp_path / "artifacts", build_shards(2)):
         args += ["--results", path]
     return args + [

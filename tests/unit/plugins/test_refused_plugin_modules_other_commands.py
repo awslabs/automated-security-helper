@@ -193,6 +193,7 @@ class TestCommandsExitThreeForANameThatDoesNotImport:
     def test_report(self, packages, tmp_path):
         result = _invoke(
             [
+                "results",
                 "report",
                 "--output-dir",
                 str(tmp_path / "out"),
@@ -213,6 +214,7 @@ class TestCommandsExitThreeForANameThatDoesNotImport:
         for shard in shards:
             shard.ash_config.ash_plugin_modules = [NOT_INSTALLED]
         args = [
+            "results",
             "merge",
             "--output-dir",
             str(tmp_path / "merged"),
@@ -264,6 +266,7 @@ class TestCommandsExitThree:
     def test_report(self, packages, tmp_path):
         result = _invoke(
             [
+                "results",
                 "report",
                 "--output-dir",
                 str(tmp_path / "out"),
@@ -284,7 +287,7 @@ class TestCommandsExitThree:
         shards = build_shards(3)
         for shard in shards:
             shard.ash_config.ash_plugin_modules = [REFUSED]
-        args = ["merge", "--output-dir", str(tmp_path / "merged")]
+        args = ["results", "merge", "--output-dir", str(tmp_path / "merged")]
         for path in write_shards(tmp_path / "artifacts", shards):
             args += ["--results", path]
 
@@ -308,6 +311,7 @@ class TestCommandsExitThree:
         for shard in shards:
             shard.ash_config.ash_plugin_modules = [joined]
         args = [
+            "results",
             "merge",
             "--output-dir",
             str(tmp_path / "merged"),
@@ -386,6 +390,7 @@ class TestARefusalQuotingMarkupStillExitsThree:
     def test_report(self, packages, tmp_path):
         result = _invoke(
             [
+                "results",
                 "report",
                 "--output-dir",
                 str(tmp_path / "out"),
@@ -409,7 +414,7 @@ class TestARefusalQuotingMarkupStillExitsThree:
         shards = build_shards(3)
         for shard in shards:
             shard.ash_config.ash_plugin_modules = [MARKUP_NAME]
-        args = ["merge", "--output-dir", str(tmp_path / "merged")]
+        args = ["results", "merge", "--output-dir", str(tmp_path / "merged")]
         for path in write_shards(tmp_path / "artifacts", shards):
             args += ["--results", path]
 

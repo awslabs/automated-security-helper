@@ -72,8 +72,8 @@ def test_every_block_has_its_markers_in_its_file(generator):
         (
             "utils/ash_helpers.ps1",
             "ps1-option-subcommands",
-            "'--ignore-suppressions'  = 'scan merge'\n",
             "'--ignore-suppressions'  = 'scan'\n",
+            "'--ignore-suppressions'  = 'scan container'\n",
         ),
         (
             "utils/ash_helpers.ps1",
@@ -132,10 +132,12 @@ def test_regenerating_a_perturbed_copy_restores_the_committed_text(generator, tm
     root = _copy_of_the_wrappers(tmp_path, generator)
     path = root / "utils" / "ash_helpers.ps1"
     text = path.read_text(encoding="utf-8")
-    # The --offline row: the one row whose value is exactly this list.
-    anchor = "= 'scan build-image container'\n"
+    # The --offline row, named with its key: --config holds the same list.
+    anchor = "'--offline'              = 'scan container'\n"
     assert text.count(anchor) == 1, f"the perturbation's anchor is gone: {anchor!r}"
-    path.write_text(text.replace(anchor, "= 'scan container'\n"), encoding="utf-8")
+    path.write_text(
+        text.replace(anchor, "'--offline'              = 'scan'\n"), encoding="utf-8"
+    )
     assert generator.check(root)
 
     written = generator.write(root)
@@ -172,9 +174,11 @@ def test_regenerating_keeps_each_files_own_line_endings(generator, tmp_path, end
     root = _copy_of_the_wrappers(tmp_path, generator)
     path = root / "utils" / "ash_helpers.ps1"
     text = path.read_text(encoding="utf-8")
-    anchor = "= 'scan build-image container'\n"
+    anchor = "'--offline'              = 'scan container'\n"
     assert text.count(anchor) == 1, f"the perturbation's anchor is gone: {anchor!r}"
-    stale = text.replace(anchor, "= 'scan container'\n").replace("\n", ending)
+    stale = text.replace(anchor, "'--offline'              = 'scan'\n").replace(
+        "\n", ending
+    )
     with path.open("w", encoding="utf-8", newline="") as handle:
         handle.write(stale)
     assert generator.check(root)

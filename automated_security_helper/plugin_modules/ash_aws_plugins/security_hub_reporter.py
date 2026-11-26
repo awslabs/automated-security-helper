@@ -1206,7 +1206,8 @@ def _workspace_results_message(model: "AshAggregatedResults") -> str:
     return (
         "aws-security-hub imports one project's results at a time, and these are a "
         "workspace's unified results, which record no scan time, configuration or "
-        "changed-files marker of their own. Run ash report with --output-dir set "
+        "changed-files marker of their own. Run ashx results report with "
+        "--output-dir set "
         "to a project's directory under the workspace output, so it reads that "
         f"project's results: {listed}."
     )

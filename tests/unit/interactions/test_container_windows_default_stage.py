@@ -76,10 +76,18 @@ _SCAN = [
     "--ash-revision-to-install",
     "v3.7.0",
 ]
-_BUILD_IMAGE = ["build-image", "--no-run", "--ash-revision-to-install", "v3.7.0"]
+_BUILD_IMAGE = [
+    "container",
+    "build",
+    "--no-run",
+    "--ash-revision-to-install",
+    "v3.7.0",
+]
 
 
-@pytest.mark.parametrize("command", [_SCAN, _BUILD_IMAGE], ids=["scan", "build-image"])
+@pytest.mark.parametrize(
+    "command", [_SCAN, _BUILD_IMAGE], ids=["scan", "container-build"]
+)
 @pytest.mark.parametrize(
     ("windows", "target_args", "expected"),
     [

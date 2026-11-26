@@ -701,7 +701,7 @@ export class AshDistributedPipelineStack extends Stack {
               // --results is repeatable and accepts a file or a directory. One
               // flag per shard directory, so a shard that vanished between the
               // check above and here still fails rather than being skipped.
-              [`${ASH_CLI} merge \\`, ...resultsFlags, '  --output-dir ./ash-merged-output'].join('\n'),
+              [`${ASH_CLI} results merge \\`, ...resultsFlags, '  --output-dir ./ash-merged-output'].join('\n'),
             ],
           },
           post_build: {

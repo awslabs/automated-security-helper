@@ -297,12 +297,12 @@ CLEAN_CLI = f"""# Commands
 ash --source-dir . --output-dir out --scanners detect-secrets --offline
 ash scan --offline \\
   --log-level INFO
-ash config init --force && ash report --format text | tee report.txt
+ash config init --force && ash results report --format text | tee report.txt
 uvx --from git+https://github.com/awslabs/automated-security-helper.git@v4.0.0 ash --mode local
 uvx git+https://github.com/awslabs/automated-security-helper.git@v4.0.0 --version
 docker run --rm -v "$(pwd):/src" ghcr.io/example/ash:latest ash --source-dir /src
 ASH_LOG=1 sudo -E ash -vd --version
-result=$(ash report --format text)
+result=$(ash results report --format text)
 which ash
 cat > notes.txt <<EOF
 ash --not-a-command, just text in a here-document
@@ -340,7 +340,7 @@ repos:
 RUN ash --version
 {FENCE}
 
-Use `ash report --format text`, pass `--offline`, or `--fail-on-findings/--no-fail-on-findings`,
+Use `ash results report --format text`, pass `--offline`, or `--fail-on-findings/--no-fail-on-findings`,
 and for another tool write `trivy fs --cache-backend memory`. The file `ash.yaml` is not a command.
 """
 
@@ -422,8 +422,8 @@ CLI_DEFECTS = [
     ),
     (
         "substitution",
-        f"{FENCE}bash\nout=$(ash report --bogus)\n{FENCE}\n",
-        "--bogus is not an option of 'ash report'",
+        f"{FENCE}bash\nout=$(ash results report --bogus)\n{FENCE}\n",
+        "--bogus is not an option of 'ash results report'",
         2,
     ),
     (
@@ -2374,7 +2374,7 @@ RELEASE_DEFECTS = [
     ),
     (
         "--ash-revision-to-install",
-        f"{FENCE}bash\nash build-image --ash-revision-to-install v{{{{RELEASE}}}}\n{FENCE}\n",
+        f"{FENCE}bash\nash container build --ash-revision-to-install v{{{{RELEASE}}}}\n{FENCE}\n",
     ),
     (
         "ash-version:",

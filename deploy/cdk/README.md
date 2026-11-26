@@ -506,7 +506,7 @@ The shard and merge actions call two commands that no ASH release up to v3.7.1
 has:
 
 - `ashx scan --shard-index <i> --shard-count <n>`
-- `ashx merge --results ... --output-dir ...`
+- `ashx results merge --results ... --output-dir ...`
 
 The `AshDistributedPipeline` template uses them as ASH defines them: zero-based
 index, both shard flags always passed together, `--results` repeatable and

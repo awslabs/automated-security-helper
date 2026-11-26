@@ -81,17 +81,18 @@ IN_TREE_OR_DELIVERED = UntrustedSource(
 #: The config a shard recorded in its results, as ``ash merge`` reads it.
 SHARD_RECORDED = UntrustedSource(
     reason=(
-        "that is the config a shard recorded in its results, which ashx merge holds "
-        "to the rules for a repository's config"
+        "that is the config a shard recorded in its results, which ashx results "
+        "merge holds to the rules for a repository's config"
     ),
     remedy=(
-        "To keep a setting, pass it with ashx merge's --config-overrides or --config. "
-        "A reporter setting that sends findings off the host is the exception: "
-        "ashx merge replaces the --config file's value for it, so pass it with "
-        "--config-overrides."
+        "To keep a setting, pass it with ashx results merge's --config-overrides or "
+        "--config. A reporter setting that sends findings off the host is the "
+        "exception: ashx results merge replaces the --config file's value for it, "
+        "so pass it with --config-overrides."
     ),
     modules_remedy=(
-        "To keep a module, pass it with ashx merge's --config-overrides or --config."
+        "To keep a module, pass it with ashx results merge's --config-overrides or "
+        "--config."
     ),
     named_modules_only=True,
     scanner_steps_note=(
@@ -109,14 +110,16 @@ SHARD_RECORDED = UntrustedSource(
 #: confine_off_host_reporters_to_overrides``).
 REPORT_CONFIG_FILE = UntrustedSource(
     reason=(
-        "ashx report cannot tell that config from the scanned repository's own, "
-        "since stored results do not record which tree was scanned"
+        "ashx results report cannot tell that config from the scanned repository's "
+        "own, since stored results do not record which tree was scanned"
     ),
     remedy=(
-        "To send findings off the host from ashx report, pass each of these "
+        "To send findings off the host from ashx results report, pass each of these "
         "settings with --config-overrides instead."
     ),
-    modules_remedy="To load a module, pass it with ashx report's --config-overrides.",
+    modules_remedy=(
+        "To load a module, pass it with ashx results report's --config-overrides."
+    ),
 )
 
 #: A config file ``ash report`` was named and ``resolve_config`` placed inside a git
@@ -134,12 +137,14 @@ REPORT_CONFIG_FILE_IN_TREE = dataclasses.replace(
 #: scanned tree's own, as for ``REPORT_CONFIG_FILE``.
 MERGE_CONFIG_FILE = UntrustedSource(
     reason=(
-        "ashx merge cannot tell that config from the scanned repository's own, "
-        "since the shards do not record which tree was scanned"
+        "ashx results merge cannot tell that config from the scanned repository's "
+        "own, since the shards do not record which tree was scanned"
     ),
     remedy=(
         "To send the merged findings off the host, pass each of these settings "
-        "with ashx merge's --config-overrides instead."
+        "with ashx results merge's --config-overrides instead."
     ),
-    modules_remedy="To load a module, pass it with ashx merge's --config-overrides.",
+    modules_remedy=(
+        "To load a module, pass it with ashx results merge's --config-overrides."
+    ),
 )

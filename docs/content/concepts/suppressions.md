@@ -99,7 +99,7 @@ A suppression's `expires` is a date. On that date, by the host's local clock, th
 
 An ignore path's `expires` works the same way: on that date it stops applying, and the findings it dropped come back on the next scan. The entries of bandit `excluded_paths`, checkov `skip_path`, and syft `exclude` expire the same way, and stop excluding their files. An expired entry stays in the config file and in the results; only its effect stops.
 
-Results written by another ASH version can hold an entry that this version refuses in a config file, such as one with an unknown key or a date in another format. `ashx report`, `ashx merge`, and the other commands that read results still load them, with a warning that names the problem, and never apply that entry.
+Results written by another ASH version can hold an entry that this version refuses in a config file, such as one with an unknown key or a date in another format. `ashx results report`, `ashx results merge`, and the other commands that read results still load them, with a warning that names the problem, and never apply that entry.
 
 ## The gate
 

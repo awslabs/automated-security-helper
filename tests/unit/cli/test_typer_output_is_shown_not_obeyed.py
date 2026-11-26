@@ -97,7 +97,7 @@ _RAISING_COMMAND = (
     "def boom(**kwargs):\n"
     f"    raise RuntimeError({_HOSTILE_EXPR})\n"
     "report.get_logger = boom\n"
-    "sys.argv = ['ash', 'report', '--output-dir', 'out']\n"
+    "sys.argv = ['ash', 'results', 'report', '--output-dir', 'out']\n"
 )
 
 
@@ -293,7 +293,7 @@ def test_a_traceback_is_as_wide_as_the_console(tmp_path):
         "def boom(**kwargs):\n"
         "    raise RuntimeError('w ' * 70)\n"
         "report.get_logger = boom\n"
-        "sys.argv = ['ash', 'report', '--output-dir', 'out']\n"
+        "sys.argv = ['ash', 'results', 'report', '--output-dir', 'out']\n"
         "from automated_security_helper.cli.entrypoint import main\n"
         "main()\n"
     )

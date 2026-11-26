@@ -139,7 +139,7 @@ It also refuses an output directory below the source directory whose real path, 
 every link resolved, is outside the source directory.
 
 The check runs before anything is written or deleted, in every run mode and whatever
-the sandbox mode, and also in `ashx report` and `ashx merge`. The command exits 3:
+the sandbox mode, and also in `ashx results report` and `ashx results merge`. The command exits 3:
 
 ```text
 ERROR (3) The output directory /work/out-link is a symlink. ASH does not write to, clear or
@@ -167,13 +167,13 @@ Remove the link and run ASH again.
 ```
 
 This applies to scans in every run mode, including `--use-existing` and workspace scans,
-and to `ashx merge`. `ashx merge` prints the same text after `Refusing to write reports:`.
-`ashx report` prints its report instead of writing it, and refuses a link only at a file
+and to `ashx results merge`. `ashx results merge` prints the same text after `Refusing to write reports:`.
+`ashx results report` prints its report instead of writing it, and refuses a link only at a file
 the reporter writes beside it.
 
 ## `ash_aggregated_results.json` {#aggregated-results}
 
-The scan engine writes this file, not a reporter, and every reporter and `ashx report`
+The scan engine writes this file, not a reporter, and every reporter and `ashx results report`
 reads it. Its JSON schema is
 [`AshAggregatedResults.json`](https://github.com/awslabs/automated-security-helper/blob/main/automated_security_helper/schemas/AshAggregatedResults.json).
 
@@ -200,7 +200,7 @@ lines is `app.py|B602|*|*`. Entries that set package or symbol fields have more 
 `tool_version` (the ASH version), `summary_stats`, `validation_summary`,
 `execution_discrepancy_report`, `shard` (set by `--shard-index`), `expected_scanners`,
 `requested_scanners_not_run` (the names in `--scanners` or `ASH_SCANNERS` that matched no
-scanner, or `null` when every name matched or no list was given; `ashx merge` records the
+scanner, or `null` when every name matched or no list was given; `ashx results merge` records the
 names of all the shards), `plugin_load_errors` (plugin groups that failed to import), and
 `changed_files_only`
 (`true` when `--changed-files-only` filtered the findings, `false` on a full scan,
@@ -208,7 +208,7 @@ including one that fell back to a full scan).
 
 `report_id` is unique to each scan: `ASH-`, the scan's start as a UTC date and time, and
 12 random hexadecimal digits, such as `ASH-20261011180835-deff7bedfe39`. Reports rendered
-again from saved results, by `ashx report` or `--use-existing`, keep it. `ashx merge` gives
+again from saved results, by `ashx results report` or `--use-existing`, keep it. `ashx results merge` gives
 the merged results an id of the same shape, computed from the shards' ids, so merging the
 same shards again gives the same id. A workspace scan's combined results have an id of
 the form `ASH-WORKSPACE-<workspace file name>-<date and time>-<hex digits>`.

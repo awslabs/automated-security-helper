@@ -11,8 +11,8 @@ that replaced them.
 A warning that only says "deprecated" makes the reader go looking for the
 replacement, so each entry maps to the canonical spelling and the message names
 it. The mapping is data rather than a string per call site because both ``scan``
-and ``build-image`` accept these options, and two hand-written messages drift
-apart.
+and ``container build`` accept these options, and two hand-written messages
+drift apart.
 """
 
 import sys

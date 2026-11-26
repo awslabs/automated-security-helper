@@ -68,7 +68,7 @@ def _report(tmp_path: Path, site: Path, overrides: List[str]) -> Dict:
         f"      title: file title\n",
         encoding="utf-8",
     )
-    args = ["report", "--format", REPORTER, "--output-dir", str(output)]
+    args = ["results", "report", "--format", REPORTER, "--output-dir", str(output)]
     for override in [f"ash_plugin_modules=[{PLUGIN}]", *overrides]:
         args += ["--config-overrides", override]
     result = subprocess.run(

@@ -106,7 +106,7 @@ def _write(shards: Path, index: int, **recorded: str) -> Path:
 
 
 def _merge(shards: Path, *extra: str):
-    arguments = ["merge", "--output-dir", "merged"]
+    arguments = ["results", "merge", "--output-dir", "merged"]
     for index in (0, 1):
         arguments += ["--results", str(shards / f"shard{index}")]
     return CliRunner().invoke(app, [*arguments, *extra], env={"COLUMNS": "300"})

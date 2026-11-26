@@ -98,7 +98,13 @@ def _command(name: str, project: dict) -> List[str]:
             str(project["output"]),
             *config,
         ],
-        "report": ["report", "--output-dir", str(project["output"]), *config],
+        "report": [
+            "results",
+            "report",
+            "--output-dir",
+            str(project["output"]),
+            *config,
+        ],
         "config get": ["config", "get", *config],
         "config validate": ["config", "validate", *config],
         "config validate-plugin-dependencies": [

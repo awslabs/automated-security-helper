@@ -1297,7 +1297,8 @@ def report_command(
         name = plugin_config_key(reporter_class)
         _print_error(
             "[red]Error: reporter '{}' sends findings off the host and is not "
-            "enabled. ashx report takes whether it runs, and where it sends, from "
+            "enabled. ashx results report takes whether it runs, and where it "
+            "sends, from "
             "--config-overrides: pass --config-overrides reporters.{}.enabled=true "
             "and its destination options.[/red]",
             name,

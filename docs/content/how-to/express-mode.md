@@ -150,8 +150,8 @@ double a scan's side effects. A Ctrl-C or termination signal that lands during t
 handshake itself ends the command with the usual interrupt code instead of starting a
 cold scan you just asked to stop.
 
-Some invocations never use the daemon: anything that is not a scan (`ashx report`,
-`ashx inspect`, shell tab-completion, ...), any scan with `--no-express`, and scans the
+Some invocations never use the daemon: anything that is not a scan (`ashx results report`,
+`ashx results inspect`, shell tab-completion, ...), any scan with `--no-express`, and scans the
 MCP server hosts in-process. The console script `ash` gets the full saving; running the
 module form (`python -m automated_security_helper.cli.main`) delegates too, but it has
 already paid the import cost by the time it does.

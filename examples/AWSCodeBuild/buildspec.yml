@@ -22,7 +22,7 @@ phases:
   # still prints its summary.
   post_build:
     commands:
-      - ash report --output-dir .ash/ash_output
+      - ash results report --output-dir .ash/ash_output
 
 # Paths are named rather than globbed from the repository root: the scan writes
 # under .ash/, and the artifact and the report group read exactly that directory.

@@ -4,7 +4,7 @@ ASH runs a set of third-party security scanners over one directory, collects wha
 
 ## Phases
 
-A scan runs up to three phases, always in this order: convert, scan, and report. `--phases` runs a subset of them, and `ashx report` renders reports again from an existing results file without scanning.
+A scan runs up to three phases, always in this order: convert, scan, and report. `--phases` runs a subset of them, and `ashx results report` renders reports again from an existing results file without scanning.
 
 ```mermaid
 flowchart LR
@@ -83,7 +83,7 @@ This has three consequences. Finding counts are counts of scanner results, not o
 
 For secret detections, the ASFF findings of the `asff` and `aws-security-hub` reporters say which of them are about one secret: they share an `ash/correlationId`, derived from where the secret is and not from who reported it. The findings stay separate. See [AWS reporters](../plugins/aws.md#aws-security-hub).
 
-Sharding splits a scan by scanner, not by file, so `ashx merge` of the shards does not count any finding twice. See [Scale to large repositories](../how-to/scale-large-repos.md).
+Sharding splits a scan by scanner, not by file, so `ashx results merge` of the shards does not count any finding twice. See [Scale to large repositories](../how-to/scale-large-repos.md).
 
 ## Where the exit code comes from
 

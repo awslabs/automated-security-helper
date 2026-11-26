@@ -232,14 +232,14 @@ describe('the env-driven merge loop matches the literal merge command', () => {
     )[0];
 
     expect(literal).toBe(
-      'ashx merge --results "out/shard-0" --results "out/shard-1" ' +
+      'ashx results merge --results "out/shard-0" --results "out/shard-1" ' +
         '--results "out/shard-2" --output-dir ".ash/ash_output" --min-severity low',
     );
 
     const loop = mergeLoopCommands().join('\n');
     expect(loop).toContain('--results "$shard_dir"');
     expect(loop).toContain(
-      'ashx merge "$@" --output-dir "$ASH_OUTPUT_DIR" --min-severity "$ASH_MIN_SEVERITY"',
+      'ashx results merge "$@" --output-dir "$ASH_OUTPUT_DIR" --min-severity "$ASH_MIN_SEVERITY"',
     );
   });
 

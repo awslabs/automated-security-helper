@@ -10,9 +10,9 @@ to the deprecated name or dropping the deprecation notice.
 
 Each test follows the pattern of test_page_claims.py in two halves: ``assert_on_page``
 checks that the sentence is still on its page, and the test then probes the code that
-makes it true: both spellings bind one option on ``scan`` and ``build-image``, the old
-spelling maps to the new one, and using it warns on stderr while the new one is silent.
-A test goes red when either half moves.
+makes it true: both spellings bind one option on ``scan`` and ``container build``, the
+old spelling maps to the new one, and using it warns on stderr while the new one is
+silent. A test goes red when either half moves.
 """
 
 from __future__ import annotations
@@ -36,17 +36,19 @@ ADVANCED_PAGE = "docs/advanced-usage.md"
 CLI_PAGE = "reference/cli.md"
 
 
-def _option_spellings(command_name: str) -> list[str]:
+def _option_spellings(path: tuple[str, ...]) -> list[str]:
     from automated_security_helper.cli.main import app
 
-    command = typer.main.get_command(app).commands[command_name]
+    command = typer.main.get_command(app)
+    for name in path:
+        command = command.commands[name]
     bound = [
         param.opts
         for param in command.params
         if CANONICAL in getattr(param, "opts", [])
         or DEPRECATED in getattr(param, "opts", [])
     ]
-    assert len(bound) == 1, f"{command_name}: expected one option, found {bound}"
+    assert len(bound) == 1, f"{' '.join(path)}: expected one option, found {bound}"
     return list(bound[0])
 
 
@@ -55,7 +57,9 @@ def _warning_for(spelling: str, capsys) -> str:
         warn_deprecated_option_spellings,
     )
 
-    with mock.patch.object(sys, "argv", ["ashx", "build-image", spelling, "p/ci"]):
+    with mock.patch.object(
+        sys, "argv", ["ashx", "container", "build", spelling, "p/ci"]
+    ):
         warn_deprecated_option_spellings()
     return capsys.readouterr().err
 
@@ -66,8 +70,8 @@ def _probe_the_rename(capsys) -> None:
     )
 
     assert DEPRECATED_OPTION_SPELLINGS[DEPRECATED] == CANONICAL
-    for command_name in ("scan", "build-image"):
-        assert _option_spellings(command_name) == [CANONICAL, DEPRECATED]
+    for path in (("scan",), ("container", "build")):
+        assert _option_spellings(path) == [CANONICAL, DEPRECATED]
     old = _warning_for(DEPRECATED, capsys)
     assert DEPRECATED in old and CANONICAL in old
     assert "deprecated" in old and "scheduled for removal" in old
@@ -120,12 +124,7 @@ def test_migrate_from_v2_maps_the_v2_flag_to_the_canonical_one(capsys) -> None:
 
 
 def test_advanced_usage_examples_use_the_canonical_flag(capsys) -> None:
-    """advanced-usage.md (Offline Mode).
-
-    The page builds with ``container build``, the name main gave ``build-image``. Both
-    names run one function (``cli.image.build_ash_image_cli_command``), so the
-    ``build-image`` probe below binds the option the examples use.
-    """
+    """advanced-usage.md (Offline Mode)."""
     assert_on_page(
         ADVANCED_PAGE, "ashx container build --offline --offline-rulesets p/ci"
     )
@@ -142,11 +141,11 @@ def test_advanced_usage_examples_use_the_canonical_flag(capsys) -> None:
 
 
 def test_the_cli_reference_lists_the_canonical_flag_first(capsys) -> None:
-    """reference/cli.md (build-image and scan option tables)."""
-    for command_name in ("build-image", "scan"):
+    """reference/cli.md (container build and scan option tables)."""
+    for anchor in ("container-build", "scan"):
         assert_on_page(
             CLI_PAGE,
-            f'<a id="{command_name}--offline-rulesets"></a>`{CANONICAL}`, '
+            f'<a id="{anchor}--offline-rulesets"></a>`{CANONICAL}`, '
             f"`{DEPRECATED}` | text | `p/ci`",
         )
     _probe_the_rename(capsys)

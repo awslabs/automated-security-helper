@@ -519,7 +519,7 @@ You can generate reports from existing scan results:
 ashx --use-existing --output-dir /path/to/results
 
 # Generate a specific report format
-ashx report --format html --output-dir /path/to/results
+ashx results report --format html --output-dir /path/to/results
 ```
 
 ## Interactive Findings Explorer
@@ -529,7 +529,7 @@ ASH v3 includes an interactive TUI for exploring findings:
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Launch the findings explorer
-ashx inspect findings --output-dir /path/to/results
+ashx results inspect findings --output-dir /path/to/results
 ```
 
 A finding's detail view shows the code snippet its results hold. For a finding with

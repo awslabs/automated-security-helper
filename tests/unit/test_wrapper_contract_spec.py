@@ -30,18 +30,16 @@ pytestmark = pytest.mark.unit
 
 
 def test_subcommands():
+    # 4.0 removed the top-level build-image, report, diff, trend, merge and inspect
+    # spellings; `results` and `container` are the commands that hold them.
     assert contract().subcommands == (
         "scan",
-        "build-image",
-        "report",
-        "diff",
-        "trend",
-        "merge",
+        "results",
         "mcp",
         "get-genai-guide",
+        "container",
         "config",
         "dependencies",
-        "inspect",
         "plugin",
         "suppress",
         "express",
@@ -112,21 +110,21 @@ def test_root_value_options():
 
 
 EXPECTED_OPTION_SUBCOMMANDS = {
-    "--quiet": ("scan", "build-image", "mcp"),
-    "--no-color": ("scan", "build-image", "report", "merge", "mcp"),
+    "--quiet": ("scan", "mcp", "container"),
+    "--no-color": ("scan", "mcp", "container"),
     "--progress": ("scan",),
     "--no-progress": ("scan",),
     "--show-summary": ("scan",),
     "--no-show-summary": ("scan",),
-    "--fail-on-findings": ("scan", "merge"),
-    "--no-fail-on-findings": ("scan", "merge"),
-    "--verbose": ("scan", "build-image", "report", "merge", "mcp"),
-    "--debug": ("scan", "build-image", "report", "merge", "mcp"),
-    "--offline": ("scan", "build-image"),
-    "--config": ("scan", "build-image", "report", "merge"),
+    "--fail-on-findings": ("scan",),
+    "--no-fail-on-findings": ("scan",),
+    "--verbose": ("scan", "mcp", "container"),
+    "--debug": ("scan", "mcp", "container"),
+    "--offline": ("scan", "container"),
+    "--config": ("scan", "container"),
     "--scanners": ("scan",),
     "--exclude-scanners": ("scan",),
-    "--ignore-suppressions": ("scan", "merge"),
+    "--ignore-suppressions": ("scan",),
 }
 
 

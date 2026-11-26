@@ -44,7 +44,7 @@ def _in_empty_dir(tmp_path, monkeypatch):
 
 
 def _report(config: Path) -> List[str]:
-    return ["report", "--config", str(config), "--output-dir", "out"]
+    return ["results", "report", "--config", str(config), "--output-dir", "out"]
 
 
 def _plugin(config: Path) -> List[str]:

@@ -195,6 +195,7 @@ def test_a_merge_of_shards_with_nothing_to_scan_says_the_same(tmp_path):
     merged = _ash(
         tmp_path,
         source,
+        "results",
         "merge",
         "--results",
         str(tmp_path / "shard-0"),

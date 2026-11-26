@@ -21,7 +21,7 @@ no other tools and answers in seconds:
 ash --source-dir . --scanners detect-secrets --offline --no-progress
 ```
 
-`ashx inspect findings` opens the last scan's findings in the terminal, and
+`ashx results inspect findings` opens the last scan's findings in the terminal, and
 pressing `x` on one writes a suppression entry, with your reason and an
 optional expiration, into the project's config
 ([Add a suppression while you review findings](../how-to/suppress-findings.md#inspect)).

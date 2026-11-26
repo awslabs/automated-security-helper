@@ -155,4 +155,4 @@ global_settings:
 
 To fail on HIGH and above while still using the repository's config, override the threshold instead: `ash --source-dir . --config-overrides global_settings.severity_threshold=HIGH`.
 
-In a sharded scan, gate on `ashx merge`, which recomputes the verdict over all shards; see [Scale to large repositories](scale-large-repos.md).
+In a sharded scan, gate on `ashx results merge`, which recomputes the verdict over all shards; see [Scale to large repositories](scale-large-repos.md).

@@ -271,6 +271,7 @@ def test_control_the_in_tree_config_decides_the_verdict_when_ash_is_given_none(
     merge = subprocess.run(
         [
             CANONICAL_CLI_NAME,
+            "results",
             "merge",
             "--results",
             str(tmp_path / "shard-0"),

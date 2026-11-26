@@ -75,10 +75,10 @@ function runMerge(baseConfig?: string): AshRecord[] {
   }
 }
 
-test('control: the merge build command runs ash merge', () => {
+test('control: the merge build command runs ash results merge', () => {
   const [ash] = runMerge('project_name: operator-base-config\n');
   expect(ash).toBeDefined();
-  expect(ash.argv[0]).toBe('merge');
+  expect(ash.argv.slice(0, 2)).toEqual(['results', 'merge']);
 });
 
 test('with a base config, ash merge is pointed at it', () => {

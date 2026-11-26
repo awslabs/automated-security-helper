@@ -89,7 +89,7 @@ class TestArgumentRefusals:
         )
 
     def test_option_before_a_subcommand_that_does_not_take_it(self, run_cli, snapshot):
-        assert run_cli(["--source-dir", "src", "report"]) == snapshot
+        assert run_cli(["--source-dir", "src", "results", "report"]) == snapshot
 
 
 def _report_scan_started(self, phases=None):

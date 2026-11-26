@@ -103,6 +103,7 @@ def _project(tmp_path: Path, options: str) -> Path:
 def _report(tmp_path: Path, output: Path, fmt: str, *overrides: str):
     session = MagicMock(side_effect=AssertionError("AWS was contacted"))
     arguments = [
+        "results",
         "report",
         "--format",
         fmt,

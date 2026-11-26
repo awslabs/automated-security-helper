@@ -37,10 +37,9 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      DeprecationWarning: 'ashx report' is deprecated and is removed in 4.1. Use 'ashx results report' instead; 'ashx report' keeps its current behavior until then.
       Usage: ashx [OPTIONS] COMMAND [ARGS]...
       Try 'ashx -h' for help.
-      Error: 'ashx report' does not take --source-dir, given before it (see 'ashx report --help'). Options given before a subcommand are passed to it only when it takes them: drop it, give it after a subcommand that takes it, or leave out 'report' to scan with it.
+      Error: 'ashx results report' does not take --source-dir, given before it (see 'ashx results report --help'). Options given before a subcommand are passed to it only when it takes them: drop it, give it after a subcommand that takes it, or leave out 'results report' to scan with it.
   
     ''',
     'stdout': '',
@@ -370,7 +369,7 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      --shard-index/--shard-count cannot be combined with --workspace. Both spread one scan over more compute, but along different axes, and only sharding is recombinable: it partitions the scanners and stamps the partition onto the results so 'ashx merge' can prove the shards reconstruct exactly one whole scan. Workspace mode's unified results file is assembled from the per-project payloads and carries none of each project's scan metadata, so a sharded workspace run would write results that merge has no provenance to verify coverage from -- and an unverifiable partial scan reads as a clean one. Either scan the workspace whole on one executor, or give each CI job one project via --source-dir and shard that.
+      --shard-index/--shard-count cannot be combined with --workspace. Both spread one scan over more compute, but along different axes, and only sharding is recombinable: it partitions the scanners and stamps the partition onto the results so 'ashx results merge' can prove the shards reconstruct exactly one whole scan. Workspace mode's unified results file is assembled from the per-project payloads and carries none of each project's scan metadata, so a sharded workspace run would write results that merge has no provenance to verify coverage from -- and an unverifiable partial scan reads as a clean one. Either scan the workspace whole on one executor, or give each CI job one project via --source-dir and shard that.
   
     ''',
     'stdout': '',

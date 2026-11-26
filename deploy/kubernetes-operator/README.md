@@ -61,7 +61,7 @@ per shard:   ashx scan --source-dir  /workspace/src \
              verdict: none. exit 0 after publishing, even with findings.
 
 collector:   walk 0..N-1 by index; refuse a short set; then
-             ashx merge --results <one per shard> --output-dir ... --min-severity ...
+             ashx results merge --results <one per shard> --output-dir ... --min-severity ...
              verdict: this exit code, and only this one:
                       0 clean, 2 findings, 1 incomplete (partial results)
 ```
@@ -99,7 +99,7 @@ that adds an early-sorting name. Nothing here is keyed on the index except
 `JOB_COMPLETION_INDEX`, read fresh inside the pod, and the results path, which is
 scoped to one run's UID.
 
-**3. Retry-safe result addressing.** `ashx merge` refuses a duplicate shard index
+**3. Retry-safe result addressing.** `ashx results merge` refuses a duplicate shard index
 arriving as two `--results` entries — "merging does not deduplicate" — but has no
 defence against **one** file that a retry overwrote. No CodeBuild backend faces
 this. A Kubernetes pod can be OOMKilled, evicted, preempted or drained, and the
@@ -125,7 +125,7 @@ asserted in `tests/test_contract.py` — including a table run against ASH's own
 `validate_shard_selection` so the two cannot disagree about what is acceptable.
 
 **5. The output directory must not be inside or above the source.** `ashx scan`
-checks source/output collision by **equality only**; `ashx merge` checks equality
+checks source/output collision by **equality only**; `ashx results merge` checks equality
 **or ancestry** and its docstring says so. So `--output-dir /src` with
 `--source-dir /src/app` passes the scan's check, and the symptom is not untidiness:
 `apply_suppressions_to_sarif` excludes findings whose location resolves inside the
@@ -229,10 +229,10 @@ the scan's phase is unaffected. deploy/README.md has the detail.
 
 ## Status
 
-`.status.phase` ends in one of four terminal values. Three are `ashx merge`'s three
+`.status.phase` ends in one of four terminal values. Three are `ashx results merge`'s three
 answers, as ASH defines its exit codes:
 
-| Phase | `ashx merge` exit | Meaning |
+| Phase | `ashx results merge` exit | Meaning |
 |---|---|---|
 | `Clean` | 0 | Nothing actionable at `minSeverity`. |
 | `Findings` | 2 | Actionable findings; `.status.findings` counts them. |
@@ -260,7 +260,7 @@ merged report to exist **and** to name a gap; exit 1 over a report with no gap i
 
 ASH's `fail_on_incomplete_scanners` defaults to **true**, and the operator leaves it
 there unless `spec.failOnIncompleteScanners` says otherwise. Setting it `false`
-accepts the gap: `ashx merge` then exits 0 or 2, the phase follows that exit code as
+accepts the gap: `ashx results merge` then exits 0 or 2, the phase follows that exit code as
 ASH's own MCP status does, and `coverageComplete: false` and
 `.status.incompleteScanners` stay beside it.
 
@@ -274,7 +274,7 @@ a collector summary the operator could not read, **or shards that recorded no
 `candidate_scanners`**.
 
 That last one is the case worth spelling out. If no shard stamped
-`candidate_scanners`, `ashx merge` does **not** refuse — it skips the union check
+`candidate_scanners`, `ashx results merge` does **not** refuse — it skips the union check
 entirely. A mid-rollout state where two executors partitioned different scanner sets
 without overlapping then merges into a report that reads as a complete scan of the
 whole tree, with a scanner having run nowhere, and nothing downstream can see it. The
@@ -521,7 +521,7 @@ What it asserts, and why each one is there:
 * **A negative control**: a clean tree ends `Clean` with zero findings, with both
   selected scanners `PASSED` and their dependencies satisfied.
 * **A partial scan is `Incomplete`**: selecting `cfn-nag`, whose ruby toolchain the
-  e2e image does not carry, beside `bandit` makes `ashx merge` exit 1 under ASH's
+  e2e image does not carry, beside `bandit` makes `ashx results merge` exit 1 under ASH's
   default gate. The run must end `Incomplete` with `coverageComplete: false`, the gap
   named, and bandit's findings still reported. Without it, the
   first bullet shows only that the pipeline reports something.

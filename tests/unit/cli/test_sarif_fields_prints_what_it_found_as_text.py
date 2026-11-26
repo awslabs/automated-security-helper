@@ -51,6 +51,7 @@ def _invoke(sarif_dir, output_dir):
     return CliRunner().invoke(
         app,
         [
+            "results",
             "inspect",
             "sarif-fields",
             "--sarif-dir",

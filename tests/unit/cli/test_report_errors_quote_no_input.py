@@ -62,7 +62,7 @@ def test_a_reporter_that_fails_on_a_refused_value(tmp_path, monkeypatch, debug):
     )
     result = CliRunner().invoke(
         app,
-        ["report", "--format", "sarif", "--output-dir", str(output), *debug],
+        ["results", "report", "--format", "sarif", "--output-dir", str(output), *debug],
         env={"COLUMNS": "300"},
     )
 
@@ -96,6 +96,7 @@ def test_debug_shows_a_reporter_section_without_its_env_value(tmp_path, monkeypa
     result = CliRunner().invoke(
         app,
         [
+            "results",
             "report",
             "--format",
             "gitlab-cyclonedx",

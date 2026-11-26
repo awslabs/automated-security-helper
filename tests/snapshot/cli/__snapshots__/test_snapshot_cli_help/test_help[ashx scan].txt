@@ -5,7 +5,7 @@
 
  Start with: ash --mode container --source-dir .
 
- Review the result with: ash inspect findings
+ Review the result with: ashx results inspect findings
 
  Options are grouped by workflow below. Running ash without a subcommand starts a scan.
 
@@ -576,7 +576,7 @@
 │                                    several executors. Requires --shard-count. A 3-way split uses │
 │                                    indices 0, 1 and 2. Each shard runs a disjoint subset of the  │
 │                                    scanners and records which ones in its results; recombine     │
-│                                    them with 'ashx merge'.                                       │
+│                                    them with 'ashx results merge'.                               │
 │                                    [env var: ASH_SHARD_INDEX]                                    │
 │ --shard-count               <int>  Total number of shards this scan is split across. Requires    │
 │                                    --shard-index. Balance is by scanner count rather than        │

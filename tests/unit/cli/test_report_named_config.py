@@ -55,6 +55,7 @@ def test_a_named_config_that_cannot_be_used_exits_3(
     result = CliRunner().invoke(
         app,
         [
+            "results",
             "report",
             "--output-dir",
             str(results_dir),
@@ -86,6 +87,7 @@ def test_a_config_that_does_not_parse_is_refused_on_stderr_as_text(
     result = CliRunner().invoke(
         app,
         [
+            "results",
             "report",
             "--output-dir",
             str(results_dir),
@@ -106,7 +108,7 @@ def test_a_config_that_does_not_parse_is_refused_on_stderr_as_text(
 
 def test_without_a_named_config_the_report_uses_the_defaults(results_dir: Path):
     result = CliRunner().invoke(
-        app, ["report", "--output-dir", str(results_dir), "--format", "text"]
+        app, ["results", "report", "--output-dir", str(results_dir), "--format", "text"]
     )
 
     assert result.exit_code == 0, result.output

@@ -46,6 +46,34 @@
 
 ## Unreleased
 
+### Breaking changes
+
+- **The spellings deprecated for removal in 4.0 are removed.** Each now fails the way
+  any unknown command or value does:
+  - `build-image` is no longer a command; `ashx container build` takes the same options.
+  - `report`, `diff`, `trend`, `merge` and `inspect` are no longer top-level commands;
+    `ashx results report`, `results diff`, `results trend`, `results merge` and
+    `results inspect` take the same options. A removed word is a usage error (exit 5,
+    `No such command`) and runs nothing.
+  - A plugin manifest whose `tier` is `community` or `community_optin` is refused like any
+    other unknown tier; write `alpha` or `alpha_optin`. The image build no longer reads
+    the `ASH_COMMUNITY_PLUGIN_MODULES` build argument; pass `ASH_ALPHA_PLUGIN_MODULES`.
+    The `#community` anchor ids are gone from the docs; the redirects of the moved plugin
+    pages stay.
+- **Messages that named a removed spelling now name the `ashx` command that works**: the
+  scan summary's next steps, the scan help, the shard and merge refusals and warnings,
+  the off-host reporter refusals, the workspace reporter errors, the Markdown report's
+  truncation note, the diff refusal for sharded results, the run-history warning, and
+  the model descriptions the JSON schemas are generated from. `Invoke-ASH`'s
+  `ASH_OCI_RUNNER` deprecation names the `ashx` CLI.
+- **The deployment targets in this repository run the new spellings.** The CDK
+  constructs' merge step, the CDK app's distributed merge project, the Terraform
+  CodePipeline executor's merge buildspec and the Kubernetes operator's collector run
+  `ashx results merge`; the reusable `run-ash-security-scan.yml` workflow runs
+  `results report`. An ASH older than 3.9 has neither, so a deployment or a workflow
+  call pinned to one fails with a usage error. `Invoke-ASH` no longer routes the removed
+  words.
+
 ### Behavior changes
 
 - **npm-audit findings are located at the lockfile they were audited from**
@@ -126,12 +154,12 @@
   the name says maturity, not provenance. Behavior is unchanged. The plugin pages moved
   from `docs/plugins/community/` to `docs/plugins/alpha/` (the old URLs redirect), the
   repository's own scan config is now `.ash/.ash_alpha_plugins.yaml`, the register's
-  tier value is `alpha_optin`, and the CI config variant is `alpha`. Two old spellings
-  are accepted for one release: the register tier value `community_optin` (it warns)
-  and the Dockerfile build argument `ASH_COMMUNITY_PLUGIN_MODULES`, now
-  `ASH_ALPHA_PLUGIN_MODULES` (a value given for the old name wins). The docs checks
-  refuse the old `Community plugins` / `Community scanners` column headings and name
-  the new one. ASH 4.1.0 stops accepting the old spellings.
+  tier value is `alpha_optin`, and the CI config variant is `alpha`. The old spellings,
+  which 3.x accepted with a warning, are not accepted from 4.0: the register tier values
+  `community` and `community_optin` are refused, and the Dockerfile build argument
+  `ASH_COMMUNITY_PLUGIN_MODULES` is not read (pass `ASH_ALPHA_PLUGIN_MODULES`); see
+  Breaking changes. The docs checks refuse the old `Community plugins` /
+  `Community scanners` column headings and name the new one.
 
 ### Fixes
 

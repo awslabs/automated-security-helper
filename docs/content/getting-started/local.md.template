@@ -252,12 +252,12 @@ An excluded scanner shows as SKIPPED and does not fail the scan. Add the same
 
 ## 6. Look at a finding
 
-`ashx report` prints the latest results in the terminal. After the scan details, a
+`ashx results report` prints the latest results in the terminal. After the scan details, a
 legend, the scanner table, and the files with the most findings, it prints one block
 per actionable finding:
 
 ```bash
-ashx report
+ashx results report
 ```
 
 ```text
@@ -281,7 +281,7 @@ Piped to another program, or with `--no-color`, it prints the same report as Mar
 
 <!-- doctest: run -->
 ```bash
-ashx report --no-color
+ashx results report --no-color
 ```
 
 <!-- doctest: output -->
@@ -300,7 +300,7 @@ Use of weak MD5 hash for security. Consider usedforsecurity=False
 
 Finding 2 is B602, `subprocess call with shell=True`, at `app.py:11`. The Rule ID is
 what a suppression names in the next step. To browse the findings interactively, run
-`ashx inspect findings`, which shows the same value in its Rule ID column, or open
+`ashx results inspect findings`, which shows the same value in its Rule ID column, or open
 `.ash/ash_output/reports/ash.html` in a browser.
 
 ## 7. Suppress the false positive

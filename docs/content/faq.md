@@ -97,7 +97,7 @@ global_settings:
       reason: The command is a constant string; no user input reaches it.
 ```
 
-`ashx report` shows each finding's rule ID. You can add `expires` with a date in quotes,
+`ashx results report` shows each finding's rule ID. You can add `expires` with a date in quotes,
 such as `"2027-06-30"`; from that date the suppression stops applying, and
 `ashx config lint` reports it as expired. ASH also honors inline `ash-ignore` comments, and
 scanners honor their own, such as bandit's `# nosec`. See
