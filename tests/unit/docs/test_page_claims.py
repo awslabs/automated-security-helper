@@ -5869,8 +5869,12 @@ def test_the_sarif_member_writes_every_field_and_ash_sarif_leaves_out_what_ash_d
     ``ash_aggregated_results.json`` has ``ruleIndex`` -1 and ``rule`` null, and the
     same result in ``reports/ash.sarif`` has neither. Every value
     ``reports/ash.sarif`` holds is the member's value at the same place, which is
-    what makes them the same run written two ways; the control is that the report is
-    not nearly empty, so that comparison is not made over nothing.
+    what makes them the same run written two ways, except the one the page names the
+    report as adding: a result's ``ash/correlationId``, which the sarif reporter
+    writes on a copy of the run and so never into the member. A detect-secrets result
+    is a secret detection, so each report result carries a ``secret/<sha256>`` id
+    there and the member none. The control is that the report is not nearly empty, so
+    that comparison is not made over nothing.
     """
     assert_on_page(
         _OUTPUTS_PAGE,
@@ -5879,6 +5883,13 @@ def test_the_sarif_member_writes_every_field_and_ash_sarif_leaves_out_what_ash_d
         'every result, defaults included, so its results show `"ruleIndex": -1`, and '
         '`"rule": null` unless the scanner gave one. `reports/ash.sarif` leaves out the '
         "fields ASH did not set, `ruleIndex` among them, and the empty ones,",
+    )
+    assert_on_page(
+        _OUTPUTS_PAGE,
+        "It also writes a result's cross-scanner correlation id, where the result has "
+        "one, into the result's `properties` as `ash/correlationId` ([Correlate one "
+        "observation across scanners](../how-to/export-reports.md#correlation)), which "
+        "the member does not hold.",
     )
     member = json.loads(
         (outputs_default_scan / "ash_aggregated_results.json").read_text(
@@ -5898,10 +5909,21 @@ def test_the_sarif_member_writes_every_field_and_ash_sarif_leaves_out_what_ash_d
 
     member_leaves, report_leaves = _outputs_leaves(member), _outputs_leaves(report)
     assert len(report_leaves) > 20, "reports/ash.sarif is nearly empty"
+    # The property key is ``ash/correlationId``, so its pointer ends in these two parts.
+    correlation = {
+        pointer: value
+        for pointer, value in report_leaves.items()
+        if pointer.endswith("/properties/ash/correlationId")
+    }
+    assert len(correlation) == len(in_report), correlation
+    for pointer, value in correlation.items():
+        assert pointer not in member_leaves, pointer
+        assert re.fullmatch(r"secret/[0-9a-f]{64}", value), (pointer, value)
     differ = {
         pointer: (member_leaves.get(pointer, "<absent>"), value)
         for pointer, value in report_leaves.items()
-        if member_leaves.get(pointer, "<absent>") != value
+        if pointer not in correlation
+        and member_leaves.get(pointer, "<absent>") != value
     }
     assert not differ, f"(member, reports/ash.sarif) differ at: {differ}"
 
@@ -14480,8 +14502,8 @@ _CONTAINER_LINKED_OUTPUT = (
 _CONTAINER_SCAN_REFUSES_A_LINKED_OUTPUT = (
     "An output directory that is a symlink, or that a symlink below the source "
     "directory leads to, such as a committed `.ash` link for the default "
-    "`.ash/ash_output`, stops `ash scan --mode container` and `ash build-image` with exit "
-    "code 3 ([Exit codes](../reference/exit-codes.md#container)), because the scan "
+    "`.ash/ash_output`, stops `ash scan --mode container` and `ash container build` with "
+    "exit code 3 ([Exit codes](../reference/exit-codes.md#container)), because the scan "
     "inside the container would write wherever the link points. The refusal comes before "
     "a container runtime is looked up, with `--no-run` too, so nothing is built, "
     "created, or mounted."
@@ -14544,12 +14566,14 @@ def test_container_mode_refuses_a_linked_output_directory_before_it_runs_anythin
     tmp_path: Path, command: str, link: str
 ) -> None:
     """exit-codes.md (Container and Nix mode), and run-in-a-container.md (Mounts and
-    network) for the scan and for ``ash build-image`` that runs its scan.
+    network) for the scan and for ``ash container build`` that runs its scan.
 
     ``ash scan --mode container`` runs on a tree whose output directory is a symlink, or
     whose ``.ash`` is a symlink on the way to the default ``.ash/ash_output``, also
-    with ``--no-run``, and ``ash build-image`` runs on the second, with and without
-    ``--no-run``. Each names a container runtime that does not exist, also in
+    with ``--no-run``, and ``ash container build`` runs on the second, with and without
+    ``--no-run``. The build-image ids keep the name of the 3.8 spelling, which #1133
+    deprecated; the page names ``ash container build``, so that is the command the
+    probe runs. Each names a container runtime that does not exist, also in
     ``OCI_RUNNER``, so looking it up would fail with exit 1, and runs with logging
     stand-ins for the runtimes first on PATH, none of which may be called. Each must
     exit 3 and refuse the output directory, which shows the refusal came before the
@@ -14562,15 +14586,15 @@ def test_container_mode_refuses_a_linked_output_directory_before_it_runs_anythin
         assert_on_page(RUN_IN_A_CONTAINER, _CONTAINER_SCAN_REFUSES_A_LINKED_OUTPUT)
     tree = _config_scan_tree(tmp_path, {"app.py": "x = 1\n"})
     runner = str(tmp_path / "no-such-runtime" / "docker")
-    # build-image builds from the working directory; scan is told it. A UID and GID
-    # that are not root keep the non-root image's own refusal of root out of the way.
+    # container build builds from the working directory; scan is told it. A UID and
+    # GID that are not root keep the non-root image's own refusal of root out of the way.
     if command.startswith("container-scan"):
         args = ["scan", "--mode", "container", "--offline", "--source-dir", str(tree)]
     else:
         args = (
-            ["build-image", "--no-run"]
+            ["container", "build", "--no-run"]
             if command.endswith("-no-run")
-            else ["build-image"]
+            else ["container", "build"]
         )
     if command == "container-scan-no-run":
         args.append("--no-run")
@@ -17270,10 +17294,15 @@ _DEPENDENCIES_BAD_SELECTION_ROW = (
     "`reporter`. ASH names the tool or the type, installs nothing, and starts no "
     "program. |"
 )
+#: The usage-error paragraph's clauses this test probes. The paragraph goes on to the
+#: selections #1140 added (an unknown `--providers` name, the virtualenv flags without
+#: `--virtualenv-path`, a refused `--binary-path` entry); their exit 2 is measured by
+#: test_dependencies_providers_flag.py, test_dependencies_virtualenv_matrix.py and
+#: test_dependencies_binary_path.py in tests/unit/cli.
 _DEPENDENCIES_BAD_SELECTION_INTRO = (
-    "Two `ash dependencies install` selections exit 2 instead: a `--tool` name that it "
-    "has no plugin for, or whose plugin type `--plugin-type` leaves out, and a "
-    "`--plugin-type` other than `converter`, `scanner`, or `reporter`."
+    "Some `ash dependencies install` selections exit 2 instead: a `--tool` name that it "
+    "has no plugin for, or whose plugin type `--plugin-type` leaves out, a "
+    "`--plugin-type` other than `converter`, `scanner`, or `reporter`,"
 )
 
 
@@ -17451,7 +17480,10 @@ def test_ash_dependencies_install_names_an_unknown_tool_and_lists_the_ones_it_kn
 
     assert result.returncode == 2, _output_tail(result)
     assert _squeezed(f"Unknown tool(s): {unknown}") in shown, _output_tail(result)
-    listed = re.search(r"Available:([a-z0-9,\-]+)", shown)
+    # A plugin name can hold an underscore: the MCP config converter is `mcp_config`
+    # (mcp_config_converter.py, `name: Literal["mcp_config"]`). Read without `_`, the
+    # sorted list stopped at that name and every name after it, syft among them, was lost.
+    listed = re.search(r"Available:([a-z0-9_,\-]+)", shown)
     assert listed is not None, _output_tail(result)
     names = set(listed[1].split(","))
     assert {"grype", "syft"} <= names and unknown not in names, sorted(names)

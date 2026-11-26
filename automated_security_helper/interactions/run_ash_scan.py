@@ -1057,14 +1057,18 @@ def _refuse_an_inner_file_that_is_not_regular(path: Path, what: str) -> None:
     raise ReportPathRefusedExit(reason)
 
 
-def _discard_history_record(results: Any, output_dir: Path) -> None:
+def discard_history_record(results: Any, output_dir: Path) -> None:
     """Remove the run record of a scan a cancel is taking back. Never raises.
 
     The orchestrator appends the record right after it writes the results file
-    (``_record_history``); the cancel check before the final rewrite lands
-    after that, so a cancelled or restored MCP run kept a record saying it
-    completed. The record's id is the run's own ``report_id``; a results value
-    that carries none names no record, and nothing is removed.
+    (``_record_history``), so a cancel that lands after that left a record
+    saying the run completed, and ``ash trend`` showed the taken-back run as a
+    point. Three paths remove it: the cancel check before this module's final
+    rewrite, ``execute_scan``'s arm for a cancel that escapes the write step
+    after the record (core/orchestrator.py), and the MCP runner's settle, which
+    takes the results back when the cancel landed after the last check here
+    (cli/mcp_tools.py). The record's id is the run's own ``report_id``; a
+    results value that carries none names no record, and nothing is removed.
     """
     try:
         from automated_security_helper.utils.scan_history import discard_run_record
@@ -1079,8 +1083,12 @@ def _discard_history_record(results: Any, output_dir: Path) -> None:
         else:
             return
         discard_run_record(output_dir, report_id)
-    except Exception:  # noqa: BLE001 - the cancel is what the caller must see
-        pass
+    except Exception as exc:  # noqa: BLE001 - the cancel is what the caller must see
+        # At debug, not swallowed without a word: when a cancelled run still
+        # shows in ``ash trend``, this line is the trace of why its record stayed.
+        ASH_LOGGER.debug(
+            f"Could not discard the taken-back run's record in {output_dir}: {exc}"
+        )
 
 
 def _read_back_inner_results(
@@ -5805,7 +5813,7 @@ def _run_local_mode(
         try:
             raise_if_cancelled()
         except BaseException:
-            _discard_history_record(results, opts.output_dir)
+            discard_history_record(results, opts.output_dir)
             raise
 
         # This rewrite lands after the REPORT phase, while an MCP client that has seen
