@@ -4301,10 +4301,10 @@ SOFTWARE.
 </tr>
 <tr>
 <td><a href="#snyk-code"><code>snyk-code</code></a></td>
-<td>10</td>
-<td>2</td>
+<td>0</td>
+<td>0</td>
 <td>6</td>
-<td>2</td>
+<td>14</td>
 </tr>
 <tr>
 <td><a href="#trivy-repo"><code>trivy-repo</code></a></td>
@@ -4321,7 +4321,7 @@ SOFTWARE.
 <ul>
 <li><code>pin</code>: the interpreter request is constrained to the runtime range. The preferred resolution.</li>
 <li><code>polyfill</code>: a shim is applied over the runtime range at tool launch. A polyfill row states why a pin cannot serve.</li>
-<li>open-ended: the incompatibility is unsolved upstream. The row declares only the bounds that are proved, links the upstream issue, and is re-read whenever the tool's version constraint moves.</li>
+<li>open-ended: the incompatibility is unsolved upstream. The row declares only the bounds that are proved, links the upstream issue (or says what was searched when none exists to cite), and is re-read whenever the tool's version constraint moves.</li>
 </ul>
 <table>
 <thead>
@@ -4351,7 +4351,7 @@ SOFTWARE.
 <td>all</td>
 <td><code>&gt;=3.10,&lt;3.14</code></td>
 <td><code>pin</code></td>
-<td>no</td>
+<td>yes, no upstream issue exists to cite: a search of the VirusTotal/yara-python issues for a cp314 report found none (a 'wheel' search returned issues, so the search itself works; read 2026-11-25); re-check pygit2 and yara-python cp314 wheels at the next guarddog version bump</td>
 <td>pygit2 1.18 and yara-python 4.5 publish no CPython 3.14 wheels at the pinned guarddog==3.2.0, so on a host where uv would pick 3.14 the install builds them from source, which needs libgit2 headers and a C toolchain, and fails; measured with uv 0.12 on Linux x86_64: an unconstrained 'uv tool install guarddog==3.2.0' picked 3.14 and failed on pygit2, and with --python '&gt;=3.10,&lt;3.14' it installed; PyPI read 2026-11-25: pygit2 publishes cp314 wheels from 1.19.0, while yara-python publishes none through 4.5.4</td>
 </tr>
 </tbody>
@@ -5599,37 +5599,37 @@ SOFTWARE.
 <td><code>rule_id</code></td>
 <td><code>mapped</code></td>
 <td>SARIF result ruleId (the vulnerability id plus the package name)</td>
-<td></td>
+<td>observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference</td>
 </tr>
 <tr>
 <td><code>severity</code></td>
 <td><code>mapped</code></td>
 <td>SARIF rule properties "security-severity" (CVSS), else the result "level"</td>
-<td></td>
+<td>observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference</td>
 </tr>
 <tr>
 <td><code>file_path</code></td>
 <td><code>mapped</code></td>
 <td>SARIF locations[].physicalLocation.artifactLocation.uri (the manifest or lockfile)</td>
-<td></td>
+<td>observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference</td>
 </tr>
 <tr>
 <td><code>line_range</code></td>
 <td><code>mapped</code></td>
 <td>SARIF region.startLine (grype writes line 1 of the manifest)</td>
-<td></td>
+<td>observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference</td>
 </tr>
 <tr>
 <td><code>column</code></td>
 <td><code>mapped</code></td>
 <td>SARIF region.startColumn / region.endColumn (always 1 in the capture, as the finding is the manifest's line 1)</td>
-<td></td>
+<td>observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference</td>
 </tr>
 <tr>
 <td><code>message</code></td>
 <td><code>mapped</code></td>
 <td>SARIF result message.text</td>
-<td></td>
+<td>observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference</td>
 </tr>
 <tr>
 <td><code>resource_id</code></td>
@@ -5647,13 +5647,13 @@ SOFTWARE.
 <td><code>package_name</code></td>
 <td><code>mapped</code></td>
 <td>SARIF message "package: &lt;name&gt;, version &lt;version&gt; was found at:" parsed by _GRYPE_PACKAGE_MESSAGE</td>
-<td></td>
+<td>observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference</td>
 </tr>
 <tr>
 <td><code>package_version</code></td>
 <td><code>mapped</code></td>
 <td>SARIF message "package: &lt;name&gt;, version &lt;version&gt; was found at:" parsed by _GRYPE_PACKAGE_MESSAGE</td>
-<td></td>
+<td>observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference</td>
 </tr>
 <tr>
 <td><code>package_path</code></td>
@@ -5677,13 +5677,13 @@ SOFTWARE.
 <td><code>fingerprints</code></td>
 <td><code>mapped</code></td>
 <td>SARIF result partialFingerprints.primaryLocationLineHash (a hash of the manifest line, so findings at one manifest line share a value; 6 distinct values over 21 results in the capture)</td>
-<td></td>
+<td>observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference</td>
 </tr>
 <tr>
 <td><code>fix_available</code></td>
 <td><code>mapped</code></td>
 <td>the SARIF rule help.text line "Fix Version: &lt;versions&gt;" (grype's rendering of matches[].vulnerability.fix.versions); fix_available=True is written only for a non-empty list on a uniquely named rule whose Package and Version lines match the result's own message</td>
-<td></td>
+<td>observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference</td>
 </tr>
 <tr>
 <td><code>remediation_text</code></td>
@@ -5701,7 +5701,7 @@ SOFTWARE.
 <td><code>references</code></td>
 <td><code>mapped</code></td>
 <td>tool.driver.rules[].helpUri, read into the flat references by the shared rule read when the result carries none of its own</td>
-<td>grype writes the advisory dataSource as the rule helpUri; the native match urls (matches[].vulnerability.urls, relatedVulnerabilities[].urls) are still never read</td>
+<td>grype writes the advisory dataSource as the rule helpUri; the native match urls (matches[].vulnerability.urls, relatedVulnerabilities[].urls) are still never read; observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference</td>
 </tr>
 <tr>
 <td><code>tags</code></td>
@@ -5713,7 +5713,7 @@ SOFTWARE.
 <td><code>extras</code></td>
 <td><code>mapped</code></td>
 <td>SARIF result properties bag (package identity keys this adapter writes) passed through to the flat properties</td>
-<td></td>
+<td>observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference</td>
 </tr>
 </tbody>
 </table>
@@ -7229,39 +7229,39 @@ SOFTWARE.
 <tbody>
 <tr>
 <td><code>rule_id</code></td>
-<td><code>mapped</code></td>
-<td>result "ruleId"</td>
+<td><code>unconfirmed</code></td>
 <td></td>
+<td>UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a <code>snyk code test --sarif</code> capture under snyk/captured/ settles it (candidate field: result "ruleId")</td>
 </tr>
 <tr>
 <td><code>severity</code></td>
-<td><code>mapped</code></td>
-<td>result "level" (no security-severity on rules, so a bare error reads as CRITICAL)</td>
+<td><code>unconfirmed</code></td>
 <td></td>
+<td>UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a <code>snyk code test --sarif</code> capture under snyk/captured/ settles it (candidate field: result "level"; no security-severity on rules, so a bare error reads as CRITICAL)</td>
 </tr>
 <tr>
 <td><code>file_path</code></td>
-<td><code>mapped</code></td>
-<td>locations[].physicalLocation.artifactLocation.uri (%SRCROOT% base)</td>
+<td><code>unconfirmed</code></td>
 <td></td>
+<td>UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a <code>snyk code test --sarif</code> capture under snyk/captured/ settles it (candidate field: locations[].physicalLocation.artifactLocation.uri, %SRCROOT% base)</td>
 </tr>
 <tr>
 <td><code>line_range</code></td>
-<td><code>mapped</code></td>
-<td>region.startLine / region.endLine</td>
+<td><code>unconfirmed</code></td>
 <td></td>
+<td>UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a <code>snyk code test --sarif</code> capture under snyk/captured/ settles it (candidate fields: region.startLine / region.endLine)</td>
 </tr>
 <tr>
 <td><code>column</code></td>
-<td><code>mapped</code></td>
-<td>region.startColumn / region.endColumn</td>
+<td><code>unconfirmed</code></td>
 <td></td>
+<td>UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a <code>snyk code test --sarif</code> capture under snyk/captured/ settles it (candidate fields: region.startColumn / region.endColumn)</td>
 </tr>
 <tr>
 <td><code>message</code></td>
-<td><code>mapped</code></td>
-<td>result "message.text"</td>
+<td><code>unconfirmed</code></td>
 <td></td>
+<td>UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a <code>snyk code test --sarif</code> capture under snyk/captured/ settles it (candidate field: result "message.text")</td>
 </tr>
 <tr>
 <td><code>resource_id</code></td>
@@ -7301,21 +7301,21 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>taxonomy_cwe</code></td>
-<td><code>mapped</code></td>
-<td>rule properties "cwe" (e.g. ["CWE-798"]), normalized by normalize_rule_cwe_into_tags into the rule's tags as external/cwe/cwe-&lt;n&gt;, which the shared flat reader reads</td>
+<td><code>unconfirmed</code></td>
 <td></td>
+<td>UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a <code>snyk code test --sarif</code> capture under snyk/captured/ settles it (candidate field: rule properties "cwe", e.g. ["CWE-798"], normalized by normalize_rule_cwe_into_tags into the rule's tags as external/cwe/cwe-&lt;n&gt;, which the shared flat reader reads)</td>
 </tr>
 <tr>
 <td><code>fingerprints</code></td>
-<td><code>mapped</code></td>
-<td _0_="&quot;0&quot;," _1_="&quot;1&quot;">result "fingerprints"</td>
+<td><code>unconfirmed</code></td>
 <td></td>
+<td>UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a <code>snyk code test --sarif</code> capture under snyk/captured/ settles it (candidate field: result "fingerprints" {"0", "1"})</td>
 </tr>
 <tr>
 <td><code>fix_available</code></td>
-<td><code>mappable-dropped</code></td>
-<td>rule properties "isAutofixable"</td>
-<td>no flat fix_available write exists for snyk; weak signal (autofix availability, not a fixed version); UNCONFIRMED against a real tool run</td>
+<td><code>unconfirmed</code></td>
+<td></td>
+<td>UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a <code>snyk code test --sarif</code> capture under snyk/captured/ settles it (candidate field: rule properties "isAutofixable"; no flat fix_available write exists for snyk, and it would be a weak signal, autofix availability and not a fixed version)</td>
 </tr>
 <tr>
 <td><code>remediation_text</code></td>
@@ -7331,21 +7331,21 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>references</code></td>
-<td><code>mappable-dropped</code></td>
-<td>rule "help.markdown" and properties "exampleCommitFixes"</td>
-<td>the rule help survives the SARIF model and dies at the flat reader; UNCONFIRMED against a real tool run</td>
+<td><code>unconfirmed</code></td>
+<td></td>
+<td>UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a <code>snyk code test --sarif</code> capture under snyk/captured/ settles it (candidate fields: rule "help.markdown" and properties "exampleCommitFixes"; the rule help survives the SARIF model and dies at the flat reader)</td>
 </tr>
 <tr>
 <td><code>tags</code></td>
-<td><code>mapped</code></td>
-<td>tool.driver.rules[].properties.tags, read into the flat tags by the shared rule read when the result carries none of its own</td>
-<td>no tag write exists in this adapter at this checkout; the rule-level tags are what the flat row carries</td>
+<td><code>unconfirmed</code></td>
+<td></td>
+<td>UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a <code>snyk code test --sarif</code> capture under snyk/captured/ settles it (candidate field: tool.driver.rules[].properties.tags, read into the flat tags by the shared rule read when the result carries none of its own; no tag write exists in this adapter)</td>
 </tr>
 <tr>
 <td><code>extras</code></td>
-<td><code>mapped</code></td>
-<td>result properties bag, passed through the SARIF model untouched and read whole into the flat properties</td>
-<td>the rule properties bag survives the SARIF model but the flat reader takes only the rule's tags and helpUri from the rule, so rule-bag keys (cwe, isAutofixable, exampleCommitFixes) reach the flat row only through the cells above that name them</td>
+<td><code>unconfirmed</code></td>
+<td></td>
+<td>UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a <code>snyk code test --sarif</code> capture under snyk/captured/ settles it (the result properties bag passes through the SARIF model untouched; the flat reader takes only the rule's tags and helpUri from the rule, so rule-bag keys such as cwe, isAutofixable and exampleCommitFixes reach the flat row only through the cells above that name them)</td>
 </tr>
 </tbody>
 </table>
