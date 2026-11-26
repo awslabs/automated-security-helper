@@ -306,6 +306,12 @@ _INSTALLER = f"{_ASH}/assets/install-pinned-tool.py"
 _INSTALLS = "the standalone tool installer: the install and staging directories"
 _CONFIG = "the config file the operator names or ASH resolved"
 _DOWNLOADS = "tool installs, download staging and the asset cache under ASH's home"
+_DEVSKIM_INSTALL = (
+    "the DevSkim install in the bin directory (ash_devskim_plugins/devskim_install.py): "
+    "the verified package's build unpacked file by file (open 'xb') into a new mkdtemp "
+    "directory beside .devskim/<version> and renamed into place, the old build moved "
+    "aside first; the launcher written to a mkstemp file and renamed over bin/devskim"
+)
 _RULES_INSTALLS = (
     "the cfn-guard rules directory beside the tool installs (rules_bundles.rules_root): "
     "a staging directory made in it, renamed into place"
@@ -671,6 +677,31 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         "the install receipts under ASH's home",
     ),
+    # The DevSkim package holds a directory of files, not one executable, so its
+    # module unpacks the build itself; the download and the receipt go through
+    # download_utils above.
+    (
+        f"{_ASH}/plugin_modules/ash_devskim_plugins/devskim_install.py",
+        "extract_build",
+        "open",
+    ): (1, _DEVSKIM_INSTALL),
+    # Three renames: the old build aside, the staged build into place (twice, one per
+    # branch).
+    (
+        f"{_ASH}/plugin_modules/ash_devskim_plugins/devskim_install.py",
+        "_replace_directory",
+        "os.replace",
+    ): (3, _DEVSKIM_INSTALL),
+    (
+        f"{_ASH}/plugin_modules/ash_devskim_plugins/devskim_install.py",
+        "_write_launcher",
+        "os.fdopen",
+    ): (1, _DEVSKIM_INSTALL),
+    (
+        f"{_ASH}/plugin_modules/ash_devskim_plugins/devskim_install.py",
+        "_write_launcher",
+        "os.replace",
+    ): (1, _DEVSKIM_INSTALL),
     # One open creates: the read-write open, with O_CREAT. The read-only fallback
     # for a lock file another account made does not ask to create, so it is no
     # write and the detector does not count it.
@@ -813,6 +844,13 @@ NOT_WRITES: Dict[Site, Tuple[int, str]] = {
         1,
         "nothing: it reads a member of the uploaded zip",
     ),
+    # `archive.open(info)` reads one member of the verified DevSkim package; the
+    # file it is copied into is the `open(target, "xb")` listed with the writes.
+    (
+        f"{_ASH}/plugin_modules/ash_devskim_plugins/devskim_install.py",
+        "extract_build",
+        "Path.open",
+    ): (1, "nothing: it reads a member of the verified DevSkim package"),
     # `tarfile.open(archive, "r:")` reads a saved image's member names to pick the
     # stereoscope scheme; the detector cannot read the mode of a tarfile.open().
     (f"{_ASH}/utils/image_tool_targets.py", "archive_scheme", "Path.open"): (

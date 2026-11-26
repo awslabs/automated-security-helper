@@ -348,6 +348,12 @@ RAW_PYTHON_ARGV_ALLOWED = {
     ),
     ("cli/dependencies.py", "_with_path_imported"),
     ("utils/cdk_nag_worker.py", "_run_child"),
+    # The DevSkim scanner's install command, declared like the pinned-tool one and
+    # run the same way, by `ash dependencies install` through run_command.
+    (
+        "plugin_modules/ash_devskim_plugins/devskim_install.py",
+        "devskim_install_commands",
+    ),
 }
 
 #: Spawn helpers a Python child may be handed to.

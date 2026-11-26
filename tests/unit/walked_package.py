@@ -54,6 +54,7 @@ PACKAGE_DIRS = frozenset(
         "plugin_modules/ash_builtin/scanners",
         "plugin_modules/ash_credsweeper_plugins",
         "plugin_modules/ash_dependency_check_plugins",
+        "plugin_modules/ash_devskim_plugins",
         "plugin_modules/ash_ferret_plugins",
         "plugin_modules/ash_ggshield_plugins",
         "plugin_modules/ash_gosec_plugins",

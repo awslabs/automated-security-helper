@@ -215,6 +215,9 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
         "template-shaped file beside it is authored to the adapter)",
     ),
     "detect-secrets": CorpusSpec("detect_secrets", prep="detect-secrets"),
+    # The committed SARIF is DevSkim 1.0.103's own output, byte for byte, for a REAL
+    # run over captured/in/ (captured/README.md has the argv and the runtime).
+    "devskim": CorpusSpec("devskim", sarif=("captured/*.sarif",)),
     "ferret-scan": CorpusSpec(
         "ferret-scan", sarif=("captured/*.sarif",), prep="ferret-scan"
     ),

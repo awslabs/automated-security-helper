@@ -1330,6 +1330,14 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     # 'gcc'`). The scanner installs on user machines with a toolchain; its register
     # carries the license read (MIT, the 1.19.7 wheel's licenses/LICENSE).
     #
+    # DevSkim (alpha scanner) has NO entry either: its tool is a .NET program (the
+    # Microsoft.CST.DevSkim.CLI 1.0.103 package holds framework-dependent net8.0,
+    # net9.0 and net10.0 builds and no executable), and the image carries no .NET
+    # runtime to run it. It is pinned and installed by its own module
+    # (ash_devskim_plugins/devskim_install.py) on user machines that have a .NET
+    # runtime; its register carries the license read (MIT, the repository
+    # LICENSE.txt at the commit the 1.0.103 package names).
+    #
     # The alpha ggshield scanner's uv tool. The wheel's dist-info carries
     # licenses/LICENSE (MIT), the file whose sha256 the scanner's register cites.
     "ggshield": ThirdPartyLicense(

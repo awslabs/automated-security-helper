@@ -162,6 +162,14 @@ MANIFESTS = (
         owned=(f"{_DOCS}/dependency_check-plugin.md", f"{_FIXTURES}/dependency-check"),
     ),
     _alpha(
+        "devskim",
+        "ash_devskim_plugins",
+        "devskim_scanner",
+        "DevSkimScanner",
+        "DevSkimScannerConfigOptions",
+        owned=(f"{_DOCS}/devskim-plugin.md", f"{_FIXTURES}/devskim"),
+    ),
+    _alpha(
         "ferret-scan",
         "ash_ferret_plugins",
         "ferret_scanner",
