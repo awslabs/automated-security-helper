@@ -234,6 +234,11 @@ ends in `/`, a pattern that names no path, and one holding a newline, carriage r
 NUL are left to the report filter alone, and ASH logs one line saying so; at most 200
 globs are passed to a tool. The convert phase stays filesystem-only.
 
+Like a suppression without `image:`, an `ignore_paths` entry written before image scans
+existed now also filters in-image findings: a broad `**`-glob (say `**/vendor/**`,
+meant for the source tree) drops a CVE reported at `/vendor/...` inside every image this
+project scans. Review broad ignore entries when you adopt image scanning.
+
 ## Tests never pull
 
 ASH's own test fixtures build OCI layout directories and a small saved-image archive from
