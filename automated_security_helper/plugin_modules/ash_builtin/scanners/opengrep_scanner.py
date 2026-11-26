@@ -303,8 +303,9 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         # The offline rule cache ASH checked before the scan and passes as --config.
         read_path_env=("OPENGREP_RULES_CACHE_DIR",),
         # extra_subprocess_env's safe.directory entries: the sandbox's allowlist
-        # passes no GIT_CONFIG_* variable, so it writes them from the directories
-        # it computes from the scan target (safe_directories_for) instead.
+        # passes no GIT_CONFIG_* variable that could add configuration, so it
+        # writes them from the directories it computes from the scan target
+        # (safe_directories_for) instead.
         git_safe_directory=True,
     )
 
@@ -622,8 +623,9 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
 
         Git compares ``safe.directory`` with the top of the work tree, so a scan
         pointed at a subdirectory of a checkout names the checkout's top level as
-        well: the first parent that holds a ``.git`` the scanned directory's owner
-        also owns, and never a filesystem root (``safe_directories_for``). Outside a
+        well: the first parent that holds a ``.git``, when that parent and its
+        ``.git`` each belong to the scanned directory's owner or to the effective
+        uid, and never a filesystem root (``safe_directories_for``). Outside a
         checkout only the scanned directory is named. Where the platform has no user
         ids (Windows) no owner can be compared, so the top is not named and git's own
         ownership check decides it.
