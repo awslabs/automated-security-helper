@@ -1,0 +1,27 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "govulncheck",
+          "semanticVersion": "v1.9.0",
+          "informationUri": "https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck",
+          "properties": {
+            "protocol_version": "v1.0.0",
+            "scanner_name": "govulncheck",
+            "scanner_version": "v1.9.0",
+            "db": "https://vuln.go.dev",
+            "db_last_modified": "2026-11-24T15:56:00Z",
+            "go_version": "go1.27.4",
+            "scan_level": "symbol",
+            "scan_mode": "source"
+          },
+          "rules": []
+        }
+      },
+      "results": []
+    }
+  ]
+}

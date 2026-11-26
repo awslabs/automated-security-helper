@@ -186,6 +186,14 @@ MANIFESTS = (
         owned=(f"{_DOCS}/gosec-plugin.md", f"{_FIXTURES}/gosec"),
     ),
     _alpha(
+        "govulncheck",
+        "ash_govulncheck_plugins",
+        "govulncheck_scanner",
+        "GovulncheckScanner",
+        "GovulncheckScannerConfigOptions",
+        owned=(f"{_DOCS}/govulncheck-plugin.md", f"{_FIXTURES}/govulncheck"),
+    ),
+    _alpha(
         "guarddog",
         "ash_guarddog_plugins",
         "guarddog_scanner",

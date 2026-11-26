@@ -1,0 +1,1330 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "govulncheck",
+          "semanticVersion": "v1.9.0",
+          "informationUri": "https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck",
+          "properties": {
+            "protocol_version": "v1.0.0",
+            "scanner_name": "govulncheck",
+            "scanner_version": "v1.9.0",
+            "db": "https://vuln.go.dev",
+            "db_last_modified": "2026-11-24T15:56:00Z",
+            "go_version": "go1.27.0",
+            "scan_level": "symbol",
+            "scan_mode": "source"
+          },
+          "rules": [
+            {
+              "id": "GO-2026-6599",
+              "shortDescription": {
+                "text": "[GO-2026-6599] Reset context tracking on consecutive template expressions in html/template"
+              },
+              "fullDescription": {
+                "text": "Reset context tracking on consecutive template expressions in html/template"
+              },
+              "help": {
+                "text": "When a JavaScript template literal contains consecutive expressions, the context tracking state was not properly reset upon entering a new expression.\n\nWe now ensure that template-literal expression entries correctly reset context variables so all subsequent regular expression literals are accurately recognized and escaped."
+              },
+              "helpUri": "https://pkg.go.dev/vuln/GO-2026-6599",
+              "properties": {
+                "tags": [
+                  "CVE-2026-94448"
+                ]
+              }
+            },
+            {
+              "id": "GO-2026-6600",
+              "shortDescription": {
+                "text": "[GO-2026-6600] Recognize yield as regexp preceder keyword in html/template"
+              },
+              "fullDescription": {
+                "text": "Recognize yield as regexp preceder keyword in html/template"
+              },
+              "help": {
+                "text": "A trusted template author may have previously written a valid template wherein the use of the 'yield' keyword would not be correctly escaped.\n\nWe now ensure that valid keyword uses are escaped and non-keyword uses are not escaped."
+              },
+              "helpUri": "https://pkg.go.dev/vuln/GO-2026-6600",
+              "properties": {
+                "tags": [
+                  "CVE-2026-97030"
+                ]
+              }
+            },
+            {
+              "id": "GO-2026-6603",
+              "shortDescription": {
+                "text": "[GO-2026-6603] HTTP/2 server memory exhaustion due to Trailer headers in net/http"
+              },
+              "fullDescription": {
+                "text": "HTTP/2 server memory exhaustion due to Trailer headers in net/http"
+              },
+              "help": {
+                "text": "When \"Trailer\" headers are sent by a client, the HTTP server internally uses the header values to populate the Request.Trailer map passed to the server handler. Because Request.Trailer is a map, each entry incurs memory overhead. For HTTP/2 servers, a malicious client can exploit this by sending a \"Trailer\" header that declares a large number of fields, causing the server to allocate a disproportionate amount of memory while bypassing Server.MaxHeaderValueCount and Server.MaxHeaderBytes limits. This exploit is not applicable for HTTP/1 servers, which do not support multiplexing a large number of requests over one TCP connection, and whose Server.MaxHeaderBytes are calculated differently."
+              },
+              "helpUri": "https://pkg.go.dev/vuln/GO-2026-6603",
+              "properties": {
+                "tags": [
+                  "CVE-2026-78659"
+                ]
+              }
+            },
+            {
+              "id": "GO-2026-6604",
+              "shortDescription": {
+                "text": "[GO-2026-6604] Root.Mkdir(All) can follow junctions out of the root on Windows in os"
+              },
+              "fullDescription": {
+                "text": "Root.Mkdir(All) can follow junctions out of the root on Windows in os"
+              },
+              "help": {
+                "text": "On Windows, when the target of Root.Mkdir or Root.MkdirAll is a junction pointing to an empty location, the operation can create a directory at the junction target even when that target is located outside the root. This only applies to operations where the last path component is a junction (path/to/junction, but not path/junction/target)."
+              },
+              "helpUri": "https://pkg.go.dev/vuln/GO-2026-6604",
+              "properties": {
+                "tags": [
+                  "CVE-2026-56857"
+                ]
+              }
+            },
+            {
+              "id": "GO-2026-6605",
+              "shortDescription": {
+                "text": "[GO-2026-6605] HTTP/1 client connection desynchronization after CONNECT rejection in net/http"
+              },
+              "fullDescription": {
+                "text": "HTTP/1 client connection desynchronization after CONNECT rejection in net/http"
+              },
+              "help": {
+                "text": "When http.Transport sends an HTTP/1 CONNECT request with a non-empty Request.Body, it writes the body directly to the connection without framing after the request headers. If the server rejects the CONNECT request with a non-2xx keep-alive response, Transport returns the connection to the idle pool. Because CONNECT requests do not have a request body, the server may interpret the trailing body bytes as a subsequent pipelined HTTP/1.1 request on the connection, leaving the pooled connection desynchronized and causing the next caller that reuses it to read the response to the injected request. In reverse proxies (including httputil.ReverseProxy) that forward CONNECT requests through a shared Transport, this can lead to cross-user response poisoning."
+              },
+              "helpUri": "https://pkg.go.dev/vuln/GO-2026-6605",
+              "properties": {
+                "tags": [
+                  "CVE-2026-56866"
+                ]
+              }
+            },
+            {
+              "id": "GO-2026-6607",
+              "shortDescription": {
+                "text": "[GO-2026-6607] Reject malformed ECH outer extension references in crypto/tls"
+              },
+              "fullDescription": {
+                "text": "Reject malformed ECH outer extension references in crypto/tls"
+              },
+              "help": {
+                "text": "Multiple ECH outer extension references are not permitted under RFC 9849; previously, a client could send a well-crafted packet that could trigger memory exhaustion in the server process by specifying multiple references.\n\nWe now reject these as malformed and curb the memory amplification vector as a result."
+              },
+              "helpUri": "https://pkg.go.dev/vuln/GO-2026-6607",
+              "properties": {
+                "tags": [
+                  "CVE-2026-97031"
+                ]
+              }
+            },
+            {
+              "id": "GO-2026-6608",
+              "shortDescription": {
+                "text": "[GO-2026-6608] Memory limit bypass when parsing MIME headers in net/textproto, mime/multipart"
+              },
+              "fullDescription": {
+                "text": "Memory limit bypass when parsing MIME headers in net/textproto, mime/multipart"
+              },
+              "help": {
+                "text": "Parsing a multipart form can bypass memory limits and read an arbitrarily long line into memory when the remaining limit at the start of a part is less than 400 bytes."
+              },
+              "helpUri": "https://pkg.go.dev/vuln/GO-2026-6608",
+              "properties": {
+                "tags": [
+                  "CVE-2026-94440"
+                ]
+              }
+            },
+            {
+              "id": "GO-2026-6609",
+              "shortDescription": {
+                "text": "[GO-2026-6609] Lack of limit on size of parsed Range headers in net/http"
+              },
+              "fullDescription": {
+                "text": "Lack of limit on size of parsed Range headers in net/http"
+              },
+              "help": {
+                "text": "When parsing a Range header containing a large number of small ranges, FileServer(FS), ServeContent, and ServeFile(FS) can consume an excessive amount of CPU."
+              },
+              "helpUri": "https://pkg.go.dev/vuln/GO-2026-6609",
+              "properties": {
+                "tags": [
+                  "CVE-2026-78667"
+                ]
+              }
+            },
+            {
+              "id": "GO-2026-6610",
+              "shortDescription": {
+                "text": "[GO-2026-6610] HTTP/2 transport accepts malformed framing-related headers in net/http"
+              },
+              "fullDescription": {
+                "text": "HTTP/2 transport accepts malformed framing-related headers in net/http"
+              },
+              "help": {
+                "text": "Historically, we have been rather lax about malformed framing-related headers in our HTTP/2 implementation, as they cannot interfere with HTTP/2 framing. However, this makes it possible for our HTTP/2 implementation to forward responses containing such headers to an HTTP/1 client when acting as a reverse proxy. If the HTTP/1 client also does not behave strictly enough, this can result in response smuggling."
+              },
+              "helpUri": "https://pkg.go.dev/vuln/GO-2026-6610",
+              "properties": {
+                "tags": [
+                  "CVE-2026-78660"
+                ]
+              }
+            },
+            {
+              "id": "GO-2026-6611",
+              "shortDescription": {
+                "text": "[GO-2026-6611] Excessive CPU consumption from repeated initial window changes in net/http"
+              },
+              "fullDescription": {
+                "text": "Excessive CPU consumption from repeated initial window changes in net/http"
+              },
+              "help": {
+                "text": "A malicious HTTP/2 peer can cause excessive CPU consumption in the client or server by opening a large number of streams and then sending many small SETTINGS frames containing SETTINGS_INITIAL_WINDOW_SIZE values."
+              },
+              "helpUri": "https://pkg.go.dev/vuln/GO-2026-6611",
+              "properties": {
+                "tags": [
+                  "CVE-2026-78669"
+                ]
+              }
+            },
+            {
+              "id": "GO-2026-6612",
+              "shortDescription": {
+                "text": "[GO-2026-6612] Double flow control refund on HTTP/2 server streams in net/http"
+              },
+              "fullDescription": {
+                "text": "Double flow control refund on HTTP/2 server streams in net/http"
+              },
+              "help": {
+                "text": "The HTTP/2 server can refund connection-level flow control twice for the same data: Once when a client resets a stream (refunding data for any sent-but-unread portion of the stream), and again when a request handler reads the buffered data. A malicious client can exploit this to bypass the configured connection-level flow control limit (MaxReceiveBufferPerConnection). Total buffered data is still limited by the concurrent stream limit and stream-level flow control."
+              },
+              "helpUri": "https://pkg.go.dev/vuln/GO-2026-6612",
+              "properties": {
+                "tags": [
+                  "CVE-2026-78663"
+                ]
+              }
+            },
+            {
+              "id": "GO-2026-6613",
+              "shortDescription": {
+                "text": "[GO-2026-6613] HTTP/1 server connection desynchronization after 2xx CONNECT response in net/http"
+              },
+              "fullDescription": {
+                "text": "HTTP/1 server connection desynchronization after 2xx CONNECT response in net/http"
+              },
+              "help": {
+                "text": "When an HTTP server handler sends a 2xx response to an HTTP/1 CONNECT request and returns without hijacking the connection, the server improperly continues to read and serve requests from the connection. Since a 2xx response to an HTTP/1 CONNECT converts the connection into a tunnel, the server should not treat the connection as continuing to contain HTTP.\n\nThe impact of this misbehavior is mostly limited to potential request smuggling, where an intermediate proxy considers the data on the connection to be tunneled and the server considers it to be HTTP."
+              },
+              "helpUri": "https://pkg.go.dev/vuln/GO-2026-6613",
+              "properties": {
+                "tags": [
+                  "CVE-2026-94439"
+                ]
+              }
+            },
+            {
+              "id": "GO-2026-6617",
+              "shortDescription": {
+                "text": "[GO-2026-6617] HTTP/2 server crash due to HPACK encoder race in net/http"
+              },
+              "fullDescription": {
+                "text": "HTTP/2 server crash due to HPACK encoder race in net/http"
+              },
+              "help": {
+                "text": "HTTP/2 servers could end up crashing due to inadvertently modifying its HPACK encoder concurrently. This happens because the server modifies the HPACK encoder from two goroutines without synchronization: one uses the encoder to encode a HEADERS frame as part of a response sent to a client and the other modifies the encoder's table size when handling a SETTINGS frame containing SETTINGS_HEADER_TABLE_SIZE that a client sends. A malicious client can repeatedly send a request while changing the header table size to crash the server."
+              },
+              "helpUri": "https://pkg.go.dev/vuln/GO-2026-6617",
+              "properties": {
+                "tags": [
+                  "CVE-2026-97032"
+                ]
+              }
+            },
+            {
+              "id": "GO-2026-6809",
+              "shortDescription": {
+                "text": "[GO-2026-6809] Distrust compromised intermediate certificates in crypto/x509"
+              },
+              "fullDescription": {
+                "text": "Distrust compromised intermediate certificates in crypto/x509"
+              },
+              "help": {
+                "text": "On most platforms, Go uses the given system root certificates. However, in some narrower cases, the system trust stores may not be updated without further action.\n\nTo defend against the narrower set of cases that may remain affected, a denylist was added in crypto/x509 to return an error when calling Verify with any of the known intermediate certificates that are no longer considered to be trustworthy."
+              },
+              "helpUri": "https://pkg.go.dev/vuln/GO-2026-6809",
+              "properties": {
+                "tags": [
+                  "CVE-2026-111943"
+                ]
+              }
+            },
+            {
+              "id": "GO-2026-6859",
+              "shortDescription": {
+                "text": "[GO-2026-6859] HTTP/1 server crash due to MaxBytesReader header race in net/http"
+              },
+              "fullDescription": {
+                "text": "HTTP/1 server crash due to MaxBytesReader header race in net/http"
+              },
+              "help": {
+                "text": "For HTTP/1 servers, when MaxBytesReader's limit is exceeded, \"Connection: close\" header is automatically set without synchronization, which might race with another header being set explicitly in the server handler. As a result, an HTTP/1 server that utilizes MaxBytesReader or MaxBytesHandler can crash due to runtime panic if its handler reads the request body concurrently with writing the response header."
+              },
+              "helpUri": "https://pkg.go.dev/vuln/GO-2026-6859",
+              "properties": {
+                "tags": [
+                  "CVE-2026-97054"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "GO-2026-6599",
+          "level": "error",
+          "message": {
+            "text": "Your code calls vulnerable functions in 1 package (html/template)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "go.mod",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "message": {
+                "text": "Findings for vulnerability GO-2026-6599"
+              }
+            }
+          ],
+          "codeFlows": [
+            {
+              "threadFlows": [
+                {
+                  "locations": [
+                    {
+                      "module": "example.com/govulncheck-positive@",
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "main.go",
+                            "uriBaseId": "%SRCROOT%"
+                          },
+                          "region": {
+                            "startLine": 21,
+                            "startColumn": 24
+                          }
+                        },
+                        "message": {
+                          "text": "example.com/govulncheck-positive.main"
+                        }
+                      }
+                    },
+                    {
+                      "module": "stdlib@v1.27.0",
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "src/html/template/template.go",
+                            "uriBaseId": "%GOROOT%"
+                          },
+                          "region": {
+                            "startLine": 121,
+                            "startColumn": 20
+                          }
+                        },
+                        "message": {
+                          "text": "html/template.*Template.Execute"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "message": {
+                "text": "A summarized code flow for vulnerable function html/template.*Template.Execute"
+              }
+            }
+          ],
+          "stacks": [
+            {
+              "message": {
+                "text": "A call stack for vulnerable function html/template.*Template.Execute"
+              },
+              "frames": [
+                {
+                  "module": "example.com/govulncheck-positive@",
+                  "location": {
+                    "physicalLocation": {
+                      "artifactLocation": {
+                        "uri": "main.go",
+                        "uriBaseId": "%SRCROOT%"
+                      },
+                      "region": {
+                        "startLine": 21,
+                        "startColumn": 24
+                      }
+                    },
+                    "message": {
+                      "text": "example.com/govulncheck-positive.main"
+                    }
+                  }
+                },
+                {
+                  "module": "stdlib@v1.27.0",
+                  "location": {
+                    "physicalLocation": {
+                      "artifactLocation": {
+                        "uri": "src/html/template/template.go",
+                        "uriBaseId": "%GOROOT%"
+                      },
+                      "region": {
+                        "startLine": 121,
+                        "startColumn": 20
+                      }
+                    },
+                    "message": {
+                      "text": "html/template.*Template.Execute"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ruleId": "GO-2026-6600",
+          "level": "error",
+          "message": {
+            "text": "Your code calls vulnerable functions in 1 package (html/template)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "go.mod",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "message": {
+                "text": "Findings for vulnerability GO-2026-6600"
+              }
+            }
+          ],
+          "codeFlows": [
+            {
+              "threadFlows": [
+                {
+                  "locations": [
+                    {
+                      "module": "example.com/govulncheck-positive@",
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "main.go",
+                            "uriBaseId": "%SRCROOT%"
+                          },
+                          "region": {
+                            "startLine": 21,
+                            "startColumn": 24
+                          }
+                        },
+                        "message": {
+                          "text": "example.com/govulncheck-positive.main"
+                        }
+                      }
+                    },
+                    {
+                      "module": "stdlib@v1.27.0",
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "src/html/template/template.go",
+                            "uriBaseId": "%GOROOT%"
+                          },
+                          "region": {
+                            "startLine": 121,
+                            "startColumn": 20
+                          }
+                        },
+                        "message": {
+                          "text": "html/template.*Template.Execute"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "message": {
+                "text": "A summarized code flow for vulnerable function html/template.*Template.Execute"
+              }
+            }
+          ],
+          "stacks": [
+            {
+              "message": {
+                "text": "A call stack for vulnerable function html/template.*Template.Execute"
+              },
+              "frames": [
+                {
+                  "module": "example.com/govulncheck-positive@",
+                  "location": {
+                    "physicalLocation": {
+                      "artifactLocation": {
+                        "uri": "main.go",
+                        "uriBaseId": "%SRCROOT%"
+                      },
+                      "region": {
+                        "startLine": 21,
+                        "startColumn": 24
+                      }
+                    },
+                    "message": {
+                      "text": "example.com/govulncheck-positive.main"
+                    }
+                  }
+                },
+                {
+                  "module": "stdlib@v1.27.0",
+                  "location": {
+                    "physicalLocation": {
+                      "artifactLocation": {
+                        "uri": "src/html/template/template.go",
+                        "uriBaseId": "%GOROOT%"
+                      },
+                      "region": {
+                        "startLine": 121,
+                        "startColumn": 20
+                      }
+                    },
+                    "message": {
+                      "text": "html/template.*Template.Execute"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ruleId": "GO-2026-6603",
+          "level": "warning",
+          "message": {
+            "text": "Your code imports 1 vulnerable package (net/http/internal/http2), but doesn’t appear to call any of the vulnerable symbols."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "go.mod",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "message": {
+                "text": "Findings for vulnerability GO-2026-6603"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "GO-2026-6604",
+          "level": "warning",
+          "message": {
+            "text": "Your code imports 1 vulnerable package (os), but doesn’t appear to call any of the vulnerable symbols."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "go.mod",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "message": {
+                "text": "Findings for vulnerability GO-2026-6604"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "GO-2026-6605",
+          "level": "warning",
+          "message": {
+            "text": "Your code imports 1 vulnerable package (net/http), but doesn’t appear to call any of the vulnerable symbols."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "go.mod",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "message": {
+                "text": "Findings for vulnerability GO-2026-6605"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "GO-2026-6607",
+          "level": "warning",
+          "message": {
+            "text": "Your code imports 1 vulnerable package (crypto/tls), but doesn’t appear to call any of the vulnerable symbols."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "go.mod",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "message": {
+                "text": "Findings for vulnerability GO-2026-6607"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "GO-2026-6608",
+          "level": "error",
+          "message": {
+            "text": "Your code calls vulnerable functions in 1 package (net/textproto)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "go.mod",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "message": {
+                "text": "Findings for vulnerability GO-2026-6608"
+              }
+            }
+          ],
+          "codeFlows": [
+            {
+              "threadFlows": [
+                {
+                  "locations": [
+                    {
+                      "module": "example.com/govulncheck-positive@",
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "main.go",
+                            "uriBaseId": "%SRCROOT%"
+                          },
+                          "region": {
+                            "startLine": 25,
+                            "startColumn": 38
+                          }
+                        },
+                        "message": {
+                          "text": "example.com/govulncheck-positive.main"
+                        }
+                      }
+                    },
+                    {
+                      "module": "stdlib@v1.27.0",
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "src/net/textproto/reader.go",
+                            "uriBaseId": "%GOROOT%"
+                          },
+                          "region": {
+                            "startLine": 507,
+                            "startColumn": 18
+                          }
+                        },
+                        "message": {
+                          "text": "net/textproto.*Reader.ReadMIMEHeader"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "message": {
+                "text": "A summarized code flow for vulnerable function net/textproto.*Reader.ReadMIMEHeader"
+              }
+            }
+          ],
+          "stacks": [
+            {
+              "message": {
+                "text": "A call stack for vulnerable function net/textproto.*Reader.ReadMIMEHeader"
+              },
+              "frames": [
+                {
+                  "module": "example.com/govulncheck-positive@",
+                  "location": {
+                    "physicalLocation": {
+                      "artifactLocation": {
+                        "uri": "main.go",
+                        "uriBaseId": "%SRCROOT%"
+                      },
+                      "region": {
+                        "startLine": 25,
+                        "startColumn": 38
+                      }
+                    },
+                    "message": {
+                      "text": "example.com/govulncheck-positive.main"
+                    }
+                  }
+                },
+                {
+                  "module": "stdlib@v1.27.0",
+                  "location": {
+                    "physicalLocation": {
+                      "artifactLocation": {
+                        "uri": "src/net/textproto/reader.go",
+                        "uriBaseId": "%GOROOT%"
+                      },
+                      "region": {
+                        "startLine": 507,
+                        "startColumn": 18
+                      }
+                    },
+                    "message": {
+                      "text": "net/textproto.*Reader.ReadMIMEHeader"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ruleId": "GO-2026-6609",
+          "level": "warning",
+          "message": {
+            "text": "Your code imports 1 vulnerable package (net/http), but doesn’t appear to call any of the vulnerable symbols."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "go.mod",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "message": {
+                "text": "Findings for vulnerability GO-2026-6609"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "GO-2026-6610",
+          "level": "warning",
+          "message": {
+            "text": "Your code imports 1 vulnerable package (net/http/internal/http2), but doesn’t appear to call any of the vulnerable symbols."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "go.mod",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "message": {
+                "text": "Findings for vulnerability GO-2026-6610"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "GO-2026-6611",
+          "level": "warning",
+          "message": {
+            "text": "Your code imports 1 vulnerable package (net/http/internal/http2), but doesn’t appear to call any of the vulnerable symbols."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "go.mod",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "message": {
+                "text": "Findings for vulnerability GO-2026-6611"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "GO-2026-6612",
+          "level": "warning",
+          "message": {
+            "text": "Your code imports 1 vulnerable package (net/http/internal/http2), but doesn’t appear to call any of the vulnerable symbols."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "go.mod",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "message": {
+                "text": "Findings for vulnerability GO-2026-6612"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "GO-2026-6613",
+          "level": "error",
+          "message": {
+            "text": "Your code calls vulnerable functions in 1 package (net/http)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "go.mod",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "message": {
+                "text": "Findings for vulnerability GO-2026-6613"
+              }
+            }
+          ],
+          "codeFlows": [
+            {
+              "threadFlows": [
+                {
+                  "locations": [
+                    {
+                      "module": "example.com/govulncheck-positive@",
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "main.go",
+                            "uriBaseId": "%SRCROOT%"
+                          },
+                          "region": {
+                            "startLine": 25,
+                            "startColumn": 38
+                          }
+                        },
+                        "message": {
+                          "text": "example.com/govulncheck-positive.main"
+                        }
+                      }
+                    },
+                    {
+                      "module": "stdlib@v1.27.0",
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "src/net/textproto/reader.go",
+                            "uriBaseId": "%GOROOT%"
+                          },
+                          "region": {
+                            "startLine": 508,
+                            "startColumn": 23
+                          }
+                        },
+                        "message": {
+                          "text": "net/textproto.*Reader.ReadMIMEHeader"
+                        }
+                      }
+                    },
+                    {
+                      "module": "stdlib@v1.27.0",
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "src/net/textproto/reader.go",
+                            "uriBaseId": "%GOROOT%"
+                          },
+                          "region": {
+                            "startLine": 545,
+                            "startColumn": 25
+                          }
+                        },
+                        "message": {
+                          "text": "net/textproto.readMIMEHeader"
+                        }
+                      }
+                    },
+                    {
+                      "module": "stdlib@v1.27.0",
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "src/net/http/transport.go",
+                            "uriBaseId": "%GOROOT%"
+                          },
+                          "region": {
+                            "startLine": 3227,
+                            "startColumn": 26
+                          }
+                        },
+                        "message": {
+                          "text": "net/http.*bodyEOFSignal.Read"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "message": {
+                "text": "A summarized code flow for vulnerable function net/http.*bodyEOFSignal.Read"
+              }
+            }
+          ],
+          "stacks": [
+            {
+              "message": {
+                "text": "A call stack for vulnerable function net/http.*bodyEOFSignal.Read"
+              },
+              "frames": [
+                {
+                  "module": "example.com/govulncheck-positive@",
+                  "location": {
+                    "physicalLocation": {
+                      "artifactLocation": {
+                        "uri": "main.go",
+                        "uriBaseId": "%SRCROOT%"
+                      },
+                      "region": {
+                        "startLine": 25,
+                        "startColumn": 38
+                      }
+                    },
+                    "message": {
+                      "text": "example.com/govulncheck-positive.main"
+                    }
+                  }
+                },
+                {
+                  "module": "stdlib@v1.27.0",
+                  "location": {
+                    "physicalLocation": {
+                      "artifactLocation": {
+                        "uri": "src/net/textproto/reader.go",
+                        "uriBaseId": "%GOROOT%"
+                      },
+                      "region": {
+                        "startLine": 508,
+                        "startColumn": 23
+                      }
+                    },
+                    "message": {
+                      "text": "net/textproto.*Reader.ReadMIMEHeader"
+                    }
+                  }
+                },
+                {
+                  "module": "stdlib@v1.27.0",
+                  "location": {
+                    "physicalLocation": {
+                      "artifactLocation": {
+                        "uri": "src/net/textproto/reader.go",
+                        "uriBaseId": "%GOROOT%"
+                      },
+                      "region": {
+                        "startLine": 545,
+                        "startColumn": 25
+                      }
+                    },
+                    "message": {
+                      "text": "net/textproto.readMIMEHeader"
+                    }
+                  }
+                },
+                {
+                  "module": "stdlib@v1.27.0",
+                  "location": {
+                    "physicalLocation": {
+                      "artifactLocation": {
+                        "uri": "src/bufio/bufio.go",
+                        "uriBaseId": "%GOROOT%"
+                      },
+                      "region": {
+                        "startLine": 152,
+                        "startColumn": 9
+                      }
+                    },
+                    "message": {
+                      "text": "bufio.*Reader.Peek"
+                    }
+                  }
+                },
+                {
+                  "module": "stdlib@v1.27.0",
+                  "location": {
+                    "physicalLocation": {
+                      "artifactLocation": {
+                        "uri": "src/bufio/bufio.go",
+                        "uriBaseId": "%GOROOT%"
+                      },
+                      "region": {
+                        "startLine": 113,
+                        "startColumn": 22
+                      }
+                    },
+                    "message": {
+                      "text": "bufio.*Reader.fill"
+                    }
+                  }
+                },
+                {
+                  "module": "stdlib@v1.27.0",
+                  "location": {
+                    "physicalLocation": {
+                      "artifactLocation": {
+                        "uri": "src/net/http/transport.go",
+                        "uriBaseId": "%GOROOT%"
+                      },
+                      "region": {
+                        "startLine": 3227,
+                        "startColumn": 26
+                      }
+                    },
+                    "message": {
+                      "text": "net/http.*bodyEOFSignal.Read"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ruleId": "GO-2026-6617",
+          "level": "warning",
+          "message": {
+            "text": "Your code imports 1 vulnerable package (net/http/internal/http2), but doesn’t appear to call any of the vulnerable symbols."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "go.mod",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "message": {
+                "text": "Findings for vulnerability GO-2026-6617"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "GO-2026-6809",
+          "level": "warning",
+          "message": {
+            "text": "Your code imports 1 vulnerable package (crypto/x509), but doesn’t appear to call any of the vulnerable symbols."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "go.mod",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "message": {
+                "text": "Findings for vulnerability GO-2026-6809"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "GO-2026-6859",
+          "level": "error",
+          "message": {
+            "text": "Your code calls vulnerable functions in 1 package (net/http)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "go.mod",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "message": {
+                "text": "Findings for vulnerability GO-2026-6859"
+              }
+            }
+          ],
+          "codeFlows": [
+            {
+              "threadFlows": [
+                {
+                  "locations": [
+                    {
+                      "module": "example.com/govulncheck-positive@",
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "main.go",
+                            "uriBaseId": "%SRCROOT%"
+                          },
+                          "region": {
+                            "startLine": 25,
+                            "startColumn": 38
+                          }
+                        },
+                        "message": {
+                          "text": "example.com/govulncheck-positive.main"
+                        }
+                      }
+                    },
+                    {
+                      "module": "stdlib@v1.27.0",
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "src/net/textproto/reader.go",
+                            "uriBaseId": "%GOROOT%"
+                          },
+                          "region": {
+                            "startLine": 508,
+                            "startColumn": 23
+                          }
+                        },
+                        "message": {
+                          "text": "net/textproto.*Reader.ReadMIMEHeader"
+                        }
+                      }
+                    },
+                    {
+                      "module": "stdlib@v1.27.0",
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "src/net/textproto/reader.go",
+                            "uriBaseId": "%GOROOT%"
+                          },
+                          "region": {
+                            "startLine": 545,
+                            "startColumn": 25
+                          }
+                        },
+                        "message": {
+                          "text": "net/textproto.readMIMEHeader"
+                        }
+                      }
+                    },
+                    {
+                      "module": "stdlib@v1.27.0",
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "src/net/http/transport.go",
+                            "uriBaseId": "%GOROOT%"
+                          },
+                          "region": {
+                            "startLine": 3227,
+                            "startColumn": 26
+                          }
+                        },
+                        "message": {
+                          "text": "net/http.*bodyEOFSignal.Read"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "message": {
+                "text": "A summarized code flow for vulnerable function net/http.*bodyEOFSignal.Read"
+              }
+            }
+          ],
+          "stacks": [
+            {
+              "message": {
+                "text": "A call stack for vulnerable function net/http.*bodyEOFSignal.Read"
+              },
+              "frames": [
+                {
+                  "module": "example.com/govulncheck-positive@",
+                  "location": {
+                    "physicalLocation": {
+                      "artifactLocation": {
+                        "uri": "main.go",
+                        "uriBaseId": "%SRCROOT%"
+                      },
+                      "region": {
+                        "startLine": 25,
+                        "startColumn": 38
+                      }
+                    },
+                    "message": {
+                      "text": "example.com/govulncheck-positive.main"
+                    }
+                  }
+                },
+                {
+                  "module": "stdlib@v1.27.0",
+                  "location": {
+                    "physicalLocation": {
+                      "artifactLocation": {
+                        "uri": "src/net/textproto/reader.go",
+                        "uriBaseId": "%GOROOT%"
+                      },
+                      "region": {
+                        "startLine": 508,
+                        "startColumn": 23
+                      }
+                    },
+                    "message": {
+                      "text": "net/textproto.*Reader.ReadMIMEHeader"
+                    }
+                  }
+                },
+                {
+                  "module": "stdlib@v1.27.0",
+                  "location": {
+                    "physicalLocation": {
+                      "artifactLocation": {
+                        "uri": "src/net/textproto/reader.go",
+                        "uriBaseId": "%GOROOT%"
+                      },
+                      "region": {
+                        "startLine": 545,
+                        "startColumn": 25
+                      }
+                    },
+                    "message": {
+                      "text": "net/textproto.readMIMEHeader"
+                    }
+                  }
+                },
+                {
+                  "module": "stdlib@v1.27.0",
+                  "location": {
+                    "physicalLocation": {
+                      "artifactLocation": {
+                        "uri": "src/bufio/bufio.go",
+                        "uriBaseId": "%GOROOT%"
+                      },
+                      "region": {
+                        "startLine": 152,
+                        "startColumn": 9
+                      }
+                    },
+                    "message": {
+                      "text": "bufio.*Reader.Peek"
+                    }
+                  }
+                },
+                {
+                  "module": "stdlib@v1.27.0",
+                  "location": {
+                    "physicalLocation": {
+                      "artifactLocation": {
+                        "uri": "src/bufio/bufio.go",
+                        "uriBaseId": "%GOROOT%"
+                      },
+                      "region": {
+                        "startLine": 113,
+                        "startColumn": 22
+                      }
+                    },
+                    "message": {
+                      "text": "bufio.*Reader.fill"
+                    }
+                  }
+                },
+                {
+                  "module": "stdlib@v1.27.0",
+                  "location": {
+                    "physicalLocation": {
+                      "artifactLocation": {
+                        "uri": "src/net/http/transport.go",
+                        "uriBaseId": "%GOROOT%"
+                      },
+                      "region": {
+                        "startLine": 3227,
+                        "startColumn": 26
+                      }
+                    },
+                    "message": {
+                      "text": "net/http.*bodyEOFSignal.Read"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

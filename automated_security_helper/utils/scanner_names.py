@@ -142,6 +142,7 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
     "ggshield": ScannerToolType.SECRETS.value,
     "gitleaks": ScannerToolType.SECRETS.value,
     "gosec": ScannerToolType.SAST.value,
+    "govulncheck": ScannerToolType.SCA.value,
     "grype": ScannerToolType.SCA.value,
     "guarddog": ScannerToolType.SCA.value,
     "hadolint": ScannerToolType.IAC.value,

@@ -1,0 +1,28 @@
+// The positive capture input, scanned with the go1.27.0 toolchain, whose standard
+// library has vulnerabilities fixed in later 1.27 releases. The code calls
+// html/template's Template.Execute and net/textproto's Reader.ReadMIMEHeader, and
+// govulncheck follows the calls on into net/http (symbol-level findings); net/http
+// also brings in crypto/tls and crypto/x509, whose affected functions it does not
+// reach (package-level findings).
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"html/template"
+	"net/http"
+	"net/textproto"
+	"os"
+	"strings"
+)
+
+func main() {
+	page := template.Must(template.New("page").Parse("<p>{{.}}</p>\n"))
+	if err := page.Execute(os.Stdout, "hello"); err != nil {
+		fmt.Println(err)
+	}
+	reader := textproto.NewReader(bufio.NewReader(strings.NewReader("Key: value\r\n\r\n")))
+	header, err := reader.ReadMIMEHeader()
+	fmt.Println(header, err)
+	fmt.Println(http.StatusText(http.StatusOK))
+}

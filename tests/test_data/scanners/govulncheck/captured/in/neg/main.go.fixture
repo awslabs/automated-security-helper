@@ -1,0 +1,9 @@
+// The negative capture input. Run under go1.27.4, the release that fixes every
+// standard library vulnerability the go1.27.0 run reports; the code uses fmt only.
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("no vulnerable code")
+}

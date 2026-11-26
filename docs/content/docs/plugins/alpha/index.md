@@ -12,6 +12,7 @@ This section covers the alpha plugins for ASH: the opt-in scanner packages (`ash
 - **[Ferret Scan Plugin](ferret-scan-plugin.md)** - Integrates Ferret Scan for comprehensive sensitive data detection (credit cards, passports, SSNs, API keys, secrets, and more)
 - **[ggshield Plugin](ggshield-plugin.md)** (`ash_ggshield_plugins`) - Secret detection with GitGuardian's ggshield
 - **[gosec Plugin](gosec-plugin.md)** (`ash_gosec_plugins`) - Go source security analysis with gosec
+- **[govulncheck Plugin](govulncheck-plugin.md)** (`ash_govulncheck_plugins`) - Known-vulnerability reachability for Go modules with the Go project's govulncheck
 - **[GuardDog Plugin](guarddog-plugin.md)** (`ash_guarddog_plugins`) - Malicious-package heuristics for PyPI, npm, Go, GitHub Actions, RubyGems and crates packages (pending licensing review)
 - **[hadolint Plugin](hadolint-plugin.md)** (`ash_hadolint_plugins`) - Lints Dockerfiles and Containerfiles with hadolint and its ShellCheck integration (pending licensing review)
 - **[KICS Plugin](kics-plugin.md)** (`ash_kics_plugins`) - Infrastructure-as-code misconfiguration scanning with Checkmarx KICS
@@ -21,7 +22,7 @@ This section covers the alpha plugins for ASH: the opt-in scanner packages (`ash
 - **[Snyk Code Plugin](snyk-plugin.md)** - Integrates Snyk Code for static application security testing (SAST) of source code vulnerabilities
 - **[Trivy Plugin](trivy-plugin.md)** - Integrates Aquasec's Trivy for vulnerability, misconfiguration, secret, and license scanning
 
-These fourteen ship inside ASH. Each takes part in a scan only when that scan names its
+These fifteen ship inside ASH. Each takes part in a scan only when that scan names its
 plugin module in `ash_plugin_modules` or `--ash-plugin-modules`, as its page shows.
 The MCP `list_scanners` tool reports them either way; listing one does not add it to
 any scan.

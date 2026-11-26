@@ -221,6 +221,11 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
     "ggshield": CorpusSpec("ggshield", sarif=("captured/*.sarif",)),
     "gitleaks": CorpusSpec("gitleaks", sarif=("gitleaks-*.sarif",), prep="gitleaks"),
     "gosec": CorpusSpec("gosec", sarif=("captured/*.sarif",)),
+    # The committed SARIF is a REAL govulncheck v1.9.0 run (captured/README.md), read
+    # through the adapter's severity step, the one it applies to a root module.
+    "govulncheck": CorpusSpec(
+        "govulncheck", sarif=("captured/*.sarif",), prep="govulncheck"
+    ),
     "grype": CorpusSpec("grype", sarif=("captured/*.sarif",), prep="grype"),
     "guarddog": CorpusSpec("guarddog", prep="guarddog"),
     "hadolint": CorpusSpec("hadolint", sarif=("captured/*.sarif",)),
@@ -445,6 +450,22 @@ def _prep_betterleaks(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Resu
             yield report, [r for run in report.runs or [] for r in run.results or []]
 
 
+def _prep_govulncheck(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The committed govulncheck capture through the adapter's own severity step.
+
+    A root module's report gets no directory prefix, so ``apply_severity_mapping``
+    is the whole of what the scanner does to it before the report is written.
+    """
+    from automated_security_helper.plugin_modules.ash_govulncheck_plugins.govulncheck_scanner import (
+        GovulncheckScanner,
+    )
+
+    for pattern in spec.sarif:
+        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+            report = GovulncheckScanner.apply_severity_mapping(_load_sarif(path))
+            yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
 def _prep_actionlint(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
     from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
         build_sarif,
@@ -665,6 +686,7 @@ _PREPS: Mapping[
     "detect-secrets": _prep_detect_secrets,
     "ferret-scan": _prep_ferret_scan,
     "gitleaks": _prep_gitleaks,
+    "govulncheck": _prep_govulncheck,
     "grype": _prep_grype,
     "guarddog": _prep_guarddog,
     "npm-audit": _prep_npm_audit,
@@ -763,7 +785,7 @@ def test_the_gate_carries_no_waiver_but_the_register() -> None:
 def test_the_registry_and_the_corpus_table_agree() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
     names = {_name(cls) for cls in SCANNER_CLASSES}
-    assert len(SCANNER_CLASSES) == 30, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == 31, sorted(c.__name__ for c in SCANNER_CLASSES)
     assert names == set(CORPORA) == set(SCANNER_TOOL_TYPES), (
         f"registry {sorted(names)} / corpus table {sorted(CORPORA)}: a scanner "
         "needs a CORPORA row (a corpus, or None with the fixture to author)"
