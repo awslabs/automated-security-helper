@@ -131,11 +131,11 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
         report_data: Dict[str, Any] = {}
 
         # Add metadata if enabled
-        if self.config.options.include_metadata:
+        if self._require_config().options.include_metadata:
             report_data["metadata"] = emitter.get_metadata()
 
         # Add scanner metrics if enabled
-        if self.config.options.include_scanner_metrics:
+        if self._require_config().options.include_scanner_metrics:
             report_data["scanner_metrics"] = emitter.get_scanner_results()
 
         # Every content database the scan measured, fresh or stale, with its build time, age,

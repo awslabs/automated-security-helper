@@ -597,7 +597,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         from automated_security_helper.utils.scan_output_dirs import scan_set_of
 
         if target_type == TargetType.CONVERTED:
-            candidates = list(Path(self._ctx.work_dir).rglob("*"))
+            candidates = list(self._require_work_dir().rglob("*"))
         else:
             candidates = [Path(p) for p in scan_set_of(self._ctx)]
 

@@ -761,7 +761,7 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
             )
             return json.dumps(
                 self._build_minimal_empty_sbom(
-                    inventory_known=False, options=self.config.options
+                    inventory_known=False, options=self._require_config().options
                 ),
                 separators=(",", ":"),
             )
@@ -789,7 +789,8 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
             inventory_known = bool(doc.get("metadata") or doc.get("serialNumber"))
             return json.dumps(
                 self._build_minimal_empty_sbom(
-                    inventory_known=inventory_known, options=self.config.options
+                    inventory_known=inventory_known,
+                    options=self._require_config().options,
                 ),
                 separators=(",", ":"),
             )
@@ -812,7 +813,7 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
         # components map to no ecosystem in the tables; gating on the dominant
         # type dropped every one of these and left the report with no source
         # properties at all, the case the overrides exist to cure.
-        options = self.config.options
+        options = self._require_config().options
         every_component = _walk_components(components)
         dominant_type = self._resolve_dominant_type(every_component, options)
         pm, lang = (None, None)

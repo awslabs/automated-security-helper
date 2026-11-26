@@ -217,19 +217,28 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         default_extension = UnusedSuppressionsReporterConfig.model_fields[
             "extension"
         ].default
-        if output_format == "markdown" and self.config.extension == default_extension:
-            self.config = self.config.model_copy(
+        # A config that is not set reads as the default format above, so the
+        # markdown branches below are never taken for one.
+        config = self.config
+        if (
+            config is not None
+            and output_format == "markdown"
+            and config.extension == default_extension
+        ):
+            self.config = config.model_copy(
                 update={"extension": self.MARKDOWN_EXTENSION}
             )
-        elif output_format == "markdown" and self.config.extension.lower().endswith(
-            ".json"
+        elif (
+            config is not None
+            and output_format == "markdown"
+            and config.extension.lower().endswith(".json")
         ):
             # Kept, as the operator's choice, but said: the text written under it
             # is markdown, and `ash config lint --fix-unused` reads a file of
             # this name as JSON. Once for a name: the reporter settles its name
             # when it is built and again when it is configured.
-            if self._json_name_warned_for != self.config.extension:
-                self._json_name_warned_for = self.config.extension
+            if self._json_name_warned_for != config.extension:
+                self._json_name_warned_for = config.extension
                 ASH_LOGGER.warning(
                     "The unused-suppressions reporter writes markdown "
                     "(output_format: markdown) under a file name that ends in "
@@ -263,7 +272,9 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         if workspace:
             all_suppressions: List[AshSuppression] = []
         else:
-            all_suppressions = self.context.config.global_settings.suppressions or []
+            all_suppressions = (
+                self._require_ash_config().global_settings.suppressions or []
+            )
 
         # Under --ignore-suppressions nothing was matched, so the subtraction
         # below has no meaning: the report says so instead of listing every
@@ -292,7 +303,7 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         # environment value is itself reference text (interpolation is one
         # pass) resolves to another entry's written id and reads "used"
         # although nothing applied it.
-        recorded = recorded_suppressions(self.context.config)
+        recorded = recorded_suppressions(self._require_context().config)
         written = {
             id(suppression): written_suppression_id(suppression, recorded)
             for suppression in all_suppressions
@@ -385,7 +396,8 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                 {
                     "project": project.project,
                     "path": (
-                        f"{project.output_path}/reports/ash.{self.config.extension}"
+                        f"{project.output_path}/reports/ash."
+                        f"{self._require_config().extension}"
                     ),
                 }
                 for project in (workspace_results.projects if workspace_results else ())
@@ -393,7 +405,7 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             ]
 
         # Check if we should generate both formats
-        output_format = getattr(self.config.options, "output_format", "both")
+        output_format = getattr(self._require_config().options, "output_format", "both")
 
         if output_format == "both":
             # Generate both formats and write markdown separately

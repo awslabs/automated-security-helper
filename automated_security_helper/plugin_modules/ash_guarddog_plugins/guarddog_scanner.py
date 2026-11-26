@@ -1072,12 +1072,12 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
     @property
     def _opts(self) -> GuardDogScannerConfigOptions:
         """The options, typed. ``config`` is set in ``model_post_init``."""
-        return self.config.options
+        return self._require_config().options
 
     @property
     def _ctx(self) -> PluginContext:
         """The plugin context, typed. ScannerPluginBase refuses to construct without one."""
-        return self.context
+        return self._require_context()
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -1318,7 +1318,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         # excluded_paths. Read as config.options.excluded_paths, the shape
         # tests/unit/utils/test_ignore_path_expiration.py looks for.
         option_entries = active_ignore_paths(
-            self.config.options.excluded_paths,
+            self._require_config().options.excluded_paths,
             where="scanners.guarddog.options.excluded_paths",
         )
         patterns = [p.path for p in global_ignore_paths or []] + [

@@ -320,7 +320,7 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
         # Coverage facts no scanner row carries: they follow the summary's
         # tables when it is on and stand in its place when it is off.
         coverage_parts = _coverage_sections(model)
-        if self.config.options.include_summary:
+        if self._require_config().options.include_summary:
             text_parts.append("SUMMARY")
             text_parts.append("-------")
 
@@ -394,7 +394,7 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
 
             # Add top hotspots (files with most findings)
             top_hotspots = emitter.get_top_hotspots(
-                self.config.options.top_hotspots_limit
+                self._require_config().options.top_hotspots_limit
             )
             if top_hotspots:
                 text_parts.append(f"Top {len(top_hotspots)} Hotspots:")
@@ -412,7 +412,7 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
             text_parts.extend(coverage_parts)
 
         # Add findings table if enabled
-        if self.config.options.include_findings_table:
+        if self._require_config().options.include_findings_table:
             findings = emitter.get_findings_overview()
             if findings:
                 text_parts.append("FINDINGS OVERVIEW")
@@ -421,9 +421,9 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 text_parts.append("")
 
         # Add detailed findings if enabled
-        if self.config.options.include_detailed_findings:
+        if self._require_config().options.include_detailed_findings:
             detailed_findings = emitter.get_detailed_findings(
-                self.config.options.max_detailed_findings
+                self._require_config().options.max_detailed_findings
             )
             if detailed_findings:
                 text_parts.append("DETAILED FINDINGS")
@@ -494,7 +494,7 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
             # The list above is the actionable findings. A finding the project's
             # outcome left out is counted in the summary, so it is named here.
             left_out = emitter.get_policy_not_gating_findings(
-                self.config.options.max_detailed_findings
+                self._require_config().options.max_detailed_findings
             )
             # A limit of 0 lists none of them, yet the summary still counts
             # them, so the section and the note follow the count.

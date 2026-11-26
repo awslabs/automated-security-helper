@@ -364,12 +364,14 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
 
     def _process_config_options(self):
         self._append_trivy_options()
-        if self.config.options.ignore_unfixed:
+        if self._require_config().options.ignore_unfixed:
             # The default here, unlike the builtin trivy scanner's, so every default
             # run says once what it withholds, as grype's config warning does. Once
             # per scanner (_warned_inputs), however often the options are read, and
             # as set: "the default" only when the option was not written.
-            written = "ignore_unfixed" in self.config.options.model_fields_set
+            written = (
+                "ignore_unfixed" in self._require_config().options.model_fields_set
+            )
             warning = (
                 "scanners.trivy-repo.options.ignore_unfixed is true "
                 f"({'set in the configuration' if written else 'the default'}), "
@@ -404,7 +406,7 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         outside the scanned tree for this run (``empty_tool_directory``), new each
         time and removed when the run ends.
         """
-        options = self.config.options
+        options = self._require_config().options
         config_file = self._trivy_config_file()
         module_dir: Optional[Path] = None
         if options.module_dir:
@@ -536,7 +538,7 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         # as it is instead of building a second message from it.
         flagged_refusal: Optional[ScannerError] = None
         try:
-            target_results_dir = self.results_dir.joinpath(target_type)
+            target_results_dir = self._require_results_dir().joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             target_results_dir.mkdir(exist_ok=True, parents=True)
             # A report left by an earlier run must not be read as this run's: trivy
@@ -676,7 +678,7 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                     # Attach scanner details for proper identification
                     sarif_report = attach_scanner_details(
                         sarif_report=sarif_report,
-                        scanner_name=self.config.name,
+                        scanner_name=self._require_config().name,
                         scanner_version=getattr(self, "tool_version", None),
                         invocation_details={
                             "command_line": shown_command,
