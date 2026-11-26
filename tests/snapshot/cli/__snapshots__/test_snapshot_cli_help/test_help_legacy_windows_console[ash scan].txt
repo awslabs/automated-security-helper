@@ -167,7 +167,13 @@
 │                                                              fetches nothing itself: the image  │
 │                                                              is prepared by a container engine  │
 │                                                              or the scanner tools' own registry │
-│                                                              clients. Exclusive with            │
+│                                                              clients. Repeat it, or give a      │
+│                                                              comma list, to scan several        │
+│                                                              images: each is its own scan, with │
+│                                                              its own reports under              │
+│                                                              <output-dir>/<NN>-<image>-<hash>/, │
+│                                                              and the exit code is the worst of  │
+│                                                              theirs. Exclusive with             │
 │                                                              --source-dir, --image-archive and  │
 │                                                              --image-layout; scanners that do   │
 │                                                              not declare container_image        │
@@ -187,6 +193,26 @@
 │                                                              engine. Exclusive with             │
 │                                                              --source-dir, --image and          │
 │                                                              --image-archive.                   │
+│ --source-git                <str>                            Scan a remote git repository: ASH  │
+│                                                              clones it into a temporary         │
+│                                                              directory, scans that, and removes │
+│                                                              it afterwards. The request is      │
+│                                                              checked by the rules the MCP       │
+│                                                              set_source_git tool applies        │
+│                                                              (https, ssh or scp-like URLs only; │
+│                                                              no local paths). Exclusive with    │
+│                                                              --source-dir, --image,             │
+│                                                              --image-archive, --image-layout,   │
+│                                                              --staged, --use-existing and       │
+│                                                              --changed-files-only. The output   │
+│                                                              directory defaults to              │
+│                                                              .ash/ash_output in the working     │
+│                                                              directory.                         │
+│ --git-ref                   <str>                            Branch or tag to clone with        │
+│                                                              --source-git (default: the         │
+│                                                              remote's default branch).          │
+│ --git-depth                 <int>                            History depth of the --source-git  │
+│                                                              clone (default 1).                 │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Reports ───────────────────────────────────────────────────────────────────────────────────────┐
 │ --output-dir                                              <str>  The directory to output        │
@@ -687,3 +713,6 @@
 │                                      it is required or an environment variable backs it, and    │
 │                                      exit.                                                      │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+ Subjects of `ash scan`: fs (scan a directory). Run `ash scan <subject> --help` for a subject's
+ own options.

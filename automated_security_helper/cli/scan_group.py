@@ -184,9 +184,18 @@ def run_ash_scan_fs_cli_command(*args: Any, **kwargs: Any) -> Any:
                 "--source-git cannot be combined with the PATH argument: the clone "
                 "is the directory that is scanned."
             )
-        # On the command line a word that is not a subject never reaches here (the
-        # group refuses it), so a path in the subject-less form came from a
-        # --cli-json-input document, whose skeleton lists `path`.
+        # A path typed on the command line in the subject-less form is a word that
+        # is not a subject (it reaches here after `--`, which the group does not
+        # read). One from a --cli-json-input document arrives as a default, and its
+        # skeleton lists `path`, so that is accepted.
+        path_typed = (
+            getattr(ctx.get_parameter_source("path"), "name", None) == "COMMANDLINE"
+        )
+        if routed_without_subject and path_typed:
+            ctx.fail(
+                f"'{path}' is not a scan subject. "
+                f"To scan a directory, run 'ash scan {DEFAULT_SUBJECT} {path}'."
+            )
         if from_command_line and kwargs.get("source_dir") != path:
             ctx.fail(
                 "Name the directory once: as the PATH argument or with --source-dir, "

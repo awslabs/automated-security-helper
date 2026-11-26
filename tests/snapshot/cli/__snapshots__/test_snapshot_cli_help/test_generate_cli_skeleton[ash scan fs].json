@@ -61,5 +61,8 @@
   "baseline": null,
   "image": null,
   "image_archive": null,
-  "image_layout": null
+  "image_layout": null,
+  "source_git": null,
+  "git_ref": null,
+  "git_depth": null
 }

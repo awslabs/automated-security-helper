@@ -435,7 +435,15 @@ def _clone_git_source(ctx: typer.Context, url: str, ref: str | None, depth: int)
         GitTimeoutError,
         SessionWorkspaceError,
         clone_remote_source,
+        validated_remote_clone_request,
     )
+
+    # The request rules run first, with nothing made on disk, so a refused request is
+    # a usage error whatever the clone below would have done with it.
+    try:
+        validated_remote_clone_request(url, ref, depth, None)
+    except CloneRequestRefused as refusal:
+        _fail_usage(shown_on_one_line(f"--source-git: {refusal}"))
 
     root = Path(tempfile.mkdtemp(prefix="ash-source-git-"))
     ctx.call_on_close(lambda: shutil.rmtree(root, ignore_errors=True))

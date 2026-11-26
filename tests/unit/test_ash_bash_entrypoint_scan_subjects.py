@@ -235,6 +235,35 @@ def test_a_second_word_after_the_path_is_refused_not_forwarded(runner, tmp_path)
 
 
 @pytest.mark.integration
+def test_a_workspace_value_is_not_read_as_a_second_directory(runner, tmp_path):
+    source = tmp_path / "project"
+    source.mkdir()
+
+    result = _ash(
+        runner,
+        tmp_path,
+        "scan",
+        "fs",
+        str(source),
+        "--workspace",
+        "team.code-workspace",
+    )
+
+    assert "Unexpected extra argument" not in result.stderr, result.stderr
+    assert result.returncode == 3, result.stdout + result.stderr
+
+
+@pytest.mark.integration
+def test_no_color_reaches_the_command_under_results(runner, tmp_path):
+    run_argv = _run_argv(_ash(runner, tmp_path, "--no-color", "results", "report"))
+
+    assert "--no-color" in _inner_argv(run_argv)
+    assert _inner_argv(run_argv).index("results") < _inner_argv(run_argv).index(
+        "report"
+    )
+
+
+@pytest.mark.integration
 def test_an_option_value_after_the_path_is_not_a_second_path(runner, tmp_path):
     source = tmp_path / "project"
     source.mkdir()
@@ -284,7 +313,7 @@ def test_the_scan_tables_are_the_clis():
         if param.param_type_name == "option"
         for spelling in (*param.opts, *param.secondary_opts)
         if spelling.startswith("--")
-    }
+    } - {"--install-completion"}  # the wrapper has no shell to install into
 
     assert _table("ASH_SCAN_SUBJECTS") == set(subjects)
     assert _table("ASH_SCAN_VALUE_OPTIONS") == subject_value

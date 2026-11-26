@@ -173,3 +173,15 @@ def test_the_completer_offers_what_the_wrapper_parses():
         "Register-ArgumentCompleter -CommandName Invoke-ASH -ParameterName 'RemainingAshArgs'"
         in block
     )
+
+
+def test_options_added_for_a_group_go_after_its_command_word():
+    """`container build` and `results report` take the options Invoke-ASH adds after
+    the command word: `ash container --offline build` is a usage error, and
+    `results merge` takes what `merge` takes. Read from the text, as PowerShell is not
+    run here."""
+    text = _text()
+
+    assert "$insertAfter" in text
+    assert "$subcommand -ceq 'container' -or $subcommand -ceq 'results'" in text
+    assert "-ccontains $takerName" in text

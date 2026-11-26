@@ -1262,7 +1262,8 @@ while (("$#")); do
       exit "$?"
       ;;
     # The bash completion function, from the same tables as this parser, for a host
-    # with no Python: `source <(./ash --show-completion)`.
+    # with no Python: `eval "$(./ash --show-completion)"` (not `source <(...)`, which loads
+    # nothing on bash 3.2).
     --show-completion)
       print_bash_completion
       exit 0
@@ -1309,6 +1310,13 @@ while (("$#")); do
       ;;
     --workspace | --workspace=*)
       WORKSPACE_GIVEN="YES"
+      if [[ "${INNER_VALUE_PENDING}" = "YES" ]]; then
+        # The value of the inner option before it, not the option.
+        INNER_VALUE_PENDING="NO"
+      elif [[ "$1" = "--workspace" ]]; then
+        # Its value is the next word, which is not a second scan directory.
+        INNER_VALUE_PENDING="YES"
+      fi
       ASH_ARGS="${ASH_ARGS} $1"
       ;;
     *)
@@ -2130,11 +2138,25 @@ else
       # the words of a --config value, which moves a subcommand that stood after
       # them, and the splice below needs the index in the words the scan is given.
       detect_subcommand
+      # `results report` and its siblings are the commands `report`, `merge` and the
+      # rest under a group, and take what those take: the first word after `results`
+      # that names a command is the one whose options apply. Without this, the
+      # deprecated `./ash --no-color report` kept --no-color and the spelling the
+      # deprecation names, `./ash --no-color results report`, dropped it.
+      TAKER="${SUBCOMMAND}"
+      if [[ "${SUBCOMMAND}" = "results" ]]; then
+        for ((ASH_WORD_AT = SUBCOMMAND_AT + 1; ASH_WORD_AT < ${#ASH_ARG_WORDS[@]}; ASH_WORD_AT++)); do
+          if [[ "${ASH_ARG_WORDS[ASH_WORD_AT]}" != "results" && " ${ASH_SUBCOMMANDS} " == *" ${ASH_ARG_WORDS[ASH_WORD_AT]} "* ]]; then
+            TAKER="${ASH_ARG_WORDS[ASH_WORD_AT]}"
+            break
+          fi
+        done
+      fi
       ASH_FLAG_ARGS=""
-      if [[ -n "${QUIET_ARG}" ]] && [[ -z "${SUBCOMMAND}" || " ${ASH_TAKES_QUIET} " == *" ${SUBCOMMAND} "* ]]; then
+      if [[ -n "${QUIET_ARG}" ]] && [[ -z "${SUBCOMMAND}" || " ${ASH_TAKES_QUIET} " == *" ${TAKER} "* ]]; then
         ASH_FLAG_ARGS="${ASH_FLAG_ARGS} ${QUIET_ARG}"
       fi
-      if [[ -n "${NO_COLOR_ARG}" ]] && [[ -z "${SUBCOMMAND}" || " ${ASH_TAKES_COLOR} " == *" ${SUBCOMMAND} "* ]]; then
+      if [[ -n "${NO_COLOR_ARG}" ]] && [[ -z "${SUBCOMMAND}" || " ${ASH_TAKES_COLOR} " == *" ${TAKER} "* ]]; then
         ASH_FLAG_ARGS="${ASH_FLAG_ARGS} ${NO_COLOR_ARG}"
       fi
       # --sandbox off goes right after the command word, or before every word when

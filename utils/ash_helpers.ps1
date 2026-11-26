@@ -1751,7 +1751,27 @@ function Invoke-ASH {
             }
         }
         else {
-            for ($i = 0; $i -le $subcommandAt; $i++) {
+            # `container build` and `results report` are a group and the command under
+            # it. The group takes no options (`ash container --offline build` is a
+            # usage error), so what Invoke-ASH adds goes after the command word, and
+            # for `results` the command is what decides which options apply: it takes
+            # what the command of the same name takes (`results merge` takes what
+            # `merge` takes).
+            $insertAfter = $subcommandAt
+            $takerName = $subcommand
+            if ($subcommand -ceq 'container' -or $subcommand -ceq 'results') {
+                for ($i = $subcommandAt + 1; $i -lt $forwardedAshArgs.Count; $i++) {
+                    if ($forwardedAshArgs[$i] -clike '-*') {
+                        continue
+                    }
+                    $insertAfter = $i
+                    if ($subcommand -ceq 'results') {
+                        $takerName = $forwardedAshArgs[$i]
+                    }
+                    break
+                }
+            }
+            for ($i = 0; $i -le $insertAfter; $i++) {
                 $ashArguments.Add($forwardedAshArgs[$i])
             }
             foreach ($group in $ashCmdArgs) {
@@ -1760,16 +1780,16 @@ function Invoke-ASH {
                     # The ASH_CONFIG words exist only for a scan, which takes them all.
                     $ashArguments.AddRange([string[]]$group)
                 }
-                elseif (@($ashOptionSubcommands[$option] -split ' ') -ccontains $subcommand) {
+                elseif (@($ashOptionSubcommands[$option] -split ' ') -ccontains $takerName) {
                     $ashArguments.AddRange([string[]]$group)
                 }
                 elseif ($option -cnotin @('--quiet', '--no-color')) {
                     # --quiet and --no-color have quieted the build and chosen the
                     # terminal already, so only the others are worth a warning.
-                    Write-Warning "ash $subcommand does not take $option, so it is not passed."
+                    Write-Warning "ash $takerName does not take $option, so it is not passed."
                 }
             }
-            for ($i = $subcommandAt + 1; $i -lt $forwardedAshArgs.Count; $i++) {
+            for ($i = $insertAfter + 1; $i -lt $forwardedAshArgs.Count; $i++) {
                 $ashArguments.Add($forwardedAshArgs[$i])
             }
         }

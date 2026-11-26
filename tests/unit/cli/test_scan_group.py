@@ -73,6 +73,14 @@ def test_a_path_key_in_a_json_document_is_accepted_without_a_subject(engine, tmp
     assert [call["source_dir"] for call in engine.calls] == ["from/json"]
 
 
+def test_a_directory_after_a_double_dash_is_not_a_subject_less_scan_of_it(engine):
+    result = _invoke(["scan", "--", "somewhere"])
+
+    assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+    assert "'somewhere' is not a scan subject" in result.output
+    assert engine.calls == []
+
+
 def test_fs_help_takes_a_path_argument_and_every_scan_option():
     result = _invoke(["scan", "fs", "--help"])
 
@@ -115,6 +123,17 @@ def test_a_legacy_spelling_prints_one_line_on_stderr_and_keeps_its_exit_code(
     assert _deprecation_lines(result.stdout) == [], (
         "a script's stdout is never handed it"
     )
+
+
+def test_the_subject_less_line_still_prints_inside_the_container(monkeypatch):
+    # `./ash --source-dir X` leaves the one deprecation line to the scan inside the
+    # container, so that scan must not silence it there.
+    monkeypatch.setenv("ASH_IN_CONTAINER", "1")
+
+    result = _invoke(["scan", *FAILS_FAST])
+
+    lines = _deprecation_lines(result.stderr)
+    assert len(lines) == 1 and NO_SUBJECT_LINE in lines[0], result.stderr
 
 
 def test_scan_without_subject_and_with_source_dir_prints_one_line_not_two():
