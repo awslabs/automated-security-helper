@@ -390,7 +390,9 @@ def _remove_delivered_image_archive(
         roots.append(workspace_root)
     try:
         roots.append(resolve_workspace_root())
-    except (OSError, ValueError):
+    except (OSError, RuntimeError, ValueError):
+        # RuntimeError: Path.home() with no resolvable home raises it, and a
+        # cleanup must never fail the delivery that asked for it.
         pass
     for root in roots:
         try:

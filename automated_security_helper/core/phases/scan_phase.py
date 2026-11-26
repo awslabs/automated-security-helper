@@ -1256,8 +1256,10 @@ class ScanPhase(EnginePhase):
             # did not select whose constructor raised is counted with the others.
             excluded_scanner_names: List[str] = []
             # Scanners whose tool is absent and that have nothing to scan, or that
-            # do not scan this asset's kind; SKIPPED. Started here, as the list
-            # above is, because the construction loop records the second kind.
+            # do not scan this asset's kind; SKIPPED. Started here, before any of
+            # the loops below, because several of them append to it (the
+            # construction loop, and the filter loop that records the
+            # asset-kind skips).
             nothing_to_scan_names: List[str] = []
             # The operator's names, compared as everywhere in this phase.
             operator_allowlist = {name.lower().strip() for name in enabled_scanners}
