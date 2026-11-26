@@ -174,7 +174,7 @@ def layout_to_docker_archive(layout: Path, destination: Path) -> Path:
             tarfile.TarFile(fileobj=out, mode="w") as archive,
         ):
             _write_member(archive, config_name, config_blob.read_bytes())
-            seen: set = set()
+            seen: set[str] = set()
             for layer in layers:
                 blob = _blob_path(
                     layout, layer.get("digest") if isinstance(layer, dict) else None
