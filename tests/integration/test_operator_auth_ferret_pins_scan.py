@@ -3,7 +3,7 @@
 
 """``ashx scan`` with ferret-scan over the operator's auth module and its test.
 
-``.ash/.ash_community_plugins.yaml`` suppresses ferret-scan's API_KEY_OR_SECRET
+``.ash/.ash_alpha_plugins.yaml`` suppresses ferret-scan's API_KEY_OR_SECRET
 on one line of each file. This copies both files into a scratch project at their
 repository paths, plants a hardcoded credential on two other lines of each (one
 replaced in place, so the pinned line does not move, and one appended), and runs
@@ -35,7 +35,7 @@ from tests.utils.helpers import checkout_env
 pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CONFIG = REPO_ROOT / ".ash" / ".ash_community_plugins.yaml"
+CONFIG = REPO_ROOT / ".ash" / ".ash_alpha_plugins.yaml"
 RULE = "API_KEY_OR_SECRET"
 FERRET_MODULE = "automated_security_helper.plugin_modules.ash_ferret_plugins"
 PATHS = (

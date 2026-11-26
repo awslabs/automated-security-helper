@@ -1031,9 +1031,9 @@ runs:
     # even when the self-scan failed: that verdict is about this repository's findings, and
     # these snapshots only need the image, which a failed build would fail here too.
     #
-    # Not on sh-helper: utils/ash_helpers.sh forwards to ./ash, none of these modules
-    # sources it, and every sh-helper row has a bash row on the same OS and runner whose
-    # step compares the same output (tests/unit/test_ci_container_runtime_snapshots_skip_the_sh_helper_legs.py
+    # Not on sh-helper: utils/ash_helpers.sh forwards to `ashx --mode container`, none of
+    # these modules sources it, and every sh-helper row has a python-container row on the
+    # same OS and runner whose step compares the same output (tests/unit/test_ci_container_runtime_snapshots_skip_the_sh_helper_legs.py
     # pins both).
     - name: Snapshot the container-runtime output
       if: ${{ !cancelled() && inputs.method != 'python-local' && inputs.method != 'sh-helper' }}
