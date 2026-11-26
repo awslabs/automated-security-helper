@@ -21,6 +21,13 @@ What a row is:
   system package manager installs the version it carries, not the range the plugin
   declares (distro packages lag), and a Nix row installs what the flake pins. A row
   never hides that; a command built from a row says so.
+- ``platforms``, when set, is the host platforms the row holds on, named as the
+  installer names them (``linux``, ``darwin``, ``windows``: ``RouteContext.platform_name``,
+  which ``cli/dependencies.py:get_platform`` fills). On any other platform the row
+  is not offered: its provider is skipped, naming where the row holds. It is for a
+  row known to fail elsewhere in a way the install would not report, such as a
+  flake entry that is listed for Linux only (the shell realizes whether or not it
+  carries the tool). Unset, the row holds wherever its ecosystem runs.
 
 What a row is not: a promise the package exists at every version, or on every
 platform. A package name that does not resolve fails the install command loudly, and
@@ -67,6 +74,11 @@ DEFAULT_PREFERENCE: Tuple[str, ...] = (
 )
 
 
+#: The platform names a row can be scoped to (``EcosystemPackage.platforms``): the
+#: values ``RouteContext.platform_name`` carries, apart from ``unknown``.
+ROW_PLATFORMS: Tuple[str, ...] = ("linux", "darwin", "windows")
+
+
 @dataclass(frozen=True)
 class EcosystemPackage:
     """One tool's package in one ecosystem."""
@@ -74,6 +86,23 @@ class EcosystemPackage:
     ecosystem: str
     package: str
     caveat: Optional[str] = None
+    #: The platforms the row holds on (see the module docstring); None holds on all.
+    platforms: Optional[Tuple[str, ...]] = None
+
+    def __post_init__(self) -> None:
+        if self.platforms is None:
+            return
+        unknown = [name for name in self.platforms if name not in ROW_PLATFORMS]
+        if not self.platforms or unknown:
+            raise ValueError(
+                f"the {self.ecosystem} row for {self.package} is scoped to "
+                f"{list(self.platforms)!r}; a scope names one or more of "
+                f"{', '.join(ROW_PLATFORMS)}"
+            )
+
+    def holds_on(self, platform_name: str) -> bool:
+        """Whether the row holds on ``platform_name`` (an unknown platform: only unscoped)."""
+        return self.platforms is None or platform_name in self.platforms
 
 
 @dataclass(frozen=True)
@@ -91,12 +120,22 @@ class InstallPackageFacet:
         return None
 
 
-def _facet(tool: str, *, brew: bool, nix: bool) -> InstallPackageFacet:
+def _facet(
+    tool: str,
+    *,
+    brew: bool,
+    nix: bool,
+    nix_platforms: Optional[Tuple[str, ...]] = None,
+) -> InstallPackageFacet:
     rows = []
     if brew:
         rows.append(EcosystemPackage("brew", tool, _BREW_CAVEAT))
     if nix:
-        rows.append(EcosystemPackage("nix", NIX_FLAKE_OUTPUT, _NIX_CAVEAT))
+        rows.append(
+            EcosystemPackage(
+                "nix", NIX_FLAKE_OUTPUT, _NIX_CAVEAT, platforms=nix_platforms
+            )
+        )
     return InstallPackageFacet(
         tool=tool, rows=tuple(rows), preference=DEFAULT_PREFERENCE
     )
@@ -104,8 +143,11 @@ def _facet(tool: str, *, brew: bool, nix: bool) -> InstallPackageFacet:
 
 #: Tools whose Homebrew formula exists (read from formulae.brew.sh/api/formula/<name>
 #: .json on 2026-11-25: 200 for every name below with ``brew=True``, 404 for
-#: cfn-guard, opengrep and cfn-nag, which therefore have no brew row) and that the
-#: repository flake's ``ash-scanners`` output carries (``flake.nix``, ``scannersFor``).
+#: cfn-guard, opengrep and cfn-nag, and on 2026-11-26 for dockle, which therefore
+#: have no brew row) and that the repository flake's ``ash-scanners`` output carries
+#: (``flake.nix``, ``scannersFor``). The flake lists dockle for Linux only (its
+#: nixpkgs derivation needs Linux-only libraries), so dockle's nix row is scoped to
+#: linux.
 INSTALL_PACKAGE_FACETS: Mapping[str, InstallPackageFacet] = {
     f.tool: f
     for f in (
@@ -117,6 +159,7 @@ INSTALL_PACKAGE_FACETS: Mapping[str, InstallPackageFacet] = {
         _facet("cfn-nag", brew=False, nix=True),
         _facet("checkov", brew=True, nix=True),
         _facet("detect-secrets", brew=True, nix=True),
+        _facet("dockle", brew=False, nix=True, nix_platforms=("linux",)),
         _facet("gitleaks", brew=True, nix=True),
         _facet("grype", brew=True, nix=True),
         _facet("hadolint", brew=True, nix=True),

@@ -97,12 +97,20 @@ runs:
       # reports a symptom and hides the cause, which cost a full CI round trip to diagnose.
       run: |
         set +e
+        # The dockle module is listed on Linux only, where the flake supplies dockle
+        # (the Linux guard at pkgs.dockle in flake.nix). On macOS the module would
+        # make dockle MISSING and fail the scan for a tool the flake does not carry.
+        dockle_module=()
+        if [ "$(uname -s)" = "Linux" ]; then
+          dockle_module=(--ash-plugin-modules automated_security_helper.plugin_modules.ash_dockle_plugins)
+        fi
         ash scan \
           --mode nix \
           --source-dir /tmp/ash-nix-selftest \
           --output-dir /tmp/ash-nix-selftest/output \
           --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins \
           --ash-plugin-modules automated_security_helper.plugin_modules.ash_betterleaks_plugins \
+          "${dockle_module[@]}" \
           --simple
         rc=$?
         set -e
@@ -161,6 +169,11 @@ runs:
         # supply it. betterleaks comes from nixpkgs at the version flake.lock locks,
         # which is older than ASH's pin (see the comment at pkgs.betterleaks in
         # flake.nix); this check says it runs, not that it is the pinned version.
+        # dockle, also an alpha scanner, is supplied on Linux only (its nixpkgs
+        # derivation needs Linux-only libraries), so it is checked on Linux only, as
+        # the scan above lists its module on Linux only. The fixture names no image,
+        # so dockle starts no scan; what this list can check for it is that the flake
+        # put a dockle binary on PATH, since a missing one reads MISSING.
         flake_supplied = [
             "actionlint",
             "bandit",
@@ -180,6 +193,8 @@ runs:
             "trivy",
             "zizmor",
         ]
+        if sys.platform.startswith("linux"):
+            flake_supplied.append("dockle")
 
         for name in sorted(statuses):
             print(f"  {name:<18} {statuses[name]}")

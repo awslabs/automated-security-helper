@@ -277,6 +277,41 @@ def test_the_nix_provider_realizes_the_flake_once_per_run(monkeypatch):
     assert route.run_once_key == "nix:github:example/flake"
 
 
+def test_a_row_scoped_to_other_platforms_is_skipped_naming_where_it_holds(monkeypatch):
+    """dockle's nix row holds on linux only, as the flake lists it: on macOS the
+    nix provider is skipped with the reason, never handed the row."""
+    from automated_security_helper.utils import subprocess_utils
+
+    monkeypatch.setattr(
+        subprocess_utils,
+        "find_executable",
+        lambda c: "/nix/bin/nix" if c == "nix" else None,
+    )
+    monkeypatch.setenv("ASH_NIX_FLAKE_REF", "github:example/flake")
+    pinned = create_pinned_tool_install_command("dockle", "linux", "amd64", "/b")
+    request = ip.classify_install_command(list(pinned.args), False, "dockle")
+    darwin = ip.RouteContext(
+        platform_name="darwin", arch="arm64", bin_dir=Path("/x/bin"), explicit=True
+    )
+
+    refused = ip.route_install(
+        request, ip.EnvOptions(), providers=["nix"], context=darwin
+    )
+    routed = ip.route_install(
+        request, ip.EnvOptions(), providers=["nix"], context=EXPLICIT
+    )
+
+    assert isinstance(refused, ip.Refused)
+    expected_reason = (
+        "nix does not support native package installs (the install-package "
+        "facet's nix row for dockle holds on linux only, not on darwin)"
+    )
+    assert refused.tried == (("nix", expected_reason),)
+    assert isinstance(routed, ip.Route), routed
+    assert routed.provider == "nix"
+    assert routed.run_once_key == "nix:github:example/flake"
+
+
 def test_the_release_download_provider_serves_a_downloadable_tool_from_a_uv_declaration():
     request = ip.classify_install_command(
         ["uv", "tool", "install", "opengrep"], False, "opengrep"

@@ -70,6 +70,7 @@ Dockle runs once, on the source target. The converted target is the same image a
 
 - **Local mode:** `ash dependencies install --tool dockle`, with the module listed in `ash_plugin_modules` (or added with `--config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_dockle_plugins"]'`), downloads the pinned Dockle v0.4.15 release archive from GitHub and verifies it, and the executable inside it, against the SHA256 digests pinned in ASH before installing it. Linux and macOS on x86_64 and arm64 are supported; Dockle publishes no Windows build.
 - **Container mode:** the ASH container image includes Dockle, installed the same way.
+- **Nix mode:** on Linux the flake supplies `dockle` from nixpkgs, at nixpkgs' version, which is v0.4.15 at the flake's locked revision, the same as the pin. On macOS the flake does not supply it, because nixpkgs builds Dockle against Linux-only libraries; install it with `ash dependencies install`, or have it on `PATH`. `ash dependencies install --providers nix --tool dockle` is refused on macOS for the same reason.
 - Any `dockle` already on `PATH` is also used.
 
 ## What is scanned
@@ -93,18 +94,23 @@ Dockle writes the SARIF level itself, and ASH rates each result to match:
 
 ## Suppressions
 
-ASH suppressions by rule, path and line work as for any scanner. A finding's location is the image reference or a path inside the image:
+ASH suppressions by rule and path work as for any scanner. A finding's `path` is the location Dockle reports, not a file in the scanned tree: a path inside the image, written without a leading slash (`app/id_rsa`, `etc/shadow`), or the word `metadata` for a checkpoint about the image's configuration, such as `CIS-DI-0001` (the last user is root). A few checkpoints report another phrase, or no location at all; read the location from the report before you write an entry.
+
+A `path` that names the image, such as `registry.example.com/team/app:1.2.3`, matches no finding. To scope an entry to one image, add `image`, a case-insensitive glob matched against the image as submitted and its resolved digest (see [Scan container images](../../../how-to/scan-container-images.md#findings-identity-and-suppressions)):
 
 <!-- doctest: config kind=other reason="alpha plugin suppression example" -->
 ```yaml
 global_settings:
   suppressions:
     - rule_id: CIS-DI-0001
-      path: registry.example.com/team/app:1.2.3
+      path: metadata
+      image: registry.example.com/team/app:*
       reason: the image runs a root-only init system by design
 ```
 
-Package-scoped and symbol-scoped suppressions do not apply: no Dockle finding names a package or a symbol.
+`image` matches only the findings of an image scan (`ash scan --image` or `--image-archive`). A directory scan that names the image in `scanners.dockle.options` records no image on its findings, so an entry with `image` never matches them; scope those entries by `rule_id` and `path` alone.
+
+Line-scoped, package-scoped and symbol-scoped suppressions do not apply: no Dockle finding has a line, a package or a symbol, and an entry with `line_start` or `line_end` matches none of them.
 
 ## Exit status
 

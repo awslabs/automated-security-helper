@@ -128,7 +128,17 @@
           pkgs.trivy # its vulnerability database is seeded by the shellHook below
           pkgs.zizmor
           (opengrepFor system)
-        ];
+        ]
+        # dockle, an alpha scanner that runs when its module is listed, on Linux only.
+        # nixpkgs ships 0.4.15 at the locked revision (34ab9907, checked 2026-11-26 in
+        # pkgs/by-name/do/dockle), the version the image and `ash dependencies install`
+        # pin. That derivation builds against btrfs-progs and lvm2, which nixpkgs
+        # declares for Linux only, so it does not evaluate for a darwin system: listed
+        # unguarded, it would break every macOS output of this flake. On macOS, Nix
+        # mode finds the dockle that `ash dependencies install` puts in ASH's bin
+        # directory, or one on PATH. Dockle's nix row in base/install_package_facets.py
+        # is scoped to linux to match, so `--providers nix` refuses it on macOS.
+        ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.dockle ];
     in
     {
       packages = forAllSystems (system:

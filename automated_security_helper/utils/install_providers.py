@@ -1003,14 +1003,19 @@ def route_install(
 
     The first provider in :func:`candidate_order` whose builder returns commands wins.
     Every provider skipped on the way keeps its reason on the route, and when none
-    builds, the :class:`Refused` carries every reason. Nothing is run, and a refused
-    request is never handed to a provider outside the candidate list.
+    builds, the :class:`Refused` carries every reason. A facet row scoped to other
+    platforms (``EcosystemPackage.platforms``) is not handed to its provider: the
+    provider is skipped the same way, naming where the row holds. Nothing is run,
+    and a refused request is never handed to a provider outside the candidate list.
     """
     facet = install_package_facet(request.tool)
     tried: List[Tuple[str, str]] = []
     for name in candidate_order(providers, request.native_provider, facet):
         provider = INSTALL_PROVIDERS[name]
         row = facet.row_for(name) if facet is not None else None
+        if row is not None and not row.holds_on(context.platform_name):
+            tried.append((name, _row_held_elsewhere(name, request, row, context).text))
+            continue
         built = provider.build(request, env, row, context)
         if isinstance(built, Refusal):
             tried.append((name, built.text))
@@ -1033,6 +1038,25 @@ def route_install(
         subject=request.subject,
         tried=tuple(tried),
         providers=tuple(providers) if providers is not None else KNOWN_PROVIDERS,
+    )
+
+
+def _row_held_elsewhere(
+    name: str, request: InstallRequest, row: EcosystemPackage, context: RouteContext
+) -> Refusal:
+    """The refusal for a facet row whose platforms exclude this host's.
+
+    Worded as the missing-row refusal is, because on this platform the row is not
+    there: ``nix does not support native package installs (the install-package
+    facet's nix row for dockle holds on linux only, not on darwin)``.
+    """
+    where = ", ".join(row.platforms or ())
+    here = context.platform_name or "this platform"
+    return Refusal(
+        name,
+        Capability.NATIVE_PACKAGES,
+        f"the install-package facet's {name} row for {request.subject} holds on "
+        f"{where} only, not on {here}",
     )
 
 
