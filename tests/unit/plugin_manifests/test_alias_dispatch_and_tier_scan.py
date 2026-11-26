@@ -113,7 +113,7 @@ def test_the_opt_in_scan_lists_exactly_the_scanners_that_do_not_load_by_default(
     assert set(opt_in_scanner_modules()) == {
         m.name for m in scanner_manifests() if not m.default_enabled
     }
-    assert len(opt_in_scanner_modules()) == 7
+    assert len(opt_in_scanner_modules()) == 15
     # Today the opt-in scanners are the alpha ones; that is the data, not the
     # rule (test_a_promoted_optin_scanner_keeps_its_hint covers the difference).
     assert {m.name for m in scanner_manifests() if m.tier is PluginTier.ALPHA} == set(
