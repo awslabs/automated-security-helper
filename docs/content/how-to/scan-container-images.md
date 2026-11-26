@@ -12,6 +12,7 @@ daemon socket handed to ASH.
 One scan has one subject. Name the image in exactly one of three ways, each exclusive
 with `--source-dir` and with the others:
 
+<!-- doctest: illustrative reason="needs a container runtime, network access and a registry that holds the image, and grype, syft and trivy installed on the host" -->
 ```bash
 # An indirect reference: resolved by an engine or the tools' own registry clients.
 ash scan --image registry.example.com/team/app:1.2.3
@@ -22,6 +23,14 @@ ash scan --image-archive app.tar
 
 # An OCI image-layout directory (the directory holding the oci-layout marker file).
 ash scan --image-layout ./app-layout/
+```
+
+Naming two of them in one call is refused before anything runs, with exit code 5 (a
+usage error):
+
+<!-- doctest: run expect-exit=5 -->
+```bash
+ash scan --image registry.example.com/team/app:1.2.3 --image-archive app.tar
 ```
 
 Prefer a digest-pinned reference (`repo@sha256:...`): two scans of the same pinned
@@ -56,6 +65,7 @@ scan and scans the whole image.
 image keeps its own report, its own identity scope and its own exit code. To scan several
 images in one call, repeat `--image` or give a comma-separated list (the two forms mix):
 
+<!-- doctest: illustrative reason="scans two images from a registry, which needs network access and grype, syft and trivy installed on the host" -->
 ```bash
 ash scan --image registry.example.com/team/app:1.2.3 --image registry.example.com/team/db:4.5
 ash scan --image registry.example.com/team/app:1.2.3,registry.example.com/team/db:4.5

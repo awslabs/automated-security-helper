@@ -1454,6 +1454,11 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     # actionlint's absolute path, from validate_plugin_dependencies; see
     # find_absolute_executable for why it is never looked up by name at run time.
     _executable: Optional[str] = PrivateAttr(default=None)
+    # The integrations the --binary-path read that opened the current dependency
+    # check resolved (_forced_binary_precluded_reason), for that check's own
+    # route (validate_plugin_dependencies), so one check resolves each
+    # integration once. Dropped where every check starts (_forced_binary_satisfies).
+    _check_integrations: Optional[Dict[str, Optional[str]]] = PrivateAttr(default=None)
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -1599,20 +1604,42 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             "that integration."
         )
 
+    def _forced_binary_satisfies(self) -> bool:
+        """The base ``--binary-path`` read, where every dependency check starts.
+
+        ``ScannerPluginBase.__pydantic_init_subclass__`` wraps
+        ``validate_plugin_dependencies`` so this read runs first. A resolution an
+        earlier check kept is dropped here, before this check's read can make
+        one, so the check's own route uses a resolution only when this check's
+        read made it. The read does not always resolve the integrations (it stops
+        first when a reason was recorded before the check), and such a check looks
+        them up itself rather than answering from an earlier check's lookup.
+        """
+        self._check_integrations = None
+        return super()._forced_binary_satisfies()
+
     def _forced_binary_precluded_reason(self) -> Optional[str]:
         """With a configured integration missing, a forced actionlint must not pass.
 
         The integrations (shellcheck, pyflakes) are separate executables the
         scan hands to actionlint; a ``--binary-path`` record names actionlint's
         own binary and says nothing about them, so the same check
-        ``validate_plugin_dependencies`` makes runs first here.
+        ``validate_plugin_dependencies`` makes runs first here. The resolution is
+        kept for that method, which the read falls through to in the same
+        dependency check, so the check looks each integration up once: a second
+        lookup costs another PATH walk and can answer differently from the first.
         """
-        return self._missing_integrations(self._integration_executables())
+        integrations = self._integration_executables()
+        self._check_integrations = integrations
+        return self._missing_integrations(integrations)
 
     def validate_plugin_dependencies(self) -> bool:
-        self.dependency_unavailable_reason = self._missing_integrations(
-            self._integration_executables()
-        )
+        # The --binary-path read that opened this check resolved the integrations
+        # unless a reason was recorded before it (see _forced_binary_satisfies).
+        integrations = self._check_integrations
+        if integrations is None:
+            integrations = self._integration_executables()
+        self.dependency_unavailable_reason = self._missing_integrations(integrations)
         if self.dependency_unavailable_reason:
             self._plugin_log(self.dependency_unavailable_reason, level=logging.WARNING)
             return False

@@ -9,6 +9,11 @@ test_image_digest_resolver.py holds its rows). The ids key on whichever digest
 the first rung to answer gave, the notice names the rung, and the reference
 text is the key only when every rung fails. The engine is a fake here: a real
 unix-socket HTTP server for the inspect call, a table for the ladder's order.
+
+Windows' CPython has no ``socket.AF_UNIX``, so the fake server cannot be built
+there and the rows that ask it do not apply (``needs_unix_sockets``). What the
+inspect answers on such a Python is pinned on every platform by a row that
+deletes the attribute.
 """
 
 from __future__ import annotations
@@ -35,6 +40,13 @@ IMAGE_ID = "sha256:" + "cd" * 32
 OTHER = "sha256:" + "ef" * 32
 REF = "registry.example.com/team/app:1.2.3"
 CRANE = "/opt/bin/crane"
+
+#: A row that needs the fake daemon below: it serves on a unix socket, which a
+#: Python without socket.AF_UNIX (Windows' CPython) cannot open.
+needs_unix_sockets = pytest.mark.skipif(
+    not hasattr(socket, "AF_UNIX"),
+    reason="no socket.AF_UNIX (Windows), so no unix-socket engine can be faked",
+)
 
 
 class _Logged(logging.Handler):
@@ -291,6 +303,7 @@ def _record(**fields) -> bytes:
 
 
 class TestInspectOverTheSocket:
+    @needs_unix_sockets
     def test_the_repository_digest_of_the_reference_is_the_answer(self, daemon):
         fake = daemon(
             {
@@ -309,12 +322,14 @@ class TestInspectOverTheSocket:
         assert inspect_digest(REF, fake.path) == (MANIFEST, "")
         assert fake.requests == [f"GET /images/{REF}/json HTTP/1.1"]
 
+    @needs_unix_sockets
     def test_a_local_build_with_no_repo_digest_answers_its_id(self, daemon):
         fake = daemon(
             {f"/images/{REF}/json": (200, _record(Id=IMAGE_ID, RepoDigests=[]))}
         )
         assert inspect_digest(REF, fake.path) == (IMAGE_ID, "")
 
+    @needs_unix_sockets
     def test_docker_hub_spellings_name_one_repository(self, daemon):
         fake = daemon(
             {
@@ -329,12 +344,14 @@ class TestInspectOverTheSocket:
             "",
         )
 
+    @needs_unix_sockets
     def test_an_image_the_engine_does_not_hold_is_a_404_with_a_reason(self, daemon):
         fake = daemon({})
         digest, why = inspect_digest(REF, fake.path)
         assert digest is None
         assert "does not hold" in why
 
+    @needs_unix_sockets
     @pytest.mark.parametrize(
         "status,body,reason",
         [
@@ -357,8 +374,21 @@ class TestInspectOverTheSocket:
         assert digest is None
         assert "could not be asked" in why
 
+    def test_a_python_without_unix_sockets_answers_nothing_with_a_reason(
+        self, monkeypatch, tmp_path
+    ):
+        # Windows' CPython has no socket.AF_UNIX. Deleting it here measures that
+        # case on every platform: the inspect answers nothing with the reason
+        # instead of raising AttributeError out of the rung.
+        monkeypatch.delattr(socket, "AF_UNIX", raising=False)
+        digest, why = inspect_digest(REF, str(tmp_path / "engine.sock"))
+        assert digest is None
+        assert "could not be asked" in why
+        assert "no unix sockets" in why
+
 
 class TestTheDefaultEngineRung:
+    @needs_unix_sockets
     def test_a_detected_socket_is_asked_and_a_missing_one_is_not(
         self, daemon, monkeypatch, tmp_path
     ):

@@ -124,8 +124,13 @@ def delegated_exit_code(
 
     Never raises: express is an accelerator, and no defect in it may fail a scan
     that would have run cold. Every unexpected exception is the ``None``
-    answer, with one line on stderr only when ``--express`` asked for the daemon
-    explicitly.
+    answer. Which ones say so on stderr depends on the type:
+    ``AttributeError``, ``TypeError``, ``NameError`` and ``AssertionError``
+    (:data:`_PROGRAMMING_ERRORS`) are defects in ASH, so they are always
+    reported as an internal error, with or without ``--express``. Any other
+    exception is a condition of the host, and gets one line on stderr only when
+    ``--express`` asked for the daemon explicitly. A ``KeyboardInterrupt`` that
+    escapes the inner guards is exit code 130, not a cold run.
     """
     if environ is None:
         environ = snapshot_environ()

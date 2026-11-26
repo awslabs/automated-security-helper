@@ -11,7 +11,9 @@ constructor, so semgrep and opengrep failed to construct for a tree holding such
 link. The file is named as the repository's instead.
 
 The judgment is stood in for here: the real one resolves only under an MCP shared
-workspace root, and the exception shape is Python's, not this repository's.
+workspace root, and the exception shape is Python's, not this repository's. It
+lives in ``config.mcp_sandbox`` and ``_grep_scanner_base`` binds it at import
+time, so the stand-in patches the consumer module's name.
 """
 
 from __future__ import annotations
@@ -79,7 +81,9 @@ def test_an_unresolvable_semgrepignore_leaves_the_scanner_constructed(
 ):
     """Fails at the base: the exception left ``config_is_client_supplied`` and the
     constructor with it."""
-    from automated_security_helper.cli.mcp import sandbox
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        _grep_scanner_base,
+    )
 
     source = test_plugin_context.source_dir
     source.mkdir(parents=True, exist_ok=True)
@@ -93,7 +97,9 @@ def test_an_unresolvable_semgrepignore_leaves_the_scanner_constructed(
         asked.append(config_path)
         raise error
 
-    monkeypatch.setattr(sandbox, "config_is_client_supplied", refuse_to_resolve)
+    monkeypatch.setattr(
+        _grep_scanner_base, "config_is_client_supplied", refuse_to_resolve
+    )
 
     # Enabled on every platform: the default turns semgrep off on Windows, and a
     # disabled scanner never asks about the file, so the stub would never run.
@@ -115,7 +121,9 @@ def test_the_unresolvable_file_is_named_as_the_repositorys(
 ):
     """The warning still names the file, as one the repository holds, whichever
     exception the resolution raised."""
-    from automated_security_helper.cli.mcp import sandbox
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        _grep_scanner_base,
+    )
 
     source = test_plugin_context.source_dir
     source.mkdir(parents=True, exist_ok=True)
@@ -129,7 +137,9 @@ def test_the_unresolvable_file_is_named_as_the_repositorys(
         asked.append(config_path)
         raise error
 
-    monkeypatch.setattr(sandbox, "config_is_client_supplied", refuse_to_resolve)
+    monkeypatch.setattr(
+        _grep_scanner_base, "config_is_client_supplied", refuse_to_resolve
+    )
     # The config's own list of resolution warnings, which the note is appended to.
     warnings = test_plugin_context.config._resolution_warnings
 
