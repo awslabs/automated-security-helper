@@ -214,7 +214,7 @@
           "symbol": "TestOnlyAllowlistedHttpsUrlsAreFetched.test_a_url_outside_the_allowlist_is_refused_unopened"
         }
       ],
-      "sha256": "489753523d3df6299649fb8b016fc41ff909bbc4f171eaee4a5fba415ef6f9c0"
+      "sha256": "108124b9b96c30a324037e0cfc5c1f2facc0e91ab88b5727af2d01712152a407"
     },
     "tests/unit/utils/test_opengrep_pinned_download.py": {
       "created": "2026-11-25T17:03:10Z",
