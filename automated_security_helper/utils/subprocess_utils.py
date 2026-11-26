@@ -1561,12 +1561,23 @@ class HeldInterrupt:
 
     Only a Python handler is held. SIGINT ignored (a script run as ``cmd &``
     starts that way, and its children inherit it), at its default, or set outside
-    Python is left as it is: a recording handler in its place would be reset at
-    exec, so a child started inside the block would stop ignoring SIGINT, and a
-    SIGINT would raise KeyboardInterrupt where it is meant to be ignored. Only the
-    main thread can set a signal handler, so elsewhere nothing is held either. The
-    signal mask is not touched: a child inherits the mask, but not a handler,
-    which exec resets.
+    Python is not: a recording handler in its place would be reset at exec, so a
+    child started inside the block would stop ignoring SIGINT, and a SIGINT would
+    raise KeyboardInterrupt where it is meant to be ignored.
+
+    An ignored SIGINT is set again instead, so that the child inherits it. A
+    native library can install a SIGINT handler behind Python's back, and
+    ``signal.getsignal`` then still reads SIG_IGN while the process catches
+    SIGINT. Importing polars does that (measured with polars 1.44.2, whose startup
+    registers the handler), so every child ASH started once polars was loaded
+    began with SIGINT at its default, exec having reset the handler. Setting
+    SIG_IGN again puts back the disposition Python records. A Python handler
+    needs no such step: holding it sets it, and the restore sets it again.
+
+    Only the main thread can set a signal handler, so elsewhere nothing is held or
+    set. The disposition belongs to the process, so a child started off the main
+    thread keeps what the main thread last set. The signal mask is not touched: a
+    child inherits the mask, but not a handler, which exec resets.
     """
 
     def __init__(self) -> None:
@@ -1577,11 +1588,15 @@ class HeldInterrupt:
         self._left = False
 
     def __enter__(self) -> Self:
-        if threading.current_thread() is threading.main_thread() and callable(
-            signal.getsignal(signal.SIGINT)
-        ):
+        if threading.current_thread() is not threading.main_thread():
+            return self
+        current = signal.getsignal(signal.SIGINT)
+        if callable(current):
             self._previous = signal.signal(signal.SIGINT, self._record)
             self._held = True
+        elif current == signal.SIG_IGN:
+            # See the class docstring: a native handler can have replaced it.
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
         return self
 
     def _record(self, signum: int, frame: Any) -> None:

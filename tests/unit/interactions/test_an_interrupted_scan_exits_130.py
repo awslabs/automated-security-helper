@@ -18,6 +18,7 @@ on PATH, so no case can reach a real container runtime.
 from __future__ import annotations
 
 import contextlib
+import faulthandler
 import itertools
 import os
 import signal
@@ -469,7 +470,10 @@ def test_the_runtime_keeps_the_sigint_disposition_ash_was_started_with(
     """A script run as `cmd &` starts ASH with SIGINT ignored, and the runtime
     inherits that. The hold around the runtime's start put a handler in its place,
     which exec resets, so the runtime was started with SIGINT at its default and a
-    Ctrl-C meant for the foreground job reached it. The control: started with
+    Ctrl-C meant for the foreground job reached it. Loading polars, which
+    build-image does when it discovers the reporter plugins, put one there from
+    native code (test_the_hold_ignores_sigint_again_where_a_native_handler_
+    replaced_it), with the same result. The control: started with
     SIGINT at its default, the runtime is not started ignoring SIGINT either. This
     test sees only the runtime's mask; that ASH holds its own Python handler there
     is checked in-process, by test_a_ctrl_c_while_the_runtime_is_started_stops_it.
@@ -1126,6 +1130,50 @@ def test_a_sigint_disposition_that_raises_nothing_is_left_alone(disposition):
     ]
     sigint_ignored = bool(ignored & (1 << (signal.SIGINT - 1)))
     assert sigint_ignored is (disposition is signal.SIG_IGN)
+
+
+@pytest.mark.skipif(
+    not hasattr(faulthandler, "register"), reason="faulthandler.register is POSIX"
+)
+@pytest.mark.parametrize("held", [True, False], ids=["in-the-hold", "control"])
+@pytest.mark.integration
+def test_the_hold_ignores_sigint_again_where_a_native_handler_replaced_it(
+    tmp_path, held
+):
+    """Importing polars installs a SIGINT handler behind Python's back. In ASH
+    started with SIGINT ignored, signal.getsignal then still read SIG_IGN, so the
+    hold left the disposition as it found it, and a child started once polars was
+    loaded began with SIGINT at its default, exec having reset the handler. The hold
+    sets SIG_IGN again. faulthandler.register stands in for the library: it installs
+    a handler from C and leaves Python's record as it was. The control shows the
+    stand-in has the library's effect: without the hold, the child does not start
+    ignoring SIGINT.
+    """
+    from automated_security_helper.utils.subprocess_utils import HeldInterrupt
+
+    previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    try:
+        with open(tmp_path / "traceback.txt", "w", encoding="utf-8") as dump:
+            faulthandler.register(signal.SIGINT, file=dump, chain=False)
+            try:
+                recorded = signal.getsignal(signal.SIGINT)
+                with HeldInterrupt() if held else contextlib.nullcontext():
+                    child = subprocess.run(  # nosec B603 - fixed interpreter and arguments
+                        [sys.executable, "-I", "-c", _SAYS_IF_SIGINT_IS_IGNORED],
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
+                        check=True,
+                    )
+            finally:
+                faulthandler.unregister(signal.SIGINT)
+        still_ignored = signal.getsignal(signal.SIGINT) == signal.SIG_IGN
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+    assert recorded == signal.SIG_IGN, "the stand-in changed Python's record"
+    assert child.stdout.strip() == ("True" if held else "False"), child
+    assert still_ignored, "SIGINT was not left ignored"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a SIGINT sent to a process is POSIX")
