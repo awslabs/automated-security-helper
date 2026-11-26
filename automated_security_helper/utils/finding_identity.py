@@ -216,7 +216,7 @@ FINGERPRINT_KINDS = ("fingerprints", "partialFingerprints")
 CONVERTED_PATH_PROPERTY = "converted_path"
 
 #: The ``tree`` of a finding inside a container image.
-IMAGE_TREE = "image"
+IMAGE_TREE = TargetType.IMAGE.value
 
 #: SARIF result properties carrying an image finding's attribution, written by
 #: the scanner executor on every image-scan result (``utils/image_attribution``)
@@ -444,7 +444,9 @@ def finding_identity(
     }
     if image is not None:
         base["tree"] = IMAGE_TREE
-        base["image"] = image
+        # The key is spelled as the tree label on purpose: an id that hashed it
+        # is already in reports and must not change.
+        base[IMAGE_TREE] = image
     elif converted:
         base["tree"] = TargetType.CONVERTED.value
     return FindingIdentity(

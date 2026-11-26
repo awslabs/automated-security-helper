@@ -758,7 +758,8 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         try:
             # For this resolution only, exactly as the extra-args swaps are
             # scoped: the next fs target must not inherit the image subcommand.
-            self.subcommands = ["image"]
+            # trivy's image subcommand is spelled like the image tree label.
+            self.subcommands = [TargetType.IMAGE.value]
             final_args = self._resolve_arguments(
                 target=target_token, results_file=results_file
             )
