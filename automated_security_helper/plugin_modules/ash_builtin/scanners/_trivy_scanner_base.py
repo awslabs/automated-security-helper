@@ -56,6 +56,10 @@ from typing import (
 import yaml
 from pydantic import Field, PrivateAttr, model_validator
 
+from automated_security_helper.base.plugin_base import (
+    PROGRAMMING_ERRORS,
+    side_run_skip_reason,
+)
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -861,8 +865,11 @@ def trivy_misconfig_resources(
 ) -> dict[_MisconfigKey, List[Optional[str]]]:
     """The resource of every failed misconfiguration in trivy's JSON report.
 
-    Each key holds one entry per FAIL record, in report order, because the SARIF
-    report lists the same records in the same order. An entry is the record's
+    Each key holds one entry per FAIL record, in the JSON report's order. The
+    order is not relied on to pair a record with a SARIF result (the two reports
+    come from two separate runs; :func:`attach_trivy_resources` pairs by key and
+    gives a shared key a resource only when every entry names the same one). An
+    entry is the record's
     ``CauseMetadata.Resource`` when its result's type is one of
     :data:`_MISCONFIG_RESOURCE_TYPES` and None otherwise, so a key's entries
     still count every record that has it. Only FAIL records are listed: trivy's
@@ -917,8 +924,9 @@ def attach_trivy_resources(
     would bind a suppression to a finding it was not written for where a missing
     one only fails closed. When the two reports disagree on how many records a
     key has, none of that key's results is given a resource. The assignments are
-    worked out first and written together, so a failure part way leaves the report
-    as it was. Returns how many results were set.
+    worked out first and then written in one loop, so a failure while working them
+    out leaves the report as it was; a failure part way through the write loop
+    leaves the results written so far. Returns how many results were set.
     """
     by_key: dict[_MisconfigKey, List[Any]] = {}
     for run in sarif_report.runs or []:
@@ -2690,6 +2698,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         """
         try:
             return self._attach_misconfig_resources_unguarded(sarif_report, final_args)
+        except PROGRAMMING_ERRORS:
+            # A defect in ASH's own code is not a condition of the second run:
+            # it surfaces instead of passing as a skipped report.
+            raise
         except Exception as error:  # noqa: BLE001 -- best-effort enrichment
             self._warn_side_report_skipped(f"{type(error).__name__}")
             return sarif_report
@@ -2747,15 +2759,26 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 env=env,
                 timeout=self._effective_scan_timeout(),
             )
-            if response.get("returncode") != 0 or not json_file.is_file():
+            flagged = side_run_skip_reason(response)
+            if (
+                flagged is not None
+                or response.get("returncode") != 0
+                or not json_file.is_file()
+            ):
                 ASH_LOGGER.debug(
                     f"trivy's misconfiguration report was not written "
                     f"(exit {response.get('returncode')}); no resource is named."
                 )
+                # The response's own flags first: a run stopped at its timeout
+                # or one whose tool could not be stopped has no exit code to
+                # name, and "exited None" says nothing about why.
                 self._warn_side_report_skipped(
-                    f"the second run exited {response.get('returncode')}"
-                    if response.get("returncode") != 0
-                    else "the second run wrote no report"
+                    flagged
+                    or (
+                        f"the second run exited {response.get('returncode')}"
+                        if response.get("returncode") != 0
+                        else "the second run wrote no report"
+                    )
                 )
                 return sarif_report
             document = json.loads(json_file.read_text(encoding="utf-8"))
@@ -2765,7 +2788,18 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             return sarif_report
         finally:
             json_file.unlink(missing_ok=True)
-        attach_trivy_resources(sarif_report, trivy_misconfig_resources(document))
+        resources = trivy_misconfig_resources(document)
+        attached = attach_trivy_resources(sarif_report, resources)
+        if attached == 0 and any(
+            name is not None for named in resources.values() for name in named
+        ):
+            # The JSON report named resources and none reached a result: the two
+            # reports did not line up (a key or a count differed), and nothing
+            # else in the run says why a resource-scoped suppression never
+            # matches.
+            self._warn_side_report_skipped(
+                "the report named resources and none matched a result"
+            )
         return sarif_report
 
     @staticmethod
