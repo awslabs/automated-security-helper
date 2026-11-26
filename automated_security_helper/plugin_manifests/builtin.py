@@ -250,3 +250,33 @@ MANIFESTS = (
         fixtures="zizmor",
     ),
 )
+
+
+def _check_tables(
+    manifests: tuple[ScannerManifest, ...],
+    descriptions: dict[str, str],
+    exclusions: dict[str, tuple[ExclusionOption, ...]],
+) -> None:
+    """Refuse a table row that names no builtin scanner.
+
+    ``_builtin`` reads each table by the scanner's name, and ``.get`` on
+    ``_EXCLUSIONS`` answers "none" for a name nothing is declared under, so a
+    row for a renamed or removed scanner would be dropped without a word and the
+    scanner would ship without its exclusion options. Every description belongs
+    to a scanner and every scanner has one; an exclusion row belongs to one.
+    """
+    names = {manifest.name for manifest in manifests}
+    if set(descriptions) != names:
+        raise ManifestRegistryError(
+            "_SECTION_DESCRIPTIONS and the builtin scanners disagree: "
+            f"described but not declared {sorted(set(descriptions) - names)}, "
+            f"declared but not described {sorted(names - set(descriptions))}"
+        )
+    unknown = sorted(set(exclusions) - names)
+    if unknown:
+        raise ManifestRegistryError(
+            f"_EXCLUSIONS names no builtin scanner for {unknown}"
+        )
+
+
+_check_tables(MANIFESTS, _SECTION_DESCRIPTIONS, _EXCLUSIONS)

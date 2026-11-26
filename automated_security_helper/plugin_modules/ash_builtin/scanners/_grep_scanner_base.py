@@ -43,6 +43,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
+from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
 from automated_security_helper.config.path_trust import honored_path, resolved_path
 from automated_security_helper.core.constants import ASH_ASSETS_DIR
 from automated_security_helper.core.enums import OfflineStrategy
@@ -532,12 +533,6 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         is named as client-supplied. A disabled scanner runs neither tool, so
         there is nothing it leaves unhonored and it records no note.
         """
-        # Imported when called, as config/path_trust.py does: a scanner module
-        # loads while the plugins register, before the config layer is needed.
-        from automated_security_helper.config.mcp_sandbox import (
-            config_is_client_supplied,
-        )
-
         if not getattr(self.config, "enabled", True):
             return
         source = getattr(self.context, "source_dir", None)
