@@ -462,8 +462,9 @@ class TestPlatformAndFlagMappings:
         """Off means ``None``, not ``"auto"``.
 
         The flag exists so a caller with no terminal gets no escape sequences.
-        Passing ``"auto"`` regardless would put them in the output, which for an
-        MCP client reading a log means control characters in a JSON string.
+        Passing a color system regardless of the flag would put them in the
+        output, which for an MCP client reading a log means control characters
+        in a JSON string.
         """
         assert _builder()(self._opts_with(tmp_path, color=True)).color_system == "auto"
         assert _builder()(self._opts_with(tmp_path, color=False)).color_system is None
