@@ -2491,6 +2491,10 @@ def _apply_suppressions_within_budget(
                     and location.physicalLocation.root.artifactLocation is not None
                 ):
                     raw_uri = location.physicalLocation.root.artifactLocation.uri
+                    # An in-image path goes through the SAME one-spelling
+                    # reading the ignore step used (_matched_path_text), so the
+                    # two steps cannot read one location differently (decoded
+                    # there, raw here was exactly that).
                     uri = (
                         _normalize_sarif_uri(
                             raw_uri or "",
@@ -2500,7 +2504,7 @@ def _apply_suppressions_within_budget(
                             _source_dir_basename,
                         )
                         if raw_uri and not in_image
-                        else (raw_uri or "")
+                        else _matched_path_text(raw_uri or "", _source_dir_prefix)
                     )
                     # The spelling the report records, escapes kept: a person who
                     # copies ``a%20b.py`` from the report (or saves the dialog's
@@ -2508,7 +2512,8 @@ def _apply_suppressions_within_budget(
                     # decoded match never met. Matched second, when the decoded
                     # spelling differs and misses, and never when a sibling file
                     # literally so named exists (_second_match_spelling). An
-                    # in-image path is matched as written already.
+                    # in-image path took the one-spelling _matched_path_text
+                    # reading above, so no second spelling exists for it.
                     if raw_uri and "%" in raw_uri and not in_image:
                         uri_as_written = _second_match_spelling(
                             raw_uri,

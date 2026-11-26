@@ -258,6 +258,19 @@ class TestStereoscopeTargets:
             stereoscope_target(locator, ContainerEngine.NONE) == f"registry:{IMAGE_REF}"
         )
 
+    def test_a_declared_remote_daemon_is_a_schemeless_ref(self):
+        # The tool's own client honors the declared daemon, and the schemeless
+        # form keeps stereoscope's source fallback; NONE is unaffected.
+        locator = ImageLocator(ref=IMAGE_REF)
+        assert (
+            stereoscope_target(locator, ContainerEngine.DOCKER, remote_daemon=True)
+            == IMAGE_REF
+        )
+        assert (
+            stereoscope_target(locator, ContainerEngine.NONE, remote_daemon=True)
+            == f"registry:{IMAGE_REF}"
+        )
+
 
 DIGEST = "sha256:" + "ab" * 32
 
@@ -367,13 +380,29 @@ class TestGrypeImageArgv:
 
     def test_the_detected_engine_is_read_once_per_target(self, monkeypatch, tmp_path):
         # scan_image detects once and the argv build reads that one answer
-        # (_image_engine), so the skip decision and the target cannot disagree
-        # when a socket appears or vanishes between two reads.
+        # (_image_engine plus its socket), so the skip decision and the target
+        # cannot disagree when a socket appears or vanishes between two reads.
         _no_engine(monkeypatch, tmp_path)
         scanner = self._scanner(tmp_path)
         scanner._image_engine = ContainerEngine.PODMAN
+        scanner._image_engine_socket = str(tmp_path / "podman.sock")
         argv, _results, _env = scanner._execute_image_scan(ImageLocator(ref=IMAGE_REF))
         assert f"podman:{IMAGE_REF}" in argv
+
+    def test_a_declared_remote_daemon_keeps_the_source_fallback(
+        self, monkeypatch, tmp_path
+    ):
+        # A tcp:// DOCKER_HOST counts as a daemon, but stereoscope gets the
+        # SCHEMELESS ref: its own client honors the declaration AND its source
+        # order still reaches the registry when the declaration is stale, where
+        # a pinned docker: scheme flipped every scan to an ERROR.
+        _no_engine(monkeypatch, tmp_path)
+        monkeypatch.setenv("DOCKER_HOST", "tcp://docker:2375")
+        scanner = self._scanner(tmp_path)
+        argv, _results, _env = scanner._execute_image_scan(ImageLocator(ref=IMAGE_REF))
+        assert IMAGE_REF in argv
+        assert f"docker:{IMAGE_REF}" not in argv
+        assert f"registry:{IMAGE_REF}" not in argv
 
     def test_an_oci_archive_is_an_oci_archive_target(self, monkeypatch, tmp_path):
         _no_engine(monkeypatch, tmp_path)

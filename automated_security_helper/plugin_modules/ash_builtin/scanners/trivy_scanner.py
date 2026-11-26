@@ -852,12 +852,24 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             return 0
         env = {**snapshot_environ(), **self.extra_env} if self.extra_env else None
         env = with_offline_tool_environment(env, self._scanner_offline())
+        # What is LEFT of the scan's one budget, not a second full one: the
+        # SARIF run already spent part of it, and an attribution pass must not
+        # double the time an operator bounded. The floor keeps a nearly-spent
+        # budget from turning into an unbounded wait (0 disables trivy's own
+        # timeout). Cancellation passes through: ScanCancelled is a
+        # BaseException, which the attribution except below never catches.
+        budget = self._effective_scan_timeout()
+        if budget is not None and self.start_time is not None:
+            from datetime import datetime, timezone
+
+            elapsed = (datetime.now(timezone.utc) - self.start_time).total_seconds()
+            budget = max(1.0, budget - elapsed)
         try:
             completed = spawn_run(
                 argv,
                 capture_output=True,
                 text=True,
-                timeout=self._effective_scan_timeout(),
+                timeout=budget,
                 check=False,
                 cwd=self._subprocess_cwd(json_path.parent),
                 env=env,

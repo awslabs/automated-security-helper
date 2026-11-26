@@ -1200,6 +1200,17 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             stereoscope_target,
         )
 
+        engine = self._image_engine
+        engine_socket = self._image_engine_socket
+        if engine is None:
+            # A direct call outside scan_image (a test driving this hook
+            # alone); the template detects once per target otherwise.
+            from automated_security_helper.core.container_engine import (
+                detect_engine_socket,
+            )
+
+            engine, engine_socket = detect_engine_socket()
+
         target_results_dir = Path(os.path.abspath(self.results_dir)).joinpath("image")
         results_file = target_results_dir.joinpath("results_sarif.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
@@ -1222,7 +1233,15 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 for glob in self._image_exclude_globs()
             )
             final_args = self._resolve_arguments(
-                target=stereoscope_target(image, engine=self._image_engine),
+                target=stereoscope_target(
+                    image,
+                    engine=engine,
+                    # Declared in the environment with no local socket: the
+                    # schemeless target keeps stereoscope's source fallback.
+                    # Only read when the engine is docker or podman, so the
+                    # always-socketless NONE case is unaffected.
+                    remote_daemon=engine_socket is None,
+                ),
                 results_file=results_file,
             )
         finally:

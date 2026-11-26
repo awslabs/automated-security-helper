@@ -63,14 +63,23 @@ def archive_scheme(archive: Path) -> str:
 
 
 def stereoscope_target(
-    image: "ImageLocator", engine: ContainerEngine | None = None
+    image: "ImageLocator",
+    engine: ContainerEngine | None = None,
+    *,
+    remote_daemon: bool = False,
 ) -> str:
     """*image* as grype and syft take it on the command line.
 
     *engine* defaults to one detection per call; the scanners pass the one
     reading ``scan_image`` took for the target (``_image_engine``) so the skip
     decision and the argv agree, and tests pass their own so no row depends on
-    the suite's host.
+    the suite's host. *remote_daemon* says the engine was DECLARED in the
+    environment with no local socket (a ``tcp://``/``ssh://`` DOCKER_HOST, a
+    remote CONTAINER_HOST): the target then stays SCHEMELESS, so stereoscope
+    honors the declared daemon through its own client AND keeps its own source
+    fallback -- a stale declaration degrades to the registry instead of
+    flipping every image scan to an ERROR, which a pinned ``docker:`` scheme
+    (no fallback) did.
     """
     if image.oci_archive is not None:
         # Absolute and in posix form, as the dir: scans spell their targets:
@@ -84,6 +93,8 @@ def stereoscope_target(
     # Digest-pinned where the REGISTRY named the digest (ImageLocator.pulled_ref):
     # the tool then pulls exactly the manifest the finding ids key on.
     ref = image.pulled_ref()
+    if remote_daemon and engine in (ContainerEngine.DOCKER, ContainerEngine.PODMAN):
+        return ref
     if engine == ContainerEngine.DOCKER:
         return f"docker:{ref}"
     if engine == ContainerEngine.PODMAN:

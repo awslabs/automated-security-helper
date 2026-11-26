@@ -96,7 +96,8 @@ selected it. An image scan's report therefore says which scanners did not look, 
 than looking clean.
 
 When *nothing* scanned the image -- no selected scanner declares the kind, or
-no engine is present on an offline host -- the report carries one
+the subject is a reference in `--offline` mode, where every reference is
+skipped (see Engine delegation below) -- the report carries one
 informational SARIF result (`kind=informational`, `level=note`, rule
 `ASH-container-image-not-scanned`) naming the image. It is information, not a finding:
 it never grades, never fails a threshold and never lands in a SIEM as a vulnerability,
@@ -113,8 +114,11 @@ through one (Colima, OrbStack, Docker Desktop without the default socket) counts
 `DOCKER_HOST` names it. With a daemon present, one pull serves every scanner -- the
 engine's content store is the dedup; trivy is told
 `--image-src=<engine>,remote`, so an image the daemon does not hold still scans from
-the registry. With no engine and network allowed, the tools' own registry clients
-fetch, each into its own cache.
+the registry. For a daemon that is only *declared* (no local socket), grype and syft
+get the reference schemeless, so their client honors the declaration and their own
+source fallback still reaches the registry when the declaration is stale. With no
+engine and network allowed, the tools' own registry clients fetch, each into its own
+cache.
 
 In `--offline` mode a *reference* is always skipped, engine or no engine: a daemon
 asked for an image it does not hold pulls it from the registry, and the tools' own
@@ -178,7 +182,7 @@ as written. Three attribution columns say which image it came from:
 | Column | Meaning |
 |---|---|
 | `image_ref` | The image as submitted: the reference, or the archive or layout path. |
-| `image_digest` | The image's sha256 **manifest digest**, when one is named, read from these sources in order: the tool's own run output (trivy records `repoDigests`; its config-blob `imageID` is used only when no repo digest exists, as for a locally built, never-pushed image), the digest the lookup ladder resolved for a tag-only reference (the local engine, then `crane digest`; see above), else the digest a pinned reference (`repo@sha256:...`) states. Empty only when every source failed, as for a tag-only reference scanned offline with no engine record. |
+| `image_digest` | The image's sha256 **manifest digest**, when one is named, read from these sources in order: the tool's own run output (trivy records `repoDigests`), the digest the lookup ladder resolved for a tag-only reference (the local engine, then `crane digest`; see above) or the digest a pinned reference (`repo@sha256:...`) states, else trivy's config-blob `imageID` -- last because it is a *different* value for the same image, used only when nothing names the manifest, as for a locally built, never-pushed image. Empty only when every source failed, as for a tag-only reference with no engine record whose registry read also failed (`crane` missing, or the registry unreachable). |
 | `layer_digest` | The digest of the layer the finding comes from, for trivy findings. trivy's SARIF carries no layer data, so ASH runs trivy once more with JSON output, joins each result to the SARIF by finding (vulnerability: CVE and package; secret: rule, target and start line; misconfiguration: check ID and target), and writes the layer's `Digest`, else its `DiffID`. A finding two layers both report, or one the JSON pass cannot match, stays empty. If the second pass fails the scan still succeeds with the column empty. syft reports no findings and grype's output has no layer data, so their findings carry none. Attribution only. |
 
 **The id-stability contract.** A finding's id keys on the in-image path and the image's
@@ -195,6 +199,18 @@ digest; when no digest is named anywhere, it keys on the submitted reference. So
 An image finding never shares an id with a source finding at the same path. The layer
 digest is not part of the id: a rebuilt layer that still carries the same vulnerable
 file at the same path is the same finding.
+
+The digest is also the scan's **reporting scope** (the recorded scan source a
+reporter that archives resolved findings compares within, such as
+aws-security-hub). The consequence cuts both ways: a tag that moves to a
+*different* image never archives the old image's findings as fixed, and for the
+same reason a *rebuild* pushed to the same tag is a new scope -- an unfixed CVE
+present in both builds appears under each build's digest, and the old build's
+copy is not archived by the new build's scan. Scanning a moving tag repeatedly
+therefore accumulates per-build finding sets; pin a rebuild cadence's reporting
+on the digests you keep, or suppress the accepted CVE with an `image:` glob that
+covers the repository. A per-repository reporting granularity is not an option
+yet.
 
 To scope a suppression to one image, add `image`, a case-insensitive glob matched
 against the submitted reference and the resolved digest:

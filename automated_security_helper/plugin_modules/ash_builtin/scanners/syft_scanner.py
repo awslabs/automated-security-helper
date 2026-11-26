@@ -906,12 +906,13 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         self._image_ignore_paths = list(global_ignore_paths or [])
 
         # One engine reading for the whole target, as the base template takes
-        # it: the skip decision and the stereoscope target must agree.
+        # it: the skip decision and the stereoscope target must agree. The
+        # socket half says whether the daemon is local or only DECLARED.
         from automated_security_helper.core.container_engine import (
-            detect_container_engine,
+            detect_engine_socket,
         )
 
-        self._image_engine = detect_container_engine()
+        self._image_engine, self._image_engine_socket = detect_engine_socket()
 
         not_scanned = self._image_not_scanned_reason(image)
         if not_scanned is not None:
@@ -996,7 +997,15 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 for glob in self._image_exclude_globs()
             )
             final_args = self._resolve_arguments(
-                target=stereoscope_target(image, engine=self._image_engine),
+                target=stereoscope_target(
+                    image,
+                    engine=self._image_engine,
+                    # Declared in the environment with no local socket: the
+                    # schemeless target keeps stereoscope's source fallback.
+                    # Only read when the engine is docker or podman, so the
+                    # always-socketless NONE case is unaffected.
+                    remote_daemon=self._image_engine_socket is None,
+                ),
             )
             subprocess_env = (
                 {**snapshot_environ(), **self.extra_env} if self.extra_env else None

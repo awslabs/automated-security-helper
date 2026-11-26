@@ -356,8 +356,13 @@ def _clear_image_dir_except(image_dir: Path, keep: Optional[Path] = None) -> Non
                 entry.unlink()
 
 
-def _remove_delivered_image_archive(session_id: str) -> None:
-    """Remove the staged archive of the session's current image binding.
+def _remove_delivered_image_archive(
+    session_id: str,
+    previous: "Optional[ImageLocator]" = None,
+    *,
+    workspace_root: Optional[Path] = None,
+) -> None:
+    """Remove the staged archive of an image binding the session replaced.
 
     Only when the binding's archive sits where the finalize itself stages one,
     ``<session>/image``: the locator registry is a module global, and emptying
@@ -365,32 +370,56 @@ def _remove_delivered_image_archive(session_id: str) -> None:
     caller that binds an operator-owned archive path have that operator's
     directory emptied by the next delivery. A binding outside the expected
     directory is simply dropped by the caller; nothing of it is deleted.
+
+    *previous* is the binding the caller already POPPED (the registry change
+    comes first, so an exception here never leaves a session with two scan
+    subjects); None reads the live registry, for a caller that replaces the
+    binding itself right after. *workspace_root* is the override the delivery
+    ran under, where it had one: the expected directory is checked under it
+    AND under the default resolution, so an archive staged under an overridden
+    root is still cleared by a later delivery that carries the same override.
     """
 
-    previous = _SESSION_IMAGE_LOCATORS.get(session_id)
+    if previous is None:
+        previous = _SESSION_IMAGE_LOCATORS.get(session_id)
     if previous is None or previous.oci_archive is None:
         return
     parent = Path(previous.oci_archive).parent
+    roots = []
+    if workspace_root is not None:
+        roots.append(workspace_root)
     try:
-        expected = _session_workspace(resolve_workspace_root(), session_id) / "image"
+        roots.append(resolve_workspace_root())
     except (OSError, ValueError):
-        return
-    if parent != expected:
+        pass
+    for root in roots:
         try:
-            if not os.path.samefile(parent, expected):
-                return
+            expected = _session_workspace(root, session_id) / "image"
+        except (OSError, ValueError):
+            continue
+        if parent == expected:
+            break
+        try:
+            if os.path.samefile(parent, expected):
+                break
         except OSError:
-            return
+            continue
+    else:
+        return
     _clear_image_dir_except(parent)
 
 
-def _set_session_source_dir(session_id: str, source_dir: Path) -> None:
+def _set_session_source_dir(
+    session_id: str, source_dir: Path, *, workspace_root: Optional[Path] = None
+) -> None:
     _SESSION_SOURCE_DIRS[session_id] = source_dir
     # The latest delivery wins: a source tree delivered after an image makes
     # the tree the session's one scan subject, exactly as an image delivered
     # after a tree makes the image it (get_session_image_locator's contract).
-    _remove_delivered_image_archive(session_id)
-    _SESSION_IMAGE_LOCATORS.pop(session_id, None)
+    # The binding is POPPED before the archive cleanup, so a cleanup failure
+    # can never leave the session with two scan subjects.
+    previous = _SESSION_IMAGE_LOCATORS.pop(session_id, None)
+    _remove_delivered_image_archive(session_id, previous, workspace_root=workspace_root)
 
 
 def _drop_session_source_dir(session_id: str) -> None:
@@ -2064,7 +2093,7 @@ def _clone_into_session(
         if not swapped:
             _discard_staging(staging)
 
-    _set_session_source_dir(session_id, target)
+    _set_session_source_dir(session_id, target, workspace_root=workspace_root)
     if replaced is not None:
         # The new tree is in place and recorded; what is left of the old one is
         # session scratch that the next delivery, clear_source or the end of the
@@ -3013,7 +3042,7 @@ def _finalize_zip_upload(
         if not swapped:
             _discard_staging(staging)
 
-    _set_session_source_dir(session_id, target)
+    _set_session_source_dir(session_id, target, workspace_root=workspace_root)
     if replaced is not None:
         # The new tree is in place and recorded; what is left of the old one is
         # session scratch that the next delivery, clear_source or the end of the
@@ -3219,9 +3248,11 @@ def set_source_image(
     # nothing to free).
     ensure_session_workspace(session_id)
     # A reference replaces a delivered archive as the subject: the archive is
-    # scratch now and must not stay in the session workspace.
-    _remove_delivered_image_archive(session_id)
+    # scratch now and must not stay in the session workspace. The registry
+    # changes first, so a cleanup failure never leaves the old subject bound.
+    previous = _SESSION_IMAGE_LOCATORS.pop(session_id, None)
     _set_session_image_locator(session_id, locator)
+    _remove_delivered_image_archive(session_id, previous)
     ASH_LOGGER.info(
         "session %s delivered image ref %s as its scan subject",
         session_id,

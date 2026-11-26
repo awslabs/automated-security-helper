@@ -1134,6 +1134,9 @@ class ScanPhase(EnginePhase):
         ):
             self.validation_manager = ScannerValidationManager(self.plugin_context)
         self._has_executed = True
+        # Per execute, like the shard assignment above: the no-run warning's
+        # once-per-SCAN dedup must not swallow a later run's own warning.
+        self._unscanned_image_noted = False
         # Any regular file, whatever its name: see _holds_a_regular_file.
         self._include_work_dir = _holds_a_regular_file(self.plugin_context.work_dir)
 

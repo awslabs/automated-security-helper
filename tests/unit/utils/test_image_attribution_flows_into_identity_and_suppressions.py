@@ -151,12 +151,24 @@ def test_a_pinned_ref_and_a_tag_of_the_same_image_share_ids_when_the_run_names_t
     assert pinned.id == tagged.id
 
 
-def test_the_runs_own_digest_beats_the_locators():
-    run = _run(imageID=DIGEST)
+def test_the_runs_repo_digest_beats_the_locators():
+    # Both name the MANIFEST: the tool's own reading of what it scanned wins.
+    run = _run(repoDigests=[f"registry.example.com/team/app@{DIGEST}"])
     mark_image_results(
         _Report(run), ImageLocator(ref=REF, resolved_digest=OTHER_DIGEST)
     )
     assert getattr(run.results[0].properties, IMAGE_DIGEST_PROPERTY) == DIGEST
+
+
+def test_the_locators_resolved_digest_beats_a_bare_image_id():
+    # The imageID is the CONFIG-BLOB digest, a different value for the same
+    # image: letting it beat a known manifest digest re-split one image's
+    # attribution between trivy rows and everyone else's.
+    run = _run(imageID=DIGEST)
+    mark_image_results(
+        _Report(run), ImageLocator(ref=REF, resolved_digest=OTHER_DIGEST)
+    )
+    assert getattr(run.results[0].properties, IMAGE_DIGEST_PROPERTY) == OTHER_DIGEST
 
 
 # -- the flat columns and the identity --------------------------------------

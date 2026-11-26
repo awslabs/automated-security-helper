@@ -9,12 +9,14 @@ them back by the names ``utils/finding_identity`` exports. For an image scan the
 properties are the subject itself:
 
 - ``imageRef``: the locator as submitted (``ImageLocator.shown()``), always;
-- ``imageDigest``: the image's sha256 MANIFEST digest wherever one is named:
-  the tool's own run output first (``repoDigests`` ahead of the config-blob
-  ``imageID``, so every source yields the same value for one image), else the
-  locator's ``resolved_digest`` (the digest-resolver ladder fills it at scan
-  start), else the digest a pinned reference (``repo@sha256:...``) states. The
-  executor never asks an engine itself;
+- ``imageDigest``: the image's sha256 MANIFEST digest wherever one is named,
+  in order: the run's own ``repoDigests``, else the locator's
+  ``resolved_digest`` (the digest-resolver ladder fills it at scan start) or
+  the digest a pinned reference (``repo@sha256:...``) states, else the run's
+  bare ``imageID`` -- last because it is the config-blob digest, a DIFFERENT
+  value for the same image, read only when nothing names the manifest (a
+  locally built, never-pushed image). The executor never asks an engine
+  itself;
 - ``layerDigest``: written by the scanner, not here. trivy's SARIF carries no
   layer, so its image scan joins its JSON report (``utils/image_layer_digests``)
   onto the results; grype and syft name none, so their results have none. The
@@ -83,10 +85,15 @@ def image_digest_of_run(run: Any) -> Optional[str]:
     neither (grype's, syft has no SARIF) resolves nothing here, and the caller
     falls back to the locator.
     """
+    return _run_digest(run, ("repoDigests", "imageID"))
+
+
+def _run_digest(run: Any, names: "tuple[str, ...]") -> Optional[str]:
+    """The first digest the run's properties name under *names*, in order."""
     properties = getattr(run, "properties", None)
     if properties is None:
         return None
-    for name in ("repoDigests", "imageID"):
+    for name in names:
         value = getattr(properties, name, None)
         if isinstance(value, (list, tuple)):
             for entry in value:
@@ -103,8 +110,9 @@ def image_digest_of_run(run: Any) -> Optional[str]:
 def mark_image_results(sarif_report: Any, image: Optional[ImageLocator]) -> int:
     """Record, on each result of an image scan, which image it is about.
 
-    ``imageRef`` on every result, and ``imageDigest`` where the result's run
-    resolved one (:func:`image_digest_of_run`). Runs before suppressions are
+    ``imageRef`` on every result, and ``imageDigest`` where any source names
+    one (the run's ``repoDigests``, then the locator, then the run's bare
+    ``imageID``). Runs before suppressions are
     applied, so an ``image:``-scoped suppression can match, and before the flat
     extractor keys the result, so the identity carries the image component.
 
@@ -117,12 +125,19 @@ def mark_image_results(sarif_report: Any, image: Optional[ImageLocator]) -> int:
         return 0
     shown = image.shown()
     marked = 0
-    # The tool's own run output names the image it read. Failing that, the
-    # locator's: an engine's resolved digest, else the digest a pinned reference
-    # (``repo@sha256:...``) states itself.
+    # The MANIFEST digest wherever one is named, in order: the run's own
+    # repoDigests, else the locator's (the resolver's answer, or the digest a
+    # pinned ``repo@sha256:...`` reference states). The run's bare ``imageID``
+    # comes LAST: it is the config-blob digest, a different value for the same
+    # image, so letting it beat a known manifest digest re-split one image's
+    # attribution between trivy rows and everyone else's.
     fallback = _digest_text(image.resolved_digest) or _digest_text(image.ref)
     for run in getattr(sarif_report, "runs", None) or []:
-        digest = image_digest_of_run(run) or fallback
+        digest = (
+            _run_digest(run, ("repoDigests",))
+            or fallback
+            or _run_digest(run, ("imageID",))
+        )
         for result in getattr(run, "results", None) or []:
             if result.properties is None:
                 result.properties = PropertyBag()

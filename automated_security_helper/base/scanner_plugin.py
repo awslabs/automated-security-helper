@@ -558,6 +558,11 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     #: detecting on its own could disagree (a socket appearing or vanishing
     #: between the two reads) and send a ref to an engine the skip never saw.
     _image_engine: Optional[Any] = PrivateAttr(default=None)
+    #: The detected engine's local socket path, or None for a daemon DECLARED
+    #: in the environment (a remote DOCKER_HOST / CONTAINER_HOST): stereoscope
+    #: targets then stay schemeless so the tool's own source fallback still
+    #: reaches the registry when the declaration is stale.
+    _image_engine_socket: Optional[str] = PrivateAttr(default=None)
     #: Whether staged files matched this scanner and the run's scan set then left
     #: every one of them out; the skip's reason says so instead of "no staged
     #: file matches". Reset per scan().
@@ -2326,6 +2331,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self._nothing_scanned_reason = None
         self._image_scan_in_progress = False
         self._image_engine = None
+        self._image_engine_socket = None
         staged_targets = self._staged_scope_paths(target, target_type)
         if staged_targets is not None:
             if not staged_targets:
@@ -2688,12 +2694,13 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
         # One engine reading for the whole target: the skip decision and the
         # argv build must agree on it, and two detections could not (a socket
-        # appearing or vanishing between them).
+        # appearing or vanishing between them). The socket half says whether
+        # the daemon is local or only DECLARED (a remote DOCKER_HOST).
         from automated_security_helper.core.container_engine import (
-            detect_container_engine,
+            detect_engine_socket,
         )
 
-        self._image_engine = detect_container_engine()
+        self._image_engine, self._image_engine_socket = detect_engine_socket()
 
         not_scanned = self._image_not_scanned_reason(image)
         if not_scanned is not None:
@@ -3371,14 +3378,17 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if global_ignore_paths is None:
             global_ignore_paths = []
         try:
-            # Passed by keyword: a scan override reads them by name, and an
-            # extra positional would collide with ``target``.
+            # Passed by keyword: a scan override reads them by name. *args is
+            # accepted for signature compatibility and NOT forwarded: any
+            # positional beside the keywords above collided with ``target``
+            # and turned every such call into a TypeError that this handler
+            # then reported as a scan failure (the ty-ignore that sat here was
+            # silencing the checker saying exactly that).
             return self.scan(
                 target=target,
                 target_type=target_type,
                 global_ignore_paths=global_ignore_paths,
                 config=config,
-                *args,  # ty: ignore[parameter-already-assigned]
                 **kwargs,
             )
         except Exception as e:
