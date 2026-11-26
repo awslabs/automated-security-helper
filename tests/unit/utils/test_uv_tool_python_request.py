@@ -35,7 +35,11 @@ def _isolate_module_caches():
 
 
 @pytest.fixture
-def runner():
+def runner(monkeypatch):
+    # The runner appends ``--offline`` to ``uv tool install`` when UV_OFFLINE=1 is
+    # in the environment (an offline runner profile exports it), so the recorded
+    # command is only the plain one with the variable unset.
+    monkeypatch.delenv("UV_OFFLINE", raising=False)
     r = UVToolRunner(uv_executable="uv")
     r._uv_available_cache = True
     return r

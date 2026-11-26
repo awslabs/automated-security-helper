@@ -38,7 +38,7 @@ What it actually is, stated plainly:
 
   * FAIL-CLOSED ALLOWLISTS over every namespace where new payload can hide
     without looking like any of those shapes. Three are pinned MEMBER BY MEMBER:
-    `automated_security_helper/assets/` (20 entries), the wheel's `.dist-info/`
+    `automated_security_helper/assets/` (21 entries), the wheel's `.dist-info/`
     (6), and the files sitting directly in `automated_security_helper/` itself
     (1 -- `__init__.py`). The first two exist to carry data rather than code,
     which is what makes payload dropped into either indistinguishable from what
@@ -184,7 +184,7 @@ losing game: the pattern list is finite and the space of filenames is not. The
 fail-closed rules change the default instead of extending the list.
 
   5. Not on the pinned list, in a namespace that is pinned. `assets/` holds
-     20 members in the current wheel and exists precisely to carry non-Python
+     21 members in the current wheel and exists precisely to carry non-Python
      data, which makes it the most comfortable hiding place in the tree -- an
      upstream ruleset or a tool database dropped there looks exactly like the
      ASH-authored data next to it (5a). Same for a brand-new directory anywhere in
@@ -217,9 +217,9 @@ fail-closed rules change the default instead of extending the list.
 
 WHAT IS DELIBERATELY ALLOWED
 ----------------------------
-automated_security_helper/assets/ ships and must keep shipping: 20 members in
+automated_security_helper/assets/ ships and must keep shipping: 21 members in
 the built wheel, all ASH-authored or build-generated, listed one by one in
-ASSETS_ALLOWLIST below. Fourteen are tracked files; six are produced by
+ASSETS_ALLOWLIST below. Fifteen are tracked files; six are produced by
 hatch_build.py during the build: assets/Dockerfile, generated from the root
 Dockerfile; assets/ASH_INSTALLED_REVISION, which holds the commit it was built
 from; assets/tool_downloads.py, assets/exceptions.py and
@@ -682,7 +682,7 @@ DISTRIBUTION_ROOT_DIRECTORIES = frozenset({PACKAGE_ROOT})
 ASSETS_PREFIX = f"{PACKAGE_ROOT}/assets/"
 
 # The complete contents of automated_security_helper/assets/ in the built wheel
-# and sdist, verified identical in both: 20 members, no more.
+# and sdist, verified identical in both: 21 members, no more.
 #
 # HOW THIS IS MAINTAINED. Adding a file to assets/ fails this gate until the path
 # is added here. That is the intended cost -- assets/ is where non-Python payload
@@ -745,6 +745,9 @@ ASSETS_ALLOWLIST = frozenset(
         f"{ASSETS_PREFIX}appsec_cfn_rules/beta/RotationEnabledForSecretsManagerRule.rb",
         f"{ASSETS_PREFIX}ash_stargrep_rules/README.md",
         f"{ASSETS_PREFIX}ash_stargrep_rules/appsec.yaml",
+        # ASH's own checkov JSON-array hook, shipped by design with the
+        # runtime-compatibility work.
+        f"{ASSETS_PREFIX}polyfills/checkov_json_array_hook/sitecustomize.py",
         f"{ASSETS_PREFIX}with-retry.sh",
     }
 )
@@ -769,6 +772,7 @@ PACKAGE_SUBDIRECTORIES = frozenset(
         "express",
         "interactions",
         "models",
+        "plugin_manifests",  # ASH's own subpackage of plugin manifest modules.
         "plugin_modules",
         "plugins",
         "schemas",

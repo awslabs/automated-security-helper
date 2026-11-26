@@ -635,7 +635,7 @@ class TestMergeCommand:
         """A --config file outside the working directory and every checkout does not turn it on.
 
         The shards do not record which tree was scanned, so the file may be that
-        tree's own ``.ash/.ash.yaml`` (a scanned directory beside this one). With
+        tree's own ``.ash.yaml`` (a scanned directory beside this one). With
         the dependency check answered, a reporter that ran would reach PutObject.
         """
         self._answer_the_dependency_check(monkeypatch, requests)

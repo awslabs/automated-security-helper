@@ -74,7 +74,7 @@ def _setup(tmp_path, scalar, op_name, repository_list):
     written, _value = _OWN_SCALAR[scalar]
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    repository = checkout / ".ash" / ".ash.yaml"
+    repository = checkout / ".ash.yaml"
     repository.parent.mkdir(parents=True, exist_ok=True)
     repository.write_text(
         "reporters:\n  aws-security-hub:\n    options:\n      tags: [x, y]\n"
@@ -363,7 +363,7 @@ def test_an_operator_only_scalar_under_a_removed_index_still_loads(
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    repository = checkout / ".ash" / ".ash.yaml"
+    repository = checkout / ".ash.yaml"
     repository.parent.mkdir(parents=True, exist_ok=True)
     repository.write_text(
         "reporters:\n  aws-security-hub:\n    options:\n      findings_scope: [x, y]\n",
@@ -466,7 +466,7 @@ def _misfit_load(tmp_path, monkeypatch, chain, op):
         monkeypatch.setenv("ASH_CONFIG", str(root))
         return resolve_config(source_dir=checkout)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
-    root = checkout / ".ash" / ".ash.yaml"
+    root = checkout / ".ash.yaml"
     root.parent.mkdir(parents=True, exist_ok=True)
     root.write_text(_root_text([own, base], op, project="repo-root"), encoding="utf-8")
     return resolve_config(config_path=root, source_dir=tmp_path, scanned_root=checkout)

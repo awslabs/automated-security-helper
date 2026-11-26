@@ -85,8 +85,8 @@ def _resolve(tmp_path: Path, document: str):
     from automated_security_helper.config.resolve_config import resolve_config
 
     tree = tmp_path / "tree"
-    (tree / ".ash").mkdir(parents=True)
-    (tree / ".ash" / ".ash.yaml").write_text(document, encoding="utf-8")
+    tree.mkdir(parents=True)
+    (tree / ".ash.yaml").write_text(document, encoding="utf-8")
     return resolve_config(source_dir=tree)
 
 

@@ -46,8 +46,7 @@ def _repo(tmp_path: Path, with_pyproject: bool) -> Path:
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
     document: Dict[str, Any] = {"scanners": {"bandit": {"enabled": False}}}
-    config = repo / ".ash" / ".ash.yaml"
-    config.parent.mkdir(parents=True)
+    config = repo / ".ash.yaml"
     config.write_text(yaml.safe_dump(document), encoding="utf-8")
     if with_pyproject:
         (repo / "pyproject.toml").write_text(
@@ -100,7 +99,7 @@ def test_a_named_but_discovered_config_reports_the_ignored_sources(
     """
     repo = _repo(tmp_path, with_pyproject=True)
 
-    config = resolve_config(config_path=repo / ".ash" / ".ash.yaml", source_dir=repo)
+    config = resolve_config(config_path=repo / ".ash.yaml", source_dir=repo)
 
     ignored = [
         warning

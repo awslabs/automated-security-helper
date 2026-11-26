@@ -177,6 +177,8 @@ class TestDiscoveredConfigFile:
 
     @pytest.mark.parametrize(("relative", "content"), DISCOVERED_UNLOADABLE)
     def test_unloadable_file_is_refused(self, tmp_path, relative, content):
+        """Every discovery location is covered, the canonical root file and the
+        legacy ``.ash/.ash.yaml`` location (the ``dot_ash_dir`` cases) alike."""
         path = _write(tmp_path / relative, content)
         _assert_refused(*_resolve(source_dir=tmp_path), path)
 
@@ -186,6 +188,9 @@ class TestDiscoveredConfigFile:
 
         Typical cause: ``.ash/.ash.yaml`` linked to a shared file that is not checked
         out in CI. Treating it as "no config" scans with the defaults.
+
+        Legacy location: this test covers every discovery location, including the
+        deprecated ``.ash/.ash.yaml`` path.
         """
         link = tmp_path / relative
         link.parent.mkdir(exist_ok=True)
@@ -197,7 +202,7 @@ class TestDiscoveredConfigFile:
         _assert_refused(*_resolve(source_dir=tmp_path), path)
 
     def test_control_loadable_discovered_file_is_used(self, tmp_path):
-        _write(tmp_path / ".ash" / ".ash.yaml", GOOD_YAML)
+        _write(tmp_path / ".ash.yaml", GOOD_YAML)
         config, error = _resolve(source_dir=tmp_path)
         assert error is None
         assert _describe(config) == {"fail_on_findings": False, "suppressions": 1}

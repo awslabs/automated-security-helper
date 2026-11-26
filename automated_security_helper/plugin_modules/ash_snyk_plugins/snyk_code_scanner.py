@@ -10,7 +10,7 @@ import re
 import shutil
 import time
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Iterable, List, Literal, Set
+from typing import Annotated, Any, ClassVar, Iterable, List, Literal, Optional, Set
 
 import yaml
 from pydantic import Field, PrivateAttr
@@ -45,7 +45,10 @@ from automated_security_helper.utils.get_scan_set import (
     file_links_leaving_tree,
     honors_ignore_files,
 )
-from automated_security_helper.base.uv_tool_mixin import guarded_values_read
+from automated_security_helper.base.uv_tool_mixin import (
+    _tool_name,
+    guarded_values_read,
+)
 from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.link_exclusions import walked_files
@@ -361,6 +364,14 @@ class SnykCodeScannerConfig(ScannerPluginConfigBase):
     ] = SnykCodeScannerConfigOptions()
 
 
+#: Why every snyk-code cell the tool's output would settle is unconfirmed.
+_UNCONFIRMED_NO_CAPTURE = (
+    "UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the "
+    "authored shape the tests use is not a read of the tool; a `snyk code test "
+    "--sarif` capture under snyk/captured/ settles it"
+)
+
+
 @ash_scanner_plugin
 class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
     """Runs ``snyk code test`` and returns the SARIF it writes."""
@@ -380,40 +391,45 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
 
     #: The facets register row (base/scanner_facets.py). Declaration only: no
-    #: behavior changes. snyk code is a pure SARIF pass-through. The mapped
-    #: cells below are observed by the facets corpus gate over the committed,
-    #: authored SARIF in tests/test_data/scanners/snyk/authored (the shape the
-    #: tests' in-test double generates), through the adapter's own rule-CWE
-    #: normalization. No snyk SARIF from a licensed tool run is committed, so
-    #: the native field names are the survey's reading of that shape; a
-    #: `snyk code test --sarif` capture under snyk/captured/ joins the corpus
-    #: and would show any difference.
+    #: behavior changes. snyk code is a pure SARIF pass-through. UNCONFIRMED
+    #: for every cell the tool's own output would settle: no snyk SARIF from a
+    #: licensed tool run is committed, and the authored SARIF in
+    #: tests/test_data/scanners/snyk/authored (the shape the tests' in-test
+    #: double generates) is data written to match the adapter, which is not a
+    #: read of the tool, so the corpus gate does not observe it. The native
+    #: field names are the survey's reading of that shape; a
+    #: `snyk code test --sarif` capture under snyk/captured/ settles them.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result "ruleId"',
+            state=FacetState.UNCONFIRMED,
+            reason=_UNCONFIRMED_NO_CAPTURE + ' (candidate field: result "ruleId")',
         ),
         severity=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result "level" (no security-severity on rules, so a '
-            "bare error reads as CRITICAL)",
+            state=FacetState.UNCONFIRMED,
+            reason=_UNCONFIRMED_NO_CAPTURE
+            + ' (candidate field: result "level"; no security-severity on rules, '
+            "so a bare error reads as CRITICAL)",
         ),
         file_path=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="locations[].physicalLocation.artifactLocation.uri "
-            "(%SRCROOT% base)",
+            state=FacetState.UNCONFIRMED,
+            reason=_UNCONFIRMED_NO_CAPTURE
+            + " (candidate field: locations[].physicalLocation.artifactLocation.uri, "
+            "%SRCROOT% base)",
         ),
         line_range=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="region.startLine / region.endLine",
+            state=FacetState.UNCONFIRMED,
+            reason=_UNCONFIRMED_NO_CAPTURE
+            + " (candidate fields: region.startLine / region.endLine)",
         ),
         column=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="region.startColumn / region.endColumn",
+            state=FacetState.UNCONFIRMED,
+            reason=_UNCONFIRMED_NO_CAPTURE
+            + " (candidate fields: region.startColumn / region.endColumn)",
         ),
         message=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result "message.text"',
+            state=FacetState.UNCONFIRMED,
+            reason=_UNCONFIRMED_NO_CAPTURE
+            + ' (candidate field: result "message.text")',
         ),
         resource_id=FacetDecl(
             state=FacetState.NA,
@@ -441,21 +457,23 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             reason="snyk code rules are source-defect classes, not CVEs",
         ),
         taxonomy_cwe=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='rule properties "cwe" (e.g. ["CWE-798"]), normalized '
-            "by normalize_rule_cwe_into_tags into the rule's tags as "
-            "external/cwe/cwe-<n>, which the shared flat reader reads",
+            state=FacetState.UNCONFIRMED,
+            reason=_UNCONFIRMED_NO_CAPTURE
+            + ' (candidate field: rule properties "cwe", e.g. ["CWE-798"], '
+            "normalized by normalize_rule_cwe_into_tags into the rule's tags as "
+            "external/cwe/cwe-<n>, which the shared flat reader reads)",
         ),
         fingerprints=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result "fingerprints" {"0", "1"}',
+            state=FacetState.UNCONFIRMED,
+            reason=_UNCONFIRMED_NO_CAPTURE
+            + ' (candidate field: result "fingerprints" {"0", "1"})',
         ),
         fix_available=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='rule properties "isAutofixable"',
-            reason="no flat fix_available write exists for snyk; weak signal "
-            "(autofix availability, not a fixed version); UNCONFIRMED "
-            "against a real tool run",
+            state=FacetState.UNCONFIRMED,
+            reason=_UNCONFIRMED_NO_CAPTURE
+            + ' (candidate field: rule properties "isAutofixable"; no flat '
+            "fix_available write exists for snyk, and it would be a weak signal, "
+            "autofix availability and not a fixed version)",
         ),
         remediation_text=FacetDecl(
             state=FacetState.UNCONFIRMED,
@@ -469,27 +487,27 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             "UNCONFIRMED against a real tool run",
         ),
         references=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='rule "help.markdown" and properties "exampleCommitFixes"',
-            reason="the rule help survives the SARIF model and dies at the "
-            "flat reader; UNCONFIRMED against a real tool run",
+            state=FacetState.UNCONFIRMED,
+            reason=_UNCONFIRMED_NO_CAPTURE
+            + ' (candidate fields: rule "help.markdown" and properties '
+            '"exampleCommitFixes"; the rule help survives the SARIF model and '
+            "dies at the flat reader)",
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="tool.driver.rules[].properties.tags, read into the "
-            "flat tags by the shared rule read when the result carries none "
-            "of its own",
-            reason="no tag write exists in this adapter at this checkout; the "
-            "rule-level tags are what the flat row carries",
+            state=FacetState.UNCONFIRMED,
+            reason=_UNCONFIRMED_NO_CAPTURE
+            + " (candidate field: tool.driver.rules[].properties.tags, read into "
+            "the flat tags by the shared rule read when the result carries none "
+            "of its own; no tag write exists in this adapter)",
         ),
         extras=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="result properties bag, passed through the SARIF model "
-            "untouched and read whole into the flat properties",
-            reason="the rule properties bag survives the SARIF model but the "
-            "flat reader takes only the rule's tags and helpUri from the "
-            "rule, so rule-bag keys (cwe, isAutofixable, exampleCommitFixes) "
-            "reach the flat row only through the cells above that name them",
+            state=FacetState.UNCONFIRMED,
+            reason=_UNCONFIRMED_NO_CAPTURE
+            + " (the result properties bag passes through the SARIF model "
+            "untouched; the flat reader takes only the rule's tags and helpUri "
+            "from the rule, so rule-bag keys such as cwe, isAutofixable and "
+            "exampleCommitFixes reach the flat row only through the cells above "
+            "that name them)",
         ),
     )
 
@@ -620,6 +638,20 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         )
         super().model_post_init(context)
 
+    def _forced_binary_precluded_reason(self) -> Optional[str]:
+        """Offline, a forced snyk binary must not satisfy validation.
+
+        snyk code audits against Snyk's service, so the offline refusal below is
+        a semantic verdict a ``--binary-path`` record has no say in. The
+        credential check is not mirrored here: a forced snyk without credentials
+        fails loudly at scan time rather than reporting a clean result.
+        """
+        if self._is_offline_mode():
+            return (
+                "snyk code does not run offline; the offline check precedes any binary"
+            )
+        return None
+
     def validate_plugin_dependencies(self) -> bool:
         """Validate scanner configuration.
 
@@ -684,7 +716,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         self._process_config_options()
 
         # Start with base command and subcommands
-        args: List[str] = [self._tool_command(), *self.subcommands]
+        args: List[str] = [_tool_name(self), *self.subcommands]
 
         # Add extra args. A value may be a number or a bool (ToolExtraArg), and
         # a spawn takes text only; a bool is spelled as a config file spells it,

@@ -453,7 +453,7 @@ def _scan_with_tree_config(
     scanners: str = "cfn-lint",
     cwd: Path | None = None,
 ):
-    """``ash scan`` with no --config, so the tree's .ash/.ash.yaml is the config.
+    """``ash scan`` with no --config, so the tree's .ash.yaml is the config.
 
     ``cwd`` is where ASH runs, which a relative --config-overrides path is
     taken from.
@@ -461,8 +461,7 @@ def _scan_with_tree_config(
     source = tmp_path / "repo"
     if not source.exists():
         shutil.copytree(FIXTURE_REPO, source)
-    (source / ".ash").mkdir(exist_ok=True)
-    (source / ".ash" / ".ash.yaml").write_text(
+    (source / ".ash.yaml").write_text(
         yaml.safe_dump(
             {
                 "project_name": "scanned",
@@ -577,7 +576,7 @@ def test_a_relative_path_in_the_operators_cfnlintrc_names_nothing(tmp_path):
 
 def test_the_scanned_trees_config_cannot_narrow_what_is_reported(tmp_path):
     """ignore_checks and rule_sets drop findings before ASH sees them, and
-    tool_version picks the cfn-lint release. Set by the tree's .ash/.ash.yaml,
+    tool_version picks the cfn-lint release. Set by the tree's .ash.yaml,
     each is ignored with a warning and the default is used."""
     _require_tools()
     proc, output = _scan_with_tree_config(

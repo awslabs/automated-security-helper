@@ -86,7 +86,7 @@ def _selecting(*names: str) -> Dict[str, Any]:
 def _repo(tmp_path: Path, document: Dict[str, Any]) -> Path:
     repo = tmp_path / "repo"
     mark_git_checkout(repo)
-    _write(repo / ".ash" / ".ash.yaml", document)
+    _write(repo / ".ash.yaml", document)
     return repo
 
 
@@ -210,9 +210,7 @@ class TestARepositoryCannotChangeTheOperatorsSelection:
     ) -> None:
         repo = _repo(tmp_path, _selecting("trivy"))
 
-        config = resolve_config(
-            config_path=repo / ".ash" / ".ash.yaml", source_dir=repo
-        )
+        config = resolve_config(config_path=repo / ".ash.yaml", source_dir=repo)
 
         assert _only(config) == ["bandit"]
         assert _warnings_naming(ash_log, "default_scanners")
@@ -248,8 +246,8 @@ class TestARepositoryCannotChangeTheOperatorsSelection:
         self, tmp_path: Path, operator_base: Path
     ) -> None:
         repo = _repo(tmp_path, {})
-        _write(repo / ".ash" / "base.yaml", _selecting("trivy"))
-        _write(repo / ".ash" / ".ash.yaml", {"extends": "base.yaml"})
+        _write(repo / "base.yaml", _selecting("trivy"))
+        _write(repo / ".ash.yaml", {"extends": "base.yaml"})
 
         config = resolve_config(source_dir=repo)
 
@@ -262,7 +260,7 @@ class TestARepositoryCannotChangeTheOperatorsSelection:
         operator = _operator(tmp_path, _selecting("bandit"))
 
         config = resolve_config(
-            config_path=repo / ".ash" / ".ash.yaml",
+            config_path=repo / ".ash.yaml",
             source_dir=repo,
             trusted_config_path=operator,
             overlay_config_path=operator,
@@ -315,9 +313,7 @@ class TestTheWarningNamesOnlyWhatARepositoryWrote:
     ) -> None:
         repo = _repo(tmp_path, {"project_name": "repo"})
 
-        config = resolve_config(
-            config_path=repo / ".ash" / ".ash.yaml", source_dir=repo
-        )
+        config = resolve_config(config_path=repo / ".ash.yaml", source_dir=repo)
 
         assert _only(config) == ["bandit"]
         assert not _warnings_naming(ash_log, "default_scanners")
@@ -350,9 +346,9 @@ class TestTheWarningNamesOnlyWhatARepositoryWrote:
         self, tmp_path: Path, operator_base: Path, ash_log
     ) -> None:
         repo = _repo(tmp_path, {})
-        _write(repo / ".ash" / "base.yaml", _selecting("trivy"))
+        _write(repo / "base.yaml", _selecting("trivy"))
         _write(
-            repo / ".ash" / ".ash.yaml",
+            repo / ".ash.yaml",
             {"extends": "base.yaml", **_selecting("checkov")},
         )
 
@@ -582,7 +578,7 @@ class TestAnOperatorFileExtendingACheckoutFileKeepsItsSelection:
         repo, operator = _mixed(
             tmp_path, {"project_name": "repo"}, _selecting("bandit")
         )
-        _write(repo / ".ash" / ".ash.yaml", {"project_name": "repo"})
+        _write(repo / ".ash.yaml", {"project_name": "repo"})
         monkeypatch.setenv("ASH_CONFIG", str(operator))
 
         config = resolve_config(source_dir=repo)
@@ -596,7 +592,7 @@ class TestAnOperatorFileExtendingACheckoutFileKeepsItsSelection:
         repo, operator = _mixed(
             tmp_path, {"project_name": "repo"}, _selecting("bandit")
         )
-        named = _write(repo / ".ash" / ".ash.yaml", _selecting("trivy"))
+        named = _write(repo / ".ash.yaml", _selecting("trivy"))
         monkeypatch.setenv("ASH_CONFIG", str(operator))
 
         config = resolve_config(config_path=named, source_dir=repo)

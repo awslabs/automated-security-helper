@@ -8,7 +8,7 @@ Why this exists
 The MCP workspace tools check the two config files a caller names (the workspace
 definition and its policy) against the session's roots, and project confinement
 checks every project directory. The config a project's directory holds needs a
-check of its own: were resolution to find ``<project>/.ash/ash.yaml`` and load it
+check of its own: were resolution to find ``<project>/.ash.yaml`` and load it
 unchecked, a project config linked out of the permitted roots would be read, and
 ``resolve_workspace`` would return what it set (``display_label``,
 ``severity_threshold``) and the outside path itself as ``config_source``.
@@ -42,7 +42,7 @@ def layout(tmp_path, monkeypatch) -> Dict[str, Path]:
 
     root = tmp_path / "ws"
     project = root / "app"
-    (project / ".ash").mkdir(parents=True)
+    project.mkdir(parents=True)
     (project / "app.py").write_text("x = 1\n", encoding="utf-8")
     workspace_file = root / "dev.code-workspace"
     workspace_file.write_text(
@@ -105,7 +105,7 @@ def _assert_a_confinement_refusal(response: Dict[str, Any]) -> None:
 
 
 def test_a_project_config_linked_out_of_the_roots_is_refused(layout) -> None:
-    link = layout["project"] / ".ash" / "ash.yaml"
+    link = layout["project"] / ".ash.yaml"
     link.symlink_to(layout["outside_config"])
 
     response = _resolve(layout["workspace_file"])
@@ -119,7 +119,7 @@ def test_a_workspace_scan_refuses_it_before_any_project_starts(
 ) -> None:
     from automated_security_helper.cli.mcp import workspace as mcp_workspace
 
-    (layout["project"] / ".ash" / "ash.yaml").symlink_to(layout["outside_config"])
+    (layout["project"] / ".ash.yaml").symlink_to(layout["outside_config"])
     started: list = []
     monkeypatch.setattr(
         mcp_workspace,
@@ -141,9 +141,7 @@ def test_a_workspace_scan_refuses_it_before_any_project_starts(
 def test_a_project_config_linked_to_a_missing_outside_file_is_refused(layout) -> None:
     """Refused as a link to a present file is, so the answer does not say
     whether the outside path exists."""
-    (layout["project"] / ".ash" / "ash.yaml").symlink_to(
-        layout["outside"] / "not-there.yaml"
-    )
+    (layout["project"] / ".ash.yaml").symlink_to(layout["outside"] / "not-there.yaml")
 
     response = _resolve(layout["workspace_file"])
 
@@ -168,7 +166,7 @@ def test_a_project_pyproject_linked_out_of_the_roots_is_refused(layout) -> None:
 def test_a_project_config_extending_out_of_the_roots_is_refused(layout) -> None:
     """Also refused by the CLI's own confinement of a chain to
     its project; kept so the gate's route through resolution covers it."""
-    config = layout["project"] / ".ash" / "ash.yaml"
+    config = layout["project"] / ".ash.yaml"
     config.write_text(
         f"extends: {json.dumps(str(layout['outside_config']))}\n", encoding="utf-8"
     )
@@ -187,7 +185,7 @@ def test_one_refusal_kind_one_code_across_the_tools(layout) -> None:
 
     from automated_security_helper.cli.mcp_server import run_ash_scan
 
-    (layout["project"] / ".ash" / "ash.yaml").symlink_to(layout["outside_config"])
+    (layout["project"] / ".ash.yaml").symlink_to(layout["outside_config"])
     workspace = _resolve(layout["workspace_file"])
     ctx = MagicMock()
     ctx.headers = {"mcp-session-id": SESSION}
@@ -206,7 +204,7 @@ def test_one_refusal_kind_one_code_across_the_tools(layout) -> None:
 
 
 def test_control_an_in_tree_project_config_is_read(layout) -> None:
-    config = layout["project"] / ".ash" / "ash.yaml"
+    config = layout["project"] / ".ash.yaml"
     config.write_text(
         "project_name: in-tree\nglobal_settings:\n  severity_threshold: HIGH\n",
         encoding="utf-8",

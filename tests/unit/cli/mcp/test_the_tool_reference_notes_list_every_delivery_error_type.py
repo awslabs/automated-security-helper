@@ -15,9 +15,10 @@ directly. It imports the script as a module (it imports no product code until
 The values a tool returns are read from the code that returns them, not listed
 here: the four ``mcp_*`` wrappers of the delivery tools are parsed, and every
 ``error_type`` in a returned dict, and every second argument of the ``refused``
-helper ``mcp_set_source_git`` uses, is collected. A name is resolved against the
-constants of ``source_delivery`` and ``sessions``; ``e.error_type`` is resolved to
-the values ``source_delivery`` gives ``GitCommandError``. A value a wrapper starts
+helper ``mcp_set_source_git`` uses, is collected. Each value is read as a string
+literal or as a ``McpErrorType`` member's ``.value`` (resolved to its wire
+spelling); ``e.error_type`` is resolved to the values ``source_delivery`` gives
+``GitCommandError``. A value a wrapper starts
 returning that its note does not name fails here, and so does a note that gives an
 exception's class name where the wrapper returns a string.
 

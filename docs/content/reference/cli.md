@@ -488,6 +488,11 @@ ash dependencies install [OPTIONS]
 | <a id="dependencies-install--tool"></a>`--tool`, `-T` | text, repeatable | not set |  | Install dependencies for these tools only, by plugin name (repeatable, e.g. '--tool grype --tool syft'). An unknown name is an error rather than a no-op. |
 | <a id="dependencies-install--config"></a>`--config`, `-c` | text | not set | `ASH_CONFIG` | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: .ash.yaml at the root, then the deprecated ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/; .ash.yaml only in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
 | <a id="dependencies-install--config-overrides"></a>`--config-overrides` | text, repeatable | not set |  | Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2') |
+| <a id="dependencies-install--inherit-system-tools"></a>`--inherit-system-tools` / `--no-inherit-system-tools` | flag | on |  | Whether a tool found on PATH or in a system directory satisfies a dependency during install. The default (--inherit-system-tools) is what the installer has always done: a tool already there is accepted as present. With --no-inherit-system-tools a global copy, for example a system checkov, is ignored: the managed install still runs and the result counts only what ASH, uv or --virtualenv-path put in place. Programs ASH never installs, such as Node.js for cdk-nag, are still found on PATH either way. Install time only; a scan finds tools as before. |
+| <a id="dependencies-install--providers"></a>`--providers` | text | not set |  | The install providers this run may use, in order of preference (comma-separated). Only the listed providers may install anything, and the first one that can serve a tool wins; a provider that cannot is skipped with its reason printed, and when none can the tool is refused. Without the flag every provider is permitted and each tool is installed the way its plugin declares. Known providers: uv, pipx, pip, release-download, nix, apt, dnf, yum, zypper, brew, npm, pnpm, conda, choco, gem, go, cargo, custom. |
+| <a id="dependencies-install--virtualenv-path"></a>`--virtualenv-path` | text | not set |  | Install Python tools into the virtualenv at this path through the selected provider, instead of into per-tool environments. The virtualenv must already exist (for example one a node or CI setup step prepared) unless --create-virtualenv lets ASH create it. |
+| <a id="dependencies-install--create-virtualenv"></a>`--create-virtualenv` / `--no-create-virtualenv` | flag | off |  | Let ASH create the virtualenv at --virtualenv-path when it does not exist (--create-virtualenv), or refuse when it does not (--no-create-virtualenv, the default). A path that exists and is not a virtualenv is never overwritten. |
+| <a id="dependencies-install--binary-path"></a>`--binary-path` | text, repeatable | not set |  | Force this binary for the named scanner (repeatable, one per scanner): its install commands are skipped, binary detection is bypassed, and the path is recorded for dependency validation -- the scanners' dependency checks and later install runs read the record, re-checking the file and its SHA-256 each time. The path must be absolute, exist, and be an executable regular file outside the scanned tree. ASH checks the file and never runs it. The record resolves the scanner's own binary only: a scanner's other requirements (npm-audit's offline refusal, trivy's offline database, cfn-guard's rules, actionlint's integrations) still apply, and cdk-nag, detect-secrets and mcp-config run Python libraries rather than one binary, so they never consult it. '&lt;scanner&gt;=' with an empty path removes the recorded entry. |
 | <a id="dependencies-install--verbose"></a>`--verbose`, `-v` | flag | off |  | Enable verbose logging |
 | <a id="dependencies-install--debug"></a>`--debug`, `-d` | flag | off |  | Enable debug logging |
 | <a id="dependencies-install--color"></a>`--color` / `--no-color` | flag | on |  | Enable/disable colorized output |
@@ -753,7 +758,9 @@ platform, pinned provisioning, and docs generated from the manifest. A row that 
 be evaluated here reads not-run, which is not a pass.
 
 Exit status: 0 when every named plugin passes, 1 when any row is red, 3 when none is red
-but some row was not run, 2 for a usage error (an unknown plugin, no transcript root).
+but some row was not run, 2 for a usage error (an unknown plugin, no transcript root, a
+plugin that cannot be loaded). A red row outranks a load error: a run that found both
+exits 1, so a red verdict is never masked by an unrelated plugin's import failure.
 
 ```text
 ash plugin verify [OPTIONS] [names]...
@@ -791,7 +798,7 @@ This command is hidden from `--help` output.
 | <a id="report--config"></a>`--config`, `-c` | text | not set | `ASH_CONFIG` | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: .ash.yaml at the root, then the deprecated ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/; .ash.yaml only in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
 | <a id="report--config-overrides"></a>`--config-overrides` | text, repeatable | not set |  | Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2') |
 | <a id="report--annotate-duplicates"></a>`--annotate-duplicates` | flag | off |  | Add `cluster_id`, `duplicate_of` and `duplicate_sources` columns to the csv and flat-json reports, naming findings that two scanners report for one defect. Rows, ids and counts are unchanged. Adds three columns to the CSV header, so it is off by default. Sets `global_settings.deduplication.annotate`. |
-| <a id="report--fold-duplicates"></a>`--fold-duplicates` | flag | off |  | Show one row per duplicate cluster in the HTML, Markdown and text reports, with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Off by default because it changes row counts. Sets `global_settings.deduplication.fold`. |
+| <a id="report--fold-duplicates"></a>`--fold-duplicates` | flag | off |  | Show one row per duplicate cluster in the human-readable reports (HTML, Markdown, text, and the Bedrock summary), with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Findings fold when they share a CVE and package, or when overlapping lines share a CWE; line overlaps chain, so two findings can fold through a third that overlaps both. Off by default because it changes row counts. Sets `global_settings.deduplication.fold`. |
 | <a id="report--verbose"></a>`--verbose`, `-v` | flag | off |  | Enable verbose logging |
 | <a id="report--debug"></a>`--debug`, `-d` | flag | off |  | Enable debug logging |
 | <a id="report--color"></a>`--color` / `--no-color` | flag | on |  | Enable/disable colorized output |
@@ -934,7 +941,7 @@ ash results report [OPTIONS]
 | <a id="results-report--config"></a>`--config`, `-c` | text | not set | `ASH_CONFIG` | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: .ash.yaml at the root, then the deprecated ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/; .ash.yaml only in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
 | <a id="results-report--config-overrides"></a>`--config-overrides` | text, repeatable | not set |  | Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2') |
 | <a id="results-report--annotate-duplicates"></a>`--annotate-duplicates` | flag | off |  | Add `cluster_id`, `duplicate_of` and `duplicate_sources` columns to the csv and flat-json reports, naming findings that two scanners report for one defect. Rows, ids and counts are unchanged. Adds three columns to the CSV header, so it is off by default. Sets `global_settings.deduplication.annotate`. |
-| <a id="results-report--fold-duplicates"></a>`--fold-duplicates` | flag | off |  | Show one row per duplicate cluster in the HTML, Markdown and text reports, with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Off by default because it changes row counts. Sets `global_settings.deduplication.fold`. |
+| <a id="results-report--fold-duplicates"></a>`--fold-duplicates` | flag | off |  | Show one row per duplicate cluster in the human-readable reports (HTML, Markdown, text, and the Bedrock summary), with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Findings fold when they share a CVE and package, or when overlapping lines share a CWE; line overlaps chain, so two findings can fold through a third that overlaps both. Off by default because it changes row counts. Sets `global_settings.deduplication.fold`. |
 | <a id="results-report--verbose"></a>`--verbose`, `-v` | flag | off |  | Enable verbose logging |
 | <a id="results-report--debug"></a>`--debug`, `-d` | flag | off |  | Enable debug logging |
 | <a id="results-report--color"></a>`--color` / `--no-color` | flag | on |  | Enable/disable colorized output |
@@ -952,7 +959,7 @@ ash results trend [OPTIONS] [files]...
 <!-- doctest: options of=cli.results.trend -->
 | Argument | Type | Default | Environment variable | Description |
 |----------|------|---------|----------------------|-------------|
-| <a id="results-trend--arg-files"></a>`files` | path, any number | not set |  | ASH scan results JSON files, one per run. They are put in chronological order by report id. At least two. |
+| <a id="results-trend--arg-files"></a>`files` | path, any number | not set |  | ASH scan results JSON files, one per run. When every file names one of ASH's timestamped report ids they are put in chronological order by it; otherwise they are kept in the order given, which the output says. At least two. |
 
 <!-- doctest: options of=cli.results.trend -->
 | Option | Type | Default | Environment variable | Description |
@@ -1017,7 +1024,7 @@ ash scan [OPTIONS]
 | <a id="scan--min-severity"></a>`--min-severity` | one of `critical`, `high`, `medium`, `low`, `none` | `low` |  | Minimum severity to trigger non-zero exit code (critical, high, medium, low, none). 'critical' and 'high' are equivalent because SARIF does not distinguish them. Findings below this threshold are still reported but don't affect the exit code. |
 | <a id="scan--compact-report"></a>`--compact-report` | flag | off |  | Produce a shorter markdown report suitable for PR comments. Omits the severity legend, scan metadata, footer, and rows for scanners that were skipped or had zero findings. |
 | <a id="scan--annotate-duplicates"></a>`--annotate-duplicates` | flag | off |  | Add `cluster_id`, `duplicate_of` and `duplicate_sources` columns to the CSV and flat-JSON reports, naming findings that two scanners report for one defect (same CVE and package, same IaC resource, or same line and CWE). Rows, ids, counts, SARIF, suppressions and baselines are unchanged. Adds three columns to the CSV header, so it is off by default. Sets `global_settings.deduplication.annotate`. |
-| <a id="scan--fold-duplicates"></a>`--fold-duplicates` | flag | off |  | Show one row per duplicate cluster in the HTML, Markdown and text reports, with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Only the same CVE and package, or the same line and CWE, fold. Finding ids, SARIF, per-scanner counts, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. Sets `global_settings.deduplication.fold`. |
+| <a id="scan--fold-duplicates"></a>`--fold-duplicates` | flag | off |  | Show one row per duplicate cluster in the human-readable reports (HTML, Markdown, text, and the Bedrock summary), with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Findings fold when they share a CVE and package, or when overlapping lines share a CWE; line overlaps chain, so two findings can fold through a third that overlaps both. Finding ids, SARIF, per-scanner counts, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. Sets `global_settings.deduplication.fold`. |
 | <a id="scan--changed-files-only"></a>`--changed-files-only` | flag | off | `ASH_CHANGED_FILES_ONLY` | Report only findings in files changed between --base-ref and HEAD, for example on a pull request. Scanners still scan every file; findings located in other files are dropped from every report, the summary counts and the exit code. Findings with no file location are kept. When git cannot list the changes, everything is reported; when nothing changed inside --source-dir, nothing is. Not supported with --mode container, which refuses it (exit 5). |
 | <a id="scan--base-ref"></a>`--base-ref` | text | `origin/main` | `ASH_BASE_REF` | Git ref to diff against when --changed-files-only is set. |
 | <a id="scan--staged"></a>`--staged` | flag | off | `ASH_STAGED` | With --mode precommit only: scan the staged files (git diff --cached, without deletions; a rename's new path) instead of the whole tree, so a commit pays for what it stages. What the tools read is the working-tree copy of each staged file; under the pre-commit framework the two are identical, because it stashes unstaged changes around the hooks. Suppressions and ignore paths apply exactly as in a whole-tree scan; findings in files that are not staged are out of scope. With nothing staged the scan exits 0 without starting any scanner. Unlike --changed-files-only, which only filters the reports after scanning everything, --staged saves the scan time. Any other --mode refuses it (exit 5). Planned to become the precommit default in ASH v4. |
@@ -1106,7 +1113,8 @@ Record a new review: re-hash locked files whose bytes changed.
 
 Run it after reading what changed in a file and confirming its suppressions
 still hold. It prints each file whose hash changed. A locked file that no
-longer exists is reported and left as it was; exit code 1 then.
+longer exists is reported and left as it was (exit code 1), unless
+--drop-missing removes its dead entry.
 
 ```text
 ash suppress refresh [OPTIONS] [paths]...
@@ -1115,11 +1123,13 @@ ash suppress refresh [OPTIONS] [paths]...
 <!-- doctest: options of=cli.suppress.refresh -->
 | Argument | Type | Default | Environment variable | Description |
 |----------|------|---------|----------------------|-------------|
-| <a id="suppress-refresh--arg-paths"></a>`paths` | text, any number | not set |  | Locked files to re-hash. Every locked file when none is named. |
+| <a id="suppress-refresh--arg-paths"></a>`paths` | text, any number | not set |  | Locked files to re-hash. Pass --all for every locked file. |
 
 <!-- doctest: options of=cli.suppress.refresh -->
 | Option | Type | Default | Environment variable | Description |
 |--------|------|---------|----------------------|-------------|
+| <a id="suppress-refresh--all"></a>`--all` | flag | off |  | Re-hash every locked file. A refresh re-approves each changed file it touches, so the whole-lock run is asked for explicitly. |
+| <a id="suppress-refresh--drop-missing"></a>`--drop-missing` | flag | off |  | Remove the entry of a named file that no longer exists, instead of leaving it and exiting 1. |
 | <a id="suppress-refresh--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash.lock. Defaults to the current directory. |
 
 ### <a id="suppress-verify"></a>`ash suppress verify`
@@ -1127,8 +1137,12 @@ ash suppress refresh [OPTIONS] [paths]...
 Check the lock against the tree. Exits 1 when anything is out of date.
 
 Lists every locked file whose bytes changed or that is gone, and every
-symbol suppression in the named configs whose file has no lock entry. Exit
-code 0 means a scan applies every symbol suppression.
+symbol suppression in the checked configs that the lock does not record
+(no entry for its file, or no recorded (rule_id, symbol) scope). It checks
+the named --config files, or the one config file a scan of the source
+directory discovers, and prints which; suppressions an `extends` base
+contributes are not read, so exit code 0 covers the checked files, not
+every config a scan could merge.
 
 ```text
 ash suppress verify [OPTIONS]
@@ -1153,7 +1167,7 @@ This command is hidden from `--help` output.
 <!-- doctest: options of=cli.trend -->
 | Argument | Type | Default | Environment variable | Description |
 |----------|------|---------|----------------------|-------------|
-| <a id="trend--arg-files"></a>`files` | path, any number | not set |  | ASH scan results JSON files, one per run. They are put in chronological order by report id. At least two. |
+| <a id="trend--arg-files"></a>`files` | path, any number | not set |  | ASH scan results JSON files, one per run. When every file names one of ASH's timestamped report ids they are put in chronological order by it; otherwise they are kept in the order given, which the output says. At least two. |
 
 <!-- doctest: options of=cli.trend -->
 | Option | Type | Default | Environment variable | Description |

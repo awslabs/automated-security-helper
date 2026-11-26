@@ -40,8 +40,7 @@ pytestmark = pytest.mark.unit
 
 
 def _setup(tmp_path: Path, config_text: str, unused: list) -> Path:
-    config_path = tmp_path / ".ash" / ".ash.yaml"
-    config_path.parent.mkdir(parents=True)
+    config_path = tmp_path / ".ash.yaml"
     # Bytes: write_text turns every "\n" into "\r\n" on Windows, so a test
     # about line breaks wrote a different file there (a CRLF text became
     # "\r\r\n"), and the fixer, which keeps the file's own breaks, read back

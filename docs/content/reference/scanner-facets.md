@@ -45,7 +45,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | [`ferret-scan`](#ferret-scan) | 8 | 0 | 12 | 0 |
 | [`guarddog`](#guarddog) | 12 | 0 | 8 | 0 |
 | [`hadolint`](#hadolint) | 7 | 0 | 13 | 0 |
-| [`snyk-code`](#snyk-code) | 10 | 2 | 6 | 2 |
+| [`snyk-code`](#snyk-code) | 0 | 0 | 6 | 14 |
 | [`trivy-repo`](#trivy-repo) | 15 | 0 | 3 | 2 |
 
 ## Runtime compatibility
@@ -56,12 +56,12 @@ Ranges are written in the grammar native to the runtime: `python` uses PEP 440 s
 
 - `pin`: the interpreter request is constrained to the runtime range. The preferred resolution.
 - `polyfill`: a shim is applied over the runtime range at tool launch. A polyfill row states why a pin cannot serve.
-- open-ended: the incompatibility is unsolved upstream. The row declares only the bounds that are proved, links the upstream issue, and is re-read whenever the tool's version constraint moves.
+- open-ended: the incompatibility is unsolved upstream. The row declares only the bounds that are proved, links the upstream issue (or says what was searched when none exists to cite), and is re-read whenever the tool's version constraint moves.
 
 | Scanner | Runtime | Tool versions | Runtime request | Resolution | Open-ended | Reason |
 |---------|---------|---------------|-----------------|------------|------------|--------|
 | [`checkov`](#checkov) | `python` | all | `>=3.10,<3.15` | `pin` | yes, [https://github.com/bridgecrewio/checkov/issues/7777](https://github.com/bridgecrewio/checkov/issues/7777) | CPython 3.15 made array_hook a required argument of json.decoder.JSONArray (signature 3.14.9: (s_and_end, scan_once, \_w, \_ws); 3.15.0: (s_and_end, scan_once, array_hook, \_w, \_ws)); checkov's Decoder.json_array (checkov/common/parsers/json/decoder.py) calls it without one, so every JSON document that holds an array fails to parse, and on a large tree the parallel runner can wait indefinitely on the worker error; reported against checkov 3.4.3 and 3.4.0 on 3.15.0; a fix is proposed upstream in bridgecrewio/checkov#7778 and not merged |
-| [`guarddog`](#guarddog) | `python` | all | `>=3.10,<3.14` | `pin` | no | pygit2 1.18 and yara-python 4.5 publish no CPython 3.14 wheels at the pinned guarddog==3.2.0, so on a host where uv would pick 3.14 the install builds them from source, which needs libgit2 headers and a C toolchain, and fails; measured with uv 0.12 on Linux x86_64: an unconstrained 'uv tool install guarddog==3.2.0' picked 3.14 and failed on pygit2, and with --python '&gt;=3.10,&lt;3.14' it installed; PyPI read 2026-11-25: pygit2 publishes cp314 wheels from 1.19.0, while yara-python publishes none through 4.5.4 |
+| [`guarddog`](#guarddog) | `python` | all | `>=3.10,<3.14` | `pin` | yes, no upstream issue exists to cite: a search of the VirusTotal/yara-python issues for a cp314 report found none (a 'wheel' search returned issues, so the search itself works; read 2026-11-25); re-check pygit2 and yara-python cp314 wheels at the next guarddog version bump | pygit2 1.18 and yara-python 4.5 publish no CPython 3.14 wheels at the pinned guarddog==3.2.0, so on a host where uv would pick 3.14 the install builds them from source, which needs libgit2 headers and a C toolchain, and fails; measured with uv 0.12 on Linux x86_64: an unconstrained 'uv tool install guarddog==3.2.0' picked 3.14 and failed on pygit2, and with --python '&gt;=3.10,&lt;3.14' it installed; PyPI read 2026-11-25: pygit2 publishes cp314 wheels from 1.19.0, while yara-python publishes none through 4.5.4 |
 
 2 of 23 scanners declare a row. The other 21 declare none: no incompatibility between their tool versions and their runtime versions is known.
 
@@ -314,26 +314,26 @@ Ranges are written in the grammar native to the runtime: `python` uses PEP 440 s
 
 | Facet | State | Native field | Reason |
 |-------|-------|--------------|--------|
-| `rule_id` | `mapped` | SARIF result ruleId (the vulnerability id plus the package name) |  |
-| `severity` | `mapped` | SARIF rule properties "security-severity" (CVSS), else the result "level" |  |
-| `file_path` | `mapped` | SARIF locations[].physicalLocation.artifactLocation.uri (the manifest or lockfile) |  |
-| `line_range` | `mapped` | SARIF region.startLine (grype writes line 1 of the manifest) |  |
-| `column` | `mapped` | SARIF region.startColumn / region.endColumn (always 1 in the capture, as the finding is the manifest's line 1) |  |
-| `message` | `mapped` | SARIF result message.text |  |
+| `rule_id` | `mapped` | SARIF result ruleId (the vulnerability id plus the package name) | observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference |
+| `severity` | `mapped` | SARIF rule properties "security-severity" (CVSS), else the result "level" | observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference |
+| `file_path` | `mapped` | SARIF locations[].physicalLocation.artifactLocation.uri (the manifest or lockfile) | observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference |
+| `line_range` | `mapped` | SARIF region.startLine (grype writes line 1 of the manifest) | observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference |
+| `column` | `mapped` | SARIF region.startColumn / region.endColumn (always 1 in the capture, as the finding is the manifest's line 1) | observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference |
+| `message` | `mapped` | SARIF result message.text | observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference |
 | `resource_id` | `n/a` |  | LOCATOR-ONLY: grype reports packages; the only location is the manifest at line 1, a file locator and package identity (artifact.purl), not a resource with its own lifecycle |
 | `resource_type` | `n/a` |  | grype output names no resource; artifact.type is a package ecosystem (gem, npm), not a resource type |
-| `package_name` | `mapped` | SARIF message "package: &lt;name&gt;, version &lt;version&gt; was found at:" parsed by \_GRYPE_PACKAGE_MESSAGE |  |
-| `package_version` | `mapped` | SARIF message "package: &lt;name&gt;, version &lt;version&gt; was found at:" parsed by \_GRYPE_PACKAGE_MESSAGE |  |
+| `package_name` | `mapped` | SARIF message "package: &lt;name&gt;, version &lt;version&gt; was found at:" parsed by \_GRYPE_PACKAGE_MESSAGE | observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference |
+| `package_version` | `mapped` | SARIF message "package: &lt;name&gt;, version &lt;version&gt; was found at:" parsed by \_GRYPE_PACKAGE_MESSAGE | observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference |
 | `package_path` | `unconfirmed` |  | UNCONFIRMED: the adapter resolves an npm lockfile entry by name and version beside the manifest (set only when exactly one copy matches), pinned over the conformance tests' presenter shape only; no grype SARIF fixture from a real run (over a committed npm tree) is committed, so a `grype -o sarif` capture settles it |
 | `taxonomy_cve` | `unconfirmed` |  | UNCONFIRMED: the SARIF result ruleId is the vulnerability id (matches[].vulnerability.id, a CVE or GHSA id; the committed native JSON's eight matches are all GHSA ids, which the flat CVE column never reads); no grype SARIF fixture from a real run with a CVE-named match is committed, so a `grype -o sarif` capture settles it |
 | `taxonomy_cwe` | `n/a` |  | the committed native grype JSON (vulnerability keys advisories, cvss, dataSource, description, epss, fix, id, namespace, severity, urls) carries no CWE, and the captured SARIF rule properties hold only purls and security-severity |
-| `fingerprints` | `mapped` | SARIF result partialFingerprints.primaryLocationLineHash (a hash of the manifest line, so findings at one manifest line share a value; 6 distinct values over 21 results in the capture) |  |
-| `fix_available` | `mapped` | the SARIF rule help.text line "Fix Version: &lt;versions&gt;" (grype's rendering of matches[].vulnerability.fix.versions); fix_available=True is written only for a non-empty list on a uniquely named rule whose Package and Version lines match the result's own message |  |
+| `fingerprints` | `mapped` | SARIF result partialFingerprints.primaryLocationLineHash (a hash of the manifest line, so findings at one manifest line share a value; 6 distinct values over 21 results in the capture) | observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference |
+| `fix_available` | `mapped` | the SARIF rule help.text line "Fix Version: &lt;versions&gt;" (grype's rendering of matches[].vulnerability.fix.versions); fix_available=True is written only for a non-empty list on a uniquely named rule whose Package and Version lines match the result's own message | observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference |
 | `remediation_text` | `unconfirmed` |  | UNCONFIRMED: not classified by the survey; the flat model has no remediation column, and matchDetails[].fix.suggestedVersion is a version, not text |
 | `snippet` | `n/a` |  | a package match has no source code snippet |
-| `references` | `mapped` | tool.driver.rules[].helpUri, read into the flat references by the shared rule read when the result carries none of its own | grype writes the advisory dataSource as the rule helpUri; the native match urls (matches[].vulnerability.urls, relatedVulnerabilities[].urls) are still never read |
+| `references` | `mapped` | tool.driver.rules[].helpUri, read into the flat references by the shared rule read when the result carries none of its own | grype writes the advisory dataSource as the rule helpUri; the native match urls (matches[].vulnerability.urls, relatedVulnerabilities[].urls) are still never read; observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference |
 | `tags` | `unconfirmed` |  | UNCONFIRMED: the survey reads SARIF rule properties.tags off the conformance tests' presenter shape (rule-level, which the flat reader takes as the tags column only when the result itself carries none); no grype SARIF fixture from a real run is committed, so a `grype -o sarif` capture settles whether results carry tags |
-| `extras` | `mapped` | SARIF result properties bag (package identity keys this adapter writes) passed through to the flat properties |  |
+| `extras` | `mapped` | SARIF result properties bag (package identity keys this adapter writes) passed through to the flat properties | observed in the committed grype 0.122.1 capture over a syft SBOM, not in a dir: scan, the mode ASH wires; a dir: capture would settle any difference |
 
 ## `mcp-config`
 
@@ -371,8 +371,8 @@ Ranges are written in the grammar native to the runtime: `python` uses PEP 440 s
 | `rule_id` | `mapped` | vulnerabilities.&lt;name&gt;.via[]."url" (the GHSA id, synthesized as the ruleId); "npm-audit-transitive-&lt;name&gt;" for a transitive-only entry | an advisory with no usable URL segment falls back to npm-&lt;package&gt;-&lt;source id&gt; (npm-&lt;package&gt; when it has no source id), and a v1 advisory (yarn, pnpm) takes the last segment of its own url the same way (\_advisory_id) |
 | `severity` | `mapped` | vulnerabilities.&lt;name&gt;.via[]."severity", else the entry's "severity" |  |
 | `file_path` | `mapped` | (no native file) the lockfile the audit ran against (package-lock.json, npm-shrinkwrap.json, pnpm-lock.yaml or yarn.lock), relative to the scan root | npm audit, yarn audit and pnpm audit name no file, and the node_modules/&lt;package&gt;/package.json install location they imply usually is not in the checkout and matches a node_modules ignore path, so the adapter reports the lockfile; the install location is kept in the package_path property. A report converted with no lockfile known keeps the install-location URI |
-| `line_range` | `mapped` | (no native line) the 1-based line of the package's entry in an npm lockfile's packages map, read by the adapter | a result with no readable entry (yarn.lock, pnpm-lock.yaml, a lockfile v1, a node npm names no entry for) carries no region; a line is never invented |
-| `column` | `n/a` |  | npm audit output carries no column and the lockfile location is a line, so the adapter writes none |
+| `line_range` | `mapped` | (no native line) the 1-based line of the package's entry in an npm lockfile's packages map, read by the adapter | a lockfile-located result with no readable entry (yarn.lock, pnpm-lock.yaml, a lockfile v1, a node npm names no entry for) carries no region; a lockfile line is never invented. A report converted with no lockfile known keeps the line 1 placeholder its install location always carried |
+| `column` | `n/a` |  | npm audit output carries no column; a lockfile-located result gets none, and a report converted with no lockfile known keeps the column 1 (with line 1) placeholder its install location always carried |
 | `message` | `mapped` | vulnerabilities.&lt;name&gt;.via[]."title" composed with the package, "range" and "url" |  |
 | `resource_id` | `n/a` |  | LOCATOR-ONLY (set by the adapter): the URI is the lockfile the audit ran against, a locator; the findings are packages, not resources |
 | `resource_type` | `n/a` |  | npm audit output names no resource; findings are packages |
@@ -638,26 +638,26 @@ Ranges are written in the grammar native to the runtime: `python` uses PEP 440 s
 
 | Facet | State | Native field | Reason |
 |-------|-------|--------------|--------|
-| `rule_id` | `mapped` | result "ruleId" |  |
-| `severity` | `mapped` | result "level" (no security-severity on rules, so a bare error reads as CRITICAL) |  |
-| `file_path` | `mapped` | locations[].physicalLocation.artifactLocation.uri (%SRCROOT% base) |  |
-| `line_range` | `mapped` | region.startLine / region.endLine |  |
-| `column` | `mapped` | region.startColumn / region.endColumn |  |
-| `message` | `mapped` | result "message.text" |  |
+| `rule_id` | `unconfirmed` |  | UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a `snyk code test --sarif` capture under snyk/captured/ settles it (candidate field: result "ruleId") |
+| `severity` | `unconfirmed` |  | UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a `snyk code test --sarif` capture under snyk/captured/ settles it (candidate field: result "level"; no security-severity on rules, so a bare error reads as CRITICAL) |
+| `file_path` | `unconfirmed` |  | UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a `snyk code test --sarif` capture under snyk/captured/ settles it (candidate field: locations[].physicalLocation.artifactLocation.uri, %SRCROOT% base) |
+| `line_range` | `unconfirmed` |  | UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a `snyk code test --sarif` capture under snyk/captured/ settles it (candidate fields: region.startLine / region.endLine) |
+| `column` | `unconfirmed` |  | UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a `snyk code test --sarif` capture under snyk/captured/ settles it (candidate fields: region.startColumn / region.endColumn) |
+| `message` | `unconfirmed` |  | UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a `snyk code test --sarif` capture under snyk/captured/ settles it (candidate field: result "message.text") |
 | `resource_id` | `n/a` |  | pure SAST: findings are source locators, not deployable resources; the result carries a uri and a region only |
 | `resource_type` | `n/a` |  | pure SAST: findings are source locators, not deployable resources |
 | `package_name` | `n/a` |  | snyk code findings are source defects and carry no package |
 | `package_version` | `n/a` |  | snyk code findings are source defects and carry no package |
 | `package_path` | `n/a` |  | snyk code findings are source defects and carry no package |
 | `taxonomy_cve` | `n/a` |  | snyk code rules are source-defect classes, not CVEs |
-| `taxonomy_cwe` | `mapped` | rule properties "cwe" (e.g. ["CWE-798"]), normalized by normalize_rule_cwe_into_tags into the rule's tags as external/cwe/cwe-&lt;n&gt;, which the shared flat reader reads |  |
-| `fingerprints` | `mapped` | result "fingerprints" {"0", "1"} |  |
-| `fix_available` | `mappable-dropped` | rule properties "isAutofixable" | no flat fix_available write exists for snyk; weak signal (autofix availability, not a fixed version); UNCONFIRMED against a real tool run |
+| `taxonomy_cwe` | `unconfirmed` |  | UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a `snyk code test --sarif` capture under snyk/captured/ settles it (candidate field: rule properties "cwe", e.g. ["CWE-798"], normalized by normalize_rule_cwe_into_tags into the rule's tags as external/cwe/cwe-&lt;n&gt;, which the shared flat reader reads) |
+| `fingerprints` | `unconfirmed` |  | UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a `snyk code test --sarif` capture under snyk/captured/ settles it (candidate field: result "fingerprints" {"0", "1"}) |
+| `fix_available` | `unconfirmed` |  | UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a `snyk code test --sarif` capture under snyk/captured/ settles it (candidate field: rule properties "isAutofixable"; no flat fix_available write exists for snyk, and it would be a weak signal, autofix availability and not a fixed version) |
 | `remediation_text` | `unconfirmed` |  | UNCONFIRMED: the survey classified rule help.markdown under references only; a `snyk code test --sarif` run settles whether remediation text is separate |
 | `snippet` | `unconfirmed` |  | the survey read no snippet in the native regions; UNCONFIRMED against a real tool run |
-| `references` | `mappable-dropped` | rule "help.markdown" and properties "exampleCommitFixes" | the rule help survives the SARIF model and dies at the flat reader; UNCONFIRMED against a real tool run |
-| `tags` | `mapped` | tool.driver.rules[].properties.tags, read into the flat tags by the shared rule read when the result carries none of its own | no tag write exists in this adapter at this checkout; the rule-level tags are what the flat row carries |
-| `extras` | `mapped` | result properties bag, passed through the SARIF model untouched and read whole into the flat properties | the rule properties bag survives the SARIF model but the flat reader takes only the rule's tags and helpUri from the rule, so rule-bag keys (cwe, isAutofixable, exampleCommitFixes) reach the flat row only through the cells above that name them |
+| `references` | `unconfirmed` |  | UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a `snyk code test --sarif` capture under snyk/captured/ settles it (candidate fields: rule "help.markdown" and properties "exampleCommitFixes"; the rule help survives the SARIF model and dies at the flat reader) |
+| `tags` | `unconfirmed` |  | UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a `snyk code test --sarif` capture under snyk/captured/ settles it (candidate field: tool.driver.rules[].properties.tags, read into the flat tags by the shared rule read when the result carries none of its own; no tag write exists in this adapter) |
+| `extras` | `unconfirmed` |  | UNCONFIRMED: no snyk SARIF from a licensed tool run is committed, and the authored shape the tests use is not a read of the tool; a `snyk code test --sarif` capture under snyk/captured/ settles it (the result properties bag passes through the SARIF model untouched; the flat reader takes only the rule's tags and helpUri from the rule, so rule-bag keys such as cwe, isAutofixable and exampleCommitFixes reach the flat row only through the cells above that name them) |
 
 ## `trivy-repo`
 

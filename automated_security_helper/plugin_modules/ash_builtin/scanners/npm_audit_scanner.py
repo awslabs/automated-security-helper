@@ -17,6 +17,7 @@ from typing import (
     List,
     Literal,
     Any,
+    Optional,
     Sequence,
     Set,
     TypeGuard,
@@ -42,7 +43,10 @@ from automated_security_helper.models.core import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
-from automated_security_helper.base.uv_tool_mixin import guarded_values_read
+from automated_security_helper.base.uv_tool_mixin import (
+    _tool_name,
+    guarded_values_read,
+)
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -171,6 +175,9 @@ def _usable_cvss_score(cvss: Any) -> float | None:
 # The userinfo of a URL (``https://user:token@host``), masked in log excerpts.  # pragma: allowlist secret
 _URL_USERINFO = re.compile(r"(://)[^\s/@]+@")
 
+# Shown in place of a tool's text when the values to redact could not be read.
+_TOOL_TEXT_NOT_SHOWN = "(not shown)"
+
 
 def _shown_tool_text(text: Any, values: Sequence[str] | None) -> str:
     """``text``, a tool's own words, as it may be shown or recorded.
@@ -183,8 +190,15 @@ def _shown_tool_text(text: Any, values: Sequence[str] | None) -> str:
     failure's reason, the yarn error detail and a raised exception's text
     reached ScannerError and the persisted results with the user part shown.
     Every tool-text path goes through here.
+
+    ``values`` is ``None`` when the hook that reads them could not be read. The
+    text is then not shown at all: with no value set to redact, showing it would
+    print what the values would have hidden, so a fixed placeholder takes its
+    place.
     """
-    return _URL_USERINFO.sub(r"\1***@", shown_tool_stderr(str(text), values or ()))
+    if values is None:
+        return _TOOL_TEXT_NOT_SHOWN
+    return _URL_USERINFO.sub(r"\1***@", shown_tool_stderr(str(text), values))
 
 
 # One comparator of an npm advisory range: an operator, a version and an
@@ -356,6 +370,19 @@ def _shown_lockfile(lock_file: Path | None, target_path: Path | str) -> str | No
             (lock.parent.resolve() / lock.name).relative_to(root.resolve()).as_posix()
         )
     except (ValueError, OSError):
+        # Not silent: with no relative form the lockfile's results keep the
+        # node_modules/<package>/package.json install location with no
+        # identity fingerprints, so a node_modules ignore path drops them and
+        # findings from two projects for one package collapse (issue #1125's
+        # shape). Seen only for a lockfile outside the scanned directory.
+        ASH_LOGGER.warning(
+            f"npm-audit: {lock_file} is not under the scanned directory "
+            f"{target_path}, so its results keep the install-location URI "
+            "(node_modules/<package>/package.json): a node_modules ignore "
+            "path drops them, and copies of one package in two such "
+            "projects share one identity",
+            extra=NO_MARKUP,
+        )
         return None
 
 
@@ -578,14 +605,18 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             state=FacetState.MAPPED,
             native_field="(no native line) the 1-based line of the package's "
             "entry in an npm lockfile's packages map, read by the adapter",
-            reason="a result with no readable entry (yarn.lock, pnpm-lock.yaml, "
-            "a lockfile v1, a node npm names no entry for) carries no region; "
-            "a line is never invented",
+            reason="a lockfile-located result with no readable entry "
+            "(yarn.lock, pnpm-lock.yaml, a lockfile v1, a node npm names no "
+            "entry for) carries no region; a lockfile line is never invented. "
+            "A report converted with no lockfile known keeps the line 1 "
+            "placeholder its install location always carried",
         ),
         column=FacetDecl(
             state=FacetState.NA,
-            reason="npm audit output carries no column and the lockfile "
-            "location is a line, so the adapter writes none",
+            reason="npm audit output carries no column; a lockfile-located "
+            "result gets none, and a report converted with no lockfile known "
+            "keeps the column 1 (with line 1) placeholder its install "
+            "location always carried",
         ),
         message=FacetDecl(
             state=FacetState.MAPPED,
@@ -750,7 +781,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 note="each result carries partialFingerprints.ashNpmAuditFinding/v1, "
                 "a hash ASH computes from the rule id, package name, installed "
                 "version, install path and dependency paths, so findings in one "
-                "lockfile stay distinct although they share its location",
+                "lockfile stay distinct although they share its location. Stable "
+                "for an unchanged install: the hash includes the install path "
+                "and the tool-reported dependency paths, so a dedupe or "
+                "hoisting that moves a copy re-keys its fingerprint",
             ),
             extensibility=opsf.ExtensibilityFacet(
                 custom_rules=opsf.CustomRules.NONE,
@@ -823,6 +857,17 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
         return self
 
+    def _forced_binary_precluded_reason(self) -> Optional[str]:
+        """Offline, a forced npm must not satisfy validation.
+
+        The offline refusal below is a semantic verdict, not a presence probe:
+        ``npm audit --offline`` prints a clean audit and exits 0, so a
+        ``--binary-path`` record that outvoted it would turn an offline scan into
+        a silent false clean. The same reason ``validate_plugin_dependencies``
+        records, read from the same predicate.
+        """
+        return _OFFLINE_REASON if self._scanner_offline() else None
+
     def validate_plugin_dependencies(self) -> bool:
         """Validate the scanner configuration and requirements.
 
@@ -871,10 +916,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 self._source_manifests(), "source"
             )
             return False
-        if find_executable(self._tool_command()):
+        if find_executable(_tool_name(self)):
             self._probe_npm_version()
             return True
-        needed = self._package_managers_needed() or {self._tool_command()}
+        needed = self._package_managers_needed() or {_tool_name(self)}
         if not any(find_executable(binary) for binary in needed):
             names = ", ".join(sorted(needed))
             self.dependency_unavailable_reason = (
@@ -904,7 +949,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         for manifest in self._source_manifests():
             lock_file = self._lockfile_beside(manifest)
             if lock_file is not None:
-                needed.add(_LOCKFILE_BINARY.get(lock_file.name, self._tool_command()))
+                needed.add(_LOCKFILE_BINARY.get(lock_file.name, _tool_name(self)))
         return needed
 
     def _probe_npm_version(self) -> None:
@@ -933,7 +978,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             probe_dir = None
         try:
             response = self._run_subprocess(
-                command=[self._tool_command(), "--version"],
+                command=[_tool_name(self), "--version"],
                 stderr_preference="return",
                 stdout_preference="return",
                 cwd=probe_dir,
@@ -2476,7 +2521,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
         One entry per (advisory, installed copy of the advisory's package),
         identified the way that copy's own result is: rule id, ``package_path``
-        when the lockfile gives one, and the result URI. Suppression uses these
+        when the lockfile gives one (``package_name`` for a copy with no
+        install path, whose result the shared lockfile URI alone no longer
+        names), and the result URI. Suppression uses these
         to treat the transitive finding as suppressed only when every one of
         those results is. npm audit does not say which copy of a root package a
         dependent resolves to, so every copy is listed that has a result under
@@ -2546,6 +2593,20 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     ref = {"rule_id": rule_id}
                     if identity.get(PACKAGE_PATH_KEY):
                         ref["package_path"] = identity[PACKAGE_PATH_KEY]
+                    else:
+                        # A copy npm lists no node for is located at the shared
+                        # lockfile, so the URI alone no longer names the root
+                        # package the way node_modules/<package>/package.json
+                        # used to: under one rule id (two packages sharing one
+                        # advisory URL) a lockfile-keyed reference matched
+                        # another package's suppressed result while this root's
+                        # advisory was live. The name keeps the reference on
+                        # this package's own by-name result, and with that
+                        # result missing the reference matches nothing, so the
+                        # dependent stays visible (the fail-closed contract).
+                        # It also keeps two such roots' references distinct
+                        # instead of byte-identical.
+                        ref["package_name"] = name
                     # The root result's own reported location (the lockfile
                     # when one is known), so the ref and the result share it.
                     ref["uri"] = lockfile or _synthetic_uri(pkg_location)
@@ -2748,7 +2809,13 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
         # The place of these results: yarn and pnpm name no install path, so the
         # audited lockfile is what tells one project's finding from another's.
-        lock_shown = _shown_lockfile(lock_file, target_path)
+        # For an npm lockfile, _lock_context above already asked _shown_lockfile,
+        # so its answer is reused: asking again warned twice per out-of-tree
+        # lockfile.
+        if lock_file is not None and Path(lock_file).name in NPM_LOCKFILE_NAMES:
+            lock_shown = lock_rel
+        else:
+            lock_shown = _shown_lockfile(lock_file, target_path)
         # The result already emitted for a (rule id, result URI) pair of this
         # lockfile: one GHSA can come back as several via entries with one URL
         # (one per vulnerable range), which share a rule, and a copy whose

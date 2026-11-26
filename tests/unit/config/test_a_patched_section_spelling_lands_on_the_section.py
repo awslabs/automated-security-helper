@@ -168,8 +168,7 @@ def test_a_split_type_word_spelling_does_not_fold(tmp_path, monkeypatch):
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    repository = checkout / ".ash" / ".ash.yaml"
-    repository.parent.mkdir(parents=True, exist_ok=True)
+    repository = checkout / ".ash.yaml"
     repository.write_text("project_name: repository\n", encoding="utf-8")
     operator = tmp_path / "operator.yaml"
     operator.write_text(
@@ -201,8 +200,7 @@ def test_the_relax_check_reads_the_folds_identity_not_the_sections_name(
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    repository = checkout / ".ash" / ".ash.yaml"
-    repository.parent.mkdir(parents=True, exist_ok=True)
+    repository = checkout / ".ash.yaml"
     repository.write_text(
         "project_name: repository\nreporters:\n  bedrock-summary-reporter:\n"
         "    enabled: true\n    options:\n      aws_region: repo-r0\n",
@@ -240,8 +238,7 @@ def test_an_add_at_the_swap_of_a_repository_only_key_lands_on_it(tmp_path, monke
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    repository = checkout / ".ash" / ".ash.yaml"
-    repository.parent.mkdir(parents=True, exist_ok=True)
+    repository = checkout / ".ash.yaml"
     repository.write_text(
         "project_name: repository\nreporters:\n  aws-security-hub:\n"
         "    enabled: false\n    options:\n      aws_region: repo-r0\n",
@@ -280,8 +277,7 @@ def test_control_a_repository_case_variant_patch_keeps_the_off_host_section(
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    repository = checkout / ".ash" / ".ash.yaml"
-    repository.parent.mkdir(parents=True, exist_ok=True)
+    repository = checkout / ".ash.yaml"
     repository.write_text(
         "reporters: {}\n"
         "patch:\n"
@@ -359,8 +355,7 @@ def test_a_repository_case_variant_patch_on_its_own_section_stays_out(
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    repository = checkout / ".ash" / ".ash.yaml"
-    repository.parent.mkdir(parents=True, exist_ok=True)
+    repository = checkout / ".ash.yaml"
     repository.write_text(
         "reporters:\n  aws-security-hub:\n    enabled: false\n"
         "    options:\n      aws_region: repo-r0\n"
@@ -415,8 +410,7 @@ def _twin_chain(tmp_path, order, patch_lines, repository_reporters=True):
     twin of it (or none), and the root extends both in *order* and patches."""
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    repository = checkout / ".ash" / ".ash.yaml"
-    repository.parent.mkdir(parents=True, exist_ok=True)
+    repository = checkout / ".ash.yaml"
     repository_text = "project_name: repository\n"
     if repository_reporters:
         repository_text += (
@@ -510,8 +504,7 @@ def _twin_capture_chain(tmp_path, twin_key, operator_key, patch_spelling):
     *operator_key*; the root patches a deep option under *patch_spelling*."""
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    repository = checkout / ".ash" / ".ash.yaml"
-    repository.parent.mkdir(parents=True, exist_ok=True)
+    repository = checkout / ".ash.yaml"
     repository.write_text(
         f"project_name: repository\nreporters:\n  {twin_key}:\n"
         "    enabled: false\n    options:\n      aws_region: repo-r0\n",
@@ -681,8 +674,7 @@ def test_a_twin_reached_through_the_repository_is_not_the_operators(
         "    options:\n      aws_region: repo-r0\n",
         encoding="utf-8",
     )
-    repository = checkout / ".ash" / ".ash.yaml"
-    repository.parent.mkdir(parents=True, exist_ok=True)
+    repository = checkout / ".ash.yaml"
     repository.write_text(f"extends:\n  - {vendor.as_posix()}\n", encoding="utf-8")
     own = tmp_path / "own.yaml"
     own.write_text(
@@ -716,8 +708,7 @@ def test_an_environment_reference_follows_the_ownership_folded_patch(
     monkeypatch.setenv("ASH_ZZ_TWIN_REGION", "us-east-1")
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    repository = checkout / ".ash" / ".ash.yaml"
-    repository.parent.mkdir(parents=True, exist_ok=True)
+    repository = checkout / ".ash.yaml"
     repository.write_text(
         "project_name: repository\nreporters:\n  AwsSecurityHub:\n    enabled: false\n",
         encoding="utf-8",
@@ -898,8 +889,7 @@ def test_beside_both_swaps_only_the_joined_key_counts_as_the_operators(
     }[typed]
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    repository = checkout / ".ash" / ".ash.yaml"
-    repository.parent.mkdir(parents=True, exist_ok=True)
+    repository = checkout / ".ash.yaml"
     repository.write_text(
         "project_name: repository\nreporters:\n"
         + "".join(
@@ -942,8 +932,7 @@ def _guarded_write_chain(tmp_path, own_key, twin_key, spelling, order, tested):
     then replaces the same pointer."""
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    repository = checkout / ".ash" / ".ash.yaml"
-    repository.parent.mkdir(parents=True, exist_ok=True)
+    repository = checkout / ".ash.yaml"
     repository.write_text(
         f"project_name: repository\nreporters:\n  {twin_key}:\n"
         "    enabled: false\n    options:\n      aws_region: repo-r0\n",
@@ -1084,8 +1073,7 @@ def test_a_repository_root_folding_onto_its_outside_base_s_section_stays_out(
         "    options:\n      aws_region: us-east-1\n",
         encoding="utf-8",
     )
-    root = checkout / ".ash" / ".ash.yaml"
-    root.parent.mkdir(parents=True, exist_ok=True)
+    root = checkout / ".ash.yaml"
     root.write_text(
         "project_name: repo-root\nextends:\n  - " + own.as_posix() + "\n"
         "patch:\n  - op: replace\n"
@@ -1114,8 +1102,7 @@ def _repository_only_scanners_chain(tmp_path, patch_spelling, repo_key="bandit")
     operator's root only patches it, under *patch_spelling*."""
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    repository = checkout / ".ash" / ".ash.yaml"
-    repository.parent.mkdir(parents=True, exist_ok=True)
+    repository = checkout / ".ash.yaml"
     repository.write_text(
         f"project_name: repository\nscanners:\n  {repo_key}:\n    enabled: false\n",
         encoding="utf-8",

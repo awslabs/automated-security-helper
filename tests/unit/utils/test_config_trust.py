@@ -58,8 +58,7 @@ def test_a_config_without_provenance_is_not_the_operators():
 
 
 def test_a_discovered_config_is_the_scanned_trees(repo):
-    (repo / ".ash").mkdir()
-    (repo / ".ash" / ".ash.yaml").write_text(_config_text())
+    (repo / ".ash.yaml").write_text(_config_text())
 
     config = resolve_config(source_dir=repo)
 
@@ -127,8 +126,8 @@ def test_a_config_inside_a_scanned_directory_outside_every_checkout_is_not_the_o
 ):
     """With no checkout around the scan, the scanned directory is the tree."""
     scanned = tmp_path / "scanned"
-    (scanned / ".ash").mkdir(parents=True)
-    (scanned / ".ash" / ".ash.yaml").write_text(_config_text())
+    scanned.mkdir(parents=True)
+    (scanned / ".ash.yaml").write_text(_config_text())
     outside = tmp_path / "operator.yaml"
     outside.write_text(_config_text())
 
@@ -181,8 +180,7 @@ def test_an_extends_base_inside_the_tree_makes_the_config_the_trees(repo, tmp_pa
 
 @pytest.mark.skipif(not hasattr(Path, "symlink_to"), reason="no symlinks")
 def test_a_symlink_into_the_tree_is_the_trees(repo, tmp_path):
-    real = repo / ".ash" / ".ash.yaml"
-    real.parent.mkdir()
+    real = repo / ".ash.yaml"
     real.write_text(_config_text())
     link = tmp_path / "looks-outside.yaml"
     try:
@@ -204,8 +202,7 @@ def test_a_symlink_into_the_tree_is_the_trees(repo, tmp_path):
     ],
 )
 def test_an_override_that_resolves_to_the_value_vouches_for_it(repo, override):
-    (repo / ".ash").mkdir()
-    (repo / ".ash" / ".ash.yaml").write_text(_config_text())
+    (repo / ".ash.yaml").write_text(_config_text())
 
     config = resolve_config(source_dir=repo, config_overrides=[override])
 
@@ -221,8 +218,7 @@ def test_an_override_that_resolves_to_the_value_vouches_for_it(repo, override):
     ],
 )
 def test_an_override_that_resolves_elsewhere_does_not(repo, override):
-    (repo / ".ash").mkdir()
-    (repo / ".ash" / ".ash.yaml").write_text(_config_text())
+    (repo / ".ash.yaml").write_text(_config_text())
 
     config = resolve_config(source_dir=repo, config_overrides=[override])
 
@@ -233,8 +229,7 @@ def test_an_override_that_resolves_elsewhere_does_not(repo, override):
 
 @pytest.mark.parametrize("spelling", ["cfn-lint", "cfn_lint"])
 def test_scanner_names_match_with_either_separator(repo, spelling):
-    (repo / ".ash").mkdir()
-    (repo / ".ash" / ".ash.yaml").write_text(
+    (repo / ".ash.yaml").write_text(
         yaml.safe_dump(
             {
                 "project_name": "scanned",
@@ -289,8 +284,7 @@ def _context_after_initialize(
 
 
 def test_the_scanners_context_carries_the_trees_provenance(repo):
-    (repo / ".ash").mkdir()
-    (repo / ".ash" / ".ash.yaml").write_text(_config_text())
+    (repo / ".ash.yaml").write_text(_config_text())
 
     context = _context_after_initialize(repo)
 
@@ -307,8 +301,7 @@ def test_the_scanners_context_carries_the_operators_provenance(repo, tmp_path):
 
 
 def test_the_scanners_context_carries_the_overrides(repo):
-    (repo / ".ash").mkdir()
-    (repo / ".ash" / ".ash.yaml").write_text(_config_text())
+    (repo / ".ash.yaml").write_text(_config_text())
 
     context = _context_after_initialize(repo, overrides=[f"{KEY}=sh"])
 
@@ -332,8 +325,7 @@ def _where(where: str, repo: Path, tmp_path: Path, monkeypatch) -> dict:
     """resolve_config's arguments for a config in the tree, outside it, or none."""
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     if where == "in-tree":
-        (repo / ".ash").mkdir()
-        (repo / ".ash" / ".ash.yaml").write_text(_config_text())
+        (repo / ".ash.yaml").write_text(_config_text())
         return {"source_dir": repo}
     if where == "operator-file":
         operator = tmp_path / "operator.yaml"
@@ -444,7 +436,7 @@ def _operator_path_case(tmp_path, *, operator: bool):
     config = AshConfig()
     record_provenance(
         config,
-        in_tree=[] if operator else [repo / ".ash" / ".ash.yaml"],
+        in_tree=[] if operator else [repo / ".ash.yaml"],
         trusted=AshConfig(),
     )
     return repo, config

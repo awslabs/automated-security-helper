@@ -196,8 +196,7 @@ def test_enabling_in_the_project_config_runs_it_without_a_selection(
     lines = ["scanners:"]
     lines += [f"  {name}:\n    enabled: false" for name in others]
     lines += ["  hadolint:\n    enabled: true"]
-    (source / ".ash").mkdir()
-    (source / ".ash" / ".ash.yaml").write_text("\n".join(lines) + "\n")
+    (source / ".ash.yaml").write_text("\n".join(lines) + "\n")
     output = tmp_path / "out"
     proc = _ash_scan(source, output)
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -274,8 +273,7 @@ def test_an_ash_line_suppression_suppresses_exactly_that_finding(
 ):
     _hadolint()
     source = fixture_copy("positive")
-    (source / ".ash").mkdir()
-    (source / ".ash" / ".ash.yaml").write_text(
+    (source / ".ash.yaml").write_text(
         "global_settings:\n"
         "  suppressions:\n"
         "    - rule_id: DL3008\n"

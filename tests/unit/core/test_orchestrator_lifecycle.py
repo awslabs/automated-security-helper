@@ -687,7 +687,7 @@ class TestIgnoredConfigSources:
 
         monkeypatch.delenv("ASH_CONFIG", raising=False)
         src = tmp_path / "src"
-        used = src / ".ash" / ".ash.yaml"
+        used = src / ".ash.yaml"
         used.parent.mkdir(parents=True)
         used.write_text("project_name: used\n", encoding="utf-8")
         (src / "pyproject.toml").symlink_to(tmp_path / "absent.toml")

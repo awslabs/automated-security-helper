@@ -71,8 +71,7 @@ def test_ash_config_is_handed_to_the_container_when_the_tree_has_no_config(
 def test_a_config_in_the_tree_wins_over_ash_config_as_in_a_local_scan(
     handed_over, operator_config, monkeypatch, tmp_path
 ):
-    (tmp_path / "src" / ".ash").mkdir()
-    (tmp_path / "src" / ".ash" / ".ash.yaml").write_text(
+    (tmp_path / "src" / ".ash.yaml").write_text(
         "project_name: repo\n", encoding="utf-8"
     )
     monkeypatch.setenv("ASH_CONFIG", str(operator_config))

@@ -45,8 +45,7 @@ FLOW_LIST = (
 
 def _run(tmp_path: Path, monkeypatch, config_text: str):
     monkeypatch.delenv("ASH_CONFIG", raising=False)
-    config = tmp_path / ".ash" / ".ash.yaml"
-    config.parent.mkdir(parents=True)
+    config = tmp_path / ".ash.yaml"
     # Bytes, so the file holds the text as written on Windows too.
     config.write_bytes(config_text.encode("utf-8"))
     reports = tmp_path / ".ash" / "ash_output" / "reports"

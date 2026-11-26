@@ -84,7 +84,7 @@ def _write(path: Path, text: str) -> Path:
 def _repository(tmp_path: Path, config: str) -> Path:
     repository = tmp_path / "repo"
     mark_git_checkout(repository)
-    _write(repository / ".ash" / ".ash.yaml", config)
+    _write(repository / ".ash.yaml", config)
     return repository
 
 
@@ -362,7 +362,7 @@ def test_an_overlay_in_another_checkout_is_accepted_and_grants_nothing(
     check_operator_config(overlay, repository)
     with caplog.at_level(logging.WARNING):
         config = resolve_config(
-            config_path=repository / ".ash" / ".ash.yaml",
+            config_path=repository / ".ash.yaml",
             source_dir=repository,
             scanned_root=repository,
             trusted_config_path=overlay,

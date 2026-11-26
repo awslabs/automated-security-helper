@@ -217,8 +217,12 @@ DEFAULT_TRANSPORT = Transport.STDIO
 #: enum cannot drift. Byte-equal to the text both CLI declarations carried by hand;
 #: ``tests/unit/cli/mcp/test_mcp_transport_enum.py`` pins it.
 TRANSPORT_HELP = (
-    f"Transport: '{Transport.STDIO.value}' (default), "
-    f"'{Transport.STREAMABLE_HTTP.value}', or '{Transport.SSE.value}'."
+    "Transport: "
+    + ", ".join(
+        f"'{member.value}'" + (" (default)" if member is DEFAULT_TRANSPORT else "")
+        for member in list(Transport)[:-1]
+    )
+    + f", or '{list(Transport)[-1].value}'."
 )
 
 

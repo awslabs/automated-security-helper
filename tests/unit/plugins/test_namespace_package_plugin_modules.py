@@ -129,8 +129,8 @@ class TestTheInTreeConfigFilter:
         from automated_security_helper.config.resolve_config import resolve_config
 
         source = tmp_path / "repo"
-        (source / ".ash").mkdir(parents=True)
-        (source / ".ash" / ".ash.yaml").write_text(
+        source.mkdir(parents=True)
+        (source / ".ash.yaml").write_text(
             f"project_name: repo\nash_plugin_modules:\n  - {REGULAR}.shared\n",
             encoding="utf-8",
         )
@@ -189,8 +189,7 @@ class TestAScanNamingANamespacePackage:
     def test_a_config_file_inside_the_scanned_tree(self, tmp_path):
         """The package is installed outside the tree, so the in-tree filter keeps it."""
         run = self._run(tmp_path)
-        (run.tree / ".ash").mkdir()
-        (run.tree / ".ash" / ".ash.yaml").write_text(
+        (run.tree / ".ash.yaml").write_text(
             f"project_name: tree\nash_plugin_modules:\n  - {NAMESPACE}\n",
             encoding="utf-8",
         )

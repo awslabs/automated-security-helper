@@ -89,10 +89,7 @@ class TestOtherConfigInputs:
         Refused like any named config, so the grants of an in-tree config are
         always decided against the file the operator named.
         """
-        (tmp_path / ".ash").mkdir()
-        (tmp_path / ".ash" / ".ash.yaml").write_text(
-            "project_name: in-tree\n", encoding="utf-8"
-        )
+        (tmp_path / ".ash.yaml").write_text("project_name: in-tree\n", encoding="utf-8")
 
         with pytest.raises(ASHConfigValidationError, match="operator.yaml"):
             resolve_config(
@@ -101,10 +98,8 @@ class TestOtherConfigInputs:
 
     def test_a_trusted_config_that_does_not_parse_is_refused(self, tmp_path):
         source = tmp_path / "src"
-        (source / ".ash").mkdir(parents=True)
-        (source / ".ash" / ".ash.yaml").write_text(
-            "project_name: in-tree\n", encoding="utf-8"
-        )
+        source.mkdir(parents=True)
+        (source / ".ash.yaml").write_text("project_name: in-tree\n", encoding="utf-8")
         operator = tmp_path / "operator.yaml"
         operator.write_text("sandbox: [unclosed\n", encoding="utf-8")
 
@@ -430,7 +425,10 @@ class TestIgnoredSourcesAreResolutionWarnings:
     def test_a_file_in_a_linked_ash_directory_records_it_when_passed_by_path(
         self, tmp_path
     ):
-        """``.ash`` linked to a shared directory is still where discovery looked."""
+        """``.ash`` linked to a shared directory is still where discovery looked.
+
+        Legacy location: this test's subject is the deprecated .ash/.ash.yaml path.
+        """
         repo = tmp_path / "repo"
         repo.mkdir()
         shared = tmp_path / "shared"

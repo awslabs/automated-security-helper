@@ -34,7 +34,7 @@ def _write(path: Path, document: Any) -> Path:
 
 
 def _layered(tmp_path: Path, project: Dict[str, Any], operator: Dict[str, Any]):
-    project_file = _write(tmp_path / "repo" / ".ash" / ".ash.yaml", project)
+    project_file = _write(tmp_path / "repo" / ".ash.yaml", project)
     operator_file = _write(tmp_path / "operator" / "ash.yaml", operator)
     return resolve_config(
         config_path=project_file,

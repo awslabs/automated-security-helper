@@ -54,9 +54,9 @@ def workspace_with_broken_module(tmp_path, monkeypatch):
     monkeypatch.delitem(sys.modules, BROKEN, raising=False)
 
     root = tmp_path / "ws"
-    (root / "api" / ".ash").mkdir(parents=True)
+    (root / "api").mkdir(parents=True)
     (root / "api" / "app.py").write_text("x = 1\n", encoding="utf-8")
-    (root / "api" / ".ash" / ".ash.yaml").write_text(
+    (root / "api" / ".ash.yaml").write_text(
         f"project_name: api\nash_plugin_modules:\n  - {BROKEN}\n", encoding="utf-8"
     )
     workspace = root / "dev.code-workspace"

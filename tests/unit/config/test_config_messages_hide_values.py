@@ -206,8 +206,7 @@ def test_a_project_name_from_the_environment_is_hidden_by_vpd(project):
 def test_fix_unused_lists_what_it_comments_out_without_the_value(project):
     from automated_security_helper.models.core import suppression_id
 
-    config = project / ".ash" / ".ash.yaml"
-    config.parent.mkdir()
+    config = project / ".ash.yaml"
     config.write_text(
         "project_name: demo\nglobal_settings:\n  suppressions:\n"
         f"    - path: ${{{VARIABLE}:src/a.py}}\n      rule_id: B101\n      reason: r\n",
@@ -700,8 +699,8 @@ def _workspace(project: Path, project_config: str) -> list:
     (project / "team.code-workspace").write_text(
         json.dumps({"folders": [{"path": "svc"}]}), encoding="utf-8"
     )
-    (project / "svc" / ".ash").mkdir(parents=True)
-    (project / "svc" / ".ash" / ".ash.yaml").write_text(
+    (project / "svc").mkdir(parents=True)
+    (project / "svc" / ".ash.yaml").write_text(
         textwrap.dedent(project_config), encoding="utf-8"
     )
     return ["scan", "--no-progress", "--workspace", "team.code-workspace"]

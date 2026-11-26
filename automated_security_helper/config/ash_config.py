@@ -57,6 +57,10 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.base.extraction_limits import EXTRACTION_LIMIT_OPTIONS
 from automated_security_helper.config.plugin_sections import build_segment
+from automated_security_helper.config.wire_enum import (
+    wire_enum_validator,
+    wire_value,
+)
 from automated_security_helper.core.constants import (
     ASH_CONFIG_ENV_VAR_ALLOWLIST,
     ASH_CONFIG_ENV_VAR_PREFIX,
@@ -89,6 +93,7 @@ from automated_security_helper.models.core import (
 from automated_security_helper.utils.config_trust import ConfigProvenance
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.report_yaml import NoCommandLineDumper
+from automated_security_helper.utils.scanner_names import canonical_scanner_name
 
 
 def config_env_var_is_interpolatable(var_name: str) -> bool:
@@ -656,6 +661,37 @@ def _merge_config_values(base: Any, overlay: Any) -> Any:
     return merged
 
 
+def _declared_option_names(segment_cls: type[BaseModel], plugin_key: str) -> set | None:
+    """The option names (field names and aliases) a declared plugin's options
+    model accepts, or None when they cannot be read.
+
+    Read for the alias fold: an alias section's option keys outside this set
+    name settings the canonical plugin would never consult, so the fold drops
+    them with a warning instead of carrying them as silent extras. None (an
+    alias whose canonical plugin is not a declared field, or a field whose
+    options model cannot be resolved) means "drop nothing": an unreadable set
+    must not cost the operator's settings.
+    """
+    field = segment_cls.model_fields.get(plugin_key)
+    if field is None:
+        return None
+    config_model = field.annotation
+    if not (isinstance(config_model, type) and issubclass(config_model, BaseModel)):
+        return None
+    options_field = config_model.model_fields.get("options")
+    if options_field is None:
+        return None
+    options_model = options_field.annotation
+    if not (isinstance(options_model, type) and issubclass(options_model, BaseModel)):
+        return None
+    names = set()
+    for name, info in options_model.model_fields.items():
+        names.add(name)
+        if isinstance(info.alias, str):
+            names.add(info.alias)
+    return names
+
+
 def field_name_spellings(segment_cls: type[BaseModel]) -> Dict[str, str]:
     """Map each declared field name to its alias, where the two differ.
 
@@ -816,6 +852,90 @@ class _ScannerConfigSegmentBase(_PluginConfigSegment):
     )
 
     __pydantic_extra__: Dict[str, Any | ScannerPluginConfigBase] = {}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fold_scanner_name_aliases(cls, data: Any) -> Any:
+        """Fold a retired scanner's section onto the plugin that serves it.
+
+        ``utils/scanner_names.SCANNER_NAME_ALIASES`` names the retired scanners
+        (the table is empty today; a retirement adds one row there). A config
+        written for a retired name keeps working: its section is applied to the
+        canonical plugin's section, with one log line naming the mapping, so
+        ``enabled`` and the shared options take effect on the scanner that
+        actually runs.
+
+        Without the fold, a retired name would land in the ``extra="allow"``
+        bucket and read as an unknown third-party scanner: never instantiated,
+        never run, and the operator's ``<retired name>: enabled: false``
+        silently ignored while the serving scanner ran anyway.
+
+        Merge rules, stated in fold order:
+
+        * ``name`` is dropped: the alias section's literal (``name: <retired
+          name>``) is the one key that must not reach the canonical plugin's
+          config.
+        * Option keys the canonical options model does not declare are dropped,
+          each named in a warning: carrying them as extras would show settings
+          that nothing reads (a retired scanner's install options can describe
+          machinery its serving plugin does not have).
+        * A section already present under the canonical name is the base and
+          the alias section is the overlay, key by key -- the same choice as
+          the field-name-spelling fold above, for the same reason:
+          ``apply_config_overrides`` round-trips through ``model_dump()``, which
+          emits the canonical section with every default filled in, so on any
+          override run the canonical side is mostly machine-written defaults
+          while the alias side holds what the operator actually wrote (the
+          alias section's ``enabled: false`` must win over the dumped
+          ``enabled: true``). A hand-written config with both spellings is
+          flagged by ``ash config lint``.
+        """
+        if not isinstance(data, dict):
+            return data
+        for key in list(data):
+            if not isinstance(key, str):
+                continue
+            canonical = canonical_scanner_name(key)
+            if canonical == key or canonical in (None, ""):
+                continue
+            data = dict(data)
+            section = data.pop(key)
+            ASH_LOGGER.info(
+                f"scanners.{key} is an alias of the {canonical} plugin; "
+                f"applying its section to scanners.{canonical}"
+            )
+            if isinstance(section, BaseModel):
+                section = section.model_dump(exclude_unset=True)
+            if section is None:
+                section = {}
+            if not isinstance(section, dict):
+                ASH_LOGGER.warning(
+                    f"scanners.{key} is not a mapping; nothing of it can be "
+                    f"applied to scanners.{canonical}"
+                )
+                continue
+            section = dict(section)
+            section.pop("name", None)
+            declared = _declared_option_names(cls, canonical)
+            options = section.get("options")
+            if declared is not None and isinstance(options, dict):
+                dropped = sorted(k for k in options if k not in declared)
+                if dropped:
+                    section["options"] = {
+                        k: v for k, v in options.items() if k in declared
+                    }
+                    ASH_LOGGER.warning(
+                        f"scanners.{key}.options.{{{', '.join(dropped)}}} have no "
+                        f"{canonical} counterpart and were dropped"
+                    )
+            if canonical in data:
+                canonical_section = data[canonical]
+                if isinstance(canonical_section, BaseModel):
+                    canonical_section = canonical_section.model_dump(exclude_unset=True)
+                data[canonical] = _merge_config_values(canonical_section, section)
+            else:
+                data[canonical] = section
+        return data
 
     if TYPE_CHECKING:
 
@@ -1146,7 +1266,8 @@ class RuntimeOverridesConfig(RedactedSection):
                 "JSON-Pointer glob patterns that are never allowed (denied wins over allowed). "
                 "Each entry starts with '/'. The defaults block the fields that decide "
                 "whether a scan fails, what it runs and reports, where findings are "
-                "sent, the scanner sandbox, and this policy. A list equal to a default "
+                "sent, the scanner sandbox, the run history's recording and "
+                "retention, and this policy. A list equal to a default "
                 "ASH has shipped counts as the current default list. Any other list "
                 "is added to the current defaults, unless replace_default_denied_paths "
                 "is true. When it is added, a list that holds some default entries and "
@@ -1202,6 +1323,11 @@ class RuntimeOverridesConfig(RedactedSection):
         # through patch_ops could then lift every other entry here.
         "/global_settings/mcp",
         "/global_settings/mcp/**",
+        # The run history: enabled turns on writes beside the output on every
+        # scan, and keep_runs bounds what pruning may delete (keep_runs=1 prunes
+        # a kept history down to one record), so neither is a client's to change.
+        "/global_settings/history",
+        "/global_settings/history/**",
         # Scanner options that drop findings by rule ID, by a baseline, or by a
         # whole category (a framework, a severity, a rule set, a detector, a
         # confidence level, a cap on the number reported) rather than by path. A
@@ -1546,30 +1672,25 @@ SandboxModeName = Literal[
 ]
 
 
-def _sandbox_mode_name(value: Any) -> Any:
-    """``sandbox.mode``: a name becomes its ``SandboxMode``.
+def _refuse_sandbox_mode(value: Any) -> Any:
+    """The refusal of a ``sandbox.mode`` that names no mode.
 
-    Config files are validated with strict=True, which accepts only a
-    SandboxMode instance for a SandboxMode field, so a name read from YAML would
-    be refused; converting here keeps the enum type. Anything that is no mode,
-    a boolean included, is refused with the error the field's Literal gave
-    before it was an enum (type ``literal_error``, the same text), so a refusal
-    reads as it always has. A name read from an environment reference arrives as
-    the loader's carrier ``str`` subclass and leaves as the plain member.
+    Anything that is no mode, a boolean included, is refused with the error the
+    field's Literal gave before it was an enum (type ``literal_error``, the same
+    text), so a refusal reads as it always has. The value is not quoted.
     """
-    if isinstance(value, SandboxMode):
-        return value
-    if isinstance(value, str):
-        try:
-            return SandboxMode(str(value))
-        except ValueError:
-            pass
     names = [f"'{mode.value}'" for mode in SandboxMode]
     raise PydanticCustomError(
         "literal_error",
         "Input should be {expected}",
         {"expected": f"{', '.join(names[:-1])} or {names[-1]}"},
     )
+
+
+#: ``sandbox.mode``: a name becomes its ``SandboxMode`` (see ``config/wire_enum.py``;
+#: a name read from an environment reference arrives as the loader's carrier
+#: ``str`` subclass and leaves as the plain member).
+_sandbox_mode_name = wire_enum_validator(SandboxMode, _refuse_sandbox_mode)
 
 
 class SandboxConfig(RedactedSection):
@@ -1605,9 +1726,10 @@ class SandboxConfig(RedactedSection):
         # The name, not the member, in every dump mode, for the reason
         # ``AshConfig._output_format_values`` gives: a Python-mode dump of a member
         # is refused by yaml.safe_dump and written by yaml.dump as a tag no later
-        # load reads. Read through SandboxMode so a mode assigned as a plain str
-        # (the model does not validate assignment) is written the same way.
-        return SandboxMode(v).value
+        # load reads. A mode assigned as a plain str (the model does not validate
+        # assignment) is written as that text: ``wire_value`` never raises and
+        # never quotes the value, which may have come from the environment.
+        return wire_value(v)
 
     network_scanners: Annotated[
         Optional[List[str]],
@@ -1778,13 +1900,16 @@ class AshDeduplicationConfig(RedactedSection):
         bool,
         Field(
             description=(
-                "When true, the HTML, Markdown and text reports show one row per "
+                "When true, the human-readable reports (HTML, Markdown, text, "
+                "and the Bedrock summary) show one row per "
                 "duplicate cluster (the primary finding, with a note naming the "
                 "other scanners that reported it) in their findings tables, "
                 "detailed findings, finding cards and hotspots, and add "
                 "deduplicated counts beside, never in place of, the per-scanner "
-                "counts. Only clusters of the same CVE and package, or the same "
-                "line and CWE, fold; IaC resource clusters are annotated only. "
+                "counts. Findings fold when they share a CVE and package, or "
+                "when overlapping lines share a CWE; line overlaps chain, so "
+                "two findings can fold through a third that overlaps both. IaC "
+                "resource clusters are annotated only. "
                 "Finding ids, SARIF, per-scanner metrics, suppressions, "
                 "baselines, the CSV, flat-JSON and JUnit reports and the exit "
                 "code are unchanged. Off by default because it changes row "
@@ -2277,28 +2402,27 @@ class ContentDbStalenessOverride(RedactedSection):
         return (now or datetime.now(timezone.utc)) >= self.expires_at
 
 
-def _export_format_name(item: Any) -> Any:
-    """One ``output_formats`` entry: a name becomes its ``ExportFormat``.
+def _refuse_export_format(item: Any) -> Any:
+    """The refusal of an ``output_formats`` entry that names no format.
 
-    Config files are validated with strict=True, which accepts only an
-    ExportFormat instance for an ExportFormat field, so a name read from YAML
-    would be refused; converting here keeps the enum type. Per entry, so that a
-    refusal is located at the entry and its input is that name alone: ``ash
-    config validate`` replaces every input value in a message with ``<value>``,
-    and with the whole list as the input, a valid name the list also held was
-    replaced in the list of valid formats too.
+    The valid formats, not the entry, which may have been read from the
+    environment; the error's location names the entry. An entry that is not text
+    is left for the field's own type check.
     """
-    if isinstance(item, str) and not isinstance(item, ExportFormat):
-        try:
-            return ExportFormat(item.strip())
-        except ValueError:
-            valid = ", ".join(fmt.value for fmt in ExportFormat)
-            # The valid formats, not the entry, which may have been read from
-            # the environment; the error's location names the entry.
-            raise ValueError(
-                f"the value is not a valid format. Valid formats are: {valid}"
-            ) from None
+    if isinstance(item, str):
+        valid = ", ".join(fmt.value for fmt in ExportFormat)
+        raise ValueError(f"the value is not a valid format. Valid formats are: {valid}")
     return item
+
+
+#: One ``output_formats`` entry: a name becomes its ``ExportFormat`` (see
+#: ``config/wire_enum.py``). Per entry, so that a refusal is located at the entry
+#: and its input is that name alone: ``ash config validate`` replaces every input
+#: value in a message with ``<value>``, and with the whole list as the input, a
+#: valid name the list also held was replaced in the list of valid formats too.
+_export_format_name = wire_enum_validator(
+    ExportFormat, _refuse_export_format, strip=True
+)
 
 
 def _output_formats_schema(schema: Dict[str, Any]) -> None:
@@ -2918,7 +3042,7 @@ class AshConfig(RedactedSection):
         # !!python/object/apply tags that no later load could read, and refused by
         # yaml.safe_dump (save, the MCP session config). A file that failed to load
         # was then scanned with the default config.
-        return [str(getattr(fmt, "value", fmt)) for fmt in v]
+        return [wire_value(fmt) for fmt in v]
 
     @field_validator("content_db_staleness_overrides")
     @classmethod

@@ -159,9 +159,9 @@ def runs(tmp_path_factory):
     env.update(ASH_PROBE_VALUE=CANARY, COLUMNS="300")
     env.pop("ASH_CONFIG", None)
 
-    (work / "src" / ".ash").mkdir(parents=True)
+    (work / "src").mkdir(parents=True)
     (work / "src" / "app.py").write_text("print('hello')\n", encoding="utf-8")
-    (work / "src" / ".ash" / ".ash.yaml").write_text(
+    (work / "src" / ".ash.yaml").write_text(
         f"project_name: {REFERENCE}\n", encoding="utf-8"
     )
     overrides = [

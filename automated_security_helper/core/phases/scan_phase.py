@@ -64,6 +64,10 @@ from automated_security_helper.utils.sandbox.scope import (
     plugin_probe_scope,
     sandbox_refusal_grades_missing,
 )
+from automated_security_helper.utils.scanner_names import (
+    canonical_scanner_name,
+    selection_key,
+)
 from automated_security_helper.utils.sarif_utils import (
     get_severity_metrics_from_sarif,
 )
@@ -221,6 +225,27 @@ def _nothing_to_scan_reason(plugin_instance, values: Iterable[str] = ()) -> str 
     if not (isinstance(reason, str) and reason):
         return None
     return text_without_values(reason, values)
+
+
+def _resolve_scanner_name_aliases(names: List[str]) -> List[str]:
+    """The caller's scanner names with retired names resolved, order kept.
+
+    ``utils/scanner_names.SCANNER_NAME_ALIASES`` names the retired scanners
+    (the table is empty today; a retirement adds one row there). The mapping is
+    logged once per name, so a scan asked for a retired name says which scanner
+    it ran. Unknown names pass through unchanged for the allowlist check below
+    to warn about or refuse.
+    """
+    resolved = []
+    for name in names:
+        canonical = canonical_scanner_name(name)
+        if canonical != name:
+            ASH_LOGGER.info(
+                f"Scanner name {name} is an alias of the {canonical} plugin; "
+                f"running {canonical}"
+            )
+        resolved.append(canonical)
+    return resolved
 
 
 def _staged_nothing_to_scan_reason(
@@ -1100,6 +1125,18 @@ class ScanPhase(EnginePhase):
         # rather than watching a partial scan run to completion and exit 0.
         validate_shard_selection(shard_index, shard_count)
 
+        # Retired scanner names resolve to the plugin that serves them before
+        # anything matches on them (the exclusion subtraction below, the
+        # allowlist check, the shard partition and --exclude-scanners all compare
+        # against registered config names, and an alias is not one). A retired
+        # name in --scanners therefore selects its serving plugin instead of
+        # refusing with ScannerSelectionError, with the mapping named. Done first
+        # so that what the operator excluded, which the SKIPPED rows below are
+        # told apart by, is the mapped list: excluding a retired name excludes
+        # the scanner that serves it.
+        enabled_scanners = _resolve_scanner_name_aliases(enabled_scanners)
+        excluded_scanners = _resolve_scanner_name_aliases(excluded_scanners)
+
         # The exclusions taken out of the allowlist, as the engine does when it is
         # built. A phase called directly (a library, the MCP tool) with an
         # allowlist its own exclusions empty ran zero scanners and reported clean,
@@ -1649,11 +1686,19 @@ class ScanPhase(EnginePhase):
             # with spelling advice and turn the failure into a usage error.
             if enabled_scanners and scanner_instances:
                 registered_names = {
-                    _scanner_display_name(instance).lower().strip()
+                    selection_key(_scanner_display_name(instance))
                     for instance in scanner_instances
                 }
-                known_names = registered_names | construction_failed
-                requested = [(name, name.lower().strip()) for name in enabled_scanners]
+                # construction_failed holds raw lower-cased display names, while
+                # the requested names and registered_names are selection keys
+                # (a retired spelling resolved to the scanner that serves it).
+                # Re-keyed here so a scanner whose retired-spelling name failed
+                # construction is known under the key a request for it resolves
+                # to, and the two refusals below agree on it.
+                known_names = registered_names | {
+                    selection_key(name) for name in construction_failed
+                }
+                requested = [(name, selection_key(name)) for name in enabled_scanners]
                 unresolved = [name for name, key in requested if key not in known_names]
                 # The module hint and the refusal text are the engine's too
                 # (plugins.enablement): one text for the construction-time

@@ -43,7 +43,7 @@ def ash_warnings():
 @pytest.fixture
 def layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     tree = tmp_path / "repo"
-    (tree / ".ash").mkdir(parents=True)
+    tree.mkdir(parents=True)
     operator = tmp_path / "operator" / "ash.yaml"
     operator.parent.mkdir()
     operator.write_text(
@@ -64,7 +64,7 @@ def limit_warnings(records) -> List[str]:
 
 
 def test_a_limit_the_file_leaves_out_is_named_as_the_default(layout, ash_warnings):
-    (layout / ".ash" / ".ash.yaml").write_text("project_name: scanned\n")
+    (layout / ".ash.yaml").write_text("project_name: scanned\n")
 
     config = resolve_config(source_dir=layout)
 
@@ -75,7 +75,7 @@ def test_a_limit_the_file_leaves_out_is_named_as_the_default(layout, ash_warning
 
 
 def test_a_limit_the_file_sets_is_named_as_set_by_the_file(layout, ash_warnings):
-    (layout / ".ash" / ".ash.yaml").write_text(
+    (layout / ".ash.yaml").write_text(
         "project_name: scanned\nconverters:\n  archive:\n    options:\n"
         "      max_members: 1000\n"
     )

@@ -19,16 +19,19 @@ from automated_security_helper.config import session_profiles as _moved
 
 if TYPE_CHECKING:
     # For type checkers and IDEs only, which do not follow the ``sys.modules``
-    # swap below and would see a module that defines nothing. A star import skips
-    # names with a leading underscore, so the private names the tests reach
-    # through this path are listed.
+    # swap below and would see a module that defines nothing.
+    # ``config.session_profiles`` defines no ``__all__``, so the star import
+    # skips every name with a leading underscore and the private names the tests
+    # reach through this path are listed, each as ``_a as _a`` to mark it a
+    # deliberate re-export.
     from automated_security_helper.config.session_profiles import *  # noqa: F401,F403
     from automated_security_helper.config.session_profiles import (  # noqa: F401
-        _binding_write_locks,
-        _rematerialize_binding,
-        _replace_staged,
-        _session_lock,
-        _session_state,
+        _binding_write_locks as _binding_write_locks,
+        _file_sha256 as _file_sha256,
+        _rematerialize_binding as _rematerialize_binding,
+        _replace_staged as _replace_staged,
+        _session_lock as _session_lock,
+        _session_state as _session_state,
     )
 
 sys.modules[__name__] = _moved

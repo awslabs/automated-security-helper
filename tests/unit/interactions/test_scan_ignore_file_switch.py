@@ -337,14 +337,14 @@ VARIANTS: Dict[str, Callable[[Path], ScanRun]] = {
     "in_tree_config": lambda base: scan(
         base,
         "in_tree_config",
-        tree_extra={".ash/.ash.yaml": f"project_name: scanned\n{CONFIG_KEY}: false\n"},
+        tree_extra={".ash.yaml": f"project_name: scanned\n{CONFIG_KEY}: false\n"},
     ),
     # The repository's config asks to keep honoring them; the operator's flag wins.
     "in_tree_config_with_flag": lambda base: scan(
         base,
         "in_tree_config_with_flag",
         SWITCH_OFF_FLAG,
-        tree_extra={".ash/.ash.yaml": f"project_name: scanned\n{CONFIG_KEY}: true\n"},
+        tree_extra={".ash.yaml": f"project_name: scanned\n{CONFIG_KEY}: true\n"},
     ),
     "workspace_flag": lambda base: _workspace_scan(base, SWITCH_OFF_FLAG),
 }

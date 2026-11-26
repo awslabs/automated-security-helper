@@ -199,15 +199,14 @@ def build_workspace(root: Path) -> Path:
         source_dir.mkdir(parents=True, exist_ok=True)
         (source_dir / "marker.py").write_text(project.source, encoding="utf-8")
 
-        config_dir = root / project.key / ".ash"
-        config_dir.mkdir(parents=True, exist_ok=True)
+        config_dir = root / project.key
         if project.declared_name is None:
             content = CONFIG_TEMPLATE_WITHOUT_NAME.format(threshold="LOW")
         else:
             content = CONFIG_TEMPLATE.format(
                 name=project.declared_name, threshold="LOW"
             )
-        (config_dir / "ash.yaml").write_text(content, encoding="utf-8")
+        (config_dir / ".ash.yaml").write_text(content, encoding="utf-8")
 
     definition = root / WORKSPACE_FILENAME
     definition.write_text(

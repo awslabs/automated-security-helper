@@ -117,7 +117,7 @@ UV_RUN_STEPS = _steps_whose_run_contains("uv run")
 
 CONFIG_INPUTS = [
     pytest.param("", id="config input empty"),
-    pytest.param(".ash/.ash.yaml", id="config input set"),
+    pytest.param(".ash.yaml", id="config input set"),
 ]
 
 
@@ -154,8 +154,7 @@ def _context(config: str) -> dict[str, Any]:
 def _sandbox(tmp_path: Path) -> ga.StepSandbox:
     """A checkout shaped like ASH scanning itself, with a repository config in it."""
     sandbox = ga.StepSandbox(tmp_path)
-    (sandbox.workspace / ".ash").mkdir()
-    (sandbox.workspace / ".ash" / ".ash.yaml").write_text(
+    (sandbox.workspace / ".ash.yaml").write_text(
         yaml.safe_dump({"ash_plugin_modules": ["module_named_by_the_checkout"]}),
         encoding="utf-8",
     )
@@ -446,7 +445,7 @@ class TestOnlyTheAshStepsSeeTheConfig:
     )
     def test_a_helper_step_runs_without_ash_config(self, tmp_path, step_name):
         sandbox = _sandbox(tmp_path)
-        run = _run(sandbox, _step(step_name), ".ash/.ash.yaml")
+        run = _run(sandbox, _step(step_name), ".ash.yaml")
         calls = [
             c for c in run.calls if c["tool"] in ("uv", "uvx", "python", "python3")
         ]

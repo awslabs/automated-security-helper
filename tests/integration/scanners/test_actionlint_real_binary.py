@@ -320,8 +320,7 @@ def _repo_config(repo: Path, **options: str) -> None:
         "    options:",
         *(f"      {name}: {json.dumps(value)}" for name, value in options.items()),
     ]
-    (repo / ".ash").mkdir(exist_ok=True)
-    (repo / ".ash" / ".ash.yaml").write_text("\n".join(lines) + "\n")
+    (repo / ".ash.yaml").write_text("\n".join(lines) + "\n")
 
 
 def _scan(

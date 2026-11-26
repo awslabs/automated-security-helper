@@ -1460,7 +1460,7 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--fold-duplicates",
             rich_help_panel="Reports",
-            help="Show one row per duplicate cluster in the HTML, Markdown and text reports, with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Only the same CVE and package, or the same line and CWE, fold. Finding ids, SARIF, per-scanner counts, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. Sets `global_settings.deduplication.fold`.",
+            help="Show one row per duplicate cluster in the human-readable reports (HTML, Markdown, text, and the Bedrock summary), with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Findings fold when they share a CVE and package, or when overlapping lines share a CWE; line overlaps chain, so two findings can fold through a third that overlaps both. Finding ids, SARIF, per-scanner counts, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. Sets `global_settings.deduplication.fold`.",
         ),
     ] = False,
     changed_files_only: Annotated[

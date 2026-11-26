@@ -34,9 +34,9 @@ def _no_operator_config(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _repo(tmp_path: Path, value: Any) -> Path:
     repo = tmp_path / "repo"
-    (repo / ".ash").mkdir(parents=True)
+    repo.mkdir(parents=True)
     (repo / ".git").mkdir()
-    (repo / ".ash" / ".ash.yaml").write_text(
+    (repo / ".ash.yaml").write_text(
         yaml.safe_dump({"scanners": {"snyk-code": {"options": {OPTION: value}}}}),
         encoding="utf-8",
     )

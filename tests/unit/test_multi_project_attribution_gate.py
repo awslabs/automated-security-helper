@@ -1340,9 +1340,9 @@ class TestGeneratedFixture:
     def test_each_project_config_carries_its_own_threshold(self, workspace_root):
         for project in gate.FIXTURE_PROJECTS:
             config = yaml.safe_load(
-                (
-                    workspace_root / project.relative_path / ".ash" / "ash.yaml"
-                ).read_text(encoding="utf-8")
+                (workspace_root / project.relative_path / ".ash.yaml").read_text(
+                    encoding="utf-8"
+                )
             )
             assert config["global_settings"]["severity_threshold"] == project.threshold
 
@@ -1363,7 +1363,7 @@ class TestGeneratedFixture:
         """Read from the root, not from a project: how many run at once is not a
         project's decision."""
         config = yaml.safe_load(
-            (workspace_root / ".ash" / "ash.yaml").read_text(encoding="utf-8")
+            (workspace_root / ".ash.yaml").read_text(encoding="utf-8")
         )
         assert config["workspace"]["max_parallel_projects"] >= 1
 

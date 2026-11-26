@@ -175,6 +175,21 @@ VOCABULARIES: tuple[Vocabulary, ...] = (
             {"none", "lockfile", "manifest", "template", "git_checkout"}
         ),
     ),
+    Vocabulary(
+        ops_register.RuntimeName,
+        _OPS_HOME,
+        # "python" and "node" name the runtimes all over the package (uv
+        # --python arguments, node on PATH checks), so neither can be scanned
+        # for.
+        ambiguous=frozenset({"python", "node"}),
+    ),
+    Vocabulary(
+        ops_register.CompatResolution,
+        _OPS_HOME,
+        # "pin" is an ordinary word (pinned versions, pinned releases); the
+        # scan would drown.
+        ambiguous=frozenset({"pin"}),
+    ),
 )
 
 

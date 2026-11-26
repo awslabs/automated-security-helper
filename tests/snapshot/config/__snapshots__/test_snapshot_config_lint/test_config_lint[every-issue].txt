@@ -1,5 +1,5 @@
 $ ash config lint
-Linting configuration file: <TMP>/demo-project/.ash/.ash.yaml
+Linting configuration file: <TMP>/demo-project/.ash.yaml
 
 Found 20 issue(s):
   ❌ Invalid value at 'global_settings.suppressions[2].symbol': Value error, symbol must be a dotted qualified name such as 'MyClass.my_method' (identifiers joined by '.', no spaces, wildcards or call syntax) [blocks the scan]

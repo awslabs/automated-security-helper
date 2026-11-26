@@ -777,15 +777,29 @@ class RuntimeCompatRow(_Frozen):
     resolution: CompatResolution
     #: The incompatibility and its measurement. Always required.
     reason: str
-    #: The upstream issue. Required, and URL-shaped, when ``open_ended``.
+    #: The upstream issue, URL-shaped. An ``open_ended`` row carries this or a
+    #: ``recheck_note``.
     upstream_issue: Optional[str] = None
     #: An UNSOLVED upstream incompatibility: the row declares only the bounds it
     #: can prove (an upper runtime bound with the tool side open, or a lower
     #: bound only) and is re-read whenever the tool's version constraint moves.
-    #: The consistency gate holds every open-ended row to covering the
-    #: scanner's default constraint, so a bump that escapes the row fails the
-    #: gate, which is the re-check: has the issue been fixed?
+    #: The re-check is :meth:`recheck_fires`: the row records the scanner's
+    #: default tool constraint as of row-write time
+    #: (``recorded_default_constraint``), and the consistency gate goes red the
+    #: moment the live default no longer equals it -- the tool bumped, so read
+    #: the row's upstream issue (or recheck_note) and close or re-bound the row.
+    #: A membership test alone could never red here: an open-ended row's tool
+    #: range is typically blank (applies everywhere) and a default constraint
+    #: is typically a range (kept the safe side by :meth:`applies_to`).
     open_ended: bool = False
+    #: Open-ended only, in place of an ``upstream_issue`` when none exists to
+    #: cite: what was searched and found absent, so the re-check reader knows
+    #: where to look. A gap with no upstream issue is still an unsolved one.
+    recheck_note: Optional[str] = None
+    #: Open-ended only, required there: the scanner's default tool-version
+    #: constraint as of row-write time (``""`` when the scanner had none), in
+    #: the row's range grammar. The re-check gate's record.
+    recorded_default_constraint: Optional[str] = None
     #: POLYFILL only: the shim directory under
     #: ``automated_security_helper/assets/polyfills/``.
     polyfill: Optional[str] = None
@@ -814,15 +828,45 @@ class RuntimeCompatRow(_Frozen):
             parse_range(self.runtime.value, self.runtime_request)
         except RangeError as exc:
             raise ValueError(str(exc)) from exc
-        if self.open_ended and _blank(self.upstream_issue):
+        if (
+            self.open_ended
+            and _blank(self.upstream_issue)
+            and _blank(self.recheck_note)
+        ):
             raise ValueError(
                 "an open-ended row records an unsolved upstream issue and "
-                "carries its upstream_issue URL"
+                "carries its upstream_issue URL, or a recheck_note where no "
+                "upstream issue exists to cite"
+            )
+        if not self.open_ended and self.recheck_note is not None:
+            raise ValueError("recheck_note belongs to an open-ended row")
+        if self.upstream_issue is not None and _blank(self.upstream_issue):
+            raise ValueError(
+                "upstream_issue is its URL or None, never blank: a blank "
+                "string is truthy to the reference renderer, which would emit "
+                "a broken whitespace link and drop the recheck_note"
             )
         if not _blank(self.upstream_issue) and not (
             self.upstream_issue or ""
         ).startswith(("https://", "http://")):
             raise ValueError("upstream_issue is a URL")
+        if self.open_ended and self.recorded_default_constraint is None:
+            raise ValueError(
+                "an open-ended row records the scanner's default tool "
+                "constraint as of row-write time (recorded_default_constraint, "
+                '"" when the scanner has none), so the re-check gate can red '
+                "when the default moves"
+            )
+        if not self.open_ended and self.recorded_default_constraint is not None:
+            raise ValueError(
+                "recorded_default_constraint is the open-ended re-check's "
+                "record; a closed row carries none"
+            )
+        if self.recorded_default_constraint is not None:
+            try:
+                parse_range(self.runtime.value, self.recorded_default_constraint)
+            except RangeError as exc:
+                raise ValueError(str(exc)) from exc
         if self.resolution is CompatResolution.PIN:
             if self.polyfill is not None or self.pin_insufficient is not None:
                 raise ValueError("a PIN row carries no polyfill or pin_insufficient")
@@ -863,6 +907,24 @@ class RuntimeCompatRow(_Frozen):
         if version is None:
             return True
         return parse_range(self.runtime.value, self.tool_versions).contains(version)
+
+    def recheck_fires(self, default_tool_constraint: Optional[str]) -> bool:
+        """Whether the open-ended re-check fires at *default_tool_constraint*.
+
+        The re-check is an equality against the default constraint recorded at
+        row-write time, so it is decidable for every constraint shape -- a
+        blank tool range and a range constraint included, where
+        :meth:`applies_to` alone can never go red (a blank ``tool_versions``
+        applies everywhere, and a range constraint keeps the row the safe
+        side). A moved default IS the event the gate exists for: the tool
+        bumped, so re-read the row's upstream issue (or recheck_note) and
+        close or re-bound the row. Never fires for a closed row.
+        """
+        if not self.open_ended:
+            return False
+        return (default_tool_constraint or "") != (
+            self.recorded_default_constraint or ""
+        )
 
 
 class RuntimeCompatFacet(_Frozen):

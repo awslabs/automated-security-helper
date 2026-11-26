@@ -111,7 +111,7 @@ def assert_linked_crate_is_listed_with_its_parent(
 def harvest_suppressions() -> List[AshSuppression]:
     """The repository's suppressions that name the harvested lockfile."""
     document = yaml.safe_load(
-        REPO_ROOT.joinpath(".ash", ".ash.yaml").read_text(encoding="utf-8")
+        REPO_ROOT.joinpath(".ash.yaml").read_text(encoding="utf-8")
     )
     entries = [
         AshSuppression.model_validate(raw)

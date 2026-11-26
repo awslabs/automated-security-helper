@@ -204,6 +204,7 @@ def test_an_operators_own_tool_variable_is_in_neither_refusal_set():
 
 @pytest.mark.unit
 def test_an_in_source_config_with_an_absolute_base_is_refused(layout):
+    """Legacy location: this test's subject is the deprecated .ash/ash.yaml path."""
     base = _write(layout["source"] / ".ash" / "base.yaml", "project_name: b\n")
     config = _write(
         layout["source"] / ".ash" / "ash.yaml", "extends: " + str(base) + "\n"
@@ -229,7 +230,7 @@ def test_an_absolute_extends_refusal_shows_the_entry_as_written(layout, monkeypa
     _write(ops / "base.yaml", "project_name: b\n")
     monkeypatch.setenv("ASH_CHAIN_BASE", str(ops))
     config = _write(
-        layout["source"] / ".ash" / "ash.yaml",
+        layout["source"] / ".ash.yaml",
         "extends: ${ASH_CHAIN_BASE}/base.yaml\n",
     )
 
@@ -248,7 +249,9 @@ def test_an_absolute_refusal_names_an_env_chosen_file_as_value(layout, monkeypat
     The refusal names the extending file; when that file's own place came from
     the environment, its path holds the variable's value, so it is shown as
     the chain views show one -- the rule resolve_config applies to a base the
-    environment chose and every base below it."""
+    environment chose and every base below it.
+
+    Legacy location: this test's subject is the deprecated .ash/ash.yaml path."""
     from automated_security_helper.config.environment_record import (
         ENVIRONMENT_VALUE_SHOWN,
     )
@@ -458,7 +461,7 @@ def test_ash_config_is_not_named_over_the_sources_own_config(layout, monkeypatch
     """The scan inside would read the operator's file instead of the
     repository's own discovered config."""
     env_config = _write(layout["w"] / "env" / "ash-env.yaml", "project_name: e\n")
-    _write(layout["source"] / ".ash" / ".ash.yaml", "project_name: repo\n")
+    _write(layout["source"] / ".ash.yaml", "project_name: repo\n")
     monkeypatch.setenv("ASH_CONFIG", str(env_config))
     assert ras._discovered_config_path(layout["source"]) is not None
 
@@ -476,7 +479,7 @@ def test_a_discoverable_source_config_wins_over_ash_config_in_the_container(
     from automated_security_helper.core.enums import RunMode
 
     env_config = _write(layout["w"] / "env" / "ash-env.yaml", "project_name: e\n")
-    _write(layout["source"] / ".ash" / ".ash.yaml", "project_name: discovered\n")
+    _write(layout["source"] / ".ash.yaml", "project_name: discovered\n")
     monkeypatch.setenv("ASH_CONFIG", str(env_config))
 
     try:
@@ -560,7 +563,7 @@ def test_a_workspace_scan_names_ash_config_whatever_the_workspace_root_holds(
     nothing about them and the mounted ASH_CONFIG file is named as it always
     was. A scan of one directory with the same layout names nothing."""
     env_config = _write(layout["w"] / "env" / "ash-env.yaml", "project_name: e\n")
-    _write(layout["source"] / ".ash" / ".ash.yaml", "project_name: root\n")
+    _write(layout["source"] / ".ash.yaml", "project_name: root\n")
     monkeypatch.setenv("ASH_CONFIG", str(env_config))
     assert ras._discovered_config_path(layout["source"]) is not None
 
@@ -592,7 +595,7 @@ def _record_the_rules_asks(monkeypatch) -> List[tuple]:
 
 def _discoverable_source_with_an_env_config(layout, monkeypatch) -> Path:
     env_config = _write(layout["w"] / "env" / "ash-env.yaml", "project_name: e\n")
-    _write(layout["source"] / ".ash" / ".ash.yaml", "project_name: root\n")
+    _write(layout["source"] / ".ash.yaml", "project_name: root\n")
     monkeypatch.setenv("ASH_CONFIG", str(env_config))
     assert ras._discovered_config_path(layout["source"]) is not None
     return env_config
@@ -805,6 +808,7 @@ def _discovery_layouts():
             False,
             id="dedicated-name-in-the-root",
         ),
+        # Legacy location: this case's subject is the deprecated .ash/.ash.yaml path.
         pytest.param(
             files((f".ash/{ASH_CONFIG_FILE_NAMES[0]}", "project_name: r\n")),
             False,

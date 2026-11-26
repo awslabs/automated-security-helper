@@ -204,7 +204,7 @@ def test_a_config_in_the_collectors_checkout_does_not_turn_it_on(
     could write (a collector job runs in its checkout), so it enables no
     off-host reporter, as in a scan."""
     endpoint, requests = aws_stand_in
-    config = _operator_config(tmp_path / "collector" / ".ash" / "ash.yaml", ENABLE_S3)
+    config = _operator_config(tmp_path / "collector" / ".ash.yaml", ENABLE_S3)
 
     result = _merge_in_a_child(tmp_path, endpoint, "--config", str(config))
 

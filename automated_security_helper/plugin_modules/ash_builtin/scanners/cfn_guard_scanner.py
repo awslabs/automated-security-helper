@@ -959,6 +959,26 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             arguments.append(f"--rules={path.as_posix()}")
         return arguments
 
+    def _forced_binary_precluded_reason(self) -> Optional[str]:
+        """Without its rules files, a forced cfn-guard must not satisfy validation.
+
+        The rules gate below is about what the scan evaluates, not where the
+        binary is, so a ``--binary-path`` record has no say in it. The same
+        ``rule_files`` read ``validate_plugin_dependencies`` makes, with the same
+        two catches; the reason is returned rather than recorded, so the check
+        falls through to the scanner's own route and its wording.
+        """
+        try:
+            self.rule_files()
+        except RulesBundleUnavailable as exc:
+            return str(exc)
+        except OSError as exc:
+            return (
+                "cfn-guard rules could not be checked: "
+                f"{type(exc).__name__}: {exc.strerror or exc}"
+            )
+        return None
+
     def validate_plugin_dependencies(self) -> bool:
         """The binary on PATH, and every selected rules file present and verified."""
         if self.dependency_unavailable_reason:

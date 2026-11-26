@@ -51,13 +51,11 @@ def _workspace(root, folders, name="dev.code-workspace"):
 
 
 def _project(root, relative, config=None):
-    """Create a project directory, optionally with an ``.ash/ash.yaml``."""
+    """Create a project directory, optionally with an ``.ash.yaml``."""
     project = root / relative
     project.mkdir(parents=True, exist_ok=True)
     if config is not None:
-        ash_dir = project / ".ash"
-        ash_dir.mkdir(exist_ok=True)
-        (ash_dir / "ash.yaml").write_text(config, encoding="utf-8")
+        (project / ".ash.yaml").write_text(config, encoding="utf-8")
     return project
 
 
@@ -634,8 +632,7 @@ def test_config_source_names_the_file_that_was_used(tmp_path):
     plan = resolve_workspace(workspace)
 
     assert (
-        plan.projects[0].config_source
-        == (project / ".ash" / "ash.yaml").resolve().as_posix()
+        plan.projects[0].config_source == (project / ".ash.yaml").resolve().as_posix()
     )
 
 

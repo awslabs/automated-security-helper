@@ -46,8 +46,7 @@ STARTING_CONFIG = textwrap.dedent(
 def config_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
-    path = tmp_path / ".ash" / ".ash.yaml"
-    path.parent.mkdir()
+    path = tmp_path / ".ash.yaml"
     path.write_text(STARTING_CONFIG, encoding="utf-8")
     return path
 

@@ -153,15 +153,15 @@ def _scanner(
     """A scanner whose config came from the scanned tree, or from the operator.
 
     ``operator=True`` records a config file outside the tree; ``overrides`` records
-    --config-overrides keys. Otherwise the config is the tree's own .ash/.ash.yaml.
+    --config-overrides keys. Otherwise the config is the tree's own .ash.yaml.
     """
     output = output or source.parent / "ash_output"
     config = get_default_config()
     # operator=True: built from no file in the scanned tree. Otherwise from the
-    # tree's .ash/.ash.yaml, judged against the defaults plus ``overrides``.
+    # tree's .ash.yaml, judged against the defaults plus ``overrides``.
     record_provenance(
         config,
-        in_tree=[] if operator else [source / ".ash" / ".ash.yaml"],
+        in_tree=[] if operator else [source / ".ash.yaml"],
         trusted=AshConfig(),
         config_overrides=list(overrides),
     )

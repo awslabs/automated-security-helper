@@ -47,8 +47,7 @@ from automated_security_helper.models.scan_results_container import (
 )
 from automated_security_helper.utils.scan_output_dirs import (
     drop_results_in_ash_output_dirs,
-    map_back_converted_results,
-    mark_converted_results,
+    place_converted_results,
 )
 from automated_security_helper.core.cancellation import (
     ScanCancelled,
@@ -578,6 +577,9 @@ def _timeout_ending(scanner_plugin: Any) -> str:
     timeout's own stop failed (the timeout's ending); a record of other runs only
     means a later run's tool may still be running while the timed-out tool was
     killed; an empty record means every stop succeeded (the was-killed ending).
+    A side run's failed stop (a second launch of the tool that only adds to a
+    report) is filed under its own ``side_run:``-prefixed key, so it counts as
+    another run here and never as the scan's own ``timed_out``.
     The kept-flag reading above is the fallback for a plugin that carries no such
     record (an older plugin class, a double).
     """
@@ -2150,15 +2152,14 @@ class ScannerExecutor:
                                     self.plugin_context,
                                     scanner_name=scanner_config_name,
                                 )
-                                # So a converted file's finding keeps its id
-                                # wherever the output directory is.
-                                mark_converted_results(raw_results, self.plugin_context)
                                 # A generated file with a span sidecar (the MCP
                                 # config converter's) has its findings moved to
                                 # the original file and span before suppressions
                                 # are applied, so a suppression written against
-                                # the original matches.
-                                map_back_converted_results(
+                                # the original matches. What is still in a
+                                # converted file is then marked, so its finding
+                                # keeps its id wherever the output directory is.
+                                place_converted_results(
                                     raw_results, self.plugin_context
                                 )
                             if not self.plugin_context.ignore_suppressions:

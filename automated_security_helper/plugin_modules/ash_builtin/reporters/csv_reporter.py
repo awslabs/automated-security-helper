@@ -261,6 +261,10 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
 
         # Get flattened vulnerabilities
         flat_items = model.to_flat_vulnerabilities()
+        # A python-mode dump: ``severity`` is the ``Severity`` member, a str
+        # subclass that csv writes as its text. A yaml writer would refuse it
+        # (pinned in tests/unit/models/
+        # test_the_python_dump_of_a_finding_carries_a_severity_member.py).
         flat_vulns = [
             item.model_dump(
                 exclude_defaults=False,

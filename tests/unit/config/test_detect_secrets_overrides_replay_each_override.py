@@ -39,7 +39,7 @@ VERIFICATION_OVERRIDE = (
     + json.dumps([{"path": VERIFICATION_FILTER, "min_level": 2}])
 )
 OTHER_OVERRIDE = "scanners.detect-secrets.options.scan_timeout=60"
-IN_TREE = [Path("repo") / ".ash" / ".ash.yaml"]
+IN_TREE = [Path("repo") / ".ash.yaml"]
 REASON = "the file is the repository's"
 
 

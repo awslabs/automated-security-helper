@@ -117,6 +117,7 @@ on:
       - "CDK Extra Drift"
       - "Docs CI Runners"
       - "ASH - IaC Drift"
+      - "ASH - Image scan against a live engine and registry"
       - "Install Method Validation"
       - "ASH - Offline-capable scanners (non-blocking)"
       - "ASH - Package Build"

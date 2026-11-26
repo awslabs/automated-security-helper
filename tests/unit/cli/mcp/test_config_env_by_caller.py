@@ -119,9 +119,9 @@ def stdio_repo(_server, monkeypatch) -> Path:
     monkeypatch.delenv("ASH_MCP_ALLOWED_ROOTS", raising=False)
     monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
     repo = _server["tmp"] / "home" / "repo"
-    (repo / ".ash").mkdir(parents=True)
+    repo.mkdir(parents=True)
     (repo / "app.py").write_text("x = 1\n", encoding="utf-8")
-    (repo / ".ash" / ".ash.yaml").write_text(UNTAGGED, encoding="utf-8")
+    (repo / ".ash.yaml").write_text(UNTAGGED, encoding="utf-8")
     return repo
 
 
@@ -249,7 +249,7 @@ def _scan(
 def test_stdio_get_config_of_a_named_repo_config_resolves_env(stdio_repo):
     from automated_security_helper.cli.mcp_tools import mcp_get_config
 
-    named = mcp_get_config(config_path=str(stdio_repo / ".ash" / ".ash.yaml"))
+    named = mcp_get_config(config_path=str(stdio_repo / ".ash.yaml"))
     discovered = mcp_get_config(search_dir=str(stdio_repo))
 
     _assert_read(named)
@@ -257,7 +257,7 @@ def test_stdio_get_config_of_a_named_repo_config_resolves_env(stdio_repo):
 
 
 def test_stdio_scan_with_a_named_repo_config_starts_and_resolves_env(stdio_repo):
-    config = stdio_repo / ".ash" / ".ash.yaml"
+    config = stdio_repo / ".ash.yaml"
 
     result, started = _scan_directory(stdio_repo, config, None)
     _, outcomes = _scan(stdio_repo, config, None)
@@ -271,7 +271,7 @@ def test_stdio_scan_with_a_named_repo_config_starts_and_resolves_env(stdio_repo)
 def test_stdio_validate_config_path_and_content_accept_env(stdio_repo):
     from automated_security_helper.cli.mcp_tools import mcp_validate_config
 
-    by_path = mcp_validate_config(config_path=str(stdio_repo / ".ash" / ".ash.yaml"))
+    by_path = mcp_validate_config(config_path=str(stdio_repo / ".ash.yaml"))
     by_content = mcp_validate_config(config_content=f"extends: []\n{UNTAGGED}")
 
     assert by_path["valid"] is True, by_path
@@ -323,7 +323,7 @@ def test_remote_named_config_outside_the_config_roots_is_refused(_server):
 @pytest.mark.parametrize("raw", [False, True], ids=["resolved", "raw"])
 @pytest.mark.parametrize(
     "name,text",
-    [(".ash/.ash.yaml", TAGGED), (".ashrc.toml", TOML)],
+    [(".ash.yaml", TAGGED), (".ashrc.toml", TOML)],
     ids=["yaml", "toml"],
 )
 def test_remote_config_discovered_in_a_search_dir_is_refused(_server, name, text, raw):
@@ -409,7 +409,7 @@ def test_remote_set_aside_base_of_a_refused_root_is_refused(_server, set_aside_b
 
 
 def test_remote_scan_target_own_config_is_refused(_server):
-    _write(_server["target"] / ".ash" / ".ash.yaml", UNTAGGED)
+    _write(_server["target"] / ".ash.yaml", UNTAGGED)
 
     started_result, started = _run_ash_scan(source_dir=str(_server["target"]))
     entry, outcomes = _scan(_server["target"], None, SESSION)
@@ -426,7 +426,7 @@ def test_remote_scan_target_own_config_is_refused(_server):
 def test_remote_workspace_project_config_is_refused(_server):
     from automated_security_helper.cli.mcp.workspace import mcp_resolve_workspace
 
-    _write(_server["target"] / ".ash" / ".ash.yaml", UNTAGGED)
+    _write(_server["target"] / ".ash.yaml", UNTAGGED)
     workspace_file = _write(
         _server["scan_root"] / "dev.code-workspace",
         json.dumps({"folders": [{"path": "target"}]}),

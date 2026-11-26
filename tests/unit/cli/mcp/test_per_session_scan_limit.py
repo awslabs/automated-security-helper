@@ -238,8 +238,7 @@ def test_a_scan_config_cannot_raise_the_limit(
     """The limit is the operator's: a config inside the scanned tree is not read for it."""
     _limit(tmp_path, monkeypatch, 1)
     for name in ("one", "two"):
-        (granted / name / ".ash").mkdir()
-        (granted / name / ".ash" / ".ash.yaml").write_text(
+        (granted / name / ".ash.yaml").write_text(
             "project_name: tree\n"
             "mcp-resource-management:\n"
             "  max_concurrent_scans_per_session: 5\n",

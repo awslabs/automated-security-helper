@@ -385,8 +385,7 @@ class TestAProfileKeptWhereAScanMayRewriteIt:
     ) -> None:
         checkout = self.allowed / "checkout"
         (checkout / ".git").mkdir(parents=True)
-        (checkout / ".ash").mkdir()
-        profile = _write_yaml(checkout / ".ash" / "ash.yaml", _valid_config_yaml())
+        profile = _write_yaml(checkout / ".ash.yaml", _valid_config_yaml())
 
         with pytest.raises(ProfileRegistryError) as exc:
             register_profiles([f"default={profile}"])
@@ -420,9 +419,9 @@ class TestAProfileKeptWhereAScanMayRewriteIt:
         assert "ASH_MCP_ALLOWED_ROOTS" in message
 
     def test_the_same_profile_under_a_root_with_no_checkout_registers(self) -> None:
-        plain = self.allowed / "plain" / ".ash"
+        plain = self.allowed / "plain"
         plain.mkdir(parents=True)
-        profile = _write_yaml(plain / "ash.yaml", _valid_config_yaml("plain"))
+        profile = _write_yaml(plain / ".ash.yaml", _valid_config_yaml("plain"))
 
         registry = register_profiles([f"default={profile}"])
 

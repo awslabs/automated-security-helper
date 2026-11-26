@@ -59,13 +59,14 @@ def _granted(config) -> bool:
 
 def test_a_discovered_link_in_a_checkout_to_a_file_outside_every_checkout(tmp_path):
     repo = _checkout(tmp_path / "repo")
-    (repo / ".ash").mkdir()
-    (repo / ".ash" / ".ash.yaml").symlink_to(_grants(tmp_path / "outside" / "ash.yaml"))
+    (repo / ".ash.yaml").symlink_to(_grants(tmp_path / "outside" / "ash.yaml"))
 
     assert not _granted(resolve_config(source_dir=repo))
 
 
 def test_a_discovered_dot_ash_link_in_a_checkout_to_a_directory_outside(tmp_path):
+    """Legacy location: this test's subject is the deprecated .ash/.ash.yaml path
+    reached through a linked .ash directory."""
     repo = _checkout(tmp_path / "repo")
     _grants(tmp_path / "outside" / "dot-ash" / ".ash.yaml")
     (repo / ".ash").symlink_to(tmp_path / "outside" / "dot-ash")
@@ -110,7 +111,7 @@ def test_an_ash_config_link_in_a_checkout_is_not_the_trusted_base(
 ):
     """The base an in-tree config's grants are replaced from."""
     repo = _checkout(tmp_path / "repo")
-    _grants(repo / ".ash" / ".ash.yaml")
+    _grants(repo / ".ash.yaml")
     ops = _checkout(tmp_path / "ops")
     (ops / "env.yaml").symlink_to(_grants(tmp_path / "outside" / "env.yaml"))
     monkeypatch.setenv("ASH_CONFIG", str(ops / "env.yaml"))
@@ -141,7 +142,7 @@ def test_control_an_ash_config_outside_every_checkout_is_the_trusted_base(
     tmp_path, monkeypatch
 ):
     repo = _checkout(tmp_path / "repo")
-    _grants(repo / ".ash" / ".ash.yaml")
+    _grants(repo / ".ash.yaml")
     monkeypatch.setenv("ASH_CONFIG", str(_grants(tmp_path / "outside" / "env.yaml")))
 
     assert _granted(resolve_config(source_dir=repo))

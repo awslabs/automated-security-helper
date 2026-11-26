@@ -43,10 +43,7 @@ def _scan_resolution(tmp_path, override):
 
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    (checkout / ".ash").mkdir()
-    (checkout / ".ash" / ".ash.yaml").write_text(
-        "project_name: repo\n", encoding="utf-8"
-    )
+    (checkout / ".ash.yaml").write_text("project_name: repo\n", encoding="utf-8")
     operator = tmp_path / "operator.yaml"
     operator.write_text(
         "project_name: op\nreporters:\n  aws-security-hub:\n    enabled: true\n",
@@ -97,8 +94,7 @@ def _scan_resolution_with_repo_spelling(tmp_path, override):
 
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    (checkout / ".ash").mkdir()
-    (checkout / ".ash" / ".ash.yaml").write_text(
+    (checkout / ".ash.yaml").write_text(
         "project_name: repo\nreporters:\n  AwsSecurityHub:\n    enabled: true\n",
         encoding="utf-8",
     )
@@ -155,8 +151,7 @@ def _resolution(tmp_path, repo_text, operator_text, override):
 
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    (checkout / ".ash").mkdir()
-    (checkout / ".ash" / ".ash.yaml").write_text(repo_text, encoding="utf-8")
+    (checkout / ".ash.yaml").write_text(repo_text, encoding="utf-8")
     operator = tmp_path / "operator.yaml"
     operator.write_text(operator_text, encoding="utf-8")
     return resolve_config(

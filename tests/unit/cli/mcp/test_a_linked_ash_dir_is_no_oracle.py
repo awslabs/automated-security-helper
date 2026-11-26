@@ -17,6 +17,9 @@ A ``.ash`` that is a link outside the roots is refused by itself, before
 anything in it is looked at, so the answer is the same either way. Each cell
 asks the same question twice, with the outside directory holding the name and
 without it.
+
+Legacy location: this module's subject is the deprecated ``.ash/`` directory and
+the ``.ash/.ash.yaml`` path inside it.
 """
 
 from __future__ import annotations

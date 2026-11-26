@@ -48,6 +48,13 @@
 
 ### Behavior changes
 
+- **npm-audit findings are located at the lockfile they were audited from**
+  (`deploy/cdk/package-lock.json`, say), not at the installed package's
+  `node_modules/<package>/package.json`. A path-scoped suppression for an npm-audit
+  finding must name the lockfile in `path`; one that names the old `node_modules`
+  path matches nothing. Use `package_name` / `package_path` on the entry to scope
+  to a package or an installed copy within the lockfile, as this repository's own
+  `.ash.yaml` entries now do.
 - **`.ash.yaml` at the project root is the canonical config file.** A scan reads it
   before any other config source, and `ash config init`, `ash config wizard` and
   `ash inspect findings` create it when no config exists (they wrote `.ashrc.yaml`
@@ -62,9 +69,24 @@
   names, with no warning. To move a config, run `git mv .ash/.ash.yaml .ash.yaml`
   (or the same with the file's own name). This repository's own config moved the same
   way.
+- **A finding moved from an MCP config's generated script back to the config file has a
+  new property name and a new id.** The result property that names the generated script
+  is now `converted_from`; it was `ash/convertedFrom`, so a tool that reads the old name
+  from ASH's SARIF output finds nothing. The generated script's path is now part of the
+  finding's identity, so the id of such a finding (a finding at a line of `.mcp.json`
+  that a scanner reported in the script the MCP config converter wrote) changes, and a
+  baseline or a suppression keyed by that id needs refreshing. A suppression written
+  against the config file's path and lines is not affected. A result that has a line in
+  the generated script with no sidecar row is unchanged.
 
 ### Maintenance
 
+- Removed the four stale `.ash.yaml` suppressions for GHSA-g3hv-75wg-m249 /
+  CVE-2026-118764 (minimatch globparts amplification): they pinned the minimatch
+  10.2.5 copy bundled inside aws-cdk-lib 2.273.0, and the aws-cdk-lib 2.278.0 bump
+  put minimatch 11.0.9 — outside the advisory's vulnerable range (`>= 7.0.0,
+  < 11.0.1`) — inside both deploy lockfiles, so the entries matched no installed
+  copy. A unit test pins that no suppression matches the bundled copy again.
 - Removed the ASH v2 in-container scanner scripts `utils/common.sh`,
   `utils/git-docker-execute.sh`, `utils/grype-docker-execute.sh`,
   `utils/js-docker-execute.sh`, and `utils/yaml-docker-execute.sh`. ASH v3 has not run
@@ -99,7 +121,8 @@
 
 - **The "community" scanner tier is now called "alpha".** The opt-in scanners ASH ships
   but does not yet promote as supported (Betterleaks, Ferret Scan, GuardDog, hadolint,
-  Snyk Code, Trivy and the rest of the `ash_*_plugins` modules) are alpha scanners:
+  Snyk Code and Trivy, each an `ash_*_plugins` scanner package; the `ash_aws_plugins`
+  reporters load the same opt-in way but are not alpha) are alpha scanners:
   the name says maturity, not provenance. Behavior is unchanged. The plugin pages moved
   from `docs/plugins/community/` to `docs/plugins/alpha/` (the old URLs redirect), the
   repository's own scan config is now `.ash/.ash_alpha_plugins.yaml`, the register's
@@ -125,17 +148,24 @@
 ### Features
 
 - **Symbol suppressions are bound to their file's content hash in `.ash.lock`.**
-  A symbol-scoped suppression whose file has no lock entry is refused when the config is
-  validated (`ash scan`, `ash config validate`), with a message that names the command to
-  run. When a locked file's bytes change, its symbol suppressions stop applying, their
-  findings return, and the scan prints one notice naming the file, the suppressions and
-  `ash suppress refresh`. The new `ash suppress add`, `refresh` and `verify` commands
-  write the suppression and its lock entry together, record a reviewed change, and fail
-  CI when the lock is out of date. Line-range suppressions are unchanged. This
-  repository's own symbol suppressions are locked in the same change. The lock is the
-  root dotfile `.ash.lock`; a lock still at `.ash/ash.lock` is read with a deprecation
-  warning (deprecated in v3.9, removed in v4.0) and rewritten to `.ash.lock` by
-  `ash suppress add` or `refresh`. See
+  A symbol-scoped suppression the lock does not record is refused when the config is
+  validated (`ash scan`, a workspace scan handing the orchestrator a resolved config,
+  `ash config validate`, and the MCP `validate_config`, which used to skip the check
+  without a source directory), with a message that names the command to run. The lock
+  records the reviewed `(rule_id, symbol)` scopes beside each file's hash and both are
+  required: locking a file for one rule does not approve a suppression added to the
+  same file later. When a locked file's bytes change, its symbol suppressions stop
+  applying, their findings return, and the scan prints one notice naming the file, the
+  suppressions and `ash suppress refresh`. The new `ash suppress add`, `refresh` and
+  `verify` commands write the suppression and its lock entry together, record a
+  reviewed change, and fail CI when the lock is out of date; `add` resolves `--file`
+  to the key the scan looks up (a path through a symlink locks the real file), a
+  whole-lock refresh is the explicit `refresh --all`, and `refresh --drop-missing`
+  removes the entry of a locked file that is gone. Line-range suppressions are
+  unchanged. This repository's own symbol suppressions are locked in the same change.
+  The lock is the root dotfile `.ash.lock`; a lock still at `.ash/ash.lock` is read
+  with a deprecation warning (deprecated in v3.9, removed in v4.0) that advises
+  `git mv`. See
   [Lock a symbol suppression to its file](docs/content/how-to/suppress-findings.md#lock).
 - **ASFF findings of one secret carry one `ash/correlationId`.** ASH does not
   deduplicate, so a secret that two scanners find is two findings with two Ids in
@@ -264,6 +294,9 @@
   documented to reach the project approvals API that checkov's GitLab check reads.
   Name a framework in `frameworks`, with or without `all`, to run it. In an offline
   scan their settings are not fetched.
+- Listed `GIT_CONFIG_*` environment entries are refused for scanners that need
+  git `safe.directory` (opengrep); remove the entry from the environment list to
+  run such a scanner.
 
 ## v3.8.0 (2026-11-12)
 

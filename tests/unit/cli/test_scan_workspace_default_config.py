@@ -53,8 +53,7 @@ def _workspace(tmp_path):
     root.mkdir()
     for project in ("api", "web"):
         (root / project).mkdir()
-    (root / "web" / ".ash").mkdir()
-    (root / "web" / ".ash" / "ash.yaml").write_text(
+    (root / "web" / ".ash.yaml").write_text(
         "project_name: web\nglobal_settings:\n  severity_threshold: LOW\n",
         encoding="utf-8",
     )
@@ -100,7 +99,7 @@ def test_a_project_with_its_own_config_keeps_it(tmp_path, scan_calls):
 
     web = next(p for p in scan_calls[0]["workspace_plan"].projects if p.key == "web")
     assert web.config_source is not None
-    assert web.config_source.endswith("web/.ash/ash.yaml"), web.config_source
+    assert web.config_source.endswith("web/.ash.yaml"), web.config_source
     assert web.operator_config is not None
     assert web.operator_config.endswith("strict.yaml"), web.operator_config
     assert web.severity_threshold == "CRITICAL"
