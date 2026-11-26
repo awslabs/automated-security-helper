@@ -1232,11 +1232,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         if engine is None:
             # A direct call outside scan_image (a test driving this hook
             # alone); the template detects once per target otherwise.
-            from automated_security_helper.core.container_engine import (
-                detect_engine_socket,
-            )
-
-            engine, engine_socket = detect_engine_socket()
+            engine, engine_socket = self._detect_image_engine()
 
         target_results_dir = Path(os.path.abspath(self.results_dir)).joinpath("image")
         results_file = target_results_dir.joinpath("results_sarif.sarif")

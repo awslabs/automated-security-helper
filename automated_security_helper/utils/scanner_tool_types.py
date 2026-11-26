@@ -240,7 +240,6 @@ def an_image_digest_consumer_is_selected(
     """
     try:
         from automated_security_helper.base import scanner_operational_facets as opsf
-        from automated_security_helper.core.asset import AssetKind
     except ImportError:
         return False
     allow = {
@@ -258,7 +257,7 @@ def an_image_digest_consumer_is_selected(
         network = getattr(facets, "network", None)
         if opsf.Fetched.IMAGE_DIGEST not in (getattr(network, "fetches", None) or ()):
             continue
-        if not opsf.serves_asset_kind(cls, AssetKind.CONTAINER_IMAGE):
+        if not opsf.serves_container_images(cls):
             continue
         if python_based_plugins_only and not getattr(
             getattr(facets, "runtime", None), "python_only", False
@@ -285,7 +284,7 @@ def scanner_serves_container_images(scanner_name: Any) -> Optional[bool]:
     one process and not the other). A test checks the table against each
     shipped class's own register row.
 
-    A third-party name falls back to the by-name form of ``serves_asset_kind``
+    A third-party name falls back to the register's ``serves_container_images``
     (``base/scanner_operational_facets``) over the loaded plugin classes
     (:func:`_loaded_scanner_classes`), importing and instantiating nothing
     else. The flat extractor reads it to honor the image attribution
@@ -298,13 +297,12 @@ def scanner_serves_container_images(scanner_name: Any) -> Optional[bool]:
         return scanner_name in IMAGE_SERVING_SCANNERS
     try:
         from automated_security_helper.base.scanner_operational_facets import (
-            serves_asset_kind,
+            serves_container_images,
         )
-        from automated_security_helper.core.asset import AssetKind
     except ImportError:
         return None
     for cls in _loaded_scanner_classes():
         if _class_config_name(cls) != scanner_name:
             continue
-        return serves_asset_kind(cls, AssetKind.CONTAINER_IMAGE)
+        return serves_container_images(cls)
     return None

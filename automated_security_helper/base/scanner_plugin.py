@@ -2814,6 +2814,21 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             )
         return excludes.globs
 
+    def _detect_image_engine(self) -> Tuple[Any, Optional[str]]:
+        """A fresh container-engine reading: the engine, and its local socket or None.
+
+        The one place a scanner reads the engine. ``scan_image`` takes it once
+        per target; a subclass that overrides the image dispatch, or needs a
+        reading outside the template, asks here instead of importing
+        ``core.container_engine``, which the layer order keeps out of the
+        plugin packages (tests/unit/test_layer_dag_boundaries.py).
+        """
+        from automated_security_helper.core.container_engine import (
+            detect_engine_socket,
+        )
+
+        return detect_engine_socket()
+
     def scan_image(
         self,
         image: "ImageLocator",
@@ -2852,11 +2867,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # argv build must agree on it, and two detections could not (a socket
         # appearing or vanishing between them). The socket half says whether
         # the daemon is local or only DECLARED (a remote DOCKER_HOST).
-        from automated_security_helper.core.container_engine import (
-            detect_engine_socket,
-        )
-
-        self._image_engine, self._image_engine_socket = detect_engine_socket()
+        self._image_engine, self._image_engine_socket = self._detect_image_engine()
 
         # The caller's config BEFORE the skip decision: the decision reads
         # options.offline and the subclass shape hooks, and reading them off

@@ -924,11 +924,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         # One engine reading for the whole target, as the base template takes
         # it: the skip decision and the stereoscope target must agree. The
         # socket half says whether the daemon is local or only DECLARED.
-        from automated_security_helper.core.container_engine import (
-            detect_engine_socket,
-        )
-
-        self._image_engine, self._image_engine_socket = detect_engine_socket()
+        self._image_engine, self._image_engine_socket = self._detect_image_engine()
 
         not_scanned = self._image_not_scanned_reason(image)
         if not_scanned is not None:
