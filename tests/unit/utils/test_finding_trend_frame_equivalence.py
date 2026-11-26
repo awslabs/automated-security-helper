@@ -339,3 +339,115 @@ def test_the_seeded_changes_reach_ties_and_both_kinds(monkeypatch):
         ties += len(keys) != len(set(keys))
     assert kinds == {"severity", "suppression"}
     assert ties >= 10
+
+
+# ------------------------------------------- the counts the text output reads
+
+STATUSES = finding_trend.STATUSES
+SERIES_SCANNERS = [None, "", "bandit", "semgrep", "a\udcffb", "é", "Z"]
+SERIES_SEVERITIES = ["HIGH", "LOW", "MEDIUM", "UNKNOWN", "é", "bad\x1bsev"]
+
+
+def oracle_totals(series):
+    totals: dict[tuple[int, str], int] = {}
+    for entry in series:
+        key = (entry["run"], entry["status"])
+        totals[key] = totals.get(key, 0) + entry["count"]
+    return totals
+
+
+def oracle_cells(series):
+    cells: dict[tuple[int, str | None, str], dict[str, int]] = {}
+    for entry in series:
+        cell = (entry["run"], entry["scanner"], entry["severity"])
+        counts = cells.setdefault(cell, {})
+        counts[entry["status"]] = counts.get(entry["status"], 0) + entry["count"]
+    return [
+        (run, scanner, severity, {s: counts.get(s, 0) for s in STATUSES})
+        for (run, scanner, severity), counts in sorted(
+            cells.items(), key=lambda item: (item[0][0], item[0][1] or "", item[0][2])
+        )
+    ]
+
+
+def seeded_series(seed):
+    """Series entries in the order ``_series`` yields them, over awkward values."""
+    rng = random.Random(seed)
+    keys = {
+        (
+            rng.randint(1, 4),
+            rng.choice(SERIES_SCANNERS),
+            rng.choice(SERIES_SEVERITIES),
+            rng.choice(STATUSES),
+            rng.random() < 0.5,
+        )
+        for _ in range(rng.randint(0, 40))
+    }
+    ordered = sorted(
+        keys, key=lambda k: (k[0], k[1] is not None, k[1] or "", k[2], k[3], k[4])
+    )
+    return [
+        {
+            "run": run,
+            "scanner": scanner,
+            "severity": severity,
+            "status": status,
+            "suppressed": suppressed,
+            "count": rng.randint(1, 6),
+        }
+        for run, scanner, severity, status, suppressed in ordered
+    ]
+
+
+@pytest.mark.parametrize("seed", range(300))
+def test_the_status_totals_are_the_oracles(seed):
+    series = seeded_series(seed)
+    assert finding_trend.status_totals(series) == oracle_totals(series)
+
+
+@pytest.mark.parametrize("seed", range(300))
+def test_the_cell_counts_are_the_oracles(seed):
+    series = seeded_series(seed)
+    assert finding_trend.cell_counts(series) == oracle_cells(series)
+
+
+def test_the_seeded_series_reach_the_cases_the_table_order_depends_on():
+    blank_tie = zero_cell = lone_surrogate = 0
+    for seed in range(300):
+        cells = oracle_cells(seeded_series(seed))
+        none_cells = {(run, sev) for run, scanner, sev, _ in cells if scanner is None}
+        blank_cells = {(run, sev) for run, scanner, sev, _ in cells if scanner == ""}
+        blank_tie += bool(none_cells & blank_cells)
+        zero_cell += any(0 in counts.values() for *_, counts in cells)
+        lone_surrogate += any(s is not None and "\udcff" in s for _, s, _, _ in cells)
+    assert min(blank_tie, zero_cell, lone_surrogate) >= 10
+
+
+def test_an_empty_series_has_no_totals_and_no_cells():
+    assert finding_trend.status_totals([]) == {}
+    assert finding_trend.cell_counts([]) == []
+
+
+def _entry(scanner, status, count=1):
+    return {
+        "run": 1,
+        "scanner": scanner,
+        "severity": "HIGH",
+        "status": status,
+        "suppressed": False,
+        "count": count,
+    }
+
+
+def test_a_cell_with_one_status_reads_zero_for_the_others():
+    series = [_entry("bandit", "fixed", 3)]
+    assert finding_trend.cell_counts(series) == [
+        (1, "bandit", "HIGH", {"new": 0, "carried": 0, "fixed": 3, "unobserved": 0})
+    ]
+    assert finding_trend.status_totals(series) == {(1, "fixed"): 3}
+
+
+def test_a_missing_scanner_and_an_empty_one_keep_the_series_order():
+    series = [_entry(None, "new"), _entry("", "fixed")]
+    assert [c[1] for c in finding_trend.cell_counts(series)] == [None, ""]
+    assert [c[1] for c in oracle_cells(series)] == [None, ""]
