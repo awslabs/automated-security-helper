@@ -357,6 +357,13 @@ async def test_list_scanners(monkeypatch, snapshot, snapshot_normalizer):
     monkeypatch.setattr(cdk_nag_scanner, "_cdk_nag_version", "0.0.0-snapshot")
 
     listed = await _call("list_scanners")
+    # Each version is masked as its own scanner's <NAME_VERSION>, and a string
+    # registered again takes the later scanner's placeholder, in the list order
+    # this test does not control (see below). Two scanners reporting one version
+    # would make the snapshot depend on which tests ran first, so every uv-managed
+    # tool needs its own pin in tests/snapshot/conftest.py.
+    reported = [entry["version"] for entry in listed["result"] if entry.get("version")]
+    assert len(reported) == len(set(reported)), sorted(reported)
     for entry in listed["result"]:
         if entry.get("version"):
             snapshot_normalizer.add_literal(
