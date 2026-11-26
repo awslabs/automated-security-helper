@@ -245,8 +245,8 @@ under one noun: `ashx results report`, `ashx results diff`, `ashx results trend`
 same as the top-level command it replaces.
 
 The old top-level spellings (`ashx report`, `ashx diff`, `ashx trend`, `ashx merge` and
-`ashx inspect`) still work in 3.9. Each prints one `DeprecationWarning` line on standard
-error that names its replacement, and all five are removed in 4.0. They no longer appear in
+`ashx inspect`) still work in 3.9 and 4.0. Each prints one `DeprecationWarning` line on standard
+error that names its replacement, and all five are removed in 4.1. They no longer appear in
 `ashx --help`. Standard output, exit codes and options are unchanged, so a script that reads
 them keeps working while you move it to the new spelling. The sections below use the
 top-level spelling; add `results` after `ashx` to use the new one.

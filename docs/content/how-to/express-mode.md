@@ -18,7 +18,7 @@ the child is the cold run and inherits the environment -- the engine socket incl
 that the cold run would have used. Nothing about images is configured here.
 
 Unix only (Linux and macOS). On Windows, and anywhere else without unix-domain sockets,
-there is no express mode: `ash express start` refuses with a clear message,
+there is no express mode: `ashx express start` refuses with a clear message,
 `ashx scan --express` prints one line on stderr saying the platform has no express mode
 and runs cold, and every scan without the flag runs cold silently, exactly as before.
 
@@ -47,9 +47,9 @@ Or manage it explicitly -- `start` is idempotent, takes `--idle-seconds` and
 
 <!-- doctest: illustrative reason="starts a resident daemon that would outlive the docs run, and only on unix" -->
 ```bash
-ash express start
-ash express status
-ash express stop
+ashx express start
+ashx express status
+ashx express stop
 ```
 
 Force a cold run without stopping the daemon:
@@ -60,7 +60,7 @@ ashx scan --source-dir . --no-express
 ```
 
 The daemon retires itself after 30 minutes without a request (configure with the
-`--idle-seconds` option of `ash express start`, or the `ASH_EXPRESS_IDLE_SECONDS`
+`--idle-seconds` option of `ashx express start`, or the `ASH_EXPRESS_IDLE_SECONDS`
 environment variable), so a daemon you forget about costs memory only until then.
 
 ## What a scan sends to the daemon {#protocol}
@@ -92,7 +92,7 @@ way, and a daemon started for a client is launched with that client's flags, so 
 `python -s` client never shares a daemon with one that sees the user site packages.
 A daemon that finds extra threads in its process after its warm imports cannot fork
 scan children safely, so it retires itself and leaves a marker beside its socket;
-`ash express start` then names that cause, and an implicit start backs off for ten
+`ashx express start` then names that cause, and an implicit start backs off for ten
 minutes instead of launching a daemon that would retire again. The marker clears
 when a daemon binds successfully. The
 client also passes its stdin, stdout and stderr as file descriptors, so the forked
@@ -172,22 +172,22 @@ commit, and its idle timer retires it after a quiet half hour.
 
 ## Troubleshooting {#troubleshoot}
 
-- `ash express status` says whether a daemon is running and what it has served -- and
+- `ashx express status` says whether a daemon is running and what it has served -- and
   reports separately, with a non-zero exit, a socket that something holds without
   answering (a wedged daemon): find the holder with `fuser` or `lsof` on the socket,
   stop it, or remove the socket file.
-- The daemon logs to `ash-<uid>-<key>.log` next to its socket; `ash express start
+- The daemon logs to `ash-<uid>-<key>.log` next to its socket; `ashx express start
   --foreground` runs it attached to your terminal instead. A foreground daemon runs
   inside the CLI process, with its environment scrubbed and its signal handlers reset
   the way a detached daemon's are before it serves, but with the CLI's imports (typer,
   rich, the logging stack) already resident, which a detached start, a fresh
   interpreter, does not have. It is for watching the log; to reproduce a daemon's
   behavior exactly, start it detached.
-- `ash express start` prints "started" only after a status query shows a daemon this
+- `ashx express start` prints "started" only after a status query shows a daemon this
   installation's scans can use (the same fingerprint and protocol). Replacing a stale
   daemon first checks that the old one is really gone, and exits 1 if it is not.
 - A scan that behaves differently under express than with `--no-express` is a bug to
   report: the scan's environment, arguments and working directory travel with each
   request precisely so the two cannot differ.
-- Scans still slow with the daemon running: the first request after `ash express start`
+- Scans still slow with the daemon running: the first request after `ashx express start`
   may wait briefly while the warm imports finish; later ones do not.

@@ -39,7 +39,7 @@ A config file inside the repository you scan, including the `.ash.yaml` that ASH
 
 ASH never merges sources and does not look in parent directories. Every other source it finds is ignored, with a warning that names it. The [configuration reference](../reference/configuration.md#where-ash-finds-its-configuration) lists all the locations in order.
 
-A config file at any location other than `.ash.yaml` at the root still loads, and ASH prints one warning that names the file, says the location is deprecated, and names `.ash.yaml` as the path to move it to. Support for those locations is removed in ASH 4.0; the warning starts in 3.9. When both `.ash.yaml` and a legacy file exist, `.ash.yaml` is used and one warning names the legacy file it shadows. `--config`, `-c`, and the `ASH_CONFIG` variable name a file directly and produce no warning.
+A config file at any location other than `.ash.yaml` at the root still loads, and ASH prints one warning that names the file, says the location is deprecated, and names `.ash.yaml` as the path to move it to. Support for those locations is removed in ASH 4.1; the warning starts in 3.9, and ASH 4.0 still reads them. When both `.ash.yaml` and a legacy file exist, `.ash.yaml` is used and one warning names the legacy file it shadows. `--config`, `-c`, and the `ASH_CONFIG` variable name a file directly and produce no warning.
 
 ### Move an existing config to `.ash.yaml` {#move-config}
 

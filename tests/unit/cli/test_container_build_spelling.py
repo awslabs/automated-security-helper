@@ -6,7 +6,8 @@
 Both run the same image build with the same options. The old spelling is
 deprecated the way every spelling that moved in 3.9 is (``ash report`` is now
 ``ash results report``): it prints one warning on stderr on every invocation, it is
-hidden from the root ``--help``, and it is removed in 4.0; the new one prints none.
+hidden from the root ``--help``, it runs through 4.0, and it is removed in 4.1; the
+new one prints none. The warning names the command ``ashx``, the v4 entry point.
 The scan the command starts is replaced by a stand-in that records its arguments, so
 no image is built.
 """
@@ -19,8 +20,8 @@ from typer.testing import CliRunner
 pytestmark = pytest.mark.unit
 
 WARNING = (
-    "DeprecationWarning: 'ash build-image' is deprecated and is removed in 4.0. "
-    "Use 'ash container build' instead; 'ash build-image' keeps its current "
+    "DeprecationWarning: 'ashx build-image' is deprecated and is removed in 4.1. "
+    "Use 'ashx container build' instead; 'ashx build-image' keeps its current "
     "behavior until then."
 )
 

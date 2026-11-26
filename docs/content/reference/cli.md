@@ -35,11 +35,11 @@ The Environment variable column names the variable click reads for the option; a
 | [`ashx dependencies`](#dependencies) | Check or install dependencies for ASH plugins |
 | [`ashx dependencies check`](#dependencies-check) | Check Grype and Trivy cache metadata without running or downloading tools. |
 | [`ashx dependencies install`](#dependencies-install) | Install dependencies for ASH plugins. |
-| [`ash diff`](#diff) | Compare the findings in two saved ASH scans without running a scan. |
-| [`ash express`](#express) | Manage the express daemon: a resident warm ASH process that removes startup cost from every scan. Unix only; scans fall back to ordinary cold runs wherever the daemon is unavailable. |
-| [`ash express start`](#express-start) | Start the express daemon for this user and ASH version (idempotent). |
-| [`ash express status`](#express-status) | Report whether the express daemon is running, and what it has served. |
-| [`ash express stop`](#express-stop) | Stop the express daemon. A scan it is running is sent SIGTERM. |
+| [`ashx diff`](#diff) | Compare the findings in two saved ASH scans without running a scan. |
+| [`ashx express`](#express) | Manage the express daemon: a resident warm ASH process that removes startup cost from every scan. Unix only; scans fall back to ordinary cold runs wherever the daemon is unavailable. |
+| [`ashx express start`](#express-start) | Start the express daemon for this user and ASH version (idempotent). |
+| [`ashx express status`](#express-status) | Report whether the express daemon is running, and what it has served. |
+| [`ashx express stop`](#express-stop) | Stop the express daemon. A scan it is running is sent SIGTERM. |
 | [`ashx get-genai-guide`](#get-genai-guide) | Write the ASH GenAI Integration Guide for AI assistants and LLMs to a file. |
 | [`ashx inspect`](#inspect) | Inspect and analyze ASH outputs and reports |
 | [`ashx inspect findings`](#inspect-findings) | The `inspect findings` command provides an interactive TUI to explore the findings and identify actions to quickly take. |
@@ -59,11 +59,11 @@ The Environment variable column names the variable click reads for the option; a
 | [`ashx results report`](#results-report) | Generate a report from ASH scan results using the specified reporter plugin. |
 | [`ashx results trend`](#results-trend) | Show new, carried and fixed findings over a series of saved ASH scans. |
 | [`ashx scan`](#scan) | Scan code, infrastructure, secrets, and dependencies. |
-| [`ash suppress`](#suppress) | Create symbol suppressions and keep their content-hash lock (.ash.lock) current. |
-| [`ash suppress add`](#suppress-add) | Add a symbol suppression and lock its file's content hash. |
-| [`ash suppress refresh`](#suppress-refresh) | Record a new review: re-hash locked files whose bytes changed. |
-| [`ash suppress verify`](#suppress-verify) | Check the lock against the tree. Exits 1 when anything is out of date. |
-| [`ash trend`](#trend) | Show new, carried and fixed findings over a series of saved ASH scans. |
+| [`ashx suppress`](#suppress) | Create symbol suppressions and keep their content-hash lock (.ash.lock) current. |
+| [`ashx suppress add`](#suppress-add) | Add a symbol suppression and lock its file's content hash. |
+| [`ashx suppress refresh`](#suppress-refresh) | Record a new review: re-hash locked files whose bytes changed. |
+| [`ashx suppress verify`](#suppress-verify) | Check the lock against the tree. Exits 1 when anything is out of date. |
+| [`ashx trend`](#trend) | Show new, carried and fixed findings over a series of saved ASH scans. |
 
 ## `ash`
 
@@ -83,7 +83,7 @@ Options that only `ash` itself accepts:
 | <a id="ash--install-completion"></a>`--install-completion` | flag | off |  | Install completion for the current shell. |
 | <a id="ash--show-completion"></a>`--show-completion` | flag | off |  | Show completion for the current shell, to copy it or customize the installation. |
 
-Subcommands: [`ashx build-image`](#build-image), [`ashx config`](#config), [`ashx container`](#container), [`ashx dependencies`](#dependencies), [`ash diff`](#diff), [`ash express`](#express), [`ashx get-genai-guide`](#get-genai-guide), [`ashx inspect`](#inspect), [`ashx mcp`](#mcp), [`ashx merge`](#merge), [`ashx plugin`](#plugin), [`ashx report`](#report), [`ashx results`](#results), [`ashx scan`](#scan), [`ash suppress`](#suppress), [`ash trend`](#trend).
+Subcommands: [`ashx build-image`](#build-image), [`ashx config`](#config), [`ashx container`](#container), [`ashx dependencies`](#dependencies), [`ashx diff`](#diff), [`ashx express`](#express), [`ashx get-genai-guide`](#get-genai-guide), [`ashx inspect`](#inspect), [`ashx mcp`](#mcp), [`ashx merge`](#merge), [`ashx plugin`](#plugin), [`ashx report`](#report), [`ashx results`](#results), [`ashx scan`](#scan), [`ashx suppress`](#suppress), [`ashx trend`](#trend).
 
 ## <a id="build-image"></a>`ashx build-image`
 
@@ -497,12 +497,12 @@ ashx dependencies install [OPTIONS]
 | <a id="dependencies-install--debug"></a>`--debug`, `-d` | flag | off |  | Enable debug logging |
 | <a id="dependencies-install--color"></a>`--color` / `--no-color`, `-C` | flag | on |  | Enable/disable colorized output |
 
-## <a id="diff"></a>`ash diff`
+## <a id="diff"></a>`ashx diff`
 
 Compare the findings in two saved ASH scans without running a scan.
 
 ```text
-ash diff [OPTIONS] {before} {after}
+ashx diff [OPTIONS] {before} {after}
 ```
 
 This command is hidden from `--help` output.
@@ -520,24 +520,24 @@ This command is hidden from `--help` output.
 | <a id="diff--cli-json-input"></a>`--cli-json-input` | text | not set |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
 | <a id="diff--generate-cli-skeleton"></a>`--generate-cli-skeleton` | flag | off |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit. |
 
-## <a id="express"></a>`ash express`
+## <a id="express"></a>`ashx express`
 
 Manage the express daemon: a resident warm ASH process that removes startup cost from every scan. Unix only; scans fall back to ordinary cold runs wherever the daemon is unavailable.
 
 ```text
-ash express [OPTIONS] COMMAND [ARGS]...
+ashx express [OPTIONS] COMMAND [ARGS]...
 ```
 
 This command takes no options.
 
-Subcommands: [`ash express start`](#express-start), [`ash express status`](#express-status), [`ash express stop`](#express-stop).
+Subcommands: [`ashx express start`](#express-start), [`ashx express status`](#express-status), [`ashx express stop`](#express-stop).
 
-### <a id="express-start"></a>`ash express start`
+### <a id="express-start"></a>`ashx express start`
 
 Start the express daemon for this user and ASH version (idempotent).
 
 ```text
-ash express start [OPTIONS]
+ashx express start [OPTIONS]
 ```
 
 <!-- doctest: options of=cli.express.start -->
@@ -546,12 +546,12 @@ ash express start [OPTIONS]
 | <a id="express-start--idle-seconds"></a>`--idle-seconds` | int range | not set |  | Seconds of inactivity after which the daemon exits. Defaults to the ASH_EXPRESS_IDLE_SECONDS environment variable, else 1800. |
 | <a id="express-start--foreground"></a>`--foreground` | flag | off |  | Run the daemon in this process, attached to this terminal, instead of detaching it. Useful for watching its log live. |
 
-### <a id="express-status"></a>`ash express status`
+### <a id="express-status"></a>`ashx express status`
 
 Report whether the express daemon is running, and what it has served.
 
 ```text
-ash express status [OPTIONS]
+ashx express status [OPTIONS]
 ```
 
 <!-- doctest: options of=cli.express.status -->
@@ -559,12 +559,12 @@ ash express status [OPTIONS]
 |--------|------|---------|----------------------|-------------|
 | <a id="express-status--json"></a>`--json` | flag | off |  | Print the daemon's status object as JSON. |
 
-### <a id="express-stop"></a>`ash express stop`
+### <a id="express-stop"></a>`ashx express stop`
 
 Stop the express daemon. A scan it is running is sent SIGTERM.
 
 ```text
-ash express stop [OPTIONS]
+ashx express stop [OPTIONS]
 ```
 
 This command takes no options.
@@ -1057,26 +1057,26 @@ ashx scan [OPTIONS]
 | <a id="scan--cli-json-input"></a>`--cli-json-input` | text | not set |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
 | <a id="scan--generate-cli-skeleton"></a>`--generate-cli-skeleton` | flag | off |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit. |
 
-## <a id="suppress"></a>`ash suppress`
+## <a id="suppress"></a>`ashx suppress`
 
 Create symbol suppressions and keep their content-hash lock (.ash.lock) current.
 
 ```text
-ash suppress [OPTIONS] COMMAND [ARGS]...
+ashx suppress [OPTIONS] COMMAND [ARGS]...
 ```
 
 This command takes no options.
 
-Subcommands: [`ash suppress add`](#suppress-add), [`ash suppress refresh`](#suppress-refresh), [`ash suppress verify`](#suppress-verify).
+Subcommands: [`ashx suppress add`](#suppress-add), [`ashx suppress refresh`](#suppress-refresh), [`ashx suppress verify`](#suppress-verify).
 
-### <a id="suppress-add"></a>`ash suppress add`
+### <a id="suppress-add"></a>`ashx suppress add`
 
 Add a symbol suppression and lock its file's content hash.
 
 Writes the suppression into the config and the hash of the file's bytes
 into .ash.lock. While the file is unchanged the suppression applies;
 after any edit to the file its findings are reported again until the change
-is reviewed and `ash suppress refresh` records it.
+is reviewed and `ashx suppress refresh` records it.
 
 A suppression already in the config for the same rule, file and symbol is
 not written twice; the lock entry is still created or completed, which is
@@ -1085,12 +1085,12 @@ how an existing suppression is brought under the lock.
 Example:
 
 ```text
-ash suppress add B602 --symbol Handler.run --file src/app.py \
+ashx suppress add B602 --symbol Handler.run --file src/app.py \
     --reason "The command is a constant."
 ```
 
 ```text
-ash suppress add [OPTIONS] {rule_id}
+ashx suppress add [OPTIONS] {rule_id}
 ```
 
 <!-- doctest: options of=cli.suppress.add -->
@@ -1107,7 +1107,7 @@ ash suppress add [OPTIONS] {rule_id}
 | <a id="suppress-add--config"></a>`--config`, `-c` | text | not set |  | The YAML config file to write the suppression to. Defaults to the config a scan of the source directory uses. |
 | <a id="suppress-add--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash.lock. Defaults to the current directory. |
 
-### <a id="suppress-refresh"></a>`ash suppress refresh`
+### <a id="suppress-refresh"></a>`ashx suppress refresh`
 
 Record a new review: re-hash locked files whose bytes changed.
 
@@ -1117,7 +1117,7 @@ longer exists is reported and left as it was (exit code 1), unless
 --drop-missing removes its dead entry.
 
 ```text
-ash suppress refresh [OPTIONS] [paths]...
+ashx suppress refresh [OPTIONS] [paths]...
 ```
 
 <!-- doctest: options of=cli.suppress.refresh -->
@@ -1132,7 +1132,7 @@ ash suppress refresh [OPTIONS] [paths]...
 | <a id="suppress-refresh--drop-missing"></a>`--drop-missing` | flag | off |  | Remove the entry of a named file that no longer exists, instead of leaving it and exiting 1. |
 | <a id="suppress-refresh--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash.lock. Defaults to the current directory. |
 
-### <a id="suppress-verify"></a>`ash suppress verify`
+### <a id="suppress-verify"></a>`ashx suppress verify`
 
 Check the lock against the tree. Exits 1 when anything is out of date.
 
@@ -1145,7 +1145,7 @@ contributes are not read, so exit code 0 covers the checked files, not
 every config a scan could merge.
 
 ```text
-ash suppress verify [OPTIONS]
+ashx suppress verify [OPTIONS]
 ```
 
 <!-- doctest: options of=cli.suppress.verify -->
@@ -1154,12 +1154,12 @@ ash suppress verify [OPTIONS]
 | <a id="suppress-verify--config"></a>`--config`, `-c` | text, repeatable | not set |  | A YAML config file whose symbol suppressions must each have a lock entry. Repeat it for several. Defaults to the config a scan of the source directory uses. |
 | <a id="suppress-verify--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash.lock. Defaults to the current directory. |
 
-## <a id="trend"></a>`ash trend`
+## <a id="trend"></a>`ashx trend`
 
 Show new, carried and fixed findings over a series of saved ASH scans.
 
 ```text
-ash trend [OPTIONS] [files]...
+ashx trend [OPTIONS] [files]...
 ```
 
 This command is hidden from `--help` output.

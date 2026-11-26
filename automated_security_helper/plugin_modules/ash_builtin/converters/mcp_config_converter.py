@@ -6,7 +6,7 @@
 Turns each command-declaring server entry of a repo-local MCP config file
 (``.mcp.json``, ``.cursor/mcp.json``, ``.codex/config.toml`` and the other formats
 listed in ``utils/mcp_config/readers.py``) into one shell script, so the script
-scanners that already run over the converted tree (semgrep, opengrep) read the
+scanner that already runs over the converted tree (opengrep) reads the
 command a config would launch — whether or not the entry also spells a url. Each
 script has a ``.spanmap.json`` sidecar beside it that maps every script line back
 to the entry's place in the config file.

@@ -5706,7 +5706,7 @@ def _outputs_known_file_names() -> Set[str]:
 
     # .ash.lock is the committed suppression lock (utils/ash_lock.py), an input
     # ASH reads and ``ash suppress`` writes at the scan root; the bare ash.lock
-    # spelling is its deprecated .ash/ash.lock location, still read until v4.0.
+    # spelling is its deprecated .ash/ash.lock location, still read until v4.1.
     known = {
         "ash.log",
         "ash.log.jsonl",

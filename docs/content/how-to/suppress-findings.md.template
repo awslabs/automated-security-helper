@@ -117,7 +117,7 @@ global_settings:
       reason: run_hook only runs commands from the deploy manifest
 ```
 
-A symbol suppression also needs an entry for its file in `.ash.lock`; [create both with `ash suppress add`](#lock).
+A symbol suppression also needs an entry for its file in `.ash.lock`; [create both with `ashx suppress add`](#lock).
 
 ASH finds the definition by parsing the file with tree-sitter, for Python, JavaScript, TypeScript, and Java files. The parsers are in the `symbols` extra, which is not installed by default; without it, a suppression with `symbol` matches nothing and the scan logs a warning that names the extra. The container image includes it. For the qualified-name grammar, the fail-closed rules, and the resolver's API and limits, see [Symbol resolution](../reference/symbol-resolution.md).
 
@@ -125,17 +125,17 @@ ASH finds the definition by parsing the file with tree-sitter, for Python, JavaS
 
 A symbol suppression follows its definition when the code moves, so a definition that is rewritten would keep a review that no longer describes it. The lock prevents that. `.ash.lock`, a committed JSON file at the top of the scanned directory (`--source-dir`, usually the repository root -- the lock follows the scanned directory, wherever the config file lives), records the SHA-256 of each file a symbol suppression names, taken when the suppression was reviewed, and the `(rule_id, symbol)` scopes reviewed on it:
 
-- A symbol suppression the lock does not record is refused when the config is validated, by `ashx scan` and by `ashx config validate`: a file with no entry, and equally a `(rule_id, symbol)` the file's entry does not record, so locking a file for one rule does not approve suppressions added to it later. The message names the `ash suppress add` command to run, which records a new scope on an existing entry without re-hashing. The rule id is compared case-insensitively, the symbol exactly.
+- A symbol suppression the lock does not record is refused when the config is validated, by `ashx scan` and by `ashx config validate`: a file with no entry, and equally a `(rule_id, symbol)` the file's entry does not record, so locking a file for one rule does not approve suppressions added to it later. The message names the `ashx suppress add` command to run, which records a new scope on an existing entry without re-hashing. The rule id is compared case-insensitively, the symbol exactly.
 - A symbol suppression's `path` must name one file. A glob or directory path cannot be hashed, so it is refused with its own message; lock each file that holds a suppressed definition with its own entry.
 - When the file's bytes no longer hash to the entry, every symbol suppression bound to that file stops applying. Its findings are reported again, and the scan prints one notice that names the file, the suppressions, and the refresh command.
 - Line-range suppressions are not affected.
 
 The whole file is hashed, not the definition, so reformatting a definition and editing it are treated alike. The file is read as bytes, so a checkout that rewrites line endings changes the hash; refresh the lock on that checkout.
 
-Create the suppression and its lock entry together with `ash suppress add`:
+Create the suppression and its lock entry together with `ashx suppress add`:
 
 ```bash
-ash suppress add B602 --symbol Deployer.run_hook --file src/deploy.py \
+ashx suppress add B602 --symbol Deployer.run_hook --file src/deploy.py \
   --reason "run_hook only runs commands from the deploy manifest"
 ```
 
@@ -144,16 +144,16 @@ This writes the suppression to the config a scan of the current directory uses (
 After you change a locked file, read the change, confirm the suppressions still hold, and record the review:
 
 ```bash
-ash suppress refresh src/deploy.py   # or --all, after reviewing every change
+ashx suppress refresh src/deploy.py   # or --all, after reviewing every change
 ```
 
-A refresh re-approves each changed file it touches, so the whole-lock run is asked for explicitly with `--all`, never by leaving the paths off. A locked file that no longer exists cannot be re-hashed; `refresh` reports it and exits 1, and `ash suppress refresh --drop-missing <file>` removes the dead entry (then remove its suppressions from the config).
+A refresh re-approves each changed file it touches, so the whole-lock run is asked for explicitly with `--all`, never by leaving the paths off. A locked file that no longer exists cannot be re-hashed; `refresh` reports it and exits 1, and `ashx suppress refresh --drop-missing <file>` removes the dead entry (then remove its suppressions from the config).
 
-`ash suppress verify` exits 1 and lists every locked file that changed or is gone, and every symbol suppression the checked configs hold that the lock does not record. Run it in CI. It prints which config files it checked: the named `--config` files (repeatable for a repository with more than one), or the one config a scan of the source directory discovers; suppressions contributed by an `extends` base are not read.
+`ashx suppress verify` exits 1 and lists every locked file that changed or is gone, and every symbol suppression the checked configs hold that the lock does not record. Run it in CI. It prints which config files it checked: the named `--config` files (repeatable for a repository with more than one), or the one config a scan of the source directory discovers; suppressions contributed by an `extends` base are not read.
 
 Commit `.ash.lock` with the change it belongs to, so a reviewer sees the new hash beside the edit it covers. The commands are the supported way to write the file. Its keys are sorted, so the same entries produce the same bytes in any order; each entry keeps the `created` stamp of its first review, `refresh` keeps it too, and a refresh that changes nothing rewrites nothing, so two independently created locks differ only in those stamps.
 
-The lock was first written inside the `.ash/` directory. ASH still reads that older file when `.ash.lock` does not exist, with a deprecation warning; move it with `git mv .ash/ash.lock .ash.lock` (any later `ash suppress add` or `refresh` also writes `.ash.lock` and leaves the old file for `git rm`). Reading it is deprecated since v3.9 and ends in v4.0.
+The lock was first written inside the `.ash/` directory. ASH still reads that older file when `.ash.lock` does not exist, with a deprecation warning; move it with `git mv .ash/ash.lock .ash.lock` (any later `ashx suppress add` or `refresh` also writes `.ash.lock` and leaves the old file for `git rm`). Reading it is deprecated since v3.9 and ends in v4.1.
 
 ### Installing the extra {#installing-the-extra}
 
