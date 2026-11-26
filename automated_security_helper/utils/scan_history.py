@@ -139,6 +139,21 @@ def _order_key(name: str) -> tuple[str, str, str]:
     return (match["stamp"], match["token"], name)
 
 
+def run_order_key(report_id: Any) -> tuple[str, str, str] | None:
+    """How runs sort by *report_id*: (start second, token, name), or None.
+
+    None for an id that is not ``new_report_id``'s shape: ordering such ids as
+    raw strings sorts by prefix first and puts a hand-written id anywhere, so a
+    caller with one keeps its given order instead. The key is the one the
+    history is ordered by (:func:`record_names`), so ``ash trend`` over
+    explicit files and over ``--history`` order the same runs the same way.
+    """
+    name = record_file_name(report_id)
+    if name is None:
+        return None
+    return _order_key(name)
+
+
 def _finding_row(finding: "FlatVulnerability") -> dict[str, Any]:
     base = finding.identity_base
     return {

@@ -14,6 +14,16 @@ module only reads the inputs, refuses what cannot be a series, and renders.
 
 One source per invocation: explicit results files, or ``--history``. Mixing the
 two is refused so that the provenance of every point is obvious.
+
+Beside the trend itself (``finding_trend.Trend.to_dict``) the JSON payload says
+how this command built the series: ``ordered_by`` is ``"report_id"`` when the
+runs were put in chronological order by their timestamped report ids (always
+so for ``--history``, whose records are named by them) and ``"given"`` when a
+file names no such id and the order given was kept; ``unreadable_records`` is
+how many recorded runs were skipped as unreadable, since a boundary that spans
+one is not between consecutive runs; and ``history_cut`` names the older
+records left out because they are not part of one series with the newest. The
+text output states each of these too.
 """
 
 import json
@@ -30,8 +40,13 @@ from automated_security_helper.utils.finding_trend import (
     TrendRefusal,
     TrendRun,
     build_trend,
+    longest_compatible_suffix,
     run_from_results,
     runs_from_history,
+)
+from automated_security_helper.utils.scan_history import (
+    record_names,
+    run_order_key,
 )
 from automated_security_helper.utils.scan_results_file import (
     ScanResultsRefused,
@@ -58,7 +73,7 @@ def _refuse(reason: str, path: Path | None = None) -> NoReturn:
     raise typer.Exit(1)
 
 
-def _runs_from_files(files: list[Path]) -> list[TrendRun]:
+def _runs_from_files(files: list[Path]) -> tuple[list[TrendRun], str]:
     runs: list[TrendRun] = []
     for path in files:
         try:
@@ -69,12 +84,17 @@ def _runs_from_files(files: list[Path]) -> list[TrendRun]:
             runs.append(run_from_results(results, str(path)))
         except TrendRefusal as exc:
             _refuse(str(exc))
-    # Report ids embed the UTC start second, so ordering by them is chronological
-    # whatever order the shell expanded the files in. Without an id on every run
-    # the order given is kept.
-    if all(run.report_id for run in runs):
-        runs.sort(key=lambda run: run.report_id or "")
-    return runs
+    # ASH's report ids embed the UTC start second, so ordering by them is
+    # chronological whatever order the shell expanded the files in. The key is
+    # the history's own (stamp, token) one, never the raw string: a prefix
+    # difference would sort by prefix first, and a hand-written id anywhere.
+    # Unless every run names such an id, the order given is kept, and the
+    # output says which of the two happened (``ordered_by``).
+    keys = [run_order_key(run.report_id) for run in runs]
+    if all(key is not None for key in keys):
+        runs = [run for _, run in sorted(zip(keys, runs), key=lambda pair: pair[0])]
+        return runs, "report_id"
+    return runs, "given"
 
 
 def _payload(runs: list[TrendRun]) -> dict[str, Any]:
@@ -91,12 +111,39 @@ def _location(row: dict[str, Any]) -> str:
     return location
 
 
+def _shown_change_value(value: Any) -> str:
+    """A change's from/to as ``ash diff`` words it: booleans are yes/no."""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    return str(value)
+
+
 def _print_text(payload: dict[str, Any]) -> None:
     runs = payload["runs"]
-    echo(f"Runs: {len(runs)} (oldest first)")
+    if payload.get("ordered_by") == "given":
+        echo(
+            f"Runs: {len(runs)} (in the order given: not every file names a "
+            "sortable report id)"
+        )
+    else:
+        echo(f"Runs: {len(runs)} (oldest first)")
     for index, run in enumerate(runs):
         echo(
             shown_on_one_line(f"  {index}: {run['label']} ({run['findings']} findings)")
+        )
+    if payload.get("unreadable_records"):
+        echo(
+            f"Warning: {payload['unreadable_records']} recorded run(s) were "
+            "unreadable and are not in this series; a boundary that spans one "
+            "is not between consecutive runs."
+        )
+    if payload.get("history_cut"):
+        echo(
+            shown_on_one_line(
+                f"Warning: {len(payload['history_cut'])} older record(s) are not "
+                "part of one series with the newest and were left out: "
+                f"{', '.join(payload['history_cut'])}"
+            )
         )
 
     totals: dict[tuple[int, str], int] = {}
@@ -109,7 +156,7 @@ def _print_text(payload: dict[str, Any]) -> None:
             f"Run {k}: "
             + " | ".join(
                 f"{status.capitalize()}: {totals.get((k, status), 0)}"
-                for status in ("new", "carried", "fixed")
+                for status in ("new", "carried", "fixed", "unobserved")
             )
         )
         for warning in boundary["coverage_warnings"]:
@@ -132,14 +179,20 @@ def _print_text(payload: dict[str, Any]) -> None:
                 f"Run {k} is not like for like with the run before it; "
                 "its fixed and new counts do not measure progress."
             )
-    echo("Fixed means not observed, not confirmed fixed.")
+    echo(
+        "Fixed means the scanner evaluated the run and did not report it; "
+        "unobserved means its scanner did not run there."
+    )
 
     if payload["series"]:
-        table = Table("Run", "Scanner", "Severity", "New", "Carried", "Fixed")
+        table = Table(
+            "Run", "Scanner", "Severity", "New", "Carried", "Fixed", "Unobserved"
+        )
         cells: dict[tuple[int, str | None, str], dict[str, int]] = {}
         for entry in payload["series"]:
             cell = (entry["run"], entry["scanner"], entry["severity"])
-            cells.setdefault(cell, {})[entry["status"]] = entry["count"]
+            counts = cells.setdefault(cell, {})
+            counts[entry["status"]] = counts.get(entry["status"], 0) + entry["count"]
         for (run, scanner, severity), counts in sorted(
             cells.items(), key=lambda item: (item[0][0], item[0][1] or "", item[0][2])
         ):
@@ -150,43 +203,58 @@ def _print_text(payload: dict[str, Any]) -> None:
                 str(counts.get("new", 0)),
                 str(counts.get("carried", 0)),
                 str(counts.get("fixed", 0)),
+                str(counts.get("unobserved", 0)),
             )
         ash_console(markup=False, highlight=False).print(table)
 
-    streaks = payload["streaks"]
-    if streaks:
-        echo(
-            f"Longest carried findings (top {min(len(streaks), TEXT_STREAK_LIMIT)} "
-            f"of {len(streaks)}):"
-        )
-        table = Table("Scanner / rule", "Location", "Severity", "Runs", "Open since")
-        for row in streaks[:TEXT_STREAK_LIMIT]:
-            since = row["open_since"]
-            if row["left_censored"]:
-                since += " (or earlier)"
-            table.add_row(
-                raw_controls_on_one_line(f"{row['scanner']} / {row['rule_id'] or '-'}"),
-                raw_controls_on_one_line(_location(row)),
-                raw_controls_on_one_line(row["severity"]),
-                str(row["streak_runs"]),
-                raw_controls_on_one_line(since),
-            )
-        ash_console(markup=False, highlight=False).print(table)
+    _print_streaks(payload["streaks"], "Longest carried findings")
+    _print_streaks(
+        payload.get("suppressed_streaks") or [],
+        "Longest carried suppressed findings (accepted, listed apart)",
+    )
 
     changes = payload["changes"]
     if changes:
-        echo(f"Changes while carried: {len(changes)}")
+        # Capped like the streak tables; the JSON lists all. The rows are
+        # sorted by (run, kind, scanner, rule, location, id), so "first" is
+        # the earliest boundaries.
+        if len(changes) > TEXT_STREAK_LIMIT:
+            echo(
+                f"Changes while carried (first {TEXT_STREAK_LIMIT} of "
+                f"{len(changes)}; the JSON output lists all):"
+            )
+        else:
+            echo(f"Changes while carried: {len(changes)}")
         table = Table("Run", "Change", "Scanner / rule", "Location", "From", "To")
-        for row in changes:
+        for row in changes[:TEXT_STREAK_LIMIT]:
             table.add_row(
                 str(row["run"]),
                 row["kind"],
                 raw_controls_on_one_line(f"{row['scanner']} / {row['rule_id'] or '-'}"),
                 raw_controls_on_one_line(_location({**row, "line_start": None})),
-                raw_controls_on_one_line(str(row["from"])),
-                raw_controls_on_one_line(str(row["to"])),
+                raw_controls_on_one_line(_shown_change_value(row["from"])),
+                raw_controls_on_one_line(_shown_change_value(row["to"])),
             )
         ash_console(markup=False, highlight=False).print(table)
+
+
+def _print_streaks(streaks: list[dict[str, Any]], title: str) -> None:
+    if not streaks:
+        return
+    echo(f"{title} (top {min(len(streaks), TEXT_STREAK_LIMIT)} of {len(streaks)}):")
+    table = Table("Scanner / rule", "Location", "Severity", "Runs", "Open since")
+    for row in streaks[:TEXT_STREAK_LIMIT]:
+        since = row["open_since"]
+        if row["left_censored"]:
+            since += " (or earlier)"
+        table.add_row(
+            raw_controls_on_one_line(f"{row['scanner']} / {row['rule_id'] or '-'}"),
+            raw_controls_on_one_line(_location(row)),
+            raw_controls_on_one_line(row["severity"]),
+            str(row["streak_runs"]),
+            raw_controls_on_one_line(since),
+        )
+    ash_console(markup=False, highlight=False).print(table)
 
 
 def trend_command(
@@ -194,8 +262,10 @@ def trend_command(
         list[Path] | None,
         typer.Argument(
             help=(
-                "ASH scan results JSON files, one per run. They are put in "
-                "chronological order by report id. At least two."
+                "ASH scan results JSON files, one per run. When every file names "
+                "one of ASH's timestamped report ids they are put in "
+                "chronological order by it; otherwise they are kept in the "
+                "order given, which the output says. At least two."
             ),
         ),
     ] = None,
@@ -216,15 +286,40 @@ def trend_command(
     """Show new, carried and fixed findings over a series of saved ASH scans."""
     if files and history is not None:
         _refuse("give results files or --history, not both")
+    unreadable = 0
+    cut: list[str] = []
     if history is not None:
+        recorded = len(list(record_names(history)))
         runs = runs_from_history(history)
         if not runs:
-            _refuse(f"no readable run records under {history}/history")
+            if not recorded:
+                _refuse(f"no run records under {history}/history")
+            _refuse(
+                f"none of the {recorded} run records under {history}/history "
+                "are readable"
+            )
+        unreadable = recorded - len(runs)
+        # One bad record (a duplicate id, a foreign project) used to refuse the
+        # whole history; the series is cut to the longest suffix ending at the
+        # newest record instead, and the cut is reported.
+        runs, cut = longest_compatible_suffix(runs)
+        if len(runs) < 2:
+            _refuse(
+                f"only {len(runs)} of the recorded runs form one series ending "
+                f"at the newest record ({len(cut)} left out: "
+                f"{shown_on_one_line(', '.join(cut))})"
+            )
+        ordered_by = "report_id"
     elif files:
-        runs = _runs_from_files(list(files))
+        runs, ordered_by = _runs_from_files(list(files))
     else:
         _refuse("give at least two results files, or --history DIR")
     payload = _payload(runs)
+    # How this command built the series, beside the trend itself; the module
+    # docstring documents the three keys.
+    payload["ordered_by"] = ordered_by
+    payload["unreadable_records"] = unreadable
+    payload["history_cut"] = cut
     if output_format == TrendFormat.JSON:
         document = json_commands_broken(
             json.dumps(payload, indent=2, ensure_ascii=True)
