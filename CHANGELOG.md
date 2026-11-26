@@ -48,6 +48,15 @@
 
 ### Behavior changes
 
+- **`ash merge` records the merged run in the scan history.** With
+  `global_settings.history.enabled` in the merged configuration (the shards'
+  recorded config, with `--config-overrides` applied), the merge appends one run
+  record to `<output-dir>/history/` under the merged report's own id, so a
+  sharded CI's history now comes from the merge; before, the merge recorded
+  nothing and a CI that only ever ran shards built no history at all. A re-merge
+  of the same shards replaces its record rather than adding a second run, and
+  the warning a non-recorded run logs now says where a sharded CI's history
+  comes from.
 - **npm-audit findings are located at the lockfile they were audited from**
   (`deploy/cdk/package-lock.json`, say), not at the installed package's
   `node_modules/<package>/package.json`. A path-scoped suppression for an npm-audit
