@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional, TypeGuard
 
 from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.vocab import SEVERITY_BUCKETS
+from automated_security_helper.utils.frame_ops import ordered_counts
+from automated_security_helper.utils.frame_text import unwire, wire
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_THRESHOLDS,
     SUPPRESSED_COUNT_KEY,
@@ -224,6 +226,42 @@ def _rows_without_a_breakdown(scanner_results: Dict[str, Any]) -> bool:
         and _count(data.get("finding_count")) > 0
         for data in scanner_results.values()
     )
+
+
+def _fold_kept_results(
+    buckets: List[str],
+    names: List[Optional[str]],
+    kept_counts: Dict[str, int],
+    kept_per_scanner: Dict[str, Dict[str, int]],
+) -> None:
+    """Add the kept results' bucket counts into the seeded dicts.
+
+    *buckets* and *names* are parallel and wired (``frame_text.wire``). The
+    dicts were seeded in their fixed key order before this runs and are only
+    added to, each fold guarded by ``bucket in`` as the per-result loop was, so
+    the group order of the counts never reaches the response. A result that
+    names no scanner counts globally and not per scanner. No frame is built when
+    nothing was kept.
+    """
+    if not buckets:
+        return
+    import polars as pl
+
+    frame = pl.DataFrame(
+        {"name": names, "bucket": buckets},
+        schema={"name": pl.String, "bucket": pl.String},
+    )
+    for bucket, n in ordered_counts(frame, "bucket").iter_rows():
+        bucket = unwire(bucket)
+        if bucket in kept_counts:
+            kept_counts[bucket] += n
+    named = frame.filter(pl.col("name").is_not_null())
+    if named.height:
+        for name, bucket, n in ordered_counts(named, ["name", "bucket"]).iter_rows():
+            row = kept_per_scanner[unwire(name)]
+            bucket = unwire(bucket)
+            if bucket in row:
+                row[bucket] += n
 
 
 def _seed_scanners_the_sarif_never_named(
@@ -479,6 +517,10 @@ def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
             kept_counts = dict.fromkeys(_SEVERITY_KEYS, 0)
             # A workspace document's per-project gates; empty for a single scan.
             projects = _workspace_project_gates(filtered_results["raw_results"])
+            # One entry per kept result, across runs: its bucket, and the name
+            # of the scanner it names (None for an unnamed one), both wired.
+            kept_buckets: List[str] = []
+            kept_names: List[Optional[str]] = []
             for run in sarif["runs"]:
                 if "results" in run and run["results"]:
                     saw_a_result = True
@@ -494,12 +536,9 @@ def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
                         if _actionable_in_view(r, thresholds, projects)
                     ]
                     for r in run["results"]:
-                        bucket = _get_finding_severity(r).lower()
-                        if bucket in kept_counts:
-                            kept_counts[bucket] += 1
-                        name = _sarif_scanner_name(r)
-                        if name is not None and bucket in kept_per_scanner[name]:
-                            kept_per_scanner[name][bucket] += 1
+                        kept_buckets.append(wire(_get_finding_severity(r).lower()))
+                        kept_names.append(wire(_sarif_scanner_name(r)))
+            _fold_kept_results(kept_buckets, kept_names, kept_counts, kept_per_scanner)
             # The SARIF is the one document that holds every finding, so a
             # scanner that ran (PASSED or FAILED) and that it never names has
             # none: nothing kept, actionable 0, which is known. Left unnamed,
@@ -1131,19 +1170,27 @@ def _stats_of_sarif(
     counts = dict.fromkeys(_SEVERITY_KEYS, 0)
     total = 0
     actionable: Optional[int] = 0 if isinstance(thresholds, dict) else None
+    # The kind of every result, wired: "suppressed" or its severity bucket.
+    kinds: List[str] = []
     for run in sarif.get("runs") or []:
         for result in (run.get("results") or []) if isinstance(run, dict) else []:
             if is_result_suppressed(result):
-                counts["suppressed"] += 1
+                kinds.append("suppressed")
                 continue
             total += 1
-            bucket = _get_finding_severity(result).lower()
-            if bucket in counts:
-                counts[bucket] += 1
+            kinds.append(wire(_get_finding_severity(result).lower()))
             if actionable is not None and _actionable_in_view(
                 result, thresholds, projects
             ):
                 actionable += 1
+    if kinds:
+        import polars as pl
+
+        frame = pl.DataFrame({"kind": kinds}, schema={"kind": pl.String})
+        for kind, n in ordered_counts(frame, "kind").iter_rows():
+            kind = unwire(kind)
+            if kind in counts:
+                counts[kind] += n
     return {
         "severity_counts": counts,
         "total": total,
