@@ -174,6 +174,50 @@
       ],
       "source": "https://raw.githubusercontent.com/actions/upload-artifact/cf430e030ddbb5b0abf93d22962f4752f3646cd9/action.yml"
     },
+    "astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d": {
+      "inputs": [
+        "activate-environment",
+        "add-problem-matchers",
+        "cache-dependency-glob",
+        "cache-local-path",
+        "cache-python",
+        "cache-suffix",
+        "checksum",
+        "download-from-astral-mirror",
+        "enable-cache",
+        "github-token",
+        "ignore-empty-workdir",
+        "ignore-nothing-to-cache",
+        "manifest-file",
+        "no-project",
+        "prune-cache",
+        "python-arch",
+        "python-version",
+        "quiet",
+        "require-checksums",
+        "resolution-strategy",
+        "restore-cache",
+        "save-cache",
+        "tool-bin-dir",
+        "tool-dir",
+        "venv-path",
+        "version",
+        "version-file",
+        "working-directory"
+      ],
+      "outputs": [
+        "cache-hit",
+        "cache-key",
+        "python-cache-hit",
+        "python-runtime-id",
+        "python-version",
+        "uv-path",
+        "uv-version",
+        "uvx-path",
+        "venv"
+      ],
+      "source": "https://raw.githubusercontent.com/astral-sh/setup-uv/1db35dd8eee11c5894872e0b383ae6c406cf738d/action.yml"
+    },
     "astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78": {
       "inputs": [
         "activate-environment",
@@ -211,49 +255,6 @@
         "venv"
       ],
       "source": "https://raw.githubusercontent.com/astral-sh/setup-uv/37802adc94f370d6bfd71619e3f0bf239e1f3b78/action.yml"
-    },
-    "astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2": {
-      "inputs": [
-        "activate-environment",
-        "add-problem-matchers",
-        "cache-dependency-glob",
-        "cache-local-path",
-        "cache-python",
-        "cache-suffix",
-        "checksum",
-        "download-from-astral-mirror",
-        "enable-cache",
-        "github-token",
-        "ignore-empty-workdir",
-        "ignore-nothing-to-cache",
-        "manifest-file",
-        "no-project",
-        "prune-cache",
-        "python-arch",
-        "python-version",
-        "quiet",
-        "resolution-strategy",
-        "restore-cache",
-        "save-cache",
-        "tool-bin-dir",
-        "tool-dir",
-        "venv-path",
-        "version",
-        "version-file",
-        "working-directory"
-      ],
-      "outputs": [
-        "cache-hit",
-        "cache-key",
-        "python-cache-hit",
-        "python-runtime-id",
-        "python-version",
-        "uv-path",
-        "uv-version",
-        "uvx-path",
-        "venv"
-      ],
-      "source": "https://raw.githubusercontent.com/astral-sh/setup-uv/68559e99cc807c1eb7e9238fd43a15bba460eec2/action.yml"
     },
     "astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7": {
       "inputs": [
