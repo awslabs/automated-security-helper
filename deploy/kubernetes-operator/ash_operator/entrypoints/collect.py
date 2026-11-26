@@ -236,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "merge_argv",
         nargs=argparse.REMAINDER,
-        help="the ashx merge argv, after --; --results flags are appended by this script",
+        help="the ashx results merge argv, after --; --results flags are appended by this script",
     )
     args = parser.parse_args(argv)
 
@@ -339,7 +339,7 @@ def main(argv: list[str] | None = None) -> int:
     # ── 3. merge. This exit code is the verdict. ─────────────────────────────
     merge_argv = [arg for arg in args.merge_argv if arg != "--"]
     if not merge_argv:
-        raise SystemExit("no ashx merge argv was supplied after --")
+        raise SystemExit("no ashx results merge argv was supplied after --")
     full_argv = list(merge_argv)
     for directory in results_dirs:
         full_argv += ["--results", directory]
@@ -352,9 +352,9 @@ def main(argv: list[str] | None = None) -> int:
     if not merged_path.is_file():
         summary["phase"] = PHASE_REFUSED
         summary["refusal"] = (
-            f"ashx merge exited {completed.returncode} and wrote no {RESULTS_FILENAME}. "
-            f"Its exit code alone cannot distinguish a refused coverage check from "
-            f"findings, so the missing file is what this reports."
+            f"ashx results merge exited {completed.returncode} and wrote no "
+            f"{RESULTS_FILENAME}. Its exit code alone cannot distinguish a refused "
+            f"coverage check from findings, so the missing file is what this reports."
         )
         write_termination_message(args.termination_message_path, summary)
         return 1
@@ -381,8 +381,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     if summary["phase"] == PHASE_REFUSED:
         summary["refusal"] = (
-            f"ashx merge exited {completed.returncode} and wrote a merged report, but "
-            f"the report names no coverage gap (coverage assessed from "
+            f"ashx results merge exited {completed.returncode} and wrote a merged "
+            f"report, but the report names no coverage gap (coverage assessed from "
             f"{coverage['source']}: complete={coverage['complete']}). Exit 1 without a "
             f"gap is ASH's 'error during execution', so this run has no answer to "
             f"report; the collector pod's log has ASH's error."

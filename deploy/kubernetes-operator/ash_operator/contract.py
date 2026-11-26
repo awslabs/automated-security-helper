@@ -256,7 +256,7 @@ def build_merge_argv(
     if results_dirs is not None:
         if not results_dirs:
             raise ContractError(
-                "ashx merge over an empty result set would exit 0, and an empty "
+                "ashx results merge over an empty result set would exit 0, and an empty "
                 "report is indistinguishable from a clean scan. Refuse before "
                 "merging."
             )

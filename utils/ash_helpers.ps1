@@ -137,13 +137,13 @@ function Invoke-ASH {
     .PARAMETER RemainingAshArgs
     Arguments after Invoke-ASH's own parameters, handled like those in -AshArgs. Each
     is passed to ASH as one argument. The first of them is -SourceDir, which takes
-    position 0, unless -SourceDir is given: `Invoke-ASH report` takes report as
-    -SourceDir, so it scans a directory named report, and is refused with 5 when
-    there is none. `Invoke-ASH -SourceDir . report` runs `ash report`. PowerShell reads
-    them before Invoke-ASH does: a comma list such as `sarif,html` is rejoined with
-    commas, but a bare `-c` is an ambiguous prefix of -Config, -ContainerUID, and
-    -ContainerGID and is refused by PowerShell, so write it as '-c' or put it in
-    -AshArgs.
+    position 0, unless -SourceDir is given: `Invoke-ASH results` takes results as
+    -SourceDir, so it scans a directory named results, and is refused with 5 when
+    there is none. `Invoke-ASH -SourceDir . results report` runs
+    `ash results report`. PowerShell reads them before Invoke-ASH does: a comma list
+    such as `sarif,html` is rejoined with commas, but a bare `-c` is an ambiguous
+    prefix of -Config, -ContainerUID, and -ContainerGID and is refused by PowerShell,
+    so write it as '-c' or put it in -AshArgs.
 
     .PARAMETER OCIRunner
     Preferred OCI runner CLI tool to use, e.g. `docker`, `finch`, `nerdctl`, or `podman`.

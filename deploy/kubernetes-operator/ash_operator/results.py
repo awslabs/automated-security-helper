@@ -174,7 +174,7 @@ def status_from_summary(summary: CollectorSummary, *, expected_shard_count: int)
             "no shard recorded candidate_scanners, or the shards did not agree on it. "
             "That field is the only check that can see a coverage hole where two "
             "executors partitioned different scanner sets without overlapping, and "
-            "`ashx merge` does not refuse when it is absent from every shard -- it "
+            "`ashx results merge` does not refuse when it is absent from every shard -- it "
             "skips the union check and merges. So a scanner may have run nowhere and "
             "the report would read as a complete scan. Most likely cause: spec.image "
             "is an ASH build that predates ShardAssignment stamping.",
