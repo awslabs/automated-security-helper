@@ -34,17 +34,30 @@
 #   check is gated on the recorded span still being one of the symbol's spans,
 #   so later edits to a listed file relax that entry's check instead of
 #   failing it; `span_at_migration` records the verification at the migration
-#   tip (origin/main b7b85bad79561524ea931ec9374b30a71dc805fb).
+#   tip (origin/main b7b85bad79561524ea931ec9374b30a71dc805fb), except on a
+#   row that carries `span_measured_at`, which names the commit that row's span
+#   (and `flagged_line`) were measured at instead.
 # - scripts/verify_symbol_suppressions_extra.py (the CI control, run by the
 #   symbols-extra-control job in .github/workflows/ash-repo-scan.yml) reads the
 #   `symbol` rows of this record and builds a suppression from each row's
 #   rule_id, path and symbol (it does not read the two configs). Without the
-#   `symbols` extra every row, probed at the line its old pin named, must match
-#   nothing, and the same row with its symbol removed must match (so only the
-#   symbol clause rejects it); with the extra, every row probed at the first
-#   line of its symbol's current definition must match. Rows marked
-#   `old_pin_stale_at_migration` have an old line outside their definition,
-#   which is why the fail-closed probe needs that second, symbol-less check.
+#   `symbols` extra every row, probed at a line known to sit inside its
+#   definition (its `flagged_line`, else its `old_line_start`, which must lie
+#   inside `span_at_migration` or the row is refused), must match nothing, and
+#   the same row with its symbol removed must match (so only the symbol clause
+#   rejects it); with the extra, every row probed at the first line of its
+#   symbol's current definition must match.
+# - Rows marked `old_pin_stale_at_migration` have an old line outside their
+#   definition, so they also carry `flagged_line`: the line their flagged code
+#   really sits on, inside `span_at_migration`, measured in the same tree as
+#   that span. The CI control probes there, and the per-entry oracle and the
+#   innermost-definition check hold that line, not the stale one, inside the
+#   span.
+# - `kept` lists the line pins that stayed, by rule, path and lines. The
+#   agreement test requires each one to be a line pin in the config it names, so
+#   a pin that moved (or a path that was renamed) fails there until the row is
+#   re-measured; a row that was re-measured against a later commit than the
+#   migration says so in `remeasured_at`.
 #
 # Maintenance
 # -----------
@@ -55,7 +68,7 @@
 # the CI control reads only this record. Give it `old_line_start` and
 # `old_line_end` (the line of the finding it covers) and `span_at_migration`.
 entries:
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: tests/integration/scanners/test_trivy_real_binary.py
   old_line_start: 738
@@ -64,82 +77,82 @@ entries:
   span_at_migration:
   - 724
   - 776
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: HIPAA.Security-IAMNoInlinePolicy
   path: deploy/cdk/templates/AshCodeCommitGate.template.json
   old_line_start: 1323
   old_line_end: 1323
   resource_id: '*/ScanFunctionRoleEc2Access99A7E33E'
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: NIST.800.53.R4-IAMNoInlinePolicy
   path: deploy/cdk/templates/AshCodeCommitGate.template.json
   old_line_start: 1323
   old_line_end: 1323
   resource_id: '*/ScanFunctionRoleEc2Access99A7E33E'
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: NIST.800.53.R5-IAMNoInlinePolicy
   path: deploy/cdk/templates/AshCodeCommitGate.template.json
   old_line_start: 1323
   old_line_end: 1323
   resource_id: '*/ScanFunctionRoleEc2Access99A7E33E'
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: PCI.DSS.321-IAMNoInlinePolicy
   path: deploy/cdk/templates/AshCodeCommitGate.template.json
   old_line_start: 1323
   old_line_end: 1323
   resource_id: '*/ScanFunctionRoleEc2Access99A7E33E'
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: F3031
   path: deploy/cdk/templates/AshCodeCommitGate.template.json
   old_line_start: 1202
   old_line_end: 1202
   resource_id: '*/ScanFunction322CD7EE'
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-process-download-exec
   path: automated_security_helper/assets/install-pinned-tool.py
-  old_line_start: 1030
-  old_line_end: 1030
+  old_line_start: 1041
+  old_line_end: 1041
   symbol: uv_tool_dir
   span_at_migration:
-  - 1017
-  - 1045
-- config: .ash/.ash.yaml
+  - 1028
+  - 1056
+- config: .ash.yaml
   rule_id: threat-process-download-exec
   path: automated_security_helper/assets/install-pinned-tool.py
-  old_line_start: 1518
-  old_line_end: 1518
+  old_line_start: 1529
+  old_line_end: 1529
   symbol: version_output
   span_at_migration:
-  - 1500
-  - 1528
-- config: .ash/.ash.yaml
+  - 1511
+  - 1539
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/cli/mcp/source_delivery.py
-  old_line_start: 2501
-  old_line_end: 2501
+  old_line_start: 2573
+  old_line_end: 2573
   symbol: _validate_zip_member
   span_at_migration:
-  - 2496
-  - 2524
-- config: .ash/.ash.yaml
+  - 2568
+  - 2596
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/utils/path_matching.py
-  old_line_start: 268
-  old_line_end: 268
+  old_line_start: 317
+  old_line_end: 317
   symbol: ignore_path_pattern
   span_at_migration:
-  - 255
-  - 288
-- config: .ash/.ash.yaml
+  - 304
+  - 339
+- config: .ash.yaml
   rule_id: threat-process-download-exec
   path: automated_security_helper/assets/install-pinned-tool.py
-  old_line_start: 1612
-  old_line_end: 1612
+  old_line_start: 1623
+  old_line_end: 1623
   symbol: _uv_tool_dir
   span_at_migration:
-  - 1606
-  - 1622
-- config: .ash/.ash.yaml
+  - 1617
+  - 1633
+- config: .ash.yaml
   rule_id: threat-process-download-exec
   path: automated_security_helper/utils/python_installer.py
   old_line_start: 116
@@ -148,7 +161,7 @@ entries:
   span_at_migration:
   - 106
   - 156
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/interactions/run_ash_container.py
   old_line_start: 4361
@@ -157,25 +170,25 @@ entries:
   span_at_migration:
   - 4300
   - 4405
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-filesystem-destruction
   path: tests/snapshot/test_snapshot_normalizer.py
-  old_line_start: 266
-  old_line_end: 266
+  old_line_start: 294
+  old_line_end: 294
   symbol: TestSurvives.test_panel_width_on_a_masked_line
   span_at_migration:
-  - 262
-  - 270
-- config: .ash/.ash.yaml
+  - 290
+  - 298
+- config: .ash.yaml
   rule_id: threat-filesystem-destruction
   path: tests/snapshot/test_snapshot_normalizer.py
-  old_line_start: 274
-  old_line_end: 274
+  old_line_start: 302
+  old_line_end: 302
   symbol: TestSurvives.test_markdown_table_padding_after_a_masked_value
   span_at_migration:
-  - 272
-  - 275
-- config: .ash/.ash.yaml
+  - 300
+  - 303
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: tests/unit/test_artifact_contents_gate.py
   old_line_start: 784
@@ -184,16 +197,16 @@ entries:
   span_at_migration:
   - 780
   - 806
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: tests/unit/test_artifact_contents_gate.py
-  old_line_start: 1471
-  old_line_end: 1471
+  old_line_start: 1477
+  old_line_end: 1477
   symbol: TestArchiveReading.test_an_escaping_symlink_in_a_real_tar_fails_the_gate
   span_at_migration:
-  - 1451
-  - 1476
-- config: .ash/.ash.yaml
+  - 1457
+  - 1482
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: tests/unit/test_defense_in_depth.py
   old_line_start: 406
@@ -202,16 +215,16 @@ entries:
   span_at_migration:
   - 395
   - 412
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: tests/unit/test_pinned_tool_version_check.py
-  old_line_start: 1175
-  old_line_end: 1175
+  old_line_start: 1178
+  old_line_end: 1178
   symbol: TestOnlyAllowlistedHttpsUrlsAreFetched.test_a_url_outside_the_allowlist_is_refused_unopened
   span_at_migration:
-  - 1172
-  - 1194
-- config: .ash/.ash.yaml
+  - 1175
+  - 1197
+- config: .ash.yaml
   rule_id: threat-runtime-obfuscation-base64exec
   path: tests/unit/utils/test_opengrep_pinned_download.py
   old_line_start: 613
@@ -220,25 +233,25 @@ entries:
   span_at_migration:
   - 608
   - 613
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-  old_line_start: 787
-  old_line_end: 787
+  old_line_start: 816
+  old_line_end: 816
   symbol: NpmAuditScanner._probe_npm_version
   span_at_migration:
-  - 786
-  - 824
-- config: .ash/.ash.yaml
+  - 815
+  - 853
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-  old_line_start: 789
-  old_line_end: 789
+  old_line_start: 818
+  old_line_end: 818
   symbol: NpmAuditScanner._probe_npm_version
   span_at_migration:
-  - 786
-  - 824
-- config: .ash/.ash.yaml
+  - 815
+  - 853
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/utils/package_manager_child.py
   old_line_start: 304
@@ -247,7 +260,7 @@ entries:
   span_at_migration:
   - 295
   - 313
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/utils/package_manager_child.py
   old_line_start: 319
@@ -256,7 +269,7 @@ entries:
   span_at_migration:
   - 316
   - 342
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/utils/package_manager_child.py
   old_line_start: 359
@@ -265,7 +278,7 @@ entries:
   span_at_migration:
   - 349
   - 386
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/utils/package_manager_child.py
   old_line_start: 420
@@ -274,7 +287,7 @@ entries:
   span_at_migration:
   - 415
   - 492
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/utils/package_manager_child.py
   old_line_start: 436
@@ -283,7 +296,7 @@ entries:
   span_at_migration:
   - 415
   - 492
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/utils/package_manager_child.py
   old_line_start: 574
@@ -292,7 +305,7 @@ entries:
   span_at_migration:
   - 568
   - 639
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: B604
   path: automated_security_helper/cli/dependencies.py
   old_line_start: 1785
@@ -303,11 +316,17 @@ entries:
   # shell=True call anywhere in the install loop. The call that forwards the
   # declared shell flag now lives in its own helper, and the entry names that.
   old_pin_stale_at_migration: true
+  # This row's span and flagged_line were re-measured in one read of main
+  # e19cc22a5d6 (the span first recorded here, 972-979, came from a later
+  # snapshot than the migration tip the header names); the old pin above is in
+  # the migration tip's numbering and is not compared with either.
+  span_measured_at: e19cc22a5d6
+  flagged_line: 989
   symbol: _run_declared_install_command
   span_at_migration:
-  - 972
-  - 979
-- config: .ash/.ash.yaml
+  - 982
+  - 989
+- config: .ash.yaml
   rule_id: B608
   path: automated_security_helper/utils/content_db_refresh.py
   old_line_start: 837
@@ -316,16 +335,16 @@ entries:
   span_at_migration:
   - 827
   - 843
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: SECRET-BASIC-AUTH-CREDENTIALS
   path: automated_security_helper/interactions/run_ash_nix.py
-  old_line_start: 198
-  old_line_end: 198
+  old_line_start: 199
+  old_line_end: 199
   symbol: shown_flake_ref
   span_at_migration:
-  - 197
-  - 209
-- config: .ash/.ash.yaml
+  - 198
+  - 210
+- config: .ash.yaml
   rule_id: SECRET-BASIC-AUTH-CREDENTIALS
   path: automated_security_helper/utils/secret_masking.py
   old_line_start: 2261
@@ -334,7 +353,7 @@ entries:
   span_at_migration:
   - 2253
   - 2285
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: SECRET-BASIC-AUTH-CREDENTIALS
   path: automated_security_helper/utils/secret_masking.py
   old_line_start: 2960
@@ -343,7 +362,7 @@ entries:
   span_at_migration:
   - 2960
   - 2963
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: SECRET-SECRET-KEYWORD
   path: automated_security_helper/utils/detect_secrets_worker.py
   old_line_start: 138
@@ -352,33 +371,42 @@ entries:
   span_at_migration:
   - 132
   - 147
+- config: .ash.yaml
+  rule_id: B104
+  path: automated_security_helper/cli/mcp/__init__.py
+  old_line_start: 953
+  old_line_end: 953
+  symbol: _log_where_the_server_listens
+  span_at_migration:
+  - 934
+  - 965
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: B104
   path: automated_security_helper/cli/mcp/__init__.py
-  old_line_start: 930
-  old_line_end: 930
+  old_line_start: 940
+  old_line_end: 940
   symbol: _log_where_the_server_listens
   span_at_migration:
-  - 924
-  - 955
+  - 934
+  - 965
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/cli/mcp/source_delivery.py
-  old_line_start: 2501
-  old_line_end: 2501
+  old_line_start: 2573
+  old_line_end: 2573
   symbol: _validate_zip_member
   span_at_migration:
-  - 2496
-  - 2524
+  - 2568
+  - 2596
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/utils/path_matching.py
-  old_line_start: 268
-  old_line_end: 268
+  old_line_start: 317
+  old_line_end: 317
   symbol: ignore_path_pattern
   span_at_migration:
-  - 255
-  - 288
+  - 304
+  - 339
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: tests/unit/utils/test_secret_masking_shapes_in_text.py
@@ -409,30 +437,30 @@ entries:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-process-download-exec
   path: automated_security_helper/assets/install-pinned-tool.py
-  old_line_start: 1030
-  old_line_end: 1030
+  old_line_start: 1041
+  old_line_end: 1041
   symbol: uv_tool_dir
   span_at_migration:
-  - 1017
-  - 1045
+  - 1028
+  - 1056
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-process-download-exec
   path: automated_security_helper/assets/install-pinned-tool.py
-  old_line_start: 1518
-  old_line_end: 1518
+  old_line_start: 1529
+  old_line_end: 1529
   symbol: version_output
   span_at_migration:
-  - 1500
-  - 1528
+  - 1511
+  - 1539
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-process-download-exec
   path: automated_security_helper/assets/install-pinned-tool.py
-  old_line_start: 1612
-  old_line_end: 1612
+  old_line_start: 1623
+  old_line_end: 1623
   symbol: _uv_tool_dir
   span_at_migration:
-  - 1606
-  - 1622
+  - 1617
+  - 1633
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-process-download-exec
   path: automated_security_helper/utils/python_installer.py
@@ -454,21 +482,21 @@ entries:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-  old_line_start: 787
-  old_line_end: 787
+  old_line_start: 816
+  old_line_end: 816
   symbol: NpmAuditScanner._probe_npm_version
   span_at_migration:
-  - 786
-  - 824
+  - 815
+  - 853
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-  old_line_start: 789
-  old_line_end: 789
+  old_line_start: 818
+  old_line_end: 818
   symbol: NpmAuditScanner._probe_npm_version
   span_at_migration:
-  - 786
-  - 824
+  - 815
+  - 853
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/utils/package_manager_child.py
@@ -524,7 +552,7 @@ entries:
   - 568
   - 639
 kept:
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/utils/package_manager_child.py
   line_start: 1186
@@ -536,88 +564,92 @@ kept:
   line_start: 1186
   line_end: 1186
   kept_because: 'high-signal rule over a 99-line definition: a symbol would also suppress a real file read added anywhere in package_manager_child; one flagged string, so the line pin stays (the GuardDog pin test ties it to its text)'
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: SECRET-SECRET-KEYWORD
   path: automated_security_helper/utils/redacted_model.py
   line_start: 298
   line_end: 299
   kept_because: module-level code; the Python grammar addresses class and function definitions only
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: SECRET-SECRET-KEYWORD
   path: automated_security_helper/utils/scanner_tool_types.py
   line_start: 34
   line_end: 34
   kept_because: module-level code; the Python grammar addresses class and function definitions only
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: SECRET-SECRET-KEYWORD
   path: automated_security_helper/utils/scanner_names.py
   line_start: 133
   line_end: 133
   kept_because: module-level code; the Python grammar addresses class and function definitions only
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-runtime-environment-read
   path: deploy/cdk/lib/ash-container-scripts.ts
   line_start: 559
   line_end: 559
   kept_because: 'no enclosing named definition: the pinned line sits in a template-literal string or an
     anonymous callback, which the TypeScript grammar does not name'
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-filesystem-destruction
   path: deploy/cdk-constructs/test/ash-scan-step.test.ts
   line_start: 367
   line_end: 367
   kept_because: 'no enclosing named definition: the pinned line sits in a template-literal string or an
     anonymous callback, which the TypeScript grammar does not name'
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: deploy/cdk-constructs/test/ash-scan-step.test.ts
   line_start: 362
   line_end: 362
   kept_because: 'no enclosing named definition: the pinned line sits in a template-literal string or an
     anonymous callback, which the TypeScript grammar does not name'
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-  line_start: 141
-  line_end: 141
+  line_start: 145
+  line_end: 145
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-  line_start: 144
-  line_end: 144
+  line_start: 148
+  line_end: 148
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-  line_start: 171
-  line_end: 171
+  line_start: 175
+  line_end: 175
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/utils/package_manager_child.py
   line_start: 62
   line_end: 62
   kept_because: module-level code; the Python grammar addresses class and function definitions only
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: threat-filesystem-read
   path: scripts/generate_plugin_data_partial.py
-  line_start: 185
-  line_end: 185
+  line_start: 187
+  line_end: 187
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: B104
   path: automated_security_helper/utils/secret_masking.py
   line_start: 458
   line_end: 458
   kept_because: module-level code; the Python grammar addresses class and function definitions only
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: SECRET-BASIC-AUTH-CREDENTIALS
   path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
   line_start: 155
   line_end: 155
   kept_because: module-level code; the Python grammar addresses class and function definitions only
-- config: .ash/.ash.yaml
+- config: .ash.yaml
   rule_id: SECRET-SECRET-KEYWORD
   path: automated_security_helper/plugin_modules/ash_builtin/reporters/gitlab_sast_reporter.py
   line_start: 50
@@ -626,20 +658,25 @@ kept:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: automated_security_helper/config/tool_config_trust.py
-  line_start: 122
-  line_end: 122
-  kept_because: module-level code; the Python grammar addresses class and function definitions only
+  line_start: 139
+  line_end: 139
+  remeasured_at: e19cc22a5d6
+  kept_because: module-level code; the Python grammar addresses class and function definitions only.
+    The migration kept two pins here (lines 116 and 122); the config now carries one, the
+    detect-secrets baseline_file row, so this row replaces both
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: Dockerfile
-  line_start: 812
-  line_end: 814
+  line_start: 823
+  line_end: 825
+  remeasured_at: e19cc22a5d6
   kept_because: no symbol grammar for this file type
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: automated_security_helper/assets/Dockerfile
-  line_start: 812
-  line_end: 814
+  line_start: 823
+  line_end: 825
+  remeasured_at: e19cc22a5d6
   kept_because: no symbol grammar for this file type
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
@@ -657,12 +694,6 @@ kept:
     coverage would widen against the entry's recorded one-line intent
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
-  path: automated_security_helper/config/tool_config_trust.py
-  line_start: 116
-  line_end: 116
-  kept_because: module-level code; the Python grammar addresses class and function definitions only
-- config: .ash/.ash_alpha_plugins.yaml
-  rule_id: API_KEY_OR_SECRET
   path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret-config.yaml
   line_start: 325
   line_end: 325
@@ -675,18 +706,22 @@ kept:
   kept_because: no symbol grammar for this file type
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
-  path: .ash/.ash.yaml
-  line_start: 1050
-  line_end: 1050
-  kept_because: no symbol grammar for this file type; re-pinned by this migration because the target file's
-    lines moved
+  path: .ash.yaml
+  line_start: 774
+  line_end: 774
+  remeasured_at: e19cc22a5d6
+  kept_because: no symbol grammar for this file type; the target file is now the root .ash.yaml (it was
+    .ash/.ash.yaml, where this pin sat at line 1050), and its lines moved again, so the pin was
+    re-measured at main e19cc22a5d6
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
-  path: .ash/.ash.yaml
-  line_start: 1297
-  line_end: 1297
-  kept_because: no symbol grammar for this file type; re-pinned by this migration because the target file's
-    lines moved
+  path: .ash.yaml
+  line_start: 1021
+  line_end: 1021
+  remeasured_at: e19cc22a5d6
+  kept_because: no symbol grammar for this file type; the target file is now the root .ash.yaml (it was
+    .ash/.ash.yaml, where this pin sat at line 1297), and its lines moved again, so the pin was
+    re-measured at main e19cc22a5d6
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: .github/workflows/ash-repo-docs.yml
@@ -703,14 +738,16 @@ kept:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: automated_security_helper/utils/tool_downloads.py
-  line_start: 398
-  line_end: 538
+  line_start: 388
+  line_end: 528
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: automated_security_helper/utils/tool_downloads.py
-  line_start: 1012
-  line_end: 1057
+  line_start: 1002
+  line_end: 1047
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: B311
@@ -734,20 +771,23 @@ kept:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-  line_start: 141
-  line_end: 141
+  line_start: 145
+  line_end: 145
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-  line_start: 144
-  line_end: 144
+  line_start: 148
+  line_end: 148
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-  line_start: 171
-  line_end: 171
+  line_start: 175
+  line_end: 175
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
@@ -758,6 +798,7 @@ kept:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: scripts/generate_plugin_data_partial.py
-  line_start: 185
-  line_end: 185
+  line_start: 187
+  line_end: 187
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only

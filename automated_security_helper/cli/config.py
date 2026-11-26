@@ -65,6 +65,7 @@ from automated_security_helper.config.config_sources import (
     discover_config_source,
     is_config_parse_error,
     is_json_file,
+    is_pyproject,
     is_regular_file,
     is_toml_file,
     parse_config_text,
@@ -739,7 +740,9 @@ def _print_invalid_config(
     if not messages:
         if isinstance(error, ValidationError):
             # Not one resolve_config raises; formatted without its inputs.
-            messages = [ConfigValidator.format_model_error(e) for e in error.errors()]
+            messages = [
+                ConfigValidator.format_model_error(dict(e)) for e in error.errors()
+            ]
         else:
             messages = [str(error)]
             # The ASH_CONFIG file's parse refusal, printed as the scan prints it.
@@ -858,8 +861,10 @@ def _new_source_refusal(search_dir: Path, target: Path) -> str | None:
 
     Configuration sources are never merged (config/config_sources.py): with a
     second one beside an existing source, one of the two files is not read,
-    and which one depends on the precedence of their names. The older names
-    win, so a new `.ashrc.yaml` next to `.ash/.ash.yaml` would be ignored.
+    and which one depends on the precedence of their names. The canonical
+    `.ash.yaml` is read before every other source, so a new one next to a
+    legacy `.ash/.ash.yaml` would leave the legacy file unread, and a new
+    file anywhere else would be the one left unread.
     """
     try:
         discovery = discover_config_source(search_dir)
@@ -874,11 +879,21 @@ def _new_source_refusal(search_dir: Path, target: Path) -> str | None:
     selected = discovery.selected
     if selected is None or selected.path.absolute() == wanted:
         return None
+    if is_pyproject(selected.path):
+        advice = (
+            f"Edit {selected.label}, or pass --config to write the new file "
+            "somewhere else"
+        )
+    else:
+        advice = (
+            f"Move {selected.label} to {target} (the canonical config file), "
+            f"edit {selected.label} in place, or pass --config to write the "
+            "new file somewhere else"
+        )
     return (
         f"ASH already reads its configuration from {selected.label}, and "
         f"configuration sources are never merged, so a new {target} here "
-        f"would leave one of the two files unread. Edit {selected.label}, or "
-        "pass --config to write the new file somewhere else"
+        f"would leave one of the two files unread. {advice}"
     )
 
 
@@ -1119,7 +1134,7 @@ def init(
         typer.Option(
             "--config",
             "-c",
-            help=f"Where to write the new config file. By default {ASH_DEFAULT_CONFIG_FILE_NAME} in the current directory, a name a scan of that directory reads. Discovery reads these names: {ASH_CONFIG_SOURCES_DESCRIPTION}. Can also be set with the ASH_CONFIG environment variable.",
+            help=f"Where to write the new config file. By default {ASH_DEFAULT_CONFIG_FILE_NAME} in the current directory, the canonical config file a scan of that directory reads first. Discovery reads these names: {ASH_CONFIG_SOURCES_DESCRIPTION}. Can also be set with the ASH_CONFIG environment variable.",
             envvar="ASH_CONFIG",
         ),
     ] = None,
@@ -1139,10 +1154,10 @@ def init(
 ):
     """Create a configuration file with every setting at its default.
 
-    Without --config, writes .ashrc.yaml in the current directory, and refuses
-    when the directory already has a config source (.ash/.ash.yaml, an ashrc
-    file, or the tool.ash table of pyproject.toml), since sources are never
-    merged.
+    Without --config, writes .ash.yaml, the canonical config file, in the
+    current directory, and refuses when the directory already has a config
+    source (a legacy name such as .ash/.ash.yaml, an ashrc file, or the tool.ash
+    table of pyproject.toml), since sources are never merged.
     """
     get_logger(
         level=(logging.DEBUG if debug else 15 if verbose else logging.INFO),
@@ -1530,8 +1545,17 @@ def update(
     if not _config_name_exists(config_path):
         _refuse_missing_config(config_path)
 
+    _update_config_file(Path(config_path), modifications, dry_run, logger)
+
+
+def _update_config_file(
+    config_path: Path,
+    modifications: List[str],
+    dry_run: bool,
+    logger: logging.Logger,
+) -> None:
+    """Apply --set modifications to the named config file (the update body)."""
     # Load the existing config
-    config_path = Path(config_path)
     _refuse_unless_a_file(config_path)
     # The file's bytes as the refusal checks below are about to read them. The
     # checks (TOML, environment references, extends) and the load each open the
@@ -1855,7 +1879,7 @@ def lint(
         ),
     ] = None,
     output_dir: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--output-dir",
             "-o",
@@ -2554,7 +2578,8 @@ def wizard(
     Reads the existing config (the one a scan of --source-dir, or the current
     directory, would use, or --config), walks through scanner, reporter,
     offline-mode, and alpha-plugin settings interactively, then writes the
-    result back. With no config yet, it creates .ashrc.yaml there.
+    result back. With no config yet, it creates .ash.yaml, the canonical
+    config file, there.
     """
     get_logger(
         level=(logging.DEBUG if debug else 15 if verbose else logging.INFO),

@@ -22,6 +22,7 @@ import tarfile
 from typing import (
     Annotated,
     Any,
+    IO,
     BinaryIO,
     Callable,
     Dict,
@@ -30,8 +31,10 @@ from typing import (
     List,
     Literal,
     Optional,
+    Sequence,
     Set,
     Tuple,
+    cast,
 )
 import zipfile
 import zlib
@@ -210,12 +213,10 @@ SCANNABLE_MEMBER_SUFFIXES = frozenset(
 
 #: The options of ArchiveConverterConfigOptions that bound what extracting an archive
 #: can write. A config file inside the scanned tree can lower them but not raise
-#: them; see config/archive_limits.py.
-EXTRACTION_LIMIT_OPTIONS = (
-    "max_members",
-    "max_member_bytes",
-    "max_total_bytes",
-    "max_compression_ratio",
+#: them; see config/archive_limits.py. Declared in base/extraction_limits.py (the
+#: config layer reads the names and cannot import this module).
+from automated_security_helper.base.extraction_limits import (  # noqa: E402
+    EXTRACTION_LIMIT_OPTIONS as EXTRACTION_LIMIT_OPTIONS,
 )
 from automated_security_helper.utils.tar_listing import (
     SKIPPED_BYTES_LIMIT,
@@ -231,7 +232,7 @@ class ArchiveConverterConfigOptions(ConverterOptionsBase):
     Each is an inclusive maximum, checked against what the archive declares, for
     every member, before anything is written. An archive over any of them is not
     extracted at all. The defaults are far above an ordinary source archive. Set
-    inside the scanned tree (``.ash/.ash.yaml``), by a config an MCP client
+    inside the scanned tree (``.ash.yaml``), by a config an MCP client
     supplied, or by a workspace project's own config, a value can only lower a
     limit; raise one with ``--config-overrides`` or a config file outside the tree.
     """
@@ -1072,7 +1073,7 @@ def _is_tar_header(block: bytes, *, empty_is_tar: bool) -> bool:
         block_of = getattr(info, "_block", None)
         if block_of is not None and _tarfile_sizes(info):
             block_of(info.size)
-    except tarfile.EOFHeaderError:  # type: ignore[attr-defined]  # missing from the typeshed stub
+    except tarfile.EOFHeaderError:  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]  # missing from the typeshed stub
         return empty_is_tar
     except tarfile.HeaderError:
         return False
@@ -1403,7 +1404,7 @@ def _sparse_map_problem(member: tarfile.TarInfo) -> Optional[str]:
     return None
 
 
-def _copy_at_most(source: BinaryIO, out: BinaryIO, limit: int) -> None:
+def _copy_at_most(source: IO[bytes], out: IO[bytes], limit: int) -> None:
     """Copy from ``source`` to ``out`` until ``limit`` bytes or the end of ``source``."""
     remaining = limit
     while remaining > 0:
@@ -1440,7 +1441,7 @@ def _decompress_plain_gzip(
         # A copy that stops short of room + 1 bytes stopped because the stream
         # ended, and zlib checks the CRC and length before the stream reports
         # the end, so a damaged stream or a bad CRC has raised by then.
-        _copy_at_most(source, out, room + 1)
+        _copy_at_most(cast(BinaryIO, source), out, room + 1)
         written = out.tell()
         trailing = source.trailing or 0
     budget.admit(name, written)
@@ -1977,7 +1978,7 @@ def _windows_long_paths_enabled() -> bool:
     failing the archive."""
     try:
         # By name, so a checker on another platform meets no winreg stub.
-        winreg = importlib.import_module("winreg")
+        winreg: Any = importlib.import_module("winreg")
         with winreg.OpenKey(
             winreg.HKEY_LOCAL_MACHINE,
             r"SYSTEM\CurrentControlSet\Control\FileSystem",
@@ -2478,7 +2479,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
 
     def inspect_members(
         self,
-        members: List[str | zipfile.ZipInfo | tarfile.TarInfo],
+        members: Sequence[str | zipfile.ZipInfo | tarfile.TarInfo],
         target_path: Optional[Path] = None,
         archive: Optional[str] = None,
         ignore_paths: Optional[List[IgnorePathWithReason]] = None,
@@ -2737,7 +2738,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                             )
                         if isinstance(member, tarfile.TarInfo):
                             member.name = renamed
-                        else:
+                        elif isinstance(member, zipfile.ZipInfo):
                             member.filename = renamed
                         member_name = renamed
                         # The placement adds a directory the name as read did
@@ -3025,7 +3026,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         # not the header allowance, and a skip-free tar keeps
                         # the strict base-plus-per-member bound.
                         with open_tar_listing(
-                            tar_stream,
+                            cast(BinaryIO, tar_stream),
                             unreadable,
                             stopped,
                             budget=skipped_blocks,

@@ -93,6 +93,7 @@ from typing import (
 from urllib.parse import unquote
 
 import yaml
+from yaml.composer import ComposerError
 from pydantic import AnyUrl, Field, PrivateAttr, field_validator
 
 from automated_security_helper.base.options import (
@@ -105,6 +106,10 @@ from automated_security_helper.config.path_trust import (
 )
 from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.plugin_base import (
+    PROGRAMMING_ERRORS,
+    side_run_skip_reason,
+)
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -290,7 +295,9 @@ def cfn_lint_resources(report: Any) -> Dict[_FindingKey, Set[Optional[str]]]:
             else None
         )
         key = (rule_id, filename, *spans, message)
-        found.setdefault(key, set()).add(resource)  # type: ignore[arg-type]
+        # ``spans`` is a variable-length run of line/column numbers, which a
+        # fixed-shape key type cannot describe.
+        found.setdefault(key, set()).add(resource)  # type: ignore[arg-type]  # ty: ignore[no-matching-overload]
     return found
 
 
@@ -539,9 +546,9 @@ def _names_a_template(text: str, names: List[str]) -> bool:
     return False
 
 
-def _successful_exit(code: object) -> bool:
+def _successful_exit(code: Any) -> bool:
     try:
-        value = int(code)  # type: ignore[call-overload]
+        value = int(code)
     except (TypeError, ValueError):
         return False
     return 0 <= value <= 14 and value % 2 == 0
@@ -856,6 +863,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 python_only=True,
                 use_uv_tool=True,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="a PyPI package run through uv; platform support is the package's and was not read here",
@@ -893,7 +901,6 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 semantics="the base default {0, 1}; a run-failure probe separates a failed run from findings",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=(),
                 upstream_license=(
@@ -945,7 +952,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         For the options that decide what cfn-lint reports: ``ignore_checks`` drops
         findings before ASH sees them, so they are neither reported nor counted as
         suppressed (measured: ``ignore_checks: [E, W]`` in the scanned tree's
-        ``.ash/.ash.yaml`` turned 3 findings into a PASSED scan). A value from a
+        ``.ash.yaml`` turned 3 findings into a PASSED scan). A value from a
         config inside a git checkout or the scanned directory, or from an MCP client,
         is replaced by the operator's own value (the trusted base with the
         operator's overrides replayed, ``config_trust.operator_value``), or by
@@ -1315,7 +1322,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
 
         try:
             parsed = load_config_yaml(Path(config_file).read_text(encoding="utf-8"))
-        except yaml.composer.ComposerError as exc:
+        except ComposerError as exc:
             line = exc.problem_mark.line + 1 if exc.problem_mark else "?"
             raise ScannerError(
                 f"ASH could not read {Path(config_file).as_posix()}: {exc.problem} "
@@ -2106,6 +2113,10 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             self._attach_resources_unguarded(
                 report, arguments, batch_file, option_args, results_dir, cwd, child_env
             )
+        except PROGRAMMING_ERRORS:
+            # A defect in ASH's own code is not a condition of the second run:
+            # it surfaces instead of passing as a skipped report.
+            raise
         except Exception as error:  # noqa: BLE001 -- best-effort enrichment
             self._warn_side_report_skipped(type(error).__name__)
 
@@ -2173,11 +2184,22 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             )
             # cfn-lint exits with a bit set per finding class, so a non-zero exit
             # is expected; the report's presence is what says it ran.
-            if not isinstance(response, dict) or not json_file.is_file():
+            flagged = side_run_skip_reason(response)
+            if (
+                not isinstance(response, dict)
+                or flagged is not None
+                or not json_file.is_file()
+            ):
+                # The response's own flags first: a run stopped at its timeout
+                # or one whose tool could not be stopped has no exit code to
+                # name, and "exited None" says nothing about why.
                 self._warn_side_report_skipped(
-                    f"the second run exited {response.get('returncode')} and wrote no report"
-                    if isinstance(response, dict)
-                    else "the second run gave no response"
+                    flagged
+                    or (
+                        f"the second run exited {response.get('returncode')} and wrote no report"
+                        if isinstance(response, dict)
+                        else "the second run gave no response"
+                    )
                 )
                 return
             document = json.loads(json_file.read_text(encoding="utf-8"))
@@ -2190,7 +2212,17 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             return
         finally:
             json_file.unlink(missing_ok=True)
-        attach_cfn_lint_resources(report, cfn_lint_resources(document))
+        resources = cfn_lint_resources(document)
+        attached = attach_cfn_lint_resources(report, resources)
+        if attached == 0 and any(
+            name is not None for named in resources.values() for name in named
+        ):
+            # The JSON report named resources and none reached a result: the two
+            # reports did not line up, and nothing else in the run says why a
+            # resource-scoped suppression never matches.
+            self._warn_side_report_skipped(
+                "the report named resources and none matched a result"
+            )
 
     def _probe_run_wide_failure(
         self,

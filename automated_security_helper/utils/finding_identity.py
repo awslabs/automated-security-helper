@@ -18,9 +18,23 @@ The key of a result is:
   different machines agree. A file a converter wrote (a notebook converted to
   Python, a member extracted from an archive) is keyed by its path relative to
   the converted root, with ``"tree": "converted"``, so the key does not depend on
-  where the output directory is;
-* the package name and path, for a dependency finding (grype and npm-audit put
-  every package of a lockfile at its line 1);
+  where the output directory is. A result moved from a generated file back to the
+  original it was generated from (the MCP config converter's) is keyed by the
+  original's path, with ``"convertedFrom"`` naming the generated file, so it is not
+  the same finding as a source-tree scanner's result at that place. A finding
+  inside a container image is keyed by
+  the in-image path as the tool reports it, with ``"tree": "image"`` and an
+  ``"image"`` component: the image's sha256 digest when the scan resolved one,
+  else the locator as submitted, so two scans of one pinned image agree across
+  machines and an image finding never collides with a source finding at the same
+  path. The layer digest is deliberately not in the key (a rebuilt layer that
+  still carries the same vulnerable file at the same path is the same finding,
+  the reasoning that keeps the package version out); it travels as attribution
+  only, through the result properties named below;
+* the package name and path, for a dependency finding (the location does not
+  tell packages apart: grype puts every package of a lockfile at its line 1,
+  and npm-audit's results share the lockfile's URI, with a line only where an
+  npm lockfile names the package's entry);
 * the workspace project;
 * the result's SARIF ``fingerprints``, or failing those its ``partialFingerprints``,
   as sorted ``[key, value]`` pairs under the kind's name, so that an edit above the
@@ -70,26 +84,52 @@ the same scanner and rule that names that file by its relative path and carries
 one of its fingerprint values: the reporter counts that value as shared between
 the two, and the flattened findings do not.
 
-The same secret from more than one scanner
-------------------------------------------
+Correlation ids: the same observation from more than one scanner
+----------------------------------------------------------------
 
-The identity key starts with the scanner and the rule, so two scanners that find
-one secret give two findings with two identities, and nothing in either says they
-are about the same thing. ASH keeps both: it does not deduplicate. What it adds is
-a second key that leaves the scanner and the rule out
-(:func:`secret_location_key`): the file, the start line, the workspace project and,
-for a converted file, the tree. Findings that share it are still separate findings,
-each with its own identity; the key only lets a consumer put them side by side.
+The identity key starts with the scanner and the rule, so two scanners that
+report one secret, or one vulnerable package, give two findings with two
+identities, and nothing in either says they are about the same thing. ASH keeps
+both: it does not deduplicate. What it adds is a second, scanner-excluding key
+per family of findings, hashed with the identity contract v2's own shape,
+``sha256(json.dumps([target, key], sort_keys=True))``, and exported under a
+family prefix so two families cannot collide (:func:`correlation_id`). *target*
+is the run's correlation scope, the scan metadata's project name
+(:func:`correlation_target`). The families are a closed registry
+(:data:`CORRELATION_PREFIXES`):
 
-Only a secret detection has one, because only there does the place say what the
-problem is: a credential at a line is that credential, whichever scanner read it.
-A SAST or IaC check does not get one (two rules that fire on one line are two
-problems), and neither does a dependency finding (every package of a lockfile sits
-at its line 1). A secret detection with no file or no start line has none either.
+* ``secret/`` (:func:`secret_correlation_key`): the file, the start line and
+  the workspace project, plus ``tree`` for a converted file, each spelled as
+  the identity key spells them. A credential at a line is that credential,
+  whichever scanner read it. A secret detection with no file or no start line
+  carries none, and two secrets on one line share one id (few scanners report
+  a column, and those that do disagree on where a secret starts); the
+  scanner-inclusive ``id`` still tells them apart.
+* ``dep/`` (:func:`dep_correlation_key`): the advisory id upper-cased, the
+  package name and the installed version. No file or line: the location does
+  not tell packages apart (grype puts every package of a lockfile at its line
+  1, and npm-audit's results share the lockfile's URI). The version is in
+  this key although the identity key leaves it out on purpose: the identity
+  serves longitudinal continuity (upgrading to a release that is still
+  vulnerable is the same finding), where a correlation id answers the
+  within-scan cross-scanner question. A finding missing the advisory, the
+  name or the version carries none.
+* ``iac/`` (:data:`IAC_CORRELATION_PREFIX`) is reserved and deliberately not
+  emitted: engines spell one resource differently (checkov writes template
+  logical ids, cdk-nag CDK construct paths), so a key over ``resource_id``
+  would only ever correlate findings of the same engine, which the
+  scanner-inclusive identity already does. It waits on an engine-to-canonical
+  resource-address normalization.
 
-Known limitations: two secrets on one line share the key, since the column is not
-in it (few scanners report one, and those that do disagree on where a secret
-starts); and scanners that place one secret on different lines do not share it.
+A SAST finding carries no correlation id at all: a location does not say which
+problem, two tools flagging one line usually flag different defects, and
+fingerprints are scanner-specific.
+
+The id groups findings and identifies none. Every finding id, SARIF result,
+baseline, suppression, metric, cluster and diff/trend match stays keyed by the
+scanner-inclusive identity; reporters export the correlation id beside it,
+under one name (:data:`CORRELATION_ID_PROPERTY`), so a consumer can put the
+findings that share an observation side by side.
 
 The frame boundary
 ------------------
@@ -141,9 +181,11 @@ import hashlib
 import json
 import posixpath
 import re
-from dataclasses import dataclass, replace
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple
+
+from pydantic import BaseModel, ConfigDict
 
 from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.utils.frame_ops import ordinal_over
@@ -155,6 +197,8 @@ from automated_security_helper.utils.uri_separators import (
 
 if TYPE_CHECKING:
     import polars as pl
+
+    from automated_security_helper.models.frame_model import FrameSpec
 
 #: Hex digits of the digest in a flattened finding's id. 48 bits: two findings of
 #: one scanner and rule collide with odds near n**2 / 2**49, about 1 in 5 million
@@ -178,24 +222,64 @@ FINGERPRINT_KINDS = ("fingerprints", "partialFingerprints")
 #: relative to the converted root in (``utils/scan_output_dirs``).
 CONVERTED_PATH_PROPERTY = "converted_path"
 
+#: The SARIF result property a result moved from a generated file back to its
+#: original (``utils/scan_output_dirs.map_back_converted_results``) records the
+#: generated file's path in, relative to the converted root. It keys the result as
+#: ``"convertedFrom"``, so that a result mapped to a file stays distinct from a
+#: source-tree scanner's result at the same place in that file.
+CONVERTED_FROM_PROPERTY = "converted_from"
+
+#: The ``tree`` of a finding inside a container image.
+IMAGE_TREE = TargetType.IMAGE.value
+
+#: SARIF result properties carrying an image finding's attribution, written by
+#: the scanner executor on every image-scan result (``utils/image_attribution``)
+#: and read back by the flat extractor: the locator as submitted, the image's
+#: resolved sha256 digest where the scan's own output names one, and the layer
+#: digest where the scanner reports one. The digest, or failing it the
+#: reference, is the key's ``image`` component; the ref and layer digest are
+#: attribution only.
+IMAGE_REF_PROPERTY = "imageRef"
+IMAGE_DIGEST_PROPERTY = "imageDigest"
+IMAGE_LAYER_DIGEST_PROPERTY = "layerDigest"
+
 _DRIVE = re.compile(r"^[A-Za-z]:/")
 
 Fingerprints = Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...]
 
 
-@dataclass(frozen=True)
-class FindingIdentity:
+class FindingIdentity(BaseModel):
     """One result's identity, before the run it belongs to is considered.
+
+    A frozen pydantic model; it was a frozen dataclass until the frame-models
+    design's decision R4 converted it, so the frame layer reads one mechanism
+    (``model_fields`` and the drift gate) across every model it projects. What
+    the conversion keeps, pinned by
+    ``tests/unit/utils/test_finding_identity_model.py``: immutability
+    (assignment raises; the one mutation site, :func:`relative_to_scan_root`,
+    copies with ``model_copy(update=...)``, which does not re-validate the
+    update -- the value comes from :func:`relative_path`, the same trust as
+    before); equality (field-wise and same-class, which the derived join keys
+    rely on); and hashing (never hashed at runtime; the generated field-based
+    ``__hash__`` raises on the ``Mapping`` base exactly as the dataclass's
+    did). Construction now validates once, on the flatten hot path, which R4
+    accepts knowingly; the unit's record carries the before/after construction
+    read.
 
     Attributes:
         base: The key's fields every result has: scanner, rule, file, package,
-            project, and ``tree`` for a converted file.
+            project, ``tree`` for a converted file or a file in an image, ``image``
+            (the image's digest or locator) for a file in an image, and
+            ``convertedFrom`` (the generated file's path) for a result mapped back
+            from a generated file to the original.
         lines: The start and end line.
         column: The start column, or None.
         fingerprints: Each fingerprint kind the result carries, in preference
             order, as sorted ``(key, value)`` pairs, placeholders removed.
         occurrence: The occurrence digest of the column and message.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     base: Mapping[str, Any]
     lines: Tuple[Optional[int], Optional[int]]
@@ -207,6 +291,44 @@ class FindingIdentity:
     def location(self) -> Tuple[Any, ...]:
         """Where the result is, for telling a shared fingerprint value."""
         return (self.base.get("tree"), self.base.get("file"), *self.lines, self.column)
+
+
+@lru_cache(maxsize=None)
+def identity_frame_spec() -> "FrameSpec":
+    """Every name of :class:`FindingIdentity`, accounted for the drift gate.
+
+    The identity frames' columns are derived from a whole run's keys
+    (:func:`identity_keys`): which fingerprints key a result, its occurrence
+    and its ordinal exist only relative to the collection, so no per-identity
+    column can be projected straight off the model and the spec projects none.
+    It exists for the accounted-for gate
+    (``tests/unit/models/test_frame_schemas.py``): a field added to
+    ``FindingIdentity`` fails there until someone decides its frame fate.
+    Built lazily because ``models/frame_model`` lives beside models that
+    import this module.
+    """
+    from automated_security_helper.models.frame_model import FrameSpec
+
+    return FrameSpec(
+        FindingIdentity,
+        (),
+        waived={
+            "base": "a nested mapping; reaches frames only derived, as "
+            "canonical(base) in the fingerprint-choices frame's base column "
+            "and inside the key column's JSON",
+            "lines": "unbounded ints; appear only inside the key column's "
+            "JSON and the loc column's JSON (RankEncoded is for columns, and "
+            "these never become one)",
+            "column": "an input of the occurrence digest and of the loc "
+            "column's JSON, never a column",
+            "fingerprints": "unpacked per pair into the fingerprint-choices "
+            "frame's kind/name/value rows, not per-identity columns",
+            "occurrence": "projected into the located-keys frame beside the "
+            "run's keys, which no single identity can supply",
+            "location": "read by the fingerprint-choices frame as one JSON "
+            "text (the loc column)",
+        },
+    )
 
 
 def _is_absolute(text: str) -> bool:
@@ -317,13 +439,21 @@ def finding_identity(
     column: Optional[int] = None,
     message: Optional[str] = None,
     converted: bool = False,
+    image: Optional[str] = None,
+    converted_from: Optional[str] = None,
 ) -> FindingIdentity:
     """One result's identity; see the module docstring for what is in it.
 
     *file_path* is used as given: pass it through :func:`relative_path` first, or,
-    with *converted*, pass the path relative to the converted root. *fingerprints*
+    with *converted*, pass the path relative to the converted root. *converted_from*
+    is the generated file a result mapped back to *file_path* was found in; it is
+    in the key as ``convertedFrom``. *fingerprints*
     is what :func:`result_fingerprints` returns. *message* is the masked message
-    with the finding's own path replaced by *file_path*.
+    with the finding's own path replaced by *file_path*. *image* is the subject
+    image's resolved digest, or failing that the locator as submitted, for a
+    finding inside a container image; it keys the result under ``"tree": "image"``.
+    The two trees cannot co-occur (an image scan runs no converter), and a result
+    carrying both properties is keyed as an image finding.
     """
     base: Dict[str, Any] = {
         "scanner": scanner,
@@ -332,8 +462,15 @@ def finding_identity(
         "package": [package_name, package_path],
         "project": workspace_project,
     }
-    if converted:
+    if image is not None:
+        base["tree"] = IMAGE_TREE
+        # The key is spelled as the tree label on purpose: an id that hashed it
+        # is already in reports and must not change.
+        base[IMAGE_TREE] = image
+    elif converted:
         base["tree"] = TargetType.CONVERTED.value
+    if converted_from is not None:
+        base["convertedFrom"] = converted_from
     return FindingIdentity(
         base=base,
         lines=(line_start, line_end),
@@ -361,15 +498,21 @@ def relative_to_scan_root(
     recorded under the symbolic-link-resolved form of *source_dir*, False only
     the spelling given, which changes the identity (the file in its key) of a
     path that only the resolved form matched.
+
+    An image finding's file is an in-image path, which no host scan root may
+    rebase: ``/usr/lib/libssl.so`` names a file inside the image whatever
+    directory anchored the scan, so the identity is returned as it is.
     """
-    if source_dir is None:
+    if source_dir is None or identity.base.get("tree") == IMAGE_TREE:
         return identity
     file = relative_path(
         identity.base.get("file"), source_dir, resolve_root=resolve_root
     )
     if file == identity.base.get("file"):
         return identity
-    return replace(identity, base={**identity.base, "file": file})
+    # model_copy does not re-validate the update: the boundary rule's shape
+    # (the value comes from relative_path, the same trust replace() carried).
+    return identity.model_copy(update={"base": {**identity.base, "file": file}})
 
 
 def _run_bases(
@@ -612,7 +755,50 @@ def key_base(key: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
-def secret_location_key(
+#: The name every reporter exports a correlation id under: the ASFF
+#: ``ProductFields`` key, the SARIF and GitHub GHAS ``result.properties`` key and
+#: the OCSF ``unmapped`` key. One spelling, so a consumer greps one string.
+CORRELATION_ID_PROPERTY = "ash/correlationId"
+
+#: The ``secret/`` correlation family: findings that report a secret at one
+#: file and start line of one project (see the module docstring).
+SECRET_CORRELATION_PREFIX = "secret/"
+
+#: The ``dep/`` correlation family: findings that report one advisory against
+#: one installed package version (see the module docstring).
+DEP_CORRELATION_PREFIX = "dep/"
+
+#: Reserved, never emitted: an IaC family waits on an engine-to-canonical
+#: resource-address normalization (the module docstring says why). Declared so
+#: no other family can take the prefix meanwhile.
+IAC_CORRELATION_PREFIX = "iac/"
+
+#: The closed registry of correlation families :func:`correlation_id` accepts.
+#: A new family is a reviewed addition here, next to its key builder, never a
+#: free-form prefix chosen at a call site.
+CORRELATION_PREFIXES = (SECRET_CORRELATION_PREFIX, DEP_CORRELATION_PREFIX)
+
+#: The correlation ``target`` of a run whose metadata names no project: the
+#: report metadata model's own default project name.
+DEFAULT_CORRELATION_TARGET = "ASH"
+
+
+def correlation_target(project_name: Optional[str]) -> str:
+    """The ``target`` every correlation id of a run is hashed with.
+
+    The scan metadata's project name, which is the one scope the model itself
+    carries: it is recorded in the results file, so a report rebuilt from a
+    saved scan hashes the same target the scan did, and every reporter of one
+    run exports one value for one finding. A missing or blank name is the
+    metadata model's own default, so a default-constructed model and one whose
+    name was never set agree.
+    """
+    if isinstance(project_name, str) and project_name.strip():
+        return project_name.strip()
+    return DEFAULT_CORRELATION_TARGET
+
+
+def secret_correlation_key(
     identity: FindingIdentity, default_project: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
     """Where a secret detection is, without the scanner or the rule that found it.
@@ -624,8 +810,8 @@ def secret_location_key(
     None when the identity names no file or no start line: there is then no
     place to compare.
 
-    The caller decides that the result is a secret detection; see the module
-    docstring for why no other kind of finding has such a key.
+    The caller decides that the result is a secret detection; the module
+    docstring says why no other kind of finding has such a key.
     """
     file_path = identity.base.get("file")
     line = identity.lines[0]
@@ -639,6 +825,66 @@ def secret_location_key(
     if identity.base.get("tree") is not None:
         key["tree"] = identity.base["tree"]
     return key
+
+
+#: The ASFF reporter's name for the same key (it landed there first); one function,
+#: so the two spellings cannot drift apart.
+secret_location_key = secret_correlation_key
+
+
+def dep_correlation_key(
+    advisory_id: Optional[str],
+    package_name: Optional[str],
+    package_version: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """What a dependency finding observed, without the scanner that observed it.
+
+    The advisory id upper-cased (as ``utils/finding_clusters`` normalizes it, so
+    grype's ``CVE-2024-1234`` and another scanner's ``cve-2024-1234`` get one
+    key), the package name and the installed version. None when any of the
+    three is missing or blank: without all three there is no concrete
+    observation two scanners could share. No file, line or install path, which
+    are the least stable fields across SCA scanners (the module docstring).
+    """
+    advisory = _correlation_part(advisory_id)
+    package = _correlation_part(package_name)
+    version = _correlation_part(package_version)
+    if advisory is None or package is None or version is None:
+        return None
+    return {"advisory": advisory.upper(), "package": package, "version": version}
+
+
+def _correlation_part(value: Optional[str]) -> Optional[str]:
+    """*value* stripped, None when it is missing, blank or not text."""
+    if not isinstance(value, str):
+        return None
+    return value.strip() or None
+
+
+def correlation_id(
+    prefix: str, target: str, key: Optional[Dict[str, Any]]
+) -> Optional[str]:
+    """``<prefix><sha256>`` of the scan *target* and a family's correlation *key*.
+
+    The same value on every finding that shares the key, whichever scanner and
+    rule reported it, so a consumer can group them. Hashed as the Security Hub
+    ``Id`` is, ``sha256(json.dumps([target, key], sort_keys=True))``; the
+    prefix names the family, so another family cannot collide with it, and must
+    be in :data:`CORRELATION_PREFIXES`. None for a key of None: the family's
+    key builder found no observation to compare.
+
+    It groups findings and identifies none: no finding is merged, dropped or
+    archived because of this value, and nothing else is keyed by it.
+    """
+    if prefix not in CORRELATION_PREFIXES:
+        raise ValueError(
+            f"unknown correlation family prefix {prefix!r}; the closed registry "
+            f"is {CORRELATION_PREFIXES}"
+        )
+    if key is None:
+        return None
+    canonical_text = json.dumps([target, key], sort_keys=True)
+    return prefix + hashlib.sha256(canonical_text.encode("utf-8")).hexdigest()
 
 
 def finding_id(key: Mapping[str, Any]) -> str:

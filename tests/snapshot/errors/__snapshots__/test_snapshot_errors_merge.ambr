@@ -26,8 +26,8 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      Usage: ash merge [OPTIONS]
-      Try 'ash merge --help' for help.
+      Usage: ash results merge [OPTIONS]
+      Try 'ash results merge --help' for help.
       Error: Invalid value: 'pdf' is not a valid format. Valid formats are: aggregated, text, flat-json, yaml, csv, html, dict, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, custom, github-ghas, gitlab-sast, gitlab-cyclonedx, unused-suppressions, aws-security-hub, bedrock-summary-reporter, cloudwatch-logs, s3
   
     ''',
@@ -38,8 +38,8 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      Usage: ash merge [OPTIONS]
-      Try 'ash merge --help' for help.
+      Usage: ash results merge [OPTIONS]
+      Try 'ash results merge --help' for help.
       Error: Missing option '--results'.
   
     ''',

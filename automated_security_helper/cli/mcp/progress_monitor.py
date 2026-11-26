@@ -89,7 +89,7 @@ async def _fetch_initial_scan_info(
         # the same dead client and logged the dead send as a monitor failure.
         await _safe_send(
             True,
-            lambda: ctx.error(
+            lambda: ctx.error(  # ty: ignore[deprecated]
                 raw_controls_on_one_line(
                     "Failed to get scan info: "
                     f"{registry_info.get('error', 'Unknown error')}"
@@ -103,7 +103,7 @@ async def _fetch_initial_scan_info(
     if not directory_path:
         await _safe_send(
             True,
-            lambda: ctx.error("Missing directory path in scan registry"),
+            lambda: ctx.error("Missing directory path in scan registry"),  # ty: ignore[deprecated]
             "Failed to send scan-info error",
         )
         return None
@@ -196,7 +196,7 @@ async def _handle_scan_completed(
 
     return await _safe_send(
         connection_alive,
-        lambda: ctx.info(raw_controls_on_one_line(summary)),
+        lambda: ctx.info(raw_controls_on_one_line(summary)),  # ty: ignore[deprecated]
         "Failed to send completion summary",
     )
 
@@ -233,7 +233,7 @@ async def _handle_terminal_status(
         error_message = progress_info.get("error_message", "Unknown error")
         connection_alive = await _safe_send(
             connection_alive,
-            lambda: ctx.error(
+            lambda: ctx.error(  # ty: ignore[deprecated]
                 raw_controls_on_one_line(f"Scan failed: {error_message}")
             ),
             "Failed to send completion message",
@@ -245,7 +245,7 @@ async def _handle_terminal_status(
         )
         connection_alive = await _safe_send(
             connection_alive,
-            lambda: ctx.warning(
+            lambda: ctx.warning(  # ty: ignore[deprecated]
                 raw_controls_on_one_line(
                     "Scan finished with incomplete coverage; its results are partial"
                     + (f". Did not complete: {names}" if names else "")
@@ -256,7 +256,7 @@ async def _handle_terminal_status(
     elif status is MCScanStatus.CANCELLED:
         connection_alive = await _safe_send(
             connection_alive,
-            lambda: ctx.info("Scan was cancelled."),
+            lambda: ctx.info("Scan was cancelled."),  # ty: ignore[deprecated]
             "Failed to send completion message",
         )
     return connection_alive
@@ -341,7 +341,7 @@ async def _emit_scanner_progress(
     )
     connection_alive = await _safe_send(
         connection_alive,
-        lambda: ctx.debug(
+        lambda: ctx.debug(  # ty: ignore[deprecated]
             raw_controls_on_one_line(
                 f"Scanner progress: {scanner_name}/{target_type} - "
                 f"{int(progress * 100)}%"
@@ -396,7 +396,7 @@ async def _process_scanner_result(
         logger.warning(warning_message)
         connection_alive = await _safe_send(
             connection_alive,
-            lambda: ctx.warning(raw_controls_on_one_line(warning_message)),
+            lambda: ctx.warning(raw_controls_on_one_line(warning_message)),  # ty: ignore[deprecated]
             "Failed to send warning message",
         )
 
@@ -468,7 +468,7 @@ async def _report_lost_scan(
     )
     return await _safe_send(
         connection_alive,
-        lambda: ctx.error(raw_controls_on_one_line(message)),
+        lambda: ctx.error(raw_controls_on_one_line(message)),  # ty: ignore[deprecated]
         "Failed to send lost-scan error",
     )
 
@@ -495,7 +495,7 @@ async def _run_monitor_loop(
             # fails here is one failed send, not a monitor failure.
             await _safe_send(
                 connection_alive,
-                lambda: ctx.warning(
+                lambda: ctx.warning(  # ty: ignore[deprecated]
                     raw_controls_on_one_line(
                         f"Scan monitoring timed out after {_MAX_WAIT_SECONDS} seconds"
                     )
@@ -740,7 +740,7 @@ async def monitor_scan_progress(
         logger.info(f"Scan monitoring cancelled for scan_id: {scan_id}")
         await _safe_send(
             connection_alive,
-            lambda: ctx.info("Scan monitoring stopped."),
+            lambda: ctx.info("Scan monitoring stopped."),  # ty: ignore[deprecated]
             "Failed to send cancellation message",
         )
     except Exception as exc:
@@ -751,6 +751,6 @@ async def monitor_scan_progress(
         logger.exception(error_message)
         await _safe_send(
             connection_alive,
-            lambda: ctx.error(raw_controls_on_one_line(error_message)),
+            lambda: ctx.error(raw_controls_on_one_line(error_message)),  # ty: ignore[deprecated]
             "Failed to send error message to client",
         )

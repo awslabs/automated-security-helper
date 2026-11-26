@@ -53,7 +53,7 @@ Decisions, and why
    without it, so an enabled integration is never skipped quietly either.
 
    Both options name the program actionlint pipes each ``run:`` script to, and
-   ASH's config usually comes from the scanned repository (``.ash/.ash.yaml``), so
+   ASH's config usually comes from the scanned repository (``.ash.yaml``), so
    ``shellcheck: sh`` there would execute the repository's scripts. From a config
    inside a git checkout or the scanned directory, each option accepts only its own
    name (``shellcheck``, ``pyflakes``), looked up on PATH and ASH's bin directory.
@@ -1276,8 +1276,11 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         rule_id=FacetDecl(state=FacetState.MAPPED, native_field="errors[].kind"),
         severity=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="errors[].kind (ASH severity table; a message matching "
-            "the untrusted-input pattern raises it to HIGH)",
+            native_field="errors[].kind and errors[].message (ASH severity "
+            "table, severity_for; an expression finding whose message matches "
+            "the untrusted-input pattern is raised to HIGH, and a "
+            "deprecated-commands finding whose message names set-env or "
+            "add-path is raised to MEDIUM)",
         ),
         file_path=FacetDecl(state=FacetState.MAPPED, native_field="errors[].filepath"),
         line_range=FacetDecl(state=FacetState.MAPPED, native_field="errors[].line"),
@@ -1398,6 +1401,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=opsf.PLATFORMS_ALL,
                 note="asset table lists all six platform/arch pairs",
@@ -1431,7 +1435,6 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 semantics="the base default {0, 1}; an exit code that disagrees with the findings is raised, not read as clean",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=(),
                 upstream_license=(
@@ -1595,6 +1598,16 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             "found. Install it, or unset the option to run actionlint without "
             "that integration."
         )
+
+    def _forced_binary_precluded_reason(self) -> Optional[str]:
+        """With a configured integration missing, a forced actionlint must not pass.
+
+        The integrations (shellcheck, pyflakes) are separate executables the
+        scan hands to actionlint; a ``--binary-path`` record names actionlint's
+        own binary and says nothing about them, so the same check
+        ``validate_plugin_dependencies`` makes runs first here.
+        """
+        return self._missing_integrations(self._integration_executables())
 
     def validate_plugin_dependencies(self) -> bool:
         self.dependency_unavailable_reason = self._missing_integrations(

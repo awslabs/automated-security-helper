@@ -837,7 +837,7 @@ def unevaluated_rules(results: Optional[AshAggregatedResults]) -> List[str]:
     results -- so read naively this gate would be unsuppressable, and an operator
     who has already reviewed a rule's failure and accepted not knowing its verdict
     would have no way to say so. That is not hypothetical: this repository's own
-    ``.ash/.ash.yaml`` carries fifteen such entries under the heading "rules that
+    ``.ash.yaml`` carries fifteen such entries under the heading "rules that
     threw and never ran", each with a reviewed reason, and its own note calls
     naming them "the only way to keep the exit code honest". A gate that ignored
     them would fail ASH's own default scan with no escape hatch, which is a worse

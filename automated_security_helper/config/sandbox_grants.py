@@ -4,7 +4,7 @@
 """Sandbox grants a config file the scanned repository could have written may not make.
 
 The repository being scanned is untrusted. Anyone who can commit to it can write a
-config file there, and ASH picks up ``.ash/.ash.yaml`` from the scan root without
+config file there, and ASH picks up ``.ash.yaml`` from the scan root without
 being asked. These sandbox settings grant scanners access:
 
 * ``sandbox.network_scanners`` gives the scanners it names a network.

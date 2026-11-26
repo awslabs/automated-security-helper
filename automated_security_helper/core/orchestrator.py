@@ -30,6 +30,7 @@ from pydantic import (
 )
 
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.core.asset import Asset, AssetKind
 
 from automated_security_helper.config.path_trust import (
     derived_roots_scope,
@@ -262,6 +263,17 @@ class ASHScanOrchestrator(BaseModel):
                 "them, so the scanners, the converters and their candidate "
                 "counts all see the staged files and nothing else. None means "
                 "no staged scope."
+            )
+        ),
+    ] = None
+    asset: Annotated[
+        Asset | None,
+        Field(
+            description=(
+                "The subject of this scan when it is not the source directory: "
+                "a CONTAINER_IMAGE asset carrying the submitted image locator. "
+                "None (the default) scans source_dir exactly as today. Carried "
+                "onto the PluginContext, where the scan phase routes by it."
             )
         ),
     ] = None
@@ -962,6 +974,7 @@ class ASHScanOrchestrator(BaseModel):
                     run_id=self._run_id,
                     workspace_output_dir=self.workspace_output_dir,
                     staged_files=self.staged_files,
+                    asset=self.asset,
                 ),
                 strategy=self.strategy,
                 enabled_scanners=enabled_scanners,
@@ -977,7 +990,9 @@ class ASHScanOrchestrator(BaseModel):
                     active_ignore_paths(config.global_settings.ignore_paths),
                     ignore_suppressions=self.ignore_suppressions,
                 ),
-                color_system=self.color_system,  # type: ignore[arg-type]
+                # The field is a free string for the CLI; the engine takes rich's
+                # literal names and rich rejects any other.
+                color_system=self.color_system,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
                 verbose=self.verbose,
                 debug=self.debug,
                 python_based_plugins_only=self.python_based_plugins_only,
@@ -1551,17 +1566,24 @@ class ASHScanOrchestrator(BaseModel):
                 dangling one.
         """
         self._refuse_linked_output_dir()
-        refuse_a_linked_reports_dir(self.output_dir.joinpath("reports"))
+        # initialize() resolves the output directory (the source directory's
+        # ``.ash/ash_output`` by default) before this runs.
+        if self.output_dir is None:
+            raise ASHValidationError(
+                "The output directory is not set; initialize() sets it first."
+            )
+        output_dir: Path = self.output_dir
+        refuse_a_linked_reports_dir(output_dir.joinpath("reports"))
         try:
             # Create output directory if it doesn't exist
             ASH_LOGGER.debug(
-                f"Creating output directory if it does not exist: {self.output_dir}"
+                f"Creating output directory if it does not exist: {output_dir}"
             )
-            self.output_dir.mkdir(parents=True, exist_ok=True)
+            output_dir.mkdir(parents=True, exist_ok=True)
             # Inside the scanned tree, a .gitignore keeps ASH's output from a tool
             # that reads the tree and honors one, such as snyk code test, which
             # uploads what it reads. Before any scanner starts.
-            ignore_output_dir_in_git(self.source_dir, self.output_dir)
+            ignore_output_dir_in_git(self.source_dir, output_dir)
 
             # If we're using existing results, only ensure the reports directory
             # exists. A plain mkdir: a link there was refused at the top of this
@@ -1572,12 +1594,12 @@ class ASHScanOrchestrator(BaseModel):
             # falling through to the branch that clears the working directories
             # and then reporting a scan that never ran.
             if self.existing_results_path is not None:
-                self.output_dir.joinpath("reports").mkdir(parents=True, exist_ok=True)
+                output_dir.joinpath("reports").mkdir(parents=True, exist_ok=True)
             else:
                 # Otherwise, set up all working directories. initialize has made
                 # sure git tracks nothing in them (_refuse_committed_results_paths).
                 for working_dir in OUTPUT_WORKING_DIRS:
-                    path_working_dir = self.output_dir.joinpath(working_dir)
+                    path_working_dir = output_dir.joinpath(working_dir)
                     if path_working_dir.exists() and self.existing_results_path is None:
                         ASH_LOGGER.verbose(
                             f"Cleaning up working directory from previous run: {path_working_dir.as_posix()}"
@@ -1907,6 +1929,20 @@ class ASHScanOrchestrator(BaseModel):
                 # refused here as results that failed to load.
                 ensure_reports_dir(self._output_path.joinpath("reports"))
             # Only identify files to scan if we're not using existing results
+            elif (
+                self.asset is not None and self.asset.kind == AssetKind.CONTAINER_IMAGE
+            ):
+                # An image asset presents no source files: the scan-set walker
+                # is filesystem-only by design (C4/C7 of the container-targets
+                # design), and walking the anchoring directory here would list
+                # files no scanner of this run reads -- on the MCP server that
+                # directory is the server's own workspace, not anything the
+                # caller delivered for scanning.
+                self.source_scan_set = []
+                ASH_LOGGER.info(
+                    "The scan's subject is a container image; no source files "
+                    "are identified and the scan-set walk is skipped."
+                )
             elif ExecutionPhase.CONVERT in phases or ExecutionPhase.SCAN in phases:
                 # Before the walk: a scan with no engine walked the whole tree and
                 # wrote its scan set before the check below said it had nothing to

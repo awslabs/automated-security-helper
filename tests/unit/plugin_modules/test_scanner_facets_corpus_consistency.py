@@ -31,7 +31,11 @@ only place the truth lives. There is no suppression list, skip list or
 allowlist in this gate; the one waiver is REDECLARING the cell in the
 scanner's own register row (with the reason the register requires), which is
 itself reviewed. A failure message names the cell and both exits: fix the
-adapter, or redeclare the cell.
+adapter, or redeclare the cell. One module table is not a waiver and is named
+here so it cannot be read as one: ``_ONLY_A_HISTORICAL_RECORDING_FILLS`` is
+an expected-gap list the current-only test asserts EXACTLY, in both
+directions -- a new gap fails the test, and a gap that closes fails it too
+until its entry is deleted -- so it ratchets and suppresses nothing.
 
 What is observed, said plainly. The observation surface is the flat row built
 by ``FlatVulnerability.from_sarif_result`` from each result of the scanner's
@@ -52,96 +56,49 @@ the corpus read has its own non-vacuity controls.
 
 from __future__ import annotations
 
+import functools
 import importlib
 import json
 import pkgutil
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, Iterator, Mapping, Optional
 
 import pytest
 
 from automated_security_helper import plugin_modules
+from automated_security_helper.base.facet_conformance import (
+    FACET_COLUMNS,
+    Verdict,
+    judge,
+    observed_counts,
+    text_present,
+)
 from automated_security_helper.base.scanner_facets import (
     FACET_NAMES,
     SCANNER_FACETS_ATTR,
     FacetState,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
-from automated_security_helper.plugin_modules import ash_builtin
 from automated_security_helper.schemas.sarif_schema_model import Result, SarifReport
 from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
 from automated_security_helper.utils.scanner_tool_types import _class_config_name
+from tests.utils.scanner_enumeration import load_scanner_universe
 
 pytestmark = pytest.mark.unit
 
-_REMAINING_LOAD_ERRORS = ash_builtin.retry_failed_plugin_groups()
+#: The shared enumeration (tests/utils/scanner_enumeration.py).
+SCANNER_CLASSES, _REMAINING_LOAD_ERRORS = load_scanner_universe()
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "test_data" / "scanners"
 
 
 # --------------------------------------------------------------------------
-# The facet -> observed-column map (GC-1). Total over FACET_NAMES.
+# The facet -> observed-column map (GC-1) lives in base/facet_conformance.py,
+# where the conformance harness reads the same verdicts; it is total over
+# FACET_NAMES (asserted below).
 # --------------------------------------------------------------------------
-
-
-def _text(value: Any) -> bool:
-    return isinstance(value, str) and value.strip() not in ("", "[]", "{}", "null")
-
-
-def _present(value: Any) -> bool:
-    return value is not None
-
-
-@dataclass(frozen=True)
-class Observation:
-    """How one facet is read off a flat row.
-
-    ``columns`` are the FlatVulnerability attributes read; ``populated`` is the
-    predicate over their values (in column order). ``excluded`` is the declared
-    v1 exclusion reason for a facet with no flat column.
-    """
-
-    columns: tuple[str, ...] = ()
-    populated: Optional[Callable[..., bool]] = None
-    excluded: Optional[str] = None
-
-
-FACET_COLUMNS: Mapping[str, Observation] = {
-    "rule_id": Observation(("rule_id",), _text),
-    "severity": Observation(("severity",), _text),
-    "file_path": Observation(("file_path",), _text),
-    "line_range": Observation(
-        ("line_start", "line_end"), lambda start, end: _present(start) or _present(end)
-    ),
-    "column": Observation(
-        excluded="the flat row has no column field: the start column is read "
-        "only into the finding identity, so it is observed nowhere (G10 shape)"
-    ),
-    "message": Observation(("description",), _text),
-    "resource_id": Observation(("resource_id",), _text),
-    "resource_type": Observation(("resource_type",), _text),
-    "package_name": Observation(("package_name",), _text),
-    "package_version": Observation(("package_version",), _text),
-    "package_path": Observation(("package_path",), _text),
-    "taxonomy_cve": Observation(("cve_id",), _text),
-    "taxonomy_cwe": Observation(("cwe_id",), _text),
-    # A boolean observation: the id is keyed by a scanner fingerprint.
-    "fingerprints": Observation(("has_fingerprint_identity",), bool),
-    # False is a written value (the adapter said "no fix"); only None is empty.
-    "fix_available": Observation(("fix_available",), _present),
-    "remediation_text": Observation(
-        excluded="no flat column: remediation text lives only in the SARIF "
-        "property bag (G10; add property-bag observation as its own unit)"
-    ),
-    "snippet": Observation(("code_snippet",), _text),
-    "references": Observation(("references",), _text),
-    "tags": Observation(("tags",), _text),
-    "extras": Observation(
-        excluded="no flat column: extras are the property bag itself (G10; "
-        "add property-bag observation as its own unit)"
-    ),
-}
 
 
 def test_the_facet_map_is_total_over_the_vocabulary() -> None:
@@ -180,144 +137,15 @@ def test_the_exclusions_are_exactly_the_facets_with_no_flat_column() -> None:
 # The verdict (GC-2): a pure join of declared state and observed counts.
 # --------------------------------------------------------------------------
 
-#: The two legal exits, named in every failure so the maintainer never has to
-#: guess what "fix" means. There is no third (no skip list; see the module
-#: docstring's waiver contract).
-_EXITS = (
-    "Two exits: (1) fix the adapter or the fixture so the observed column "
-    "matches the declaration, or (2) redeclare the cell in the scanner's own "
-    "register row (the `facets` class attribute) with its reason; that edit "
-    "is the reviewed waiver and the only one."
-)
-
-
-@dataclass(frozen=True)
-class Verdict:
-    scanner: str
-    facet: str
-    state: str
-    non_null: Optional[int]
-    total: Optional[int]
-    outcome: str  # "ok" | "FAIL" | "excluded" | "owed"
-    detail: str
-
-    def row(self) -> str:
-        counted = "no-corpus" if self.total is None else f"{self.non_null}/{self.total}"
-        return (
-            f"{self.scanner}\t{self.facet}\t{self.state}\t{counted}\t"
-            f"{self.outcome}\t{self.detail}"
-        )
-
-
-def judge(
-    scanner: str,
-    facet: str,
-    state: FacetState,
-    observed: Optional[tuple[int, int]],
-    *,
-    corpus_hint: str = "",
-) -> Verdict:
-    """The verdict for one cell. ``observed`` is (non_null_count, total_results)
-    or None when the scanner has no corpus at all."""
-    if FACET_COLUMNS[facet].excluded is not None:
-        return Verdict(scanner, facet, state.value, None, None, "excluded", "G10")
-    non_null, total = observed if observed is not None else (None, None)
-    populated = bool(non_null)
-    cell = f"{scanner}.{facet} declared {state.value}"
-    if state is FacetState.UNCONFIRMED:
-        # Neither contamination nor proof: nobody has read a real run for this
-        # cell, so whatever the corpus holds proves nothing yet. It is a fixture
-        # owed, listed in the table and never failed.
-        return Verdict(
-            scanner,
-            facet,
-            state.value,
-            non_null,
-            total,
-            "owed",
-            "fixture owed: author or capture the real run that settles the cell, "
-            "then redeclare it MAPPED or N/A with the evidence",
-        )
-    if state is FacetState.MAPPED:
-        if observed is None or not total:
-            why = (
-                "has no corpus to observe: "
-                + (corpus_hint or "no committed fixture and no registered prep")
-                if observed is None
-                else f"its fixtures hold no results ({corpus_hint or 'empty corpus'})"
-            )
-            return Verdict(
-                scanner,
-                facet,
-                state.value,
-                non_null,
-                total,
-                "FAIL",
-                f"{cell} but the scanner {why}. Name the missing fixture "
-                f"(author it) or register its prep. {_EXITS}",
-            )
-        if not populated:
-            return Verdict(
-                scanner,
-                facet,
-                state.value,
-                non_null,
-                total,
-                "FAIL",
-                f"{cell} but the observed column is empty across the corpus "
-                f"(0 of {total} results): the tool's output moved or an adapter "
-                f"regression dropped the mapping. {_EXITS}",
-            )
-    elif state is FacetState.NA and populated:
-        return Verdict(
-            scanner,
-            facet,
-            state.value,
-            non_null,
-            total,
-            "FAIL",
-            f"{cell} (cannot be present) but the observed column is populated "
-            f"({non_null} of {total} results): a value reached a column the "
-            f"register says is impossible. {_EXITS}",
-        )
-    elif state is FacetState.DROPPED and populated:
-        return Verdict(
-            scanner,
-            facet,
-            state.value,
-            non_null,
-            total,
-            "FAIL",
-            f"{cell} (discarded today) but the observed column is populated "
-            f"({non_null} of {total} results): the cell is out of date, "
-            f"redeclare it MAPPED with its native field. {_EXITS}",
-        )
-    return Verdict(scanner, facet, state.value, non_null, total, "ok", "")
+# Verdict, judge, FACET_COLUMNS, observed_counts and text_present are imported from
+# base/facet_conformance.py (Observation is defined there and not imported here): the
+# harness behind `ash plugin verify` judges cells with the same function, over
+# transcripts instead of CorpusSpecs.
 
 
 # --------------------------------------------------------------------------
 # The corpus: registered scanners, their fixtures, the observed frame (GC-1).
 # --------------------------------------------------------------------------
-
-
-def _registered_scanner_classes() -> list[type]:
-    classes: list[type] = []
-    seen: set[type] = set()
-    modules = sorted(
-        pkgutil.iter_modules(plugin_modules.__path__), key=lambda m: m.name
-    )
-    for info in modules:
-        if not info.ispkg:
-            continue
-        package = importlib.import_module(f"{plugin_modules.__name__}.{info.name}")
-        for cls in getattr(package, "ASH_SCANNERS", []):
-            if cls not in seen:
-                seen.add(cls)
-                classes.append(cls)
-    return classes
-
-
-SCANNER_CLASSES = _registered_scanner_classes()
 
 
 def _name(cls: type) -> str:
@@ -373,6 +201,7 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
     "grype": CorpusSpec("grype", sarif=("captured/*.sarif",), prep="grype"),
     "guarddog": CorpusSpec("guarddog", prep="guarddog"),
     "hadolint": CorpusSpec("hadolint", sarif=("captured/*.sarif",)),
+    "mcp-config": CorpusSpec("mcp_config", sarif=("captured/*.sarif",)),
     "npm-audit": CorpusSpec("npmaudit", prep="npm-audit"),
     "opengrep": CorpusSpec("opengrep", sarif=("captured/*.sarif",)),
     "semgrep": CorpusSpec("semgrep", sarif=("captured/*.sarif",)),
@@ -434,8 +263,9 @@ def _prep_cfn_lint(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]
                     ),
                 )
             # normalize_report reads no instance state: it locates results,
-            # maps severities and sorts rules in place.
-            CfnLintScanner.normalize_report(None, report)  # type: ignore[arg-type]
+            # maps severities and sorts rules in place. An uninitialized
+            # instance stands in for the scanner, so the call keeps its types.
+            CfnLintScanner.__new__(CfnLintScanner).normalize_report(report)
             yield report, [r for run in report.runs or [] for r in run.results or []]
 
 
@@ -809,9 +639,13 @@ _PREPS: Mapping[
 
 
 def _results_with_runs(
-    spec: CorpusSpec,
+    spec: CorpusSpec, fixtures_root: Path = _FIXTURES
 ) -> Iterator[tuple[Any, Result]]:
-    """(run or None, result) for every result of the scanner's corpus."""
+    """(run or None, result) for every result of the scanner's corpus.
+
+    ``fixtures_root`` roots the SARIF globs only (a planted control points it at
+    a scratch directory); a registered prep always reads the committed corpus.
+    """
     if spec.prep is not None:
         for report, results in _PREPS[spec.prep](spec):
             run = report.runs[0] if report.runs else None
@@ -819,37 +653,32 @@ def _results_with_runs(
                 yield run, result
         return
     for pattern in spec.sarif:
-        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+        for path in sorted((fixtures_root / spec.directory).glob(pattern)):
             report = _load_sarif(path)
             for run in report.runs or []:
                 for result in run.results or []:
                     yield run, result
 
 
+@functools.lru_cache(maxsize=None)
 def observed_frame(
-    name: str, spec: Optional[CorpusSpec]
+    name: str, spec: Optional[CorpusSpec], fixtures_root: Path = _FIXTURES
 ) -> Optional[dict[str, tuple[int, int]]]:
     """Per facet (non_null_count, total_results) over the scanner's corpus, or
     None when the scanner has no corpus (no spec, or no readable fixture/prep).
+
+    Cached: the gate, the transcript comparison and the named-gap rows each
+    read the same corpus, and a prep converts every fixture it holds. Callers
+    read the returned mapping and never change it.
     """
     if spec is None or (not spec.sarif and spec.prep is None):
         return None
     tool_type = SCANNER_TOOL_TYPES[name]
     flats = [
         FlatVulnerability.from_sarif_result(result, name, tool_type, run)
-        for run, result in _results_with_runs(spec)
+        for run, result in _results_with_runs(spec, fixtures_root)
     ]
-    counts: dict[str, tuple[int, int]] = {}
-    for facet, observation in FACET_COLUMNS.items():
-        if observation.excluded is not None:
-            continue
-        populated = 0
-        for flat in flats:
-            values = [getattr(flat, column) for column in observation.columns]
-            if observation.populated(*values):  # type: ignore[misc]
-                populated += 1
-        counts[facet] = (populated, len(flats))
-    return counts
+    return observed_counts(flats)
 
 
 def _hint(name: str) -> str:
@@ -899,7 +728,7 @@ def test_the_gate_carries_no_waiver_but_the_register() -> None:
 def test_the_registry_and_the_corpus_table_agree() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
     names = {_name(cls) for cls in SCANNER_CLASSES}
-    assert len(SCANNER_CLASSES) == 22, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == 23, sorted(c.__name__ for c in SCANNER_CLASSES)
     assert names == set(CORPORA) == set(SCANNER_TOOL_TYPES), (
         f"registry {sorted(names)} / corpus table {sorted(CORPORA)}: a scanner "
         "needs a CORPORA row (a corpus, or None with the fixture to author)"
@@ -1128,22 +957,82 @@ def test_planted_a_fixture_with_the_mapped_field_removed_is_flagged(
     tmp_path: Path,
 ) -> None:
     """Must-flag through the real observation path: a fixture copy with the
-    native location removed reads empty file_path/line_range, so a MAPPED
-    declaration over it fails; the intact copy passes."""
+    native location removed reads empty file_path and line_range, so a MAPPED
+    declaration over it fails; the intact copy passes.
+
+    The counts come from ``observed_frame``, which reads the columns through
+    ``FACET_COLUMNS``: a control that recomputed one column by hand would stay
+    green when the column mapping of the real gate was mis-wired.
+    """
     for with_location, expected in ((True, "ok"), (False, "FAIL")):
-        path = tmp_path / f"planted-{with_location}.sarif"
-        path.write_text(json.dumps(_planted_sarif(with_location=with_location)))
-        report = _load_sarif(path)
-        flats = [
-            FlatVulnerability.from_sarif_result(r, "bandit", "SAST", run)
-            for run in report.runs or []
-            for r in run.results or []
-        ]
-        non_null = sum(1 for f in flats if _text(f.file_path))
-        verdict = judge(
-            "planted", "file_path", FacetState.MAPPED, (non_null, len(flats))
+        directory = tmp_path / f"planted-{with_location}"
+        directory.mkdir()
+        (directory / "planted.sarif").write_text(
+            json.dumps(_planted_sarif(with_location=with_location))
         )
-        assert verdict.outcome == expected, verdict.detail
+        spec = CorpusSpec(directory.name, sarif=("planted.sarif",))
+        frame = observed_frame("bandit", spec, fixtures_root=tmp_path)
+        assert frame is not None
+        for facet in ("file_path", "line_range"):
+            verdict = judge("planted", facet, FacetState.MAPPED, frame[facet])
+            assert verdict.outcome == expected, (facet, verdict.detail)
+
+
+def test_planted_a_result_with_only_a_rule_id_reads_empty_but_for_the_defaults(
+    tmp_path: Path,
+) -> None:
+    """A result that declares nothing but its rule id and message populates
+    exactly the facets the flat row fills by default, through the real frame.
+
+    ``severity`` is one of them (a result with no level reads MEDIUM), so a
+    MAPPED severity cell is observed as populated even when the tool wrote no
+    level: that cell is held by the fixture content, not by this column. Every
+    other facet must read empty, so a default that starts to populate one of
+    them (a fix_available=False, a placeholder path) shows up here first.
+    """
+    sarif = {
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {"driver": {"name": "planted"}},
+                "results": [
+                    {"ruleId": "PLANTED-1", "message": {"text": "a finding"}},
+                ],
+            }
+        ],
+    }
+    directory = tmp_path / "only-rule-id"
+    directory.mkdir()
+    (directory / "planted.sarif").write_text(json.dumps(sarif))
+    frame = observed_frame(
+        "bandit",
+        CorpusSpec(directory.name, sarif=("planted.sarif",)),
+        fixtures_root=tmp_path,
+    )
+    assert frame is not None
+    populated = {facet for facet, (count, _total) in frame.items() if count}
+    assert populated == {"rule_id", "severity", "message"}, populated
+    assert all(total == 1 for _count, total in frame.values())
+
+
+def test_a_text_column_of_another_type_is_unreadable_not_empty() -> None:
+    """The contamination direction must not fail open on a type change."""
+    assert text_present("a value") is True
+    assert text_present("  ") is False
+    assert text_present(None) is False
+    for value in (0, 1, False, ["a"], {"a": 1}, b"bytes"):
+        with pytest.raises(TypeError, match="not str or None"):
+            text_present(value)
+
+
+def test_judge_refuses_a_state_it_does_not_judge() -> None:
+    """The next FacetState member must be judged on purpose, never passed."""
+    for state in FacetState:
+        for observed in ((1, 2), (0, 2), None):
+            judge("planted", "tags", state, observed)  # no member is refused
+    with pytest.raises(AssertionError, match="no judgment"):
+        # an object that is not one of the four members, as a fifth would be
+        judge("planted", "tags", SimpleNamespace(value="a-new-state"), (1, 2))  # type: ignore[arg-type]
 
 
 def test_planted_a_legitimate_na_cell_over_the_real_corpus_passes() -> None:
@@ -1156,6 +1045,118 @@ def test_planted_a_legitimate_na_cell_over_the_real_corpus_passes() -> None:
     ]
     assert legitimate, "no N/A cell over a non-empty corpus: the control is vacuous"
     assert all(v.outcome == "ok" for v in legitimate)
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=_name)
+def test_the_transcripts_observe_exactly_what_the_corpus_table_observes(
+    cls: type,
+) -> None:
+    """The upgrade of the loose fixtures into transcripts lost no corpus and added none.
+
+    ``ash plugin verify`` judges the facet cells over transcripts
+    (core/plugin_conformance.py); this gate judges them over the CORPORA table. Until
+    the table is retired the two must observe the same counts for every scanner, or the
+    promotion bar and the PR gate would disagree about one register row.
+    """
+    from automated_security_helper.core.plugin_conformance import (
+        discover_transcript_files,
+        observed_frame as transcript_frame,
+        transcripts_of,
+    )
+
+    name = _name(cls)
+    mine = transcripts_of(name, discover_transcript_files(_FIXTURES))
+    got = transcript_frame(name, mine) if mine else None
+    assert got == observed_frame(name, CORPORA.get(name))
+
+
+#: MAPPED cells that only a historical recording fills today, by scanner. ``ash plugin
+#: verify`` reads each as red until the scanner is re-recorded at its pin with a
+#: recording that carries it; the entry is then deleted (the test below fails when a gap
+#: closes, so the table cannot go stale). Trivy's current recording is the terraform
+#: misconfiguration run, which has no package and no fixed version; its
+#: package-bearing runs are 0.69.3 and 0.75.0.
+_ONLY_A_HISTORICAL_RECORDING_FILLS: dict[str, frozenset[str]] = {
+    "trivy": frozenset(
+        {
+            "fix_available",
+            "package_name",
+            "package_version",
+            "package_path",
+            "taxonomy_cve",
+        }
+    ),
+    "trivy-repo": frozenset(
+        {
+            "fix_available",
+            "package_name",
+            "package_version",
+            "package_path",
+            "taxonomy_cve",
+        }
+    ),
+}
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=_name)
+def test_the_current_recordings_alone_carry_every_mapped_cell_but_the_named_gaps(
+    cls: type,
+) -> None:
+    """``ash plugin verify`` judges a MAPPED cell over current recordings only, so a
+    historical recording of an older release cannot keep a cell green after the pinned
+    tool stops filling it. For a scanner that has a current, readable recording, the
+    MAPPED cells the current recordings alone leave empty are exactly the named gaps."""
+    from automated_security_helper.core.plugin_conformance import (
+        discover_transcript_files,
+        observed_frame as transcript_frame,
+        transcripts_of,
+    )
+
+    name = _name(cls)
+    mine = transcripts_of(name, discover_transcript_files(_FIXTURES))
+    current = transcript_frame(name, mine, current_only=True)
+    if current is None:
+        return
+    declared = vars(cls).get(SCANNER_FACETS_ATTR)
+    empty = set()
+    for facet in FACET_NAMES:
+        state = getattr(declared, facet).state
+        if state is not FacetState.MAPPED:
+            continue
+        if judge(name, facet, state, current.get(facet)).outcome == "FAIL":
+            empty.add(facet)
+    assert empty == _ONLY_A_HISTORICAL_RECORDING_FILLS.get(name, frozenset())
+
+
+def test_the_current_only_reading_is_not_vacuous() -> None:
+    """Some scanner has both a current and a historical recording, and some scanner has a
+    current recording that reads as results; otherwise the test above checks nothing."""
+    from automated_security_helper.core.plugin_conformance import (
+        discover_transcript_files,
+        observed_frame as transcript_frame,
+        transcripts_of,
+    )
+
+    files = discover_transcript_files(_FIXTURES)
+    mixed = [
+        _name(cls)
+        for cls in SCANNER_CLASSES
+        if {t.retention for _b, t in transcripts_of(_name(cls), files)}
+        == {"current", "historical"}
+    ]
+    assert mixed, "no scanner keeps both a current and a historical recording"
+    current_readable = [
+        _name(cls)
+        for cls in SCANNER_CLASSES
+        if transcript_frame(
+            _name(cls), transcripts_of(_name(cls), files), current_only=True
+        )
+        is not None
+    ]
+    assert current_readable, "no current recording reads as results"
+    # the two halves overlap: at least one mixed scanner's CURRENT recordings read
+    # as results, or the current-only gap test never judges a real gap
+    assert set(mixed) & set(current_readable), (mixed, current_readable)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -11,7 +11,7 @@ ash scan --sandbox auto            # best sandbox this machine has
 ash scan --sandbox bwrap --offline # bubblewrap, no scanner gets a network
 ```
 
-or in your ASH config file (`.ashrc.yaml` in a new project):
+or in your ASH config file (`.ash.yaml` at the project root):
 
 ```yaml
 sandbox:
@@ -519,7 +519,7 @@ An in-tree `network_scanners` list still takes network away: a scanner it doesn'
 name gets none, so a repository can keep its own scan offline with
 `network_scanners: []`.
 
-When any file the config was built from can't grant (the discovered `.ash/.ash.yaml`,
+When any file the config was built from can't grant (the discovered `.ash.yaml`,
 a `--config` path, an `extends` base, or the file `ASH_CONFIG` names), the five
 settings are taken from the files that can: in workspace mode the operator's
 default config (under the MCP server, the session's bound profile), else
@@ -533,11 +533,11 @@ warning that names the files that can't grant and the settings it dropped. A `ne
 it doesn't name gets none, so a repository can keep its own scan offline with
 `network_scanners: []`.
 
-For a config in `/home/me/src/app/.ash/.ash.yaml` that grants grype a network and a
+For a config in `/home/me/src/app/.ash.yaml` that grants grype a network and a
 read path, the warning reads:
 
 ```text
-WARNING  Ignoring sandbox.network_scanners, sandbox.extra_read_paths from /home/me/src/app/.ash/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. A network_scanners list there still removes network from scanners it does not name, and a sandbox mode there still applies when nothing else turns the sandbox on. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
+WARNING  Ignoring sandbox.network_scanners, sandbox.extra_read_paths from /home/me/src/app/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. A network_scanners list there still removes network from scanners it does not name, and a sandbox mode there still applies when nothing else turns the sandbox on. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
 ```
 
 This applies to a trusted config kept in a checkout of its own as well, such as an

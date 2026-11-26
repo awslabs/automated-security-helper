@@ -44,7 +44,7 @@ There is no config key for offline mode. `build.build_mode` exists in the config
 | detect-secrets | Runs as usual. If its settings turn on detect-secrets' verification filter, it still sends each candidate secret to the service that issued it, to check whether it is live; under the sandbox, leave detect-secrets out of `sandbox.network_scanners` to stop that. |
 | checkov | Uses the policies in the installed package and skips platform downloads. |
 | npm-audit | Does not run: npm, yarn, and pnpm audit a lockfile by asking the registry. MISSING for a project with a `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, or `pnpm-lock.yaml` beside a `package.json`, which fails the scan, and SKIPPED for a project with none. |
-| syft | Skips its update check. |
+| syft | Skips its update check. Offline also skips the [sdist lockfile harvest](../docs/plugins/builtin/syft.md#the-sdist-lockfile-harvest): the SBOM then omits the embedded lockfiles of compiled dependencies, and the harvester's results record one informational `ash-sbom-harvest-skipped` entry naming each package the SBOM is missing. A cache warmed by one online scan (`ash/sdist-harvest/` under the user-level cache directory, or `scanners.syft.options.sdist_harvest.cache_dir`) restores full coverage offline: entries are keyed by each sdist's sha256 pin and every cached file is re-verified against the digest recorded when it was written, so the cache can only serve the bytes the lockfile resolves. |
 | zizmor | Runs offline, as it does by default. |
 | snyk-code | Does not run. |
 | bandit, cdk-nag, cfn-nag, cfn-lint, cfn-guard, actionlint, gitleaks | No change, once installed. |
@@ -120,7 +120,7 @@ or that the scan will cover every input.
 
 ## The offline image {#offline-image}
 
-`ash build-image --offline` and `ash scan --mode container --offline` build the image with
+`ash container build --offline` and `ash scan --mode container --offline` build the image with
 `OFFLINE=YES`. The build needs network access: it downloads the grype database, the trivy
 database, and the semgrep rulesets named by `--offline-semgrep-rulesets` (default `p/ci`),
 copies the rulesets for opengrep, and fails if any of them is empty. The image has

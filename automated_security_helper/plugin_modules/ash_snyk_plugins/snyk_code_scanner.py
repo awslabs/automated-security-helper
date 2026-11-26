@@ -10,7 +10,7 @@ import re
 import shutil
 import time
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Iterable, List, Literal, Set
+from typing import Annotated, Any, ClassVar, Iterable, List, Literal, Optional, Set
 
 import yaml
 from pydantic import Field, PrivateAttr
@@ -40,6 +40,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
 )
 from automated_security_helper.utils.display_text import escape_controls
+from automated_security_helper.utils.log import VERBOSE_LEVEL
 from automated_security_helper.utils.get_scan_set import (
     file_links_leaving_tree,
     honors_ignore_files,
@@ -483,8 +484,12 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="result and rule properties bags, passed through the "
-            "SARIF model untouched",
+            native_field="result properties bag, passed through the SARIF model "
+            "untouched and read whole into the flat properties",
+            reason="the rule properties bag survives the SARIF model but the "
+            "flat reader takes only the rule's tags and helpUri from the "
+            "rule, so rule-bag keys (cwe, isAutofixable, exampleCommitFixes) "
+            "reach the flat row only through the cells above that name them",
         ),
     )
 
@@ -534,6 +539,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="the user's installed Snyk CLI, absent from TOOL_VERSIONS, so ASH provisions "
@@ -580,7 +586,6 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 semantics="from the CLI's exit codes: 0 no issues, 1 issues found, 2 an error, 3 no supported project (read through the staged-refusal logic)",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.ALPHA_OPTIN,
                 source=opsf.ProvenanceSource.USER_INSTALLED,
                 selection_surfaces=("ash_snyk_plugins in ash_plugin_modules",),
                 upstream_license=opsf.LICENSE_NOT_READ,
@@ -614,6 +619,20 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             extra_args=[],
         )
         super().model_post_init(context)
+
+    def _forced_binary_precluded_reason(self) -> Optional[str]:
+        """Offline, a forced snyk binary must not satisfy validation.
+
+        snyk code audits against Snyk's service, so the offline refusal below is
+        a semantic verdict a ``--binary-path`` record has no say in. The
+        credential check is not mirrored here: a forced snyk without credentials
+        fails loudly at scan time rather than reporting a clean result.
+        """
+        if self._is_offline_mode():
+            return (
+                "snyk code does not run offline; the offline check precedes any binary"
+            )
+        return None
 
     def validate_plugin_dependencies(self) -> bool:
         """Validate scanner configuration.
@@ -664,7 +683,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         return super()._process_config_options()
 
     def _resolve_arguments(
-        self, target: Path, results_file: Path | None = None
+        self, target: str | Path, results_file: str | Path | None = None
     ) -> List[str]:
         """Resolve arguments for Snyk code test command.
 
@@ -679,7 +698,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         self._process_config_options()
 
         # Start with base command and subcommands
-        args = [self.command, *self.subcommands]
+        args: List[str] = [self._tool_command(), *self.subcommands]
 
         # Add extra args. A value may be a number or a bool (ToolExtraArg), and
         # a spawn takes text only; a bool is spelled as a config file spells it,
@@ -1008,7 +1027,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                     f"Running command: {shown_command} (the arguments are not "
                     f"shown: the plugin's values hook {read.failure()})",
                     target_type=target_type,
-                    level=logging.VERBOSE,
+                    level=VERBOSE_LEVEL,
                 )
             else:
                 recorded_command_line, recorded_arguments = redacted_command_record(
@@ -1019,7 +1038,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                     "Running command: "
                     f"{text_without_values(' '.join(final_args), redact_values)}",
                     target_type=target_type,
-                    level=logging.VERBOSE,
+                    level=VERBOSE_LEVEL,
                 )
 
             # No environment modifications are currently needed for Snyk Code.

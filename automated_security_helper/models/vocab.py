@@ -18,13 +18,15 @@ Take ``.value`` at every textual boundary:
 ``str(member)`` and f-string interpolation render the qualified member name on
 some supported interpreters, so ``f"{member}"`` is never a spelling of the value
 unless the class itself pins the rendering (``PluginKind`` overrides ``__str__``
-and ``__format__`` to the value, ``TargetType`` overrides ``__str__``; the
+and ``__format__`` to the value, as does ``Severity``; ``TargetType`` overrides ``__str__``; the
 others do not).
 
-Severity stays an OPEN vocabulary for now: a scanner may emit a word that is not
-on the ladder, and the ingest helpers here return ``None`` for it instead of
-raising. Closing it (a ``Severity``-typed finding field, a polars ``Enum``
-column) is a separate, deliberate change.
+Severity is OPEN at the scanner boundary and CLOSED from the finding on: a
+scanner may emit a word that is not on the ladder, and the ingest helpers here
+return ``None`` for it instead of raising, but the grading functions in
+``utils.severity_ladder`` always land on a ladder word, and
+``FlatVulnerability.severity`` (a ``Severity``-typed field) and the flat frame's
+``severity`` column (a polars ``Enum``) refuse any other value.
 """
 
 from enum import Enum
@@ -44,14 +46,23 @@ class Severity(str, Enum):
     LOW = "LOW"
     INFO = "INFO"
 
+    # A finding holds a member (``FlatVulnerability.severity`` is typed as this
+    # enum), and the reporters and exports interpolate it, so the rendering is
+    # pinned to the value on every supported interpreter.
+    def __str__(self) -> str:
+        return self.value
+
+    def __format__(self, format_spec: str) -> str:
+        return format(self.value, format_spec)
+
     @classmethod
     def from_text(cls, text: object) -> Optional["Severity"]:
         """The member *text* names in any case, or ``None`` when it names none.
 
         The one ingest helper for severity words: it case-folds and strips, and
         an off-ladder word (npm's ``moderate``, a blank, a non-string) is not an
-        error here -- severity is an open vocabulary until it is deliberately
-        closed.
+        error here: this is the scanner-boundary helper, and the caller decides
+        what an unknown word grades as.
         """
         if isinstance(text, Severity):
             return text
@@ -81,18 +92,6 @@ class SeverityThreshold(str, Enum):
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
     CRITICAL = "CRITICAL"
-
-    @classmethod
-    def from_text(cls, text: object) -> Optional["SeverityThreshold"]:
-        """The member *text* names in any case, or ``None`` when it names none."""
-        if isinstance(text, SeverityThreshold):
-            return text
-        if not isinstance(text, str):
-            return None
-        try:
-            return cls(text.strip().upper())
-        except ValueError:
-            return None
 
 
 class PluginKind(str, Enum):
@@ -169,8 +168,10 @@ class TargetType(str, Enum):
     """Which tree a scanner is asked to scan: the source tree or the converted one.
 
     ``SOURCE`` is the directory the user pointed ASH at. ``CONVERTED`` is the work
-    directory holding what converters produced from archives and notebooks. The
-    wire spellings (``"source"`` / ``"converted"``) are in result files, identity
+    directory holding what converters produced from archives and notebooks.
+    ``IMAGE`` labels the results of a scan whose subject is a container image, not
+    a tree. The wire spellings (``"source"`` / ``"converted"`` / ``"image"``) are in
+    result files, identity
     keys and log lines and never change.
 
     ``__str__`` returns the value so ``f"{target_type}"`` and ``str(target_type)``
@@ -182,6 +183,7 @@ class TargetType(str, Enum):
 
     SOURCE = "source"
     CONVERTED = "converted"
+    IMAGE = "image"
 
     def __str__(self) -> str:
         return self.value

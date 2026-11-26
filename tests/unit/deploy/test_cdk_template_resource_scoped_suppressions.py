@@ -1,11 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The resource-scoped .ash/.ash.yaml entries on deploy/cdk/templates hit one resource each.
+"""The resource-scoped .ash.yaml entries on deploy/cdk/templates hit one resource each.
 
 Why this exists
 ---------------
-cdk-nag findings on a committed template are suppressed through .ash/.ash.yaml, which
+cdk-nag findings on a committed template are suppressed through .ash.yaml, which
 takes the FIRST entry that matches. The file-level entries for AshCodeCommitGate name
 the resources they were written for. When the gate gained its optional VPC placement,
 two new records appeared under rules those entries cover (F3031 on ScanFunction's
@@ -34,7 +34,7 @@ from automated_security_helper.models.core import scope_value_matches
 pytestmark = pytest.mark.unit
 
 REPO = Path(__file__).resolve().parents[3]
-ASH_YAML = REPO / ".ash" / ".ash.yaml"
+ASH_YAML = REPO / ".ash.yaml"
 GATE = "deploy/cdk/templates/AshCodeCommitGate.template.json"
 
 PACKS = ["HIPAA.Security", "NIST.800.53.R4", "NIST.800.53.R5", "PCI.DSS.321"]

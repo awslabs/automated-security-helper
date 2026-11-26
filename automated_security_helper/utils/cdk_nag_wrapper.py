@@ -11,7 +11,7 @@ import json
 import threading
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Sequence
+from typing import Dict, List, Literal, Sequence
 
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactContent,
@@ -132,7 +132,7 @@ def _build_nag_pack(
     """
     import cdk_nag
 
-    pack_type: Any = getattr(cdk_nag, pack_name, None)
+    pack_type = getattr(cdk_nag, pack_name, None)
     if pack_type is None:
         raise ValueError(f"Unknown cdk-nag pack: {pack_name}")
     if validate_outcomes is None:
@@ -1740,7 +1740,7 @@ def run_cdk_nag_against_cfn_template(
     """
     if nag_packs is None:
         nag_packs = ["AwsSolutionsChecks"]
-    results: Dict[str, List[Any]] = {}
+    results: Dict[str, List[Result]] = {}
 
     # JSII (used by cdk_nag) reads these env vars at Python module import
     # time, so we can't pass them via env= to a subprocess — we have to

@@ -262,7 +262,13 @@ def _converted_path_list(result: Any) -> List[str]:
         items = [result]
     else:
         items = list(result)
-    return [Path(item).as_posix() for item in items if item is not None and item != ""]
+    paths: List[str] = []
+    for item in items:
+        if item is None or item == "":
+            continue
+        # ``item`` is Any; ty narrows it to an intersection Path() does not take.
+        paths.append(Path(item).as_posix())  # ty: ignore[invalid-argument-type]
+    return paths
 
 
 def _redaction_values_or(plugin_instance: Any, run_config: Any, fallback: Any) -> Any:

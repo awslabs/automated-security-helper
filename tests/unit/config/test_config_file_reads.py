@@ -127,7 +127,7 @@ class TestSpecialFilesAreNotRead:
     def test_control_ashs_own_config_is_within_the_bound(self):
         from automated_security_helper.core.constants import ASH_CONFIG_MAX_FILE_BYTES
 
-        own = Path(__file__).resolve().parents[3] / ".ash" / ".ash.yaml"
+        own = Path(__file__).resolve().parents[3] / ".ash.yaml"
 
         # Half the bound, not a quarter: this is a control that the repo's own
         # config is nowhere near the production limit, and the file had 291 bytes

@@ -1070,7 +1070,7 @@ class TestTheOfflineImageDefault:
         assert record.policy == cdb.StalenessPolicy.WARN
         assert "OFFLINE=YES" in (record.policy_source or "")
         assert "OFFLINE=YES" in record.message()
-        assert "ash build-image --offline" in record.message()
+        assert "ash container build --offline" in record.message()
 
         model = _model(sarif)
         assert _exit_code(tmp_path, model) == 0
@@ -1317,9 +1317,18 @@ class TestNoSecondLiteral:
     )
 
     def test_no_file_restates_the_trivy_or_ruleset_bound(self):
-        registry = (
-            REPO_ROOT / "automated_security_helper" / "utils" / "content_databases.py"
-        )
+        # The bounds are declared once, in the plugins' provisioning blocks (this
+        # registry derives its table from them and holds the arithmetic).
+        registry = {
+            REPO_ROOT / "automated_security_helper" / "utils" / "content_databases.py",
+            REPO_ROOT / "automated_security_helper" / "base" / "plugin_provisioning.py",
+            # The flat copy hatch_build.py stages beside tool_downloads.py (gitignored;
+            # present in any tree that has been built).
+            REPO_ROOT
+            / "automated_security_helper"
+            / "assets"
+            / "plugin_provisioning.py",
+        }
         offenders = []
         for root in ("automated_security_helper", ".github", "scripts"):
             for path in (REPO_ROOT / root).rglob("*"):
@@ -1330,7 +1339,7 @@ class TestNoSecondLiteral:
                     ".sh",
                 }:
                     continue
-                if path == registry:
+                if path in registry:
                     continue
                 for number, line in enumerate(
                     path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1

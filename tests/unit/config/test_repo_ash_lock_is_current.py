@@ -25,7 +25,7 @@ from automated_security_helper.utils.ash_lock import AshLock, lock_key
 pytestmark = pytest.mark.unit
 
 REPO = Path(__file__).resolve().parents[3]
-CONFIGS = (".ash/.ash.yaml", ".ash/.ash_alpha_plugins.yaml")
+CONFIGS = (".ash.yaml", ".ash/.ash_alpha_plugins.yaml")
 
 
 def _symbol_entries():

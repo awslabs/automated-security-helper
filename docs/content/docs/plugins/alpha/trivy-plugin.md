@@ -87,7 +87,7 @@ trivy version
 
 ### Basic Configuration
 
-Add the Trivy plugin to your ASH config file (`.ashrc.yaml` in a new project):
+Add the Trivy plugin to your ASH config file (`.ash.yaml` at the project root):
 
 ```text
 ash_plugin_modules:
@@ -153,7 +153,7 @@ ash --source-dir /path/to/project --scanners trivy-repo
 ### Vulnerability-Only Scan
 
 ```yaml
-# ASH config file (.ashrc.yaml in a new project)
+# ASH config file (.ash.yaml at the project root)
 scanners:
   trivy-repo:
     enabled: true
@@ -171,7 +171,7 @@ ash --scanners trivy-repo
 ### Comprehensive Security Scan
 
 ```yaml
-# ASH config file (.ashrc.yaml in a new project)
+# ASH config file (.ash.yaml at the project root)
 scanners:
   trivy-repo:
     enabled: true
@@ -184,7 +184,7 @@ scanners:
 ### Integration with Other Scanners
 
 ```yaml
-# ASH config file (.ashrc.yaml in a new project)
+# ASH config file (.ash.yaml at the project root)
 scanners:
   # Combine Trivy with other ASH scanners
   trivy-repo:
@@ -227,7 +227,7 @@ ASH decides the scan's exit code from the findings. See
 ### Example Output Configuration
 
 ```yaml
-# ASH config file (.ashrc.yaml in a new project)
+# ASH config file (.ash.yaml at the project root)
 reporters:
   sarif:
     enabled: true
@@ -989,7 +989,7 @@ with open('.security-baseline/baseline-suppressions.yaml', 'w') as f:
     yaml.dump({'global_settings': {'suppressions': suppressions}}, f, default_flow_style=False)
 
 print(f"Generated {len(suppressions)} baseline suppressions")
-print("Review .security-baseline/baseline-suppressions.yaml and merge approved suppressions into your ASH config file (.ashrc.yaml in a new project)")
+print("Review .security-baseline/baseline-suppressions.yaml and merge approved suppressions into your ASH config file (.ash.yaml at the project root)")
 EOF
 ```
 
@@ -1379,7 +1379,7 @@ docker logs $(docker ps -q --filter ancestor=ash)
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Use the host network
-ash build-image --container-network host
+ash container build --container-network host
 
 # Pre-download database
 trivy image --download-db-only
@@ -1454,7 +1454,7 @@ trivy version
 ash --version
 
 # Configuration
-cat .ashrc.yaml  # your ASH config file; `ash config validate` prints which one a scan uses
+cat .ash.yaml  # your ASH config file; `ash config validate` prints which one a scan uses
 
 # Recent logs
 tail -50 .ash/ash_output/scanners/trivy-repo/*/ash.log
@@ -1651,7 +1651,7 @@ to scan with an older one and have the reports say so.
 #### Rule-Based Suppressions
 
 ```yaml
-# ASH config file (.ashrc.yaml in a new project)
+# ASH config file (.ash.yaml at the project root)
 global_settings:
   suppressions:
     # Suppress specific CVEs
@@ -1700,7 +1700,7 @@ jq -c '. as $all | range(0; length; 200) | $all[.:. + 200]' suppressions.json |
   done
 ```
 
-Appending YAML to the config file (`cat suppressions.yaml >> .ashrc.yaml`) does
+Appending YAML to the config file (`cat suppressions.yaml >> .ash.yaml`) does
 not work: it adds a second top-level `global_settings`, YAML keeps only the last
 one, and every other global setting in the file is dropped. `ash config update`
 keeps them, and writes each entry with only the fields it sets. It rewrites the
@@ -1795,7 +1795,7 @@ touch .last_scan
 #### Resource Management
 
 ```yaml
-# ASH config file (.ashrc.yaml in a new project) - Optimized for large repositories
+# ASH config file (.ash.yaml at the project root) - Optimized for large repositories
 scanners:
   trivy-repo:
     enabled: true

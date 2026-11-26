@@ -32,6 +32,10 @@ hand in two places drifts. Everything that needs a database's age bound reads it
 
 The inventory, and what each entry's bound is
 ---------------------------------------------
+Each entry is declared by the scanner that owns it, in that scanner's provisioning block
+(``base/plugin_provisioning.py``; ``ScannerManifest.provisioning``), and ``CONTENT_DATABASES``
+below is iterated from those blocks. Retiring a scanner retires its entries with it.
+
 Read from each tool's source at the version ASH pins. The Dockerfile's ``GRYPE_VERSION`` is
 v0.122.1 and its ``TRIVY_VERSION`` is v0.76.2. Each entry also says, in ``bound_source``,
 where its number comes from, and ``bound_is_tool_default`` separates a number the tool itself
@@ -97,11 +101,26 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from types import MappingProxyType
 from typing import Mapping
+
+# The declaration vocabulary lives with the declarations, in a module that is standard
+# library only for the same reason this one is. Re-exported: this module is where callers
+# have always imported them from.
+from automated_security_helper.base.plugin_provisioning import (  # noqa: F401
+    GRYPE_DB_MAX_AGE,
+    OFFLINE_RULESET_BOUND_REASON,
+    OFFLINE_RULESET_MAX_AGE,
+    RULESET_FETCHED_AT_FILE,
+    TRIVY_DB_MAX_AGE,
+    ContentDatabase,
+    go_duration,
+)
+from automated_security_helper.base.plugin_provisioning import (
+    content_databases as declared_content_databases,
+)
 
 # The key prefix's version. Bump it when the bucket arithmetic changes, so entries keyed under
 # the old arithmetic are never restored by the new one.
@@ -204,186 +223,12 @@ def content_db_staleness_flag_overrides(allow_stale: bool) -> list[str]:
     ]
 
 
-#: Written next to an offline ruleset when it is downloaded, holding the download time as an
-#: RFC 3339 UTC timestamp. A rules file carries no build time of its own, and its mtime is
-#: reset by an ordinary ``cp``, so the download records the time explicitly. No extension, so
-#: neither semgrep nor opengrep tries to load it as a rule file from the ``--config`` directory.
-RULESET_FETCHED_AT_FILE = ".ash-rules-fetched-at"
-
-
-@dataclass(frozen=True)
-class ContentDatabase:
-    """One scanner content database, and the bound ASH holds it to."""
-
-    name: str
-    scanner: str
-    cache_path: str
-    max_age: timedelta
-    # Where the number comes from: a citation to the tool's source at the pinned version, or,
-    # when ``bound_is_tool_default`` is False, ASH's reasoning for choosing it.
-    bound_source: str
-    bound_is_tool_default: bool
-    # What timestamp the age is measured from, and how it is read.
-    age_source: str
-    # What an operator does to get a fresh copy. Shown in the staleness message.
-    refresh: str
-    # Environment variables that tell the tool the bound, with the values they must carry. Empty
-    # when the tool has no such control.
-    bound_env: dict[str, str] = field(default_factory=dict)
-    how_enforced: str = ""
-    # The verb for the timestamp ``age_source`` reads, as the staleness message prints it:
-    # a vulnerability database is built, an offline ruleset is downloaded.
-    timestamp_label: str = "built"
-    # Whether CI may cache this database. Only grype's is, because only grype's has the CI
-    # restore and save guards (`check-age`) the bucket argument on ``bucket_width`` relies on.
-    # A declared max age alone is not enough: it bounds what a SCAN accepts, not what a cache
-    # hands out, and the drift gate refuses a CI cache of anything not marked here.
-    cacheable_in_ci: bool = False
-    # Other scanners that read the same database, by config name. ``scanner`` is the one
-    # the database is declared for; a scanner named here is held to the same bound, and
-    # its measurements are recorded under its own name. The trivy database is read by
-    # both scanners of the Trivy plugin, ``trivy-repo`` and ``trivy``.
-    also_read_by: tuple[str, ...] = ()
-
-    @property
-    def readers(self) -> tuple[str, ...]:
-        """Every scanner config name that reads this database, ``scanner`` first."""
-        return (self.scanner, *self.also_read_by)
-
-    @property
-    def cacheable(self) -> bool:
-        """Only a database with an enforced bound AND the CI age guards may be cached in CI."""
-        return self.cacheable_in_ci
-
-
-def go_duration(value: timedelta) -> str:
-    """A Go ``time.Duration`` string, which is what grype parses the bound from."""
-    seconds = int(value.total_seconds())
-    sign = "-" if seconds < 0 else ""
-    hours, rest = divmod(abs(seconds), 3600)
-    minutes, secs = divmod(rest, 60)
-    if minutes == 0 and secs == 0:
-        return f"{sign}{hours}h"
-    return f"{sign}{hours}h{minutes}m{secs}s"
-
-
-GRYPE_DB_MAX_AGE = timedelta(hours=120)
-TRIVY_DB_MAX_AGE = timedelta(hours=24)
-# ASH's own choice for both offline rulesets; see OFFLINE_RULESET_BOUND_REASON.
-OFFLINE_RULESET_MAX_AGE = timedelta(days=30)
-
-OFFLINE_RULESET_BOUND_REASON = (
-    "ASH's own choice, not a tool default: neither semgrep nor opengrep has any notion of a "
-    "local rules file going stale, so there is no tool number to adopt. 30 days because a "
-    "ruleset encodes code patterns rather than advisories, and ages more slowly than a "
-    "vulnerability feed: holding it to grype's 5 days would fail every air-gapped image "
-    "within a week over content that changes over weeks. But the registry packs keep "
-    "gaining new and corrected rules, and with no bound at all an image can scan with "
-    "rules years old while every report reads as current. A month bounds an offline image "
-    "to a monthly rebuild for its rules; its grype database, if it has one, needs a rebuild "
-    "far sooner anyway."
-)
-
-CONTENT_DATABASES: tuple[ContentDatabase, ...] = (
-    ContentDatabase(
-        name="grype-db",
-        scanner="grype",
-        cache_path="~/.cache/grype/db",
-        max_age=GRYPE_DB_MAX_AGE,
-        bound_source=(
-            "grype's own default, `time.Hour * 24 * 5` "
-            "(grype/db/v6/installation/curator.go:58 at v0.120.1)"
-        ),
-        bound_is_tool_default=True,
-        age_source="`built` in `grype db status -o json`, the database's own build time",
-        refresh=(
-            "run `grype db update` with network access, or rebuild the offline image "
-            "(`ash build-image --offline`) so it downloads a current database"
-        ),
-        bound_env={
-            "GRYPE_DB_MAX_ALLOWED_BUILT_AGE": go_duration(GRYPE_DB_MAX_AGE),
-            "GRYPE_DB_VALIDATE_AGE": "true",
-        },
-        how_enforced=(
-            "grype refuses a database built longer ago than db.max-allowed-built-age while "
-            "db.validate-age is true: it downloads a newer one, and fails the scan if it "
-            "cannot (grype/db/v6/installation/curator.go:221-225,605-615 at v0.120.1). "
-            "Offline, validate-age is off, and ASH's scan-time check holds the same bound"
-        ),
-        cacheable_in_ci=True,
-    ),
-    ContentDatabase(
-        name="trivy-db",
-        scanner="trivy-repo",
-        also_read_by=("trivy",),
-        cache_path="~/.cache/trivy",
-        max_age=TRIVY_DB_MAX_AGE,
-        bound_source=(
-            "trivy's own rule: a database is current until its NextUpdate "
-            "(pkg/db/db.go:172-183 at v0.75.0), and the published database's NextUpdate is "
-            "its UpdatedAt plus `--update-interval 24h` (trivy-db Makefile:94 and "
-            "pkg/vulndb/db.go:90 at 650c4091)"
-        ),
-        bound_is_tool_default=True,
-        age_source=(
-            "`VulnerabilityDB.UpdatedAt` in `trivy version --format json`, the database's "
-            "own build time"
-        ),
-        refresh=(
-            "run `trivy image --download-db-only` with network access, or copy a current "
-            "trivy database into the cache directory trivy reads"
-        ),
-        how_enforced=(
-            "no max-age option exists; trivy refreshes on its own NextUpdate metadata unless "
-            "--skip-db-update is passed (pkg/db/db.go:145-174 at v0.75.0). ASH's scan-time "
-            "check holds it to the bound in both modes"
-        ),
-    ),
-    ContentDatabase(
-        name="semgrep-offline-rules",
-        scanner="semgrep",
-        cache_path="/deps/.semgrep",
-        max_age=OFFLINE_RULESET_MAX_AGE,
-        bound_source=OFFLINE_RULESET_BOUND_REASON,
-        bound_is_tool_default=False,
-        timestamp_label="downloaded",
-        age_source=(
-            f"the download time in `{RULESET_FETCHED_AT_FILE}` in the cache directory, "
-            "else the oldest rules file's mtime"
-        ),
-        refresh=(
-            "rebuild the offline image (`ash build-image --offline`), which downloads the "
-            "rulesets again, or download them into $SEMGREP_RULES_CACHE_DIR and record the "
-            f"time in {RULESET_FETCHED_AT_FILE}"
-        ),
-        how_enforced=(
-            "none in semgrep: a local rules file has no staleness check. ASH's scan-time "
-            "check holds it to the bound in offline mode, the only mode that uses it"
-        ),
-    ),
-    ContentDatabase(
-        name="opengrep-offline-rules",
-        scanner="opengrep",
-        cache_path="/deps/.opengrep",
-        max_age=OFFLINE_RULESET_MAX_AGE,
-        bound_source=OFFLINE_RULESET_BOUND_REASON,
-        bound_is_tool_default=False,
-        timestamp_label="downloaded",
-        age_source=(
-            f"the download time in `{RULESET_FETCHED_AT_FILE}` in the cache directory, "
-            "else the oldest rules file's mtime"
-        ),
-        refresh=(
-            "rebuild the offline image (`ash build-image --offline`), which downloads the "
-            "rulesets again, or download them into $OPENGREP_RULES_CACHE_DIR and record the "
-            f"time in {RULESET_FETCHED_AT_FILE}"
-        ),
-        how_enforced=(
-            "none in opengrep: a local rules file has no staleness check. ASH's scan-time "
-            "check holds it to the bound in offline mode, the only mode that uses it"
-        ),
-    ),
-)
+#: Every content database, DERIVED from the blocks the scanners declare
+#: (``Provisioning.content_databases`` in ``base/plugin_provisioning.py``, one per
+#: scanner, readable as ``scanner_manifests()[...].provisioning``). The entries, their
+#: bounds and the reasoning behind each number are on those declarations; this module
+#: owns what is done with them (cache keys, age checks, the staleness policy).
+CONTENT_DATABASES: tuple[ContentDatabase, ...] = declared_content_databases()
 
 #: Scanners that keep an offline cache (``OfflineStrategy.CACHE_FLAGS``) yet read no content
 #: database whose age matters, each with the reason. A scanner of that strategy that is in

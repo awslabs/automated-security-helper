@@ -22,6 +22,7 @@ from yaml import YAMLError
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
@@ -423,7 +424,10 @@ def _unevaluated_rule_notifications(
     notifications: list[Notification] = []
     seen: set[str] = set()
     for result in results:
-        finding_props = (result.properties.model_extra or {}).get("cdk_nag_finding", {})
+        finding_props = (
+            (result.properties.model_extra if result.properties is not None else None)
+            or {}
+        ).get("cdk_nag_finding", {})
         if finding_props.get("compliance") != NOT_EVALUATED:
             continue
         rule_id = result.ruleId or ""
@@ -471,7 +475,9 @@ def _is_unevaluated_result(result: Result) -> bool:
     """
     from automated_security_helper.utils.cdk_nag_wrapper import NOT_EVALUATED
 
-    finding_props = (result.properties.model_extra or {}).get("cdk_nag_finding", {})
+    finding_props = (
+        (result.properties.model_extra if result.properties is not None else None) or {}
+    ).get("cdk_nag_finding", {})
     return finding_props.get("compliance") == NOT_EVALUATED
 
 
@@ -650,7 +656,9 @@ def _reporting_descriptor_for(
     an evaluated row as the rule's representative, which is also the better answer: the rule's
     real description is used whenever any template managed to evaluate it.
     """
-    finding_props = (result.properties.model_extra or {}).get("cdk_nag_finding", {})
+    finding_props = (
+        (result.properties.model_extra if result.properties is not None else None) or {}
+    ).get("cdk_nag_finding", {})
     pack = str(finding_props.get("pack", "") or "")
     rule_level = str(finding_props.get("rule_level", "rule"))
     rule_description = _rule_scoped_description(
@@ -658,7 +666,7 @@ def _reporting_descriptor_for(
     )
 
     return ReportingDescriptor(
-        id=result.ruleId,
+        id=result.ruleId or "unknown",
         # NOT ``result.message.root.text``. See the description note in the docstring: the
         # message is built per occurrence and names the template, so forwarding it put one
         # template's path in the definition of a rule that failed on several.
@@ -1280,6 +1288,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="runs in ASH's own interpreter plus a jsii child that needs node on PATH; ASH installs neither",
@@ -1317,7 +1326,6 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 semantics="the base default {0, 1}; the evaluation is in-process, so there is no tool exit",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
                 selection_surfaces=("options nag packs",),
                 upstream_license=(
@@ -1431,6 +1439,19 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         self.description = "CDK Nag is a security scanner for AWS CloudFormation templates that applies industry standard checks against AWS infrastructure-as-code."
         self.tool_version = _cdk_nag_version
         return super().model_post_init(context)
+
+    def _forced_binary_precluded_reason(self) -> Optional[str]:
+        """cdk-nag's dependencies are never one binary, so no force satisfies them.
+
+        The scan imports aws-cdk-lib and cdk-nag in ASH's own interpreter and
+        needs Node.js for the CDK CLI; a ``--binary-path`` record names one
+        executable file and can supply none of that, so the record is never
+        consulted for this scanner and the docs name it as an exception.
+        """
+        return (
+            "cdk-nag's dependencies are Python packages (aws-cdk-lib, cdk-nag) "
+            "and Node.js, not one binary, so a forced path cannot supply them"
+        )
 
     def validate_plugin_dependencies(self) -> bool:
         """Validate the scanner configuration and requirements.
@@ -1924,6 +1945,14 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     if isinstance(config_options.nag_packs, CdkNagPacks):
                         nag_packs = nag_packs.model_dump(by_alias=True)
 
+                    # None when the wrapper failed to import; the dependency check
+                    # keeps such a scanner from running, so this is the guard for
+                    # a caller that skipped it.
+                    if run_cdk_nag_against_cfn_template is None:
+                        raise ScannerError(
+                            "The cdk-nag wrapper could not be imported: "
+                            f"{_CDK_WRAPPER_IMPORT_ERROR or 'unknown error'}"
+                        )
                     nag_result_dict = run_cdk_nag_against_cfn_template(
                         template_path=Path(cfn_file),
                         nag_packs=[
@@ -2076,7 +2105,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                         self.errors.append(f"{cfn_file}: {failure}")
                         continue
 
-                    for pack, findings in nag_result_dict.results.items():
+                    for pack, findings in (nag_result_dict.results or {}).items():
                         ASH_LOGGER.debug(
                             f"Found {len(findings)} findings for {pack} on template {cfn_file}"
                         )

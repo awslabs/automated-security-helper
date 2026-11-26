@@ -152,13 +152,13 @@ from typing import (
 )
 
 from automated_security_helper.cli.mcp.error_types import McpErrorType
-from automated_security_helper.cli.mcp.profile_registry import session_client_rules
+from automated_security_helper.config.session_profiles import session_client_rules
 from automated_security_helper.cli.mcp.progress_monitor import (
     ResultsFileState,
     monitor_workspace_progress,
     results_files_before,
 )
-from automated_security_helper.cli.mcp.sandbox import (
+from automated_security_helper.config.mcp_sandbox import (
     caller_is_remote,
     config_base_gate,
 )
@@ -649,7 +649,7 @@ def _refuse_config_inputs_outside_the_permitted_roots(
     reports all of them as ``config_input_not_permitted`` with exit code 3.
     """
 
-    from automated_security_helper.cli.mcp.sandbox import validate_config_input
+    from automated_security_helper.config.mcp_sandbox import validate_config_input
 
     for label, candidate in (
         ("workspace definition", workspace_file),
@@ -695,7 +695,7 @@ def _refuse_a_client_chosen_policy(
     outside what the session may read is refused earlier, before it is read
     (``_resolve``'s ``permit_base``).
     """
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         ASH_MCP_ALLOWED_CONFIG_ROOTS_ENV,
         client_named_config_is_untrusted,
         config_is_client_supplied,
@@ -907,7 +907,7 @@ def _gate_client_overrides(
         check_runtime_ops,
     )
 
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         session_profile_entry,
     )
     from automated_security_helper.config.client_config_policy import policy_of
@@ -1133,7 +1133,7 @@ def _resolve_session_config(
             trusted path); exit 3.
     """
 
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         call_profile_filename,
         get_profile_registry,
         materialize_session_config,
@@ -1170,7 +1170,7 @@ def _resolve_session_config(
 
 def _server_config_path() -> Optional[str]:
     """The file ``ASH_CONFIG`` names, unless a file of its chain is a client's."""
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
     from automated_security_helper.config.config_sources import by_every_name
     from automated_security_helper.config.default_config import (
         default_config_document,
@@ -2068,11 +2068,11 @@ def _session_holds_something_on_disk(session_id: str, profile: Optional[str]) ->
     the scan reads it. Checked on disk, so it holds for a tree another server
     sharing the workspace root delivered.
     """
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         CONFIG_DIR_NAME,
         SOURCE_DIR_NAME,
     )
-    from automated_security_helper.cli.mcp.session_paths import session_directory
+    from automated_security_helper.config.session_paths import session_directory
     from automated_security_helper.cli.mcp.source_delivery import (
         resolve_workspace_root,
     )

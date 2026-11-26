@@ -20,9 +20,10 @@ change without any run failing, so they are checked here, on the file:
   uses, and no checkout keeps credentials;
 * no ``${{ }}`` expression is pasted into a script, so an event value cannot become
   shell text;
-* the pull request step times the base and the head against each other with five runs a
-  build and writes the step summary, and the nightly step times the head alone and
-  writes the trend.
+* every trigger times three builds with five runs each: the tip, the previous commit
+  (HEAD~1) and the previous release (the highest vX.Y.Z tag that is an ancestor of
+  HEAD), resolved from a full-history checkout the way ash-upgrade-paths.yml resolves its
+  starting points, and the step summary and the nightly trend carry all three.
 """
 
 from __future__ import annotations
@@ -124,7 +125,7 @@ def test_no_checkout_keeps_credentials():
     checkouts = [
         s for s in _steps() if s.get("uses", "").startswith("actions/checkout@")
     ]
-    assert len(checkouts) == 2
+    assert len(checkouts) == 1
     for step in checkouts:
         assert step["with"]["persist-credentials"] is False
 
@@ -149,29 +150,66 @@ def test_every_script_runs_in_bash_with_strict_flags():
             assert "set -euo pipefail" in step["run"], step["name"]
 
 
-def test_the_base_is_only_built_for_a_pull_request():
-    for name in ("Check out the base", "Install the base build"):
-        assert "pull_request" in _step(name)["if"]
-    assert _step("Check out the base")["with"]["path"] == "base"
+def test_the_checkout_takes_full_history_and_tags_like_the_upgrade_job():
+    """The old trees come from the local clone, so the clone needs its history."""
+    step = next(
+        s for s in _steps() if s.get("uses", "").startswith("actions/checkout@")
+    )
+    assert step["with"]["fetch-depth"] == 0
+    upgrade = (WORKFLOWS / "ash-upgrade-paths.yml").read_text(encoding="utf-8")
+    assert "fetch-depth: 0" in upgrade
 
 
-def test_the_pull_request_step_alternates_base_and_head_five_runs_each():
-    run = _step("Time base against head")["run"]
+def test_the_baselines_resolve_the_way_the_upgrade_job_resolves_its_starting_points():
+    run = _step("Resolve the previous commit and the previous release")["run"]
+    upgrade = (WORKFLOWS / "ash-upgrade-paths.yml").read_text(encoding="utf-8")
+    # The previous commit: HEAD~1, as the upgrade job's from-prev-commit arm.
+    assert "git rev-parse --verify HEAD~1" in run
+    assert "git rev-parse --verify HEAD~1" in upgrade
+    # The previous release: the highest vX.Y.Z tag, selected as the upgrade job selects
+    # its tags (a version sort filtered to the release shape), not the nearest tag by
+    # distance. It does not keep the upgrade job's ancestor-of-HEAD filter, which on
+    # main skips the latest releases (they are cut on a line main does not contain).
+    for fragment in (
+        "git tag --sort=-v:refname",
+        "grep -E '^v[0-9]+\\.[0-9]+\\.[0-9]+$'",
+        "sed -n '1p'",
+    ):
+        assert fragment in run, fragment
+    assert "git tag --sort=-v:refname" in upgrade
+    assert "merge-base --is-ancestor" not in run
+    assert "git describe" not in run.replace("`git describe", "")
+
+
+def test_the_old_trees_are_local_worktrees_and_nothing_is_fetched():
+    for name in ("Install the previous commit", "Install the previous release"):
+        run = _step(name)["run"]
+        assert "git worktree add --detach" in run, name
+        assert "git fetch" not in run, name
+        assert "git clone" not in run, name
+
+
+def test_all_three_builds_are_timed_together_on_every_trigger_five_runs_each():
+    step = _step("Time the tip against the previous commit and the previous release")
+    assert "if" not in step
+    run = step["run"]
     assert "scripts/measure_precommit_cost.py bench" in run
-    assert "--base-ash" in run
-    assert "--commit" in run and "--base-commit" in run
+    assert "--ash" in run and "--commit" in run
+    assert re.search(r"--baseline prev-release\b", run)
+    assert re.search(r"--baseline prev-commit\b", run)
+    assert run.count("--baseline ") == 2
     assert re.search(r"--repeats 5\b", run)
     assert '--summary "$GITHUB_STEP_SUMMARY"' in run
     assert "--json" in run
 
 
-def test_the_nightly_step_times_the_head_alone_and_writes_the_trend():
-    step = _step("Time the head and append to the trend")
-    assert "pull_request" in step["if"]
-    run = step["run"]
-    assert "--base-ash" not in run
-    assert re.search(r"--repeats 5\b", run)
+def test_the_trend_arguments_are_added_on_the_schedule_only():
+    run = _step("Time the tip against the previous commit and the previous release")[
+        "run"
+    ]
     assert "--trend-in" in run and "--trend-out" in run
+    assert '"$EVENT_NAME" = schedule' in run
+    assert run.index('"$EVENT_NAME" = schedule') < run.index("--trend-out")
 
 
 def test_the_trend_is_fetched_and_uploaded_on_the_schedule_only():

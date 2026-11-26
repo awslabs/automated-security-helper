@@ -70,7 +70,7 @@ For a repository's own config that sets `reporters.aws-security-hub.enabled: tru
 warning reads:
 
 ```text
-Ignoring reporters.aws-security-hub.enabled from /home/me/repo/.ash/.ash.yaml: that config is inside a git checkout or the scanned tree, or was delivered by an MCP client, and these options choose whether findings are sent, where they are sent or written, and which credentials send them. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
+Ignoring reporters.aws-security-hub.enabled from /home/me/repo/.ash.yaml: that config is inside a git checkout or the scanned tree, or was delivered by an MCP client, and these options choose whether findings are sent, where they are sent or written, and which credentials send them. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
 ```
 
 Under its default policy, the MCP server refuses a delivered config that turns one of

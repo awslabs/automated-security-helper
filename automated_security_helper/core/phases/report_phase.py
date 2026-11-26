@@ -156,7 +156,7 @@ def _entries_under(directory: Path) -> Optional[set[Path]]:
 
 
 def _excluded_reporter_reason(
-    instance: object, python_only: bool, off_host_refused: bool = False
+    instance: Any, python_only: bool, off_host_refused: bool = False
 ) -> str:
     """Why ``filter_enabled_plugins`` dropped this reporter.
 
@@ -208,8 +208,8 @@ def _excluded_reporter_reason(
 
 def unsatisfied_output_formats(
     output_formats: Iterable[object],
-    selected_instances: Sequence[object],
-    all_instances: Sequence[object],
+    selected_instances: Sequence[Any],
+    all_instances: Sequence[Any],
     python_based_plugins_only: bool = False,
     off_host_refused: Collection[int] = (),
     failed_to_build: Collection[str] = (),
@@ -408,7 +408,7 @@ class ReportPhase(EnginePhase):
         """Return the name of this phase."""
         return ExecutionPhase.REPORT
 
-    def _reporters_that_name_their_files(self, reporters: List[object]) -> List[object]:
+    def _reporters_that_name_their_files(self, reporters: List[Any]) -> List[Any]:
         """*reporters* without the ones whose file names cannot be read.
 
         A reporter declares the files it writes (``companion_file_names``), and
@@ -417,7 +417,7 @@ class ReportPhase(EnginePhase):
         was written. The reporter is logged and left out instead.
         """
         values = config_environment_values(getattr(self.plugin_context, "config", None))
-        kept: List[object] = []
+        kept: List[Any] = []
         for plugin_instance in reporters:
             try:
                 reporter_file_names(plugin_instance)
@@ -434,7 +434,7 @@ class ReportPhase(EnginePhase):
     @staticmethod
     def _warn_if_an_earlier_report_remains(
         report_dir: Path,
-        plugin_instance: object,
+        plugin_instance: Any,
         display_name: str,
         written: Collection[str] = (),
     ) -> None:
@@ -465,7 +465,9 @@ class ReportPhase(EnginePhase):
         except Exception as e:  # noqa: BLE001 -- a notice must not fail the phase
             ASH_LOGGER.debug(f"Could not look for an earlier report: {e}")
 
-    def _execute_phase(
+    # EnginePhase.execute passes the phase's arguments by keyword, and each phase
+    # names the ones it takes; this one requires report_dir.
+    def _execute_phase(  # ty: ignore[invalid-method-override]
         self,
         report_dir: Path,
         aggregated_results: AshAggregatedResults,
@@ -540,7 +542,7 @@ class ReportPhase(EnginePhase):
         before = getattr(self, "_report_dir_before", None)
         after = _entries_under(report_dir) if before is not None else None
         appeared = (
-            [path for path in after if path not in before and path not in kept]
+            [path for path in after if path not in (before or ()) and path not in kept]
             if after is not None
             else []
         )
@@ -695,7 +697,7 @@ class ReportPhase(EnginePhase):
             name = getattr(getattr(plugin_instance, "config", None), "name", None)
             return name or plugin_instance.__class__.__name__
 
-        requested_reporters: List[object] = []
+        requested_reporters: List[Any] = []
         for plugin_instance in all_reporter_instances:
             if id(plugin_instance) in off_host_refused:
                 ASH_LOGGER.debug(
@@ -712,7 +714,7 @@ class ReportPhase(EnginePhase):
                 continue
             requested_reporters.append(plugin_instance)
 
-        enabled_reporters: List[object] = self.filter_enabled_plugins(
+        enabled_reporters: List[Any] = self.filter_enabled_plugins(
             plugin_instances=requested_reporters,
             plugin_context=self.plugin_context,
             python_only=python_based_plugins_only,

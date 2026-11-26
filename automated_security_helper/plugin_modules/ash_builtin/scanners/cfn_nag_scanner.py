@@ -62,7 +62,7 @@ from automated_security_helper.utils.cfn_template_model import (
     unmarked_wide_template_reason,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, TRACE_LEVEL
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.download_utils import (
     NO_BIN_DIRECTORY,
@@ -624,6 +624,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     "gem closure itself comes from the committed assets/Gemfile.lock."
                 ),
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="a Ruby gem closure from assets/Gemfile.lock, not a release binary; there is no asset table",
@@ -661,7 +662,6 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 semantics="the base default {0, 1}; Ruby stderr exception text is sniffed to tell a crash from findings",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.GEMFILE_LOCK,
                 selection_surfaces=(),
                 upstream_license=(
@@ -1368,14 +1368,14 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                         f"Not a CloudFormation file: {cfn_file}. "
                         f"Exception: {describe_parse_error(e)}",
                         target_type=target_type,
-                        level=logging.TRACE,
+                        level=TRACE_LEVEL,
                     )
                     continue
                 if cfn_model is None:
                     self._plugin_log(
                         f"Not a CloudFormation file: {cfn_file}",
                         target_type=target_type,
-                        level=logging.TRACE,
+                        level=TRACE_LEVEL,
                     )
                     continue
                 # Counted here rather than at the top of the loop: the two continues above

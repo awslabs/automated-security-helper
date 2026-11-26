@@ -12,7 +12,7 @@
 
 This page is generated from the scanner plugins in the ASH source code by `scripts/generate_scanner_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH ships 22 scanners. The built-in ones are loaded on every scan. The others are alpha scanners, each in a plugin module that `ash scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
+ASH ships 23 scanners. The built-in ones are loaded on every scan. The others are alpha scanners, each in a plugin module that `ash scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
 
 <!-- doctest: options of=scanners -->
 | Scanner | Tool type | Enabled by default | Provided by | Command | Runs with `--python-only` |
@@ -27,6 +27,7 @@ ASH ships 22 scanners. The built-in ones are loaded on every scan. The others ar
 | [`detect-secrets`](#detect-secrets) | SECRETS | yes | built in | `detect-secrets` | yes |
 | [`gitleaks`](#gitleaks) | SECRETS | yes | built in | `gitleaks` | no |
 | [`grype`](#grype) | SCA | yes | built in | `grype` | no |
+| [`mcp-config`](#mcp-config) | SAST | yes | built in | `ash-mcp-config-scanner` | yes |
 | [`npm-audit`](#npm-audit) | SCA | yes | built in | `npm` | no |
 | [`opengrep`](#opengrep) | SAST | yes on Linux and macOS; no on Windows | built in | `opengrep` | no |
 | [`semgrep`](#semgrep) | SAST | yes on Linux and macOS; no on Windows | built in | `semgrep` | yes |
@@ -314,6 +315,36 @@ Options, under `scanners.grype.options`. An option not listed here refuses the c
 | <a id="scanners.grype.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, disabling database updates and validation. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 | <a id="scanners.grype.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to Grype configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. ASH does not look for one by name. Without one, grype gets an empty config, so it does not read `.grype.yaml` from the scanned tree. |
 
+## `mcp-config`
+
+- Scanner page: [`mcp-config` scanner page](../docs/plugins/builtin/mcp-config.md)
+- Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.mcp_config_scanner.McpConfigScanner`
+- Provided by: built in, loaded on every scan
+- Enabled by default: yes
+- Tool type: SAST
+- Command: `ash-mcp-config-scanner`
+- Install: none declared
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.mcp-config.options`. An option not listed here refuses the configuration.
+
+<!-- doctest: options of=scanners.mcp-config -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.mcp-config.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.mcp-config.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.mcp-config.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
+| <a id="scanners.mcp-config.options.forbid_privilege_escalation"></a>`forbid_privilege_escalation` | boolean | `true` | Flag sudo, doas, su and pkexec used as the command, or as a whole argument, of a stdio MCP server entry (HIGH). The match is on the whole word, so a name that merely contains one is not flagged. |
+| <a id="scanners.mcp-config.options.forbid_unpinned_runners"></a>`forbid_unpinned_runners` | boolean | `true` | Flag npx, bunx, pnpm dlx, pnpx and uvx entries whose package has no exact version, such as `npx -y pkg` or `uvx pkg` (MEDIUM). `pkg@1.2.3` and `pkg==1.2.3` are pinned; `pkg@latest` and ranges are not. |
+| <a id="scanners.mcp-config.options.forbid_auto_approval"></a>`forbid_auto_approval` | boolean | `true` | Flag settings that approve MCP tool calls without asking (HIGH): gemini `trust: true`, a non-empty kiro `autoApprove` or roo `alwaysAllow`, and codex `approval_mode` of `auto` or `full-auto`. |
+| <a id="scanners.mcp-config.options.require_local"></a>`require_local` | boolean | `false` | Flag every remote (url, httpUrl, serverUrl) entry whose host is not loopback (MEDIUM). `localhost`, `127.0.0.0/8` and `::1` count as local, whichever way the IPv6 address is spelled. |
+| <a id="scanners.mcp-config.options.remote_url_prefixes"></a>`remote_url_prefixes` | list of string | `[]` | When not empty, every remote URL must start with one of these prefixes (MEDIUM), compared on URL boundaries with the scheme and host in lower case, and a remote URL that is not loopback must be https (MEDIUM). Empty turns the check off. |
+| <a id="scanners.mcp-config.options.allowed_command_prefixes"></a>`allowed_command_prefixes` | list of string | `[]` | When not empty, every stdio command must be a path that starts with one of these prefixes (MEDIUM), compared on path boundaries after the command is normalized. A bare command name such as `npx` does not start with a path prefix and is flagged. Empty turns the check off. |
+| <a id="scanners.mcp-config.options.flag_env_secrets"></a>`flag_env_secrets` | boolean | `true` | Flag an `env` entry whose name says key, token, secret or password and whose value is a literal rather than a reference such as `${NAME}` (LOW). The value is never written into the finding. |
+
 ## `npm-audit`
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner.NpmAuditScanner`
@@ -397,6 +428,7 @@ Options, under `scanners.semgrep.options`. An option not listed here refuses the
 
 ## `syft`
 
+- Scanner page: [`syft` scanner page](../docs/plugins/builtin/syft.md)
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner.SyftScanner`
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes
@@ -419,6 +451,7 @@ Options, under `scanners.syft.options`. An option not listed here refuses the co
 | <a id="scanners.syft.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to Syft configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. ASH does not look for one by name. Without one, syft gets an empty config, so it does not read `.syft.yaml` from the scanned tree. |
 | <a id="scanners.syft.options.exclude"></a>`exclude` | list of mapping | `[]` | Paths (files or directories) to skip, each a glob relative to the scanned directory and passed to syft as one --exclude. A glob must start with "./", "\*/" or "\*\*/", and syft fails the scan on any other. "\*" does not match across "/" and "\*\*" does: "./dir1/\*\*" skips the top-level "dir1", and "\*\*/dir1/\*\*" skips every directory named "dir1". |
 | <a id="scanners.syft.options.additional_outputs"></a>`additional_outputs` | list of one of `cyclonedx-json`, `cyclonedx-xml`, `github-json`, `spdx-json`, `spdx-tag-value`, `syft-json`, `syft-table`, `syft-text` | `["syft-table"]` | List of additional formats to output. Defaults to syft-table. |
+| <a id="scanners.syft.options.sdist_harvest"></a>`sdist_harvest` | mapping | see the section | Configure the cross-toolchain sdist lockfile harvest, which completes the SBOM for compiled dependencies whose artifacts carry no audit data. The harvest runs in the convert phase; offline mode disables its fetches whatever these options say. |
 
 ## `trivy`
 

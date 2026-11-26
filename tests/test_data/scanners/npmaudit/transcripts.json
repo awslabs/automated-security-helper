@@ -1,0 +1,595 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": "npm-audit",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "npm-audit-npm",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "npm.json",
+          "sha256": "7de3c0e79214f615feb035517e2b0f92aabf193213bce87a84f11d95c6247a80"
+        }
+      ],
+      "retention": "current",
+      "scanner": "npm-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "npm",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "npm-audit-pnpm-500",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "pnpm/500.json",
+          "sha256": "6f9e44e88e4bbb5ea31af82f915e6adc2691ab06bea560f76d25e29562b4e045"
+        }
+      ],
+      "retention": "current",
+      "scanner": "npm-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "pnpm",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "npm-audit-pnpm-clean",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "pnpm/clean.json",
+          "sha256": "3edadb8e2d1afbcaff3dd5a04bf3b134ae4d8d1dea7e6e0f99f81954cdddc161"
+        }
+      ],
+      "retention": "current",
+      "scanner": "npm-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "pnpm",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "npm-audit-pnpm-closedport",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "pnpm/closedport.json",
+          "sha256": "421dfc904d94683f07394e5c516e7a607df57b346998245050a8c27c9f6deeff"
+        }
+      ],
+      "retention": "current",
+      "scanner": "npm-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "pnpm",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "npm-audit-pnpm-vuln",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "pnpm/vuln.json",
+          "sha256": "fcb924c5e1d512a19e186b3402bb1dcf882b675730a4f36eb6bef750a5de6ce8"
+        }
+      ],
+      "retention": "current",
+      "scanner": "npm-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "pnpm",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "npm-audit-yarn-berry-500",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "yarn/berry-500.json",
+          "sha256": "c83ca3ac81fa68b742d08dbba06354754cdb084e2f55b7c69dc4bea324912378"
+        }
+      ],
+      "retention": "current",
+      "scanner": "npm-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "yarn",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "npm-audit-yarn-berry-clean",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "yarn/berry-clean.json",
+          "sha256": "a93e256ae79d7c28af2791fc7c65ba7e323984845f9e0f2dce661be52ce4184c"
+        }
+      ],
+      "retention": "current",
+      "scanner": "npm-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "yarn",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "npm-audit-yarn-berry-closedport",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "yarn/berry-closedport.json",
+          "sha256": "19803f6e274288c0e91b9fd587e4fb38b8fe1e4103085f6c465ec6299b081f34"
+        }
+      ],
+      "retention": "current",
+      "scanner": "npm-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "yarn",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "npm-audit-yarn-berry-legacycmd-vuln",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "yarn/berry-legacycmd-vuln.json",
+          "sha256": "290a84e440ac91fe2690ec9b179c179e6450e8561ffd7ce60acf800ffa6d5b5c"
+        }
+      ],
+      "retention": "current",
+      "scanner": "npm-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "yarn",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "npm-audit-yarn-berry-nolock",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "yarn/berry-nolock.json",
+          "sha256": "fd8d992ca86eac5933c427b1642c463d91b77de9b9364b98f87363be750b7ffb"
+        }
+      ],
+      "retention": "current",
+      "scanner": "npm-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "yarn",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "npm-audit-yarn-berry-vuln-recursive",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "yarn/berry-vuln-recursive.json",
+          "sha256": "9a6e6811b1a56c8b5d8419ea568dcb3f674fa65dd9cfc064cf31fefd6b70fef3"
+        }
+      ],
+      "retention": "current",
+      "scanner": "npm-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "yarn",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "npm-audit-yarn-berry3-clean",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "yarn/berry3-clean.json",
+          "sha256": "88aa4037c52304e43e04832d5cb2a32037a68d4d4dc26ed44ba2eb77e9733ece"
+        }
+      ],
+      "retention": "current",
+      "scanner": "npm-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "yarn",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "npm-audit-yarn-berry3-vuln",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "yarn/berry3-vuln.json",
+          "sha256": "8cd20a04117c23c5af519dd26e8b8d887af7d595b00b75ea0904f693678b2810"
+        }
+      ],
+      "retention": "current",
+      "scanner": "npm-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "yarn",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "npm-audit-yarn-classic-500",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "yarn/classic-500.json",
+          "sha256": "f43f81b29a8b998e396b5913e06e14f923bf9ce68f9045c4a247f94227c20ee4"
+        }
+      ],
+      "retention": "current",
+      "scanner": "npm-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "yarn",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "npm-audit-yarn-classic-clean",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "yarn/classic-clean.json",
+          "sha256": "b26c6c924d5285f13b52f232ab3016d3b640710fe3f271c1291a98b790519035"
+        }
+      ],
+      "retention": "current",
+      "scanner": "npm-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "yarn",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "npm-audit-yarn-classic-closedport",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "yarn/classic-closedport.json",
+          "sha256": "08db18e86b6919777e073d5163c99dff219d58e3d57390c2d6731bef4ccb9046"
+        }
+      ],
+      "retention": "current",
+      "scanner": "npm-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "yarn",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "npm-audit-yarn-classic-nolock",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "yarn/classic-nolock.json",
+          "sha256": "b88b5893c5856a5074d819ad602f204f2882ef36536f6923246ea52dd53addd2"
+        }
+      ],
+      "retention": "current",
+      "scanner": "npm-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "yarn",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "npm-audit-yarn-classic-offline",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "yarn/classic-offline.json",
+          "sha256": "c788eb3d7139c2da8e747065045e4a5f2ed856ac97a28d2b30679e16e924b3e2"
+        }
+      ],
+      "retention": "current",
+      "scanner": "npm-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "yarn",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "npm-audit-yarn-classic-vuln",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "yarn/classic-vuln.json",
+          "sha256": "3662e8e00a93c1fa1f5d22b470299011786ec44eb592a0ae1525e80edb681ab1"
+        }
+      ],
+      "retention": "current",
+      "scanner": "npm-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "yarn",
+        "version": "unknown"
+      }
+    }
+  ],
+  "unrecorded": []
+}

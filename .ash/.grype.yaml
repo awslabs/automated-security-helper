@@ -8,7 +8,7 @@
 # available fix and then drops it before writing the report. So this line removes
 # a whole category of finding from ASH's own dependency scan, and it is the only
 # exclusion under .ash/ that is not written as a suppression with a reason in
-# .ash/.ash.yaml.
+# .ash.yaml.
 #
 # It is recorded here rather than removed because removing it and leaving the
 # result untriaged is the worse of the two failures. The set it unmasks is not a
@@ -16,7 +16,7 @@
 # day the scan runs, so it changes without any commit here, and no count written
 # into this file would stay true. That also means the finding set cannot be
 # triaged once and suppressed with stable rule ids, the way the checkov, cfn-nag
-# and cdk-nag entries in .ash/.ash.yaml were.
+# and cdk-nag entries in .ash.yaml were.
 #
 # WHAT THIS COSTS, STATED PLAINLY
 #

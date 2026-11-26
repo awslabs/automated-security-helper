@@ -6,12 +6,12 @@ $ ash dependencies install --bin-path bin --tool grype --tool gryp
 ╰────────────────────────────────────────────╯
 Getting platform and architecture
 Installing dependencies for platform: darwin, architecture: amd64
-INFO     Loaded 2 converters, 16 scanners, and 16 reporters
+INFO     Loaded 4 converters, 17 scanners, and 16 reporters
 ╭─────────────────────────────────────── Nothing installed ────────────────────────────────────────╮
 │ Unknown tool(s): gryp                                                                            │
 │ Available: actionlint, archive, asff, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov,    │
 │ csv, cyclonedx, detect-secrets, flat-json, github-ghas, gitlab-cyclonedx, gitlab-sast, gitleaks, │
-│ grype, html, junitxml, jupyter, markdown, npm-audit, ocsf, opengrep, sarif, semgrep, spdx, syft, │
-│ text, trivy, unused-suppressions, yaml, zizmor                                                   │
+│ grype, html, junitxml, jupyter, markdown, mcp-config, mcp_config, npm-audit, ocsf, opengrep,     │
+│ sarif, sdist-lock-harvester, semgrep, spdx, syft, text, trivy, unused-suppressions, yaml, zizmor │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 [exit code: 2]

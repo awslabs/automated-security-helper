@@ -1,4 +1,4 @@
-$ ash report --format aggregated --log-level ERROR
+$ ash results report --format aggregated --log-level ERROR
 [exit 5]
 
 [stderr]

@@ -120,8 +120,10 @@ ENDED = frozenset(
 
 #: The session a scan belongs to when its registrar named none: stdio's single
 #: client and in-process callers. The same value as
-#: ``cli.mcp.profile_registry.DEFAULT_SESSION_ID``, spelled here rather than
-#: imported because this module sits below the MCP CLI package.
+#: ``config.session_profiles.DEFAULT_SESSION_ID``, spelled here rather than
+#: imported because the config layer imports ``core.resource_management``
+#: (``config/mcp_sandbox.py`` takes its error types from it), so importing the
+#: constant from ``config`` here would make the two packages import each other.
 DEFAULT_SCAN_SESSION = "__default__"
 
 
@@ -617,10 +619,11 @@ def _windows_process_is_running(pid: int, *, if_unasked: bool = False) -> bool:
     still_active = 259
     error_access_denied = 5
     try:
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+        # WinDLL and get_last_error exist on Windows only; this probe runs there.
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
         handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
         if not handle:
-            return ctypes.get_last_error() == error_access_denied  # type: ignore[attr-defined]
+            return ctypes.get_last_error() == error_access_denied  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
         try:
             code = ctypes.c_ulong()
             if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):

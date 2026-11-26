@@ -233,6 +233,56 @@ class TestAViewFoldsWhatItShows:
     def test_an_empty_view_is_empty(self):
         assert folded([row("a", "grype"), row("b", "trivy")], shown=[]) == []
 
+    def test_a_preferred_member_stands_for_the_cluster_over_a_severer_one(self):
+        rows = [
+            row("a", "grype", "HIGH"),
+            row("b", "trivy", "MEDIUM"),
+            row("c", "osv", "MEDIUM"),
+        ]
+        shown = list(range(len(rows)))
+        clusters = cluster_findings(rows)
+        # Without a preference the severity-ranked primary stands.
+        assert dict(fold_positions(rows, clusters, shown)) == {0: (1, 2)}
+        # The preference (the emitter's actionable rows) wins while any of its
+        # positions is present; the primary ranking orders the preferred, so of
+        # the two equally severe preferred rows the scanner name decides.
+        assert dict(fold_positions(rows, clusters, shown, prefer={1, 2})) == {2: (0, 1)}
+        assert dict(fold_positions(rows, clusters, shown, prefer={1})) == {1: (0, 2)}
+        # A preference none of whose positions is present changes nothing.
+        assert dict(fold_positions(rows, clusters, shown, prefer={99})) == {0: (1, 2)}
+        # A preferred primary is still the representative.
+        assert dict(fold_positions(rows, clusters, shown, prefer={0, 1})) == {0: (1, 2)}
+
+    def test_a_chain_folds_through_a_bridge_filtered_out_of_the_view(self):
+        # Overlap is not transitive: a location cluster is a connected
+        # component, so A-B-C makes one cluster though A and C never overlap,
+        # and with the bridge B filtered out of the view A and C still fold.
+        # The help and config text describe this chaining; a change that folds
+        # only direct matches to the representative turns this red.
+        rows = [
+            sast("a", "bandit", line=10, line_end=20),
+            sast("b", "semgrep", line=18, line_end=30),
+            sast("c", "osv", line=28, line_end=40),
+        ]
+        clusters = cluster_findings(rows)
+        assert [c.members for c in clusters] == [(0, 1, 2)]
+        assert dict(fold_positions(rows, clusters, [0, 2])) == {0: (2,)}
+
+    def test_a_suppressed_preferred_row_never_stands_for_live_ones(self):
+        rows = [
+            row("a", "grype", "HIGH"),
+            row("b", "trivy", "MEDIUM"),
+            row("c", "osv", "MEDIUM", is_suppressed=True),
+        ]
+        shown = [0, 1, 2]
+        clusters = cluster_findings(rows)
+        # The suppressed row is alone on its side of the split whatever the
+        # preference says, so it stays in the view.
+        assert dict(fold_positions(rows, clusters, shown, prefer={2})) == {
+            0: (1,),
+            2: (),
+        }
+
 
 class TestTheFoldIsDeterministic:
     def test_a_shuffled_input_keeps_the_same_representatives(self):
@@ -281,6 +331,20 @@ class TestProjects:
             row("b", "trivy", workspace_project="p2"),
         ]
         assert clusters_by_project(rows) == []
+
+    def test_identical_ids_in_two_projects_never_share_a_cluster_id(self):
+        # Identity-derived ids embed their project; a plugin-supplied id on an
+        # identity-less finding can repeat across projects, and two different
+        # clusters must never share an id.
+        def pair(project):
+            return [
+                row("same-id", "grype", workspace_project=project),
+                row("other-id", "trivy", workspace_project=project),
+            ]
+
+        clusters = clusters_by_project([*pair("api"), *pair("web")])
+        assert len(clusters) == 2
+        assert len({c.cluster_id for c in clusters}) == 2
 
 
 class TestProvenance:

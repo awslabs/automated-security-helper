@@ -1,6 +1,6 @@
 # Alpha Plugins
 
-This section covers the alpha plugins for ASH. Alpha plugins extend ASH's functionality with additional scanners, reporters, converters, and event handlers. Alpha is a maturity label, not a trust level: these are opt-in plugins that ASH ships but does not yet promote as supported.
+This section covers the alpha plugins for ASH: the opt-in scanner packages (`ash_*_plugins`) that ship with ASH but are not built in. Alpha is a maturity label, not a trust level: ASH ships these scanners but does not yet promote them as supported. The `ash_aws_plugins` reporters load the same opt-in way but are not alpha plugins (see [AWS reporters](../../../plugins/aws.md)).
 
 ## Available Alpha Plugins
 
@@ -63,6 +63,7 @@ Replace `<my-plugin-package-name>` with the actual name of the plugin package yo
 ## Plugin Name
 
 **Description**: Brief description of what the plugin does and its key features.
+
 **Repository**: [Link to GitHub/GitLab/etc. repository](https://github.com/username/plugin-repo)
 
 **Author**: Your Name or Organization
@@ -78,9 +79,8 @@ pip install <my-plugin-package-name>
 
 ### Configuration
 
-<!-- doctest: config kind=other reason="a template for a plugin page, whose plugin name and options are placeholders" -->
 ```yaml
-# Example configuration in your ASH config file (.ashrc.yaml in a new project)
+# Example configuration in your ASH config file (.ash.yaml in a new project)
 scanners:
   my-plugin:
     enabled: true
@@ -96,7 +96,6 @@ scanners:
 
 ### Example Usage
 
-<!-- doctest: illustrative reason="my_plugin is a placeholder for the module of a plugin you installed" -->
 ```bash
 # Example command line usage
 ash scan --ash-plugin-modules my_plugin

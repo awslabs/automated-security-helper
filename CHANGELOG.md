@@ -46,6 +46,39 @@
 
 ## Unreleased
 
+### Behavior changes
+
+- **npm-audit findings are located at the lockfile they were audited from**
+  (`deploy/cdk/package-lock.json`, say), not at the installed package's
+  `node_modules/<package>/package.json`. A path-scoped suppression for an npm-audit
+  finding must name the lockfile in `path`; one that names the old `node_modules`
+  path matches nothing. Use `package_name` / `package_path` on the entry to scope
+  to a package or an installed copy within the lockfile, as this repository's own
+  `.ash.yaml` entries now do.
+- **`.ash.yaml` at the project root is the canonical config file.** A scan reads it
+  before any other config source, and `ash config init`, `ash config wizard` and
+  `ash inspect findings` create it when no config exists (they wrote `.ashrc.yaml`
+  before). Every location that worked before still loads: `.ash/.ash.yaml`, `.ash.yml`,
+  `ash.yaml` and the other names of the old list, each also under `.ash/`, and the
+  `ashrc` names. A scan that reads one of them prints one warning that names the file
+  as deprecated and gives the path to move it to, and ASH 4.0 stops reading them. When
+  `.ash.yaml` and an older file both exist, `.ash.yaml` is read and the warning names the
+  file it shadowed; for a project that has `.ash.yml` beside `.ash.yaml`, this reverses
+  which of the two is read. `--config` and `ASH_CONFIG` are unchanged and print no
+  warning, and a `pyproject.toml` with a `[tool.ash]` table is still read, after the file
+  names, with no warning. To move a config, run `git mv .ash/.ash.yaml .ash.yaml`
+  (or the same with the file's own name). This repository's own config moved the same
+  way.
+- **A finding moved from an MCP config's generated script back to the config file has a
+  new property name and a new id.** The result property that names the generated script
+  is now `converted_from`; it was `ash/convertedFrom`, so a tool that reads the old name
+  from ASH's SARIF output finds nothing. The generated script's path is now part of the
+  finding's identity, so the id of such a finding (a finding at a line of `.mcp.json`
+  that a scanner reported in the script the MCP config converter wrote) changes, and a
+  baseline or a suppression keyed by that id needs refreshing. A suppression written
+  against the config file's path and lines is not affected. A result that has a line in
+  the generated script with no sidecar row is unchanged.
+
 ### Maintenance
 
 - Removed the ASH v2 in-container scanner scripts `utils/common.sh`,
@@ -56,10 +89,15 @@
   `utils/ash_helpers.ps1` (`Invoke-ASH`) are unchanged.
 - The subcommand and option tables that `./ash` and `utils/ash_helpers.ps1` carry
   (subcommand names, the root options that take a value, which subcommands take the
-  options a wrapper adds, the OCI runner order) are now generated from the `ash` CLI by
+  options a wrapper adds, the OCI runner order, the CI runner variables passed into the
+  container, the exit codes, and in `Invoke-ASH` the image build targets and the
+  image-name pattern) are now generated from the `ash` CLI by
   `scripts/generate_wrapper_tables.py` into marked blocks, and the lint job and a unit
-  test fail when a block is stale. The generated text is the text the wrappers already
-  held, so no option, exit code or message changes.
+  test fail when a block is stale. `./ash` reads the runner order and the CI variable
+  list from its generated blocks rather than from a second written-out copy. The
+  generated text is the text the wrappers already held, so no option, exit code or
+  message changes. The generator now writes each wrapper back with the line endings it
+  was read with.
 - Module-level string constants that spelled a wire vocabulary are replaced by enum
   members, so a caller that imported one of them by name must import the member
   instead. The `error_type` spellings of the MCP tools (`CONFIG_INPUT_NOT_PERMITTED`,
@@ -77,7 +115,8 @@
 
 - **The "community" scanner tier is now called "alpha".** The opt-in scanners ASH ships
   but does not yet promote as supported (Betterleaks, Ferret Scan, GuardDog, hadolint,
-  Snyk Code, Trivy and the rest of the `ash_*_plugins` modules) are alpha scanners:
+  Snyk Code and Trivy, each an `ash_*_plugins` scanner package; the `ash_aws_plugins`
+  reporters load the same opt-in way but are not alpha) are alpha scanners:
   the name says maturity, not provenance. Behavior is unchanged. The plugin pages moved
   from `docs/plugins/community/` to `docs/plugins/alpha/` (the old URLs redirect), the
   repository's own scan config is now `.ash/.ash_alpha_plugins.yaml`, the register's
@@ -242,6 +281,9 @@
   documented to reach the project approvals API that checkov's GitLab check reads.
   Name a framework in `frameworks`, with or without `all`, to run it. In an offline
   scan their settings are not fetched.
+- Listed `GIT_CONFIG_*` environment entries are refused for scanners that need
+  git `safe.directory` (opengrep); remove the entry from the environment list to
+  run such a scanner.
 
 ## v3.8.0 (2026-11-12)
 
@@ -653,6 +695,17 @@ The commits below also carry breaking-change notes, listed under BREAKING CHANGE
 
 ### Breaking changes
 
+- **`ash container build` is the command that builds the ASH container image;
+  `ash build-image` is its deprecated spelling, removed in ASH v4.** Both take the
+  same options and start the same build. `ash build-image` prints one warning on
+  stderr per run, naming `ash container build`, and then runs; it is hidden from the
+  root `--help`, as the other spellings that moved in 3.9 are. The interrupted and
+  SIGTERM messages of the command read `ASH container build ...`, and the offline
+  hints in scan messages name `ash container build --offline`. `./ash` and
+  `Invoke-ASH` accept `container` as a command word and pass `--quiet`,
+  `--no-color`, `--verbose`, `--debug`, `--offline` and `--config` given before it
+  on to `build`, as they did for `build-image`. Move scripts and CI jobs to the new
+  spelling in this release; the old one stops working in v4.
 - **`expires` is the canonical spelling of a suppression's or ignore path's
   expiration date; `expiration` is a deprecated alias, removed in ASH v4.** The
   swap reverses the earlier shape, where `expiration` was the field and

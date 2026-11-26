@@ -499,21 +499,26 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
             # A limit of 0 lists none of them, yet the summary still counts
             # them, so the section and the note follow the count.
             if summary[SUMMARY_POLICY_NOT_GATING]:
+                # The folded count, as the list itself is folded: the summary's
+                # unfolded figure read as a truncation when the fold was on,
+                # and the note then claimed the HTML lists the rest though the
+                # HTML folds the same way.
+                not_gating_total = emitter.policy_not_gating_count()
                 text_parts.append("NOT GATING (WORKSPACE POLICY)")
                 text_parts.append("-----------------------------")
                 if left_out:
                     text_parts.append(
-                        f"Showing {len(left_out)} of {summary[SUMMARY_POLICY_NOT_GATING]} "
+                        f"Showing {len(left_out)} of {not_gating_total} "
                         "findings reported and left out of the outcome because "
                         "policy_scanners_gate is off."
                     )
                     text_parts.extend(_findings_table(left_out))
                 # The list stops at the same limit as the one above, so say
                 # where the rest is, as that list does.
-                if len(left_out) < summary[SUMMARY_POLICY_NOT_GATING]:
+                if len(left_out) < not_gating_total:
                     text_parts.append("")
                     text_parts.append(
-                        f"Note: Showing {len(left_out)} of {summary[SUMMARY_POLICY_NOT_GATING]} "
+                        f"Note: Showing {len(left_out)} of {not_gating_total} "
                         "findings left out of the outcome. The HTML report lists "
                         "the rest under its 'Not gating' scope. "
                         "Configure 'max_detailed_findings' to adjust this limit."

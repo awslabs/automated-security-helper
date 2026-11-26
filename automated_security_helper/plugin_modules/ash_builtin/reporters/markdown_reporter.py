@@ -726,11 +726,16 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             # A limit of 0 lists none of them, yet the summary still counts
             # them, so the section and the pointer follow the count.
             if summary[SUMMARY_POLICY_NOT_GATING]:
+                # The list is folded when the fold is on, so its "of" total is
+                # the folded count: against the summary's unfolded figure a
+                # fold read as a truncation, and the pointer note sent the
+                # reader to an HTML report that folds the same way.
+                not_gating_total = emitter.policy_not_gating_count()
                 parts.append("## Not gating (workspace policy)\n")
                 if left_out:
                     parts.append(
                         f"Showing {len(left_out)} of "
-                        f"{summary[SUMMARY_POLICY_NOT_GATING]} findings reported and "
+                        f"{not_gating_total} findings reported and "
                         "left out of the outcome because "
                         "`policy_scanners_gate` is off.\n"
                     )
@@ -738,9 +743,9 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                     parts.append("")
                 # The table stops at the same limit as the list above, so
                 # say where the rest is, as that list does.
-                if len(left_out) < summary[SUMMARY_POLICY_NOT_GATING]:
+                if len(left_out) < not_gating_total:
                     parts.append(
-                        f"> Showing {len(left_out)} of {summary[SUMMARY_POLICY_NOT_GATING]} "
+                        f"> Showing {len(left_out)} of {not_gating_total} "
                         "findings left out of the outcome. "
                         'Open the HTML report and choose the "Not gating" scope '
                         "to review the full set. "

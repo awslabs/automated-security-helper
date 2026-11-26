@@ -84,7 +84,10 @@ class PluginConfigBase(RedactedSection):
             description="Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
             pattern=r"^[a-zA-Z][\w-]+$",
         ),
-    ] = None
+        # A subclass or the loader fills the name in; the base default is None,
+        # which pydantic does not validate. Typing it Optional would change the
+        # generated JSON schema of every plugin config.
+    ] = None  # ty: ignore[invalid-assignment]
     enabled: Annotated[bool, Field(description="Whether the component is enabled")] = (
         True
     )

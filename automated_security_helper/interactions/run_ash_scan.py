@@ -48,6 +48,7 @@ from automated_security_helper.utils.terminal_text import (
     shown_on_one_line,
 )
 
+from automated_security_helper.core.asset import Asset, AssetKind, ImageLocator
 from automated_security_helper.core.cancellation import raise_if_cancelled
 from automated_security_helper.core.previous_results import (
     HELD_DIR_NAME,
@@ -246,6 +247,13 @@ class ScanOptions(BaseModel):
     source_dir: Path
     output_dir: Path
 
+    # The subject of the scan when it is not source_dir: a CONTAINER_IMAGE
+    # asset carrying the submitted image locator (run_ash_scan builds it from
+    # image / image_archive / image_layout). None, the default, scans
+    # source_dir exactly as today. Local mode only; the image refusals in
+    # run_ash_scan enforce that before any mode runs.
+    asset: Optional[Asset] = None
+
     # Workspace mode. When set, source_dir is the workspace ROOT and each project
     # is scanned with its own source_dir inside it. None means single-directory
     # mode, which is the only shape the rest of this module handles.
@@ -263,7 +271,7 @@ class ScanOptions(BaseModel):
     config_overrides: Optional[List[str]] = Field(default_factory=list)
     # A check every `extends` base of the config must also pass, applied by every
     # config read below. The MCP server passes the calling session's allowed
-    # config roots (cli/mcp/sandbox.config_base_gate); None keeps the CLI rule.
+    # config roots (config.mcp_sandbox.config_base_gate); None keeps the CLI rule.
     config_base_gate: Optional[Callable[[Path], bool]] = Field(
         default=None, exclude=True
     )
@@ -275,7 +283,7 @@ class ScanOptions(BaseModel):
     # config_overrides came from an MCP client (a workspace tool's), so a tool
     # config path they name is not the operator's (config/path_trust.py).
     client_overrides: bool = False
-    # The scan was started by a remote MCP client (cli/mcp/sandbox.caller_is_remote),
+    # The scan was started by a remote MCP client (config.mcp_sandbox.caller_is_remote),
     # so every config file the operator did not set aside resolves no !ENV; see
     # "Environment variables" in config/config_sources.py. Applied by every config
     # read below, and carried to each project in workspace mode.
@@ -323,11 +331,7 @@ class ScanOptions(BaseModel):
     output_formats: Optional[List[ExportFormat]] = Field(default_factory=list)
     cleanup: bool = False
     phases: Optional[List[ExecutionPhase]] = Field(
-        default_factory=lambda: [
-            ExecutionPhase.CONVERT,
-            ExecutionPhase.SCAN,
-            ExecutionPhase.REPORT,
-        ]
+        default_factory=lambda: list(DEFAULT_EXECUTION_PHASES)
     )
     inspect: bool = False
     existing_results: Optional[str] = None
@@ -424,7 +428,7 @@ class ScanOptions(BaseModel):
     @classmethod
     def _phases_default(cls, v):
         if v is None:
-            return [ExecutionPhase.CONVERT, ExecutionPhase.SCAN, ExecutionPhase.REPORT]
+            return list(DEFAULT_EXECUTION_PHASES)
         return v
 
 
@@ -856,9 +860,7 @@ def print_incompleteness_message(
                 + "[/yellow]"
             )
         no_kind_rows = [
-            row
-            for row in incomplete_converter_rows
-            if not (getattr(row, "kinds", ()) or ())
+            row for row in incomplete_converter_rows if not getattr(row, "kinds", None)
         ]
         if no_kind_rows:
             # A hand-built (name, reason) pair carries no record kinds, so the
@@ -1053,6 +1055,32 @@ def _refuse_an_inner_file_that_is_not_regular(path: Path, what: str) -> None:
     )
     print(f"[bold red]ERROR (1) {escape_markup(reason)}[/bold red]")
     raise ReportPathRefusedExit(reason)
+
+
+def _discard_history_record(results: Any, output_dir: Path) -> None:
+    """Remove the run record of a scan a cancel is taking back. Never raises.
+
+    The orchestrator appends the record right after it writes the results file
+    (``_record_history``); the cancel check before the final rewrite lands
+    after that, so a cancelled or restored MCP run kept a record saying it
+    completed. The record's id is the run's own ``report_id``; a results value
+    that carries none names no record, and nothing is removed.
+    """
+    try:
+        from automated_security_helper.utils.scan_history import discard_run_record
+
+        if isinstance(results, BaseModel):
+            report_id = getattr(getattr(results, "metadata", None), "report_id", None)
+        elif isinstance(results, dict):
+            metadata = results.get("metadata")
+            report_id = (
+                metadata.get("report_id") if isinstance(metadata, dict) else None
+            )
+        else:
+            return
+        discard_run_record(output_dir, report_id)
+    except Exception:  # noqa: BLE001 - the cancel is what the caller must see
+        pass
 
 
 def _read_back_inner_results(
@@ -5426,6 +5454,37 @@ def _staged_findings_filter_set(source_dir: Path, staged_files: List[str]) -> Se
     return resolved
 
 
+def _scan_source_for(opts: "ScanOptions", find_root: Any, environ: Any) -> str | None:
+    """The ``scan_source`` this run records: the image for an image scan, else
+    the scanned directory as ``utils/scan_source.recorded_scan_source`` words it.
+
+    An image scan is anchored at a directory (the working directory unless the
+    caller named one) that is not its subject. Recording that directory would let
+    a reporter that treats "not reported" as "fixed" (aws-security-hub's archive
+    of resolved findings, which compares the scope of the stored findings with
+    this scan's) read an empty image scan as a clean scan of whatever repository
+    the scan was started in. The ``image:`` prefix keeps an image reference from
+    reading as a directory called the same thing, and a digest, where the scan
+    knows one, names the image rather than the tag
+    (``utils/image_attribution.image_scan_source``; the scan phase refines the
+    record once a tag's digest is resolved).
+    """
+    from automated_security_helper.utils.scan_source import recorded_scan_source
+
+    asset = getattr(opts, "asset", None)
+    if (
+        isinstance(asset, Asset)
+        and asset.kind == AssetKind.CONTAINER_IMAGE
+        and asset.image is not None
+    ):
+        from automated_security_helper.utils.image_attribution import (
+            image_scan_source,
+        )
+
+        return image_scan_source(asset.image)
+    return recorded_scan_source(opts.source_dir, find_root, environ)
+
+
 def _run_local_mode(
     opts: ScanOptions, logger
 ) -> tuple[AshAggregatedResults, Optional[bool]]:
@@ -5468,7 +5527,6 @@ def _run_local_mode(
     # would leave ASH_OFFLINE held with no release. Nothing but the flag assignment
     # sits between the hold and its try, as in _run_workspace_mode.
     from automated_security_helper.utils.get_scan_set import git_repository_root
-    from automated_security_helper.utils.scan_source import recorded_scan_source
 
     _offline_held = False
     if opts.offline:
@@ -5539,13 +5597,18 @@ def _run_local_mode(
 
         def validate_baseline_scope(orchestrator):
             model = orchestrator.execution_engine._asharp_model
-            scan_source = recorded_scan_source(
-                opts.source_dir, git_repository_root, snapshot_environ()
+            scan_source = _scan_source_for(
+                opts, git_repository_root, snapshot_environ()
             )
-            for warning in check_baseline_scope(
-                opts.baseline_data,
-                project_name=model.metadata.project_name,
-                scan_source=scan_source,
+            baseline = opts.baseline_data
+            for warning in (
+                check_baseline_scope(
+                    baseline,
+                    project_name=model.metadata.project_name,
+                    scan_source=scan_source,
+                )
+                if baseline is not None
+                else ()
             ):
                 logger.warning(warning)
             if staged_files == []:
@@ -5558,6 +5621,7 @@ def _run_local_mode(
             source_dir=opts.source_dir,
             output_dir=opts.output_dir,
             work_dir=opts.output_dir / ASH_WORK_DIR_NAME,
+            asset=opts.asset,
             staged_files=staged_files,
             enabled_scanners=final_scanners,
             selection_layers=selection_layers,
@@ -5687,9 +5751,7 @@ def _run_local_mode(
             # looked at, recorded at scan time while it exists
             # (utils/scan_source.py; a report made on another host cannot work it
             # out, and inside the container the launcher's label is used).
-            scan_source=recorded_scan_source(
-                opts.source_dir, git_repository_root, snapshot_environ()
-            ),
+            scan_source=_scan_source_for(opts, git_repository_root, snapshot_environ()),
         )
         _config_fail_on_findings: Optional[bool] = getattr(
             getattr(orchestrator, "config", None), "fail_on_findings", None
@@ -5736,8 +5798,15 @@ def _run_local_mode(
 
         # A scan cancelled after its last phase began must not leave a results
         # file behind: a client polling a cancelled scan reads that file as
-        # finished results. A no-op outside a cancellable scan.
-        raise_if_cancelled()
+        # finished results. A no-op outside a cancellable scan. The history
+        # record goes with it: the orchestrator recorded this run right after
+        # it wrote the results file, and a record a restore leaves behind made
+        # the cancelled run a point in ``ash trend``.
+        try:
+            raise_if_cancelled()
+        except BaseException:
+            _discard_history_record(results, opts.output_dir)
+            raise
 
         # This rewrite lands after the REPORT phase, while an MCP client that has seen
         # the reports appear may already be re-reading this file for progress. A
@@ -6484,7 +6553,7 @@ def _compute_exit_code(
         #
         # Reachable without any sharding and without any operator error beyond a
         # single word. Measured on this tree with the repository's own
-        # .ash/.ash.yaml, which sets `semgrep: enabled: true`:
+        # .ash.yaml, which sets `semgrep: enabled: true`:
         # `ash scan --scanners semgrep` on Windows resolves semgrep against the
         # registered names, so ScannerSelectionError does not fire; semgrep then
         # declares the platform unsupported and is recorded SKIPPED; the other nine
@@ -7100,6 +7169,153 @@ def _in_a_run_log_scope(scan):
     return scoped
 
 
+def _refuse_an_image_scan_scope(
+    *,
+    mode: RunMode,
+    workspace_plan: "WorkspacePlan | None",
+    existing_results: str | None,
+    changed_files_only: bool,
+    shard_index: int | None = None,
+    shard_count: int | None = None,
+) -> None:
+    """The scope rules every image scan obeys, whichever form submitted it.
+
+    Shared by the image OPTIONS (:func:`_image_asset_or_refusal`) and the
+    pre-built ``asset`` an infrastructure caller passes: an image scan runs in
+    local mode, single-directory, on a fresh scan, with no git-history scope.
+    Each refusal exits with the usage code (5).
+    """
+    if workspace_plan is not None:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "an image option cannot be combined with a workspace scan: a "
+            "workspace names directories, and one scan has one subject.",
+            one_line=True,
+        )
+    if mode != RunMode.local:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            f"an image option is supported in local mode only, not mode="
+            f"{mode.value!r}: the scan that routes by asset kind is the local "
+            "orchestrator's.",
+            one_line=True,
+        )
+    if shard_index is not None or shard_count is not None:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "an image option cannot be combined with a shard: a scan has one "
+            "subject, and one shard would report the image as not scanned "
+            "while another scanned it. Run the image scan unsharded.",
+            one_line=True,
+        )
+    if existing_results is not None:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "an image option cannot be combined with existing results: saved "
+            "results already name their subject, and nothing would be scanned.",
+            one_line=True,
+        )
+    if changed_files_only:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "an image option cannot be combined with changed_files_only, which "
+            "scopes a scan by git history: an image has none.",
+            one_line=True,
+        )
+
+
+def _image_asset_or_refusal(
+    *,
+    image: str | None,
+    image_archive: str | Path | None,
+    image_layout: str | Path | None,
+    source_dir: str | Path | None,
+    mode: RunMode,
+    workspace_plan: "WorkspacePlan | None",
+    existing_results: str | None,
+    changed_files_only: bool,
+    shard_index: int | None = None,
+    shard_count: int | None = None,
+) -> Asset | None:
+    """The CONTAINER_IMAGE asset the image options name, or None, or a refusal.
+
+    The submission contract's image side: exactly one of ``image`` (a registry
+    reference), ``image_archive`` (a saved-image tarball) and ``image_layout``
+    (an OCI image-layout directory), never beside an explicit ``source_dir``,
+    and only where the orchestrator that routes by asset kind actually runs --
+    local mode, single-directory. Everything here is checked at the stat level
+    (:mod:`automated_security_helper.utils.image_payload_refusals`); nothing is
+    fetched, which is the whole image contract: ASH passes locators, and the
+    engines and scanner tools do the fetching.
+
+    Each refusal exits with the usage code (5), as the CLI's own early
+    refusals do, so the library caller and the CLI name the same first problem.
+    """
+    given = {
+        name: value
+        for name, value in (
+            ("image", image),
+            ("image_archive", image_archive),
+            ("image_layout", image_layout),
+        )
+        if value is not None
+    }
+    if not given:
+        return None
+    if len(given) > 1:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "image, image_archive and image_layout each name the one image to "
+            f"scan, so only one may be given; this call names {len(given)} "
+            f"({', '.join(sorted(given))}). Keep the one that says where the "
+            "image is.",
+            one_line=True,
+        )
+    if source_dir is not None:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "an image option cannot be combined with source_dir: one scan has "
+            "one subject. Scan the directory and the image as two runs.",
+            one_line=True,
+        )
+    _refuse_an_image_scan_scope(
+        mode=mode,
+        workspace_plan=workspace_plan,
+        existing_results=existing_results,
+        changed_files_only=changed_files_only,
+        shard_index=shard_index,
+        shard_count=shard_count,
+    )
+    if image is not None:
+        if not image.strip():
+            _printed_refusal(
+                ASH_EXIT_USAGE_ERROR,
+                "image names no reference: it is empty or whitespace.",
+                one_line=True,
+            )
+        return Asset.for_image(ImageLocator(ref=image.strip()))
+    # The two payload shapes are gated at the stat level before anything uses
+    # the path, exactly as source_dir is (utils/image_payload_refusals.py).
+    from automated_security_helper.utils.image_payload_refusals import (
+        image_archive_refusal,
+        image_layout_refusal,
+    )
+
+    if image_archive is not None:
+        refusal = image_archive_refusal(image_archive)
+        if refusal is not None:
+            _printed_refusal(ASH_EXIT_USAGE_ERROR, refusal, one_line=True)
+        return Asset.for_image(ImageLocator(oci_archive=Path(image_archive).absolute()))
+    if image_layout is None:
+        # Unreachable: exactly one of the three was given and the other two
+        # are handled above.
+        return None
+    refusal = image_layout_refusal(image_layout)
+    if refusal is not None:
+        _printed_refusal(ASH_EXIT_USAGE_ERROR, refusal, one_line=True)
+    return Asset.for_image(ImageLocator(oci_layout=Path(image_layout).absolute()))
+
+
 @_in_a_run_log_scope
 @_in_scanned_tree_from_arguments
 def run_ash_scan(
@@ -7134,6 +7350,10 @@ def run_ash_scan(
     base_ref: str = "origin/main",
     staged: bool = False,
     staged_files: List[str] | None = None,
+    image: str | None = None,
+    image_archive: str | Path | None = None,
+    image_layout: str | Path | None = None,
+    asset: "Asset | None" = None,
     shard_index: int | None = None,
     shard_count: int | None = None,
     mode: RunMode = RunMode.local,
@@ -7187,6 +7407,72 @@ def run_ash_scan(
 
     forget_unverifiable_warnings()
 
+    # The image options, settled before any path default resolves, because
+    # their exclusivity rules read the arguments as given: source_dir=None is
+    # "not named", which an image option may accompany, where an explicit
+    # source_dir beside one leaves which subject was meant to the reader.
+    #
+    # ``asset`` is the pre-built form for an infrastructure caller (the MCP
+    # scan runner), which anchors the scan's output and config discovery in a
+    # directory it owns -- the session workspace -- while the subject is the
+    # image: for it, source_dir is the deliberate anchor, not a second
+    # subject, so the source_dir exclusivity rule binds the OPTIONS only.
+    # The mode, workspace and scope rules bind both forms alike.
+    if asset is not None and (
+        image is not None or image_archive is not None or image_layout is not None
+    ):
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "asset cannot be combined with image, image_archive or "
+            "image_layout: the asset already names the subject.",
+            one_line=True,
+        )
+    if asset is not None:
+        if asset.kind == AssetKind.CONTAINER_IMAGE:
+            _refuse_an_image_scan_scope(
+                mode=mode,
+                workspace_plan=workspace_plan,
+                existing_results=existing_results,
+                changed_files_only=changed_files_only,
+                shard_index=shard_index,
+                shard_count=shard_count,
+            )
+    else:
+        asset = _image_asset_or_refusal(
+            image=image,
+            image_archive=image_archive,
+            image_layout=image_layout,
+            source_dir=source_dir,
+            mode=mode,
+            workspace_plan=workspace_plan,
+            existing_results=existing_results,
+            changed_files_only=changed_files_only,
+            shard_index=shard_index,
+            shard_count=shard_count,
+        )
+    if asset is not None and asset.kind == AssetKind.CONTAINER_IMAGE:
+        # An image asset runs no convert phase: converters read source files,
+        # which an image asset does not present (the design's C7). The caller's
+        # other phases stand.
+        phases = [
+            phase
+            for phase in (
+                phases
+                or [ExecutionPhase.CONVERT, ExecutionPhase.SCAN, ExecutionPhase.REPORT]
+            )
+            if phase != ExecutionPhase.CONVERT
+        ]
+        if not phases:
+            # An empty list reads as "no phases given" further down, where the
+            # local mode runs convert, scan and report: a request for the
+            # convert phase alone would run the one phase an image never has.
+            _printed_refusal(
+                ASH_EXIT_USAGE_ERROR,
+                "an image scan has no convert phase, and no other phase was "
+                "asked for: nothing is left to run.",
+                one_line=True,
+            )
+
     # Resolve cwd-based defaults at call time (not import time).
     _source_dir: Path = (
         Path(source_dir).absolute() if source_dir is not None else Path.cwd()
@@ -7200,6 +7486,7 @@ def run_ash_scan(
     opts = ScanOptions(
         source_dir=_source_dir,
         output_dir=_output_dir,
+        asset=asset,
         config=config,
         config_overrides=config_overrides,
         offline=offline,

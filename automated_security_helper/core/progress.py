@@ -333,7 +333,7 @@ class LiveProgressDisplay:
 
     def add_task(
         self, phase: ExecutionPhase, description: str, total: int = 100
-    ) -> TaskID:
+    ) -> TaskID | None:
         """Add a task to the progress display.
 
         Args:
@@ -380,7 +380,7 @@ class LiveProgressDisplay:
         if not self.show_progress or task_id is None:
             return
 
-        update_kwargs = {}
+        update_kwargs: dict[str, Any] = {}
 
         if advance is not None:
             update_kwargs["advance"] = advance

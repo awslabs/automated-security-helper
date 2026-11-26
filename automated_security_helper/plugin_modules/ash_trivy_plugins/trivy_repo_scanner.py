@@ -23,6 +23,7 @@ from automated_security_helper.models.core import ToolArgs
 # trivy_default_misconfig_scanners and its reset live with the shared base, which
 # the builtin trivy uses too; this module has always offered them, so it still does.
 from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (
+    TRIVY_SARIF_FACETS,
     TrivyScannerBase,
     reset_trivy_default_misconfig_scanners as reset_trivy_default_misconfig_scanners,
     trivy_default_misconfig_scanners,
@@ -41,6 +42,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.base.uv_tool_mixin import guarded_values_read
 from automated_security_helper.utils.error_text import text_without_values
+from automated_security_helper.utils.log import VERBOSE_LEVEL
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
@@ -196,115 +198,20 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
     #: (tests/test_data/scanners/trivy/trivy-0.69.3.vuln.sarif) and from the
     #: M0 misconfig capture (tests/test_data/scanners/trivy/captured/
     #: trivy-0.76.2-misconfig-terraform.{json,sarif}, M0-FINDINGS.md (a)).
-    facets: ClassVar[ScannerFacets] = ScannerFacets(
-        rule_id=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF result ruleId",
-        ),
-        severity=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result message line "Severity: <level>", checked '
-            "against the result level and the rule tags (issue_severity)",
-        ),
-        file_path=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF locations[].physicalLocation.artifactLocation.uri",
-        ),
-        line_range=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF region.startLine / region.endLine",
-        ),
-        column=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF region.startColumn",
-        ),
-        message=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF result message.text",
-        ),
-        resource_id=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="Results[].Misconfigurations[].CauseMetadata.Resource "
-            "(trivy's JSON report, absent from its SARIF), copied onto the "
-            "SARIF result under ash_resource_id by attach_trivy_resources "
-            "for result type terraform only: cloudformation carries a "
-            "file:line locator (t.yaml:3-4) and kubernetes and dockerfile "
-            "carry none (trivy 0.76.2, M0-FINDINGS.md (a))",
-            example="aws_s3_bucket.m0_fixture_bucket",
-        ),
-        resource_type=FacetDecl(
-            state=FacetState.NA,
-            reason="trivy's CauseMetadata names Provider and Service (AWS, "
-            "s3) and no resource type; the type is only the prefix of the "
-            "dropped address, which would be a derivation",
-        ),
-        package_name=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result message line 1 "Package: <name>" '
-            "(_package_from_message)",
-        ),
-        package_version=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result message line 2 "Installed Version: <version>" '
-            "(_package_from_message)",
-        ),
-        package_path=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="npm lockfile entry at the SARIF region.startLine of "
-            "the result's location (one result per installed copy)",
-        ),
-        taxonomy_cve=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF result ruleId (the CVE id)",
-        ),
-        taxonomy_cwe=FacetDecl(
-            state=FacetState.UNCONFIRMED,
-            reason="UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are "
-            "vulnerability, security, <severity>); the JSON format's CweIDs "
-            "has no committed vulnerability fixture, and a `trivy fs --format "
-            "json` run over a lockfile settles it",
-        ),
-        fingerprints=FacetDecl(
-            state=FacetState.NA,
-            reason="trivy's SARIF results carry no fingerprints (result keys "
-            "are level, locations, message, ruleId, ruleIndex)",
-        ),
-        fix_available=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='message line "Fixed Version: <version>", written as '
-            "fix_available=True when non-empty by "
-            "TrivyScannerBase._fixed_version_from_message (an empty value "
-            "writes nothing; ignore_unfixed defaults to true, so the tool "
-            "pre-filters unfixed findings)",
-        ),
-        remediation_text=FacetDecl(
-            state=FacetState.UNCONFIRMED,
-            reason="UNCONFIRMED: not classified by the survey; the flat "
-            "model has no remediation column, and the rule help text carries "
-            "the fixed version already declared under fix_available",
-        ),
-        snippet=FacetDecl(
-            state=FacetState.NA,
-            reason="trivy's SARIF results carry no code snippet",
-        ),
-        references=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF rule helpUri, read into the flat references "
-            "by FlatVulnerability.from_sarif_result when the result carries "
-            "no relatedLocations",
-        ),
-        tags=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF rule properties.tags, read into the flat tags "
-            "by FlatVulnerability.from_sarif_result when the result carries "
-            "none (the severity word among them still feeds issue_severity)",
-        ),
-        extras=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="result properties bag (issue_severity and the "
-            "package identity keys this adapter writes) passed through to "
-            "the flat properties",
-        ),
+    #: Its cells are the shared TRIVY_SARIF_FACETS (vulnerability results, and
+    #: the terraform misconfiguration resource id); secret and license results
+    #: are not classified by any committed capture. Only fix_available differs.
+    facets: ClassVar[ScannerFacets] = TRIVY_SARIF_FACETS.model_copy(
+        update={
+            "fix_available": FacetDecl(
+                state=FacetState.MAPPED,
+                native_field='message line "Fixed Version: <version>", written as '
+                "fix_available=True when non-empty by "
+                "TrivyScannerBase._fixed_version_from_message (an empty value "
+                "writes nothing; ignore_unfixed defaults to true, so the tool "
+                "pre-filters unfixed findings)",
+            ),
+        }
     )
 
     #: The operational register row (base/scanner_operational_facets.py),
@@ -375,6 +282,7 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
                 note="no windows/arm64 and no 32-bit macOS asset (tool_downloads.py docstring)",
@@ -419,7 +327,6 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                 semantics="trivy reports findings in the file, not through its exit code",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.ALPHA_OPTIN,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=(
                     "ash_trivy_plugins in ash_plugin_modules",
@@ -707,14 +614,14 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                     f"Running command: {self.command} (the arguments are not "
                     f"shown: the plugin's values hook {read.failure()})",
                     target_type=target_type,
-                    level=logging.VERBOSE,
+                    level=VERBOSE_LEVEL,
                 )
             else:
                 self._plugin_log(
                     "Running command: "
                     f"{text_without_values(' '.join(final_args), redact_values)}",
                     target_type=target_type,
-                    level=logging.VERBOSE,
+                    level=VERBOSE_LEVEL,
                 )
 
             effective_timeout = self._effective_scan_timeout()

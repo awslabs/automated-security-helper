@@ -378,7 +378,7 @@ runs:
         if [ "${ASH_TEST_CONFIG_FILE}" = "alpha" ]; then
           ash config validate --config .ash/.ash_alpha_plugins.yaml
         else
-          ash config validate --config .ash/.ash.yaml
+          ash config validate --config .ash.yaml
         fi
 
     # The Windows half of "Set up Ruby for cfn-nag" above, deliberately placed here
@@ -559,9 +559,9 @@ runs:
         echo "Checking for plugin execution errors..."
         export PATH="$HOME/.local/bin:$PATH"
         if command -v ash >/dev/null 2>&1; then
-          REPORT_CMD="ash report --format text"
+          REPORT_CMD="ash results report --format text"
         else
-          REPORT_CMD="python -m automated_security_helper report --format text"
+          REPORT_CMD="python -m automated_security_helper results report --format text"
         fi
         # Still printed, because it is what a human reads when this step fails.
         # It is no longer what the check is computed from; see the script's module
@@ -640,18 +640,18 @@ runs:
         # used to be the check, and it is case-insensitive by default, so any
         # report line containing lower-case "error" inflated the count on top of
         # the legend-line offset the other legs carried.
-        & ash report --format text 2>&1 | Write-Host
+        & ash results report --format text 2>&1 | Write-Host
         $ReportExit = $LASTEXITCODE
         # This exit code used to be discarded outright (`$null = $LASTEXITCODE`),
         # and that was an exception this leg alone made. The container, Unix and
-        # bash legs run the same `ash report` under `shell: bash`, which the runner
+        # bash legs run the same `ash results report` under `shell: bash`, which the runner
         # invokes as `bash --noprofile --norc -eo pipefail {0}` -- so `-e` aborts
         # those steps when the report command fails. `shell: pwsh` is
         # `pwsh -command ". '{0}'"`, which does not abort on a native non-zero
         # exit; it only sets $LASTEXITCODE. Discarding it therefore made a report
         # failure fatal on three legs and invisible on the fourth.
         #
-        # Why that matters here rather than being cosmetic: `ash report` failing
+        # Why that matters here rather than being cosmetic: `ash results report` failing
         # means ASH could not load the very results file the counter below is
         # about to reach a verdict from. Measured on run 35137617199 --
         # `Error loading results file: 'charmap' codec can't decode byte 0x9d`,
@@ -666,7 +666,7 @@ runs:
         # and say it *before* the counter runs so the two outcomes cannot be
         # confused in the log.
         if ($ReportExit -ne 0) {
-          Write-Host "::error::'ash report --format text' exited $ReportExit, so ASH could not load .ash/ash_output/ash_aggregated_results.json. This step cannot evaluate whether a plugin errored -- the result below, whatever it says, is not evidence either way. Fix the report failure printed above first."
+          Write-Host "::error::'ash results report --format text' exited $ReportExit, so ASH could not load .ash/ash_output/ash_aggregated_results.json. This step cannot evaluate whether a plugin errored -- the result below, whatever it says, is not evidence either way. Fix the report failure printed above first."
           exit $ReportExit
         }
         # setup-python puts `python` on PATH everywhere and `python3` only on
@@ -740,7 +740,7 @@ runs:
         # Still printed, because it is what a human reads when this step fails.
         # It is no longer what the check is computed from; see the script's module
         # docstring for why counting "ERROR" in rendered prose was off by one.
-        ash report --format text
+        ash results report --format text
         python3 "${{ github.action_path }}/count_scanner_errors.py" \
           .ash/ash_output/ash_aggregated_results.json
 
@@ -907,7 +907,7 @@ runs:
         # Still printed, because it is what a human reads when this step fails.
         # It is no longer what the check is computed from; see the script's module
         # docstring for why counting "ERROR" in rendered prose was off by one.
-        ./ash report --format text
+        ./ash results report --format text
         python3 "${{ github.action_path }}/count_scanner_errors.py" \
           .ash/ash_output/ash_aggregated_results.json
 
@@ -1046,8 +1046,13 @@ runs:
     # Last, so a snapshot diff never hides one of the scan's own diagnostics above. Runs
     # even when the self-scan failed: that verdict is about this repository's findings, and
     # these snapshots only need the image, which a failed build would fail here too.
+    #
+    # Not on sh-helper: utils/ash_helpers.sh forwards to ./ash, none of these modules
+    # sources it, and every sh-helper row has a bash row on the same OS and runner whose
+    # step compares the same output (tests/unit/test_ci_container_runtime_snapshots_skip_the_sh_helper_legs.py
+    # pins both).
     - name: Snapshot the container-runtime output
-      if: ${{ !cancelled() && inputs.method != 'python-local' }}
+      if: ${{ !cancelled() && inputs.method != 'python-local' && inputs.method != 'sh-helper' }}
       shell: bash
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}

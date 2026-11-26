@@ -216,7 +216,7 @@ def find_config_file(
     must check its format.
 
     ``permit`` is a caller's gate, the one an MCP session passes as
-    ``permit_base`` (``cli/mcp/sandbox.config_base_gate``). With it, every name
+    ``permit_base`` (``config.mcp_sandbox.config_base_gate``). With it, every name
     discovery looks at that is there (``config_sources.discovery_candidates``),
     the ``pyproject.toml`` discovery reads to learn whether it configures ASH
     among them, must be permitted before discovery runs, and the source
@@ -1551,7 +1551,11 @@ def load_config_file(
         raise ConfigFileRefused(
             redact_values(str(e), document.environment_values),
             document=document,
-            validation_error=e.validation_error,
+            validation_error=(
+                e.validation_error
+                if isinstance(e.validation_error, ValidationError)
+                else None
+            ),
             after_overrides=True,
         ) from None
 
@@ -1789,7 +1793,7 @@ def resolve_config(
     config_path: Path | str | None = None,
     source_dir: Path | str | None = None,
     fallback_to_default: bool = True,
-    config_overrides: List[str] = None,
+    config_overrides: Optional[List[str]] = None,
     permit_base: Optional[Callable[[Path], bool]] = None,
     scanned_root: Path | str | None = None,
     trusted_config_path: Path | str | None = None,
@@ -1921,7 +1925,7 @@ def resolve_config(
             None, with ``client_overrides`` set, takes the trusted base's.
             When set, ``config_overrides`` are the client's too.
         remote_client: The config is read for an MCP call from a remote client
-            (``cli/mcp/sandbox.caller_is_remote``). Every file of the chain the
+            (``config.mcp_sandbox.caller_is_remote``). Every file of the chain the
             operator did not set aside then resolves no ``!ENV``, and one that
             uses it is refused; otherwise only a file an MCP client delivered
             is. The operator's own files (``trusted_config_path``,
@@ -2059,6 +2063,9 @@ def resolve_config(
         )
     overlay: Optional[ResolvedConfigDocument] = None
     if overlay_config_path is not None:
+        if refuse_env is None:
+            # Computed above whenever an overlay is named.
+            raise RuntimeError("no refuse_env was computed for the overlay")
         overlay = _load_overlay(
             overlay_config_path,
             source_dir,
@@ -2080,10 +2087,10 @@ def resolve_config(
         _refuse_unless_the_operators(overlay, Path(scanned_root))
     # The copy of a profile a client patched holds each value the profile read
     # from the environment as its reference; it is read from the operator's
-    # copy it was built from (cli/mcp/profile_registry.is_client_copy_of).
+    # copy it was built from (config.session_profiles.is_client_copy_of).
     fill: List[Any] = []
     if config_path is not None and trusted_config_path is not None:
-        from automated_security_helper.cli.mcp.profile_registry import (
+        from automated_security_helper.config.session_profiles import (
             is_client_copy_of,
         )
 
@@ -2325,7 +2332,7 @@ def resolve_config(
         # ASH_CONFIG is not checked. (The per-file names of that chain are
         # not carried on this protocol; the documents are, from the one
         # load's reads.)
-        from automated_security_helper.cli.mcp.sandbox import (
+        from automated_security_helper.config.mcp_sandbox import (
             config_is_client_supplied,
         )
 
@@ -5051,10 +5058,14 @@ def _resolve_config(
 
     def overlaid_fallback(
         default_config_value: Optional[AshConfig],
-    ) -> Optional[AshConfig]:
+    ) -> AshConfig:
         # The overlay alone in place of the default config: falling back to
         # the defaults would drop the fields the overlay makes final.
-        if overlay is None or default_config_value is None:
+        if default_config_value is None:
+            # Every caller falls back to the default only when
+            # fallback_to_default loaded one above.
+            raise RuntimeError("the default configuration was not loaded")
+        if overlay is None:
             return default_config_value
         chain.extend(overlay.chain)
         if named is not None:
@@ -5326,6 +5337,7 @@ def _resolve_config(
             if (
                 discovered_label is None
                 and confinement_source_dir is not None
+                and source_dir is not None
                 and not no_discovery
             ):
                 ignored_sources = _warnings_when_discovered(
@@ -5425,7 +5437,7 @@ def _resolve_config(
             if is_config_parse_error(e):
                 # The parser's own words can quote the file
                 # (unparsed_config_reason).
-                unparsed = unparsed_config_reason(config_path, e)
+                unparsed = unparsed_config_reason(Path(config_path), e)
             else:
                 if not isinstance(e, OSError):
                     # The one guard for every excluded ValueError: ASH's own
@@ -5454,7 +5466,7 @@ def _resolve_config(
                 # report success. The defaults apply only when there is no
                 # config file (above).
                 raise ASHConfigSourceError(
-                    f"could not read {describe_config_path(config_path)}: "
+                    f"could not read {describe_config_path(Path(config_path))}: "
                     f"{os_error_without_named_file(e, config_path)}"
                 ) from e
         if unparsed is not None:
@@ -5598,6 +5610,7 @@ def read_config_document(
     refuse_env: Optional[RefuseEnv] = None,
     anchor_relative_paths: Optional[AnchorPaths] = None,
     unquoted: bool = False,
+    expect: Optional[FileIdentity] = None,
 ) -> ResolvedConfigDocument:
     """``resolve_config_document``, refusing a config file that does not load.
 
@@ -5620,8 +5633,12 @@ def read_config_document(
 
     ``log_failure`` False leaves out the "Failed to load configuration file" log
     line, for a caller that reads the file ahead of the resolution that reports
-    the same failure. ``refuse_env`` and ``anchor_relative_paths`` are passed to
-    ``resolve_config_document``.
+    the same failure. ``refuse_env``, ``anchor_relative_paths`` and ``expect`` are
+    passed to ``resolve_config_document``: ``expect`` is the identity
+    (``identity_to_hold``) a caller took of the file when it judged the path, and
+    the root is then read only if it is still that file. Without it the identity
+    is taken when the read starts, so a name that led to one file at the check and
+    another by then is read as the second, which no check saw.
     """
     path = check_config_path(config_path)
     problem: Optional[str] = None
@@ -5632,6 +5649,7 @@ def read_config_document(
             permit_base=permit_base,
             refuse_env=refuse_env,
             anchor_relative_paths=anchor_relative_paths,
+            expect=expect,
         )
     except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError) as e:
         # json.JSONDecodeError, UnicodeDecodeError and a YAML constructor's
@@ -5820,14 +5838,14 @@ def _override_shown(override: str) -> str:
 
 def _is_a_client_file(path: Path | str) -> bool:
     """Whether ``path`` is a file an MCP client delivered, by any name on its way."""
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
 
     return config_is_client_supplied(Path(path))
 
 
 def _has_a_client_file(document: Any) -> bool:
     """Whether a file of ``document``'s chain is one an MCP client delivered."""
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
 
     delivered = by_every_name(config_is_client_supplied, document.names)
     return any(delivered(path) for path in document.chain)
@@ -5986,7 +6004,7 @@ def _not_the_operators(
     """The files of ``paths`` that are not the operator's.
 
     Those inside a scanned tree, which the repository wrote, and those an MCP
-    client delivered (``cli/mcp/sandbox.config_is_client_supplied``), whoever
+    client delivered (``config.mcp_sandbox.config_is_client_supplied``), whoever
     names them: a ``--config`` or ``ASH_CONFIG`` under the MCP workspace root is
     a client's file even on the CLI, scanning another directory. Each file is
     judged by its own path and by each path in ``names`` it was reached by
@@ -6005,14 +6023,14 @@ def _delivered_by_a_client(
     paths: Iterable[Path], names: Optional[ChainNames] = None
 ) -> List[Path]:
     """The files of ``paths`` that an MCP client delivered
-    (``cli/mcp/sandbox.config_is_client_supplied``), whoever names them.
+    (``config.mcp_sandbox.config_is_client_supplied``), whoever names them.
 
     Each file is judged by its own path and by each path in ``names`` it was
     reached by (``config_sources.by_every_name``), so a file reached through a
     link a client wrote is the client's. The one definition of delivery the
     membership checks share (``_not_the_operators``, ``_with_outside_files``).
     """
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
 
     delivered = by_every_name(config_is_client_supplied, names)
     return [path for path in paths if delivered(path)]
@@ -7575,7 +7593,7 @@ def _whose_file(
     place to move it out of: the scanned checkout (or the scanned directory, when
     it is in no checkout) it is inside or was reached through, else the MCP
     workspace root it was delivered under."""
-    from automated_security_helper.cli.mcp.sandbox import shared_workspace_root
+    from automated_security_helper.config.mcp_sandbox import shared_workspace_root
 
     tree = tree_holding(path, trees, names)
     if tree is None:
@@ -7648,7 +7666,9 @@ def _load_overlay(
     try:
         document = resolve_config_document(
             path,
-            confine_to=default_confinement_root(path, source_dir),
+            confine_to=default_confinement_root(
+                path, Path(source_dir) if source_dir is not None else None
+            ),
             permit_base=permit_base,
             refuse_env=refuse_env,
             anchor_relative_paths=anchor_paths,

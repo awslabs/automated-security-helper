@@ -47,7 +47,7 @@ from automated_security_helper.models.scan_results_container import (
 )
 from automated_security_helper.utils.scan_output_dirs import (
     drop_results_in_ash_output_dirs,
-    mark_converted_results,
+    place_converted_results,
 )
 from automated_security_helper.core.cancellation import (
     ScanCancelled,
@@ -577,6 +577,9 @@ def _timeout_ending(scanner_plugin: Any) -> str:
     timeout's own stop failed (the timeout's ending); a record of other runs only
     means a later run's tool may still be running while the timed-out tool was
     killed; an empty record means every stop succeeded (the was-killed ending).
+    A side run's failed stop (a second launch of the tool that only adds to a
+    report) is filed under its own ``side_run:``-prefixed key, so it counts as
+    another run here and never as the scan's own ``timed_out``.
     The kept-flag reading above is the fallback for a plugin that carries no such
     record (an older plugin class, a double).
     """
@@ -1606,12 +1609,40 @@ class ScannerExecutor:
                                         # ended.
                                         heartbeat.start()
                                         scan_called = True
-                                        raw_results = scanner_plugin.scan(
-                                            target=scan_target,
-                                            config=scanner_config,
-                                            target_type=target_type,
-                                            global_ignore_paths=self._global_ignore_paths,
-                                        )
+                                        if target_type == "image":
+                                            # The image dispatch (design C5): a
+                                            # separate method, not a widened
+                                            # scan(). The scan phase queues an
+                                            # image task only for a scanner
+                                            # whose register row serves the
+                                            # kind, and only when the context
+                                            # carries an image asset; a task
+                                            # without one is ASH's own defect,
+                                            # reported as itself.
+                                            image_asset = getattr(
+                                                self.plugin_context, "asset", None
+                                            )
+                                            image_locator = getattr(
+                                                image_asset, "image", None
+                                            )
+                                            if image_locator is None:
+                                                raise ScannerError(
+                                                    "an image task was queued "
+                                                    "with no image asset on the "
+                                                    "plugin context"
+                                                )
+                                            raw_results = scanner_plugin.scan_image(
+                                                image=image_locator,
+                                                config=scanner_config,
+                                                global_ignore_paths=self._global_ignore_paths,
+                                            )
+                                        else:
+                                            raw_results = scanner_plugin.scan(
+                                                target=scan_target,
+                                                config=scanner_config,
+                                                target_type=target_type,
+                                                global_ignore_paths=self._global_ignore_paths,
+                                            )
                                     finally:
                                         heartbeat.stop()
                                     # A tool that never started found nothing, so the
@@ -2095,9 +2126,29 @@ class ScannerExecutor:
                                 self.plugin_context,
                                 scanner_name=scanner_config_name,
                             )
-                            # So a converted file's finding keeps its id wherever the
-                            # output directory is.
-                            mark_converted_results(raw_results, self.plugin_context)
+                            # A generated file with a span sidecar (the MCP config
+                            # converter's) has its findings moved to the original
+                            # file and span before suppressions are applied, so a
+                            # suppression written against the original matches. What
+                            # is still in a converted file is then marked, so its
+                            # finding keeps its id wherever the output directory is.
+                            place_converted_results(raw_results, self.plugin_context)
+                            if target_type == "image":
+                                # Before suppressions and flattening: an
+                                # image:-scoped suppression matches on these
+                                # properties, and the identity keys on them.
+                                from automated_security_helper.utils.image_attribution import (
+                                    mark_image_results,
+                                )
+
+                                mark_image_results(
+                                    raw_results,
+                                    getattr(
+                                        getattr(self.plugin_context, "asset", None),
+                                        "image",
+                                        None,
+                                    ),
+                                )
                             if not self.plugin_context.ignore_suppressions:
                                 raw_results = apply_suppressions_to_sarif(
                                     sarif_report=raw_results,
@@ -2615,10 +2666,13 @@ class ScannerExecutor:
                     # ``"metadata": null`` (or a list); read as a mapping it raised
                     # here, after the row was graded, and the raise discarded the
                     # scanner's other targets' containers with this one.
-                    if isinstance(raw_results, dict) and isinstance(
-                        raw_results.get("metadata"), dict
-                    ):
-                        for key, value in raw_results["metadata"].items():
+                    raw_metadata = (
+                        raw_results.get("metadata")
+                        if isinstance(raw_results, dict)
+                        else None
+                    )
+                    if isinstance(raw_metadata, dict):
+                        for key, value in raw_metadata.items():
                             container.add_metadata(key, value)
 
                     results.append(container)
@@ -3062,17 +3116,24 @@ class ScannerExecutor:
                 # scanner's thread. A pool thread does not inherit context, and
                 # one copy per task, because a context cannot be entered by two
                 # threads at once.
-                future = executor.submit(
-                    contextvars.copy_context().run,
-                    self._start_and_run,
-                    scanner_name,
-                    scanner_plugin,
-                    scan_targets,
+                # Context.run is generic over its callable's return, which ty
+                # does not solve through submit; the future's value is what
+                # _start_and_run returns.
+                future: Future[Tuple[List[ScanResultsContainer], bool]] = (  # ty: ignore[invalid-assignment]
+                    executor.submit(
+                        contextvars.copy_context().run,
+                        self._start_and_run,
+                        scanner_name,
+                        scanner_plugin,
+                        scan_targets,
+                    )
                 )
-                future.scanner_name = scanner_name  # type: ignore[attr-defined]
-                future.scanner_task_key = task_key  # type: ignore[attr-defined]
+                # The handler below reads these three back off the future;
+                # Future has no slot for them, so they ride as plain attributes.
+                future.scanner_name = scanner_name  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+                future.scanner_task_key = task_key  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
                 # For the handler below, which redacts with its values.
-                future.scanner_plugin = scanner_plugin  # type: ignore[attr-defined]
+                future.scanner_plugin = scanner_plugin  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
                 futures.append(future)
 
             # A cancel ends the run, but a scanner that had finished by then stays
@@ -3144,8 +3205,8 @@ class ScannerExecutor:
 
             completed_count = 0
             for future in _futures_to_record():
-                scanner_name = future.scanner_name  # type: ignore[attr-defined]
-                task_key = future.scanner_task_key  # type: ignore[attr-defined]
+                scanner_name = future.scanner_name  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+                task_key = future.scanner_task_key  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
                 task_id = scanner_tasks_map.get(task_key)
 
                 try:

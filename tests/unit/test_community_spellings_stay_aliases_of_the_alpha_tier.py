@@ -4,10 +4,13 @@
 """The pre-rename "community" spellings of the alpha tier are aliases for one release.
 
 The opt-in scanners ASH ships but does not promote as supported were called
-"community"; the tier is now "alpha". Every old user-facing spelling still works,
-maps to the new one, and warns once, naming the release that drops it. Each test
-here reads one old spelling through the real code path and fails when the alias
-is gone, does not map, or stays silent.
+"community"; the tier is now "alpha". The old spellings that still work map to
+the new one for one release: the tier values warn once per process, and the
+Dockerfile build argument wins over the new one and warns at build time. The
+docs-lint column headings are the exception: that lint is internal, so the old
+headings are refused with the heading to use rather than kept as aliases. Each
+test here reads one old spelling through the real code path and fails when its
+alias is gone, does not map, or stays silent where a warning is promised.
 """
 
 from __future__ import annotations
@@ -18,8 +21,8 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
-from automated_security_helper.base import scanner_operational_facets as opsf
-from automated_security_helper.core import alpha_scanners
+from automated_security_helper.base import plugin_manifest
+from automated_security_helper.base.plugin_manifest import PluginTier
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -33,7 +36,7 @@ def warnings_logged(monkeypatch):
 
     logger = MagicMock()
     monkeypatch.setattr(log_module, "ASH_LOGGER", logger)
-    monkeypatch.setattr(alpha_scanners, "_WARNED_COMMUNITY_ALIASES", set())
+    monkeypatch.setattr(plugin_manifest, "_WARNED_COMMUNITY_ALIASES", set())
     return logger
 
 
@@ -41,41 +44,43 @@ def _messages(logger: MagicMock) -> list[str]:
     return [call.args[0] for call in logger.warning.call_args_list]
 
 
-def test_the_old_tier_value_maps_to_the_alpha_tier_and_warns(warnings_logged):
-    assert opsf.Tier("community_optin") is opsf.Tier.ALPHA_OPTIN
+@pytest.mark.parametrize("old", ["community", "community_optin"])
+def test_the_old_tier_value_maps_to_the_alpha_tier_and_warns(warnings_logged, old):
+    assert PluginTier(old) is PluginTier.ALPHA
     messages = _messages(warnings_logged)
     assert len(messages) == 1
-    assert "'community_optin' is deprecated" in messages[0]
-    assert "'alpha_optin'" in messages[0]
-    assert alpha_scanners.COMMUNITY_ALIASES_DROPPED_IN in messages[0]
+    assert f"'{old}' is deprecated" in messages[0]
+    assert "'alpha'" in messages[0]
+    assert plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN in messages[0]
 
 
 def test_the_old_tier_value_warns_once_per_process(warnings_logged):
-    opsf.Tier("community_optin")
-    opsf.Tier("community_optin")
+    PluginTier("community")
+    PluginTier("community")
     assert len(_messages(warnings_logged)) == 1
 
 
 def test_the_new_tier_value_does_not_warn(warnings_logged):
-    assert opsf.Tier("alpha_optin") is opsf.Tier.ALPHA_OPTIN
-    assert opsf.Tier("builtin_default") is opsf.Tier.BUILTIN_DEFAULT
+    assert PluginTier("alpha") is PluginTier.ALPHA
+    assert PluginTier("supported") is PluginTier.SUPPORTED
+    assert PluginTier("deprecated") is PluginTier.DEPRECATED
     assert _messages(warnings_logged) == []
 
 
 def test_an_unrelated_tier_value_is_still_refused(warnings_logged):
     with pytest.raises(ValueError):
-        opsf.Tier("community")
+        PluginTier("beta")
     assert _messages(warnings_logged) == []
 
 
-def test_the_register_model_accepts_the_old_tier_value(warnings_logged):
-    facet = opsf.ProvenanceFacet(
-        tier="community_optin",
-        source=opsf.ProvenanceSource.USER_INSTALLED,
-        selection_surfaces=(),
-        upstream_license=opsf.LICENSE_NOT_READ,
-    )
-    assert facet.tier is opsf.Tier.ALPHA_OPTIN
+def test_the_manifest_model_accepts_the_old_tier_value(warnings_logged):
+    from automated_security_helper.plugin_manifests import scanner_manifests
+
+    data = scanner_manifests()[0].model_dump(mode="json")
+    data["tier"] = "community"
+    data["superseded_by"] = None
+    manifest = plugin_manifest.parse_scanner_manifest(data)
+    assert manifest.tier is PluginTier.ALPHA
     assert len(_messages(warnings_logged)) == 1
 
 
@@ -150,6 +155,10 @@ def test_the_new_scanner_column_heading_does_not_warn(tmp_path, warnings_logged)
     assert _messages(warnings_logged) == []
 
 
+def test_the_alias_window_names_the_next_release():
+    assert plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN == "3.9.0"
+
+
 def test_the_aliases_are_gone_by_the_release_that_says_it_drops_them():
     """Fails at the version bump that reaches the release, forcing the removal."""
     from packaging.version import Version
@@ -157,21 +166,34 @@ def test_the_aliases_are_gone_by_the_release_that_says_it_drops_them():
     from automated_security_helper import __version__
 
     assert Version(__version__) < Version(
-        alpha_scanners.COMMUNITY_ALIASES_DROPPED_IN
+        plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN
     ), (
-        f"ASH {__version__} reached {alpha_scanners.COMMUNITY_ALIASES_DROPPED_IN}: "
-        "remove the community aliases (alpha_scanners.warn_community_alias, "
-        "Tier._missing_) and this test"
+        f"ASH {__version__} reached {plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN}: "
+        "remove the community aliases (plugin_manifest.warn_community_alias, "
+        "PluginTier._missing_, the ASH_COMMUNITY_PLUGIN_MODULES build argument in "
+        "the Dockerfile) and the alias-window tests in this module "
+        "(test_the_old_dockerfile_build_argument_still_wins_over_the_new_one, "
+        "test_the_renamed_anchors_keep_their_old_ids_for_the_alias_window) "
+        "along with this test"
     )
 
 
 def test_the_old_dockerfile_build_argument_still_wins_over_the_new_one():
-    """`--build-arg ASH_COMMUNITY_PLUGIN_MODULES=...` is read until the alias window ends."""
+    """`--build-arg ASH_COMMUNITY_PLUGIN_MODULES=...` is read until the alias window ends.
+
+    An EXPLICITLY EMPTY value wins too (the CHANGELOG says a value given for the
+    old name wins), so the default is a sentinel rather than "": a `:-` fallback
+    cannot tell `--build-arg ASH_COMMUNITY_PLUGIN_MODULES=""` from the argument
+    not being given. A build that gives the old name warns.
+    """
     text = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
-    assert text.count('ARG ASH_COMMUNITY_PLUGIN_MODULES=""\n') == 2
+    assert text.count('ARG ASH_COMMUNITY_PLUGIN_MODULES="__UNSET__"\n') == 2
+    assert text.count('[ "${ASH_COMMUNITY_PLUGIN_MODULES}" = "__UNSET__" ]') == 2
+    assert text.count('--config-overrides "ash_plugin_modules+=[${modules}]"') == 2
     assert (
-        text.count("${ASH_COMMUNITY_PLUGIN_MODULES:-${ASH_ALPHA_PLUGIN_MODULES}}") == 2
+        text.count("the ASH_COMMUNITY_PLUGIN_MODULES build argument is deprecated") == 2
     )
+    assert "${ASH_COMMUNITY_PLUGIN_MODULES:-" not in text
 
 
 def test_the_renamed_anchors_keep_their_old_ids_for_the_alias_window():

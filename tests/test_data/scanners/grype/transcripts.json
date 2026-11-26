@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "grype-0.91.0-src",
+      "live_input": true,
+      "note": "the version is read from the file's descriptor; the work file is ASH's own copy of the same run. grype reads a vulnerability database, so the recording is a dated snapshot",
+      "observable": true,
+      "pin_stamp": {
+        "tool": "grype",
+        "version": "0.91.0"
+      },
+      "provenance": "attested",
+      "reason": "recorded with grype 0.91.0, before the pin moved to v0.122.1; the native shape is still read by the adapter, so the recording stays until it is re-recorded at the pin",
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "grype.src.json",
+          "sha256": "d1813b98ba2c3b3a304af8f065941f4470ccf7910d052cc87216aad60ac1c4a8"
+        }
+      ],
+      "retention": "historical",
+      "scanner": "grype",
+      "side_reports": [
+        {
+          "format": "json",
+          "path": "grype.src.ash_output.work.json",
+          "sha256": "635bee1a350272869062fa077fefef9b10cddd2046e8011fdf03febadeb58ae6"
+        }
+      ],
+      "stderr_tail": null,
+      "tool": {
+        "name": "grype",
+        "version": "0.91.0"
+      }
+    },
+    {
+      "adapter_prep": "grype",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "grype-0.122.1-from-syft-sbom",
+      "live_input": true,
+      "note": "grype 0.122.1 over a syft SBOM, read through the adapter's post-processing (URIs, package identity, fix state) with an empty scan target; grype reads a vulnerability database, so the recording is a dated snapshot",
+      "observable": true,
+      "pin_stamp": {
+        "tool": "grype",
+        "version": "v0.122.1"
+      },
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/grype-0.122.1-from-syft-sbom.sarif",
+          "sha256": "c1768fecc1e9d13faea2f20e909d1ffe9219214b32d521b6657a5f5fc208c38b"
+        }
+      ],
+      "retention": "current",
+      "scanner": "grype",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "grype",
+        "version": "0.122.1"
+      }
+    }
+  ],
+  "unrecorded": []
+}

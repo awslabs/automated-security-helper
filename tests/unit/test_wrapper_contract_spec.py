@@ -16,10 +16,13 @@ PowerShell tables against the typer app.
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from automated_security_helper.interactions.wrapper_contract import (
     WRAPPER_FORWARDED_OPTIONS,
+    WrapperContract,
     contract,
 )
 
@@ -69,6 +72,9 @@ def test_root_value_options():
         "--exclude-scanners",
         "--format",
         "--formats",
+        "--image",
+        "--image-archive",
+        "--image-layout",
         "--log-level",
         "--min-severity",
         "--mode",
@@ -143,22 +149,53 @@ def test_exit_codes():
     spec = contract()
     assert spec.refusal_exit == 3
     assert spec.usage_error_exit == 5
-    assert spec.no_runner_exit == 3
 
 
-def test_markers_mounts_and_environment_names():
-    spec = contract()
-    assert spec.ci_runner_markers == ("GITHUB_ACTIONS", "TF_BUILD", "TEAMCITY_VERSION")
-    assert spec.mount_destinations == (
-        "/src",
-        "/out",
-        "/ash-config",
-        "/ash-env-config",
+def test_ci_runner_markers():
+    assert contract().ci_runner_markers == (
+        "GITHUB_ACTIONS",
+        "TF_BUILD",
+        "TEAMCITY_VERSION",
     )
-    assert spec.actual_directory_env_names == (
-        "ASH_ACTUAL_SOURCE_DIR",
-        "ASH_ACTUAL_OUTPUT_DIR",
+
+
+def test_every_contract_field_is_rendered_into_a_wrapper_block():
+    """A field no generated block renders is a twin the wrappers keep by hand.
+
+    The contract exists to stop the wrappers' written-out copies of the CLI's surface
+    from drifting. A field computed but rendered nowhere stops nothing, so each one
+    must be read by a renderer in the generator.
+    """
+    import dataclasses
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    script = (
+        Path(__file__).resolve().parents[2] / "scripts" / "generate_wrapper_tables.py"
     )
+    name = "wrapper_tables_for_fields"
+    spec = importlib.util.spec_from_file_location(name, script)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(name, None)
+    rendered = "\n".join(
+        inspect.getsource(renderer)
+        for blocks in module.BLOCKS.values()
+        for _, renderer in blocks
+    )
+
+    def unrendered(field_names):
+        return [n for n in field_names if f"contract.{n}" not in rendered]
+
+    fields = [field.name for field in dataclasses.fields(WrapperContract)]
+    assert unrendered(fields) == []
+    # The control: a field no renderer reads is reported, so the empty list above is
+    # not a check that passes anything.
+    assert unrendered([*fields, "mount_destinations"]) == ["mount_destinations"]
 
 
 def test_the_shared_refusal_texts_are_re_exported_not_copied():

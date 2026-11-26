@@ -6,7 +6,7 @@
 Why this exists
 ---------------
 Unless ``--config`` names a file elsewhere, ASH reads its configuration from the tree
-it scans (``.ash/.ash.yaml`` and the other discovered names). A few options of the
+it scans (``.ash.yaml`` and the other discovered names). A few options of the
 actionlint, cfn-lint and trivy fs scanners name something the scanner's tool executes
 or loads as code:
 

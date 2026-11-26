@@ -4,7 +4,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Not creating .ashrc.yaml: ASH already reads its configuration from <TMP>/.ash/.ash.yaml, and configuration sources are never merged, so a new .ashrc.yaml here would leave one of the two files unread. Edit <TMP>/.ash/.ash.yaml, or pass --config to write the new file somewhere else.
+      Not creating .ash.yaml: ASH already reads its configuration from <TMP>/.ash/.ash.yaml, and configuration sources are never merged, so a new .ash.yaml here would leave one of the two files unread. Move <TMP>/.ash/.ash.yaml to .ash.yaml (the canonical config file), edit <TMP>/.ash/.ash.yaml in place, or pass --config to write the new file somewhere else.
   
     ''',
   })

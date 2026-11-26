@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import (
     Any,
     ClassVar,
+    Dict,
     Generic,
     List,
     Literal,
@@ -36,11 +37,13 @@ from typing import (
 
 from pydantic import PrivateAttr
 
+from automated_security_helper.base.scanner_facets import FacetDecl, FacetState
 from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
+from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
 from automated_security_helper.config.path_trust import honored_path, resolved_path
 from automated_security_helper.core.constants import ASH_ASSETS_DIR
 from automated_security_helper.core.enums import OfflineStrategy
@@ -55,6 +58,94 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
 
 C = TypeVar("C", bound=ScannerPluginConfigBase)
+
+#: The facets register cells semgrep and opengrep share, because both write
+#: their SARIF through this base's validated pass-through (base/scanner_facets.py).
+#: Each scanner builds its own ``facets`` attribute from these (the registry
+#: totality test reads the class's own dict) and adds the cells that differ:
+#: fingerprints, fix_available and references. Pure code SAST: the only
+#: resource-shaped values in the output are file paths, which are locators,
+#: never resource ids. The base's _post_process_sarif touches run metadata only
+#: (targets attempted, exclude classification, the notebook refusal), not
+#: result content.
+GREP_SHARED_FACETS: Dict[str, FacetDecl] = {
+    "rule_id": FacetDecl(state=FacetState.MAPPED, native_field="results[].ruleId"),
+    "severity": FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="tool.driver.rules[].defaultConfiguration.level",
+        reason="the tool writes no level on a result (the committed captures' "
+        "result keys are fingerprints, locations, message, properties, "
+        "ruleId); the level lives on the rule, and SARIF's default-level "
+        "semantics resolve a result without one through it",
+    ),
+    "file_path": FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="results[].locations[].physicalLocation.artifactLocation.uri",
+    ),
+    "line_range": FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="results[].locations[].physicalLocation.region.startLine/endLine",
+    ),
+    "column": FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="results[].locations[].physicalLocation.region."
+        "startColumn/endColumn",
+    ),
+    "message": FacetDecl(
+        state=FacetState.MAPPED, native_field="results[].message.text"
+    ),
+    "resource_id": FacetDecl(
+        state=FacetState.NA,
+        reason="pure code SAST; the only locators in its output are file "
+        "paths, which are never resource ids",
+    ),
+    "resource_type": FacetDecl(
+        state=FacetState.NA,
+        reason="pure code SAST; no deployable resource exists in the output",
+    ),
+    "package_name": FacetDecl(
+        state=FacetState.NA,
+        reason="code findings name a file and a rule, not a package",
+    ),
+    "package_version": FacetDecl(
+        state=FacetState.NA,
+        reason="code findings name a file and a rule, not a package",
+    ),
+    "package_path": FacetDecl(
+        state=FacetState.NA,
+        reason="code findings name a file and a rule, not a package",
+    ),
+    "taxonomy_cve": FacetDecl(
+        state=FacetState.NA,
+        reason="code rules carry no CVE ids",
+    ),
+    "taxonomy_cwe": FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="tool.driver.rules[].properties.tags (CWE entries)",
+    ),
+    "remediation_text": FacetDecl(
+        state=FacetState.NA,
+        reason="rule help describes the rule, not a remediation; fixes are "
+        "recorded under fix_available",
+    ),
+    "snippet": FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="results[].locations[].physicalLocation.region.snippet.text",
+    ),
+    "tags": FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="tool.driver.rules[].properties.tags, read into the "
+        "flat tags when the result carries none (they also feed the CWE "
+        "read)",
+    ),
+    "extras": FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="results[].properties (SARIF property bag, passed "
+        "through unmodified)",
+        reason="the committed capture's bag is empty ({}), so this cell "
+        "rests on the pass-through, not on a populated key",
+    ),
+}
 
 #: semgrep's and opengrep's own ``--severity`` words (they are the tools'
 #: spellings, not ASH's ladder), and the values of their ``--metrics`` option. Both
@@ -437,15 +528,11 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         read. The note is a config warning, which the orchestrator records in the
         results as a ``config_warning`` validation checkpoint, once per file, and
         it is logged whether or not the context's config keeps such a list. A
-        file an MCP client delivered (``cli/mcp/sandbox.config_is_client_supplied``,
+        file an MCP client delivered (``config.mcp_sandbox.config_is_client_supplied``,
         judged by its path, each symlink on the way and the file it resolves to)
         is named as client-supplied. A disabled scanner runs neither tool, so
         there is nothing it leaves unhonored and it records no note.
         """
-        # Imported here, as config/path_trust.py does: importing cli.mcp runs its
-        # __init__, which imports the config modules.
-        from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
-
         if not getattr(self.config, "enabled", True):
             return
         source = getattr(self.context, "source_dir", None)
@@ -639,7 +726,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             self.dependency_unavailable_reason = (
                 f"{scanner_label} is running in offline mode but no rule cache was found. "
                 f"Set ${cache_env} to a directory containing .yaml/.yml rule files. "
-                "Run `ash build-image --offline` to pre-warm the cache in the image, "
+                "Run `ash container build --offline` to pre-warm the cache in the image, "
                 "or, while online, download each ruleset from "
                 "https://semgrep.dev/c/<ruleset> into that directory and record the "
                 "time in .ash-rules-fetched-at. See 'Seeding the semgrep and opengrep "

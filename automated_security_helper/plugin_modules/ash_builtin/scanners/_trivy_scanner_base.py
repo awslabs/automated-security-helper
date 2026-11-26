@@ -56,6 +56,15 @@ from typing import (
 import yaml
 from pydantic import Field, PrivateAttr, model_validator
 
+from automated_security_helper.base.plugin_base import (
+    PROGRAMMING_ERRORS,
+    side_run_skip_reason,
+)
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -108,6 +117,126 @@ from automated_security_helper.utils.package_identity import (
 )
 
 C = TypeVar("C", bound=ScannerPluginConfigBase)
+
+#: The facets register cells both trivy scanners share, because both read trivy's
+#: SARIF through this base (base/scanner_facets.py). Each class still declares its
+#: own ``facets`` attribute from this value (the registry totality test reads the
+#: class's own dict), overriding only the cells it classifies differently. The
+#: cells describe trivy's vulnerability results and, for resource_id, the
+#: terraform misconfiguration results; no committed capture holds a secret or a
+#: license result, so those result classes are not classified here.
+#: Native fields are quoted from the committed trivy SARIF
+#: (tests/test_data/scanners/trivy/trivy-0.69.3.vuln.sarif) and from the M0
+#: misconfig capture (tests/test_data/scanners/trivy/captured/
+#: trivy-0.76.2-misconfig-terraform.{json,sarif}, M0-FINDINGS.md (a)).
+TRIVY_SARIF_FACETS = ScannerFacets(
+    rule_id=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF result ruleId",
+    ),
+    severity=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field='result message line "Severity: <level>", checked '
+        "against the result level and the rule tags (issue_severity)",
+    ),
+    file_path=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF locations[].physicalLocation.artifactLocation.uri",
+    ),
+    line_range=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF region.startLine / region.endLine",
+    ),
+    column=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF region.startColumn",
+    ),
+    message=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF result message.text",
+    ),
+    resource_id=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="Results[].Misconfigurations[].CauseMetadata.Resource "
+        "(trivy's JSON report, absent from its SARIF), copied onto the "
+        "SARIF result under ash_resource_id by attach_trivy_resources "
+        "for result type terraform only: cloudformation carries a "
+        "file:line locator (t.yaml:3-4) and kubernetes and dockerfile "
+        "carry none (trivy 0.76.2, M0-FINDINGS.md (a))",
+        example="aws_s3_bucket.m0_fixture_bucket",
+    ),
+    resource_type=FacetDecl(
+        state=FacetState.NA,
+        reason="trivy's CauseMetadata names Provider and Service (AWS, "
+        "s3) and no resource type; the type is only the prefix of the "
+        "dropped address, which would be a derivation",
+    ),
+    package_name=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field='result message line 1 "Package: <name>" (_package_from_message)',
+    ),
+    package_version=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field='result message line 2 "Installed Version: <version>" '
+        "(_package_from_message)",
+    ),
+    package_path=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="npm lockfile entry at the SARIF region.startLine of "
+        "the result's location (one result per installed copy)",
+    ),
+    taxonomy_cve=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF result ruleId (the CVE id)",
+    ),
+    taxonomy_cwe=FacetDecl(
+        state=FacetState.UNCONFIRMED,
+        reason="UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are "
+        "vulnerability, security, <severity>); the JSON format's CweIDs "
+        "has no committed vulnerability fixture, and a `trivy fs --format "
+        "json` run over a lockfile settles it",
+    ),
+    fingerprints=FacetDecl(
+        state=FacetState.NA,
+        reason="trivy's SARIF results carry no fingerprints (result keys "
+        "are level, locations, message, ruleId, ruleIndex)",
+    ),
+    fix_available=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field='message line "Fixed Version: <version>", written as '
+        "fix_available=True when non-empty by "
+        "TrivyScannerBase._fixed_version_from_message (an empty value "
+        "writes nothing)",
+    ),
+    remediation_text=FacetDecl(
+        state=FacetState.UNCONFIRMED,
+        reason="UNCONFIRMED: not classified by the survey; the flat "
+        "model has no remediation column, and the rule help text carries "
+        "the fixed version already declared under fix_available",
+    ),
+    snippet=FacetDecl(
+        state=FacetState.NA,
+        reason="trivy's SARIF results carry no code snippet",
+    ),
+    references=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF rule helpUri, read into the flat references "
+        "by FlatVulnerability.from_sarif_result when the result carries "
+        "no relatedLocations",
+    ),
+    tags=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF rule properties.tags, read into the flat tags "
+        "by FlatVulnerability.from_sarif_result when the result carries "
+        "none (the severity word among them still feeds issue_severity)",
+    ),
+    extras=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="result properties bag (issue_severity and the "
+        "package identity keys this adapter writes) passed through to "
+        "the flat properties",
+    ),
+)
 
 #: Flags every trivy scan gets, online or offline. ``trivy --offline-scan``: trivy scans
 #: never contact package registries; the database refresh is a separate step
@@ -445,6 +574,16 @@ def skip_dirs_value(path: str) -> str:
     return _csv_field(escaped)
 
 
+def skip_files_glob_value(glob: str) -> str:
+    """*glob* as one ``--skip-files`` value, its glob characters left to trivy.
+
+    The CSV quoting of :func:`_csv_field` only: unlike :func:`skip_dirs_value`,
+    which escapes glob characters to name one directory literally, an image
+    exclude glob (``/opt/dir/**``) is meant to be read as a glob.
+    """
+    return _csv_field(glob)
+
+
 def _csv_field(value: str) -> str:
     """``value`` as one field of the CSV trivy reads a list flag as.
 
@@ -726,8 +865,11 @@ def trivy_misconfig_resources(
 ) -> dict[_MisconfigKey, List[Optional[str]]]:
     """The resource of every failed misconfiguration in trivy's JSON report.
 
-    Each key holds one entry per FAIL record, in report order, because the SARIF
-    report lists the same records in the same order. An entry is the record's
+    Each key holds one entry per FAIL record, in the JSON report's order. The
+    order is not relied on to pair a record with a SARIF result (the two reports
+    come from two separate runs; :func:`attach_trivy_resources` pairs by key and
+    gives a shared key a resource only when every entry names the same one). An
+    entry is the record's
     ``CauseMetadata.Resource`` when its result's type is one of
     :data:`_MISCONFIG_RESOURCE_TYPES` and None otherwise, so a key's entries
     still count every record that has it. Only FAIL records are listed: trivy's
@@ -782,8 +924,9 @@ def attach_trivy_resources(
     would bind a suppression to a finding it was not written for where a missing
     one only fails closed. When the two reports disagree on how many records a
     key has, none of that key's results is given a resource. The assignments are
-    worked out first and written together, so a failure part way leaves the report
-    as it was. Returns how many results were set.
+    worked out first and then written in one loop, so a failure while working them
+    out leaves the report as it was; a failure part way through the write loop
+    leaves the results written so far. Returns how many results were set.
     """
     by_key: dict[_MisconfigKey, List[Any]] = {}
     for run in sarif_report.runs or []:
@@ -940,6 +1083,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     # the cache (``cache.dir``).
     _scan_config_file: Optional[str] = PrivateAttr(default=None)
 
+    # Where the image scan's second, JSON pass writes its report (trivy's SARIF
+    # names no layer, its JSON does; see utils/image_layer_digests).
+    _image_layers_json: Optional[Path] = PrivateAttr(default=None)
+
     def _environment_values(self) -> Tuple[str, ...]:
         """The configuration's environment values, plus the two input-file variables
         both trivy scanners read straight from the environment (never through the
@@ -966,6 +1113,21 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             if slashed != value:
                 spellings.append(slashed)
         return (*super()._environment_values(), *spellings)
+
+    def _forced_binary_precluded_reason(self) -> Optional[str]:
+        """Offline without a database, a forced trivy must not satisfy validation.
+
+        The database gate below is about what trivy would read, not where trivy
+        is, so a ``--binary-path`` record has no say in it. The same predicate
+        ``validate_plugin_dependencies`` runs after the base check; consulting it
+        here keeps the force from short-circuiting past it.
+        """
+        if self._offline_database_available():
+            return None
+        return (
+            "offline with no trivy vulnerability database in the cache; a forced "
+            "binary cannot supply the database"
+        )
 
     def validate_plugin_dependencies(self) -> bool:
         """The binary, and offline, a vulnerability database for it to read.
@@ -2551,6 +2713,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         """
         try:
             return self._attach_misconfig_resources_unguarded(sarif_report, final_args)
+        except PROGRAMMING_ERRORS:
+            # A defect in ASH's own code is not a condition of the second run:
+            # it surfaces instead of passing as a skipped report.
+            raise
         except Exception as error:  # noqa: BLE001 -- best-effort enrichment
             self._warn_side_report_skipped(f"{type(error).__name__}")
             return sarif_report
@@ -2608,15 +2774,26 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 env=env,
                 timeout=self._effective_scan_timeout(),
             )
-            if response.get("returncode") != 0 or not json_file.is_file():
+            flagged = side_run_skip_reason(response)
+            if (
+                flagged is not None
+                or response.get("returncode") != 0
+                or not json_file.is_file()
+            ):
                 ASH_LOGGER.debug(
                     f"trivy's misconfiguration report was not written "
                     f"(exit {response.get('returncode')}); no resource is named."
                 )
+                # The response's own flags first: a run stopped at its timeout
+                # or one whose tool could not be stopped has no exit code to
+                # name, and "exited None" says nothing about why.
                 self._warn_side_report_skipped(
-                    f"the second run exited {response.get('returncode')}"
-                    if response.get("returncode") != 0
-                    else "the second run wrote no report"
+                    flagged
+                    or (
+                        f"the second run exited {response.get('returncode')}"
+                        if response.get("returncode") != 0
+                        else "the second run wrote no report"
+                    )
                 )
                 return sarif_report
             document = json.loads(json_file.read_text(encoding="utf-8"))
@@ -2626,7 +2803,18 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             return sarif_report
         finally:
             json_file.unlink(missing_ok=True)
-        attach_trivy_resources(sarif_report, trivy_misconfig_resources(document))
+        resources = trivy_misconfig_resources(document)
+        attached = attach_trivy_resources(sarif_report, resources)
+        if attached == 0 and any(
+            name is not None for named in resources.values() for name in named
+        ):
+            # The JSON report named resources and none reached a result: the two
+            # reports did not line up (a key or a count differed), and nothing
+            # else in the run says why a resource-scoped suppression never
+            # matches.
+            self._warn_side_report_skipped(
+                "the report named resources and none matched a result"
+            )
         return sarif_report
 
     @staticmethod

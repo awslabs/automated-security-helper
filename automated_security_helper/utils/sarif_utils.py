@@ -6,7 +6,16 @@ import os
 import random
 import re
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    overload,
+)
 import uuid
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from automated_security_helper.base.plugin_context import PluginContext
@@ -53,7 +62,14 @@ if TYPE_CHECKING:
     from automated_security_helper.config.client_scanner_exclusions import (
         EvaluationBudget,
     )
-from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.models.flat_vulnerability import (
+    FlatVulnerability,
+    _string_property,
+)
+from automated_security_helper.utils.finding_identity import (
+    IMAGE_DIGEST_PROPERTY,
+    IMAGE_REF_PROPERTY,
+)
 from automated_security_helper.utils.package_identity import (
     extract_package_identity,
     extract_resource_identity,
@@ -61,8 +77,11 @@ from automated_security_helper.utils.package_identity import (
 )
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
-from automated_security_helper.utils.shared_finding_ids import shared_ids_by_position
 from automated_security_helper.utils.ash_lock import AshLock, AshLockError
+from automated_security_helper.utils.shared_finding_ids import (
+    shared_correlation_ids_by_position,
+    shared_ids_by_position,
+)
 from automated_security_helper.utils.symbol_spans import SymbolResolver
 from automated_security_helper.utils.suppression_frame import (
     first_ignore_path,
@@ -434,7 +453,7 @@ def attach_scanner_details(
     for run in sarif_report.runs:
         # Create or update tool.driver information
         if not run.tool:
-            run.tool = Tool()
+            run.tool = Tool(driver=ToolComponent(name=scanner_name))
 
         if not run.tool.driver:
             run.tool.driver = ToolComponent(name=scanner_name)
@@ -465,7 +484,8 @@ def attach_scanner_details(
             scanner_details["tool_invocation"] = invocation_details
 
         # Add scanner details to properties
-        run.tool.driver.properties.scanner_details = scanner_details
+        # PropertyBag allows extra fields (extra="allow"), which ty cannot see.
+        run.tool.driver.properties.scanner_details = scanner_details  # ty: ignore[unresolved-attribute]
 
         # Also attach scanner information to each result
         if run.results:
@@ -789,6 +809,20 @@ def _fill_message_arguments(
     return _MESSAGE_PLACEHOLDER.sub(fill, text)
 
 
+@overload
+def result_message_text(result: Any, rule: Any = None, *, default: str) -> str: ...
+
+
+@overload
+def result_message_text(result: Any, rule: Any, default: str) -> str: ...
+
+
+@overload
+def result_message_text(
+    result: Any, rule: Any = None, default: None = None
+) -> str | None: ...
+
+
 def result_message_text(
     result: Any, rule: Any = None, default: str | None = None
 ) -> str | None:
@@ -904,6 +938,25 @@ def shared_finding_ids(model: Any, all_results: List[Any]) -> List[str | None]:
         return shared_ids_by_position(flat, all_results)
     except Exception as e:  # noqa: BLE001 -- a fallback, see the docstring
         ASH_LOGGER.debug(f"Could not derive shared finding ids: {str(e)}")
+        return [None] * len(all_results)
+
+
+def shared_correlation_ids(model: Any, all_results: List[Any]) -> List[str | None]:
+    """The cross-scanner correlation id of each result, by position, else None.
+
+    The same pairing as :func:`shared_finding_ids`, reading the flattened
+    finding's ``correlation_id`` (assigned once at flatten time,
+    ``models/flat_vulnerability.assign_correlation_ids``), so every reporter
+    exports the one value the model computed rather than re-deriving the key.
+    None at a position whose finding carries none (only the ``secret/`` and
+    ``dep/`` families have one, ``utils/finding_identity``), and at every
+    position when the flattening fails.
+    """
+    try:
+        flat = list(model.to_flat_vulnerabilities())
+        return shared_correlation_ids_by_position(flat, all_results)
+    except Exception as e:  # noqa: BLE001 -- a fallback, see the docstring
+        ASH_LOGGER.debug(f"Could not derive shared correlation ids: {str(e)}")
         return [None] * len(all_results)
 
 
@@ -1321,6 +1374,22 @@ def _matching_exclusion(
     return None
 
 
+def _is_install_location_uri(uri: str | None) -> bool:
+    """Whether *uri* is npm-audit's pre-lockfile install location.
+
+    The shape a report converted on its own (no lockfile known) still writes:
+    ``node_modules/<package>/package.json``, the package possibly nested under
+    further ``node_modules/`` segments. No audited lockfile is named
+    ``package.json``, so the tail alone cannot misread a lockfile-located
+    finding.
+    """
+    if not uri:
+        return False
+    return uri.endswith("/package.json") and (
+        uri.startswith("node_modules/") or "/node_modules/" in uri
+    )
+
+
 def _apply_config_suppression(
     result: Result,
     suppressions: list,
@@ -1331,10 +1400,24 @@ def _apply_config_suppression(
     recorded_fields: Dict[int, Dict[str, Any]] | None = None,
     written_ids: Dict[int, str] | None = None,
     warned_engines: set | None = None,
+    warned_rule_less: set | None = None,
 ) -> bool:
     """Apply a config-based suppression to *result* if one matches *flat_finding*.
 
     Mutates result.suppressions on match. Returns True when a suppression was applied.
+    ``warned_rule_less`` is the pass's warn-once set for a suppression that names
+    no rule and matches an npm-audit finding: npm-audit findings moved from
+    ``node_modules/<package>/package.json`` locations into the audited lockfile,
+    so a rule-less entry whose path scope matches a lockfile (``deploy/**``,
+    ``**/package-lock.json``) can newly cover advisories it never covered when it
+    was written, with no config change. The warning names the entry once so the
+    operator can audit it; ``None`` (a direct caller) warns nothing. An entry
+    that names a ``package_name`` is scoped on purpose, which is exactly the
+    acknowledgment the warning's remedy asks for, so it is not warned about.
+    Neither is a match on a finding still located at
+    ``node_modules/<package>/package.json`` (a report converted on its own, with
+    no lockfile known): that is the pre-move shape, which a rule-less entry
+    covered before the move too, so nothing is newly widened there.
     ``written_reasons`` (``suppression_matcher.written_suppression_reasons``) gives
     the reason quoted for a suppression whose reason was read from the environment.
     ``recorded_fields`` (``suppression_matcher.recorded_suppressions``) gives the
@@ -1349,6 +1432,29 @@ def _apply_config_suppression(
     )
     if not should_suppress:
         return False
+
+    if (
+        warned_rule_less is not None
+        and matching_suppression is not None
+        and not (getattr(matching_suppression, "rule_id", None) or "").strip()
+        and not (getattr(matching_suppression, "package_name", None) or "").strip()
+        and flat_finding.scanner == "npm-audit"
+        and not _is_install_location_uri(flat_finding.file_path)
+        and id(matching_suppression) not in warned_rule_less
+    ):
+        warned_rule_less.add(id(matching_suppression))
+        ASH_LOGGER.warning(
+            f"A suppression that names no rule_id (path "
+            f"'{escape_markup(getattr(matching_suppression, 'path', None) or '')}') "
+            f"covers npm-audit findings, first at rule "
+            f"'{escape_markup(result.ruleId)}' in "
+            f"'{escape_markup(flat_finding.file_path)}'. npm-audit findings "
+            "moved from node_modules/<package>/package.json into the audited "
+            "lockfile, so an entry written before that change may cover "
+            "advisories it never covered; see the migration note under "
+            "how-to/suppress-findings.",
+            extra=MARKUP,
+        )
 
     if used_suppressions is not None and matching_suppression:
         written_id = (
@@ -1491,7 +1597,7 @@ def _apply_inline_suppression(
         )
     for isup in inline_cache[file_key]:
         if (
-            isup.rule_id.lower() == result.ruleId.lower()
+            isup.rule_id.lower() == (result.ruleId or "").lower()
             and isup.line_number == result_line
         ):
             if not result.suppressions:
@@ -1526,8 +1632,13 @@ def _suppress_transitive_of_suppressed_roots(
     scan, so each needed its own entry.
 
     A root reference is satisfied only by a result in this report with the same
-    rule id and the same ``package_path`` (the URI when the reference has no
-    path) that is itself suppressed. A reference with no such result -- the
+    rule id and the same ``package_path``; for a reference with no path (a root
+    npm lists no install location for), by one with the same URI and the same
+    ``package_name``, since results at a lockfile share its URI and the URI
+    alone would let another package's suppressed result under the same rule
+    stand in for a root whose own advisory is live. A reference with neither a
+    path nor a name (one written before the name was recorded) matches by URI
+    alone. A reference with no such result -- the
     root was dropped by an ignore path, or reported by nothing -- or one whose
     result is not suppressed leaves the transitive finding visible. Rule ids are
     not changed, so existing suppressions on transitive findings keep matching.
@@ -1537,6 +1648,7 @@ def _suppress_transitive_of_suppressed_roots(
     """
     by_path: dict[tuple[str, str], list[Result]] = {}
     by_uri: dict[tuple[str, str], list[Result]] = {}
+    by_uri_name: dict[tuple[str, str, str], list[Result]] = {}
     transitive: list[Result] = []
     for run in sarif_report.runs:
         for result in run.results or []:
@@ -1544,7 +1656,7 @@ def _suppress_transitive_of_suppressed_roots(
                 continue
             if extract_root_advisories(result.properties):
                 transitive.append(result)
-            _, _, package_path = extract_package_identity(result.properties)
+            package_name, _, package_path = extract_package_identity(result.properties)
             if package_path:
                 key = (result.ruleId, normalize(package_path, False))
                 by_path.setdefault(key, []).append(result)
@@ -1559,6 +1671,10 @@ def _suppress_transitive_of_suppressed_roots(
                 by_uri.setdefault((result.ruleId, normalize(uri, True)), []).append(
                     result
                 )
+                if package_name:
+                    by_uri_name.setdefault(
+                        (result.ruleId, normalize(uri, True), package_name), []
+                    ).append(result)
 
     for result in transitive:
         if is_result_suppressed(result):
@@ -1582,6 +1698,16 @@ def _suppress_transitive_of_suppressed_roots(
                 key = (rule_id, normalize(ref["package_path"], False))
                 matches = by_path.get(key, [])
                 where = ref["package_path"]
+            elif "package_name" in ref:
+                # A path-less root: results at its lockfile share the URI, so
+                # the URI alone matched another package's suppressed result
+                # under the same rule while this root's advisory was live. The
+                # name keeps the reference on the root's own by-name result,
+                # and with that result absent the reference matches nothing,
+                # which leaves the transitive finding visible.
+                key = (rule_id, normalize(ref["uri"], True), ref["package_name"])
+                matches = by_uri_name.get(key, [])
+                where = f"{ref['package_name']} in {ref['uri']}"
             else:
                 key = (rule_id, normalize(ref["uri"], True))
                 matches = by_uri.get(key, [])
@@ -1788,6 +1914,17 @@ class _OutputDirExclusion:
             work_dir = plugin_context.output_dir.joinpath(ASH_WORK_DIR_NAME)
         self.work_dir = Path(work_dir).resolve()
         self.source_dir = plugin_context.source_dir.resolve()
+        # A container-image scan: every location is an in-image path, as the tool
+        # wrote it (``/usr/lib/libssl.so.3``). The source directory only anchors
+        # such a scan, so no path is read relative to it (``normalize``), none is
+        # ASH's own output, and an ignore path or suppression names the in-image
+        # path as written.
+        from automated_security_helper.core.asset import Asset, AssetKind
+
+        asset = getattr(plugin_context, "asset", None)
+        self.in_image = (
+            isinstance(asset, Asset) and asset.kind == AssetKind.CONTAINER_IMAGE
+        )
         # Spelled with "/" only where a backslash separates (uri_separators):
         # a bare replace turned a POSIX source directory named a\b into a/b,
         # which no URI under it starts with.
@@ -1855,7 +1992,12 @@ class _OutputDirExclusion:
 
         *decode* False keeps a relative URI's percent escapes, the spelling the
         report records (:func:`_normalize_sarif_uri`).
+
+        An image scan's URI is an in-image path and is never made relative to the
+        source directory: it is put in the one matching spelling and returned.
         """
+        if self.in_image:
+            return _matched_path_text(raw_uri, self.source_dir_prefix, decode)
         return _normalize_sarif_uri(
             raw_uri,
             self.source_dir_prefix,
@@ -1893,7 +2035,7 @@ class _OutputDirExclusion:
 
     def holds(self, uri: str) -> bool:
         """Whether the normalized ``uri`` is ASH's output, outside the work directory."""
-        if self.output_dir_contains_source:
+        if self.output_dir_contains_source or self.in_image:
             return False
         if uri not in self._resolve_cache:
             # Anchored on the source directory, NOT on the process's working
@@ -2147,6 +2289,9 @@ def _apply_suppressions_within_budget(
         plugin_context.config, recorded_fields
     )
     written_ids: Dict[int, str] = {}
+    # Warn once per rule-less entry that covers an npm-audit finding (see
+    # _apply_config_suppression): per pass, like the written ids above.
+    warned_rule_less: set = set()
 
     # Exclusions a delivered config gave one scanner in its options, moved out of
     # them before the scan so the files were scanned. Each finding of that scanner
@@ -2391,7 +2536,12 @@ def _apply_suppressions_within_budget(
                     None,
                 )
                 uri_as_written = None
-                if result.ruleId and location is not None:
+                if (
+                    result.ruleId
+                    and location is not None
+                    and location.physicalLocation is not None
+                    and location.physicalLocation.root.artifactLocation is not None
+                ):
                     raw_uri = location.physicalLocation.root.artifactLocation.uri
                     uri = (
                         _normalize_sarif_uri(
@@ -2479,6 +2629,10 @@ def _apply_suppressions_within_budget(
                         file_path=uri,
                         line_start=line_start,
                         line_end=line_end,
+                        # An image finding's subject, for an ``image:``-scoped
+                        # suppression (stamped by the scanner executor).
+                        image_ref=_string_property(result, IMAGE_REF_PROPERTY),
+                        image_digest=_string_property(result, IMAGE_DIGEST_PROPERTY),
                     )
 
                 if flat_finding:
@@ -2500,6 +2654,7 @@ def _apply_suppressions_within_budget(
                         recorded_fields,
                         written_ids,
                         warned_engines=warned_engines,
+                        warned_rule_less=warned_rule_less,
                     )
                     if not config_suppressed and uri_as_written is not None:
                         config_suppressed = _apply_config_suppression(
@@ -2514,6 +2669,7 @@ def _apply_suppressions_within_budget(
                             recorded_fields,
                             written_ids,
                             warned_engines=warned_engines,
+                            warned_rule_less=warned_rule_less,
                         )
                     if config_suppressed and suppressions_in_effect(
                         result.suppressions

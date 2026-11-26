@@ -406,6 +406,16 @@ ASH_DEFAULT_SEVERITY_LEVEL = _resolve_default_severity_level(
     os.environ.get("ASH_DEFAULT_SEVERITY_LEVEL")
 )
 
+# The canonical config file: ``.ash.yaml`` at the scan root. Discovery looks here
+# first, and every command that creates a config file writes it here. Every other
+# location below is a legacy one that still loads, warns once that it is
+# deprecated, and is removed in ASH 4.0.
+ASH_CANONICAL_CONFIG_FILE_NAME = ".ash.yaml"
+
+# The legacy name list, in the order discovery has always read it (each at the
+# scan root, then in ``.ash/``). The canonical file is in it, and is read before
+# all of it; ``config/config_sources.py`` skips it here, so the rest keep their
+# order.
 ASH_CONFIG_FILE_NAMES = [
     ".ash.yml",
     ".ash.yaml",
@@ -416,9 +426,9 @@ ASH_CONFIG_FILE_NAMES = [
 ]
 
 # Config sources discovered after ASH_CONFIG_FILE_NAMES, in this order. Both are
-# read from the scan root only, never from ``.ash/``. The full precedence, and why
-# the older names above still win when several sources exist, is documented in
-# ``config/config_sources.py`` and docs/content/docs/configuration-guide.md.
+# read from the scan root only, never from ``.ash/``. The full precedence is
+# documented in ``config/config_sources.py`` and
+# docs/content/docs/configuration-guide.md.
 ASH_RC_FILE_NAMES = [
     ".ashrc.toml",
     ".ashrc.yaml",
@@ -432,13 +442,11 @@ ASH_RC_FILE_NAMES = [
 
 # The name every ASH command that creates a config file gives it: `ash config
 # init` and `ash config wizard` with no --config, and `ash inspect findings` when
-# no config exists yet. Discovery reads ASH_RC_FILE_NAMES and [tool.ash] after
-# ASH_CONFIG_FILE_NAMES, and its warning calls the older names deprecated (#313),
-# so a new file gets a name from ASH_RC_FILE_NAMES. Of those, the first YAML one:
-# these commands write YAML and refuse TOML. Existing files under the older names
-# keep loading, and keep winning over this one when both exist, which is why the
-# commands refuse to create it next to another source.
-ASH_DEFAULT_CONFIG_FILE_NAME = ".ashrc.yaml"
+# no config exists yet. It is the canonical name, which discovery reads before
+# any other. Existing files at the legacy locations keep loading, and lose to
+# this one when both exist, which is why the commands refuse to create it next
+# to another source: the other file would stop being read.
+ASH_DEFAULT_CONFIG_FILE_NAME = ASH_CANONICAL_CONFIG_FILE_NAME
 
 # A pyproject.toml is a config source only when it has a [tool.ash] table.
 ASH_PYPROJECT_FILE_NAME = "pyproject.toml"
@@ -450,7 +458,9 @@ ASH_PYPROJECT_FILE_NAME = "pyproject.toml"
 # "then a  table in pyproject.toml". The file-name lists survive only because a
 # quoted, comma-separated list does not parse as a tag.
 ASH_CONFIG_SOURCES_DESCRIPTION = (
-    f"{ASH_CONFIG_FILE_NAMES} (each at the root, then in .ash/), then "
+    f"{ASH_CANONICAL_CONFIG_FILE_NAME} at the root, then the deprecated "
+    f"{ASH_CONFIG_FILE_NAMES} (each at the root, then in .ash/; "
+    f"{ASH_CANONICAL_CONFIG_FILE_NAME} only in .ash/), then "
     f"{ASH_RC_FILE_NAMES} at the root, then the tool.ash table of "
     f"{ASH_PYPROJECT_FILE_NAME} at the root; the first found is used"
 )
@@ -463,7 +473,7 @@ ASH_CONFIG_EXTENDS_MAX_DEPTH = 10
 ASH_CONFIG_EXTENDS_MAX_FILES = 50
 
 # The most ASH reads from one config file: 1 MiB. A config is text a person edits;
-# ASH's own .ash/.ash.yaml is about 160 KiB, so this is six times that. The bound
+# ASH's own .ash.yaml is about 160 KiB, so this is six times that. The bound
 # stops a file, or a device at a config name, from being read into memory without
 # limit, and it bounds what parsing one costs: a flat 15 MiB YAML list took about
 # 230 s and 4.3 GiB to resolve, where 1 MiB takes a fraction of that. It does not

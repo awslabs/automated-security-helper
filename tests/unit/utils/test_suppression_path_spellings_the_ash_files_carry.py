@@ -5,7 +5,7 @@
 
 Why this exists
 ---------------
-`.ash/.ash.yaml` and `.ash/.ash_alpha_plugins.yaml` once said, in comments, that
+`.ash.yaml` and `.ash/.ash_alpha_plugins.yaml` once said, in comments, that
 ASH's path matcher ignores a trailing ``**`` on a multi-segment pattern, and a
 neighbouring comment said ``/**`` is what makes ``tests/pytest-temp/**`` match
 anything. Both cannot be true. ``file_path_matches`` is the matcher the SARIF
@@ -24,7 +24,7 @@ from automated_security_helper.utils.suppression_matcher import file_path_matche
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-FILES = (".ash/.ash.yaml", ".ash/.ash_alpha_plugins.yaml")
+FILES = (".ash.yaml", ".ash/.ash_alpha_plugins.yaml")
 
 
 @pytest.mark.parametrize(
@@ -33,7 +33,10 @@ FILES = (".ash/.ash.yaml", ".ash/.ash_alpha_plugins.yaml")
         ("tests/pytest-temp/**", "tests/pytest-temp/a/b.py", True),
         ("tests/pytest-temp/**", "tests/pytest-temp/b.py", True),
         ("tests/pytest-temp/**", "tests/other/b.py", False),
-        ("tests/pytest-temp", "tests/pytest-temp/b.py", False),
+        # A bare directory name matches the subtree below it, like the "/**"
+        # spelling (tests/unit/utils/test_bare_directory_path_matching.py pins
+        # that behavior; this row only keeps the two suites agreeing).
+        ("tests/pytest-temp", "tests/pytest-temp/b.py", True),
         ("docs/**", "docs/content/x.md", True),
         ("tests/**/__snapshots__/**", "tests/unit/__snapshots__/a.json", True),
         ("tests/**/__snapshots__/**/*", "tests/unit/__snapshots__/a.json", True),

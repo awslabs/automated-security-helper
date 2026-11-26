@@ -112,10 +112,11 @@ def workspace_project_thresholds(model: "AshAggregatedResults") -> Dict[str, str
     Empty for a single-directory scan; a project that never ran (its threshold
     is recorded null) has no entry.
     """
-    if not is_workspace_scan(model):
+    workspace = model.workspace
+    if not is_workspace_scan(model) or workspace is None:
         return {}
     thresholds: Dict[str, str] = {}
-    for project in model.workspace.projects:
+    for project in workspace.projects:
         normalized = normalize_threshold(project.severity_threshold)
         if normalized is not None:
             thresholds[project.project] = normalized
@@ -150,10 +151,11 @@ def workspace_project_scanner_thresholds(
     a finding the project's own count included would then read as a skipped case
     in the merged report. The strictest gate is the side that cannot hide it.
     """
-    if not is_workspace_scan(model):
+    workspace = model.workspace
+    if not is_workspace_scan(model) or workspace is None:
         return {}
     by_project: Dict[str, Dict[str, str]] = {}
-    for project in model.workspace.projects:
+    for project in workspace.projects:
         recorded = getattr(project, "scanner_thresholds", None) or {}
         gates: Dict[str, str] = {}
         for scanner, value in recorded.items():
@@ -181,10 +183,11 @@ def workspace_policy_gates(model: "AshAggregatedResults") -> Dict[str, Optional[
     treats None as gating and grades the finding by the threshold, the
     fail-closed side; a project the table does not list is read the same way.
     """
-    if not is_workspace_scan(model):
+    workspace = model.workspace
+    if not is_workspace_scan(model) or workspace is None:
         return {}
     gates: Dict[str, Optional[bool]] = {}
-    for project in model.workspace.projects:
+    for project in workspace.projects:
         value = getattr(project, "policy_scanners_gate", None)
         gates[project.project] = value if isinstance(value, bool) else None
     return gates
@@ -213,9 +216,9 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
     ``model.workspace is None`` test repeated in three reporters, which is one
     place for it to be spelled wrong.
     """
-    if not is_workspace_scan(model):
-        return []
     workspace = model.workspace
+    if not is_workspace_scan(model) or workspace is None:
+        return []
 
     rows: List[Dict[str, Any]] = []
     for project in workspace.projects:
@@ -550,15 +553,18 @@ def text_workspace_section(
         return []
 
     cells = [_cells(row) for row in rows]
-    if widths is None:
-        widths = [
+    column_widths: Sequence[int] = (
+        widths
+        if widths is not None
+        else [
             max(len(COLUMNS[index]), *(len(cell[index]) for cell in cells))
             for index in range(len(COLUMNS))
         ]
+    )
 
     def line(values: Sequence[str]) -> str:
         return "  ".join(
-            value.ljust(widths[index]) for index, value in enumerate(values)
+            value.ljust(column_widths[index]) for index, value in enumerate(values)
         )
 
     lines = ["", "PROJECTS", "-" * len(line(COLUMNS))]

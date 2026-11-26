@@ -23,7 +23,7 @@ import signal
 import stat
 import types
 from pathlib import Path
-from typing import Annotated, Callable, Dict, List, Optional
+from typing import Annotated, Any, Callable, Dict, List, Optional
 import typer
 
 from automated_security_helper.core.enums import AshExitCode
@@ -35,7 +35,7 @@ from automated_security_helper.cli.mcp.http_sessions import (
     SessionBoundary,
     _handshake_protocol_versions,
 )
-from automated_security_helper.cli.mcp.profile_registry import (
+from automated_security_helper.config.session_profiles import (
     register_profiles,
     set_profile_registry,
 )
@@ -44,6 +44,7 @@ from automated_security_helper.core.constants import (
     ASH_EXIT_USAGE_ERROR,
 )
 from automated_security_helper.core.enums import (
+    DEFAULT_TRANSPORT,
     TRANSPORT_HELP,
     TRANSPORT_VALUES,
     AshLogLevel,
@@ -777,7 +778,7 @@ def build_streamable_http_app(
     # `ValueError: "Settings" object has no field "streamable_http_path"`.
     # Passing it per call is also better behaved: the previous form mutated a
     # module-level singleton's settings as a side effect.
-    app_kwargs = {
+    app_kwargs: dict[str, Any] = {
         "streamable_http_path": mount_path,
         "stateless_http": stateless_http,
         "host": host,
@@ -882,7 +883,7 @@ def build_sse_app(
 
     # Same v2 change as the streamable-HTTP path above: sse_path is a keyword
     # argument on sse_app() rather than a Settings field.
-    app_kwargs = {"sse_path": mount_path, "host": host}
+    app_kwargs: dict[str, Any] = {"sse_path": mount_path, "host": host}
     app_kwargs["transport_security"] = security
     app = _mcp_instance.sse_app(**app_kwargs)
     # The session of an sse request is the one the server issued for its event
@@ -1391,7 +1392,7 @@ def mcp_command(
             "--transport",
             help=TRANSPORT_HELP,
         ),
-    ] = Transport.STDIO.value,
+    ] = DEFAULT_TRANSPORT.value,
     host: Annotated[
         str,
         typer.Option("--host", help="Host to bind for HTTP transports."),
@@ -1591,7 +1592,7 @@ def mcp_command(
     # Before the --transport check: the container entrypoint (ash-mcp-serve)
     # passes this variable's value as --transport too, and the variable is the
     # operator's mistake to report.
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         ASH_MCP_TRANSPORT_ENV,
         KNOWN_TRANSPORTS,
         unknown_transport_override,

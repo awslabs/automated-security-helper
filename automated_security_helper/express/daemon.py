@@ -106,11 +106,11 @@ def _recording_native_exit_hooks() -> Iterator[None]:
             _NATIVE_EXIT_HOOKS.append(func)
         return original(func, *args, **kwargs)
 
-    atexit.register = register  # type: ignore[assignment]
+    setattr(atexit, "register", register)
     try:
         yield
     finally:
-        atexit.register = original
+        setattr(atexit, "register", original)
 
 
 def _run_exit_hooks_in_child() -> None:

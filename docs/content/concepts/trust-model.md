@@ -1,13 +1,13 @@
 # Configuration trust model
 
-ASH reads its configuration from places with different owners. You, the person or pipeline running ASH, control the command line, the environment, and the files outside the repository. The repository being scanned controls every file inside it, including the `.ash/.ash.yaml` that ASH discovers without being asked. A client of the ASH MCP server controls the files it delivers to the server. ASH sorts configuration into three tiers by owner, and limits what the repository and MCP clients can set for a short list of settings: the ones that grant access, send data off the host, or choose code for a tool to run.
+ASH reads its configuration from places with different owners. You, the person or pipeline running ASH, control the command line, the environment, and the files outside the repository. The repository being scanned controls every file inside it, including the `.ash.yaml` that ASH discovers without being asked. A client of the ASH MCP server controls the files it delivers to the server. ASH sorts configuration into three tiers by owner, and limits what the repository and MCP clients can set for a short list of settings: the ones that grant access, send data off the host, or choose code for a tool to run.
 
 ## The three tiers {#tiers}
 
 | Tier | Where the configuration comes from |
 |---|---|
 | Operator | Command-line flags, including `--config-overrides`, `--ash-plugin-modules`, and `--sandbox`; the environment, including `ASH_PLUGIN_MODULES`; a config file outside every git checkout and outside the scanned directory, named with `--config` or `ASH_CONFIG`. |
-| Repository | Any config file inside a git checkout or inside the scanned directory: the discovered `.ash/.ash.yaml` and its siblings, a `--config` or `ASH_CONFIG` that points into the repository being scanned, and a config file kept in a checkout of its own, such as an ops or dotfiles repository. |
+| Repository | Any config file inside a git checkout or inside the scanned directory: the discovered `.ash.yaml` and its siblings, a `--config` or `ASH_CONFIG` that points into the repository being scanned, and a config file kept in a checkout of its own, such as an ops or dotfiles repository. |
 | MCP client | Any file under the MCP server's workspace root, where delivered source trees and uploads are stored, except each session's `config/` directory, which only the server writes. Also any other config file a client names as a tool's `config_path`, wherever it is, unless it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names or in its session's `config/` directory, which only the server writes. |
 
 The MCP workspace root is `ASH_MCP_WORKSPACE_ROOT` when set, read against the current directory when it is relative; else `$XDG_CACHE_HOME/ash-mcp` when `XDG_CACHE_HOME` is an absolute path, since a relative one is ignored; else `~/.cache/ash-mcp` when `HOME` is an absolute path. A file there is an MCP-client file whether or not a server is running, so a CLI scan of a delivered tree, with that tree as `--source-dir`, gets the same treatment. With an empty or relative `HOME` and neither variable, or with an `ASH_MCP_WORKSPACE_ROOT` under `~`, there is no workspace root, and no file is an MCP-client file because of where it is. `ash mcp` still starts, with a warning that ASH uses nothing under `~`.
@@ -94,7 +94,7 @@ Settings not listed here can be set from any tier. The repository tier's limits 
 From a repository file, ASH ignores the value, uses the trusted one, logs a warning that names the settings and the file and says how to keep them, and runs the scan. For example:
 
 ```text
-Ignoring sandbox.network_scanners, sandbox.extra_read_paths from /work/repo/.ash/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. A network_scanners list there still removes network from scanners it does not name, and a sandbox mode there still applies when nothing else turns the sandbox on. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
+Ignoring sandbox.network_scanners, sandbox.extra_read_paths from /work/repo/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. A network_scanners list there still removes network from scanners it does not name, and a sandbox mode there still applies when nothing else turns the sandbox on. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
 ```
 
 Here the repository's config gave grype a network and a read path. To give grype a network yourself, pass `--config-overrides 'sandbox.network_scanners=[grype]'`.
@@ -103,7 +103,7 @@ An MCP-client file is also checked against the server's runtime-override policy,
 
 The check follows where the file is, not whether a server is running. In this example the parent directory is the workspace root, so the scanned directory is a delivered tree, and its config turns off `fail_on_findings`:
 
-<!-- doctest: save-as=.ash/.ash.yaml -->
+<!-- doctest: save-as=.ash.yaml -->
 ```yaml
 project_name: delivered
 fail_on_findings: false
@@ -149,7 +149,7 @@ The tiers decide who may change the settings above. They do not make every setti
 
     With `--ignore-suppressions`, every scanner reads the files under the repository's ignore paths, and their findings come back. It does not lift a scanner's own exclusion options, such as bandit's `excluded_paths`, or the repository's `.gitignore` and `.ignore` files ([See every finding](../how-to/suppress-findings.md#ignore-suppressions)). In a repository where detect-secrets reports a password in `app.py`, a repository config that ignores `app.py` keeps the scan passing:
 
-    <!-- doctest: save-as=.ash/.ash.yaml -->
+    <!-- doctest: save-as=.ash.yaml -->
     ```yaml
     global_settings:
       ignore_paths:
@@ -179,7 +179,7 @@ The tiers decide who may change the settings above. They do not make every setti
 
     A suppression of the same finding is lifted the same way, and the scan fails:
 
-    <!-- doctest: save-as=.ash/.ash.yaml -->
+    <!-- doctest: save-as=.ash.yaml -->
     ```yaml
     global_settings:
       suppressions:

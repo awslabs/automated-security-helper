@@ -203,7 +203,9 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         emitter = ReportContentEmitter(model, human_presentation=True)
         metadata = emitter.get_metadata()
         summary = emitter.get_scan_summary()
-        assets = resources.files(__package__).joinpath("assets")
+        assets = resources.files(__package__ or __name__.rpartition(".")[0]).joinpath(
+            "assets"
+        )
         font_faces = []
         for family, filename, license_name in (
             ("Open Sans", "open-sans.woff2", "open-sans-OFL.txt"),

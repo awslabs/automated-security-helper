@@ -11,6 +11,13 @@ touches the network or needs AWS credentials, which is also why the partition of
 region is read from botocore's bundled data file rather than through a botocore
 session.
 
+``ProductFields`` carries ASH's own keys, ``ash/target`` through
+``ash/packageVersion`` plus ``ash/correlationId``, the cross-scanner correlation
+id (``utils/finding_identity``, "Correlation ids"). The correlation pair is
+absent for a finding that carries none (SAST and IaC findings, and a secret or
+dependency finding missing its family's key fields); the finding ``Id`` stays
+the scanner-inclusive identity contract v2 hash, untouched.
+
 The frame boundary
 ------------------
 
@@ -54,15 +61,22 @@ from typing import Any, Callable, TYPE_CHECKING
 
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.finding_identity import (
+    CORRELATION_ID_PROPERTY,
+    SECRET_CORRELATION_PREFIX,
+    correlation_id,
     identity_keys,
     relative_path,
     relative_to_scan_root,
-    secret_location_key,
 )
 from automated_security_helper.utils.frame_text import wire
-from automated_security_helper.utils.sarif_utils import _resolve_result_severity
+from automated_security_helper.utils.sarif_utils import (
+    _resolve_result_severity,
+    shared_correlation_ids,
+)
 
 if TYPE_CHECKING:
+    import polars as pl
+
     from automated_security_helper.models.asharp_model import AshAggregatedResults
     from automated_security_helper.schemas.sarif_schema_model import Result
 
@@ -207,6 +221,23 @@ class AsffFormatter:
         keys = identity_keys(
             [entry["identity"] for entry in prepared], default_project=model_project
         )
+        # The cross-scanner correlation id each result's flattened finding was
+        # assigned at flatten time (models/flat_vulnerability
+        # .assign_correlation_ids), read by the same positional pairing every
+        # reporter uses (utils/sarif_utils.shared_correlation_ids): every
+        # reporter of one run must export one value for one finding, so this
+        # formatter never re-derives the key. Re-deriving here diverged from
+        # the model's value twice: the per-result flatten had no run in hand,
+        # so a scanner classified as SECRETS only by its run driver's tags lost
+        # the pair, and the key was computed over the rebased identity while
+        # the flatten keys the raw one. None (the pair omitted) at every
+        # position when the flattening fails, as the other reporters leave it.
+        if prepared:
+            correlation_ids = shared_correlation_ids(
+                model, [entry["result"] for entry in prepared]
+            )
+            for entry, correlation_id in zip(prepared, correlation_ids):
+                entry["flat"].correlation_id = correlation_id
         for entry, derived in zip(prepared, _derived(prepared)):
             entry["derived"] = derived
         return [
@@ -254,13 +285,6 @@ class AsffFormatter:
             "project": project,
             "target_key": _target_key(target, project),
             "identity": identity,
-            "correlation_id": (
-                _secret_correlation_id(
-                    target, secret_location_key(identity, model_project)
-                )
-                if flat.is_secret_detection
-                else None
-            ),
             "message": _without_code_blocks(flat.description or ""),
             "severity": _resolve_result_severity(result),
             "is_cve": bool(_CVE_PATTERN.search(flat.rule_id or "unknown")),
@@ -319,7 +343,11 @@ class AsffFormatter:
             ),
             "ash/packageName": flat.package_name,
             "ash/packageVersion": flat.package_version,
-            "ash/correlationId": entry["correlation_id"],
+            # The cross-scanner correlation id (utils/finding_identity,
+            # "Correlation ids"). The pair is omitted for a finding that
+            # carries none, by the None filter below: an always-present key
+            # would make every non-carrying finding "correlate" in a filter.
+            CORRELATION_ID_PROPERTY: flat.correlation_id,
         }
 
         return {
@@ -354,6 +382,34 @@ class AsffFormatter:
         }
 
 
+def _derived_schema() -> dict[str, Any]:
+    """The declared shape of the frame :func:`_derived` reads: the prepared
+    severity, the finding's ``is_suppressed`` (the model field's name) and
+    whether its rule names a CVE. The drift gate pins the built frame against
+    this dict."""
+    import polars as pl
+
+    return {
+        "severity": pl.String,
+        "is_suppressed": pl.Boolean,
+        "is_cve": pl.Boolean,
+    }
+
+
+def _derived_frame(prepared: list[dict[str, Any]]) -> "pl.DataFrame":
+    """One row per entry of *prepared*, in order, as :func:`_derived_schema`."""
+    import polars as pl
+
+    return pl.DataFrame(
+        {
+            "severity": [wire(entry["severity"]) for entry in prepared],
+            "is_suppressed": [bool(entry["flat"].is_suppressed) for entry in prepared],
+            "is_cve": [entry["is_cve"] for entry in prepared],
+        },
+        schema=_derived_schema(),
+    )
+
+
 def _derived(prepared: list[dict[str, Any]]) -> list[dict[str, str]]:
     """What a result's severity and two flags give, for every result at once.
 
@@ -366,18 +422,7 @@ def _derived(prepared: list[dict[str, Any]]) -> list[dict[str, str]]:
         return []
     import polars as pl
 
-    frame = pl.DataFrame(
-        {
-            "severity": [wire(entry["severity"]) for entry in prepared],
-            "is_suppressed": [bool(entry["flat"].is_suppressed) for entry in prepared],
-            "is_cve": [entry["is_cve"] for entry in prepared],
-        },
-        schema={
-            "severity": pl.String,
-            "is_suppressed": pl.Boolean,
-            "is_cve": pl.Boolean,
-        },
-    )
+    frame = _derived_frame(prepared)
     suppressed = pl.col("is_suppressed")
     return frame.select(
         # A severity the table does not name is informational.
@@ -471,6 +516,13 @@ def _unique_by_id(
     return kept, len(findings) - len(kept)
 
 
+def _secret_correlation_id(target: str, key: dict[str, Any] | None) -> str | None:
+    """``secret/<sha256>`` of the scan target and a secret's location key: the
+    ``ash/correlationId`` of a secret detection, from the one registry every
+    reporter reads (``utils/finding_identity.correlation_id``)."""
+    return correlation_id(SECRET_CORRELATION_PREFIX, target, key)
+
+
 def _finding_id(target: str, key: dict[str, Any]) -> str:
     """``ash/<sha256>`` of the scan target and the identity key; 68 characters.
 
@@ -480,28 +532,6 @@ def _finding_id(target: str, key: dict[str, Any]) -> str:
     """
     canonical = json.dumps([target, key], sort_keys=True)
     return "ash/" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def _secret_correlation_id(target: str, key: dict[str, Any] | None) -> str | None:
-    """``secret/<sha256>`` of the scan target and a secret's location key.
-
-    The ``ash/correlationId`` of a secret detection: the same value on every
-    finding that reports a secret at one file and start line of one target,
-    whichever scanner and rule reported it, so a consumer can group them. It is
-    hashed as the ``Id`` is, ``sha256(json.dumps([target, key],
-    sort_keys=True))``, over the key ``utils/finding_identity.secret_location_key``
-    defines, which has no scanner and no rule in it. The ``secret/`` prefix names
-    the kind of key, so that another kind added later cannot collide with it.
-    None for a key of None: a detection with no file or no start line.
-
-    It groups findings and identifies none: the ``Id`` stays what Security Hub
-    keys a finding on, and no finding is merged, dropped or archived because of
-    this value.
-    """
-    if key is None:
-        return None
-    canonical = json.dumps([target, key], sort_keys=True)
-    return "secret/" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _scan_scope(model: "AshAggregatedResults") -> str | None:
@@ -534,7 +564,7 @@ def _offline_partition(region: str) -> str:
         if region in partition["regions"]:
             return partition["partition"]
         pattern = partition.get("regionRegex")
-        if pattern and re.compile(pattern).match(region):
+        if pattern and region and re.compile(pattern).match(region):
             return partition["partition"]
     return "aws"
 
