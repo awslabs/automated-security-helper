@@ -279,12 +279,15 @@ class TestMainOverTheRealPins:
         def lookup(project: str) -> str:
             return latest_for(project)
 
+        # Every ecosystem main() looks up gets the stub, not only the three the pins
+        # module uses: main() also reports REPO_PINS, the pins CI keeps in workflows and
+        # test images (Docker Hub digests, dated snapshots, the uv floor), and a lookup
+        # left unstubbed reaches the refused network and reads as an error row.
         monkeypatch.setattr(
             checker,
             "DEFAULT_FETCHERS",
             {
-                checker.GITHUB: lookup,
-                checker.PYPI: lookup,
+                **dict.fromkeys(checker.DEFAULT_FETCHERS, lookup),
                 checker.RUBYGEMS: lambda project: [
                     {
                         "number": lookup(project),
@@ -299,10 +302,24 @@ class TestMainOverTheRealPins:
         return code, capsys.readouterr().out
 
     def _versions(self) -> dict[str, str]:
-        return {
-            p.project: p.version
-            for p in checker.enumerate_pins(checker.load_pins_module())
-        }
+        """project -> pinned value over the pins module and REPO_PINS, so a stub that
+        answers with these reports every pin current but the one a test moves.
+
+        A bundled library is never looked up (its project is the wheel that bundles
+        it), so it gets no answer. A project the pins module and a workflow both pin
+        (cfn-guard, actionlint) is answered with the module's value;
+        test_pinned_tool_version_check.py holds the two to one release.
+        """
+        versions: dict[str, str] = {}
+        every = (
+            checker.enumerate_pins(checker.load_pins_module())
+            + checker.enumerate_repo_pins()
+        )
+        for p in every:
+            if p.kind == checker.BUNDLED_LIBRARY:
+                continue
+            versions.setdefault(p.project, p.version)
+        return versions
 
     def test_pygit2_at_its_acknowledged_release_passes_and_is_listed(
         self, monkeypatch, capsys
