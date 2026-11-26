@@ -527,7 +527,7 @@ class SessionState:
     config_path: Optional[str] = None
     trusted_config_path: Optional[str] = None
     #: The sha256 of the bytes this process wrote to ``config_path`` and
-    #: ``trusted_config_path`` (``_replace_staged``), or None for a path the
+    #: ``trusted_config_path`` (``materialize_session_binding``), or None for a path the
     #: binding was handed without this process having written it. A recorded file
     #: whose bytes are no longer these is not this binding's: another stdio server
     #: sharing the default session's ``config/`` directory wrote the same name for
@@ -554,8 +554,8 @@ _session_lock = RLock()
 _session_state: Dict[str, SessionState] = {}
 
 #: The sha256 of the bytes this process last moved into place at each of a
-#: binding's materialized paths (``_replace_staged``, kept only for the files of
-#: ``materialize_session_binding``), by the path's POSIX spelling.
+#: binding's materialized paths (recorded only by ``materialize_session_binding``,
+#: for its own two files), by the path's POSIX spelling.
 #: ``bind_session_config`` and the rewrite of a gone file copy the entry for a
 #: binding's two paths into its ``SessionState``, so the binding can tell its own
 #: file from another server's. A path this process did not write has no entry,
@@ -799,9 +799,17 @@ def materialize_session_config(
     config: AshConfig,
     *,
     client_patched: bool = False,
-    filename: str = SESSION_CONFIG_FILENAME,
+    filename: str,
 ) -> str:
     """Write ``config`` into the session's sandbox and return the path.
+
+    ``filename`` is required: the default was the binding's own file name
+    (``SESSION_CONFIG_FILENAME``), so a per-call write that named nothing
+    overwrote a live binding's ``config/ash.yaml``, and a scan handed the
+    per-call path could read the binding's profile instead of its own. The one
+    production caller passes ``call_profile_filename(profile)``; a caller that
+    means the binding's file still may name it, which is what the rebind tests
+    do deliberately.
 
     Into ``config/``, which counts as the operator's, unless ``client_patched``:
     a profile after a client's ``patch_ops`` or ``override_yaml`` goes into
@@ -875,9 +883,9 @@ def materialize_session_config(
         session_id, config, client_patched=client_patched, filename=filename
     )
     # No digest is kept for this file. A binding keeps one for its own two paths
-    # (``materialize_session_binding``), and the default file name here is the
-    # binding's own, so a record or a removal from this function could change
-    # what a binding that is being written at the same moment copies.
+    # (``materialize_session_binding``), and ``filename`` may still name the
+    # binding's own file, so a record or a removal from this function could
+    # change what a binding that is being written at the same moment copies.
     _replace_staged(partial, target)
     return target.as_posix()
 
@@ -983,7 +991,7 @@ def _record_written(target: Path, digest: Optional[str]) -> None:
         _written_digests[target.as_posix()] = digest
 
 
-def _replace_staged(partial: Path, target: Path) -> Optional[str]:
+def _replace_staged(partial: Path, target: Path) -> None:
     """Move a staged ``partial`` over ``target``, and remove what is left of it.
 
     One rename, so a scan reading ``target`` while it is written reads the old
@@ -995,25 +1003,38 @@ def _replace_staged(partial: Path, target: Path) -> Optional[str]:
     would only delay it (half a second, with a scan waiting on the answer).
     Whatever the outcome, the partial is removed afterward.
 
-    Returns the digest of the bytes moved into place, taken from the staged file
-    before the move, so it names what this call wrote and not whatever the name
-    holds a moment later (None when the staged file could not be read). Nothing is
-    recorded here: only a binding keeps a digest (``_record_written``), and a
-    write that is not a binding's must not touch the table, since it can name the
-    same path.
+    No digest is read or recorded here: only a binding keeps one, and it takes
+    the digest from the staged file itself before the move
+    (``materialize_session_binding``, ``_staged_digest``). Returning it from
+    here conflated "the staged file could not be read" with "a test's wrapper
+    forgot to pass the return through", and both quietly reduced the binding to
+    a presence-only check.
     """
-    digest = _file_sha256(partial)
     try:
         for attempt in range(_REPLACE_ATTEMPTS):
             try:
                 os.replace(partial, target)
-                return digest
+                return
             except PermissionError:
                 if not _rename_waits_on_readers() or attempt == _REPLACE_ATTEMPTS - 1:
                     raise
                 time.sleep(_REPLACE_RETRY_SECONDS)
     finally:
         partial.unlink(missing_ok=True)
+
+
+def _staged_digest(partial: Path) -> str:
+    """The sha256 of a staged file this call just wrote, never None.
+
+    A binding records the digest so it can tell its own file from another
+    server's (``_binding_intact``); recorded without one, the binding degrades
+    to a presence-only check. A file this process staged a moment ago and
+    cannot read back is a fault to raise, not a reason to degrade the check.
+    """
+    digest = _file_sha256(partial)
+    if digest is None:
+        raise OSError(f"cannot read back the staged session config at {partial}")
+    return digest
 
 
 def materialize_session_binding(
@@ -1076,9 +1097,19 @@ def materialize_session_binding(
             client_partial.unlink(missing_ok=True)
             raise
         try:
-            client_digest = _replace_staged(client_partial, client_target)
+            # The digests are read from the staged files, before the moves: they
+            # name what this call wrote, and no wrapper around the move can drop
+            # them (``_replace_staged`` returns nothing).
+            client_digest = _staged_digest(client_partial)
+            trusted_digest = _staged_digest(trusted_partial)
+        except BaseException:
+            client_partial.unlink(missing_ok=True)
+            trusted_partial.unlink(missing_ok=True)
+            raise
+        try:
+            _replace_staged(client_partial, client_target)
             try:
-                trusted_digest = _replace_staged(trusted_partial, trusted_target)
+                _replace_staged(trusted_partial, trusted_target)
             except BaseException:
                 # The client's copy is already the new profile's and the
                 # operator's is still the old one's: a scan that read the pair
@@ -1100,6 +1131,7 @@ def materialize_session_binding(
         return client_target.as_posix(), trusted_target.as_posix()
     partial, target, sandbox = _stage_session_config(session_id, registered)
     try:
+        digest = _staged_digest(partial)
         old_client_copy = sandbox.client_config_dir / SESSION_CONFIG_FILENAME
         old_client_copy.unlink(missing_ok=True)
         # The file is gone, and so is the digest kept for it.
@@ -1107,7 +1139,8 @@ def materialize_session_binding(
     except BaseException:
         partial.unlink(missing_ok=True)
         raise
-    _record_written(target, _replace_staged(partial, target))
+    _replace_staged(partial, target)
+    _record_written(target, digest)
     trusted = target.as_posix()
     return trusted, trusted
 

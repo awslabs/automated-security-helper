@@ -17,6 +17,7 @@ from __future__ import annotations
 import pytest
 
 from automated_security_helper.cli.mcp.profile_registry import (
+    SESSION_CONFIG_FILENAME,
     materialize_session_binding,
     materialize_session_config,
 )
@@ -31,7 +32,9 @@ pytestmark = pytest.mark.unit
 def test_the_refusal_has_its_own_type() -> None:
     """Named without importing it, so the test reads the type the registry raises."""
     with pytest.raises(RuntimeError) as refused:
-        materialize_session_config(UNIDENTIFIED_SESSION_ID, AshConfig())
+        materialize_session_config(
+            UNIDENTIFIED_SESSION_ID, AshConfig(), filename=SESSION_CONFIG_FILENAME
+        )
 
     assert type(refused.value).__name__ == "SessionIdentityRequiredError", refused.value
 

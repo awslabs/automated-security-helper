@@ -53,6 +53,7 @@ from automated_security_helper.utils.ash_install import extra_install_command
 from automated_security_helper.utils.ash_lock import (
     LOCK_RELATIVE_PATH,
     AshLock,
+    file_is_gone,
     lock_key,
     stale_notice,
 )
@@ -535,18 +536,15 @@ def _unsupported_reason(file_name: str) -> str:
     )
 
 
-#: The lock notices already printed in this process, as ``(root, key, state)``.
-#: A scan builds a fresh resolver for each suppression pass (per scanner, then
-#: merged), so a per-resolver record repeated every stale-file warning, and its
-#: re-hash, once per pass.
-_LOCK_NOTICED: set = set()
-
-
 def clear_symbol_cache() -> None:
-    """Drop every cached parse and printed lock notice. For tests."""
+    """Drop every cached parse. For tests.
+
+    The lock notices a scan has printed are not kept here: they live on the
+    scan's own context (``PluginContext.lock_notices``), so the next scan in
+    the same process starts with none printed.
+    """
     with _INDEX_LOCK:
         _INDEX_CACHE.clear()
-    _LOCK_NOTICED.clear()
 
 
 class SymbolResolver:
@@ -563,9 +561,18 @@ class SymbolResolver:
         source_dir: Path,
         lock: "Optional[AshLock]" = None,
         lock_error: Optional[str] = None,
+        noticed: Optional[set[Any]] = None,
     ):
         self._source_dir = Path(source_dir).resolve()
         self._warned: set[Tuple[str, str]] = set()
+        # The lock notices already printed in this scan, as (root, key,
+        # state): the scan's PluginContext.lock_notices, shared by the
+        # resolver of every suppression pass (each scanner's, then the merged
+        # one), so a stale file is named once per scan. A resolver given none
+        # keeps its own. Kept per process before, a long-lived process (the
+        # MCP server, the express daemon) named a file once and then never
+        # again, though later scans dropped its suppressions just the same.
+        self._noticed: set[Any] = noticed if noticed is not None else set()
         # The scan root's ``.ash.lock``, or None to resolve spans with no
         # content-hash binding (the span resolver on its own). With a lock, a
         # file whose bytes no longer hash to its entry, or that has none, gets
@@ -633,8 +640,8 @@ class SymbolResolver:
 
         Decided once per file for the life of the resolver, so a scan hashes
         each file at most once per suppression pass. The notice is printed once
-        per file per process (``_LOCK_NOTICED``): a scan builds a resolver for
-        each per-scanner pass and the merged pass, and a per-resolver record
+        per file per scan (``noticed``): a scan builds a resolver for each
+        per-scanner pass and the merged pass, and a per-resolver record
         repeated it every pass.
         """
         key = lock_key(resolved.relative_to(self._source_dir).as_posix())
@@ -646,10 +653,10 @@ class SymbolResolver:
             self._lock_states[key] = state
             entry = lock.entries.get(key)
             noticed = (str(self._source_dir), key, state)
-            if state == "ok" or noticed in _LOCK_NOTICED:
+            if state == "ok" or noticed in self._noticed:
                 pass
             elif state == "unlocked":
-                _LOCK_NOTICED.add(noticed)
+                self._noticed.add(noticed)
                 ASH_LOGGER.warning(
                     f"Symbol suppressions for '{key}' do not apply: the file has "
                     f"no entry in {LOCK_RELATIVE_PATH}. Lock it with "
@@ -658,8 +665,16 @@ class SymbolResolver:
                     extra=NO_MARKUP,
                 )
             elif entry is not None:
-                _LOCK_NOTICED.add(noticed)
-                ASH_LOGGER.warning(stale_notice(key, entry, state), extra=NO_MARKUP)
+                self._noticed.add(noticed)
+                ASH_LOGGER.warning(
+                    stale_notice(
+                        key,
+                        entry,
+                        state,
+                        gone=file_is_gone(self._source_dir, key),
+                    ),
+                    extra=NO_MARKUP,
+                )
         return state == "ok"
 
     def _resolve(self, file_path: str) -> Optional[Path]:

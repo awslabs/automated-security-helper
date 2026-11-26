@@ -277,6 +277,7 @@ class TestTheRecordedPathIsSpelledLikeThePlanSpellsPaths:
 
         from automated_security_helper.cli.mcp import sandbox as sandbox_module
         from automated_security_helper.cli.mcp.profile_registry import (
+            SESSION_CONFIG_FILENAME,
             materialize_session_config,
         )
 
@@ -352,7 +353,9 @@ class TestTheRecordedPathIsSpelledLikeThePlanSpellsPaths:
         )
 
         config = _Config()
-        recorded = materialize_session_config("session-a", config)
+        recorded = materialize_session_config(
+            "session-a", config, filename=SESSION_CONFIG_FILENAME
+        )
         assert [str(dst) for dst in renamed] == [
             r"C:\ash-mcp\session-a\config\ash.yaml"
         ]

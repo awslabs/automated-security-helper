@@ -131,17 +131,21 @@ def test_the_degraded_sandbox_of_a_resolvable_grant_is_not_marked_unresolved(
 def test_a_grant_set_but_unresolved_is_read_and_warned_about_once_per_value(
     tmp_path, monkeypatch, local_transport, a_path_named_loop_cannot_be_resolved
 ):
-    """Red at the tip it was found on: the variable was parsed twice per
-    decision and the warning fired at every gate."""
+    """Red at the tip it was found on: the summary warning fired at every gate.
+    (The parse count asserted here also held before that tip on these paths; the
+    path that parsed twice per decision is the ``_sandbox_for_gate`` fallback,
+    which ``test_the_degraded_gate_sandbox_parses_the_grant_once`` covers.)"""
     warnings = []
     monkeypatch.setattr(
         mcp_sandbox._logger, "warning", lambda msg, *args: warnings.append(msg % args)
     )
-    monkeypatch.setattr(mcp_sandbox, "_WARNED_UNRESOLVED_GRANTS", set())
+    mcp_sandbox._reset_unresolved_grant_warnings()
     parses = []
     real = mcp_sandbox._parse_roots
     monkeypatch.setattr(
-        mcp_sandbox, "_parse_roots", lambda raw: (parses.append(raw), real(raw))[1]
+        mcp_sandbox,
+        "_parse_roots",
+        lambda raw, **kw: (parses.append(raw), real(raw, **kw))[1],
     )
     monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path / "loop"))
 
@@ -159,6 +163,88 @@ def test_a_grant_set_but_unresolved_is_read_and_warned_about_once_per_value(
     assert len([w for w in warnings if "ASH_MCP_ALLOWED_ROOTS" in w]) == 1, (
         "control: loop2 resolves, so it is not a set-but-unresolved grant"
     )
+
+
+def test_the_degraded_gate_sandbox_parses_the_grant_once(
+    tmp_path, monkeypatch, local_transport, a_path_named_loop_cannot_be_resolved
+):
+    """The fallback of ``_sandbox_for_gate`` read ``operator_scan_roots()`` and
+    ``scan_grant_is_unresolved()``, two parses of the variable per decision; it
+    reads ``_scan_grant()`` once now. The only twice-parsing path, which the
+    parse count above never exercised: ``session_sandbox`` must fail first."""
+    mcp_sandbox._reset_unresolved_grant_warnings()
+    parses = []
+    real = mcp_sandbox._parse_roots
+    monkeypatch.setattr(
+        mcp_sandbox,
+        "_parse_roots",
+        lambda raw, **kw: (parses.append(raw), real(raw, **kw))[1],
+    )
+    monkeypatch.setattr(
+        mcp_sandbox,
+        "session_sandbox",
+        lambda session_id=None: (_ for _ in ()).throw(ValueError("bad id")),
+    )
+    monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path / "loop"))
+
+    sandbox = mcp_sandbox._sandbox_for_gate("bad id")
+
+    assert sandbox.grant_unresolved is True, "control: the fallback ran"
+    assert parses.count(str(tmp_path / "loop")) == 1, "one parse per decision"
+
+
+def test_the_per_entry_warning_for_one_bad_value_fires_once_across_gates(
+    tmp_path, monkeypatch, local_transport, a_path_named_loop_cannot_be_resolved
+):
+    """Red at the tip it was found on: ``_parse_roots`` warned about the bad
+    entry on every read, so every gate still produced a warning for an
+    unresolvable grant; only the summary line was deduplicated."""
+    warnings = []
+    monkeypatch.setattr(
+        mcp_sandbox._logger, "warning", lambda msg, *args: warnings.append(msg % args)
+    )
+    monkeypatch.setattr(mcp_sandbox, "_WARNED_UNRESOLVED_GRANTS", set())
+    monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path / "loop"))
+
+    for _ in range(3):
+        mcp_sandbox.session_sandbox(None)
+    per_entry = [w for w in warnings if "could not be resolved and grants" in w]
+
+    assert len(per_entry) == 1
+
+    # A value that resolves partially gets its one per-entry warning too: the
+    # summary never fires for it, so the summary's dedup could not cover it.
+    good = tmp_path / "good"
+    good.mkdir()
+    monkeypatch.setenv(
+        "ASH_MCP_ALLOWED_ROOTS", os.pathsep.join([str(tmp_path / "loop"), str(good)])
+    )
+    for _ in range(3):
+        assert mcp_sandbox.operator_scan_roots() == (good.resolve(),)
+    per_entry = [w for w in warnings if "could not be resolved and grants" in w]
+    assert len(per_entry) == 2, "one more for the mixed value, once"
+
+
+def test_the_reset_helper_rearms_the_warnings(
+    tmp_path, monkeypatch, local_transport, a_path_named_loop_cannot_be_resolved
+):
+    """``_WARNED_UNRESOLVED_GRANTS`` is process-wide; the reset is what keeps a
+    test that checks the warning for a fixed value out of order-dependence."""
+    warnings = []
+    monkeypatch.setattr(
+        mcp_sandbox._logger, "warning", lambda msg, *args: warnings.append(msg % args)
+    )
+    mcp_sandbox._reset_unresolved_grant_warnings()
+    monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path / "loop"))
+
+    mcp_sandbox.session_sandbox(None)
+    mcp_sandbox._reset_unresolved_grant_warnings()
+    mcp_sandbox.session_sandbox(None)
+
+    summaries = [w for w in warnings if "ASH_MCP_ALLOWED_ROOTS" in w]
+    per_entry = [w for w in warnings if "could not be resolved and grants" in w]
+    assert len(summaries) == 2
+    assert len(per_entry) == 2
 
 
 def test_the_profile_scan_root_check_is_sane_with_no_resolved_root(
