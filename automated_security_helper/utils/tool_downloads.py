@@ -1146,6 +1146,8 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "semgrep commit": "a5844e7c2d9d04548f86048f525d467a00742656",  # pragma: allowlist secret
     "semgrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "semgrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
+    "spectral commit": "c0a0cdbc9bf219d977f07f2df2331c067b03e554",  # pragma: allowlist secret
+    "spectral/LICENSE": "d45c17f7ecc80e0deab3372ff352c7d00b7d573755c3c672088c21a376673698",  # pragma: allowlist secret
     "syft commit": "1a72047fd46c72e0a12ee77e24b23d2316753d08",  # pragma: allowlist secret
     "trivy commit": "3f6334d223b52188324af3b9923b4249cd206652",  # pragma: allowlist secret
     "trivy/NOTICE": "aed9bc6dab87c6f6567d20bf0f5c0433a8ccd3ad7873322cf79b9244eb720a1f",  # pragma: allowlist secret
@@ -1605,6 +1607,24 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             _from_source("semgrep", "https://github.com/semgrep/semgrep", "COPYRIGHT"),
         ),
         distribution="semgrep",
+    ),
+    # The alpha Spectral scanner's tool. Pinned and installed by its own module
+    # (``ash_spectral_plugins/spectral_install.py``), not by install-pinned-tool, so
+    # its license is staged from the repository at the pinned commit on the
+    # --licenses-only line. The release publishes bare executables and no license
+    # file beside them, and the repository has no NOTICE at that commit (checked on
+    # 2026-11-26). ``spectral --version`` prints "6.17.1".
+    "spectral": ThirdPartyLicense(
+        tool="spectral",
+        version="v6.17.1",
+        license="Apache-2.0",
+        repository="https://github.com/stoplightio/spectral",
+        commit=_THIRD_PARTY_HASHES["spectral commit"],
+        files=(
+            _from_source(
+                "spectral", "https://github.com/stoplightio/spectral", "LICENSE"
+            ),
+        ),
     ),
     "syft": ThirdPartyLicense(
         tool="syft",

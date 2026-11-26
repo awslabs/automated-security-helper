@@ -154,6 +154,7 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
     "secretlint": ScannerToolType.SECRETS.value,
     "semgrep": ScannerToolType.SAST.value,
     "snyk-code": ScannerToolType.SAST.value,
+    "spectral": ScannerToolType.SAST.value,
     "syft": ScannerToolType.SBOM.value,
     "trivy": ScannerToolType.SCA.value,
     "trivy-repo": ScannerToolType.SCA.value,

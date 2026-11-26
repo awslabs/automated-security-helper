@@ -245,6 +245,9 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
         "`snyk code test --sarif` output under snyk/captured/ (the authored "
         "shape under snyk/authored is not evidence of the tool)",
     ),
+    # The committed SARIF is what a REAL Spectral 6.17.1 run wrote (the tool's own
+    # SARIF, before the adapter's post-processing; see captured/README.md).
+    "spectral": CorpusSpec("spectral", sarif=("captured/*.sarif",)),
     "syft": CorpusSpec(
         "syft",
         missing="syft commits its native SBOM JSON only (syft/syft.src.json); "
@@ -763,7 +766,7 @@ def test_the_gate_carries_no_waiver_but_the_register() -> None:
 def test_the_registry_and_the_corpus_table_agree() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
     names = {_name(cls) for cls in SCANNER_CLASSES}
-    assert len(SCANNER_CLASSES) == 30, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == 32, sorted(c.__name__ for c in SCANNER_CLASSES)
     assert names == set(CORPORA) == set(SCANNER_TOOL_TYPES), (
         f"registry {sorted(names)} / corpus table {sorted(CORPORA)}: a scanner "
         "needs a CORPORA row (a corpus, or None with the fixture to author)"

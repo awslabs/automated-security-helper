@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": [
+        "spectral",
+        "lint",
+        "--ruleset=<ruleset.yaml>",
+        "--format=sarif",
+        "--output=<file>",
+        "--fail-severity=hint",
+        "--ignore-unknown-format",
+        "--quiet",
+        "**/*.{json,yaml,yml}"
+      ],
+      "env_allowlist": [],
+      "exit_code": 1,
+      "fixture_tree": null,
+      "id": "spectral-6.17.1-positive",
+      "live_input": false,
+      "note": "the loose captured/positive.sarif upgraded into this format from captured/README.md: two OpenAPI 3.0.3 files, api.yaml (six warnings) and broken.yaml (one path-params error), linted with a ruleset extending spectral:oas and spectral:asyncapi; the report was compacted to one line",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/positive.sarif",
+          "sha256": "3113cff99dec02508e1b70bac28f63c3dd8e9b45b692bce62b84add04caeda02"
+        }
+      ],
+      "retention": "current",
+      "scanner": "spectral",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "spectral",
+        "version": "6.17.1"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": [
+        "spectral",
+        "lint",
+        "--ruleset=<ruleset.yaml>",
+        "--format=sarif",
+        "--output=<file>",
+        "--fail-severity=hint",
+        "--ignore-unknown-format",
+        "--quiet",
+        "**/*.{json,yaml,yml}"
+      ],
+      "env_allowlist": [],
+      "exit_code": 0,
+      "fixture_tree": null,
+      "id": "spectral-6.17.1-negative",
+      "live_input": false,
+      "note": "the loose captured/negative.sarif upgraded into this format from captured/README.md: one YAML file that is not an API description, so the report holds no results; the report was compacted to one line",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/negative.sarif",
+          "sha256": "7df69935e24452b12efccc29b544251e269ef6832b80b38abed5c71774cee48d"
+        }
+      ],
+      "retention": "current",
+      "scanner": "spectral",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "spectral",
+        "version": "6.17.1"
+      }
+    }
+  ],
+  "unrecorded": []
+}

@@ -242,6 +242,14 @@ MANIFESTS = (
         owned=(f"{_DOCS}/snyk-plugin.md", f"{_DOCS}/snyk-plugin-setup.md"),
     ),
     _alpha(
+        "spectral",
+        "ash_spectral_plugins",
+        "spectral_scanner",
+        "SpectralScanner",
+        "SpectralScannerConfigOptions",
+        owned=(f"{_DOCS}/spectral-plugin.md", f"{_FIXTURES}/spectral"),
+    ),
+    _alpha(
         "trivy-repo",
         "ash_trivy_plugins",
         "trivy_repo_scanner",
