@@ -331,6 +331,11 @@ def test_the_helper_adds_no_directory_of_the_child_to_sys_path(tmp_path):
 #: The cdk-nag worker: its ``-c`` source drops ``sys.path[0]`` before importing
 #: anything, and it starts in a directory it has just created; see
 #: test_the_child_does_not_import_from_the_scanned_directory in test_cdk_nag_worker.py.
+#:
+#: ``venv_create_command`` is a builder like the install-command ones: it returns
+#: ``[sys.executable, -m, venv, <path>]`` to ``_create_virtualenv``, which runs it
+#: through ``_run_install_command`` -> ``cli.dependencies.run_command``, the route
+#: that starts every Python install command through ``python_child``.
 RAW_PYTHON_ARGV_ALLOWED = {
     ("utils/python_installer.py", "python_package_install_command"),
     ("utils/download_utils.py", "refusing_install_command"),
@@ -348,6 +353,7 @@ RAW_PYTHON_ARGV_ALLOWED = {
     ),
     ("cli/dependencies.py", "_with_path_imported"),
     ("utils/cdk_nag_worker.py", "_run_child"),
+    ("utils/install_providers.py", "venv_create_command"),
 }
 
 #: Spawn helpers a Python child may be handed to.

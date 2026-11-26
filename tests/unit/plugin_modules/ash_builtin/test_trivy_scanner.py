@@ -891,8 +891,16 @@ def _offline_probe_config(tmp_path, monkeypatch, **scanner_kwargs):
     monkeypatch.setattr(staleness, "_built_from_trivy", probe)
     scanner = _scanner(tmp_path, offline=True, **scanner_kwargs)
     assert scanner.validate_plugin_dependencies() is True
-    (config_file,) = seen
-    return config_file
+    # One validation reads the offline gate more than once: the forced-binary
+    # prefix (__pydantic_init_subclass__ wraps every override) and the base
+    # method's own _forced_binary_satisfies each consult
+    # _forced_binary_precluded_reason, which asks _offline_database_available,
+    # before trivy's override asks it directly. The claim here is WHICH config
+    # every one of those reads passes, not how many reads there are.
+    assert seen, "the offline probe never ran"
+    distinct = set(seen)
+    assert len(distinct) == 1, seen
+    return seen[0]
 
 
 def test_the_offline_check_reads_through_the_operators_trivy_config(
