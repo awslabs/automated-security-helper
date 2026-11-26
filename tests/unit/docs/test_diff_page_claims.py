@@ -120,8 +120,11 @@ def test_moved_holds_a_finding_paired_across_a_changed_line(tmp_path):
     assert payload["moved"][0]["after"]["line_start"] == 14
 
 
-def test_absent_after_is_the_name_the_mcp_tool_calls_resolved(tmp_path):
+def test_absent_after_is_the_name_the_mcp_tool_calls_resolved(tmp_path, monkeypatch):
     """export-reports.md: the CLI group and the MCP list are the same findings."""
+    # The MCP tool reads only under the roots the run allows; a runner that exports
+    # ASH_MCP_ALLOWED_ROOTS would refuse this test's own temporary directory.
+    monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
     assert_on_page(
         EXPORT_REPORTS,
         "`absent_after` means the second report did not record the finding, not that "
@@ -192,8 +195,9 @@ def test_a_comparison_that_finds_changes_still_exits_0(tmp_path):
     assert len(json.loads(response.stdout)["new"]) == 1
 
 
-def test_the_mcp_tool_names_a_refusal_with_its_own_error_type(tmp_path):
+def test_the_mcp_tool_names_a_refusal_with_its_own_error_type(tmp_path, monkeypatch):
     """mcp-tools.md (diff_scan_results): ``results_not_comparable`` is a listed type."""
+    monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
     assert_on_page(
         MCP_TOOLS,
         "On failure, `error_type` is one of `invalid_session_id` and "
