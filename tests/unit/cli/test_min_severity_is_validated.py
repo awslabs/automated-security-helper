@@ -144,11 +144,12 @@ def test_the_cli_choices_are_the_ranked_values():
 
     values = [member.value for member in MinSeverity]
     command = typer.main.get_command(app)
-    for name in ("scan", "merge"):
-        param = next(
-            p for p in command.commands[name].params if p.name == "min_severity"
-        )
-        assert list(param.type.choices) == values, name
+    for path in (("scan",), ("results", "merge")):
+        leaf = command
+        for name in path:
+            leaf = leaf.commands[name]
+        param = next(p for p in leaf.params if p.name == "min_severity")
+        assert list(param.type.choices) == values, path
     assert values == VALID
     assert set(_SEVERITY_RANK) == set(values)
     assert _MIN_SEVERITY_RANK == _SEVERITY_RANK
