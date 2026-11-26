@@ -45,7 +45,10 @@ from automated_security_helper.utils.get_scan_set import (
     file_links_leaving_tree,
     honors_ignore_files,
 )
-from automated_security_helper.base.uv_tool_mixin import guarded_values_read
+from automated_security_helper.base.uv_tool_mixin import (
+    _tool_name,
+    guarded_values_read,
+)
 from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.link_exclusions import walked_files
@@ -684,7 +687,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         self._process_config_options()
 
         # Start with base command and subcommands
-        args: List[str] = [self._tool_command(), *self.subcommands]
+        args: List[str] = [_tool_name(self), *self.subcommands]
 
         # Add extra args. A value may be a number or a bool (ToolExtraArg), and
         # a spawn takes text only; a bool is spelled as a config file spells it,

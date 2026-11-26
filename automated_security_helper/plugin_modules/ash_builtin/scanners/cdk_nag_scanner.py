@@ -1879,7 +1879,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             CDK_OWN_PLUGIN_NAME,
         )
 
-        outdir = self.results_dir.joinpath(target_type)
+        outdir = self._require_results_dir().joinpath(target_type)
         sarif_results: List[Result] = []
         # The tree the candidates came from. Each template is checked against it here,
         # before it reaches the worker, and the worker reads it under the same rule.

@@ -1846,7 +1846,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> SarifReport:
-        results_dir = Path(self.results_dir).joinpath(target_type)
+        results_dir = self._require_results_dir().joinpath(target_type)
         results_dir.mkdir(parents=True, exist_ok=True)
         files = self._candidate_files(target, target_type, global_ignore_paths)
         owned, verify_targets = self._discover_targets(target, files)

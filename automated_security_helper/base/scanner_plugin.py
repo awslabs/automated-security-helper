@@ -16,6 +16,7 @@ from automated_security_helper.base.plugin_config import (
     config_validated_by_declared_model,
 )
 from automated_security_helper.base.uv_tool_mixin import (
+    _tool_name,
     guarded_values,
     guarded_values_read,
 )
@@ -426,6 +427,20 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         config: T | ScannerPluginConfigBase | None = None
     dependencies_satisfied: bool = False
 
+    def _require_results_dir(self) -> Path:
+        """The scanner's results directory, or a ``ScannerError`` naming the
+        scanner when ``_pre_scan`` has not set one.
+
+        The field is typed as always set for the methods that run after
+        ``_pre_scan``; a scanner reached without it stops here with a named
+        error rather than a ``TypeError`` or ``AttributeError`` on ``None``
+        further down.
+        """
+        results_dir: Path | None = self.results_dir
+        if results_dir is None:
+            raise ScannerError(f"{self.__class__.__name__} has no results directory")
+        return Path(results_dir)
+
     #: Human-readable target coverage ("Terraform", "Python"), for the docs graphics.
     #: Supplements the by-stack prose of the coverage page; it never replaces it.
     covers: ClassVar[tuple[str, ...] | None] = None
@@ -808,8 +823,12 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """
         if self.dependency_unavailable_reason:
             return False
-        found = find_executable(self._tool_command())
-        if found is None and self.command:
+        if not self.command:
+            # No tool to look for: nothing can be found, and an empty name is
+            # never handed to the lookup.
+            return False
+        found = find_executable(_tool_name(self))
+        if found is None:
             # A copy inside the scanned tree was refused: say so in the MISSING row,
             # with the path and how to allow it, rather than "not installed".
             refusal = in_tree_refusal(self.command)
@@ -952,9 +971,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         file is written when the arguments are resolved, so building a scanner
         writes nothing.
         """
-        if self.results_dir is None:
-            raise ScannerError(f"{self.__class__.__name__} has no results directory")
-        path = (Path(self.results_dir).absolute() / name).as_posix()
+        path = (self._require_results_dir().absolute() / name).as_posix()
         self._neutral_files[path] = content
         return path
 
@@ -2860,7 +2877,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                     text,
                     read.values,
                     plugin_inputs=self._uv_run_inputs_for_records(),
-                    tool_name=self._tool_command(),
+                    tool_name=_tool_name(self),
                     limit=None,
                 )
             except Exception:  # noqa: BLE001 -- the error being reported outranks it
@@ -3128,7 +3145,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                             raw,
                             values,
                             plugin_inputs=inputs,
-                            tool_name=self._tool_command(),
+                            tool_name=_tool_name(self),
                             limit=None,
                         )
                 else:

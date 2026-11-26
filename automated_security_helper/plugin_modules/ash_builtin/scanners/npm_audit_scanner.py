@@ -42,7 +42,10 @@ from automated_security_helper.models.core import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
-from automated_security_helper.base.uv_tool_mixin import guarded_values_read
+from automated_security_helper.base.uv_tool_mixin import (
+    _tool_name,
+    guarded_values_read,
+)
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -171,6 +174,9 @@ def _usable_cvss_score(cvss: Any) -> float | None:
 # The userinfo of a URL (``https://user:token@host``), masked in log excerpts.  # pragma: allowlist secret
 _URL_USERINFO = re.compile(r"(://)[^\s/@]+@")
 
+# Shown in place of a tool's text when the values to redact could not be read.
+_TOOL_TEXT_NOT_SHOWN = "(not shown)"
+
 
 def _shown_tool_text(text: Any, values: Sequence[str] | None) -> str:
     """``text``, a tool's own words, as it may be shown or recorded.
@@ -183,8 +189,15 @@ def _shown_tool_text(text: Any, values: Sequence[str] | None) -> str:
     failure's reason, the yarn error detail and a raised exception's text
     reached ScannerError and the persisted results with the user part shown.
     Every tool-text path goes through here.
+
+    ``values`` is ``None`` when the hook that reads them could not be read. The
+    text is then not shown at all: with no value set to redact, showing it would
+    print what the values would have hidden, so a fixed placeholder takes its
+    place.
     """
-    return _URL_USERINFO.sub(r"\1***@", shown_tool_stderr(str(text), values or ()))
+    if values is None:
+        return _TOOL_TEXT_NOT_SHOWN
+    return _URL_USERINFO.sub(r"\1***@", shown_tool_stderr(str(text), values))
 
 
 # One comparator of an npm advisory range: an operator, a version and an
@@ -871,10 +884,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 self._source_manifests(), "source"
             )
             return False
-        if find_executable(self._tool_command()):
+        if find_executable(_tool_name(self)):
             self._probe_npm_version()
             return True
-        needed = self._package_managers_needed() or {self._tool_command()}
+        needed = self._package_managers_needed() or {_tool_name(self)}
         if not any(find_executable(binary) for binary in needed):
             names = ", ".join(sorted(needed))
             self.dependency_unavailable_reason = (
@@ -904,7 +917,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         for manifest in self._source_manifests():
             lock_file = self._lockfile_beside(manifest)
             if lock_file is not None:
-                needed.add(_LOCKFILE_BINARY.get(lock_file.name, self._tool_command()))
+                needed.add(_LOCKFILE_BINARY.get(lock_file.name, _tool_name(self)))
         return needed
 
     def _probe_npm_version(self) -> None:
@@ -933,7 +946,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             probe_dir = None
         try:
             response = self._run_subprocess(
-                command=[self._tool_command(), "--version"],
+                command=[_tool_name(self), "--version"],
                 stderr_preference="return",
                 stdout_preference="return",
                 cwd=probe_dir,
