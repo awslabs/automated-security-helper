@@ -24,6 +24,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    cast,
 )
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
@@ -1006,9 +1007,10 @@ class PluginBase(UVToolMixin, BaseModel):
         # a directory from it runs; the few that can be reached without one
         # check ``is None`` first. The runtime field below accepts None so a
         # plugin can still be built on its own.
-        # The ``= None`` keeps it optional in the constructor the checker
-        # sees; this branch is never evaluated.
-        context: PluginContext = None  # ty: ignore[invalid-assignment]
+        # The default keeps it optional in the constructor the checker sees,
+        # and the cast states that the default is read as the declared type,
+        # which is what this branch declares; it is never evaluated.
+        context: PluginContext = cast(PluginContext, None)
     else:
         context: PluginContext | None = None
     config: PluginConfigBase | None = None

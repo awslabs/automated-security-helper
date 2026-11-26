@@ -614,9 +614,10 @@ class ReporterPluginBase(PluginBase, Generic[T]):
         # Every concrete reporter fills its config in ``model_post_init`` when
         # none was given, so the methods read it as the plugin's own config
         # type; the runtime field below still accepts None until then.
-        # The ``= None`` keeps it optional in the constructor the checker
-        # sees; this branch is never evaluated.
-        config: T = None  # ty: ignore[invalid-assignment]
+        # The default keeps it optional in the constructor the checker sees,
+        # and the cast states that the default is read as the declared type,
+        # which is what this branch declares; it is never evaluated.
+        config: T = cast(T, None)
     else:
         config: T | ReporterPluginConfigBase | None = None
     dependencies_satisfied: bool = True
@@ -773,7 +774,10 @@ class ReporterPluginBase(PluginBase, Generic[T]):
         """
         if config:
             config = self._validated_by_declared_model(config, _as_given)
-            self.config = config
+            # The reporter's declared model (or the config as given, for a
+            # reporter that declares none); the field is typed as the model for
+            # the methods that read it, as ConverterPluginBase.configure does.
+            self.config = cast(T, config)
 
     def companion_file_names(self) -> Tuple[str, ...]:
         """The files this reporter writes itself in the reports directory, beside its report.
