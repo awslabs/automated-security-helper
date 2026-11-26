@@ -1303,7 +1303,11 @@ class TestPluginModulePins:
         with pytest.raises(checker.PinEnumerationError, match=match):
             checker.plugin_module_pin(planted, "fake")
 
-    @pytest.mark.integration
+
+@pytest.mark.integration
+class TestPluginModuleBumpSteps:
+    """The bump steps of a module-local pin, in the step tests' tier."""
+
     def test_a_bump_names_the_install_modules_values_and_the_license_entry(self, pins):
         pin = {p.tool: p for p in checker.enumerate_pins(pins)}["kyverno"]
         steps = _steps_text(pins, pin)
