@@ -12,7 +12,7 @@ the CLI inside the container does. `-v` after a subcommand is that subcommand's
 directory, not the caller's, so a package planted in a scanned checkout is not what
 runs, and exit with the CLI's own status. The script's own directory is read with CDPATH unset, and the
 container is run with its stdin open only for the subcommands that read it (`mcp`,
-`inspect`, `config`) and for a run given `--cli-json-input -`.
+`inspect`, `results`, `config`) and for a run given `--cli-json-input -`.
 
 A fake OCI runner stands in for docker, as in
 test_ash_bash_entrypoint_container_inputs.py, and records each call's argv
@@ -521,7 +521,7 @@ def test_an_mcp_run_over_a_pipe_keeps_stdin_open_and_asks_for_no_terminal(
 ):
     """An MCP client drives `./ash mcp` over a pipe on the default stdio transport:
     without -i the container got no input. Stdin here is a pipe, the client's shape
-    (the parametrized test below covers mcp, inspect and config, the three
+    (the parametrized test below covers mcp, inspect, results and config, the four
     subcommands that keep stdin open, with a regular file and /dev/null on stdin);
     this one also pins that a captured stdout asks for no pseudo-terminal and that
     the subcommand reaches the container whole."""
@@ -549,6 +549,8 @@ def test_an_mcp_run_over_a_pipe_keeps_stdin_open_and_asks_for_no_terminal(
         pytest.param(["report"], False, id="report"),
         pytest.param(["mcp"], True, id="mcp"),
         pytest.param(["inspect"], True, id="inspect"),
+        # The same Textual app under the results group: its first word is results.
+        pytest.param(["results", "inspect"], True, id="results-inspect"),
         pytest.param(["config"], True, id="config"),
         pytest.param(
             ["scan", "--cli-json-input", "-"], True, id="scan-with-its-json-on-stdin"
@@ -570,9 +572,9 @@ def test_only_the_subcommands_that_read_stdin_keep_the_containers_stdin_open(
     """Stdin is a regular file (the shape of `./ash --source-dir "$d" < dirs.txt`
     inside a `while read` loop, or a job script fed to bash on stdin) or /dev/null.
     A scan given -i consumed that input, so the loop ended after one directory and
-    the script lost the commands after ./ash; only mcp, inspect and config read
-    stdin, and any subcommand given `--cli-json-input -` reads its parameters from
-    it, so only those get -i. The list is checked against the CLI's own readers in
+    the script lost the commands after ./ash; only mcp, inspect, results and config
+    read stdin, and any subcommand given `--cli-json-input -` reads its parameters
+    from it, so only those get -i. The list is checked against the CLI's own readers in
     test_ash_bash_entrypoint_subcommand_args.py. The file's offset is read after the
     run: the wrapper itself must consume none of it, whichever way it decides."""
     source, out = _dirs(tmp_path)

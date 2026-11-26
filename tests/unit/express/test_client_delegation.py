@@ -46,6 +46,11 @@ class TestClassification:
             ["express", "start"],
             ["config", "validate"],
             ["mcp"],
+            # The results and container groups: neither line holds another
+            # subcommand's name, so only the group's own entry in the list keeps
+            # it from reaching the daemon as a scan.
+            ["results"],
+            ["container", "build"],
             ["--help"],
             ["scan", "--help"],
             ["--version"],
