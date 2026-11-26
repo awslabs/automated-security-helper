@@ -135,6 +135,12 @@
 
 ### Fixes
 
+- **A suppression's glob-free `package_path` now covers a finding whose install path is
+  spelled with a trailing slash.** An entry with `package_path: node_modules/a` did not
+  suppress a finding reported at `node_modules/a/`, so the finding stayed in the
+  report. It does now. Nothing else widens: `node_modules/ab/` and paths below the
+  named copy are still not covered, and an entry written with the trailing slash still
+  does not cover a finding reported without one.
 - **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**
   It passes `GITHUB_ACTIONS`, `TF_BUILD` and `TEAMCITY_VERSION` into the container when
   set (by name, or with their values when `OCI_RUNNER_WRAPPER` is set; a value that holds
