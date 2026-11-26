@@ -27,7 +27,7 @@ from automated_security_helper.base.scanner_facets import (
     ScannerFacets,
 )
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.base.uv_tool_mixin import _tool_name
+from automated_security_helper.base.uv_tool_mixin import tool_name
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
@@ -402,7 +402,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         directly.
         """
         if direct_only:
-            found = find_executable(_tool_name(self))
+            found = find_executable(tool_name(self))
             if found is None:
                 self._plugin_log(
                     "uv's install of semgrep failed and no semgrep binary is on PATH; "
@@ -420,7 +420,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         # set and ASH online, the resolver used to probe (and could install) from
         # PyPI while the scan, the version probe and the install ran offline.
         command = get_uv_tool_command(
-            _tool_name(self),
+            tool_name(self),
             from_spec=self._uv_probe_from_spec(),
             offline=self._is_offline_mode(),
         )
@@ -508,7 +508,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 text,
                 values,
                 plugin_inputs=self._uv_run_inputs_for_records(),
-                tool_name=_tool_name(self),
+                tool_name=tool_name(self),
                 limit=None,
             )
 
