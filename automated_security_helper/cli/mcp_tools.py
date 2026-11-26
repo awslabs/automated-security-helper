@@ -2883,6 +2883,7 @@ async def _run_scan(
     from automated_security_helper.models.asharp_model import AshAggregatedResults
     from automated_security_helper.interactions.run_ash_scan import (
         ScanIncompleteExit,
+        discard_history_record,
         run_ash_scan,
     )
 
@@ -3136,6 +3137,18 @@ async def _run_scan(
             if has_results:
                 previous_results.discard()
             else:
+                # A run taken back here may have recorded itself in history/
+                # before the cancel landed (after run_ash_scan's last check, or
+                # during its final rewrite): a scan settled as one without
+                # results keeps no record either, or ``ash trend`` shows the
+                # cancelled run as a completed one. The results carry the
+                # record's id; ``ScanIncompleteExit`` carries them on the exit,
+                # and an ending with neither names no record, so nothing is
+                # removed. Never raises (discard_history_record).
+                discard_history_record(
+                    results if results is not None else getattr(ended, "results", None),
+                    Path(output_dir),
+                )
                 previous_results.restore()
                 entry.output_holds_previous_results = holds_restored_results(
                     Path(output_dir)

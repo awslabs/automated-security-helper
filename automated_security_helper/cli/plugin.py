@@ -778,7 +778,8 @@ def verify_plugins(
             json.dumps(
                 [r.as_dict() for r in reports]
                 + [
-                    {"scanner": name, "error": message} for name, message in load_errors
+                    {PluginKind.SCANNER.value: name, "error": message}
+                    for name, message in load_errors
                 ],
                 indent=2,
             )

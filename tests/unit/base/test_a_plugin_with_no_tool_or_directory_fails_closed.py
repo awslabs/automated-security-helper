@@ -19,6 +19,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
     _shown_tool_text,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class _NoToolPlugin(UVToolMixin):
     """A plugin that names no tool and no package."""

@@ -25,7 +25,9 @@ and runs cold, and every scan without the flag runs cold silently, exactly as be
 ## Use it {#use}
 
 Nothing is required. When the daemon is running, every `ash scan` (and bare `ash`) uses it
-automatically; when it is not, or anything about it is off, the scan silently runs cold.
+automatically; when it is not, or anything about it is off, the scan silently runs cold
+(an internal error in express itself is the one exception; see
+[When it falls back cold](#fallback)).
 Up to the moment the daemon accepts a scan, express can only make it faster or leave it as
 it was: every pre-acceptance failure is the cold run. Once a scan is running on the daemon
 there is no silent fallback either way -- a daemon killed mid-scan is reported on stderr
@@ -143,12 +145,15 @@ scan*: no socket, a stale daemon, a daemon already running as many scans as you 
 CPUs, a protocol hiccup, an unsupported platform. Every one of those is a scan at the
 old speed, never a failed or wrong one. With `--express` on the command line the
 fallback additionally prints one line to stderr saying why, since that invocation asked
-for the daemon explicitly. After acceptance the scan is running against your terminal,
-so there is deliberately no fallback left: a daemon lost mid-scan (killed, machine
-shutdown) is reported on stderr and the command exits 1 -- rerunning it silently could
-double a scan's side effects. A Ctrl-C or termination signal that lands during the
-handshake itself ends the command with the usual interrupt code instead of starting a
-cold scan you just asked to stop.
+for the daemon explicitly. The one fallback that is never silent is a defect in ASH's own
+express code: an internal error (an `AttributeError`, `TypeError`, `NameError` or
+`AssertionError`) prints one line on stderr naming it as a bug in ASH express mode on
+every run, with or without `--express`, and the scan still runs cold. After acceptance
+the scan is running against your terminal, so there is deliberately no fallback left:
+a daemon lost mid-scan (killed, machine shutdown) is reported on stderr and the command
+exits 1 -- rerunning it silently could double a scan's side effects. A Ctrl-C or
+termination signal that lands during the handshake itself ends the command with the
+usual interrupt code instead of starting a cold scan you just asked to stop.
 
 Some invocations never use the daemon: anything that is not a scan (`ash report`,
 `ash inspect`, shell tab-completion, ...), any scan with `--no-express`, and scans the
