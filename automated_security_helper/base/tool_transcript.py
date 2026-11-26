@@ -253,6 +253,11 @@ class ToolTranscript(_Frozen):
             self.argv is None or self.exit_code is None
         ):
             raise ValueError("a captured transcript records its argv and exit code")
+        if self.argv is not None and not self.argv:
+            raise ValueError(
+                "argv, when recorded, names at least the executable (argv[0]); an "
+                "attested run whose argv nobody wrote down records null, never []"
+            )
         paths = [r.path for r in (*self.results, *self.side_reports)]
         if len(set(paths)) != len(paths):
             raise ValueError("a transcript lists a results path twice")
@@ -515,26 +520,31 @@ def restamp(
     *recorded_on* and *env_allowlist* are the new run's own record. They replace the
     old run's wholesale and the transcript comes back ``captured``: a re-record
     replaces an attested transcript with a captured one, and the old run's argv or
-    date kept on new bytes would attest to a run that never produced them.
+    date kept on new bytes would attest to a run that never produced them. The
+    replacement really is wholesale: *side_reports* of None means the new run wrote
+    none (the old entries never survive it), and ``observable``/``note`` come back
+    True and None, because the new run's results are full, never the hand-reduced
+    recording the old flags may have described.
 
     Digests identical to the transcript's own AND an unchanged tool version mean
-    nothing shows a re-record happened, and the call is refused: a stamp moved onto
-    old bytes would hide exactly the rot the stamp exists to expose. Identical bytes
-    under a NEW version are accepted, because a tool whose output carries no version
-    (actionlint's JSON, cdk-nag's CSV, guarddog's JSON) reproduces them on a real
-    re-record. A transcript with no stamp has nothing to move and is returned as it
-    is.
+    nothing shows a re-record happened, and the call is refused: a record (and, where
+    one exists, a stamp) moved onto old bytes would hide exactly the rot the stamp
+    exists to expose. Identical bytes under a NEW version are accepted, because a tool
+    whose output carries no version (actionlint's JSON, cdk-nag's CSV, guarddog's
+    JSON) reproduces them on a real re-record. A transcript with no stamp still gets
+    the new run's record the same way; only the stamp fields have nothing to move
+    (an unpinned scanner's re-record is still a new run).
     """
     stamp = transcript.pin_stamp
-    if stamp is None:
-        return transcript
-    pinned = current_pins.get(stamp.tool)
-    if pinned is None:
-        raise TranscriptRestampError(
-            f"{transcript.id}: stamped with the pin of {stamp.tool!r}, which no "
-            "manifest pins now; there is no pin to restamp it with. Drop the stamp "
-            "with the pin, or re-record under a pin that exists"
-        )
+    pinned = None
+    if stamp is not None:
+        pinned = current_pins.get(stamp.tool)
+        if pinned is None:
+            raise TranscriptRestampError(
+                f"{transcript.id}: stamped with the pin of {stamp.tool!r}, which no "
+                "manifest pins now; there is no pin to restamp it with. Drop the stamp "
+                "with the pin, or re-record under a pin that exists"
+            )
 
     def _digests(entries: tuple[ResultsFile, ...]) -> set[tuple[str, str]]:
         return {(entry.path, entry.sha256) for entry in entries}
@@ -542,10 +552,7 @@ def restamp(
     if (
         observed_version == transcript.tool.version
         and _digests(results) == _digests(transcript.results)
-        and (
-            side_reports is None
-            or _digests(side_reports) == _digests(transcript.side_reports)
-        )
+        and _digests(side_reports or ()) == _digests(transcript.side_reports)
     ):
         raise TranscriptRestampError(
             f"{transcript.id}: the results digests and the tool version are the ones "
@@ -554,18 +561,20 @@ def restamp(
         )
     data = transcript.model_dump()
     data.update(
-        pin_stamp={"tool": stamp.tool, "version": pinned},
         tool={"name": transcript.tool.name, "version": observed_version},
         retention="current",
         reason=None,
         results=[entry.model_dump() for entry in results],
+        side_reports=[entry.model_dump() for entry in (side_reports or ())],
         provenance="captured",
         argv=list(argv),
         exit_code=exit_code,
         stderr_tail=stderr_tail,
         recorded_on=recorded_on,
         env_allowlist=list(env_allowlist),
+        observable=True,
+        note=None,
     )
-    if side_reports is not None:
-        data["side_reports"] = [entry.model_dump() for entry in side_reports]
+    if stamp is not None:
+        data["pin_stamp"] = {"tool": stamp.tool, "version": pinned}
     return ToolTranscript.model_validate(data)

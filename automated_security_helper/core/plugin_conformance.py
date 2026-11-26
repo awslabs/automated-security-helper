@@ -35,7 +35,10 @@ run time, so ``core`` imports no plugin module while still depending on those pa
 existing (a manifest-named prep, which would drop that dependency, is not built yet). A
 scanner class is loaded to read its register rows, the way the kernel will read them: a
 class is judged on the rows it declares itself (``vars``), for every register, so a
-subclass that inherits a parent's row has declared nothing.
+subclass that inherits a parent's row has declared nothing. Scanner names are one
+namespace: a third-party plugin that reuses a shipped scanner's name is judged under the
+shipped table (its tool type comes from ``SCANNER_TOOL_TYPES`` before its own row), so
+such a plugin needs a name the table does not hold.
 
 A damaged recording is a red row, never a traceback: a results file whose digest fails
 is left out of what the facets are judged over, and a file or transcript that cannot be
@@ -236,7 +239,9 @@ def discover_transcripts(root: Path) -> Discovery:
         shown = path.relative_to(root).as_posix()
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as error:
+        # RecursionError: a file nested deeper than the interpreter's limit is one
+        # damaged file, never the end of the walk (the contract above).
+        except (OSError, ValueError, RecursionError) as error:
             unreadable.append(
                 UnreadableTranscriptFile(
                     f"{shown} cannot be read as JSON ({_describe(error)})"
@@ -245,7 +250,7 @@ def discover_transcripts(root: Path) -> Discovery:
             continue
         try:
             files.append((path.parent, parse_transcript_file(data)))
-        except ValueError as error:
+        except (ValueError, RecursionError) as error:
             unreadable.append(
                 UnreadableTranscriptFile(
                     f"{shown} is not a transcript file this ASH reads "
@@ -688,17 +693,20 @@ def _results_with_runs(
                     yield run, result
 
 
+def _readable_one(transcript: ToolTranscript) -> bool:
+    """Whether one transcript's results can be read as findings: observable, and
+    either SARIF as written or native bytes with an adapter prep."""
+    return transcript.observable and (
+        transcript.adapter_prep is not None
+        or any(r.format == "sarif" for r in transcript.results)
+    )
+
+
 def _readable(
     transcripts: Sequence[tuple[Path, ToolTranscript]],
 ) -> list[tuple[Path, ToolTranscript]]:
-    """The transcripts whose results can be read as findings: observable, and either
-    SARIF as written or native bytes with an adapter prep."""
-    return [
-        (base, t)
-        for base, t in transcripts
-        if t.observable
-        and (t.adapter_prep is not None or any(r.format == "sarif" for r in t.results))
-    ]
+    """The transcripts whose results can be read as findings (:func:`_readable_one`)."""
+    return [(base, t) for base, t in transcripts if _readable_one(t)]
 
 
 def _flats_of(
@@ -762,22 +770,49 @@ def observe_transcripts(
     """Like :func:`observed_frame`, but a transcript whose results cannot be read (a
     missing or damaged file, an invalid SARIF, an unregistered prep, an adapter that
     raises) is named in ``problems`` and left out, so one bad recording never stops the
-    others from being judged. Each transcript is read once for both frames."""
+    others from being judged. Each transcript is read once for both frames.
+
+    A transcript :func:`_readable` leaves out (marked not observable, or native bytes
+    with no adapter prep) is silently absent from the frames, UNLESS it is ``current``
+    and its exclusion leaves the scanner with no current frame at all: then every such
+    transcript is named in ``problems``, because the MAPPED cells are judged over the
+    current frame and a silent exclusion here would leave the row green with no facet
+    observed (the caller's skip of those judgments presumes the cause is on the row).
+    """
     read: list[tuple[ToolTranscript, list[FlatVulnerability]]] = []
     problems: list[str] = []
-    for base, transcript in _readable(transcripts):
+    unread_current: list[ToolTranscript] = []
+    for base, transcript in transcripts:
+        if not _readable_one(transcript):
+            if transcript.retention == "current":
+                unread_current.append(transcript)
+            continue
         try:
             read.append((transcript, _flats_of(scanner, tool_type, transcript, base)))
         except Exception as error:  # noqa: BLE001 - a damaged recording is a finding
             problems.append(
                 f"{transcript.id}: its results could not be read ({_describe(error)})"
             )
+    has_current = any(t.retention == "current" for t, _f in read)
+    if not has_current:
+        for transcript in unread_current:
+            why = (
+                "it is marked not observable"
+                if not transcript.observable
+                else "native bytes with no adapter prep and no SARIF entry"
+            )
+            problems.append(
+                f"{transcript.id}: a current recording whose results cannot be read "
+                f"as findings ({why}), and no other current recording's can; record "
+                "a readable current transcript, or mark this one historical with the "
+                "reason"
+            )
     return Observed(
         every=observed_counts(f for _t, flats in read for f in flats) if read else None,
         current=observed_counts(
             f for t, flats in read if t.retention == "current" for f in flats
         )
-        if any(t.retention == "current" for t, _f in read)
+        if has_current
         else None,
         problems=tuple(problems),
     )
@@ -903,12 +938,17 @@ def _row_facets(
                 "never over a historical one)"
             )
             # When no current recording could be read at all AND the cause is
-            # already a detail on this row (pinned but historical-only at :853,
-            # a current recording that failed its digest, results that could not
-            # be read), the per-facet MAPPED judgments would restate that one
-            # cause once per facet; the cause row is the finding. An unpinned
-            # scanner with only historical recordings records no such cause, so
-            # its MAPPED cells are still judged (and red) rather than silent.
+            # already a detail on this row (a pinned scanner whose every
+            # recording is historical, a current recording that failed its
+            # digest, a current recording observe_transcripts named because it
+            # could not be read as findings), the per-facet MAPPED judgments
+            # would restate that one cause once per facet; the cause row is the
+            # finding. An unpinned scanner with only historical recordings
+            # records no such cause, so its MAPPED cells are still judged (and
+            # red) rather than silent. The premise holds because every way a
+            # current transcript of `mine` can fail to reach the current frame
+            # leaves a detail: its digest (above), or observe_transcripts'
+            # problems (an unreadable or raising recording).
             had_current = any(t.retention == "current" for _b, t in mine)
             cause_recorded = had_current or bool(pinned)
             for facet in FACET_NAMES:

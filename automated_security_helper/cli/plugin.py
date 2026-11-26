@@ -666,7 +666,9 @@ platform, pinned provisioning, and docs generated from the manifest. A row that 
 be evaluated here reads not-run, which is not a pass.
 
 Exit status: 0 when every named plugin passes, 1 when any row is red, 3 when none is red
-but some row was not run, 2 for a usage error (an unknown plugin, no transcript root).
+but some row was not run, 2 for a usage error (an unknown plugin, no transcript root, a
+plugin that cannot be loaded). A red row outranks a load error: a run that found both
+exits 1, so a red verdict is never masked by an unrelated plugin's import failure.
 """,
 )
 def verify_plugins(
@@ -753,8 +755,8 @@ def verify_plugins(
     reports = []
     # One plugin that cannot be loaded never discards the others' computed reports:
     # everyone else is still judged and printed, the load errors are named per
-    # scanner, and the run still exits 2 (the load failure is a usage error, not a
-    # verdict on any promotion bar).
+    # scanner, and the run exits 2 unless some report is red (the load failure is a
+    # usage error, not a verdict on any promotion bar, so a red verdict outranks it).
     load_errors: list[tuple[str, str]] = []
     for manifest in manifests:
         try:
@@ -787,12 +789,14 @@ def verify_plugins(
                     echo(f"       - {detail}")
     for _name, message in load_errors:
         secho(f"Error: {message}", err=True)
+    codes = {r.exit_code for r in reports}
+    # A red row outranks a load error (the help's exit-status contract): a run that
+    # judged something red says so with 1, whoever else could not be imported.
+    if EXIT_FAIL in codes:
+        raise typer.Exit(EXIT_FAIL)
     if load_errors:
         raise typer.Exit(2)
-    codes = {r.exit_code for r in reports}
-    raise typer.Exit(
-        EXIT_FAIL if EXIT_FAIL in codes else EXIT_INCOMPLETE if codes - {0} else 0
-    )
+    raise typer.Exit(EXIT_INCOMPLETE if codes - {0} else 0)
 
 
 if __name__ == "__main__":

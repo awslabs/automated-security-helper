@@ -289,6 +289,19 @@ def test_one_unloadable_plugin_does_not_discard_the_other_scanners_reports(
     assert "cannot be loaded" in result.output
 
 
+def test_a_red_row_outranks_a_load_error_in_the_exit_code(
+    fixture_manifest, monkeypatch, transcripts_copy
+) -> None:
+    """The help's exit-status contract: 1 when any row is red, and a load error (a
+    usage error, not a verdict) never masks a red verdict the run already printed."""
+    _one_broken_beside_the_fixture(fixture_manifest, monkeypatch)
+    next(transcripts_copy.rglob("fixture-lint-1.0.0.sarif")).unlink()
+    result = _verify(transcripts_copy, "--all")
+    assert result.exit_code == 1, result.output
+    assert "fixture-lint (alpha): fail" in result.output
+    assert "fixture-broken's scanner entry point" in result.output
+
+
 def test_one_unloadable_plugin_is_an_error_entry_in_the_json_output(
     fixture_manifest, monkeypatch, transcripts_copy
 ) -> None:

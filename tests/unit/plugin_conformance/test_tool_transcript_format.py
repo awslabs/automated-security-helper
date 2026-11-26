@@ -76,6 +76,15 @@ def test_a_captured_transcript_records_its_argv_and_exit_code() -> None:
     assert _transcript(provenance="captured", argv=("gitleaks",), exit_code=0)
 
 
+def test_an_empty_argv_is_refused_whatever_the_provenance() -> None:
+    """``argv: []`` names no executable, so it records no run: the unknown-argv
+    spelling is null, never the empty list that would read as a recorded one."""
+    with pytest.raises(ValueError, match="names at least the executable"):
+        _transcript(provenance="captured", argv=(), exit_code=0)
+    with pytest.raises(ValueError, match="names at least the executable"):
+        _transcript(argv=())
+
+
 def test_an_attested_transcript_may_leave_argv_exit_and_stderr_unknown() -> None:
     transcript = _transcript()
     assert transcript.argv is None and transcript.exit_code is None
@@ -516,9 +525,88 @@ def test_restamping_a_stamp_whose_pin_is_gone_is_a_readable_error() -> None:
         )
 
 
-def test_restamping_an_unstamped_transcript_changes_nothing() -> None:
-    unstamped = _transcript(pin_stamp=None)
-    assert (
-        restamp(unstamped, PINS, observed_version="8.30.1", results=_rerecord(), **_RUN)
-        == unstamped
+def test_restamping_an_unstamped_transcript_still_takes_the_new_runs_record() -> None:
+    """An unpinned scanner's re-record is still a new run: the function is the final
+    step of EVERY re-record, so the new run's record replaces the old one's here too,
+    and only the stamp fields have nothing to move (the transcript stays unstamped)."""
+    unstamped = _transcript(
+        pin_stamp=None,
+        retention="historical",
+        reason="old",
+        tool=ToolRef(name="gitleaks", version="8.29.0"),
     )
+    fresh = restamp(
+        unstamped, PINS, observed_version="8.30.1", results=_rerecord(), **_RUN
+    )
+    assert fresh.pin_stamp is None
+    assert fresh.tool.version == "8.30.1"
+    assert fresh.results == _rerecord()
+    assert fresh.provenance == "captured" and fresh.argv == _RUN["argv"]
+    assert fresh.retention == "current" and fresh.reason is None
+    # and the nothing-was-re-recorded refusal holds without a stamp too
+    with pytest.raises(TranscriptRestampError, match="nothing was re-recorded"):
+        restamp(fresh, PINS, observed_version="8.30.1", results=fresh.results, **_RUN)
+
+
+def test_restamping_at_the_same_version_with_changed_digests_is_accepted() -> None:
+    """The common real case: the pin did not move, the tool reran at the version in
+    force, and the bytes changed (a fixture edit, a re-run over new input). A
+    refusal keyed on the version alone would refuse exactly this re-record."""
+    current = _transcript(provenance="captured", argv=("gitleaks",), exit_code=0)
+    fresh = restamp(
+        current,
+        PINS,
+        observed_version=current.tool.version,
+        results=_rerecord(sha="2" * 64),
+        **_RUN,
+    )
+    assert fresh.results == _rerecord(sha="2" * 64)
+    assert fresh.tool.version == current.tool.version
+    assert fresh.pin_stamp == current.pin_stamp
+    assert stale_transcripts([fresh], PINS) == []
+
+
+def test_restamping_replaces_the_side_reports_wholesale_and_none_means_none() -> None:
+    """The docstring's wholesale replacement covers the side reports: None means the
+    new run wrote none, so the old entries never survive onto the new bytes."""
+    aside = (ResultsFile(path="aside.json", sha256="3" * 64, format="json"),)
+    old = _old_recording().model_copy(update={"side_reports": aside})
+    dropped = restamp(old, PINS, observed_version="8.30.1", results=_rerecord(), **_RUN)
+    assert dropped.side_reports == ()
+    replaced = restamp(
+        old,
+        PINS,
+        observed_version="8.30.1",
+        results=_rerecord(),
+        side_reports=(ResultsFile(path="new.json", sha256="4" * 64, format="json"),),
+        **_RUN,
+    )
+    assert [entry.path for entry in replaced.side_reports] == ["new.json"]
+    # dropping the side reports IS a change: with the version and the results digests
+    # unchanged, the disappeared side report is the evidence a re-record happened
+    kept_bytes = restamp(
+        old, PINS, observed_version=old.tool.version, results=old.results, **_RUN
+    )
+    assert kept_bytes.side_reports == ()
+    with pytest.raises(TranscriptRestampError, match="nothing was re-recorded"):
+        restamp(
+            old,
+            PINS,
+            observed_version=old.tool.version,
+            results=old.results,
+            side_reports=aside,
+            **_RUN,
+        )
+
+
+def test_restamping_resets_observable_and_the_note_with_the_new_full_results() -> None:
+    """A hand-reduced recording's flags never describe the new run: the re-record's
+    results are full, so the transcript comes back observable with no note."""
+    reduced = _old_recording().model_copy(
+        update={"observable": False, "note": "reduced by hand: locations dropped"}
+    )
+    fresh = restamp(
+        reduced, PINS, observed_version="8.30.1", results=_rerecord(), **_RUN
+    )
+    assert fresh.observable is True
+    assert fresh.note is None

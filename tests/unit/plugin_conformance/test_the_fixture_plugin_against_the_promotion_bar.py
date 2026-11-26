@@ -310,6 +310,25 @@ def test_planted_a_transcripts_key_that_is_not_a_list_is_a_red_row_not_a_traceba
     assert "other/transcripts.json is not a transcript file this ASH reads" in details
 
 
+def test_planted_a_deeply_nested_file_does_not_abort_the_walk(
+    fixture_manifest, transcripts_copy
+) -> None:
+    """One file nested past the interpreter's recursion limit is one damaged file
+    (the walk's own contract), never a RecursionError out of the whole discovery.
+
+    The depth is a constant well past any interpreter's limit: 3.14's C decoder
+    probes the real stack and parses thousands of levels before it raises, where
+    older interpreters raise near ``sys.getrecursionlimit()``."""
+    depth = 200_000
+    _plant_a_foreign_transcript_file(transcripts_copy, "[" * depth + "]" * depth)
+    found = discover_transcripts(transcripts_copy)
+    assert len(found.files) == 1 and len(found.unreadable) == 1
+    assert "cannot be read as JSON" in found.unreadable[0].problem
+    assert "RecursionError" in found.unreadable[0].problem
+    report = _verify(fixture_manifest, transcripts_copy)
+    _expect(report, r1=RED)
+
+
 def test_planted_a_damaged_mapping_naming_no_scanner_concerns_every_scanner(
     fixture_manifest, transcripts_copy
 ) -> None:
@@ -451,6 +470,51 @@ def test_a_historical_only_corpus_with_no_cause_recorded_still_fails_mapped_cell
     assert "fixture-lint.file_path declared mapped" in details
 
 
+def test_an_unreadable_only_current_set_stays_red_not_silently_green(
+    fixture_manifest, transcripts_copy
+) -> None:
+    """The other guard on the skip: the skip's premise is that the cause of 'no
+    current frame' is already a detail on the row, and a current recording that
+    ``_readable`` leaves out (native bytes, no adapter prep) used to record none.
+    With a sound historical recording beside it the N/A cells read ok over the
+    historical corpus, the MAPPED judgments are skipped, and before the fix the row
+    read GREEN with no facet observed (the live shape: a corpus scanner's one
+    readable current SARIF entry losing its ``adapter_prep``)."""
+    _plant_a_historical_recording(transcripts_copy)
+    path = next(transcripts_copy.rglob("transcripts.json"))
+    data = json.loads(path.read_text())
+    current = next(
+        t for t in data["transcripts"] if t.get("retention", "current") == "current"
+    )
+    for entry in current["results"]:
+        entry["format"] = "json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    report = _verify(fixture_manifest, transcripts_copy)
+    _expect(report, r1=RED)
+    details = " ".join(_row(report, 1).details)
+    assert "cannot be read as findings" in details
+    assert current["id"] in details
+
+
+def test_an_unreadable_current_recording_beside_a_readable_one_stays_quiet(
+    fixture_manifest, transcripts_copy
+) -> None:
+    """The scope of the guard above: the shipped corpus keeps current native-bytes
+    recordings beside readable current ones on purpose, so an excluded current
+    transcript is named only when it leaves the scanner with no current frame at
+    all."""
+    path = next(transcripts_copy.rglob("transcripts.json"))
+    data = json.loads(path.read_text())
+    unreadable = json.loads(json.dumps(data["transcripts"][0]))
+    unreadable["id"] = "fixture-lint-native-bytes"
+    for entry in unreadable["results"]:
+        entry["format"] = "json"
+    data["transcripts"].append(unreadable)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    report = _verify(fixture_manifest, transcripts_copy)
+    _expect(report)
+
+
 def test_planted_an_unrecorded_row_names_what_to_record(
     fixture_manifest, transcripts_copy
 ) -> None:
@@ -519,13 +583,18 @@ def test_planted_an_na_cell_whose_column_is_now_populated_fails(
 def test_planted_a_transcript_that_cannot_be_read_as_results_leaves_mapped_cells_corpusless(
     fixture_manifest, transcripts_copy
 ) -> None:
+    """The one current recording is marked not observable: nothing can witness the
+    facets, and the row names that recording rather than reading green (or restating
+    the cause once per facet)."""
     path = next(transcripts_copy.rglob("transcripts.json"))
     document = json.loads(path.read_text())
     document["transcripts"][0]["observable"] = False
     path.write_text(json.dumps(document), encoding="utf-8")
     report = _verify(fixture_manifest, transcripts_copy)
     _expect(report, r1=RED)
-    assert "has no corpus to observe" in " ".join(_row(report, 1).details)
+    details = " ".join(_row(report, 1).details)
+    assert "cannot be read as findings" in details
+    assert "it is marked not observable" in details
 
 
 def _restamp_digest(root, sarif) -> None:
