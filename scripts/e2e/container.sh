@@ -158,16 +158,19 @@ image_version() {
   in_image "$1" sh -c "command -v $ASH_CLI_NAME >/dev/null && exec $ASH_CLI_NAME --version || exec ash --version"
 }
 
-# build <cli> <export dir> <tag> [container build args]: the user-facing build, from
-# the export so its Dockerfile and its source are the build context. `container build`,
-# because 4.0 removed `build-image`; every release since 3.8 has `container build`, so
-# N-1's CLI takes it too when N-1 is the latest v3 release.
+# build <cli> <export dir> <tag> [build args]: the user-facing build, from the export
+# so its Dockerfile and its source are the build context. The command is the one the
+# CLI has: `container build` from 3.9 on (4.0 removed `build-image`), and `build-image`
+# before 3.9, which is N-1's CLI when N-1 is a v3 release older than 3.9. A CLI without
+# `container build` refuses its --help as a usage error, so that probe decides.
 # --ash-revision-to-install LOCAL keeps it from cloning a published revision instead;
 # provenance() is what proves it did not. The long name, because v3 has only that one.
 build() {
   local cli="$1" tree="$2" tag="$3"
   shift 3
-  (cd "$tree" && ASH_IMAGE_NAME="$tag" "$cli" container build --no-run --ash-revision-to-install LOCAL "$@")
+  local command=(container build)
+  "$cli" container build --help >/dev/null 2>&1 || command=(build-image)
+  (cd "$tree" && ASH_IMAGE_NAME="$tag" "$cli" "${command[@]}" --no-run --ash-revision-to-install LOCAL "$@")
 }
 
 # run_case <cli> <image> <case> <label> [scan args]
@@ -349,8 +352,9 @@ prune_build_cache "the N build"
 UPGRADE_VENV="$WORK/venv-upgrade"
 uv venv --quiet --python "$PYTHON" "$UPGRADE_VENV"
 # From N-1's export directory, not its wheel, for the reason given at the host CLI's
-# install above: N-1's own `container build --ash-revision-to-install LOCAL` builds the source
-# tree it was installed from, and a wheel install records none.
+# install above: N-1's own build (`build-image` or `container build`, see build())
+# with --ash-revision-to-install LOCAL builds the source tree it was installed from, and a
+# wheel install records none.
 uv pip install --quiet --no-cache --python "$UPGRADE_VENV/bin/python" "$SRC_PREV"
 if [ -x "$UPGRADE_VENV/bin/$ASH_CLI_NAME" ]; then
   PREV_CLI="$UPGRADE_VENV/bin/$ASH_CLI_NAME"
