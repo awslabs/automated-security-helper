@@ -42,10 +42,9 @@ from automated_security_helper.utils.finding_trend import (
     build_trend,
     longest_compatible_suffix,
     run_from_results,
-    runs_from_history,
+    runs_and_recorded_from_history,
 )
 from automated_security_helper.utils.scan_history import (
-    record_names,
     run_order_key,
 )
 from automated_security_helper.utils.scan_results_file import (
@@ -289,8 +288,8 @@ def trend_command(
     unreadable = 0
     cut: list[str] = []
     if history is not None:
-        recorded = len(list(record_names(history)))
-        runs = runs_from_history(history)
+        # One pass: the names counted and the records read are the same set.
+        runs, recorded = runs_and_recorded_from_history(history)
         if not runs:
             if not recorded:
                 _refuse(f"no run records under {history}/history")
@@ -303,12 +302,15 @@ def trend_command(
         # whole history; the series is cut to the longest suffix ending at the
         # newest record instead, and the cut is reported.
         runs, cut = longest_compatible_suffix(runs)
-        if len(runs) < 2:
+        if len(runs) < 2 and cut:
             _refuse(
                 f"only {len(runs)} of the recorded runs form one series ending "
                 f"at the newest record ({len(cut)} left out: "
                 f"{shown_on_one_line(', '.join(cut))})"
             )
+        if len(runs) < 2:
+            # Nothing was cut: one readable record is simply not a series.
+            _refuse("a trend needs at least two runs")
         ordered_by = "report_id"
     elif files:
         runs, ordered_by = _runs_from_files(list(files))

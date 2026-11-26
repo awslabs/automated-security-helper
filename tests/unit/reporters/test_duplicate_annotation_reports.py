@@ -243,6 +243,36 @@ def test_an_explicit_false_override_turns_the_recorded_setting_off(tmp_path):
     assert tuple(_cli_csv(tmp_path)[-3:]) == ANNOTATION_COLUMNS
 
 
+def test_an_override_that_does_not_name_the_field_leaves_the_recorded_setting(tmp_path):
+    # Any override round-trips the whole configuration through a dump and a
+    # validate, which marks every default as set; the recorded True must not be
+    # taken for the operator's explicit False.
+    _write(tmp_path, _model(annotate=True))
+    header = _cli_csv(
+        tmp_path, "--config-overrides", "global_settings.severity_threshold=HIGH"
+    )
+    assert tuple(header[-3:]) == ANNOTATION_COLUMNS
+
+
+def test_a_config_file_naming_false_still_turns_the_recorded_setting_off_with_an_unrelated_override(
+    tmp_path,
+):
+    _write(tmp_path, _model(annotate=True))
+    config = tmp_path / "ash.yaml"
+    config.write_text(
+        "project_name: p\nglobal_settings:\n  deduplication:\n    annotate: false\n",
+        encoding="utf-8",
+    )
+    header = _cli_csv(
+        tmp_path,
+        "--config",
+        str(config),
+        "--config-overrides",
+        "global_settings.severity_threshold=HIGH",
+    )
+    assert not set(ANNOTATION_COLUMNS) & set(header)
+
+
 def test_a_request_the_results_cannot_record_is_said_not_swallowed(tmp_path, caplog):
     import logging
 

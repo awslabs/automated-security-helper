@@ -320,6 +320,33 @@ def test_a_bad_record_cuts_the_history_to_the_longest_compatible_suffix():
     assert longest_compatible_suffix([]) == ([], [])
 
 
+def test_the_suffix_walk_checks_each_candidate_against_every_kept_run():
+    from automated_security_helper.utils.finding_trend import (
+        longest_compatible_suffix,
+        run_from_record,
+    )
+
+    def record(second, project):
+        body = scan_history.run_record_body(
+            results(finding("B101"), second=second, project_name=project or "p")
+        )
+        body["project_name"] = project
+        return body
+
+    # A newest run with no project name matches any project, so checking only
+    # against it let two runs of DIFFERENT projects into one suffix, and
+    # build_trend then refused the pair the cut exists to remove.
+    runs = [
+        run_from_record(record(1, "alpha"), "r1"),
+        run_from_record(record(2, "beta"), "r2"),
+        run_from_record(record(3, None), "r3-unnamed"),
+    ]
+    kept, cut = longest_compatible_suffix(runs)
+    assert [run.label for run in kept] == ["r2", "r3-unnamed"]
+    assert cut == ["r1"]
+    build_trend(kept)
+
+
 def test_build_trend_statuses_equal_the_matchers_on_real_findings():
     # The only history-vs-files parity test compared the record adapter against
     # itself; this one pairs build_trend against match_findings over real

@@ -82,7 +82,7 @@ from automated_security_helper.utils.finding_diff import (
 )
 from automated_security_helper.utils.frame_text import unwire, wire
 from automated_security_helper.utils.scan_history import (
-    read_history,
+    read_history_counted,
     run_record_body,
 )
 
@@ -145,10 +145,16 @@ def run_from_record(record: dict[str, Any], label: str) -> TrendRun:
 
 def runs_from_history(output_dir: Any) -> list[TrendRun]:
     """Every readable record of ``<output_dir>/history``, oldest first."""
-    return [
-        run_from_record(record, str(record["report_id"]))
-        for record in read_history(output_dir)
-    ]
+    return runs_and_recorded_from_history(output_dir)[0]
+
+
+def runs_and_recorded_from_history(output_dir: Any) -> tuple[list[TrendRun], int]:
+    """:func:`runs_from_history` and the number of record names seen, in one pass."""
+    records, recorded = read_history_counted(output_dir)
+    return (
+        [run_from_record(record, str(record["report_id"])) for record in records],
+        recorded,
+    )
 
 
 class _Row:
@@ -287,8 +293,13 @@ def longest_compatible_suffix(
         rid = run.report_id
         if rid is not None and rid in seen:
             break
+        # Against every kept run, not the newest alone: a newest with no project
+        # name accepts any, and the pair it let through was refused by
+        # _check_series against the oldest kept run, the refusal the cut exists
+        # to remove.
         try:
-            check_same_project(_project_view(newest), _project_view(run))
+            for kept_run in kept:
+                check_same_project(_project_view(kept_run), _project_view(run))
         except ComparabilityRefusal:
             break
         if rid is not None:

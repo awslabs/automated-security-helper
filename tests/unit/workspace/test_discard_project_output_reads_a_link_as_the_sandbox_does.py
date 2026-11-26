@@ -27,6 +27,9 @@ from automated_security_helper.workspace.execution import (
 
 pytestmark = pytest.mark.unit
 
+# The abandoned run's own report id, which the abandon is handed.
+RECORD_ID = "ASH-20260101000001-0123456789ab"
+
 
 def test_each_scan_output_entry_is_read_with_the_sandbox_link_reader(
     tmp_path, monkeypatch
@@ -46,7 +49,7 @@ def test_each_scan_output_entry_is_read_with_the_sandbox_link_reader(
 
     monkeypatch.setattr(scanned_tree, "_is_link_stat", recording)
 
-    _discard_project_output(output)
+    _discard_project_output(output, RECORD_ID)
 
     # RED at the base: the entries were asked Path.is_symlink() and the reader
     # was never consulted. Three reads: the run-record discard reads the
@@ -71,7 +74,7 @@ def test_a_symlink_at_a_scan_output_name_goes_and_its_target_stays(tmp_path):
     except (OSError, NotImplementedError):
         pytest.skip("this host cannot make a symlink")
 
-    _discard_project_output(output)
+    _discard_project_output(output, RECORD_ID)
 
     assert not (output / "reports").is_symlink()
     assert (target / "keep.txt").read_text(encoding="utf-8") == "kept"
@@ -93,7 +96,7 @@ def test_a_junction_at_a_scan_output_name_goes_and_its_target_stays(tmp_path):
     if made.returncode != 0:
         pytest.skip(f"this host cannot make a junction: {made.stdout}{made.stderr}")
 
-    _discard_project_output(output)
+    _discard_project_output(output, RECORD_ID)
 
     assert not (output / "reports").exists()
     assert (target / "keep.txt").read_text(encoding="utf-8") == "kept"

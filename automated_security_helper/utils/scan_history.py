@@ -446,14 +446,29 @@ def _valid_coverage(coverage: Any) -> bool:
 def _valid_row(row: Any) -> bool:
     if not isinstance(row, dict):
         return False
-    if isinstance(row.get("id"), (dict, list)):
-        return False  # finding ids are collected into sets by the trend
-    # The trend upper-cases the severity and groups by the scanner name
-    # (finding_trend._severity, wire), so a number where a string belongs
-    # crashed ``ash trend`` instead of the record being skipped.
+    row_id = row.get("id")
+    # finding ids are collected into sets and sorted by the trend
+    if row_id is not None and not isinstance(row_id, str):
+        return False
+    # The trend upper-cases the severity, groups by the scanner name and sorts
+    # on the rule, file, id and line (finding_trend._severity, wire, the sorts;
+    # cli/trend's text formatter), so a value of another type where one of these
+    # belongs crashed ``ash trend`` instead of the record being skipped.
     if not all(
         value is None or isinstance(value, str)
-        for value in (row.get("severity"), row.get("scanner"))
+        for value in (
+            row.get("severity"),
+            row.get("scanner"),
+            row.get("rule_id"),
+            row.get("file_path"),
+            row.get("identity_message"),
+            row.get("source_report"),
+        )
+    ):
+        return False
+    if not all(
+        value is None or (isinstance(value, int) and not isinstance(value, bool))
+        for value in (row.get("line_start"), row.get("line_end"))
     ):
         return False
     base = row.get("identity_base")
@@ -516,20 +531,31 @@ def read_history(output_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
 
     Skips what :func:`read_run_record` skips, and says how many it skipped at debug.
     """
+    return read_history_counted(output_dir)[0]
+
+
+def read_history_counted(
+    output_dir: str | os.PathLike[str],
+) -> tuple[list[dict[str, Any]], int]:
+    """The readable run records, oldest first, and how many record names were seen.
+
+    One pass over the directory, so the count of names and the records read
+    from them cannot disagree (two passes raced a record written or removed
+    between them, and the difference printed as a negative count).
+    """
     directory = history_dir(output_dir)
     if _is_link(directory) or not directory.is_dir():
-        return []
+        return [], 0
     records: list[dict[str, Any]] = []
-    skipped = 0
-    for name in _record_names(directory):
+    names = _record_names(directory)
+    for name in names:
         record = read_run_record(directory / name)
-        if record is None:
-            skipped += 1
-        else:
+        if record is not None:
             records.append(record)
+    skipped = len(names) - len(records)
     if skipped:
         ASH_LOGGER.debug(f"Skipped {skipped} unreadable run record(s) in {directory}")
-    return records
+    return records, len(names)
 
 
 def history_enabled(history_config: Any) -> bool:
@@ -558,14 +584,26 @@ def discard_run_record(output_dir: str | os.PathLike[str], report_id: Any) -> bo
     after the orchestrator recorded the run, and a workspace project abandoned
     after its scan returned. The record says the run completed, and leaving it
     made the taken-back run a point in ``ash trend``. Never raises (these paths
-    run while a cancel or a failure is propagating), never follows a link, and
-    an id that is not a record's name (:func:`record_file_name`) names nothing.
+    run while a cancel or a failure is propagating), never follows a link (the
+    history directory included), never removes a record git tracks, and an id
+    that is not a record's name (:func:`record_file_name`) names nothing.
     """
     name = record_file_name(report_id)
     if name is None:
         return False
-    path = history_dir(output_dir) / name
+    directory = history_dir(output_dir)
+    # The directory too, as prune_history reads it: _is_link below looks only at
+    # the final component, so a linked history directory resolved and the
+    # target's file was deleted.
+    if _is_link(directory):
+        return False
+    path = directory / name
     if _is_link(path):
+        return False
+    # A committed record is never removed, as prune_history never removes one;
+    # a repository whose index could not be listed tells nothing, so nothing goes.
+    tracked = _tracked_record_names(directory)
+    if tracked is None or name in tracked:
         return False
     try:
         path.unlink()

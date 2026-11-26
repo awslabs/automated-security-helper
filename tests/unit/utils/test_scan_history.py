@@ -496,6 +496,57 @@ def test_a_cancel_after_the_record_was_written_takes_the_record_back(tmp_path):
     _discard_history_record({"metadata": "text"}, tmp_path)
 
 
+def test_the_local_scan_takes_the_record_back_when_the_last_cancel_check_fires(
+    tmp_path, monkeypatch
+):
+    # Drives the enclosing path (_run_local_mode), not the helper alone: the
+    # cancel check lands after the orchestrator recorded the run, and the
+    # wiring is what removes the record the cancelled run left.
+    from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+    from automated_security_helper.interactions import run_ash_scan
+    from automated_security_helper.interactions.run_ash_scan import (
+        ScanOptions,
+        _run_local_mode,
+    )
+
+    (tmp_path / "src").mkdir()
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    run = results(finding("B101"), rid=report_id(1))
+    earlier = results(finding("B102"), rid=report_id(2))
+
+    class _Cancelled(BaseException):
+        pass
+
+    class _Orchestrator:
+        config = None
+
+        def add_metadata(self, **values):
+            pass
+
+        def execute_scan(self, phases=None, **kwargs):
+            scan_history.write_run_record(earlier, output_dir, keep_runs=50)
+            scan_history.write_run_record(run, output_dir, keep_runs=50)
+            return run
+
+    def cancelled():
+        raise _Cancelled
+
+    monkeypatch.setattr(
+        ASHScanOrchestrator, "create", staticmethod(lambda **kwargs: _Orchestrator())
+    )
+    monkeypatch.setattr(run_ash_scan, "raise_if_cancelled", cancelled)
+
+    with pytest.raises(_Cancelled):
+        _run_local_mode(
+            ScanOptions(source_dir=tmp_path / "src", output_dir=output_dir),
+            logging.getLogger("ash"),
+        )
+
+    # The cancelled run's record went; an earlier run's stays.
+    assert list(scan_history.record_names(output_dir)) == [f"{report_id(2)}.json"]
+
+
 def test_a_scan_the_history_leaves_out_is_said_at_warning(tmp_path, caplog):
     run = results(finding("B101"), changed_files_only=True)
     with caplog.at_level(logging.WARNING, logger="ash"):
@@ -505,3 +556,96 @@ def test_a_scan_the_history_leaves_out_is_said_at_warning(tmp_path, caplog):
         and record.levelname == "WARNING"
         for record in caplog.records
     )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="needs symlinks")
+def test_discard_does_not_unlink_through_a_linked_history_directory(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    target = elsewhere / f"{report_id(1)}.json"
+    target.write_text("{}", encoding="utf-8")
+    (out / "history").symlink_to(elsewhere, target_is_directory=True)
+    assert scan_history.discard_run_record(out, report_id(1)) is False
+    assert target.exists()
+
+
+def test_discard_never_removes_a_record_git_tracks(tmp_path):
+    from tests.unit.workspace.test_execution import _git
+
+    _git(tmp_path, "init")
+    for second in (1, 2):
+        scan_history.write_run_record(
+            results(finding("B101"), rid=report_id(second)), tmp_path, keep_runs=50
+        )
+    _git(tmp_path, "add", f"history/{report_id(1)}.json")
+    _git(
+        tmp_path,
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.com",
+        "commit",
+        "-m",
+        "keep the history",
+    )
+    assert scan_history.discard_run_record(tmp_path, report_id(1)) is False
+    assert (tmp_path / "history" / f"{report_id(1)}.json").exists()
+    assert scan_history.discard_run_record(tmp_path, report_id(2)) is True
+
+
+def _tying_record(**row_overrides):
+    """A record whose two rows tie on every sort key but the overridden one."""
+    run = results(finding("B101"), rid=report_id(1))
+    record = scan_history.run_record_body(run)
+    record["report_id"] = report_id(1)
+    row = dict(record["findings"][0])
+    row.update(row_overrides)
+    record["findings"] = [dict(record["findings"][0]), row]
+    return record
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"rule_id": 7},
+        {"file_path": ["a"]},
+        {"id": 5},
+        {"identity_message": 3},
+        {"source_report": 1.5},
+        {"line_start": "10"},
+        {"line_end": [1]},
+        {"line_start": True},
+    ],
+)
+def test_a_row_with_a_value_of_the_wrong_type_makes_the_record_unreadable(
+    tmp_path, overrides
+):
+    record = _tying_record(**overrides)
+    directory = tmp_path / "history"
+    directory.mkdir()
+    path = directory / f"{report_id(1)}.json"
+    path.write_text(json.dumps(record), encoding="utf-8")
+    assert scan_history.read_run_record(path) is None
+
+
+def test_a_row_with_none_where_a_string_or_int_may_be_is_readable(tmp_path):
+    record = _tying_record(source_report=None, line_end=None, identity_message=None)
+    directory = tmp_path / "history"
+    directory.mkdir()
+    path = directory / f"{report_id(1)}.json"
+    path.write_text(json.dumps(record), encoding="utf-8")
+    assert scan_history.read_run_record(path) is not None
+
+
+def test_history_is_read_in_one_pass_and_counts_the_names_it_saw(tmp_path):
+    for second in (1, 2):
+        scan_history.write_run_record(
+            results(finding("B101"), rid=report_id(second)), tmp_path, keep_runs=50
+        )
+    (tmp_path / "history" / f"{report_id(3)}.json").write_text(
+        "{not json", encoding="utf-8"
+    )
+    records, recorded = scan_history.read_history_counted(tmp_path)
+    assert (len(records), recorded) == (2, 3)
