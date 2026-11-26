@@ -1,0 +1,29 @@
+[
+  {
+    "col": 15,
+    "end_col": 6,
+    "end_line": 14,
+    "line": 10,
+    "pointer": "/servers/runner",
+    "script_line": 1,
+    "source_file": ".vscode/mcp.json"
+  },
+  {
+    "col": 15,
+    "end_col": 6,
+    "end_line": 14,
+    "line": 10,
+    "pointer": "/servers/runner",
+    "script_line": 2,
+    "source_file": ".vscode/mcp.json"
+  },
+  {
+    "col": 15,
+    "end_col": 6,
+    "end_line": 14,
+    "line": 10,
+    "pointer": "/servers/runner",
+    "script_line": 3,
+    "source_file": ".vscode/mcp.json"
+  }
+]

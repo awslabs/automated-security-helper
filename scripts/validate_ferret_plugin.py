@@ -5,7 +5,7 @@
 
 Checks for known CI failure patterns before pushing. Also verifies that
 any SECRET-SECRET-KEYWORD hits in documentation have matching suppressions
-in .ash/.ash_alpha_plugins.yaml or .ash/.ash.yaml.
+in .ash/.ash_alpha_plugins.yaml or .ash.yaml.
 
 Usage:
     uv run python scripts/validate_ferret_plugin.py
@@ -45,10 +45,10 @@ ALL_FILES = [f for f in PLUGIN_FILES + TEST_FILES + SCRIPT_FILES if f.is_file()]
 
 #: The config files whose suppressions apply to this repository's scans. The
 #: validator used to read the alpha-plugins file alone, while the
-#: repository keeps SECRET-SECRET-KEYWORD suppressions in .ash/.ash.yaml too.
+#: repository keeps SECRET-SECRET-KEYWORD suppressions in .ash.yaml too.
 SUPPRESSION_CONFIG_FILES = (
     PROJECT_ROOT / ".ash" / ".ash_alpha_plugins.yaml",
-    PROJECT_ROOT / ".ash" / ".ash.yaml",
+    PROJECT_ROOT / ".ash.yaml",
 )
 
 #: Suppression keys that narrow an entry to a symbol or a package rather than a
@@ -570,7 +570,7 @@ def exclude_glob_hits(lines: List[str]) -> List[Tuple[int, str]]:
 def check_exclude_glob_syntax():
     config_files = [
         PROJECT_ROOT / ".ash" / ".ash_alpha_plugins.yaml",
-        PROJECT_ROOT / ".ash" / ".ash.yaml",
+        PROJECT_ROOT / ".ash.yaml",
     ]
     for filepath in config_files:
         if not filepath.exists():
@@ -813,10 +813,10 @@ def ferret_in_ash_yaml_hits(lines: List[str]) -> List[int]:
 
 
 @check(
-    "FERRET-IN-ASH-YAML: ferret-scan should not be in .ash/.ash.yaml (use alpha plugins config)"
+    "FERRET-IN-ASH-YAML: ferret-scan should not be in .ash.yaml (use alpha plugins config)"
 )
 def check_ferret_not_in_ash_yaml():
-    ash_yaml = PROJECT_ROOT / ".ash" / ".ash.yaml"
+    ash_yaml = PROJECT_ROOT / ".ash.yaml"
     if not ash_yaml.exists():
         return
     lines = _read_lines(ash_yaml)

@@ -1,0 +1,150 @@
+{
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "cfn-lint",
+          "rules": [
+            {
+              "id": "E2002",
+              "fullDescription": {
+                "text": "Making sure the parameters have a correct type"
+              },
+              "helpUri": "https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/best-practices.html#parmtypes",
+              "shortDescription": {
+                "text": "Parameters have appropriate type"
+              }
+            },
+            {
+              "id": "E3002",
+              "fullDescription": {
+                "text": "Making sure that resources properties are properly configured"
+              },
+              "helpUri": "https://github.com/aws-cloudformation/cfn-lint/blob/main/docs/cfn-schema-specification.md#properties",
+              "shortDescription": {
+                "text": "Resource properties are invalid"
+              }
+            },
+            {
+              "id": "W2001",
+              "fullDescription": {
+                "text": "Making sure the parameters defined are used"
+              },
+              "helpUri": "https://github.com/aws-cloudformation/cfn-lint",
+              "shortDescription": {
+                "text": "Check if Parameters are Used"
+              }
+            }
+          ],
+          "version": "1.57.2",
+          "informationUri": "https://github.com/aws-cloudformation/cfn-lint",
+          "shortDescription": {
+            "text": "Validates AWS CloudFormation templates against the resource specification and additional checks."
+          }
+        }
+      },
+      "results": [
+        {
+          "message": {
+            "text": "Parameter Unused not used."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "region": {
+                  "endColumn": 9,
+                  "endLine": 8,
+                  "startColumn": 3,
+                  "startLine": 8
+                },
+                "artifactLocation": {
+                  "uri": "m0_two_bad_properties.yaml",
+                  "uriBaseId": "EXECUTIONROOT"
+                }
+              }
+            }
+          ],
+          "ruleId": "W2001"
+        },
+        {
+          "message": {
+            "text": "'Strin' is not one of ['AWS::EC2::AvailabilityZone::Name', 'AWS::EC2::Image::Id', 'AWS::EC2::Instance::Id', 'AWS::EC2::KeyPair::KeyName', 'AWS::EC2::SecurityGroup::GroupName', 'AWS::EC2::SecurityGroup::Id', 'AWS::EC2::Subnet::Id', 'AWS::EC2::VPC::Id', 'AWS::EC2::Volume::Id', 'AWS::Route53::HostedZone::Id', 'AWS::SSM::Parameter::Name', 'AWS::SSM::Parameter::Value<AWS::EC2::AvailabilityZone::Name>', 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>', 'AWS::SSM::Parameter::Value<AWS::EC2::Instance::Id>', 'AWS::SSM::Parameter::Value<AWS::EC2::KeyPair::KeyName>', 'AWS::SSM::Parameter::Value<AWS::EC2::SecurityGroup::GroupName>', 'AWS::SSM::Parameter::Value<AWS::EC2::SecurityGroup::Id>', 'AWS::SSM::Parameter::Value<AWS::EC2::Subnet::Id>', 'AWS::SSM::Parameter::Value<AWS::EC2::VPC::Id>', 'AWS::SSM::Parameter::Value<AWS::EC2::Volume::Id>', 'AWS::SSM::Parameter::Value<AWS::Route53::HostedZone::Id>', 'AWS::SSM::Parameter::Value<AWS::SSM::Parameter::Name>', 'AWS::SSM::Parameter::Value<CommaDelimitedList>', 'AWS::SSM::Parameter::Value<List<AWS::EC2::AvailabilityZone::Name>>', 'AWS::SSM::Parameter::Value<List<AWS::EC2::Image::Id>>', 'AWS::SSM::Parameter::Value<List<AWS::EC2::Instance::Id>>', 'AWS::SSM::Parameter::Value<List<AWS::EC2::SecurityGroup::GroupName>>', 'AWS::SSM::Parameter::Value<List<AWS::EC2::SecurityGroup::Id>>', 'AWS::SSM::Parameter::Value<List<AWS::EC2::Subnet::Id>>', 'AWS::SSM::Parameter::Value<List<AWS::EC2::VPC::Id>>', 'AWS::SSM::Parameter::Value<List<AWS::EC2::Volume::Id>>', 'AWS::SSM::Parameter::Value<List<AWS::Route53::HostedZone::Id>>', 'AWS::SSM::Parameter::Value<List<Number>>', 'AWS::SSM::Parameter::Value<List<String>>', 'AWS::SSM::Parameter::Value<Number>', 'AWS::SSM::Parameter::Value<String>', 'CommaDelimitedList', 'List<AWS::EC2::AvailabilityZone::Name>', 'List<AWS::EC2::Image::Id>', 'List<AWS::EC2::Instance::Id>', 'List<AWS::EC2::SecurityGroup::GroupName>', 'List<AWS::EC2::SecurityGroup::Id>', 'List<AWS::EC2::Subnet::Id>', 'List<AWS::EC2::VPC::Id>', 'List<AWS::EC2::Volume::Id>', 'List<AWS::Route53::HostedZone::Id>', 'List<Number>', 'List<String>', 'Number', 'String']"
+          },
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "region": {
+                  "endColumn": 9,
+                  "endLine": 9,
+                  "startColumn": 5,
+                  "startLine": 9
+                },
+                "artifactLocation": {
+                  "uri": "m0_two_bad_properties.yaml",
+                  "uriBaseId": "EXECUTIONROOT"
+                }
+              }
+            }
+          ],
+          "ruleId": "E2002"
+        },
+        {
+          "message": {
+            "text": "Additional properties are not allowed ('NotARealProperty' was unexpected)"
+          },
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "region": {
+                  "endColumn": 23,
+                  "endLine": 14,
+                  "startColumn": 7,
+                  "startLine": 14
+                },
+                "artifactLocation": {
+                  "uri": "m0_two_bad_properties.yaml",
+                  "uriBaseId": "EXECUTIONROOT"
+                }
+              }
+            }
+          ],
+          "ruleId": "E3002"
+        },
+        {
+          "message": {
+            "text": "Additional properties are not allowed ('NotARealProperty' was unexpected)"
+          },
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "region": {
+                  "endColumn": 23,
+                  "endLine": 18,
+                  "startColumn": 7,
+                  "startLine": 18
+                },
+                "artifactLocation": {
+                  "uri": "m0_two_bad_properties.yaml",
+                  "uriBaseId": "EXECUTIONROOT"
+                }
+              }
+            }
+          ],
+          "ruleId": "E3002"
+        }
+      ],
+      "originalUriBaseIds": {
+        "EXECUTIONROOT": {
+          "description": {
+            "text": "The directory in which cfn-lint was run."
+          }
+        }
+      }
+    }
+  ],
+  "version": "2.1.0",
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/cos02/schemas/sarif-schema-2.1.0.json"
+}

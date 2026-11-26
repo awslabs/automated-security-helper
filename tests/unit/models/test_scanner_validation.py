@@ -170,7 +170,7 @@ class TestScannerValidationManagerBasic:
     def test_get_scanners_by_status(self, manager):
         manager.update_scanner_state("bandit", registration_status="registered")
         manager.update_scanner_state("checkov", registration_status="registered")
-        manager.update_scanner_state("semgrep", registration_status="failed")
+        manager.update_scanner_state("semgrep", registration_status="untracked")
 
         registered = manager.get_scanners_by_status("registration_status", "registered")
         assert registered == ["bandit", "checkov"]

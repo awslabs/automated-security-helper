@@ -8,7 +8,8 @@ native output can map into the shared pipeline. This module is its companion
 for the operational side: network behavior, output types, scan-target types,
 runtime dependency, platform support, severity fidelity, suppression surfaces,
 finding-identity stability, rules extensibility, exit-code semantics,
-provenance and tier, and input prerequisites. Every scanner class declares a
+provenance, and input prerequisites (the tier is the manifest's, not this
+register's). Every scanner class declares a
 :class:`ScannerOperationalFacets` under :data:`OPERATIONAL_FACETS_ATTR`, read
 from the class's own ``vars()`` exactly as the mapping register is.
 
@@ -54,12 +55,16 @@ Declaration rules, fail closed:
 
 from __future__ import annotations
 
+import re
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+
+if TYPE_CHECKING:
+    from automated_security_helper.core.asset import AssetKind
 
 #: The class attribute a scanner declares its operational row under. Read from
 #: ``vars(cls)``, so an inherited declaration never satisfies it.
@@ -111,6 +116,11 @@ class Fetched(str, Enum):
     MODULE_SOURCES = "module_sources"
     ISSUER_VERIFICATION = "issuer_verification"
     SOURCE_UPLOAD = "source_upload"
+    #: A registry read for the digest a tag-only image reference points at
+    #: (``crane digest``, ``utils/image_digest_resolver.py``): the manifest's
+    #: digest, no layer. Declared by the scanners that read images, whose scan
+    #: it keys the finding ids of.
+    IMAGE_DIGEST = "image_digest"
 
 
 class Prefetch(str, Enum):
@@ -277,8 +287,8 @@ class TargetKind(str, Enum):
     DEPENDENCY_LOCKFILES = "dependency_lockfiles"
     PACKAGE_SOURCES = "package_sources"
     PACKAGE_INVENTORY = "package_inventory"
-    SECRETS_CONTENTS = "secrets_contents"
-    SECRETS_GIT_HISTORY = "secrets_git_history"
+    SECRETS_CONTENTS = "secrets_contents"  # pragma: allowlist secret
+    SECRETS_GIT_HISTORY = "secrets_git_history"  # pragma: allowlist secret
     DOCKERFILES = "dockerfiles"
     GITHUB_ACTIONS_WORKFLOWS = "github_actions_workflows"
     COMPOSITE_ACTIONS = "composite_actions"
@@ -295,10 +305,9 @@ UNCLAIMED_TARGET_KINDS: dict[TargetKind, str] = {
         "'answers a different question', gitleaks_scanner module header), and "
         "no other secrets scanner reads git history"
     ),
-    TargetKind.CONTAINER_IMAGE: (
-        "grype is wired to a `dir:` scan of the source tree; its covers text "
-        "used to say container images, which no code path scans"
-    ),
+    # CONTAINER_IMAGE left this list with the asset-targets wiring: grype,
+    # syft and trivy claim it on their rows and override the image dispatch
+    # (_execute_image_scan / scan_image), which the iff-test holds together.
     TargetKind.SBOM_DOCUMENT: (
         "no scanner consumes an SBOM document as input; syft produces one and "
         "grype scans the directory, so syft-to-grype is a potential pipeline, "
@@ -336,9 +345,12 @@ TOOL_TYPE_SERVED_BY: dict[ScannerToolType, frozenset[TargetKind]] = {
             TargetKind.DEPENDENCY_LOCKFILES,
             TargetKind.PACKAGE_SOURCES,
             TargetKind.PACKAGE_INVENTORY,
+            TargetKind.CONTAINER_IMAGE,
         }
     ),
-    ScannerToolType.SBOM: frozenset({TargetKind.PACKAGE_INVENTORY}),
+    ScannerToolType.SBOM: frozenset(
+        {TargetKind.PACKAGE_INVENTORY, TargetKind.CONTAINER_IMAGE}
+    ),
 }
 
 
@@ -650,26 +662,14 @@ class ExitCodesFacet(_Frozen):
 
 
 # --------------------------------------------------------------------------
-# M. Tool provenance and default tier
+# M. Tool provenance
 # --------------------------------------------------------------------------
 
 
-class Tier(str, Enum):
-    BUILTIN_DEFAULT = "builtin_default"
-    ALPHA_OPTIN = "alpha_optin"
-
-    @classmethod
-    def _missing_(cls, value: object) -> "Tier | None":
-        """``"community_optin"``, this tier's spelling before the rename, is an
-        alias of ``alpha_optin`` for one release and warns when it is read."""
-        if value == "community_optin":
-            from automated_security_helper.core.alpha_scanners import (
-                warn_community_alias,
-            )
-
-            warn_community_alias("community_optin", cls.ALPHA_OPTIN.value)
-            return cls.ALPHA_OPTIN
-        return None
+#: The maturity tier and the default-enablement of a scanner are NOT declared
+#: here: they are the ``tier`` and ``default_enabled`` fields of its manifest
+#: (``base/plugin_manifest.py``, data in ``plugin_manifests/``), the one place
+#: they are declared, readable without importing the scanner.
 
 
 class ProvenanceSource(str, Enum):
@@ -681,7 +681,6 @@ class ProvenanceSource(str, Enum):
 
 
 class ProvenanceFacet(_Frozen):
-    tier: Tier
     source: ProvenanceSource
     #: Switches below the tier: sub-scanners, opt-in modes.
     selection_surfaces: tuple[str, ...]
@@ -735,6 +734,192 @@ class PrerequisitesFacet(_Frozen):
 
 
 # --------------------------------------------------------------------------
+# O. Runtime compatibility
+# --------------------------------------------------------------------------
+
+
+class RuntimeName(str, Enum):
+    """The language runtime a compatibility row constrains.
+
+    The value is the key :mod:`automated_security_helper.utils.runtime_compat_ranges`
+    selects a range grammar by: one filter interface, the grammar native to
+    each runtime (PEP 440 for python, node-semver for node).
+    """
+
+    PYTHON = "python"
+    NODE = "node"
+
+
+class CompatResolution(str, Enum):
+    """How a declared incompatibility is resolved at install and launch."""
+
+    #: Constrain the interpreter request (``uv tool install --python``). The
+    #: preferred resolution: overriding what runs is simpler and more honest
+    #: than patching what runs.
+    PIN = "pin"
+    #: A shim applied over {runtime range x tool range} at tool launch. Valid
+    #: only with ``pin_insufficient``, the reason a pin cannot serve.
+    POLYFILL = "polyfill"
+
+
+class RuntimeCompatRow(_Frozen):
+    """One runtime-compatibility fact: a tool range against a runtime range."""
+
+    runtime: RuntimeName
+    #: The tool versions the row covers, in the runtime's range grammar. ``""``
+    #: is every version of the tool, stated and never defaulted.
+    tool_versions: str
+    #: PIN: the interpreter request handed to ``uv tool install --python``;
+    #: it must carry no whitespace, because the stored install command is one
+    #: string split on whitespace. POLYFILL: the runtime range the shim covers
+    #: (the shim does nothing outside it).
+    runtime_request: str
+    resolution: CompatResolution
+    #: The incompatibility and its measurement. Always required.
+    reason: str
+    #: The upstream issue. Required, and URL-shaped, when ``open_ended``.
+    upstream_issue: Optional[str] = None
+    #: An UNSOLVED upstream incompatibility: the row declares only the bounds it
+    #: can prove (an upper runtime bound with the tool side open, or a lower
+    #: bound only) and is re-read whenever the tool's version constraint moves.
+    #: The consistency gate holds every open-ended row to covering the
+    #: scanner's default constraint, so a bump that escapes the row fails the
+    #: gate, which is the re-check: has the issue been fixed?
+    open_ended: bool = False
+    #: POLYFILL only: the shim directory under
+    #: ``automated_security_helper/assets/polyfills/``.
+    polyfill: Optional[str] = None
+    #: POLYFILL only: why pinning cannot serve (no compatible interpreter is
+    #: installable, floors conflict). The prefer-PIN policy's enforcement point.
+    pin_insufficient: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _shape(self) -> "RuntimeCompatRow":
+        from automated_security_helper.utils.runtime_compat_ranges import (
+            RangeError,
+            parse_range,
+        )
+
+        if _blank(self.reason):
+            raise ValueError("a runtime-compat row carries its reason")
+        if _blank(self.runtime_request):
+            raise ValueError("a runtime-compat row names its runtime_request")
+        if any(c.isspace() for c in self.runtime_request):
+            raise ValueError(
+                "runtime_request carries no whitespace: the stored uv install "
+                "command is one string split on whitespace"
+            )
+        try:
+            parse_range(self.runtime.value, self.tool_versions)
+            parse_range(self.runtime.value, self.runtime_request)
+        except RangeError as exc:
+            raise ValueError(str(exc)) from exc
+        if self.open_ended and _blank(self.upstream_issue):
+            raise ValueError(
+                "an open-ended row records an unsolved upstream issue and "
+                "carries its upstream_issue URL"
+            )
+        if not _blank(self.upstream_issue) and not (
+            self.upstream_issue or ""
+        ).startswith(("https://", "http://")):
+            raise ValueError("upstream_issue is a URL")
+        if self.resolution is CompatResolution.PIN:
+            if self.polyfill is not None or self.pin_insufficient is not None:
+                raise ValueError("a PIN row carries no polyfill or pin_insufficient")
+        else:
+            if _blank(self.polyfill):
+                raise ValueError("a POLYFILL row names its shim directory")
+            if not re.fullmatch(r"[a-z][a-z0-9_]*", self.polyfill or ""):
+                raise ValueError("polyfill is a directory name: [a-z][a-z0-9_]*")
+            if _blank(self.pin_insufficient):
+                raise ValueError(
+                    "prefer a PIN: a POLYFILL row states why pinning the "
+                    "interpreter cannot serve (pin_insufficient)"
+                )
+        return self
+
+    def applies_to(self, tool_constraint: Optional[str]) -> bool:
+        """Whether the row governs the tool at *tool_constraint*.
+
+        Decidable and conservative; no range intersection is attempted
+        (``packaging`` has none, and ``npm_audit_scanner`` documents why
+        pretending otherwise is wrong):
+
+        1. ``tool_versions == ""`` applies at every tool version.
+        2. A constraint naming exactly one version (``==3.4.11``) is a
+           membership test against the row's tool range.
+        3. Any other constraint (a range, or None) applies: a range that in
+           fact excludes the row's range still gets the row, the safe side
+           (an unnecessary interpreter constraint, never a missing one).
+        """
+        from automated_security_helper.utils.runtime_compat_ranges import (
+            exact_version,
+            parse_range,
+        )
+
+        if not self.tool_versions.strip():
+            return True
+        version = exact_version(tool_constraint)
+        if version is None:
+            return True
+        return parse_range(self.runtime.value, self.tool_versions).contains(version)
+
+
+class RuntimeCompatFacet(_Frozen):
+    """A scanner's runtime-compatibility rows.
+
+    Empty means no known incompatibility between this tool's versions and its
+    runtime's versions: the honest common state, not an unread one, so it needs
+    no reason (unlike a silencing layer, where absence is the unread state).
+    """
+
+    rows: tuple[RuntimeCompatRow, ...]
+
+    @model_validator(mode="after")
+    def _shape(self) -> "RuntimeCompatFacet":
+        keys = [
+            (r.runtime, r.tool_versions, r.runtime_request, r.resolution)
+            for r in self.rows
+        ]
+        if len(set(keys)) != len(keys):
+            raise ValueError("a runtime-compat row is declared once")
+        return self
+
+    def pin_request(
+        self, runtime: RuntimeName, tool_constraint: Optional[str]
+    ) -> Optional[str]:
+        """The interpreter request the applicable PIN rows ask for, or None.
+
+        Several applicable rows combine (every clause must hold), in
+        declaration order. This is the one derivation point the installers
+        read: ``UVToolMixin._get_tool_python_request``.
+        """
+        from automated_security_helper.utils.runtime_compat_ranges import parse_range
+
+        combined = None
+        for row in self.rows:
+            if (
+                row.runtime is runtime
+                and row.resolution is CompatResolution.PIN
+                and row.applies_to(tool_constraint)
+            ):
+                predicate = parse_range(row.runtime.value, row.runtime_request)
+                combined = (
+                    predicate if combined is None else combined.combined(predicate)
+                )
+        return combined.as_request() if combined is not None else None
+
+    def polyfills(self, tool_constraint: Optional[str]) -> tuple[RuntimeCompatRow, ...]:
+        """The POLYFILL rows that govern the tool at *tool_constraint*."""
+        return tuple(
+            row
+            for row in self.rows
+            if row.resolution is CompatResolution.POLYFILL
+            and row.applies_to(tool_constraint)
+        )
+
+
+# --------------------------------------------------------------------------
 # The whole row
 # --------------------------------------------------------------------------
 
@@ -746,6 +931,7 @@ OPERATIONAL_FACET_NAMES: tuple[str, ...] = (
     "output",
     "targets",
     "runtime",
+    "runtime_compat",
     "platforms",
     "severity",
     "silencing",
@@ -768,6 +954,7 @@ class ScannerOperationalFacets(_Frozen):
     output: OutputFacet
     targets: TargetsFacet
     runtime: RuntimeFacet
+    runtime_compat: RuntimeCompatFacet
     platforms: PlatformsFacet
     severity: SeverityFacet
     silencing: SilencingFacet
@@ -776,3 +963,73 @@ class ScannerOperationalFacets(_Frozen):
     exit_codes: ExitCodesFacet
     provenance: ProvenanceFacet
     prerequisites: PrerequisitesFacet
+
+
+# --------------------------------------------------------------------------
+# Asset routing: which asset kinds a declaration serves
+# --------------------------------------------------------------------------
+
+#: Every target kind a scanner reads out of a filesystem tree.
+#: ``CONTAINER_IMAGE`` is the one kind whose subject is not presented as files
+#: under the source directory, so the filesystem side is its complement:
+#: ``SECRETS_GIT_HISTORY`` reads the tree's ``.git`` and ``SBOM_DOCUMENT`` a
+#: document in the tree, both files under the root.
+FILESYSTEM_SIDE_KINDS: frozenset[TargetKind] = frozenset(TargetKind) - {
+    TargetKind.CONTAINER_IMAGE
+}
+
+
+def declared_operational_facets(
+    scanner_class: type,
+) -> Optional[ScannerOperationalFacets]:
+    """*scanner_class*'s own register row, or None where it declares none.
+
+    Read from the class's own ``vars()`` exactly as the registry-totality test
+    reads it, so an inherited declaration never answers for a subclass. A
+    third-party plugin predating the register has no row; its caller decides
+    what that means (for asset routing below: filesystem-only, today's
+    behavior).
+    """
+    facets = vars(scanner_class).get(OPERATIONAL_FACETS_ATTR)
+    return facets if isinstance(facets, ScannerOperationalFacets) else None
+
+
+def declared_runtime_compat(scanner_class: type) -> Optional[RuntimeCompatFacet]:
+    """The runtime-compatibility rows *scanner_class* answers with, or None.
+
+    Unlike :func:`declared_operational_facets`, a subclass answers with the
+    nearest declaring base class: the interpreter request used to be a method
+    a subclass inherited, and the installers that derive it from the rows keep
+    that behavior. A class with no declaration anywhere in its MRO (a
+    third-party plugin predating the register) answers None and derives
+    nothing, which is what it did before the register had rows.
+    """
+    for klass in scanner_class.__mro__:
+        facets = declared_operational_facets(klass)
+        if facets is not None:
+            return facets.runtime_compat
+    return None
+
+
+def serves_asset_kind(scanner_class: type, kind: "AssetKind") -> bool:
+    """Whether *scanner_class* declares that it scans assets of *kind*.
+
+    The register is the one place capability lives, so routing asks the
+    declaration rather than a scattered conditional:
+
+    - ``AssetKind.CONTAINER_IMAGE`` is served iff the declared target kinds
+      include :attr:`TargetKind.CONTAINER_IMAGE`. No declaration means no
+      claim, so an undeclared scanner is never handed an image.
+    - ``AssetKind.FILESYSTEM`` is served by every scanner that declares any
+      filesystem-side kind -- all of them today -- and by a scanner with no
+      declaration at all, which keeps today's behavior for third-party
+      plugins the register has never seen.
+    """
+    from automated_security_helper.core.asset import AssetKind
+
+    facets = declared_operational_facets(scanner_class)
+    if kind == AssetKind.CONTAINER_IMAGE:
+        return facets is not None and TargetKind.CONTAINER_IMAGE in facets.targets.kinds
+    if facets is None:
+        return True
+    return any(k in FILESYSTEM_SIDE_KINDS for k in facets.targets.kinds)

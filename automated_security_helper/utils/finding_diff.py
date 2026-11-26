@@ -5,17 +5,23 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import polars as pl
 
 from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.models.frame_model import (
+    Computed,
+    FrameSpec,
+    Position,
+    Ranked,
+    to_frame,
+)
 from automated_security_helper.utils.finding_identity import canonical
-from automated_security_helper.utils.frame_text import ranks, wire
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
-    from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
 
 class ComparabilityRefusal(ValueError):
@@ -143,6 +149,11 @@ class FindingDiff:
     suppression_changed: list[tuple[FlatVulnerability, FlatVulnerability]]
 
 
+def _severity_upper(finding: FlatVulnerability) -> str:
+    """The finding's severity upper-cased, ``None`` read as ``""``."""
+    return (finding.severity or "").upper()
+
+
 def fallback_key(finding: FlatVulnerability) -> tuple[Any, ...] | None:
     base = finding.identity_base
     if base is None or finding.source_report is not None:
@@ -152,37 +163,109 @@ def fallback_key(finding: FlatVulnerability) -> tuple[Any, ...] | None:
     return (
         canonical(base),
         finding.identity_message or "",
-        (finding.severity or "").upper(),
+        _severity_upper(finding),
     )
 
 
-def _wire(text: str | None) -> str | None:
-    """*text* as a string polars can hold, with its equality and its order kept.
+def _key_member(place: int) -> Callable[[FlatVulnerability], Any]:
+    """A reader of one member of :func:`fallback_key`; null for an unkeyed finding."""
 
-    Polars strings are UTF-8, so a lone surrogate (a path ``os.fsdecode`` made
-    from undecodable bytes reaches the key through ``canonical``) cannot enter a
-    frame. The UTF-8 bytes of the text, surrogates passed through, read as Latin-1
-    are one-to-one with the text, and sorting them sorts as the text's code
-    points do.
-    """
-    return wire(text)
+    def read(finding: FlatVulnerability) -> Any:
+        key = fallback_key(finding)
+        return None if key is None else key[place]
+
+    return read
 
 
-_SIDE_SCHEMA = {
-    "i": pl.Int64,
-    "id": pl.String,
-    "has_identity": pl.Boolean,
-    "fingerprinted": pl.Boolean,
-    "message": pl.String,
-    "base": pl.String,
-    "key_message": pl.String,
-    "severity": pl.String,
-    "suppressed": pl.Boolean,
-    "line_start": pl.Int64,
-    "line_end": pl.Int64,
-}
+#: Everything :func:`fallback_key` reads, for the drift gate's accounting.
+_FALLBACK_READS = (
+    "identity_base",
+    "source_report",
+    "has_fingerprint_identity",
+    "identity_message",
+    "severity",
+)
+
+_OFF_KEY = "joined through the identity base and the fallback key, never a column"
+
+# One scan's side of the diff. The canonical column vocabulary: a column that
+# projects a model field bears the field's pydantic name (is_suppressed,
+# line_start, line_end), and a transformed value never bears a field's bare name
+# -- severity_uc is the uppercased severity of the fallback key, identity_message
+# the identity's message, not the model's description. The line columns are the
+# per-site Ranked override of the fields' flat-frame overflow policy: only their
+# order is ever used here, a null line is a null rank, and _PLACE's fill_null(-1)
+# puts it before every real line, as the old -1 sentinel did.
+SIDE_SPEC = FrameSpec(
+    FlatVulnerability,
+    columns=(
+        Position("i"),
+        "id",
+        Computed(
+            "has_identity",
+            "Boolean",
+            lambda finding: finding.identity is not None,
+            reads=("identity",),
+            nullable=False,
+        ),
+        Computed(
+            "fingerprinted",
+            "Boolean",
+            lambda finding: finding.has_fingerprint_identity,
+            reads=("has_fingerprint_identity",),
+            nullable=False,
+        ),
+        Computed(
+            "identity_message",
+            "String",
+            lambda finding: finding.identity_message,
+            reads=("identity_message",),
+        ),
+        Computed(
+            "base",
+            "String",
+            _key_member(0),
+            reads=_FALLBACK_READS,
+            note="canonical identity base; null for a finding fallback_key "
+            "does not key",
+        ),
+        Computed("key_message", "String", _key_member(1), reads=_FALLBACK_READS),
+        Computed(
+            "severity_uc",
+            "String",
+            _key_member(2),
+            reads=_FALLBACK_READS,
+            note="the fallback key's uppercased severity, never the field's bare name",
+        ),
+        "is_suppressed",
+        Ranked("line_start", "lines"),
+        Ranked("line_end", "lines"),
+    ),
+    waived={
+        "severity": "carried as severity_uc, a member of the fallback key",
+        "scanner": _OFF_KEY,
+        "scanner_type": _OFF_KEY,
+        "rule_id": _OFF_KEY,
+        "file_path": _OFF_KEY,
+        "_identity": "read through the identity and identity_base properties",
+        "_assigned_identity_key": "read through has_fingerprint_identity and "
+        "identity_base",
+        "_identity_message": "read through the identity_message property",
+        "_secret_detection": "a baseline-gate policy flag the pair consumer "
+        "applies on the host",
+        "_source_report": "read through the source_report property",
+        "location_display": "display text over fields the diff never joins on",
+        "correlation_id": "a cross-scanner grouping id assigned at flatten time; "
+        "the diff pairs findings by identity and never joins on it",
+        "is_secret_detection": "a rule-classification flag the correlation "
+        "registry reads on the host; the diff never joins on it",
+        "requires_exact_identity_match": "a gating policy flag the pair "
+        "consumer applies on the host (see match_findings' docstring)",
+    },
+)
+
 _LOOSE = ["base", "key_message"]
-_FULL = [*_LOOSE, "severity"]
+_FULL = [*_LOOSE, "severity_uc"]
 #: How findings of one place are put in order: lines (-1 for none), then id, then
 #: where the scan listed them (the stable tie-break the old ``sorted`` gave).
 _PLACE = [
@@ -194,39 +277,15 @@ _PLACE = [
 
 
 def _side(findings: list[FlatVulnerability]) -> pl.DataFrame:
-    """One scan's findings as a frame, one row per finding, ``i`` its position.
+    """One scan's findings as a frame of :data:`SIDE_SPEC`, ``i`` the position.
 
     The identity attributes are properties of the finding objects, so reading
     them is a Python pass; everything after it is frame operations. ``base`` is
-    null for a finding :func:`fallback_key` does not key.
+    null for a finding :func:`fallback_key` does not key. Lines are unbounded
+    ints and the frame column is 64-bit, so the line columns hold each line's
+    rank; only the order of lines is ever used.
     """
-    columns: dict[str, list[Any]] = {name: [] for name in _SIDE_SCHEMA}
-    # Lines are unbounded ints and the frame column is 64-bit, so the column
-    # holds each line's rank (no line is -1, as the old sort key had it). Only
-    # the order of lines is ever used.
-    line_rank = ranks(
-        -1 if line is None else line
-        for finding in findings
-        for line in (finding.line_start, finding.line_end)
-    )
-    for index, finding in enumerate(findings):
-        key = fallback_key(finding)
-        row = (
-            index,
-            _wire(finding.id),
-            finding.identity is not None,
-            finding.has_fingerprint_identity,
-            _wire(finding.identity_message),
-            _wire(key[0]) if key else None,
-            _wire(key[1]) if key else None,
-            _wire(key[2]) if key else None,
-            finding.is_suppressed,
-            line_rank[-1 if finding.line_start is None else finding.line_start],
-            line_rank[-1 if finding.line_end is None else finding.line_end],
-        )
-        for name, value in zip(columns, row):
-            columns[name].append(value)
-    return pl.DataFrame(columns, schema=_SIDE_SCHEMA)
+    return to_frame(findings, SIDE_SPEC)
 
 
 def match_findings(
@@ -255,7 +314,7 @@ def match_findings(
                 pl.col("has_identity")
                 & pl.col("has_identity_a")
                 & ~(pl.col("fingerprinted") & pl.col("fingerprinted_a"))
-                & pl.col("message").ne_missing(pl.col("message_a"))
+                & pl.col("identity_message").ne_missing(pl.col("identity_message_a"))
             )
         )
     )
@@ -266,7 +325,9 @@ def match_findings(
     before_places = (
         old.filter(pl.col("base").is_not_null())
         .group_by(_LOOSE)
-        .agg(pl.len().alias("n"), (pl.col("suppressed").n_unique() > 1).alias("mixed"))
+        .agg(
+            pl.len().alias("n"), (pl.col("is_suppressed").n_unique() > 1).alias("mixed")
+        )
     )
     after_places = (
         new.filter(pl.col("base").is_not_null())
@@ -317,7 +378,9 @@ def match_findings(
     left_new = unmatched(new, exact["i_a"])
     moving = (
         left_old.group_by(_FULL)
-        .agg(pl.len().alias("n"), (pl.col("suppressed").n_unique() > 1).alias("mixed"))
+        .agg(
+            pl.len().alias("n"), (pl.col("is_suppressed").n_unique() > 1).alias("mixed")
+        )
         .join(left_new.group_by(_FULL).agg(pl.len().alias("n_a")), on=_FULL)
         .join(ambiguous, on=_LOOSE, how="anti")
         .filter(~pl.col("mixed") & (pl.col("n_a") <= pl.col("n")))
@@ -361,9 +424,7 @@ def compare_findings(
         absent_after=match.absent,
         moved=match.moved,
         severity_changed=[
-            (a, b)
-            for a, b in pairs
-            if (a.severity or "").upper() != (b.severity or "").upper()
+            (a, b) for a, b in pairs if _severity_upper(a) != _severity_upper(b)
         ],
         suppression_changed=[
             (a, b) for a, b in pairs if a.is_suppressed != b.is_suppressed

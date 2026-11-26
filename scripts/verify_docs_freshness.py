@@ -9,6 +9,13 @@ Run with: uv run python scripts/verify_docs_freshness.py
 
 Exit code 0 if all checks pass, exit code 1 with a detailed report if any fail, and
 exit code 2 if any check raised and so did not run (an ERROR line names it).
+
+The checks run in a few forked worker processes, grouped so that each expensive
+shared cache (the env-var read sweep, the MCP contract, the config models, the
+package syntax trees) is built in one worker where it can be; the report is
+printed in the registry's order either way, so the output matches a sequential
+run's. ``--serial``, a platform other than Linux, or a process that already has
+more than one thread runs the checks one at a time in this process instead.
 """
 
 from __future__ import annotations
@@ -16,6 +23,7 @@ from __future__ import annotations
 import ast
 import re
 import sys
+import threading
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -676,10 +684,7 @@ def check_plugin_data() -> list[str]:
     are compared with the same registry. Every link the partial gives into the
     scanner and reporter references must name a heading that exists there.
     """
-    from automated_security_helper.config.ash_config import (
-        ConverterConfigSegment,
-        ScannerConfigSegment,
-    )
+    from automated_security_helper.config.ash_config import ScannerConfigSegment
 
     failures: list[str] = []
     where = "docs/overrides/partials/generated/plugin-data.html"
@@ -700,7 +705,15 @@ def check_plugin_data() -> list[str]:
                 f"missing {sorted(expected - listed)}, extra {sorted(listed - expected)}"
             )
 
-    converters = set(_segment_names(ConverterConfigSegment))
+    # The converters come from the plugin registry, not the config segment: a
+    # converter whose section the config model does not declare (the sdist lock
+    # harvester) is still a converter, and a name with an underscore ("mcp_config")
+    # is that name, not a dashed spelling of its field.
+    # scripts/ is not on sys.path where this module is loaded by path.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _plugin_reference import discover
+
+    converters = {plugin.name for plugin in discover("converter")}
     block = _partial_block(text, "converters")
     listed = (
         set(re.findall(r'"name": "([^"]+)"', block)) if block is not None else set()
@@ -1724,6 +1737,288 @@ def _use_trees(docs_root: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Running the checks: cache groups, worker processes, the serial escape hatch
+# ---------------------------------------------------------------------------
+#
+# The registry's wall time is five caches, not twenty-six checks (measured on the
+# profile this grouping comes from, ~112s serial before the sweeps were deduplicated):
+# the env-var read sweep 61.7s, the MCP contract's abstract interpretation 15.5s, the
+# config models behind the option-table and config-block checks 10.5s + 8.9s, the
+# package syntax trees 6.0s, and everything else ~9s together. Checks that build the
+# same cache therefore run in ONE worker, in registry order, so no cache is built
+# twice; checks in different groups run concurrently, and the wall is the slowest
+# group.
+# The grouping is not a partition of the caches: check_doc_report_files sits in the
+# package-ast group but also calls load_config_models, so the config models are
+# built in two workers; wall time is unaffected because the env group dominates.
+# Threads would not do: the work is pure CPU under the GIL, and two threads
+# racing the same lru_cache build the 60s cache twice.
+
+#: Check function -> the cache group it runs in. A check absent here is cheap and
+#: runs with the others in one "misc" worker.
+_GROUP_ENV = "env-read-set"
+_GROUP_MCP = "mcp-contract"
+_GROUP_MODELS = "config-models"
+_GROUP_PACKAGE_AST = "package-ast"
+_GROUP_MISC = "misc"
+
+
+def _check_groups() -> dict[object, str]:
+    return {
+        check_doc_env_vars: _GROUP_ENV,
+        check_doc_mcp_contract: _GROUP_MCP,
+        check_reporters: _GROUP_MODELS,
+        check_scanners: _GROUP_MODELS,
+        check_plugin_data: _GROUP_MODELS,
+        check_plugin_option_keys: _GROUP_MODELS,
+        check_doc_config_blocks: _GROUP_MODELS,
+        check_doc_option_tables: _GROUP_MODELS,
+        check_doc_scanner_names: _GROUP_MODELS,
+        check_doc_report_files: _GROUP_PACKAGE_AST,
+        check_doc_code_links: _GROUP_PACKAGE_AST,
+    }
+
+
+def _execute_check(check_fn) -> tuple[str, object]:
+    """One check's verdict, as main() has always taken it.
+
+    ("ok", the failure list) for a check that ran, ("error", "<Type>: <message>")
+    for one that raised and so did not run. Exception only, as before: a
+    SystemExit is not a verdict, and in a worker it kills the process, which the
+    parent reports as the check not running -- fail-closed, never a silent pass.
+    """
+    try:
+        # The conversion is inside the try: a check that returns None, or a finding
+        # whose __str__ raises, is a check that did not run (exit 2), not a
+        # traceback (exit 1, "docs drifted") or a dead worker blaming its group.
+        return "ok", [str(f) for f in check_fn()]
+    except Exception as e:  # noqa: BLE001 -- reported as a check that did not run
+        return "error", f"{type(e).__name__}: {e}"
+
+
+def _fork_context():
+    """The fork multiprocessing context, or None where forking is not safe.
+
+    fork, never spawn: the workers must inherit this module's state as it stands
+    (the check functions, _VERBOSE, a --docs-root rebase, a test's monkeypatches)
+    rather than re-import a script that spawn cannot locate by module name, and
+    fork passes the check functions to the child without pickling them.
+
+    Fork is used only on Linux, and only while this process has one thread. On
+    macOS system libraries start threads, which is why CPython moved its default
+    there to spawn; and a fork taken while another thread holds a lock (a stream
+    buffer, an import lock) leaves that lock held forever in the child. A caller
+    that is not safe to fork from (a pytest-xdist worker has execnet's receiver
+    thread) and every other platform gets the serial run, as the gate always did.
+    """
+    import multiprocessing
+
+    if not sys.platform.startswith("linux") or threading.active_count() > 1:
+        return None
+    if "fork" not in multiprocessing.get_all_start_methods():
+        return None
+    return multiprocessing.get_context("fork")
+
+
+#: Seconds a worker may take to exit after it has closed its pipe (it has sent every
+#: result by then, so this is interpreter teardown) before it is terminated and its
+#: unreported checks are errors; and the grace between terminate and kill.
+_WORKER_EXIT_TIMEOUT_S = 60.0
+_WORKER_KILL_GRACE_S = 5.0
+
+
+def _stop_worker(process) -> None:
+    """End a worker that is still running: terminate, then kill, and reap it."""
+    if process.is_alive():
+        process.terminate()
+        process.join(_WORKER_KILL_GRACE_S)
+    if process.is_alive():
+        process.kill()
+        process.join()
+
+
+def _run_group(checks, indices, sender) -> None:
+    """Worker body: run the named checks in order, sending one result per check.
+
+    Each check's stdout (the ``skipped:`` and ``note:`` lines some checks print) is
+    captured and shipped with its verdict, so the parent can print it where the
+    sequential run would have. Results are sent as each check finishes, so a check
+    that kills the process costs only itself and the checks it had not reached.
+    """
+    import contextlib
+    import io
+
+    for index in indices:
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            status, payload = _execute_check(checks[index][1])
+        sender.send((index, buffer.getvalue(), status, payload))
+    sender.close()
+
+
+def _iter_parallel(checks):
+    """(name, captured stdout, status, payload) in registry order, one worker per
+    cache group.
+
+    A worker that exits without reporting a check -- a crash, a SystemExit, an
+    os._exit inside a check -- yields that check as an error, with the worker's
+    exit code in the message. The pipe is read before the join, and one message is
+    sent per check, so a large failure list cannot deadlock against the pipe's
+    buffer and a dead worker's finished checks keep their verdicts.
+    """
+    from multiprocessing.connection import wait as connection_wait
+
+    context = _fork_context()
+    groups: dict[str, list[int]] = {}
+    membership = _check_groups()
+    for index, (_name, check_fn) in enumerate(checks):
+        groups.setdefault(membership.get(check_fn, _GROUP_MISC), []).append(index)
+
+    # A forked child flushes inherited buffers when it exits; flush now so the
+    # header lines cannot print twice under block-buffered stdout.
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+    workers: dict[object, tuple[object, list[int], set[int]]] = {}
+    started: list[object] = []
+    try:
+        for group, indices in groups.items():
+            receiver, sender = context.Pipe(duplex=False)
+            process = context.Process(
+                target=_run_group,
+                args=(checks, indices, sender),
+                name=f"docs-freshness-{group}",
+            )
+            process.start()
+            started.append(process)
+            sender.close()
+            workers[receiver] = (process, indices, set())
+
+        results: dict[int, tuple[str, str, object]] = {}
+        emit = 0
+        while emit < len(checks):
+            while emit < len(checks) and emit in results:
+                captured, status, payload = results.pop(emit)
+                yield checks[emit][0], captured, status, payload
+                emit += 1
+            if emit >= len(checks):
+                break
+            for receiver in connection_wait(list(workers)):
+                process, indices, reported = workers[receiver]
+                try:
+                    index, captured, status, payload = receiver.recv()
+                except (EOFError, OSError):
+                    receiver.close()
+                    del workers[receiver]
+                    process.join(_WORKER_EXIT_TIMEOUT_S)
+                    if process.is_alive():
+                        _stop_worker(process)
+                        how = (
+                            "did not exit within "
+                            f"{_WORKER_EXIT_TIMEOUT_S:g}s of closing its pipe "
+                            "and was terminated"
+                        )
+                    else:
+                        how = f"exited with code {process.exitcode}"
+                    for index in indices:
+                        if index not in reported:
+                            results[index] = (
+                                "",
+                                "error",
+                                (
+                                    "the worker process running this check "
+                                    f"{how} before reporting a result"
+                                ),
+                            )
+                    continue
+                reported.add(index)
+                results[index] = (captured, status, payload)
+    finally:
+        # Reached on a normal finish, on an exception out of this loop, and when the
+        # consumer drops the generator (run_gate raising while it prints, a closed
+        # pipe under `| head`): no worker outlives the run, so the interpreter's
+        # exit never waits on a half-finished sweep.
+        for receiver in workers:
+            receiver.close()
+        for process in started:
+            _stop_worker(process)
+
+
+def _iter_serial(checks):
+    """(name, "", status, payload) in order: the pre-parallel path, one check at a
+    time in this process, its notes printing as it runs."""
+    for name, check_fn in checks:
+        status, payload = _execute_check(check_fn)
+        yield name, "", status, payload
+
+
+def run_gate(checks, serial: bool = False) -> int:
+    """Run the registered checks and print the report.
+
+    The exit-code contract is main()'s, unchanged: 2 when any check did not run,
+    1 when any failed, else 0. The report is printed in the registry's order in
+    both modes, so the parallel output is the serial output.
+    """
+    if serial or _fork_context() is None:
+        results = _iter_serial(checks)
+    else:
+        results = _iter_parallel(checks)
+
+    all_failures: list[tuple[str, list[str]]] = []
+    passed = 0
+    failed = 0
+    not_run = 0
+
+    for name, captured, status, payload in results:
+        if captured:
+            sys.stdout.write(captured)
+        if status == "error":
+            # Not a finding: the check never got as far as the docs. Printed apart
+            # from findings, counted apart and exited on apart, so that two runs
+            # where it raised the same way cannot compare as two runs that agree.
+            not_run += 1
+            print(f"ERROR {name}")
+            print(f"        - the check did not run: {payload}")
+            continue
+
+        failures = payload
+        if failures:
+            failed += 1
+            all_failures.append((name, failures))
+            print(f"FAIL  {name}")
+            for f in failures:
+                print(f"        - {f}")
+        else:
+            passed += 1
+            print(f"PASS  {name}")
+
+    print()
+    did_not_run = f"{not_run} did not run, " if not_run else ""
+    print(
+        f"Results: {passed} passed, {failed} failed, {did_not_run}"
+        f"{passed + failed + not_run} total"
+    )
+
+    if all_failures:
+        print()
+        print("Documentation is out of sync with source code.")
+        print("Fix the issues above and re-run this script.")
+
+    if not_run:
+        print()
+        print("A check that did not run checked nothing, so its docs are unverified.")
+        print("Fix what stopped it (the ERROR above) and re-run this script.")
+        return 2
+
+    if all_failures:
+        return 1
+
+    print()
+    print("All documentation freshness checks passed.")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1742,6 +2037,13 @@ def main(argv: list[str] | None = None) -> int:
         "--verbose",
         action="store_true",
         help="also say which known set each accepted environment variable matched",
+    )
+    parser.add_argument(
+        "--serial",
+        action="store_true",
+        help="run the checks one at a time in this process (the pre-parallel path); "
+        "the default runs them in grouped worker processes and prints the same "
+        "report in the same order. Platforms without fork always run serially.",
     )
     args = parser.parse_args(argv)
     global _VERBOSE
@@ -1809,58 +2111,38 @@ def main(argv: list[str] | None = None) -> int:
         ("Journey pages match their journey files", check_doc_journeys),
     ]
 
-    all_failures: list[tuple[str, list[str]]] = []
-    passed = 0
-    failed = 0
-    not_run = 0
+    return run_gate(checks, serial=args.serial)
 
-    for name, check_fn in checks:
-        try:
-            failures = check_fn()
-        except Exception as e:  # noqa: BLE001 -- reported as a check that did not run
-            # Not a finding: the check never got as far as the docs. Printed apart
-            # from findings, counted apart and exited on apart, so that two runs
-            # where it raised the same way cannot compare as two runs that agree.
-            not_run += 1
-            print(f"ERROR {name}")
-            print(f"        - the check did not run: {type(e).__name__}: {e}")
-            continue
 
-        if failures:
-            failed += 1
-            all_failures.append((name, failures))
-            print(f"FAIL  {name}")
-            for f in failures:
-                print(f"        - {f}")
-        else:
-            passed += 1
-            print(f"PASS  {name}")
+def _run_as_script() -> int:
+    """main() for the command line, with the cyclic collector off.
 
-    print()
-    did_not_run = f"{not_run} did not run, " if not_run else ""
-    print(
-        f"Results: {passed} passed, {failed} failed, {did_not_run}"
-        f"{passed + failed + not_run} total"
-    )
+    The gate deliberately holds big caches for its whole run (the env-var read
+    sweep, the config models, the MCP contract, the package syntax trees), and
+    the cyclic collector re-walks all of it on every generation-2 pass that the
+    later allocation-heavy checks trigger. Measured on a quiet 192-CPU host:
+    the same 26 checks took 94.6s with the collector on and 66.9s with it off,
+    before any other change here. Nothing in a process this short-lived needs
+    cycles reclaimed; the workers inherit the setting through fork.
 
-    if all_failures:
-        print()
-        print("Documentation is out of sync with source code.")
-        print("Fix the issues above and re-run this script.")
+    This lives here, not in main(), because both calls are process-wide: an
+    in-process caller (the tests call main() many times in one pytest worker)
+    would be left with a frozen heap or a changed collector. Nothing is restored,
+    since the process exits. freeze() is for that exit: everything allocated
+    while the collector was off sits in the young generation, and the
+    interpreter's shutdown collection would walk all of it (measured as ~27s).
+    freeze() moves every object tracked at that point, the gate's caches and any
+    garbage not yet collected, into the permanent generation, which collections
+    never visit.
+    """
+    import gc
 
-    if not_run:
-        print()
-        print("A check that did not run checked nothing, so its docs are unverified.")
-        print("Fix what stopped it (the ERROR above) and re-run this script.")
-        return 2
-
-    if all_failures:
-        return 1
-
-    print()
-    print("All documentation freshness checks passed.")
-    return 0
+    gc.disable()
+    try:
+        return main()
+    finally:
+        gc.freeze()
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_run_as_script())

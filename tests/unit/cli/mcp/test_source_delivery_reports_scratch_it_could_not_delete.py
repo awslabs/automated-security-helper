@@ -71,6 +71,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 import pytest
 
 from automated_security_helper.cli.mcp import source_delivery as sd
@@ -603,7 +604,7 @@ class TestAGitDeliveryThatCannotDeleteScratch:
         with pytest.raises(sd.GitCommandError) as raised:
             _deliver_from_git(tmp_path)
 
-        assert raised.value.error_type == sd.GIT_CLONE_FAILED
+        assert raised.value.error_type == McpErrorType.GIT_CLONE_FAILED.value
         assert "git clone failed" in str(raised.value)
         assert "fatal: early EOF" in str(raised.value)
         _the_previous_tree_stands(tmp_path)
@@ -630,7 +631,7 @@ class TestAGitDeliveryThatCannotDeleteScratch:
         with pytest.raises(sd.GitCommandError) as raised:
             _deliver_from_git(tmp_path)
 
-        assert raised.value.error_type == sd.GIT_CLONE_FAILED
+        assert raised.value.error_type == McpErrorType.GIT_CLONE_FAILED.value
         assert "could not be run" in str(raised.value)
         _the_previous_tree_stands(tmp_path)
         remnants = _scratch_beside_source(tmp_path / _SESSION)
@@ -650,7 +651,7 @@ class TestAGitDeliveryThatCannotDeleteScratch:
         with pytest.raises(sd.GitCommandError) as raised:
             _deliver_from_git(tmp_path, ref="no-such-ref")
 
-        assert raised.value.error_type == sd.GIT_CHECKOUT_FAILED
+        assert raised.value.error_type == McpErrorType.GIT_CHECKOUT_FAILED.value
         assert "git checkout" in str(raised.value)
         _the_previous_tree_stands(tmp_path)
         remnants = _scratch_beside_source(tmp_path / _SESSION)

@@ -1,0 +1,9 @@
+# Ceiling for `ty check automated_security_helper/` diagnostics (ty 0.0.84).
+# scripts/check_ty_ratchet.py fails the lint job when the count exceeds the integer
+# below. A PR that cures diagnostics lowers it in the same change; nothing raises it
+# except a deliberate ty version bump, which re-measures and says so.
+# The ceiling is 0 and the ty step's `continue-on-error` is deleted: this commit
+# lands only folded WITH the three ty cure branches, which together clear all 1308
+# diagnostics. Folded without them, ty exits 1 and the required lint check is red.
+# Once folded, this file and the separate ratchet step can go away.
+0

@@ -403,7 +403,7 @@ def test_such_a_literal_is_not_passed_as_a_plain_substring():
     the entry for it was left out and the file stayed scanned, though the
     operator excluded it by name and nothing applies the entry after the
     scan."""
-    assert bandit_exclude_globs("/scan", "-") == ["/scan/[-]"]
+    assert bandit_exclude_globs("/scan", "-") == ["/scan/[-]", "/scan/-/*"]
     entries = bandit_excluded_path_globs("/scan", "-")
     assert "/scan/-" not in entries
     assert "/scan/[-]" in entries

@@ -154,8 +154,8 @@ def test_each_advisory_is_graded_by_its_own_severity_through_the_scan(context):
         if r.properties.model_extra["package_name"] == "pkg"
     }
     assert grades == {
-        ("GHSA-pkg-low", "node_modules/pkg/package.json"): "LOW",
-        ("GHSA-pkg-critical", "node_modules/pkg/package.json"): "CRITICAL",
+        ("GHSA-pkg-low", "app/package-lock.json"): "LOW",
+        ("GHSA-pkg-critical", "app/package-lock.json"): "CRITICAL",
     }, grades
     by_id = {rule.id: rule for rule in report.runs[0].tool.driver.rules}
     for rule_id in ("GHSA-pkg-low", "GHSA-pkg-critical"):
@@ -166,7 +166,7 @@ def test_an_entry_with_no_nodes_is_one_result_by_name_through_the_scan(context):
     report = _scanned(context)
 
     (bare,) = [r for r in report.runs[0].results if r.ruleId == "GHSA-bare-moderate"]
-    assert _uri(bare) == "node_modules/bare/package.json"
+    assert _uri(bare) == "app/package-lock.json"
     assert "package_path" not in bare.properties.model_extra
     assert result_severity(bare) == "MEDIUM"
 
@@ -181,7 +181,7 @@ def test_a_transitive_result_refers_to_its_rootless_root_through_the_scan(contex
     assert child.properties.model_extra["root_advisories"] == [
         {"rule_id": "GHSA-root-high", "uri": _uri(root)}
     ]
-    assert _uri(root) == "node_modules/root/package.json"
+    assert _uri(root) == "app/package-lock.json"
     # The root's own result is graded by its word; the transitive result's
     # grade is the SARIF level's reading (it carries no word grade and its rule
     # no score), which is not pinned here.

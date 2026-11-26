@@ -1,0 +1,19 @@
+[
+  {
+    "file_results": {
+      "failure_count": 1,
+      "violations": [
+        {
+          "element_types": [],
+          "id": "FATAL",
+          "line_numbers": [],
+          "logical_resource_ids": [],
+          "message": "#<NoMethodError: undefined method 'parse' for an instance of Psych::Parser>",
+          "name": "system",
+          "type": "FAIL"
+        }
+      ]
+    },
+    "filename": "in/m0_fixture_bucket.yaml"
+  }
+]

@@ -6,6 +6,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from automated_security_helper.models.scanner_validation import (
+    EnablementStatus,
+    RegistrationStatus,
     ScannerStateTracker,
     ScannerValidationState,
 )
@@ -40,13 +42,30 @@ class TestScannerStateTrackerCRUD:
         assert state.registration_status == "registered"
         assert state.execution_completed is True
 
+    def test_a_status_spelling_is_stored_as_its_member(self, tracker):
+        tracker.update_scanner_state(
+            "bandit", registration_status="registered", enablement_status="excluded"
+        )
+        state = tracker.get_scanner_state("bandit")
+        assert state.registration_status is RegistrationStatus.REGISTERED
+        assert state.enablement_status is EnablementStatus.EXCLUDED
+
+    @pytest.mark.parametrize("field", ["registration_status", "enablement_status"])
+    def test_a_spelling_outside_the_enum_is_refused_at_the_write(self, tracker, field):
+        # A typo'd status used to be stored as given, and the scanner then fell
+        # through every branch that compares against the members.
+        with pytest.raises(ValueError, match=field):
+            tracker.update_scanner_state("bandit", **{field: "faild"})
+        state = tracker.get_scanner_state("bandit")
+        assert state is None or getattr(state, field).value == "unknown"
+
     def test_get_scanner_state_returns_none_for_unknown(self, tracker):
         assert tracker.get_scanner_state("nonexistent") is None
 
     def test_get_scanners_by_status(self, tracker):
         tracker.update_scanner_state("bandit", registration_status="registered")
         tracker.update_scanner_state("semgrep", registration_status="registered")
-        tracker.update_scanner_state("trivy", registration_status="failed")
+        tracker.update_scanner_state("trivy", registration_status="untracked")
         result = tracker.get_scanners_by_status("registration_status", "registered")
         assert sorted(result) == ["bandit", "semgrep"]
 

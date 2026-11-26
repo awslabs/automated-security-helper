@@ -24,6 +24,7 @@ nav:
       - Deduplicate findings: how-to/deduplicate-findings.md
       - Enable the scanner sandbox: docs/scanner-sandbox.md
       - Run in a container: how-to/run-in-a-container.md
+      - Scan container images: how-to/scan-container-images.md
       - Run offline: how-to/run-offline.md
       - Choose an integration: integrations.md
       - Run ASH with pre-commit: how-to/pre-commit.md
@@ -61,6 +62,7 @@ nav:
       - Exit codes: reference/exit-codes.md
       - Output files: reference/output-files.md
       - Coverage by language: reference/coverage.md
+      - Symbol resolution: reference/symbol-resolution.md
       - Python API: reference/python-api.md
   - Plugins:
       - Plugins: plugins/index.md

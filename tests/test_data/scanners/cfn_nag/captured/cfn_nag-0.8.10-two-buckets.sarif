@@ -1,0 +1,1331 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "cfn_nag",
+          "informationUri": "https://github.com/stelligent/cfn_nag",
+          "semanticVersion": "0.8.10",
+          "rules": [
+            {
+              "id": "CFN_NAG_F74",
+              "name": "AlexaASKSkillAuthenticationConfigurationClientSecretRule",
+              "fullDescription": {
+                "text": "Alexa ASK Skill AuthenticationConfiguration ClientSecret must not be a plaintext string or a Ref to a NoEcho Parameter with a Default value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F75",
+              "name": "AlexaASKSkillAuthenticationConfigurationRefreshTokenRule",
+              "fullDescription": {
+                "text": "Alexa ASK Skill AuthenticationConfiguration RefreshToken must not be a plaintext string or a Ref to a NoEcho Parameter with a Default value."
+              }
+            },
+            {
+              "id": "CFN_NAG_W53",
+              "name": "AmazonMQBrokerEncryptionOptionsRule",
+              "fullDescription": {
+                "text": "AmazonMQ Broker should specify EncryptionOptions"
+              }
+            },
+            {
+              "id": "CFN_NAG_F52",
+              "name": "AmazonMQBrokerUsersPasswordRule",
+              "fullDescription": {
+                "text": "AmazonMQ Broker Users Password must not be a plaintext string or a Ref to a Parameter with a Default value. Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F77",
+              "name": "AmazonSimpleDBDomainRule",
+              "fullDescription": {
+                "text": "SimpleDB Domain should not be a declared resource"
+              }
+            },
+            {
+              "id": "CFN_NAG_F41",
+              "name": "AmplifyAppAccessTokenRule",
+              "fullDescription": {
+                "text": "Amplify App AccessToken must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F50",
+              "name": "AmplifyAppBasicAuthConfigPasswordRule",
+              "fullDescription": {
+                "text": "Amplify App BasicAuthConfig Password must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F58",
+              "name": "AmplifyAppOauthTokenRule",
+              "fullDescription": {
+                "text": "Amplify App OauthToken must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F60",
+              "name": "AmplifyBranchBasicAuthConfigPasswordRule",
+              "fullDescription": {
+                "text": "Amplify Branch BasicAuthConfig Password must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_W45",
+              "name": "ApiGatewayAccessLoggingRule",
+              "fullDescription": {
+                "text": "ApiGateway Deployment resource should have AccessLogSetting property configured when creating an API Stage itself (through specifying the StageName and StageDescription properties)."
+              }
+            },
+            {
+              "id": "CFN_NAG_W87",
+              "name": "ApiGatewayCacheEncryptedRule",
+              "fullDescription": {
+                "text": "ApiGateway Deployment should have cache data encryption enabled when caching is enabled in StageDescription properties"
+              }
+            },
+            {
+              "id": "CFN_NAG_W68",
+              "name": "ApiGatewayDeploymentUsagePlanRule",
+              "fullDescription": {
+                "text": "AWS::ApiGateway::Deployment resources should be associated with an AWS::ApiGateway::UsagePlan. "
+              }
+            },
+            {
+              "id": "CFN_NAG_W59",
+              "name": "ApiGatewayMethodAuthorizationTypeRule",
+              "fullDescription": {
+                "text": "AWS::ApiGateway::Method should not have AuthorizationType set to 'NONE' unless it is of HttpMethod: OPTIONS."
+              }
+            },
+            {
+              "id": "CFN_NAG_W62",
+              "name": "ApiGatewaySecurityPolicyRule",
+              "fullDescription": {
+                "text": "ApiGateway SecurityPolicy should use TLS 1.2"
+              }
+            },
+            {
+              "id": "CFN_NAG_W69",
+              "name": "ApiGatewayStageAccessLoggingRule",
+              "fullDescription": {
+                "text": "AWS::ApiGateway::Stage should have the AccessLogSetting property defined."
+              }
+            },
+            {
+              "id": "CFN_NAG_W64",
+              "name": "ApiGatewayStageUsagePlanRule",
+              "fullDescription": {
+                "text": "AWS::ApiGateway::Stage resources should be associated with an AWS::ApiGateway::UsagePlan. "
+              }
+            },
+            {
+              "id": "CFN_NAG_W46",
+              "name": "ApiGatewayV2AccessLoggingRule",
+              "fullDescription": {
+                "text": "ApiGateway V2 should have access logging configured"
+              }
+            },
+            {
+              "id": "CFN_NAG_F53",
+              "name": "AppStreamDirectoryConfigServiceAccountCredentialsAccountPasswordRule",
+              "fullDescription": {
+                "text": "AppStream DirectoryConfig ServiceAccountCredentials AccountPassword must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_W34",
+              "name": "BatchJobDefinitionContainerPropertiesPrivilegedRule",
+              "fullDescription": {
+                "text": "Batch Job Definition Container Properties should not have Privileged set to true"
+              }
+            },
+            {
+              "id": "CFN_NAG_W1",
+              "name": "CloudFormationAuthenticationRule",
+              "fullDescription": {
+                "text": "Specifying credentials in the template itself is probably not the safest thing"
+              }
+            },
+            {
+              "id": "CFN_NAG_W10",
+              "name": "CloudFrontDistributionAccessLoggingRule",
+              "fullDescription": {
+                "text": "CloudFront Distribution should enable access logging"
+              }
+            },
+            {
+              "id": "CFN_NAG_W70",
+              "name": "CloudfrontMinimumProtocolVersionRule",
+              "fullDescription": {
+                "text": "Cloudfront should use minimum protocol version TLS 1.2"
+              }
+            },
+            {
+              "id": "CFN_NAG_W32",
+              "name": "CodeBuildEncryptionKeyRule",
+              "fullDescription": {
+                "text": "CodeBuild project should specify an EncryptionKey value"
+              }
+            },
+            {
+              "id": "CFN_NAG_F69",
+              "name": "CodePipelineWebhookAuthenticationConfigurationSecretTokenRule",
+              "fullDescription": {
+                "text": "CodePipeline Webhook AuthenticationConfiguration SecretToken must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_W57",
+              "name": "CognitoIdentityPoolAllowUnauthenticatedIdentitiesRule",
+              "fullDescription": {
+                "text": "AWS::Cognito::IdentityPool AllowUnauthenticatedIdentities property should be false but CAN be true if proper restrictive IAM roles and permissions are established for unauthenticated users."
+              }
+            },
+            {
+              "id": "CFN_NAG_F78",
+              "name": "CognitoUserPoolMfaConfigurationOnorOptionalRule",
+              "fullDescription": {
+                "text": "AWS Cognito UserPool should have MfaConfiguration set to 'ON' (MUST be wrapped in quotes) or at least 'OPTIONAL'"
+              }
+            },
+            {
+              "id": "CFN_NAG_W83",
+              "name": "DAXClusterEncryptionRule",
+              "fullDescription": {
+                "text": "DynamoDB Accelerator (DAX) Cluster should have encryption enabled"
+              }
+            },
+            {
+              "id": "CFN_NAG_W81",
+              "name": "DLMLifecyclePolicyCrossRegionCopyEncryptionRule",
+              "fullDescription": {
+                "text": "DLM LifecyclePolicy PolicyDetails Actions CrossRegionCopy EncryptionConfiguration should enable Encryption"
+              }
+            },
+            {
+              "id": "CFN_NAG_F55",
+              "name": "DMSEndpointMongoDbSettingsPasswordRule",
+              "fullDescription": {
+                "text": "DMS Endpoint MongoDbSettings Password must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F37",
+              "name": "DMSEndpointPasswordRule",
+              "fullDescription": {
+                "text": "DMS Endpoint password must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_W91",
+              "name": "DMSReplicationInstanceNotPublicRule",
+              "fullDescription": {
+                "text": "Database Migration Service replication instances are public, property PubliclyAccessible should be set to false"
+              }
+            },
+            {
+              "id": "CFN_NAG_F36",
+              "name": "DirectoryServiceMicrosoftADPasswordRule",
+              "fullDescription": {
+                "text": "Directory Service Microsoft AD password must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager/ssm-secure value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F31",
+              "name": "DirectoryServiceSimpleADPasswordRule",
+              "fullDescription": {
+                "text": "DirectoryService SimpleAD password must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager/ssm-secure value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F70",
+              "name": "DocDBDBClusterMasterUserPasswordRule",
+              "fullDescription": {
+                "text": "DocDB DB Cluster master user password must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_W78",
+              "name": "DynamoDBBackupRule",
+              "fullDescription": {
+                "text": "DynamoDB table should have backup enabled, should be set using PointInTimeRecoveryEnabled"
+              }
+            },
+            {
+              "id": "CFN_NAG_W73",
+              "name": "DynamoDBBillingModeRule",
+              "fullDescription": {
+                "text": "DynamoDB table should have billing mode set to either PAY_PER_REQUEST or PROVISIONED"
+              }
+            },
+            {
+              "id": "CFN_NAG_W74",
+              "name": "DynamoDBEncryptionRule",
+              "fullDescription": {
+                "text": "DynamoDB table should have encryption enabled using a CMK stored in KMS"
+              }
+            },
+            {
+              "id": "CFN_NAG_F79",
+              "name": "EC2NetworkAclEntryDuplicateRule",
+              "fullDescription": {
+                "text": "A NetworkACL's rule numbers cannot be repeated unless one is egress and one is ingress."
+              }
+            },
+            {
+              "id": "CFN_NAG_W71",
+              "name": "EC2NetworkAclEntryIneffectiveDenyRule",
+              "fullDescription": {
+                "text": "NetworkACL Entry Deny rules should affect all CIDR ranges."
+              }
+            },
+            {
+              "id": "CFN_NAG_W72",
+              "name": "EC2NetworkAclEntryOverlappingPortsRule",
+              "fullDescription": {
+                "text": "NetworkACL Entries are reusing or overlapping ports which may create ineffective rules."
+              }
+            },
+            {
+              "id": "CFN_NAG_W67",
+              "name": "EC2NetworkAclEntryPortRangeRule",
+              "fullDescription": {
+                "text": "TCP/UDP protocol NetworkACL entries possibly should not allow all ports."
+              }
+            },
+            {
+              "id": "CFN_NAG_W66",
+              "name": "EC2NetworkAclEntryProtocolRule",
+              "fullDescription": {
+                "text": "To avoid opening all ports for Allow rules, EC2 NetworkACL Entry Protocol should be either 6 (for TCP), 17 (for UDP), 1 (for ICMP), or 58 (for ICMPv6, which must include an IPv6 CIDR block, ICMP type, and code)."
+              }
+            },
+            {
+              "id": "CFN_NAG_W33",
+              "name": "EC2SubnetMapPublicIpOnLaunchRule",
+              "fullDescription": {
+                "text": "EC2 Subnet should not have MapPublicIpOnLaunch set to true"
+              }
+            },
+            {
+              "id": "CFN_NAG_W79",
+              "name": "ECRRepositoryScanOnPushRule",
+              "fullDescription": {
+                "text": "ECR Repository should have ScanOnPush enabled"
+              }
+            },
+            {
+              "id": "CFN_NAG_F32",
+              "name": "EFSFileSystemEncryptedRule",
+              "fullDescription": {
+                "text": "EFS FileSystem should have encryption enabled"
+              }
+            },
+            {
+              "id": "CFN_NAG_W82",
+              "name": "EKSClusterEncryptionRule",
+              "fullDescription": {
+                "text": "EKS Cluster EncryptionConfig Provider should specify KeyArn to enable Encryption."
+              }
+            },
+            {
+              "id": "CFN_NAG_F63",
+              "name": "EMRClusterKerberosAttributesADDomainJoinPasswordRule",
+              "fullDescription": {
+                "text": "EMR Cluster KerberosAttributes AD Domain JoinPassword must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F64",
+              "name": "EMRClusterKerberosAttributesCrossRealmTrustPrincipalPasswordRule",
+              "fullDescription": {
+                "text": "EMR Cluster KerberosAttributes CrossRealmTrustPrincipal Password must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F65",
+              "name": "EMRClusterKerberosAttributesKdcAdminPasswordRule",
+              "fullDescription": {
+                "text": "EMR Cluster KerberosAttributes KdcAdmin Password must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_W63",
+              "name": "EMRClusterSecurityConfigurationAttachedRule",
+              "fullDescription": {
+                "text": "EMR Cluster should specify SecurityConfiguration."
+              }
+            },
+            {
+              "id": "CFN_NAG_W61",
+              "name": "EMRSecurityConfigurationEncryptionsEnabledAndConfiguredRule",
+              "fullDescription": {
+                "text": "EMR SecurityConfiguration should enable and properly configure encryption at rest and in transit."
+              }
+            },
+            {
+              "id": "CFN_NAG_W37",
+              "name": "EbsVolumeEncryptionKeyRule",
+              "fullDescription": {
+                "text": "EBS Volume should specify a KmsKeyId value"
+              }
+            },
+            {
+              "id": "CFN_NAG_F1",
+              "name": "EbsVolumeHasSseRule",
+              "fullDescription": {
+                "text": "EBS volume should have server-side encryption enabled"
+              }
+            },
+            {
+              "id": "CFN_NAG_F25",
+              "name": "ElastiCacheReplicationGroupAtRestEncryptionRule",
+              "fullDescription": {
+                "text": "ElastiCache ReplicationGroup should have encryption enabled for at rest"
+              }
+            },
+            {
+              "id": "CFN_NAG_F44",
+              "name": "ElastiCacheReplicationGroupAuthTokenRule",
+              "fullDescription": {
+                "text": "ElastiCache ReplicationGroup AuthToken must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager/ssm-secure value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F33",
+              "name": "ElastiCacheReplicationGroupTransitEncryptionRule",
+              "fullDescription": {
+                "text": "ElastiCache ReplicationGroup should have encryption enabled for in transit"
+              }
+            },
+            {
+              "id": "CFN_NAG_W26",
+              "name": "ElasticLoadBalancerAccessLoggingRule",
+              "fullDescription": {
+                "text": "Elastic Load Balancer should have access logging enabled"
+              }
+            },
+            {
+              "id": "CFN_NAG_W52",
+              "name": "ElasticLoadBalancerV2AccessLoggingRule",
+              "fullDescription": {
+                "text": "Elastic Load Balancer V2 should have access logging enabled"
+              }
+            },
+            {
+              "id": "CFN_NAG_W56",
+              "name": "ElasticLoadBalancerV2ListenerProtocolRule",
+              "fullDescription": {
+                "text": "Elastic Load Balancer V2 Listener Protocol should use HTTPS for ALBs"
+              }
+            },
+            {
+              "id": "CFN_NAG_W55",
+              "name": "ElasticLoadBalancerV2ListenerSslPolicyRule",
+              "fullDescription": {
+                "text": "Elastic Load Balancer V2 Listener SslPolicy should use TLS 1.2"
+              }
+            },
+            {
+              "id": "CFN_NAG_W54",
+              "name": "ElasticsearchDomainEncryptionAtRestOptionsRule",
+              "fullDescription": {
+                "text": "ElasticsearchcDomain should specify EncryptionAtRestOptions"
+              }
+            },
+            {
+              "id": "CFN_NAG_W90",
+              "name": "ElasticsearchDomainInsideVPCRule",
+              "fullDescription": {
+                "text": "ElasticsearchcDomain should be inside vpc, should specify VPCOptions"
+              }
+            },
+            {
+              "id": "CFN_NAG_W85",
+              "name": "ElasticsearchDomainNodeToNodeEncryptionOptionsRule",
+              "fullDescription": {
+                "text": "ElasticsearchcDomain should have NodeToNodeEncryptionOptions enabled"
+              }
+            },
+            {
+              "id": "CFN_NAG_W65",
+              "name": "GameLiftFleetInboundPortRangeRule",
+              "fullDescription": {
+                "text": "GameLift fleet EC2InboundPermissions found with port range instead of just a single port"
+              }
+            },
+            {
+              "id": "CFN_NAG_F51",
+              "name": "IAMUserLoginProfilePasswordRule",
+              "fullDescription": {
+                "text": "IAM User LoginProfile Password must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_W17",
+              "name": "IamManagedPolicyNotActionRule",
+              "fullDescription": {
+                "text": "IAM managed policy should not allow Allow+NotAction"
+              }
+            },
+            {
+              "id": "CFN_NAG_W23",
+              "name": "IamManagedPolicyNotResourceRule",
+              "fullDescription": {
+                "text": "IAM managed policy should not allow Allow+NotResource"
+              }
+            },
+            {
+              "id": "CFN_NAG_F40",
+              "name": "IamManagedPolicyPassRoleWildcardResourceRule",
+              "fullDescription": {
+                "text": "IAM managed policy should not allow a * resource with PassRole action"
+              }
+            },
+            {
+              "id": "CFN_NAG_F5",
+              "name": "IamManagedPolicyWildcardActionRule",
+              "fullDescription": {
+                "text": "IAM managed policy should not allow * action"
+              }
+            },
+            {
+              "id": "CFN_NAG_W13",
+              "name": "IamManagedPolicyWildcardResourceRule",
+              "fullDescription": {
+                "text": "IAM managed policy should not allow * resource"
+              }
+            },
+            {
+              "id": "CFN_NAG_W16",
+              "name": "IamPolicyNotActionRule",
+              "fullDescription": {
+                "text": "IAM policy should not allow Allow+NotAction"
+              }
+            },
+            {
+              "id": "CFN_NAG_W22",
+              "name": "IamPolicyNotResourceRule",
+              "fullDescription": {
+                "text": "IAM policy should not allow Allow+NotResource"
+              }
+            },
+            {
+              "id": "CFN_NAG_F39",
+              "name": "IamPolicyPassRoleWildcardResourceRule",
+              "fullDescription": {
+                "text": "IAM policy should not allow * resource with PassRole action"
+              }
+            },
+            {
+              "id": "CFN_NAG_F4",
+              "name": "IamPolicyWildcardActionRule",
+              "fullDescription": {
+                "text": "IAM policy should not allow * action"
+              }
+            },
+            {
+              "id": "CFN_NAG_W12",
+              "name": "IamPolicyWildcardResourceRule",
+              "fullDescription": {
+                "text": "IAM policy should not allow * resource"
+              }
+            },
+            {
+              "id": "CFN_NAG_W43",
+              "name": "IamRoleAdministratorAccessPolicyRule",
+              "fullDescription": {
+                "text": "IAM role should not have AdministratorAccess policy"
+              }
+            },
+            {
+              "id": "CFN_NAG_W44",
+              "name": "IamRoleElevatedManagedPolicyRule",
+              "fullDescription": {
+                "text": "IAM role should not have Elevated Managed policy"
+              }
+            },
+            {
+              "id": "CFN_NAG_W15",
+              "name": "IamRoleNotActionOnPermissionsPolicyRule",
+              "fullDescription": {
+                "text": "IAM role should not allow Allow+NotAction"
+              }
+            },
+            {
+              "id": "CFN_NAG_W14",
+              "name": "IamRoleNotActionOnTrustPolicyRule",
+              "fullDescription": {
+                "text": "IAM role should not allow Allow+NotAction on trust permissions"
+              }
+            },
+            {
+              "id": "CFN_NAG_F6",
+              "name": "IamRoleNotPrincipalOnTrustPolicyRule",
+              "fullDescription": {
+                "text": "IAM role should not allow Allow+NotPrincipal in its trust policy"
+              }
+            },
+            {
+              "id": "CFN_NAG_W21",
+              "name": "IamRoleNotResourceOnPermissionsPolicyRule",
+              "fullDescription": {
+                "text": "IAM role should not allow Allow+NotResource"
+              }
+            },
+            {
+              "id": "CFN_NAG_F38",
+              "name": "IamRolePassRoleWildcardResourceRule",
+              "fullDescription": {
+                "text": "IAM role should not allow * resource with PassRole action on its permissions policy"
+              }
+            },
+            {
+              "id": "CFN_NAG_F3",
+              "name": "IamRoleWildcardActionOnPermissionsPolicyRule",
+              "fullDescription": {
+                "text": "IAM role should not allow * action on its permissions policy"
+              }
+            },
+            {
+              "id": "CFN_NAG_F2",
+              "name": "IamRoleWildcardActionOnTrustPolicyRule",
+              "fullDescription": {
+                "text": "IAM role should not allow * action on its trust policy"
+              }
+            },
+            {
+              "id": "CFN_NAG_W11",
+              "name": "IamRoleWildcardResourceOnPermissionsPolicyRule",
+              "fullDescription": {
+                "text": "IAM role should not allow * resource on its permissions policy"
+              }
+            },
+            {
+              "id": "CFN_NAG_W50",
+              "name": "IamUserLoginProfilePasswordResetRule",
+              "fullDescription": {
+                "text": "IAM User Login Profile should exist and have PasswordResetRequired property set to true"
+              }
+            },
+            {
+              "id": "CFN_NAG_W38",
+              "name": "IotPolicyWildcardActionRule",
+              "fullDescription": {
+                "text": "IOT policy should not allow * action"
+              }
+            },
+            {
+              "id": "CFN_NAG_W39",
+              "name": "IotPolicyWildcardResourceRule",
+              "fullDescription": {
+                "text": "IoT policy should not allow * resource"
+              }
+            },
+            {
+              "id": "CFN_NAG_F19",
+              "name": "KMSKeyRotationRule",
+              "fullDescription": {
+                "text": "EnableKeyRotation should not be false or absent on KMS::Key resource"
+              }
+            },
+            {
+              "id": "CFN_NAG_F76",
+              "name": "KMSKeyWildcardPrincipalRule",
+              "fullDescription": {
+                "text": "KMS key should not allow * principal (https://docs.aws.amazon.com/kms/latest/developerguide/key-policies.html)"
+              }
+            },
+            {
+              "id": "CFN_NAG_W80",
+              "name": "KendraIndexServerSideEncryptionConfigurationKmsKeyIdRule",
+              "fullDescription": {
+                "text": "Kendra Index ServerSideEncryptionConfiguration should specify a KmsKeyId value."
+              }
+            },
+            {
+              "id": "CFN_NAG_W88",
+              "name": "KinesisFirehoseDeliveryStreamEncryptionRule",
+              "fullDescription": {
+                "text": "Kinesis Firehose DeliveryStream of type DirectPut should specify SSE."
+              }
+            },
+            {
+              "id": "CFN_NAG_F66",
+              "name": "KinesisFirehoseDeliveryStreamRedshiftDestinationConfigurationPasswordRule",
+              "fullDescription": {
+                "text": "Kinesis Firehose DeliveryStream RedshiftDestinationConfiguration Password must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager/ssm-secure value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F68",
+              "name": "KinesisFirehoseDeliveryStreamSplunkDestinationConfigurationHECTokenRule",
+              "fullDescription": {
+                "text": "Kinesis Firehose DeliveryStream SplunkDestinationConfiguration HECToken must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_W49",
+              "name": "KinesisStreamStreamEncryptionRule",
+              "fullDescription": {
+                "text": "Kinesis Stream should specify StreamEncryption. EncryptionType should be KMS and specify KMS Key Id."
+              }
+            },
+            {
+              "id": "CFN_NAG_W58",
+              "name": "LambdaFunctionCloudWatchLogsRule",
+              "fullDescription": {
+                "text": "Lambda functions require permission to write CloudWatch Logs"
+              }
+            },
+            {
+              "id": "CFN_NAG_W89",
+              "name": "LambdaFunctionInsideVPCRule",
+              "fullDescription": {
+                "text": "Lambda functions should be deployed inside a VPC"
+              }
+            },
+            {
+              "id": "CFN_NAG_W92",
+              "name": "LambdaFunctionReservedConcurrentExecutionsRule",
+              "fullDescription": {
+                "text": "Lambda functions should define ReservedConcurrentExecutions to reserve simultaneous executions"
+              }
+            },
+            {
+              "id": "CFN_NAG_F45",
+              "name": "LambdaPermissionEventSourceTokenRule",
+              "fullDescription": {
+                "text": "Lambda Permission EventSourceToken must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_W24",
+              "name": "LambdaPermissionInvokeFunctionActionRule",
+              "fullDescription": {
+                "text": "Lambda permission beside InvokeFunction might not be what you want? Not sure!?"
+              }
+            },
+            {
+              "id": "CFN_NAG_F13",
+              "name": "LambdaPermissionWildcardPrincipalRule",
+              "fullDescription": {
+                "text": "Lambda permission principal should not be wildcard"
+              }
+            },
+            {
+              "id": "CFN_NAG_W84",
+              "name": "LogsLogGroupEncryptedRule",
+              "fullDescription": {
+                "text": "CloudWatchLogs LogGroup should specify a KMS Key Id to encrypt the log data"
+              }
+            },
+            {
+              "id": "CFN_NAG_W86",
+              "name": "LogsLogGroupRetentionRule",
+              "fullDescription": {
+                "text": "CloudWatchLogs LogGroup should specify RetentionInDays to expire the log data"
+              }
+            },
+            {
+              "id": "CFN_NAG_F71",
+              "name": "ManagedBlockchainMemberMemberFabricConfigurationAdminPasswordRule",
+              "fullDescription": {
+                "text": "ManagedBlockchain Member MemberFabricConfiguration AdminPasswordRule must not be a plaintext string or a Ref to a NoEcho Parameter with a Default value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F12",
+              "name": "ManagedPolicyOnUserRule",
+              "fullDescription": {
+                "text": "IAM managed policy should not apply directly to users.  Should be on group"
+              }
+            },
+            {
+              "id": "CFN_NAG_W51",
+              "name": "MissingBucketPolicyRule",
+              "fullDescription": {
+                "text": "S3 bucket should likely have a bucket policy"
+              }
+            },
+            {
+              "id": "CFN_NAG_F30",
+              "name": "NeptuneDBClusterStorageEncryptedRule",
+              "fullDescription": {
+                "text": "Neptune database cluster storage should have encryption enabled"
+              }
+            },
+            {
+              "id": "CFN_NAG_F67",
+              "name": "OpsWorksAppAppSourcePasswordRule",
+              "fullDescription": {
+                "text": "OpsWorks App AppSource Password must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager/ssm-secure value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F61",
+              "name": "OpsWorksAppSslConfigurationPrivateKeyRule",
+              "fullDescription": {
+                "text": "OpsWorks App SslConfiguration PrivateKey must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F62",
+              "name": "OpsWorksStackCustomCookbooksSourcePasswordRule",
+              "fullDescription": {
+                "text": "OpsWorks Stack CustomCookbooksSource Password must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager/ssm-secure value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F54",
+              "name": "OpsWorksStackRdsDbInstancesDbPasswordRule",
+              "fullDescription": {
+                "text": "OpsWorks Stack RDS DbInstance DbPassword must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager/ssm-secure value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F57",
+              "name": "PinpointAPNSChannelPrivateKeyRule",
+              "fullDescription": {
+                "text": "Pinpoint APNSChannel PrivateKey must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F56",
+              "name": "PinpointAPNSChannelTokenKeyRule",
+              "fullDescription": {
+                "text": "Pinpoint APNSChannel TokenKey must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F42",
+              "name": "PinpointAPNSSandboxChannelPrivateKeyRule",
+              "fullDescription": {
+                "text": "Pinpoint APNSSandboxChannel PrivateKey must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F43",
+              "name": "PinpointAPNSSandboxChannelTokenKeyRule",
+              "fullDescription": {
+                "text": "Pinpoint APNSSandboxChannel TokenKey must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F48",
+              "name": "PinpointAPNSVoipChannelPrivateKeyRule",
+              "fullDescription": {
+                "text": "Pinpoint APNSVoipChannel PrivateKey must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F49",
+              "name": "PinpointAPNSVoipChannelTokenKeyRule",
+              "fullDescription": {
+                "text": "Pinpoint APNSChannel TokenKey must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F46",
+              "name": "PinpointAPNSVoipSandboxChannelPrivateKeyRule",
+              "fullDescription": {
+                "text": "Pinpoint APNSVoipSandboxChannel PrivateKey must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F47",
+              "name": "PinpointAPNSVoipSandboxChannelTokenKeyRule",
+              "fullDescription": {
+                "text": "Pinpoint APNSVoipSandboxChannel TokenKey must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F11",
+              "name": "PolicyOnUserRule",
+              "fullDescription": {
+                "text": "IAM policy should not apply directly to users.  Should be on group"
+              }
+            },
+            {
+              "id": "CFN_NAG_F34",
+              "name": "RDSDBClusterMasterUserPasswordRule",
+              "fullDescription": {
+                "text": "RDS DB Cluster master user password must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager/ssm-secure value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F26",
+              "name": "RDSDBClusterStorageEncryptedRule",
+              "fullDescription": {
+                "text": "RDS DBCluster should have StorageEncrypted enabled"
+              }
+            },
+            {
+              "id": "CFN_NAG_F23",
+              "name": "RDSDBInstanceMasterUserPasswordRule",
+              "fullDescription": {
+                "text": "RDS instance master user password must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager/ssm-secure value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F24",
+              "name": "RDSDBInstanceMasterUsernameRule",
+              "fullDescription": {
+                "text": "RDS instance master username must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager value."
+              }
+            },
+            {
+              "id": "CFN_NAG_F27",
+              "name": "RDSDBInstanceStorageEncryptedRule",
+              "fullDescription": {
+                "text": "RDS DBInstance should have StorageEncrypted enabled"
+              }
+            },
+            {
+              "id": "CFN_NAG_W75",
+              "name": "RDSInstanceBackupRetentionPeriodRule",
+              "fullDescription": {
+                "text": "RDS instance should have backup retention period greater than 0"
+              }
+            },
+            {
+              "id": "CFN_NAG_F80",
+              "name": "RDSInstanceDeletionProtectionRule",
+              "fullDescription": {
+                "text": "RDS instance should have deletion protection enabled"
+              }
+            },
+            {
+              "id": "CFN_NAG_F22",
+              "name": "RDSInstancePubliclyAccessibleRule",
+              "fullDescription": {
+                "text": "RDS instance should not be publicly accessible"
+              }
+            },
+            {
+              "id": "CFN_NAG_F28",
+              "name": "RedshiftClusterEncryptedRule",
+              "fullDescription": {
+                "text": "Redshift Cluster should have encryption enabled"
+              }
+            },
+            {
+              "id": "CFN_NAG_F35",
+              "name": "RedshiftClusterMasterUserPasswordRule",
+              "fullDescription": {
+                "text": "Redshift Cluster master user password must not be a plaintext string or a Ref to a Parameter with a Default value.  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference to a secretsmanager/ssm-secure value."
+              }
+            },
+            {
+              "id": "CFN_NAG_W28",
+              "name": "ResourceWithExplicitNameRule",
+              "fullDescription": {
+                "text": "Resource found with an explicit name, this disallows updates that require replacement of this resource"
+              }
+            },
+            {
+              "id": "CFN_NAG_W35",
+              "name": "S3BucketAccessLoggingRule",
+              "fullDescription": {
+                "text": "S3 Bucket should have access logging configured"
+              }
+            },
+            {
+              "id": "CFN_NAG_W41",
+              "name": "S3BucketEncryptionSetRule",
+              "fullDescription": {
+                "text": "S3 Bucket should have encryption option set"
+              }
+            },
+            {
+              "id": "CFN_NAG_W20",
+              "name": "S3BucketPolicyNotActionRule",
+              "fullDescription": {
+                "text": "S3 Bucket policy should not allow Allow+NotAction"
+              }
+            },
+            {
+              "id": "CFN_NAG_F9",
+              "name": "S3BucketPolicyNotPrincipalRule",
+              "fullDescription": {
+                "text": "S3 Bucket policy should not allow Allow+NotPrincipal"
+              }
+            },
+            {
+              "id": "CFN_NAG_F15",
+              "name": "S3BucketPolicyWildcardActionRule",
+              "fullDescription": {
+                "text": "S3 Bucket policy should not allow * action"
+              }
+            },
+            {
+              "id": "CFN_NAG_F16",
+              "name": "S3BucketPolicyWildcardPrincipalRule",
+              "fullDescription": {
+                "text": "S3 Bucket policy should not allow * principal"
+              }
+            },
+            {
+              "id": "CFN_NAG_W31",
+              "name": "S3BucketPublicReadAclRule",
+              "fullDescription": {
+                "text": "S3 Bucket likely should not have a public read acl"
+              }
+            },
+            {
+              "id": "CFN_NAG_F14",
+              "name": "S3BucketPublicReadWriteAclRule",
+              "fullDescription": {
+                "text": "S3 Bucket should not have a public read-write acl"
+              }
+            },
+            {
+              "id": "CFN_NAG_W76",
+              "name": "SPCMRule",
+              "fullDescription": {
+                "text": "SPCM for IAM policy document is higher than 25"
+              }
+            },
+            {
+              "id": "CFN_NAG_W1200",
+              "name": "SageMakerEndpointConfigKmsKeyIdRule",
+              "fullDescription": {
+                "text": "SageMaker EndpointConfig should have a KmsKeyId property set."
+              }
+            },
+            {
+              "id": "CFN_NAG_W1201",
+              "name": "SageMakerNotebookInstanceKmsKeyIdRule",
+              "fullDescription": {
+                "text": "SageMaker NotebookInstance should have a KmsKeyId property set."
+              }
+            },
+            {
+              "id": "CFN_NAG_W77",
+              "name": "SecretsManagerSecretKmsKeyIdRule",
+              "fullDescription": {
+                "text": "Secrets Manager Secret should explicitly specify KmsKeyId. Besides control of the key this will allow the secret to be shared cross-account"
+              }
+            },
+            {
+              "id": "CFN_NAG_W40",
+              "name": "SecurityGroupEgressAllProtocolsRule",
+              "fullDescription": {
+                "text": "Security Groups egress with an IpProtocol of -1 found"
+              }
+            },
+            {
+              "id": "CFN_NAG_W5",
+              "name": "SecurityGroupEgressOpenToWorldRule",
+              "fullDescription": {
+                "text": "Security Groups found with cidr open to world on egress"
+              }
+            },
+            {
+              "id": "CFN_NAG_W29",
+              "name": "SecurityGroupEgressPortRangeRule",
+              "fullDescription": {
+                "text": "Security Groups found egress with port range instead of just a single port"
+              }
+            },
+            {
+              "id": "CFN_NAG_W42",
+              "name": "SecurityGroupIngressAllProtocolsRule",
+              "fullDescription": {
+                "text": "Security Groups ingress with an ipProtocol of -1 found "
+              }
+            },
+            {
+              "id": "CFN_NAG_W9",
+              "name": "SecurityGroupIngressCidrNon32Rule",
+              "fullDescription": {
+                "text": "Security Groups found with ingress cidr that is not /32"
+              }
+            },
+            {
+              "id": "CFN_NAG_W2",
+              "name": "SecurityGroupIngressOpenToWorldRule",
+              "fullDescription": {
+                "text": "Security Groups found with cidr open to world on ingress.  This should never be true on instance.  Permissible on ELB"
+              }
+            },
+            {
+              "id": "CFN_NAG_W27",
+              "name": "SecurityGroupIngressPortRangeRule",
+              "fullDescription": {
+                "text": "Security Groups found ingress with port range instead of just a single port"
+              }
+            },
+            {
+              "id": "CFN_NAG_F1000",
+              "name": "SecurityGroupMissingEgressRule",
+              "fullDescription": {
+                "text": "Missing egress rule means all traffic is allowed outbound.  Make this explicit if it is desired configuration"
+              }
+            },
+            {
+              "id": "CFN_NAG_W36",
+              "name": "SecurityGroupRuleDescriptionRule",
+              "fullDescription": {
+                "text": "Security group rules without a description obscure their purpose and may lead to bad practices in ensuring they only allow traffic from the ports and sources/destinations required."
+              }
+            },
+            {
+              "id": "CFN_NAG_W47",
+              "name": "SnsTopicKmsMasterKeyIdRule",
+              "fullDescription": {
+                "text": "SNS Topic should specify KmsMasterKeyId property"
+              }
+            },
+            {
+              "id": "CFN_NAG_W19",
+              "name": "SnsTopicPolicyNotActionRule",
+              "fullDescription": {
+                "text": "SNS Topic policy should not allow Allow+NotAction"
+              }
+            },
+            {
+              "id": "CFN_NAG_F8",
+              "name": "SnsTopicPolicyNotPrincipalRule",
+              "fullDescription": {
+                "text": "SNS Topic policy should not allow Allow+NotPrincipal"
+              }
+            },
+            {
+              "id": "CFN_NAG_F18",
+              "name": "SnsTopicPolicyWildcardPrincipalRule",
+              "fullDescription": {
+                "text": "SNS topic policy should not allow * principal"
+              }
+            },
+            {
+              "id": "CFN_NAG_W48",
+              "name": "SqsQueueKmsMasterKeyIdRule",
+              "fullDescription": {
+                "text": "SQS Queue should specify KmsMasterKeyId property"
+              }
+            },
+            {
+              "id": "CFN_NAG_W18",
+              "name": "SqsQueuePolicyNotActionRule",
+              "fullDescription": {
+                "text": "SQS Queue policy should not allow Allow+NotAction"
+              }
+            },
+            {
+              "id": "CFN_NAG_F7",
+              "name": "SqsQueuePolicyNotPrincipalRule",
+              "fullDescription": {
+                "text": "SQS Queue policy should not allow Allow+NotPrincipal"
+              }
+            },
+            {
+              "id": "CFN_NAG_F20",
+              "name": "SqsQueuePolicyWildcardActionRule",
+              "fullDescription": {
+                "text": "SQS Queue policy should not allow * action"
+              }
+            },
+            {
+              "id": "CFN_NAG_F21",
+              "name": "SqsQueuePolicyWildcardPrincipalRule",
+              "fullDescription": {
+                "text": "SQS Queue policy should not allow * principal"
+              }
+            },
+            {
+              "id": "CFN_NAG_F10",
+              "name": "UserHasInlinePolicyRule",
+              "fullDescription": {
+                "text": "IAM user should not have any inline policies.  Should be centralized Policy object on group"
+              }
+            },
+            {
+              "id": "CFN_NAG_F2000",
+              "name": "UserMissingGroupRule",
+              "fullDescription": {
+                "text": "User is not assigned to a group"
+              }
+            },
+            {
+              "id": "CFN_NAG_W60",
+              "name": "VpcHasFlowLogRule",
+              "fullDescription": {
+                "text": "VPC should have a flow log attached"
+              }
+            },
+            {
+              "id": "CFN_NAG_F665",
+              "name": "WafWebAclDefaultActionRule",
+              "fullDescription": {
+                "text": "WebAcl DefaultAction should not be ALLOW"
+              }
+            },
+            {
+              "id": "CFN_NAG_F29",
+              "name": "WorkspacesWorkspaceEncryptionRule",
+              "fullDescription": {
+                "text": "Workspace should have encryption enabled"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "CFN_NAG_W51",
+          "level": "warning",
+          "message": {
+            "text": "S3 bucket should likely have a bucket policy"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "in/m0_fixture_two_buckets.yaml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 8
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "M0FixtureBucketA"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ruleId": "CFN_NAG_W51",
+          "level": "warning",
+          "message": {
+            "text": "S3 bucket should likely have a bucket policy"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "in/m0_fixture_two_buckets.yaml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 12
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "M0FixtureBucketB"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ruleId": "CFN_NAG_W35",
+          "level": "warning",
+          "message": {
+            "text": "S3 Bucket should have access logging configured"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "in/m0_fixture_two_buckets.yaml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 8
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "M0FixtureBucketA"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ruleId": "CFN_NAG_W35",
+          "level": "warning",
+          "message": {
+            "text": "S3 Bucket should have access logging configured"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "in/m0_fixture_two_buckets.yaml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 12
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "M0FixtureBucketB"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ruleId": "CFN_NAG_W41",
+          "level": "warning",
+          "message": {
+            "text": "S3 Bucket should have encryption option set"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "in/m0_fixture_two_buckets.yaml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 8
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "M0FixtureBucketA"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ruleId": "CFN_NAG_W41",
+          "level": "warning",
+          "message": {
+            "text": "S3 Bucket should have encryption option set"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "in/m0_fixture_two_buckets.yaml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 12
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "M0FixtureBucketB"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

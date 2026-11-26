@@ -43,7 +43,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple, Union
 
-from automated_security_helper.utils.frame_text import unwire, wire
+from automated_security_helper.utils.frame_text import unwire_cell, wire
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.undecodable_text import (
     path_in_record_form,
@@ -473,14 +473,23 @@ def extract_root_advisories(properties: Any) -> List[Dict[str, str]]:
 # package or resource identity (a suppression's package and resource scope) takes.
 # Text goes into a String column through ``frame_text.wire``, so a name or a path
 # that carries a lone surrogate is held, not refused, and comes back unchanged.
+#
+# The column names are the one vocabulary these values already have everywhere
+# else: the SARIF property keys above, which are also the FlatVulnerability
+# field names these values fill (package_name/package_version/package_path and
+# resource_id/resource_type). A column that projects a model field bears that
+# field's name, so a join on these columns reads the same as the model it
+# joins against (tests/unit/utils/test_package_identity_frames.py pins the
+# correspondence).
 # ---------------------------------------------------------------------------
 
-_PACKAGE_COLUMNS = ("name", "version", "path")
+_PACKAGE_COLUMNS = (PACKAGE_NAME_KEY, PACKAGE_VERSION_KEY, PACKAGE_PATH_KEY)
 _RESOURCE_COLUMNS = ("resource_id", "resource_type")
 
 
 def package_identity_frame(properties: Iterable[Any]) -> "pl.DataFrame":
-    """One row per record of *properties*: ``name``, ``version``, ``path``.
+    """One row per record of *properties*: ``package_name``, ``package_version``,
+    ``package_path``.
 
     A row is what :func:`extract_package_identity` reads from that record, so a
     key the record does not carry (or carries as something other than a
@@ -520,9 +529,9 @@ def identity_properties_from_frame(frame: "pl.DataFrame") -> List[Dict[str, str]
     for name, version, path in frame.select(*_PACKAGE_COLUMNS).iter_rows():
         out.append(
             identity_properties(
-                unwire(name) if name is not None else None,
-                unwire(version) if version is not None else None,
-                unwire(path) if path is not None else None,
+                unwire_cell(name),
+                unwire_cell(version),
+                unwire_cell(path),
             )
         )
     return out
@@ -533,8 +542,8 @@ def package_identities_from_frame(
 ) -> List[Tuple[Optional[str], Optional[str], Optional[str]]]:
     """The ``(name, version, path)`` tuples a :func:`package_identity_frame` holds."""
     return [
-        tuple(unwire(cell) if cell is not None else None for cell in row)  # type: ignore[misc]
-        for row in frame.select(*_PACKAGE_COLUMNS).iter_rows()
+        (unwire_cell(name), unwire_cell(version), unwire_cell(path))
+        for name, version, path in frame.select(*_PACKAGE_COLUMNS).iter_rows()
     ]
 
 
@@ -543,6 +552,6 @@ def resource_identities_from_frame(
 ) -> List[Tuple[Optional[str], Optional[str]]]:
     """The ``(resource_id, resource_type)`` tuples a :func:`resource_identity_frame` holds."""
     return [
-        tuple(unwire(cell) if cell is not None else None for cell in row)  # type: ignore[misc]
-        for row in frame.select(*_RESOURCE_COLUMNS).iter_rows()
+        (unwire_cell(resource_id), unwire_cell(resource_type))
+        for resource_id, resource_type in frame.select(*_RESOURCE_COLUMNS).iter_rows()
     ]

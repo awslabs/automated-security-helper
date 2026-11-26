@@ -1,0 +1,14 @@
+# Benign test fixture for the facets program (never deployed). Two buckets with
+# the same violations, to show whether cfn_nag renders one SARIF result per
+# logical resource id or one result carrying several ids.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: ASH facets fixture - two buckets flagged by the same rules.
+Resources:
+  M0FixtureBucketA:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: ash-m0-facets-fixture-bucket-a
+  M0FixtureBucketB:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: ash-m0-facets-fixture-bucket-b

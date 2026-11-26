@@ -209,7 +209,7 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
         # every project, and projects in a workspace are independently
         # configured -- so the consumer's answer would differ from the exit code
         # for the same run, with no rule for which is authoritative.
-        if is_workspace_scan(model):
+        if is_workspace_scan(model) and model.workspace is not None:
             report_data["workspace"] = model.workspace.model_dump(mode="json")
 
         # Return the JSON string

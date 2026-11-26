@@ -27,9 +27,19 @@ artifact, and does what a single whole-suite "Run PyTest" step did in one proces
    checkout's own ``automated_security_helper/``, so one file is one entry in the
    combined data, and a path that matched no alias would fail ``coverage report`` with
    "No source for code" instead of being counted as a second file.
-3. Print the Markdown table to the step summary when asked.
+3. Print the Markdown table to the step summary when asked, followed by each OS's own
+   combined total. The per-OS totals inform and gate nothing.
 4. ``coverage report --fail-under=<threshold>`` on the combined data, whose exit status is
    this script's. This is the one place the threshold is applied.
+
+The gate is weaker than the four per-OS gates it replaced. Each of those held its own
+operating system to the threshold, "where the platform specific code paths differ". The
+union of every set is never lower than any one set's figure, so it passes everything the
+per-OS gates passed and also a run in which one platform lost a large share of its
+tests (a Windows-only ``skipif`` that skips 40% of the suite still leaves the union
+above the threshold). The union is the gate on purpose, because it is the one figure
+that does not depend on how the tier is sharded. The per-OS totals in the step summary
+are how a one-platform drop is seen; a lower per-OS floor is the way to gate it.
 
 A set is named by the artifact name up to the shard suffix, which the run-unit-tests
 action builds from the operating system, the architecture, the Python version and the
@@ -58,9 +68,11 @@ Exit codes: 0 success, 1 shards missing or malformed, 2 coverage below the thres
 from __future__ import annotations
 
 import argparse
+import glob
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 DATA_FILE = "coverage.data"
@@ -85,10 +97,9 @@ def artifact_prefix(
     label = ARCH_LABELS.get(runner_arch)
     if label is None:
         raise ValueError(
-            f"RUNNER_ARCH is {runner_arch!r}, which is not one of {sorted(ARCH_LABELS)}"
+            f"runner arch {runner_arch!r} is not one of {sorted(ARCH_LABELS)}"
         )
-    prefix = f"test-results-{os_name}-{label}-py{python_version}"
-    return prefix if marker is None else f"{prefix}-{marker}"
+    return set_prefix(os_name, label, python_version, marker)
 
 
 def check_shards(names: list[str], prefix: str) -> list[str]:
@@ -200,6 +211,37 @@ def self_test() -> list[str]:
             failures.append(
                 f"{label}: expected {'problems' if should_fail else 'none'}, got {problems}"
             )
+    # discover_labels is the path the gate takes; each case plants directories and reads
+    # back what it finds, including two image names where one is a dash-prefix of the other.
+    with tempfile.TemporaryDirectory() as scratch:
+        root = Path(scratch)
+        for name in (
+            "test-results-ubuntu-24.04-x86_64-py3.12-unit-shard1of1",
+            "test-results-ubuntu-24.04-arm-arm64-py3.12-unit-shard1of1",
+            "test-results-macos-15-arm64-py3.12-unit-shard1of2",
+            "test-results-macos-15-intel-x86_64-py3.12-unit-shard1of2",
+            "test-results-windows-latest-x86_64-py3.12-unit-shard1of1",
+            "test-results-windows-latest-arm64-py3.12-unit-shard1of1",
+            "test-results-ubuntu-latest-x86_64-py3.12-unit-shardjunk",
+        ):
+            (root / name).mkdir()
+        label_cases = [
+            ("a dash-prefix image", "ubuntu-24.04", "3.12", (["x86_64"], [])),
+            ("the longer image", "ubuntu-24.04-arm", "3.12", (["arm64"], [])),
+            ("a dash-prefix macOS image", "macos-15", "3.12", (["arm64"], [])),
+            ("the longer macOS image", "macos-15-intel", "3.12", (["x86_64"], [])),
+            ("no artifact", "ubuntu-24.04", "3.10", ([], [])),
+        ]
+        for label, os_name, version, want in label_cases:
+            got = discover_labels(root, os_name, version, "unit")
+            if got != want:
+                failures.append(f"discover_labels, {label}: {got}, not {want}")
+        _, two_labels = discover_labels(root, "windows-latest", "3.12", "unit")
+        if len(two_labels) != 1:
+            failures.append(f"discover_labels, two labels for one set: {two_labels}")
+        _, stray = discover_labels(root, "ubuntu-latest", "3.12", "unit")
+        if len(stray) != 1:
+            failures.append(f"discover_labels, a stray name: {stray}")
     for text, want in [
         ("3.12", ["3.12"]),
         ("3.10, 3.12  3.14", ["3.10", "3.12", "3.14"]),
@@ -223,9 +265,15 @@ def find_shard_dirs(results: Path, prefix: str) -> list[tuple[str, Path]]:
     return [(p.name, p) for p in dirs]
 
 
-def set_prefix(os_name: str, label: str, python_version: str, marker: str) -> str:
-    """The artifact name a set of this OS, architecture label, Python and tier shares."""
-    return f"test-results-{os_name}-{label}-py{python_version}-{marker}"
+def set_prefix(
+    os_name: str, label: str, python_version: str, marker: str | None = None
+) -> str:
+    """The one place an artifact name is built, up to the shard suffix.
+
+    Without ``marker`` the name ends at the Python version.
+    """
+    prefix = f"test-results-{os_name}-{label}-py{python_version}"
+    return prefix if marker is None else f"{prefix}-{marker}"
 
 
 def discover_labels(
@@ -234,27 +282,28 @@ def discover_labels(
     """The architecture labels one (OS, Python, tier) set was uploaded under, and problems.
 
     The label sits between the OS and the Python version and is the runner's own
-    statement (``runner.arch``), so it is read from the names found, not named here.
-    A directory under the set's glob whose name does not fit the shape is a problem.
+    statement (``runner.arch``), so it is read from the names found, not named here:
+    one glob per known label, each with the label spelled out. A wildcard in the label's
+    place would let one OS image's glob match another's artifacts when one image name is
+    a dash-prefix of the other (``ubuntu-24.04`` and ``ubuntu-24.04-arm``, ``macos-15``
+    and ``macos-15-intel``). A directory under a glob whose name is not the set's prefix
+    and a shard suffix is a problem.
     """
     labels: set[str] = set()
     problems: list[str] = []
-    known = "|".join(re.escape(label) for label in sorted(set(ARCH_LABELS.values())))
-    pattern = re.compile(
-        rf"test-results-{re.escape(os_name)}-({known})"
-        rf"-py{re.escape(python_version)}-{re.escape(marker)}"
-    )
-    glob = f"test-results-{os_name}-*-py{python_version}-{marker}-shard*"
-    for path in sorted(p for p in results.glob(glob) if p.is_dir()):
-        suffix = _SHARD_SUFFIX.search(path.name)
-        stem = path.name[: suffix.start()] if suffix else path.name
-        match = pattern.fullmatch(stem)
-        if match is None:
-            problems.append(
-                f"{path.name!r} does not fit the artifact name of a unit set"
-            )
-        else:
-            labels.add(match.group(1))
+    for label in sorted(set(ARCH_LABELS.values())):
+        prefix = set_prefix(os_name, label, python_version, marker)
+        for path in sorted(
+            p for p in results.glob(f"{glob.escape(prefix)}-shard*") if p.is_dir()
+        ):
+            suffix = _SHARD_SUFFIX.search(path.name)
+            stem = path.name[: suffix.start()] if suffix else path.name
+            if stem != prefix:
+                problems.append(
+                    f"{path.name!r} does not fit the artifact name of a unit set"
+                )
+            else:
+                labels.add(label)
     if len(labels) > 1:
         problems.append(
             f"{os_name} py{python_version} was uploaded under more than one "
@@ -305,6 +354,56 @@ def data_problem(path: Path) -> str | None:
 
 def _coverage(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, "-m", "coverage", *args], check=False)
+
+
+def per_os_table(results: Path, files_by_os: dict[str, list[str]]) -> str:
+    """Markdown rows of each OS image's own combined total. Informational, never gated.
+
+    Each image's data files are combined on their own and reported, so a drop confined to
+    one platform shows here even when the union of every set stays above the threshold.
+    A figure that cannot be computed reads ``n/a``; nothing here changes the exit status.
+    """
+    rows = ["| OS image | Combined total |", "| --- | --- |"]
+    for index, (os_name, files) in enumerate(sorted(files_by_os.items())):
+        data = results / f"combined-os-{index}.data"
+        total = "n/a"
+        combined = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "coverage",
+                "combine",
+                "--keep",
+                f"--data-file={data}",
+                *files,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if combined.returncode == 0:
+            report = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "coverage",
+                    "report",
+                    f"--data-file={data}",
+                    "--format=total",
+                    "--fail-under=0",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if report.returncode == 0 and report.stdout.strip():
+                total = f"{report.stdout.strip()}%"
+        rows.append(f"| {os_name} | {total} |")
+    return (
+        "### Per-OS combined totals (not gated)\n\n"
+        "The gate above is the union of every set; these figures only show where a "
+        "platform alone fell.\n\n" + "\n".join(rows) + "\n\n"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -372,6 +471,7 @@ def main(argv: list[str] | None = None) -> int:
     results = Path(args.results_dir)
     problems: list[str] = []
     data_files: list[str] = []
+    files_by_os: dict[str, list[str]] = {}
     sets = 0
     for os_name in os_names:
         for python_version in python_versions:
@@ -402,6 +502,7 @@ def main(argv: list[str] | None = None) -> int:
                     problems.append(problem)
                 else:
                     data_files.append(str(data))
+                    files_by_os.setdefault(os_name, []).append(str(data))
     if problems:
         for problem in problems:
             print(f"combine-unit-coverage: {problem}", file=sys.stderr)
@@ -438,6 +539,7 @@ def main(argv: list[str] | None = None) -> int:
                     f"## Code coverage (unit tier, {sets} OS and Python sets combined)\n\n"
                     + table.stdout
                     + "\n"
+                    + per_os_table(results, files_by_os)
                 )
 
     report = _coverage(

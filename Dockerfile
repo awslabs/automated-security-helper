@@ -63,7 +63,7 @@ RUN apt-get clean && \
     apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
-    ca-certificates=20*deb12u* \
+    ca-certificates=20* \
     python3-venv=3.11.2-1+b1 \
     git=1:2.39.5-0+deb12u3 \
     tree=2.1.0-1 \
@@ -89,6 +89,7 @@ RUN chmod +x /usr/local/bin/with-retry
 COPY automated_security_helper/assets/install-pinned-tool.py /usr/local/bin/install-pinned-tool
 COPY automated_security_helper/utils/tool_downloads.py /ash-pins/utils/tool_downloads.py
 COPY automated_security_helper/core/exceptions.py /ash-pins/core/exceptions.py
+COPY automated_security_helper/base/plugin_provisioning.py /ash-pins/base/plugin_provisioning.py
 RUN chmod +x /usr/local/bin/install-pinned-tool
 ARG UV_VERSION="0.13.9"
 RUN ASH_PINS_DIR=/ash-pins with-retry 'install-pinned-tool uv -b /root/.local/bin'
@@ -285,7 +286,7 @@ RUN echo "Upgrading OS packages for BUILD_DATE_EPOCH=${BUILD_DATE_EPOCH}" && \
     apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
-    ca-certificates=20*deb12u* \
+    ca-certificates=20* \
     curl=7.88.1-10+deb12u15 \
     git=1:2.39.5-0+deb12u3 \
     gnupg=2.2.40-1.1+deb12u2 \
@@ -428,6 +429,7 @@ ENV PATH="/usr/local/bin:$PATH"
 COPY automated_security_helper/assets/install-pinned-tool.py /usr/local/bin/install-pinned-tool
 COPY automated_security_helper/utils/tool_downloads.py /ash-pins/utils/tool_downloads.py
 COPY automated_security_helper/core/exceptions.py /ash-pins/core/exceptions.py
+COPY automated_security_helper/base/plugin_provisioning.py /ash-pins/base/plugin_provisioning.py
 RUN chmod +x /usr/local/bin/install-pinned-tool
 # Every `install-pinned-tool <tool>` from here on also installs that tool's license and
 # notice files under this directory, read from the release archive it has just
@@ -448,6 +450,12 @@ RUN syft --version
 ARG GRYPE_VERSION="v0.122.1"
 RUN with-retry 'install-pinned-tool grype -b /usr/local/bin'
 RUN grype --version
+
+# crane resolves a tag-only image reference to its digest at scan time, without a
+# container engine (utils/image_digest_resolver.py). Same pinned-asset path as grype.
+ARG CRANE_VERSION="v0.22.1"
+RUN with-retry 'install-pinned-tool crane -b /usr/local/bin'
+RUN crane version
 
 # actionlint backs the builtin actionlint scanner. Same pinned-asset path as syft and
 # grype.

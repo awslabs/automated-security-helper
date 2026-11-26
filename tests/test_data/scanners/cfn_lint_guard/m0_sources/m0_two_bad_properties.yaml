@@ -1,0 +1,18 @@
+# Benign test fixture (never deployed): two buckets that each carry the same
+# rejected property, so cfn-lint gives two findings that differ only in the
+# resource and the line. Captured in both formats beside this file's neighbors
+# under ../captured/cfn-lint-1.57.2-m0-two-bad-properties.{sarif,json}.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: ASH M0 facets fixture - two resources, one finding each.
+Parameters:
+  Unused:
+    Type: Strin
+Resources:
+  M0FixtureBucketA:
+    Type: AWS::S3::Bucket
+    Properties:
+      NotARealProperty: true
+  M0FixtureBucketB:
+    Type: AWS::S3::Bucket
+    Properties:
+      NotARealProperty: true

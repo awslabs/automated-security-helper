@@ -17,6 +17,7 @@ from rich.highlighter import JSONHighlighter
 from rich.markdown import Markdown
 
 from automated_security_helper.base.plugin_config import plugin_config_key
+from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import (
     off_host_reporter_refused,
@@ -108,25 +109,30 @@ from automated_security_helper.utils.terminal_text import (
 # Pretty-printed only on an interactive terminal; see _write_report. To a regular
 # file the report is written as the reporter produced it, and to a pipe with its
 # CI command forms broken.
+#
+# The names are ExportFormat values, derived from the members so a renamed or
+# retired format cannot leave a stale spelling here; --format arrives as the
+# reporter's name, a plain string, which is what these sets hold.
 JSON_STDOUT_FORMATS = frozenset(
-    {
-        "asff",
-        "aws-security-hub",
-        "cloudwatch-logs",
-        "cyclonedx",
-        "flat-json",
-        "github-ghas",
-        "gitlab-cyclonedx",
-        "gitlab-sast",
-        "ocsf",
-        "s3",
-        "sarif",
-        "spdx",
+    fmt.value
+    for fmt in (
+        ExportFormat.ASFF,
+        ExportFormat.AWS_SECURITY_HUB,
+        ExportFormat.CLOUDWATCH_LOGS,
+        ExportFormat.CYCLONEDX,
+        ExportFormat.FLAT_JSON,
+        ExportFormat.GITHUB_GHAS,
+        ExportFormat.GITLAB_CYCLONEDX,
+        ExportFormat.GITLAB_SAST,
+        ExportFormat.OCSF,
+        ExportFormat.S3,
+        ExportFormat.SARIF,
+        ExportFormat.SPDX,
         # JSON by default and under output_format json; markdown under
         # output_format markdown, which _is_json_document tells apart by the
         # content, so the markdown is never broken with JSON's escapes.
-        "unused-suppressions",
-    }
+        ExportFormat.UNUSED_SUPPRESSIONS,
+    )
 )
 
 
@@ -148,7 +154,7 @@ def _is_json_document(content: str) -> bool:
 # configuration asks for the text document, so the JSON check the command makes
 # before writing (report_command) is skipped then (_report_is_json). Under any
 # other setting the report is a JSON document and is checked as one.
-TEXT_OR_JSON_FORMATS = frozenset({"unused-suppressions"})
+TEXT_OR_JSON_FORMATS = frozenset({ExportFormat.UNUSED_SUPPRESSIONS.value})
 
 
 def _report_is_json(report_format: str, reporter_plugin: object) -> bool:
@@ -219,7 +225,9 @@ def _non_json_report_text(content: str, error: ValueError) -> str:
 
 # Reporters whose output is Markdown, rendered with rich's Markdown on an
 # interactive terminal.
-MARKDOWN_STDOUT_FORMATS = frozenset({"markdown", "bedrock-summary-reporter"})
+MARKDOWN_STDOUT_FORMATS = frozenset(
+    {ExportFormat.MARKDOWN.value, ExportFormat.BEDROCK_SUMMARY.value}
+)
 
 
 def _shown_not_obeyed(text: str, *, json_text: bool = False) -> str:
@@ -649,7 +657,7 @@ def _write_report(
     _write_report_checked(content, stream)
 
 
-def get_report_formats(incomplete: str = None) -> List[str]:
+def get_report_formats(incomplete: str | None = None) -> List[str]:
     """The formats a reporter ASH ships writes, containing ``incomplete``:
     ExportFormat's values but those no reporter writes, which --format refuses.
     The AWS plugin module's are among them, accepted once ``ash_plugin_modules``
@@ -703,7 +711,7 @@ def report_command(
         ),
     ] = AshLogLevel.INFO,
     config: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--config",
             "-c",
@@ -858,7 +866,7 @@ def report_command(
         # on one line.
         _print_refusal("[red]{}[/red]", refusal)
         # 3, as a scan exits for the same refusal (OUTPUT_DIR_REFUSED_EXIT_CODE).
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
 
     # A named file that does not exist is refused, as the config commands and a
     # scan refuse it: rendering with the defaults instead used settings the
@@ -878,12 +886,12 @@ def report_command(
                 get_default_config()
             except ASHConfigValidationError as e:
                 _print_refusal("[red]Invalid configuration: {}[/red]", e)
-                raise typer.Exit(3)
+                raise typer.Exit(AshExitCode.INVALID_CONFIG)
         _print_refusal(
             "[red]Invalid configuration: Configuration file not found: {}[/red]",
             Path(config).as_posix(),
         )
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
 
     # Load the ASH configuration. A named file that exists must load: falling
     # back to the defaults for one that does not parse rendered the reports
@@ -923,7 +931,7 @@ def report_command(
             )
     except ASHConfigValidationError as e:
         _print_refusal("[red]Invalid configuration: {}[/red]", e)
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     except OSError as e:
         # A file the command may not read is a config it cannot use, as one
         # that does not parse is: exit 3, in the words the scan uses, not an
@@ -936,7 +944,7 @@ def report_command(
             refused_name,
             error_text(e),
         )
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     except (yaml.YAMLError, ValueError) as e:
         # ValueError covers json.JSONDecodeError and UnicodeDecodeError. A file
         # that does not parse arrives above, as an ASHConfigValidationError:
@@ -955,7 +963,7 @@ def report_command(
         )
         for line in rest:
             _print_refusal("[red]{}[/red]", line)
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
 
     # Create plugin context
     plugin_context = PluginContext(
@@ -982,7 +990,7 @@ def report_command(
                 "from the config file or --config-overrides."
             ),
         )
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     except PluginModuleError as e:
         # A configured module could not be loaded; the fix clause follows the
         # loss's stage (plugin_module_fix).
@@ -993,14 +1001,14 @@ def report_command(
                 "remove the entry from the config file or --config-overrides."
             ),
         )
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     except ASHConfigValidationError as e:
         # Any other refusal plugin loading raises is still an invalid
         # configuration: the arms above name the module refusals only to pick
         # their closing words, and this one keeps the type's documented exit
         # code instead of a traceback.
         _print_refusal("[red]Invalid configuration: {}[/red]", e)
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
 
     # This run's plugins: ASH's built-ins and the modules its configuration names.
     # The registry is process-wide, so it can also hold reporters another run in
@@ -1016,7 +1024,7 @@ def report_command(
         refuse_plugin_name_clashes(run_scope, plugin_types=("reporter",))
     except ASHConfigValidationError as e:
         _print_refusal("[red]Invalid configuration: {}[/red]", e)
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
 
     # The options of a plugin loaded from ash_plugin_modules are checked only once
     # it is loaded, as the scan engine checks them (config/plugin_option_check.py).
@@ -1038,7 +1046,7 @@ def report_command(
         )
     except ASHConfigValidationError as e:
         _print_refusal("[red]Invalid configuration: {}[/red]", e)
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
 
     # Find the reporter plugin: among ASH's built-ins and the modules this run's
     # configuration names, not every reporter this process has registered.
@@ -1126,7 +1134,7 @@ def report_command(
             "or point --output-dir at the output directory of a previous scan.[/red]",
             searched,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     if found_results_files and unsearched_results_paths:
         _print_refusal(
             "[yellow]Warning: {} cannot be searched, so a scan results file there, "
@@ -1164,7 +1172,7 @@ def report_command(
             results_file.as_posix(),
             reason,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
     # A field the results' record holds as an environment reference it cannot
     # hold, such as severity_threshold, which the reports render
@@ -1181,7 +1189,7 @@ def report_command(
         )
     except ASHConfigValidationError as e:
         _print_refusal("[red]Invalid configuration: {}[/red]", e)
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
 
     # The reports read the duplicate annotation from the results' recorded
     # configuration, so a request made to this command (the flag, or the
@@ -1231,7 +1239,7 @@ def report_command(
             name,
             name,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
     # The reporter is built once: from its section when the configuration has one
     # (reporter_section returns the section as get_plugin_config gives it, a plain
@@ -1262,7 +1270,7 @@ def report_command(
         )
         if debug:
             _print_debug_trace(e)
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
     # The reporter's pre-flight check runs first, as a scan's report phase runs it
     # (engine_phase filters on validate_plugin_dependencies). A reporter whose check
@@ -1287,7 +1295,7 @@ def report_command(
             "See the log above for the reason.[/red]",
             report_format,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
     # Generate the report
     try:
@@ -1315,7 +1323,7 @@ def report_command(
                 "See the log above for the reason.[/red]",
                 report_format,
             )
-            raise typer.Exit(1)
+            raise typer.Exit(AshExitCode.SCAN_ERRORS)
         report_is_json = _report_is_json(report_format, reporter_plugin)
         parsed_report: object = _NOT_PARSED
         if report_is_json:
@@ -1340,7 +1348,7 @@ def report_command(
                     report_format,
                     _non_json_report_text(report_content, exc),
                 )
-                raise typer.Exit(1)
+                raise typer.Exit(AshExitCode.SCAN_ERRORS)
         pretty_output = bool(color and not os.environ.get("NO_COLOR"))
         if not (pretty_output and _stdout_is_terminal()):
             # Only the indenting on an interactive terminal reads the document.
@@ -1374,7 +1382,7 @@ def report_command(
                     os.close(devnull)
             except (OSError, ValueError, AttributeError):
                 pass
-            raise typer.Exit(1)
+            raise typer.Exit(AshExitCode.SCAN_ERRORS)
     except typer.Exit:
         # click.exceptions.Exit subclasses RuntimeError, so the handler below
         # would otherwise catch the deliberate exit above and relabel it
@@ -1384,4 +1392,4 @@ def report_command(
         _print_error("[red]Error generating report: {}[/red]", e)
         if debug:
             _print_debug_trace(e)
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)

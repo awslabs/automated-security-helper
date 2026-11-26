@@ -461,6 +461,10 @@ CASES = [
         scan_accepts=True,
     ),
     Case(
+        # A bare directory name matches the directory's subtree (the
+        # bare-directory rule, issue #894), so the scan and the checks accept
+        # it with no advice; "**/vendor" still matches no file and draws the
+        # directory advice.
         id="directory-ignore-path-without-glob",
         text=_dedent(
             """
@@ -469,10 +473,13 @@ CASES = [
               ignore_paths:
                 - path: vendor
                   reason: third-party code
+                - path: "**/vendor"
+                  reason: third-party code at depth
             """
         ),
         scan_accepts=True,
-        validate_mentions=["Use 'vendor/'"],
+        validate_mentions=["Use '**/vendor/'"],
+        validate_absent=["Use 'vendor/'"],
         extra_files={"vendor/lib.py": ""},
     ),
     Case(

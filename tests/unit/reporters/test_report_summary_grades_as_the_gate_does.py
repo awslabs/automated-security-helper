@@ -52,6 +52,8 @@ from automated_security_helper.utils.content_db_staleness import (
     ContentDbAgeRecord,
 )
 
+from tests.unit.models._flat_vulnerability_helpers import flat_with_severity
+
 pytestmark = pytest.mark.unit
 
 
@@ -65,7 +67,8 @@ def _vuln(**overrides) -> FlatVulnerability:
         "scanner_type": "SAST",
     }
     fields.update(overrides)
-    return FlatVulnerability(**fields)
+    severity = fields.pop("severity")
+    return flat_with_severity(severity, **fields)
 
 
 class TestAnUnrecognisedSeverityFailsClosed:

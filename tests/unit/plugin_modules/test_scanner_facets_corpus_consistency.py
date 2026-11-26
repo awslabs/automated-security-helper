@@ -52,96 +52,49 @@ the corpus read has its own non-vacuity controls.
 
 from __future__ import annotations
 
+import functools
 import importlib
 import json
 import pkgutil
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, Iterator, Mapping, Optional
 
 import pytest
 
 from automated_security_helper import plugin_modules
+from automated_security_helper.base.facet_conformance import (
+    FACET_COLUMNS,
+    Verdict,
+    judge,
+    observed_counts,
+    text_present,
+)
 from automated_security_helper.base.scanner_facets import (
     FACET_NAMES,
     SCANNER_FACETS_ATTR,
     FacetState,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
-from automated_security_helper.plugin_modules import ash_builtin
 from automated_security_helper.schemas.sarif_schema_model import Result, SarifReport
 from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
 from automated_security_helper.utils.scanner_tool_types import _class_config_name
+from tests.utils.scanner_enumeration import load_scanner_universe
 
 pytestmark = pytest.mark.unit
 
-_REMAINING_LOAD_ERRORS = ash_builtin.retry_failed_plugin_groups()
+#: The shared enumeration (tests/utils/scanner_enumeration.py).
+SCANNER_CLASSES, _REMAINING_LOAD_ERRORS = load_scanner_universe()
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "test_data" / "scanners"
 
 
 # --------------------------------------------------------------------------
-# The facet -> observed-column map (GC-1). Total over FACET_NAMES.
+# The facet -> observed-column map (GC-1) lives in base/facet_conformance.py,
+# where the conformance harness reads the same verdicts; it is total over
+# FACET_NAMES (asserted below).
 # --------------------------------------------------------------------------
-
-
-def _text(value: Any) -> bool:
-    return isinstance(value, str) and value.strip() not in ("", "[]", "{}", "null")
-
-
-def _present(value: Any) -> bool:
-    return value is not None
-
-
-@dataclass(frozen=True)
-class Observation:
-    """How one facet is read off a flat row.
-
-    ``columns`` are the FlatVulnerability attributes read; ``populated`` is the
-    predicate over their values (in column order). ``excluded`` is the declared
-    v1 exclusion reason for a facet with no flat column.
-    """
-
-    columns: tuple[str, ...] = ()
-    populated: Optional[Callable[..., bool]] = None
-    excluded: Optional[str] = None
-
-
-FACET_COLUMNS: Mapping[str, Observation] = {
-    "rule_id": Observation(("rule_id",), _text),
-    "severity": Observation(("severity",), _text),
-    "file_path": Observation(("file_path",), _text),
-    "line_range": Observation(
-        ("line_start", "line_end"), lambda start, end: _present(start) or _present(end)
-    ),
-    "column": Observation(
-        excluded="the flat row has no column field: the start column is read "
-        "only into the finding identity, so it is observed nowhere (G10 shape)"
-    ),
-    "message": Observation(("description",), _text),
-    "resource_id": Observation(("resource_id",), _text),
-    "resource_type": Observation(("resource_type",), _text),
-    "package_name": Observation(("package_name",), _text),
-    "package_version": Observation(("package_version",), _text),
-    "package_path": Observation(("package_path",), _text),
-    "taxonomy_cve": Observation(("cve_id",), _text),
-    "taxonomy_cwe": Observation(("cwe_id",), _text),
-    # A boolean observation: the id is keyed by a scanner fingerprint.
-    "fingerprints": Observation(("has_fingerprint_identity",), bool),
-    # False is a written value (the adapter said "no fix"); only None is empty.
-    "fix_available": Observation(("fix_available",), _present),
-    "remediation_text": Observation(
-        excluded="no flat column: remediation text lives only in the SARIF "
-        "property bag (G10; add property-bag observation as its own unit)"
-    ),
-    "snippet": Observation(("code_snippet",), _text),
-    "references": Observation(("references",), _text),
-    "tags": Observation(("tags",), _text),
-    "extras": Observation(
-        excluded="no flat column: extras are the property bag itself (G10; "
-        "add property-bag observation as its own unit)"
-    ),
-}
 
 
 def test_the_facet_map_is_total_over_the_vocabulary() -> None:
@@ -180,130 +133,15 @@ def test_the_exclusions_are_exactly_the_facets_with_no_flat_column() -> None:
 # The verdict (GC-2): a pure join of declared state and observed counts.
 # --------------------------------------------------------------------------
 
-#: The two legal exits, named in every failure so the maintainer never has to
-#: guess what "fix" means. There is no third (no skip list; see the module
-#: docstring's waiver contract).
-_EXITS = (
-    "Two exits: (1) fix the adapter or the fixture so the observed column "
-    "matches the declaration, or (2) redeclare the cell in the scanner's own "
-    "register row (the `facets` class attribute) with its reason; that edit "
-    "is the reviewed waiver and the only one."
-)
-
-
-@dataclass(frozen=True)
-class Verdict:
-    scanner: str
-    facet: str
-    state: str
-    non_null: Optional[int]
-    total: Optional[int]
-    outcome: str  # "ok" | "FAIL" | "excluded"
-    detail: str
-
-    def row(self) -> str:
-        counted = "no-corpus" if self.total is None else f"{self.non_null}/{self.total}"
-        return (
-            f"{self.scanner}\t{self.facet}\t{self.state}\t{counted}\t"
-            f"{self.outcome}\t{self.detail}"
-        )
-
-
-def judge(
-    scanner: str,
-    facet: str,
-    state: FacetState,
-    observed: Optional[tuple[int, int]],
-    *,
-    corpus_hint: str = "",
-) -> Verdict:
-    """The verdict for one cell. ``observed`` is (non_null_count, total_results)
-    or None when the scanner has no corpus at all."""
-    if FACET_COLUMNS[facet].excluded is not None:
-        return Verdict(scanner, facet, state.value, None, None, "excluded", "G10")
-    non_null, total = observed if observed is not None else (None, None)
-    populated = bool(non_null)
-    cell = f"{scanner}.{facet} declared {state.value}"
-    if state is FacetState.MAPPED:
-        if observed is None or not total:
-            why = (
-                "has no corpus to observe: "
-                + (corpus_hint or "no committed fixture and no registered prep")
-                if observed is None
-                else f"its fixtures hold no results ({corpus_hint or 'empty corpus'})"
-            )
-            return Verdict(
-                scanner,
-                facet,
-                state.value,
-                non_null,
-                total,
-                "FAIL",
-                f"{cell} but the scanner {why}. Name the missing fixture "
-                f"(author it) or register its prep. {_EXITS}",
-            )
-        if not populated:
-            return Verdict(
-                scanner,
-                facet,
-                state.value,
-                non_null,
-                total,
-                "FAIL",
-                f"{cell} but the observed column is empty across the corpus "
-                f"(0 of {total} results): the tool's output moved or an adapter "
-                f"regression dropped the mapping. {_EXITS}",
-            )
-    elif state is FacetState.NA and populated:
-        return Verdict(
-            scanner,
-            facet,
-            state.value,
-            non_null,
-            total,
-            "FAIL",
-            f"{cell} (cannot be present) but the observed column is populated "
-            f"({non_null} of {total} results): a value reached a column the "
-            f"register says is impossible. {_EXITS}",
-        )
-    elif state is FacetState.DROPPED and populated:
-        return Verdict(
-            scanner,
-            facet,
-            state.value,
-            non_null,
-            total,
-            "FAIL",
-            f"{cell} (discarded today) but the observed column is populated "
-            f"({non_null} of {total} results): the cell is out of date, "
-            f"redeclare it MAPPED with its native field. {_EXITS}",
-        )
-    return Verdict(scanner, facet, state.value, non_null, total, "ok", "")
+# Verdict, judge, FACET_COLUMNS, observed_counts and text_present are imported from
+# base/facet_conformance.py (Observation is defined there and not imported here): the
+# harness behind `ash plugin verify` judges cells with the same function, over
+# transcripts instead of CorpusSpecs.
 
 
 # --------------------------------------------------------------------------
 # The corpus: registered scanners, their fixtures, the observed frame (GC-1).
 # --------------------------------------------------------------------------
-
-
-def _registered_scanner_classes() -> list[type]:
-    classes: list[type] = []
-    seen: set[type] = set()
-    modules = sorted(
-        pkgutil.iter_modules(plugin_modules.__path__), key=lambda m: m.name
-    )
-    for info in modules:
-        if not info.ispkg:
-            continue
-        package = importlib.import_module(f"{plugin_modules.__name__}.{info.name}")
-        for cls in getattr(package, "ASH_SCANNERS", []):
-            if cls not in seen:
-                seen.add(cls)
-                classes.append(cls)
-    return classes
-
-
-SCANNER_CLASSES = _registered_scanner_classes()
 
 
 def _name(cls: type) -> str:
@@ -348,31 +186,26 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
         "cfn_lint_guard", sarif=("captured/cfn-lint-*.sarif",), prep="cfn-lint"
     ),
     "cfn-nag": CorpusSpec(
-        "cfn_nag",
-        missing="cfn-nag's committed output is native JSON "
-        "(cfn_nag/src.test.yaml.json) and no SARIF capture is committed "
-        "(M0-FINDINGS.md (b): the tool could not be run to a real result)",
+        "cfn_nag", sarif=("captured/cfn_nag-0.8.10-*.sarif",), prep="cfn-nag"
     ),
     "checkov": CorpusSpec("checkov", sarif=("captured/*.sarif",), prep="checkov"),
     "detect-secrets": CorpusSpec("detect_secrets", prep="detect-secrets"),
     "ferret-scan": CorpusSpec(
-        "ferret-scan",
-        missing="ferret-scan commits only its input samples (sample.txt, a "
-        ".docx), no captured output",
+        "ferret-scan", sarif=("captured/*.sarif",), prep="ferret-scan"
     ),
     "gitleaks": CorpusSpec("gitleaks", sarif=("gitleaks-*.sarif",), prep="gitleaks"),
-    "grype": CorpusSpec(
-        "grype",
-        missing="grype commits native JSON only (grype/grype.src.json); the "
-        "SARIF is rendered inside test_grype_fix_available_conformance.py, "
-        "not committed. Commit a `grype -o sarif` capture or register a prep",
-    ),
+    "grype": CorpusSpec("grype", sarif=("captured/*.sarif",), prep="grype"),
     "guarddog": CorpusSpec("guarddog", prep="guarddog"),
     "hadolint": CorpusSpec("hadolint", sarif=("captured/*.sarif",)),
+    "mcp-config": CorpusSpec("mcp_config", sarif=("captured/*.sarif",)),
     "npm-audit": CorpusSpec("npmaudit", prep="npm-audit"),
     "opengrep": CorpusSpec("opengrep", sarif=("captured/*.sarif",)),
     "semgrep": CorpusSpec("semgrep", sarif=("captured/*.sarif",)),
-    "snyk-code": None,
+    # Authored in the shape `snyk code test --sarif` writes (see the README in
+    # the directory); a licensed capture committed under captured/ joins it.
+    "snyk-code": CorpusSpec(
+        "snyk", sarif=("authored/*.sarif", "captured/*.sarif"), prep="snyk-code"
+    ),
     "syft": CorpusSpec(
         "syft",
         missing="syft commits its native SBOM JSON only (syft/syft.src.json); "
@@ -386,10 +219,7 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
 }
 
 #: Why a scanner with no CorpusSpec has none (named, not authored).
-_NO_FIXTURE_DIRECTORY = {
-    "snyk-code": "no tests/test_data/scanners/snyk directory; commit a "
-    "captured `snyk code test --sarif` result (needs a licensed run)",
-}
+_NO_FIXTURE_DIRECTORY: dict[str, str] = {}
 
 
 def _load_sarif(path: Path) -> SarifReport:
@@ -410,15 +240,66 @@ def _prep_cfn_guard(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result
 def _prep_cfn_lint(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
     from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
         CfnLintScanner,
+        attach_cfn_lint_resources,
+        cfn_lint_resources,
     )
 
     for pattern in spec.sarif:
         for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
             report = _load_sarif(path)
+            # The resource comes from the JSON run beside it, when one is
+            # committed. The scanner attaches it as each batch is read, before
+            # normalize_report relocates the results, so the keys still match.
+            companion = path.with_suffix(".json")
+            if companion.is_file():
+                attach_cfn_lint_resources(
+                    report,
+                    cfn_lint_resources(
+                        json.loads(companion.read_text(encoding="utf-8"))
+                    ),
+                )
             # normalize_report reads no instance state: it locates results,
-            # maps severities and sorts rules in place.
-            CfnLintScanner.normalize_report(None, report)  # type: ignore[arg-type]
+            # maps severities and sorts rules in place. An uninitialized
+            # instance stands in for the scanner, so the call keeps its types.
+            CfnLintScanner.__new__(CfnLintScanner).normalize_report(report)
             yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_cfn_nag(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner import (
+        attach_cfn_nag_resources,
+    )
+
+    for pattern in spec.sarif:
+        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+            report = _load_sarif(path)
+            attach_cfn_nag_resources(report)
+            yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _report_with_rules(tool_name: str, rules: list[Any]) -> SarifReport:
+    """A report whose one run declares *rules* on its driver and holds no
+    results: the results are yielded beside it, and the rule-level facets
+    (help link, tags) are read from the run."""
+    return SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {
+                            "name": tool_name,
+                            "rules": [
+                                rule.model_dump(mode="json", exclude_none=True)
+                                for rule in rules
+                            ],
+                        }
+                    },
+                    "results": [],
+                }
+            ],
+        }
+    )
 
 
 def _prep_guarddog(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
@@ -434,8 +315,10 @@ def _prep_guarddog(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]
         converted = convert_guarddog_scan_result(
             document, uri_prefix="", ecosystem=ecosystem, include_capabilities=True
         )
-        report = SarifReport.model_validate({"version": "2.1.0", "runs": []})
-        yield report, list(converted.results)
+        yield (
+            _report_with_rules("guarddog", list(converted.rules.values())),
+            list(converted.results),
+        )
     # Verify mode is where the adapter writes package identity: each committed
     # verify capture is a list of {dependency, version, result} entries over
     # the manifest committed beside it, converted the way the scanner's own
@@ -454,13 +337,17 @@ def _prep_guarddog(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]
                 manifest_uri=manifest.name,
                 manifest_line=manifest_line_for(manifest_text, entry["dependency"]),
             )
-            report = SarifReport.model_validate({"version": "2.1.0", "runs": []})
-            yield report, list(converted.results)
+            yield (
+                _report_with_rules("guarddog", list(converted.rules.values())),
+                list(converted.results),
+            )
 
 
 def _prep_checkov(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
     from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
+        attach_checkov_guidelines,
         attach_checkov_resources,
+        checkov_guidelines,
         checkov_resources,
     )
 
@@ -469,6 +356,7 @@ def _prep_checkov(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]
             sarif = json.loads(path.read_text(encoding="utf-8"))
             side = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
             attach_checkov_resources(sarif, checkov_resources(side))
+            attach_checkov_guidelines(sarif, checkov_guidelines(side))
             report = SarifReport.model_validate(sarif)
             yield report, [r for run in report.runs or [] for r in run.results or []]
 
@@ -546,9 +434,76 @@ def _materialized(template: Path, scratch: Path) -> Path:
     return destination
 
 
-def _prep_trivy(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+def _prep_ferret_scan(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The committed `ferret-scan --format sarif` capture through the adapter's
+    own base-relative URI resolution, the step it applies before the report is
+    built."""
+    from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+        _resolve_sarif_uri_base_ids,
+    )
+
+    for pattern in spec.sarif:
+        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+            document = json.loads(path.read_text(encoding="utf-8"))
+            _resolve_sarif_uri_base_ids(document)
+            report = SarifReport.model_validate(document)
+            yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_grype(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The committed `grype -o sarif` capture through the adapter's own
+    post-processing (URIs, package identity, fix state). The scan target is an
+    empty directory: the capture was taken over an SBOM, so no lockfile sits
+    beside it for the package-path lookup."""
     import tempfile
 
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
+        GrypeScanner,
+    )
+
+    with tempfile.TemporaryDirectory(prefix="facets-grype-corpus-") as scratch:
+        for pattern in spec.sarif:
+            for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+                # The step reads no instance state; building the scanner would
+                # need a run context this pure read has no use for.
+                report = GrypeScanner.__new__(GrypeScanner)._post_process_sarif(
+                    _load_sarif(path), [], Path(scratch)
+                )
+                yield (
+                    report,
+                    [r for run in report.runs or [] for r in run.results or []],
+                )
+
+
+def _prep_snyk_code(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The committed SARIF through the adapter's own rule-CWE normalization,
+    the one step the scanner applies before it builds the report."""
+    from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
+        normalize_rule_cwe_into_tags,
+    )
+
+    for pattern in spec.sarif:
+        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+            document = normalize_rule_cwe_into_tags(
+                json.loads(path.read_text(encoding="utf-8"))
+            )
+            report = SarifReport.model_validate(document)
+            yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_trivy(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The committed SARIF through the adapter's own pure steps.
+
+    Package identity and the fixed version read the message against the
+    materialized fixture lockfiles; a misconfiguration's resource comes from
+    the JSON capture beside its SARIF, when there is one.
+    """
+    import tempfile
+
+    from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (
+        attach_trivy_resources,
+        trivy_misconfig_resources,
+    )
     from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
         TrivyScanner,
     )
@@ -562,6 +517,14 @@ def _prep_trivy(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
                 report = TrivyScanner._attach_package_identity(
                     _load_sarif(path), target
                 )
+                companion = path.with_suffix(".json")
+                if companion.is_file():
+                    attach_trivy_resources(
+                        report,
+                        trivy_misconfig_resources(
+                            json.loads(companion.read_text(encoding="utf-8"))
+                        ),
+                    )
                 yield (
                     report,
                     [r for run in report.runs or [] for r in run.results or []],
@@ -571,15 +534,9 @@ def _prep_trivy(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
 def _prep_npm_audit(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
     import tempfile
 
-    from automated_security_helper.config.ash_config import AshConfig
     from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
         NpmAuditScanner,
     )
-
-    # The conversion constructs a default-configured scanner, whose model
-    # carries forward references to AshConfig; resolve them the way the other
-    # construction tests do.
-    AshConfig.model_rebuild()
 
     with tempfile.TemporaryDirectory(prefix="facets-npmaudit-corpus-") as scratch:
         target = _materialized(
@@ -597,6 +554,9 @@ def _prep_npm_audit(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result
 def _prep_cdk_nag(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
     import csv
 
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
+        _reporting_descriptor_for,
+    )
     from automated_security_helper.utils.cdk_nag_wrapper import (
         _NagFinding,
         build_nag_results,
@@ -638,8 +598,17 @@ def _prep_cdk_nag(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]
             template_path,
             template_text.splitlines(),
         )
-        report = SarifReport.model_validate({"version": "2.1.0", "runs": []})
-        yield report, [r for results in per_pack.values() for r in results]
+        nag_results = [r for results in per_pack.values() for r in results]
+        # The run the scanner writes carries one descriptor per rule, which is
+        # where the rule's help link lives; build it the way scan() does.
+        representatives: dict[Any, Result] = {}
+        for result in nag_results:
+            representatives.setdefault(result.ruleId, result)
+        rules = [
+            _reporting_descriptor_for(rep, tool_name="cdk-nag", tool_type="IAC")
+            for rep in representatives.values()
+        ]
+        yield _report_with_rules("ash-cdk-nag-wrapper", rules), nag_results
 
 
 #: Registered preps: native, non-SARIF or adapter-normalized fixtures through
@@ -652,19 +621,27 @@ _PREPS: Mapping[
     "cdk-nag": _prep_cdk_nag,
     "cfn-guard": _prep_cfn_guard,
     "cfn-lint": _prep_cfn_lint,
+    "cfn-nag": _prep_cfn_nag,
     "checkov": _prep_checkov,
     "detect-secrets": _prep_detect_secrets,
+    "ferret-scan": _prep_ferret_scan,
     "gitleaks": _prep_gitleaks,
+    "grype": _prep_grype,
     "guarddog": _prep_guarddog,
     "npm-audit": _prep_npm_audit,
+    "snyk-code": _prep_snyk_code,
     "trivy": _prep_trivy,
 }
 
 
 def _results_with_runs(
-    spec: CorpusSpec,
+    spec: CorpusSpec, fixtures_root: Path = _FIXTURES
 ) -> Iterator[tuple[Any, Result]]:
-    """(run or None, result) for every result of the scanner's corpus."""
+    """(run or None, result) for every result of the scanner's corpus.
+
+    ``fixtures_root`` roots the SARIF globs only (a planted control points it at
+    a scratch directory); a registered prep always reads the committed corpus.
+    """
     if spec.prep is not None:
         for report, results in _PREPS[spec.prep](spec):
             run = report.runs[0] if report.runs else None
@@ -672,37 +649,32 @@ def _results_with_runs(
                 yield run, result
         return
     for pattern in spec.sarif:
-        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+        for path in sorted((fixtures_root / spec.directory).glob(pattern)):
             report = _load_sarif(path)
             for run in report.runs or []:
                 for result in run.results or []:
                     yield run, result
 
 
+@functools.lru_cache(maxsize=None)
 def observed_frame(
-    name: str, spec: Optional[CorpusSpec]
+    name: str, spec: Optional[CorpusSpec], fixtures_root: Path = _FIXTURES
 ) -> Optional[dict[str, tuple[int, int]]]:
     """Per facet (non_null_count, total_results) over the scanner's corpus, or
     None when the scanner has no corpus (no spec, or no readable fixture/prep).
+
+    Cached: the gate, the transcript comparison and the named-gap rows each
+    read the same corpus, and a prep converts every fixture it holds. Callers
+    read the returned mapping and never change it.
     """
     if spec is None or (not spec.sarif and spec.prep is None):
         return None
     tool_type = SCANNER_TOOL_TYPES[name]
     flats = [
         FlatVulnerability.from_sarif_result(result, name, tool_type, run)
-        for run, result in _results_with_runs(spec)
+        for run, result in _results_with_runs(spec, fixtures_root)
     ]
-    counts: dict[str, tuple[int, int]] = {}
-    for facet, observation in FACET_COLUMNS.items():
-        if observation.excluded is not None:
-            continue
-        populated = 0
-        for flat in flats:
-            values = [getattr(flat, column) for column in observation.columns]
-            if observation.populated(*values):  # type: ignore[misc]
-                populated += 1
-        counts[facet] = (populated, len(flats))
-    return counts
+    return observed_counts(flats)
 
 
 def _hint(name: str) -> str:
@@ -752,7 +724,7 @@ def test_the_gate_carries_no_waiver_but_the_register() -> None:
 def test_the_registry_and_the_corpus_table_agree() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
     names = {_name(cls) for cls in SCANNER_CLASSES}
-    assert len(SCANNER_CLASSES) == 22, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == 23, sorted(c.__name__ for c in SCANNER_CLASSES)
     assert names == set(CORPORA) == set(SCANNER_TOOL_TYPES), (
         f"registry {sorted(names)} / corpus table {sorted(CORPORA)}: a scanner "
         "needs a CORPORA row (a corpus, or None with the fixture to author)"
@@ -764,6 +736,48 @@ def test_the_registry_and_the_corpus_table_agree() -> None:
         assert (_FIXTURES / spec.directory).is_dir(), f"{name}: {spec.directory}"
         if not spec.sarif and spec.prep is None:
             assert spec.missing, f"{name}: a corpus-less spec names what to author"
+
+
+def test_discovery_does_not_depend_on_which_tier_declares_a_scanner() -> None:
+    """The gate reads every plugin package's ``ASH_SCANNERS`` the same way.
+
+    Core (ash_builtin), the alpha ash_*_plugins packages and any package an SDK
+    plugin ships are one population here: the gate names no tier, and a scanner
+    is in or out by declaring itself, not by where it lives. The registered set
+    must equal the union of every package's list, and must span more than one
+    package so the check is not satisfied by a single tier.
+    """
+    declared: set[type] = set()
+    packages_with_scanners: set[str] = set()
+    for info in pkgutil.iter_modules(plugin_modules.__path__):
+        if not info.ispkg:
+            continue
+        package = importlib.import_module(f"{plugin_modules.__name__}.{info.name}")
+        found = list(getattr(package, "ASH_SCANNERS", []))
+        if found:
+            packages_with_scanners.add(info.name)
+        declared.update(found)
+    assert set(SCANNER_CLASSES) == declared
+    assert len(packages_with_scanners) >= 2, packages_with_scanners
+    # No scanner is looked up by the name of a tier or a package.
+    body = (
+        Path(__file__)
+        .read_text(encoding="utf-8")
+        .split("def test_discovery_does_not_depend")[0]
+    )
+    for needle in ("startswith(" + '"ash_', "== " + '"ash_builtin"'):
+        assert needle not in body, needle
+
+
+def test_the_scanners_read_from_captures_and_authored_shapes_are_observed() -> None:
+    """The scanners whose cells were redeclared unread are observed now."""
+    for name in ("snyk-code", "grype", "ferret-scan"):
+        frame = observed_frame(name, CORPORA[name])
+        assert frame is not None, name
+        assert frame["rule_id"][1] > 0 and frame["rule_id"][0] == frame["rule_id"][1]
+        assert frame["file_path"][0] > 0 and frame["message"][0] > 0, name
+    assert observed_frame("grype", CORPORA["grype"])["fingerprints"][0] > 0
+    assert observed_frame("ferret-scan", CORPORA["ferret-scan"])["fingerprints"][0] == 0
 
 
 def test_the_corpus_is_not_vacuous() -> None:
@@ -849,6 +863,50 @@ def test_planted_legitimate_cells_pass(
     assert judge("planted", "tags", state, observed).outcome == "ok"
 
 
+@pytest.mark.parametrize(
+    "observed", [(3, 4), (0, 4), None], ids=["populated", "empty", "no-corpus"]
+)
+def test_planted_an_unconfirmed_facet_is_owed_never_failed(
+    observed: Optional[tuple[int, int]],
+) -> None:
+    """UNCONFIRMED is neither contamination (a populated column does not fail
+    it, as it fails N/A) nor proof (an empty one does not pass it, as it passes
+    N/A): it is listed as a fixture owed whatever the corpus holds."""
+    verdict = judge("planted", "rule_id", FacetState.UNCONFIRMED, observed)
+    assert verdict.outcome == "owed", verdict.detail
+    assert "fixture owed" in verdict.detail
+    # The same populated column fails an N/A declaration: the states differ.
+    if observed == (3, 4):
+        assert judge("planted", "rule_id", FacetState.NA, observed).outcome == "FAIL"
+
+
+def test_the_owed_fixtures_are_listed_by_the_gate_table() -> None:
+    owed = [v for v in verdict_rows() if v.outcome == "owed"]
+    assert owed, (
+        "no UNCONFIRMED cell is listed: the register has none, or the gate hides them"
+    )
+    assert {v.state for v in owed} == {FacetState.UNCONFIRMED.value}
+
+
+def test_no_na_cell_is_the_unread_state_in_disguise() -> None:
+    """N/A means the tool cannot carry the facet. A cell whose reason says no run
+    was read, or begins UNCONFIRMED, is the unconfirmed state and is declared so."""
+    stretched = []
+    for cls in SCANNER_CLASSES:
+        facets = vars(cls).get(SCANNER_FACETS_ATTR)
+        for facet in FACET_NAMES:
+            cell = getattr(facets, facet)
+            reason = (cell.reason or "").lower()
+            if cell.state is FacetState.NA and (
+                reason.startswith("unconfirmed") or "output not read" in reason
+            ):
+                stretched.append(f"{_name(cls)}.{facet}")
+    assert not stretched, (
+        "declared n/a but worded as unread: declare these UNCONFIRMED -- "
+        + ", ".join(stretched)
+    )
+
+
 def test_planted_an_excluded_facet_is_never_judged() -> None:
     for facet in ("column", "remediation_text", "extras"):
         assert judge("planted", facet, FacetState.MAPPED, None).outcome == "excluded"
@@ -895,22 +953,82 @@ def test_planted_a_fixture_with_the_mapped_field_removed_is_flagged(
     tmp_path: Path,
 ) -> None:
     """Must-flag through the real observation path: a fixture copy with the
-    native location removed reads empty file_path/line_range, so a MAPPED
-    declaration over it fails; the intact copy passes."""
+    native location removed reads empty file_path and line_range, so a MAPPED
+    declaration over it fails; the intact copy passes.
+
+    The counts come from ``observed_frame``, which reads the columns through
+    ``FACET_COLUMNS``: a control that recomputed one column by hand would stay
+    green when the column mapping of the real gate was mis-wired.
+    """
     for with_location, expected in ((True, "ok"), (False, "FAIL")):
-        path = tmp_path / f"planted-{with_location}.sarif"
-        path.write_text(json.dumps(_planted_sarif(with_location=with_location)))
-        report = _load_sarif(path)
-        flats = [
-            FlatVulnerability.from_sarif_result(r, "bandit", "SAST", run)
-            for run in report.runs or []
-            for r in run.results or []
-        ]
-        non_null = sum(1 for f in flats if _text(f.file_path))
-        verdict = judge(
-            "planted", "file_path", FacetState.MAPPED, (non_null, len(flats))
+        directory = tmp_path / f"planted-{with_location}"
+        directory.mkdir()
+        (directory / "planted.sarif").write_text(
+            json.dumps(_planted_sarif(with_location=with_location))
         )
-        assert verdict.outcome == expected, verdict.detail
+        spec = CorpusSpec(directory.name, sarif=("planted.sarif",))
+        frame = observed_frame("bandit", spec, fixtures_root=tmp_path)
+        assert frame is not None
+        for facet in ("file_path", "line_range"):
+            verdict = judge("planted", facet, FacetState.MAPPED, frame[facet])
+            assert verdict.outcome == expected, (facet, verdict.detail)
+
+
+def test_planted_a_result_with_only_a_rule_id_reads_empty_but_for_the_defaults(
+    tmp_path: Path,
+) -> None:
+    """A result that declares nothing but its rule id and message populates
+    exactly the facets the flat row fills by default, through the real frame.
+
+    ``severity`` is one of them (a result with no level reads MEDIUM), so a
+    MAPPED severity cell is observed as populated even when the tool wrote no
+    level: that cell is held by the fixture content, not by this column. Every
+    other facet must read empty, so a default that starts to populate one of
+    them (a fix_available=False, a placeholder path) shows up here first.
+    """
+    sarif = {
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {"driver": {"name": "planted"}},
+                "results": [
+                    {"ruleId": "PLANTED-1", "message": {"text": "a finding"}},
+                ],
+            }
+        ],
+    }
+    directory = tmp_path / "only-rule-id"
+    directory.mkdir()
+    (directory / "planted.sarif").write_text(json.dumps(sarif))
+    frame = observed_frame(
+        "bandit",
+        CorpusSpec(directory.name, sarif=("planted.sarif",)),
+        fixtures_root=tmp_path,
+    )
+    assert frame is not None
+    populated = {facet for facet, (count, _total) in frame.items() if count}
+    assert populated == {"rule_id", "severity", "message"}, populated
+    assert all(total == 1 for _count, total in frame.values())
+
+
+def test_a_text_column_of_another_type_is_unreadable_not_empty() -> None:
+    """The contamination direction must not fail open on a type change."""
+    assert text_present("a value") is True
+    assert text_present("  ") is False
+    assert text_present(None) is False
+    for value in (0, 1, False, ["a"], {"a": 1}, b"bytes"):
+        with pytest.raises(TypeError, match="not str or None"):
+            text_present(value)
+
+
+def test_judge_refuses_a_state_it_does_not_judge() -> None:
+    """The next FacetState member must be judged on purpose, never passed."""
+    for state in FacetState:
+        for observed in ((1, 2), (0, 2), None):
+            judge("planted", "tags", state, observed)  # no member is refused
+    with pytest.raises(AssertionError, match="no judgment"):
+        # an object that is not one of the four members, as a fifth would be
+        judge("planted", "tags", SimpleNamespace(value="a-new-state"), (1, 2))  # type: ignore[arg-type]
 
 
 def test_planted_a_legitimate_na_cell_over_the_real_corpus_passes() -> None:
@@ -923,6 +1041,105 @@ def test_planted_a_legitimate_na_cell_over_the_real_corpus_passes() -> None:
     ]
     assert legitimate, "no N/A cell over a non-empty corpus: the control is vacuous"
     assert all(v.outcome == "ok" for v in legitimate)
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=_name)
+def test_the_transcripts_observe_exactly_what_the_corpus_table_observes(
+    cls: type,
+) -> None:
+    """The upgrade of the loose fixtures into transcripts lost no corpus and added none.
+
+    ``ash plugin verify`` judges the facet cells over transcripts
+    (core/plugin_conformance.py); this gate judges them over the CORPORA table. Until
+    the table is retired the two must observe the same counts for every scanner, or the
+    promotion bar and the PR gate would disagree about one register row.
+    """
+    from automated_security_helper.core.plugin_conformance import (
+        discover_transcript_files,
+        observed_frame as transcript_frame,
+        transcripts_of,
+    )
+
+    name = _name(cls)
+    mine = transcripts_of(name, discover_transcript_files(_FIXTURES))
+    got = transcript_frame(name, mine) if mine else None
+    assert got == observed_frame(name, CORPORA.get(name))
+
+
+#: MAPPED cells that only a historical recording fills today, by scanner. ``ash plugin
+#: verify`` reads each as red until the scanner is re-recorded at its pin with a
+#: recording that carries it; the entry is then deleted (the test below fails when a gap
+#: closes, so the table cannot go stale). Trivy's current recording is the terraform
+#: misconfiguration run, which has no package and no fixed version; its
+#: package-bearing runs are 0.69.3 and 0.75.0.
+_ONLY_A_HISTORICAL_RECORDING_FILLS: dict[str, frozenset[str]] = {
+    "trivy": frozenset(
+        {
+            "fix_available",
+            "package_name",
+            "package_version",
+            "package_path",
+            "taxonomy_cve",
+        }
+    ),
+    "trivy-repo": frozenset(
+        {
+            "fix_available",
+            "package_name",
+            "package_version",
+            "package_path",
+            "taxonomy_cve",
+        }
+    ),
+}
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=_name)
+def test_the_current_recordings_alone_carry_every_mapped_cell_but_the_named_gaps(
+    cls: type,
+) -> None:
+    """``ash plugin verify`` judges a MAPPED cell over current recordings only, so a
+    historical recording of an older release cannot keep a cell green after the pinned
+    tool stops filling it. For a scanner that has a current, readable recording, the
+    MAPPED cells the current recordings alone leave empty are exactly the named gaps."""
+    from automated_security_helper.core.plugin_conformance import (
+        discover_transcript_files,
+        observed_frame as transcript_frame,
+        transcripts_of,
+    )
+
+    name = _name(cls)
+    mine = transcripts_of(name, discover_transcript_files(_FIXTURES))
+    current = transcript_frame(name, mine, current_only=True)
+    if current is None:
+        return
+    declared = vars(cls).get(SCANNER_FACETS_ATTR)
+    empty = set()
+    for facet in FACET_NAMES:
+        state = getattr(declared, facet).state
+        if state is not FacetState.MAPPED:
+            continue
+        if judge(name, facet, state, current.get(facet)).outcome == "FAIL":
+            empty.add(facet)
+    assert empty == _ONLY_A_HISTORICAL_RECORDING_FILLS.get(name, frozenset())
+
+
+def test_the_current_only_reading_is_not_vacuous() -> None:
+    """Some scanner has both a current and a historical recording, and some scanner has a
+    current recording that reads as results; otherwise the test above checks nothing."""
+    from automated_security_helper.core.plugin_conformance import (
+        discover_transcript_files,
+        transcripts_of,
+    )
+
+    files = discover_transcript_files(_FIXTURES)
+    mixed = [
+        _name(cls)
+        for cls in SCANNER_CLASSES
+        if {t.retention for _b, t in transcripts_of(_name(cls), files)}
+        == {"current", "historical"}
+    ]
+    assert mixed, "no scanner keeps both a current and a historical recording"
 
 
 if __name__ == "__main__":  # pragma: no cover

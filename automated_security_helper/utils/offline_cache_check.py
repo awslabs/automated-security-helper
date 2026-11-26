@@ -13,7 +13,7 @@ from stat import S_ISREG
 from typing import TYPE_CHECKING, Callable, Dict
 
 from automated_security_helper.utils.content_databases import (
-    STALENESS_FAIL,
+    StalenessPolicy,
     get,
     go_duration,
     is_future_dated,
@@ -40,7 +40,7 @@ class OfflineCacheResult:
     tool: OfflineCacheTool
     database: Path
     state: CacheState
-    policy: str
+    policy: StalenessPolicy
     policy_source: str | None
     max_age: str
     built: datetime | None = None
@@ -49,7 +49,7 @@ class OfflineCacheResult:
     @property
     def blocks(self) -> bool:
         return self.state in {CacheState.MISSING, CacheState.INVALID} or (
-            self.state == CacheState.STALE and self.policy == STALENESS_FAIL
+            self.state == CacheState.STALE and self.policy == StalenessPolicy.FAIL
         )
 
 

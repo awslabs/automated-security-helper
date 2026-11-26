@@ -12,8 +12,15 @@ What is a frame expression and what is not, and why:
 
 * The line-range overlap and the conjunction of the predicate columns are
   polars expressions. Line numbers are rank-encoded first (see
-  :func:`_line_ranks`), because they are unbounded Python ints and a frame
-  column is 64-bit.
+  :func:`~automated_security_helper.utils.frame_text.ranks`), because they are
+  unbounded Python ints and a frame column is 64-bit; every comparison the
+  overlap makes is on order alone. That policy lives on the model:
+  ``AshSuppression.line_start``/``line_end`` carry ``RankEncoded("lines")``
+  markers, and the ``line_start``/``line_end`` columns here derive from
+  :func:`line_span_spec`, so the frames and the model cannot disagree about
+  the columns' names, dtypes or carrying rule. The rank collection of one
+  build is the entries' lines plus the finding's, and is relative to that
+  build alone.
 * Every string predicate (rule id, path, package, resource glob) is a Python
   callable per row, not a frame expression. They are ``fnmatch`` and
   ``path_matching`` semantics (``[`` classes, ``**`` components, a backslash
@@ -34,6 +41,7 @@ What is a frame expression and what is not, and why:
 from __future__ import annotations
 
 import fnmatch
+from functools import lru_cache
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -46,8 +54,7 @@ from typing import (
     Tuple,
 )
 
-import polars as pl
-
+from automated_security_helper.utils import frame_text
 from automated_security_helper.utils.path_matching import _path_pattern_matches
 from automated_security_helper.utils.suppression_scope_registry import (
     engine_hooks_for,
@@ -57,12 +64,83 @@ from automated_security_helper.utils.suppression_scope_registry import (
 from automated_security_helper.utils.symbol_spans import is_valid_symbol
 
 if TYPE_CHECKING:
+    import polars as pl
+
     from automated_security_helper.models.core import AshSuppression
     from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+    from automated_security_helper.models.frame_model import FrameSpec
     from automated_security_helper.utils.symbol_spans import SymbolResolver
 
 _FIRST_CHUNK = 16
 _CHUNK_GROWTH = 4
+
+
+@lru_cache(maxsize=None)
+def line_span_spec() -> "FrameSpec":
+    """The spec the ``line_start``/``line_end`` columns derive from.
+
+    Built lazily: ``models/core.py`` imports this module, so the model and the
+    spec machinery cannot be imported here at module level. Every other name
+    ``AshSuppression`` holds is waived with its reason, so the drift gate
+    (``tests/unit/models/test_frame_schemas.py``) fails on a field added to the
+    model until someone decides its frame fate.
+    """
+    from automated_security_helper.models.core import AshSuppression
+    from automated_security_helper.models.frame_model import FrameSpec
+
+    host_predicate = (
+        "a Python predicate per row (fnmatch and path semantics the module "
+        "docstring names), carried only as a boolean result column"
+    )
+    return FrameSpec(
+        AshSuppression,
+        ("line_start", "line_end"),
+        waived={
+            "path": host_predicate,
+            "rule_id": host_predicate + " (the rule column)",
+            "package_name": host_predicate + " (part of the rest column)",
+            "package_version": host_predicate + " (part of the rest column)",
+            "package_path": host_predicate + " (part of the rest column)",
+            "image": "gated on the host (_image_holds), a glob over the finding's "
+            "image reference and digest; never a column",
+            "scope": "gated on the host (_scope_gate), carried as the rest "
+            "and engine columns",
+            "resource_id": "sugar folded into scope at validation; gated with it",
+            "symbol": "resolved by the symbol resolver after the frame; never a column",
+            "reason": "display text for the unused-suppressions report, not a "
+            "matcher input",
+            "client_supplied": "provenance bookkeeping read on the host (which "
+            "entries an MCP client delivered), not a matcher input",
+            "expires": "read on the host by is_expired, which the live column carries",
+            "is_expired": "an input of the live column's predicate (_inert)",
+            "has_unknown_keys": "an input of the live column's predicate (_inert)",
+            "expiration": "the deprecated spelling of expires, same fate",
+            "days_until_expiry": "an expiry display helper over expires",
+            "id": "the suppression's stable identifier for reports, not a "
+            "matcher column",
+            "_scope_conflict": "an input of the scope gate on the host",
+            "_environment_record": "config-redaction bookkeeping "
+            "(RedactedSection), not frame data",
+        },
+    )
+
+
+def _span_schema() -> Dict[str, Any]:
+    """``line_start``/``line_end`` as polars dtypes, derived from the spec."""
+    from automated_security_helper.models.frame_model import frame_schema
+
+    return frame_schema(line_span_spec())
+
+
+def _span_frame(
+    starts: Sequence[Optional[int]], ends: Sequence[Optional[int]]
+) -> "pl.DataFrame":
+    """One row per entry: its line span, already rank-encoded by the caller."""
+    import polars as pl
+
+    return pl.DataFrame(
+        {"line_start": list(starts), "line_end": list(ends)}, schema=_span_schema()
+    )
 
 
 def _inert(entry: "AshSuppression") -> bool:
@@ -123,8 +201,29 @@ def _package_holds(entry: "AshSuppression", finding: "FlatVulnerability") -> boo
     if entry.package_path is not None:
         if finding.package_path is None:
             return False
-        return _path_pattern_matches(finding.package_path, entry.package_path)
+        # package_path separates two installed copies, so it is an identity,
+        # not a scope: the bare-directory rule (issue #894) must not make a
+        # glob-free entry cover packages nested below the copy it names.
+        return _path_pattern_matches(
+            finding.package_path, entry.package_path, bare_directory=False
+        )
     return True
+
+
+def _image_holds(entry: "AshSuppression", finding: "FlatVulnerability") -> bool:
+    """An entry with no ``image`` holds for any finding. One that names an image
+    holds only for a finding inside an image whose submitted reference or
+    resolved digest matches the pattern (case-insensitive glob); a finding that
+    carries no image never matches it, as a finding without a package never
+    matches a package field."""
+    pattern = getattr(entry, "image", None)
+    if pattern is None:
+        return True
+    wanted = pattern.lower()
+    return any(
+        value is not None and fnmatch.fnmatch(value.lower(), wanted)
+        for value in (finding.image_ref, finding.image_digest)
+    )
 
 
 def _scope_gate(
@@ -184,27 +283,18 @@ def _engine_block_matches(
     return hooks.suppression_scope_matches(engines[scanner], finding)
 
 
-def _line_ranks(values: Sequence[Optional[int]]) -> Dict[int, int]:
-    """Dense ranks of the distinct line numbers, so order and ties survive.
+def _line_ok(finding: "FlatVulnerability", ranks: Dict[int, int]) -> "pl.Expr":
+    """The overlap as an expression over the ``line_start``/``line_end`` columns.
 
-    Line numbers are unbounded Python ints; an Int64 frame column would raise
-    on a huge one. Every comparison the overlap makes is on order alone.
+    The columns hold dense ranks (the ``RankEncoded`` markers on the model), so
+    every comparison is on order alone. No entry range: any line. An entry
+    range and a finding without a line: never. A start alone is open-ended
+    (the finding's end reaches it), an end alone bounds the finding's end, both
+    mean overlap. A finding with no end is a one-line finding.
     """
-    return {
-        value: rank
-        for rank, value in enumerate(sorted({v for v in values if v is not None}))
-    }
+    import polars as pl
 
-
-def _line_ok(finding: "FlatVulnerability", ranks: Dict[int, int]) -> pl.Expr:
-    """The line-range overlap as a frame expression over columns ``s`` and ``e``.
-
-    No entry range: any line. An entry range and a finding without a line:
-    never. A start alone is open-ended (the finding's end reaches it), an end
-    alone bounds the finding's end, both mean overlap. A finding with no end is
-    a one-line finding.
-    """
-    s, e = pl.col("s"), pl.col("e")
+    s, e = pl.col("line_start"), pl.col("line_end")
     unbounded = s.is_null() & e.is_null()
     if finding.line_start is None:
         return unbounded
@@ -226,26 +316,23 @@ def line_range_overlaps(
     finding: "FlatVulnerability", entries: Sequence["AshSuppression"]
 ) -> List[bool]:
     """Per entry, whether the finding's line range overlaps the entry's."""
-    ranks = _line_ranks(
+    ranks = frame_text.ranks(
         [finding.line_start, finding.line_end]
         + [v for e in entries for v in (e.line_start, e.line_end)]
     )
-    frame = pl.DataFrame(
-        {
-            "s": [
-                None if e.line_start is None else ranks[e.line_start] for e in entries
-            ],
-            "e": [None if e.line_end is None else ranks[e.line_end] for e in entries],
-        },
-        schema={"s": pl.Int64, "e": pl.Int64},
+    frame = _span_frame(
+        [None if e.line_start is None else ranks[e.line_start] for e in entries],
+        [None if e.line_end is None else ranks[e.line_end] for e in entries],
     )
     return frame.select(_line_ok(finding, ranks).alias("ok"))["ok"].to_list()
 
 
 def _chunk_frame(
     finding: "FlatVulnerability", chunk: Sequence["AshSuppression"]
-) -> pl.DataFrame:
+) -> "pl.DataFrame":
     """One row per entry: the predicate columns that have no side effect."""
+    import polars as pl
+
     live, rule, base, rest, engine = [], [], [], [], []
     for entry in chunk:
         is_live = not _inert(entry)
@@ -257,6 +344,7 @@ def _chunk_frame(
             if holds or base_pending:
                 gate_ok = _path_pattern_matches(finding.file_path, entry.path)
                 gate_ok = gate_ok and _package_holds(entry, finding)
+                gate_ok = gate_ok and _image_holds(entry, finding)
                 if gate_ok:
                     gate_ok, needs_engine = _scope_gate(entry, finding)
         live.append(is_live)
@@ -269,10 +357,12 @@ def _chunk_frame(
     # (every entry inert, or ruled out by rule id, path, package or scope) need
     # not carry any.
     reached = rest
-    ranks = _line_ranks(
+    ranks = frame_text.ranks(
         ([finding.line_start, finding.line_end] if any(reached) else [])
         + [v for e, r in zip(chunk, reached) if r for v in (e.line_start, e.line_end)]
     )
+    # The predicate columns are results of host predicates, not model fields,
+    # so they stay hand-declared; the line columns derive from the spec.
     frame = pl.DataFrame(
         {
             "live": live,
@@ -280,11 +370,11 @@ def _chunk_frame(
             "base": base,
             "rest": rest,
             "engine": engine,
-            "s": [
+            "line_start": [
                 ranks[e.line_start] if r and e.line_start is not None else None
                 for e, r in zip(chunk, reached)
             ],
-            "e": [
+            "line_end": [
                 ranks[e.line_end] if r and e.line_end is not None else None
                 for e, r in zip(chunk, reached)
             ],
@@ -295,8 +385,7 @@ def _chunk_frame(
             "base": pl.Boolean,
             "rest": pl.Boolean,
             "engine": pl.Boolean,
-            "s": pl.Int64,
-            "e": pl.Int64,
+            **_span_schema(),
         },
     )
     lines_hold = _line_ok(finding, ranks) if any(reached) else pl.lit(False)
@@ -376,6 +465,8 @@ def matches(
 
 def _first_true(flags: Sequence[bool]) -> Optional[int]:
     """The index of the first True of ``flags``, decided by a frame."""
+    import polars as pl
+
     frame = pl.DataFrame({"hit": list(flags)}, schema={"hit": pl.Boolean})
     first = frame.with_row_index("i").filter(pl.col("hit"))["i"].head(1).to_list()
     return first[0] if first else None
@@ -415,6 +506,8 @@ def ignore_verdict(
     client's, the result is kept and marked by the LAST such path; otherwise
     (some location is outside every ignore path) it is left as it is.
     """
+    import polars as pl
+
     frame = pl.DataFrame({"client": list(client_flags)}, schema={"client": pl.Boolean})
     under = frame.height
     all_under = located > 0 and under == located
@@ -428,5 +521,6 @@ __all__: List[str] = [
     "ignore_verdict",
     "first_match",
     "line_range_overlaps",
+    "line_span_spec",
     "matches",
 ]

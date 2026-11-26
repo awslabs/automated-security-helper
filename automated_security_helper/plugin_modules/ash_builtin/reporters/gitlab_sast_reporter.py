@@ -6,24 +6,9 @@
 What is relational here is what a finding's id and severity depend on: two
 findings that fell back to one legacy id are told apart by how many came before
 them with it, and a suppressed finding is graded Info whatever its own grade.
-Those are a projection of the run's drafts as a frame (:func:`_projection`), whose
-columns are:
-
-========================  =========  =============================================
-``i``                     Int64      the draft's position among the kept results
-``id``                    String     the id the result was given, before the
-                                     collision count
-``legacy``                Boolean    whether the id is the legacy rule-file-line
-                                     one, the only kind that is counted
-``suppressed``            Boolean    whether a suppression is in effect
-``severity``              String     the gate's grade, in GitLab's spelling; null
-                                     when there is none
-``occurrence``            Int64      how many drafts before this one, in the frame's
-                                     order, have the same legacy id; 0 for a
-                                     non-legacy draft
-``severity_out``          String     ``Info`` for a suppressed draft, else
-                                     ``severity``
-========================  =========  =============================================
+Those are a projection of the run's drafts as a frame (:func:`_projection`),
+whose columns, and what each carries, are declared in one place:
+:func:`_projection_schema`.
 
 Every String column holds text through
 :func:`~automated_security_helper.utils.frame_text.wire`: an id can carry a rule
@@ -55,6 +40,7 @@ from automated_security_helper.utils.sarif_utils import (
     is_not_a_finding,
     result_message_text,
     result_rule_id,
+    shared_correlation_ids,
     shared_finding_ids,
     suppressions_in_effect,
 )
@@ -72,6 +58,7 @@ from automated_security_helper.base.reporter_plugin import (
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 from automated_security_helper.utils.error_text import error_text
+from automated_security_helper.utils.frame_ops import ordinal_over
 from automated_security_helper.utils.frame_text import unwire, wire
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -128,41 +115,84 @@ class _Draft:
     finding_id: str
     #: Whether *finding_id* is the legacy one, which collisions are counted on.
     legacy: bool
-    suppressed: bool
+    #: The value of ``FlatVulnerability.is_suppressed``, under its field's name.
+    is_suppressed: bool
     #: The gate's grade in GitLab's spelling; empty when there is none.
     severity: str
     #: The text for a suppressed finding's ``solution``.
     solution: Optional[str]
 
 
-def _projection(drafts: List[_Draft]) -> "pl.DataFrame":
-    """*drafts* as a frame, with each one's collision count and final severity
-    (the columns are in the module docstring)."""
+#: The two columns :func:`_projection` derives from the drafts' own columns.
+_PROJECTION_DERIVED = ("occurrence", "severity_out")
+
+
+def _projection_schema() -> Dict[str, Any]:
+    """The projection frame's declared shape, the one record of its columns.
+
+    ========================  =========  =========================================
+    ``i``                     Int64      the draft's position among the kept
+                                         results
+    ``id``                    String     the id the result was given, before the
+                                         collision count
+    ``legacy``                Boolean    whether the id is the legacy
+                                         rule-file-line one, the only kind that
+                                         is counted
+    ``is_suppressed``         Boolean    whether a suppression is in effect (the
+                                         name of the model field the value fills,
+                                         ``FlatVulnerability.is_suppressed``)
+    ``severity``              String     the gate's grade, in GitLab's spelling;
+                                         null when there is none
+    ``occurrence``            Int64      how many drafts before this one, in the
+                                         frame's order, have the same legacy id;
+                                         0 for a non-legacy draft
+    ``severity_out``          String     ``Info`` for a suppressed draft, else
+                                         ``severity``
+    ========================  =========  =========================================
+
+    The last two are derived from the first five (:data:`_PROJECTION_DERIVED`);
+    the drift gate pins the built frame against this dict.
+    """
     import polars as pl
 
+    return {
+        "i": pl.Int64,
+        "id": pl.String,
+        "legacy": pl.Boolean,
+        "is_suppressed": pl.Boolean,
+        "severity": pl.String,
+        "occurrence": pl.Int64,
+        "severity_out": pl.String,
+    }
+
+
+def _projection(drafts: List[_Draft]) -> "pl.DataFrame":
+    """*drafts* as a frame, with each one's collision count and final severity
+    (the columns are :func:`_projection_schema`)."""
+    import polars as pl
+
+    schema = _projection_schema()
     frame = pl.DataFrame(
         {
             "i": list(range(len(drafts))),
             "id": [wire(draft.finding_id) for draft in drafts],
             "legacy": [draft.legacy for draft in drafts],
-            "suppressed": [draft.suppressed for draft in drafts],
+            "is_suppressed": [draft.is_suppressed for draft in drafts],
             "severity": [wire(draft.severity) or None for draft in drafts],
         },
         schema={
-            "i": pl.Int64,
-            "id": pl.String,
-            "legacy": pl.Boolean,
-            "suppressed": pl.Boolean,
-            "severity": pl.String,
+            name: dtype
+            for name, dtype in schema.items()
+            if name not in _PROJECTION_DERIVED
         },
     )
     return frame.with_columns(
         pl.when(pl.col("legacy"))
-        .then(pl.int_range(pl.len()).over(["id", "legacy"]))
+        .then(ordinal_over("id", "legacy"))
         .otherwise(0)
         .cast(pl.Int64)
         .alias("occurrence"),
-        pl.when(pl.col("suppressed"))
+        pl.when(pl.col("is_suppressed"))
         .then(pl.lit("Info"))
         .otherwise(pl.col("severity"))
         .alias("severity_out"),
@@ -252,6 +282,9 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         skipped_results = 0
         if all_results:
             shared_ids = shared_finding_ids(model, all_results)
+            # The cross-scanner correlation ids, by the same pairing; None at
+            # every position a finding carries none.
+            correlation_ids = shared_correlation_ids(model, all_results)
             # Read once: the rule each result's message given by id is resolved
             # against, in the run and component the result sits in.
             descriptors = rule_descriptors_by_result(recorded_sarif)
@@ -271,6 +304,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                         model,
                         shared_ids[index],
                         descriptors[index] if index < len(descriptors) else None,
+                        correlation_id=correlation_ids[index],
                     )
                 except Exception as e:  # noqa: BLE001 -- see above
                     skipped_results += 1
@@ -350,6 +384,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         model: "AshAggregatedResults",
         shared_id: str | None = None,
         rule: Any = None,
+        correlation_id: str | None = None,
     ) -> _Draft | None:
         """One SARIF result as a draft of its GitLab vulnerability, or None to
         omit it.
@@ -367,7 +402,12 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         (:func:`rule_descriptors_by_result`): a message given by ``id`` is
         described by the string its rule or its component names, else by the
         rule's short description, else by the id itself, which is also what a
-        call without *rule* gets.
+        call without *rule* gets. *correlation_id* is the finding's
+        cross-scanner correlation id (``sarif_utils.shared_correlation_ids``),
+        carried as a ``details`` entry; None, the common case, adds nothing. It
+        is deliberately NOT an ``identifiers[]`` entry: identifiers drive
+        GitLab's own vulnerability tracking and dedup semantics, and two
+        scanners' findings of one secret are two findings there.
         """
         # `ruleId` is optional in SARIF 2.1.0 and defaults to None, and a result
         # may name its rule as `rule.id` instead (3.27.5, 3.27.7), so bind the
@@ -567,6 +607,16 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
             "value": rule_id,
         }
 
+        # The cross-scanner correlation id (utils/finding_identity,
+        # "Correlation ids"): a details entry, absent for a finding that
+        # carries none, as every other surface omits it.
+        if correlation_id:
+            details["ash_correlation_id"] = {
+                "name": "ASH correlation id",
+                "type": "text",
+                "value": correlation_id,
+            }
+
         # Add properties as JSON string
         if result.properties:
             details["properties"] = {
@@ -663,7 +713,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
             vulnerability=vuln,
             finding_id=finding_id,
             legacy=shared_id is None,
-            suppressed=is_suppressed,
+            is_suppressed=is_suppressed,
             severity=severity,
             solution=suppression_solution,
         )

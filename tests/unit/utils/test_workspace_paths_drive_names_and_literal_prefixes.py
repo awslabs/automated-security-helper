@@ -120,21 +120,19 @@ class TestAColonInANameIsNotADrive:
 
 
 class TestABracketNamedProjectIsAnchoredByEquality:
-    def test_a_literal_remainder_is_the_rewrite(self):
+    def test_a_literal_remainder_is_refused_as_glob_free(self):
         """``file_path_matches("app[v2]/x.py", "app[v2]/x.py")`` is True by
-        equality, so the pattern covers one file of the project and the rewrite
-        is that file's name; the base returned None and dropped the entry."""
-        assert to_project_pattern("app[v2]/x.py", "app[v2]", kind=SUPPRESSION) == (
-            "x.py"
-        )
-        _contract_holds("app[v2]/x.py", "app[v2]")
+        equality, so the pattern covers exactly one file of the project -- but
+        its remainder ``x.py`` is glob-free, and under the bare-directory rule
+        (issue #894) a glob-free project pattern also covers the subtree below
+        ``x.py``, which this pattern never matched. No project-side pattern
+        spells "this exact path only" for a plain name, so it is refused."""
+        with pytest.raises(WorkspacePatternError, match="bare-directory"):
+            to_project_pattern("app[v2]/x.py", "app[v2]", kind=SUPPRESSION)
 
-    def test_a_nested_bracket_component_is_anchored_too(self):
-        assert (
+    def test_a_nested_bracket_component_is_refused_too(self):
+        with pytest.raises(WorkspacePatternError, match="bare-directory"):
             to_project_pattern("apps/x[1]/a.py", "apps/x[1]", kind=SUPPRESSION)
-            == "a.py"
-        )
-        _contract_holds("apps/x[1]/a.py", "apps/x[1]")
 
     def test_a_glob_remainder_is_refused_not_widened(self):
         """Workspace-side only ``app[v2]/*.py`` spelled exactly matches; the
@@ -156,23 +154,27 @@ class TestABracketNamedProjectIsAnchoredByEquality:
         """Once ``app[v2]`` has matched only by its spelling, the glob reading
         of the whole pattern matches nothing under the prefix, so a later
         component in the prefix span can only match as its own text: ``s?b``
-        over ``s?b`` is that directory, over ``sub`` it is nothing. The base
-        refused both as a wildcard inside the project path."""
-        assert (
+        over ``s?b`` leaves the glob-free remainder ``x.py``, which is refused
+        (the bare-directory rule, issue #894, would widen it project-side);
+        over ``sub`` it is nothing. The base refused both as a wildcard inside
+        the project path."""
+        with pytest.raises(WorkspacePatternError, match="bare-directory"):
             to_project_pattern("app[v2]/s?b/x.py", "app[v2]/s?b", kind=SUPPRESSION)
-            == "x.py"
-        )
-        _contract_holds("app[v2]/s?b/x.py", "app[v2]/s?b")
         assert (
             to_project_pattern("app[v2]/s?b/x.py", "app[v2]/sub", kind=SUPPRESSION)
             is None
         )
         _contract_holds("app[v2]/s?b/x.py", "app[v2]/sub")
 
-    def test_a_lone_bracket_is_a_literal_to_fnmatch_and_converts_as_before(self):
-        """``a]b`` and ``a[b`` are literals to ``fnmatch`` and were right already."""
+    def test_a_lone_bracket_is_a_literal_to_fnmatch(self):
+        """``a]b`` has no glob character at all, so the bare-directory rule
+        (issue #894) converts it textually. ``a[b`` carries a ``[`` that
+        ``fnmatch`` reads literally but ``has_glob_syntax`` reads as glob, so
+        its glob-free remainder ``x.py`` is refused -- consistent with the
+        matcher, which keys the bare-directory rule on the same predicate."""
         assert to_project_pattern("a]b/x.py", "a]b", kind=SUPPRESSION) == "x.py"
-        assert to_project_pattern("a[b/x.py", "a[b", kind=SUPPRESSION) == "x.py"
+        with pytest.raises(WorkspacePatternError, match="bare-directory"):
+            to_project_pattern("a[b/x.py", "a[b", kind=SUPPRESSION)
         _contract_holds("a]b/x.py", "a]b")
 
 

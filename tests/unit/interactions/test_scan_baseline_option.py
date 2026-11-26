@@ -586,7 +586,10 @@ def test_baseline_options_do_not_shift_existing_positional_arguments():
 
     for function, previous in (
         (run_ash_scan, "min_severity"),
-        (run_ash_scan_cli_command, "compact_report"),
+        # The two duplicate switches (--annotate-duplicates, --fold-duplicates) landed
+        # between compact_report and changed_files_only, so the last argument that
+        # existed before the baseline options is now fold_duplicates.
+        (run_ash_scan_cli_command, "fold_duplicates"),
     ):
         names = list(inspect.signature(function).parameters)
         assert names.index("changed_files_only") == names.index(previous) + 1

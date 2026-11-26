@@ -59,7 +59,8 @@ def test_lint_has_no_exit_one_for_a_file_a_scan_accepts():
     body = _function_source("lint")
     declined = body.index("if declined:")
     after_declined = body[declined + len("if declined:") :]
-    ends = after_declined.index("raise typer.Exit(0)") + len("raise typer.Exit(0)")
+    success = "raise typer.Exit(AshExitCode.SUCCESS)"
+    ends = after_declined.index(success) + len(success)
     assert "Exit(" not in after_declined[ends:], (
         "lint exits again after a declined fix: the entry would need another look"
     )
@@ -94,6 +95,9 @@ def test_lint_exits_1_after_the_refusals_only_for_a_rewrite_it_could_not_make():
     """The one exit 1 the entry names: a refused ``--fix`` or ``--fix-unused``."""
     body = _function_source("lint")
     tail = body[body.index("if remaining.scan_refuses:") :]
-    assert tail.count("Exit(1)") == 1
+    assert tail.count("Exit(AshExitCode.SCAN_ERRORS)") == 1
     refused = tail.index("if fix_refused:")
-    assert "raise typer.Exit(1)" in tail[refused : tail.index("if declined:")]
+    assert (
+        "raise typer.Exit(AshExitCode.SCAN_ERRORS)"
+        in tail[refused : tail.index("if declined:")]
+    )

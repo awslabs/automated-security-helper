@@ -30,6 +30,7 @@ Alpha plugins run only when you load their module with `ash_plugin_modules` or
 | Composite actions (`action.yml`) | zizmor | guarddog |
 | Secrets, in any file | detect-secrets, gitleaks | betterleaks, ferret-scan (sensitive data), trivy-repo |
 | A software bill of materials | syft | |
+| MCP server config files (`.mcp.json`, `.cursor/mcp.json`, `.codex/config.toml` and the others the [MCP config page](../docs/plugins/builtin/mcp-config.md) lists) | mcp-config, semgrep, opengrep (semgrep and opengrep on the shell scripts the converter writes for them) | |
 | Jupyter notebooks | bandit, detect-secrets, gitleaks (on the converted script, bandit only for a Python notebook; see [Converted files](#converted-files)) | |
 | `.zip`, `.tar`, and `.gz` archives | detect-secrets, gitleaks (on every extracted file; see [Converted files](#converted-files)) | |
 
@@ -68,6 +69,7 @@ them to the tool.
 | detect-secrets | Secrets | Selected files: every file in the scan set except generated lockfiles | yes | yes |
 | gitleaks | Secrets | Whole directory: the files on disk, not git history | no | no |
 | grype | SCA | Whole directory: the packages it catalogs from manifests and lockfiles | no | no |
+| mcp-config | SAST | Selected files: the repo-local MCP server config files (`.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `.codex/config.toml` and the others the [MCP config page](../docs/plugins/builtin/mcp-config.md) lists), read in process | yes | no |
 | npm-audit | SCA | Selected files: each `package.json` that has a lockfile beside it | no | yes |
 | opengrep | SAST | Whole directory, with ASH's bundled rules and the `p/ci` ruleset | no | no |
 | semgrep | SAST | Whole directory, with ASH's bundled rules and the `p/ci` ruleset | yes | no |

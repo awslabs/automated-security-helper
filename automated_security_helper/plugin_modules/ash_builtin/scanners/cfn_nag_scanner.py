@@ -22,6 +22,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -61,7 +62,7 @@ from automated_security_helper.utils.cfn_template_model import (
     unmarked_wide_template_reason,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, TRACE_LEVEL
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.download_utils import (
     NO_BIN_DIRECTORY,
@@ -70,6 +71,7 @@ from automated_security_helper.utils.download_utils import (
 )
 from automated_security_helper.utils.normalizers import get_normalized_filename
 from automated_security_helper.utils.output_excerpt import tool_output_excerpt
+from automated_security_helper.utils.package_identity import ASH_RESOURCE_ID_KEY
 from automated_security_helper.utils.scanned_tree import TreeInputRefused
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.tool_downloads import CFN_NAG_GEM_VERSION
@@ -244,6 +246,23 @@ def _rule_exception_lines(stderr: str) -> List[str]:
     return raised
 
 
+#: One known cause of the unrenderable failure above, named so the error is
+#: actionable. cfn-nag 0.8.10 pins ``psych ~> 3``; on a Homebrew portable-ruby
+#: build (3.3.8 and 3.4.5 measured) the interpreter's own Psych is linked into
+#: ``ruby``, cfn-nag's template parse raises "undefined method `parse' for an
+#: instance of Psych::Parser", and cfn_nag emits a FATAL violation that its SARIF
+#: format drops (tests/test_data/scanners/M0-FINDINGS.md item b). The same gem
+#: scans cleanly on source-built Ruby 3.1.7, 3.3.8 and 3.4.5, so this is a build
+#: constraint, not a Ruby-version one. ASH does not read the Ruby version here:
+#: the SARIF run carries neither the message nor the interpreter, and a hint is
+#: all the stdout and stderr of that run can honestly support.
+_PSYCH_FATAL_HINT = (
+    "If it reads `undefined method 'parse' for an instance of Psych::Parser`, "
+    "cfn-nag 0.8.10 is running on a Ruby whose built-in Psych conflicts with its "
+    "psych 3 pin (seen on Homebrew portable-ruby builds); use a Ruby built from "
+    "source or from your distribution's package."
+)
+
 #: Where macOS keeps a real compiler: the Command Line Tools, Xcode, or the
 #: developer directory ``xcode-select`` points at. Without one of these,
 #: ``/usr/bin/cc``, ``gcc`` and ``clang`` are stubs that offer to install the
@@ -376,6 +395,40 @@ def _restore_cfn_nag_uris(
                         artifact.uri = original
 
 
+def attach_cfn_nag_resources(report: SarifReport) -> int:
+    """Write each result's CloudFormation logical id under ``ash_resource_id``.
+
+    cfn_nag's SARIF writer (``result_view/sarif_results.rb``) renders one result
+    per logical resource id of a violation and names that id in
+    ``locations[0].logicalLocations[0].name``; the captured run is
+    ``tests/test_data/scanners/cfn_nag/captured/cfn_nag-0.8.10-two-buckets.sarif``.
+    Two buckets with the same finding give two results that differ only in that
+    name and the line, so without it a resource-scoped suppression cannot tell
+    them apart.
+
+    The id is written only when the result names exactly one distinct, non-empty
+    logical location: a result with none, or with two that disagree, gets no
+    resource (a wrong id would bind a suppression to a finding it was not written
+    for, and a missing one only fails closed). Returns how many results were set.
+    """
+    attached = 0
+    for run in report.runs or []:
+        for result in run.results or []:
+            names = {
+                logical.name
+                for location in result.locations or []
+                for logical in location.logicalLocations or []
+                if isinstance(logical.name, str) and logical.name.strip()
+            }
+            if len(names) != 1:
+                continue
+            if result.properties is None:
+                result.properties = PropertyBag()
+            setattr(result.properties, ASH_RESOURCE_ID_KEY, names.pop())  # noqa: B010
+            attached += 1
+    return attached
+
+
 class CfnNagScannerConfigOptions(ScannerOptionsBase):
     pass
 
@@ -409,66 +462,55 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
-    #: The facets register row (base/scanner_facets.py). Declaration only: this
-    #: adapter writes no ``ash_resource_id`` today. The native-field names below
-    #: are the tool's JSON violation keys (committed fixture
-    #: tests/test_data/scanners/cfn_nag/src.test.yaml.json); ASH validates the
-    #: tool's SARIF rendering of the same violations, and no cfn-nag SARIF
-    #: golden is committed -- the M0 sample run FATALed on cfn-nag 0.8.10 under
-    #: Ruby 3.4 (tests/test_data/scanners/M0-FINDINGS.md, item b), so every cell
-    #: that only a real SARIF read could settle is n/a with an UNCONFIRMED
-    #: reason, never a guess.
+    #: The facets register row (base/scanner_facets.py). ``resource_id`` is
+    #: written by :func:`attach_cfn_nag_resources`. The cells below were settled
+    #: by a real ``cfn_nag_scan --output-format sarif`` and ``json`` run over the
+    #: M0 fixture (tests/test_data/scanners/cfn_nag/captured/, recapture in
+    #: tests/test_data/scanners/M0-FINDINGS.md item b).
+    #:
+    #: Runtime constraint of this row (the facet vocabulary has no runtime
+    #: field, so it is recorded here): the row holds only where cfn-nag 0.8.10
+    #: runs. It runs on source-built Ruby 3.1.7, 3.3.8 and 3.4.5 and FATALs on
+    #: Homebrew portable-ruby builds (3.3.8 and 3.4.5; its psych 3 pin collides
+    #: with the interpreter's built-in Psych). The first M0 run read that FATAL
+    #: as "Ruby 3.4 only"; the recapture shows the Ruby version is not the
+    #: variable, the build is. The FATAL shape: exit 1, SARIF with 0 results and
+    #: an empty stderr, JSON violation id FATAL with message
+    #: "undefined method 'parse' for an instance of Psych::Parser".
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
-            state=FacetState.NA,
-            reason='UNCONFIRMED: the JSON violation "id" (e.g. W51, the '
-            "committed fixture) should render as the SARIF ruleId, but the "
-            "SARIF the pipeline reads was never read to a real result (M0 "
-            "item b FATALed); one cfn_nag_scan --output-format sarif run "
-            "settles it",
+            state=FacetState.MAPPED,
+            native_field='violation "id" (e.g. W51), the SARIF ruleId',
         ),
         severity=FacetDecl(
-            state=FacetState.NA,
-            reason='UNCONFIRMED: the JSON violation "type" (WARN or FAIL) '
-            "should render as the SARIF result level, but the SARIF the "
-            "pipeline reads was never read to a real result (M0 item b); one "
-            "cfn_nag_scan --output-format sarif run settles it",
+            state=FacetState.MAPPED,
+            native_field='violation "type" (WARN or FAIL), rendered by the '
+            "tool as the SARIF result level",
         ),
         file_path=FacetDecl(
-            state=FacetState.NA,
-            reason='UNCONFIRMED: the JSON file result "filename" should '
-            "render as the SARIF artifact uri (restored from the staged copy "
-            "by _restore_cfn_nag_uris), but the SARIF the pipeline reads was "
-            "never read to a real result (M0 item b); one cfn_nag_scan "
-            "--output-format sarif run settles it",
+            state=FacetState.MAPPED,
+            native_field='file result "filename", the SARIF artifact uri '
+            "(restored from the staged copy by _restore_cfn_nag_uris)",
         ),
         line_range=FacetDecl(
-            state=FacetState.NA,
-            reason='UNCONFIRMED: the JSON violation "line_numbers" should '
-            "render as the SARIF region startLine, but the SARIF the "
-            "pipeline reads was never read to a real result (M0 item b); one "
-            "cfn_nag_scan --output-format sarif run settles it",
+            state=FacetState.MAPPED,
+            native_field='violation "line_numbers", the SARIF region startLine',
         ),
         column=FacetDecl(
             state=FacetState.NA,
-            reason="UNCONFIRMED: the tool's JSON carries line_numbers only and "
-            "no cfn-nag SARIF golden is committed; one cfn_nag_scan "
-            "--output-format sarif run settles whether a column is emitted",
+            reason="the tool's SARIF region carries startLine only and its "
+            "JSON carries line_numbers only (captured fixture, M0 item b)",
         ),
         message=FacetDecl(
-            state=FacetState.NA,
-            reason='UNCONFIRMED: the JSON violation "message" should render '
-            "as the SARIF message text, but the SARIF the pipeline reads was "
-            "never read to a real result (M0 item b); one cfn_nag_scan "
-            "--output-format sarif run settles it",
+            state=FacetState.MAPPED,
+            native_field='violation "message"',
         ),
         resource_id=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='violation "logical_resource_ids" (the JSON output format)',
-            reason="UNCONFIRMED: no SARIF run is committed, so whether the id "
-            "is a structured SARIF field or only one result per id is open "
-            "(M0 item b FATALed); the unit that attaches it (M3a) picks its "
-            "route after one cfn_nag_scan --output-format sarif run",
+            state=FacetState.MAPPED,
+            native_field="SARIF result locations[0].logicalLocations[0].name "
+            '(one result per id; the JSON "logical_resource_ids" lists them), '
+            "written under ash_resource_id by attach_cfn_nag_resources",
+            example="M0FixtureBucketA",
         ),
         resource_type=FacetDecl(
             state=FacetState.NA,
@@ -503,8 +545,8 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         ),
         fingerprints=FacetDecl(
             state=FacetState.NA,
-            reason="UNCONFIRMED: the tool's JSON carries no fingerprint and "
-            "no cfn-nag SARIF golden is committed; one SARIF run settles it",
+            reason="the captured SARIF results carry no fingerprints and the "
+            "JSON carries none (M0 item b)",
         ),
         fix_available=FacetDecl(
             state=FacetState.NA,
@@ -517,15 +559,13 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         ),
         snippet=FacetDecl(
             state=FacetState.NA,
-            reason="UNCONFIRMED: the tool's JSON carries no source excerpt "
-            "and no cfn-nag SARIF golden is committed; one SARIF run settles "
-            "whether a region snippet is emitted",
+            reason="the captured SARIF region carries startLine only, with "
+            "no snippet, and the JSON carries no excerpt (M0 item b)",
         ),
         references=FacetDecl(
             state=FacetState.NA,
-            reason="UNCONFIRMED: the tool's JSON carries no URL and no "
-            "cfn-nag SARIF golden is committed; one SARIF run settles "
-            "whether the rule driver carries a helpUri",
+            reason="the captured SARIF rules are {id, name, fullDescription} "
+            "with no helpUri, and the JSON carries no URL (M0 item b)",
         ),
         tags=FacetDecl(
             state=FacetState.NA,
@@ -584,6 +624,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     "gem closure itself comes from the committed assets/Gemfile.lock."
                 ),
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="a Ruby gem closure from assets/Gemfile.lock, not a release binary; there is no asset table",
@@ -621,7 +662,6 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 semantics="the base default {0, 1}; Ruby stderr exception text is sniffed to tell a crash from findings",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.GEMFILE_LOCK,
                 selection_surfaces=(),
                 upstream_license=(
@@ -987,7 +1027,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: CfnNagScannerConfig | None = None,
     ) -> SarifReport | bool:
@@ -1135,7 +1175,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             # refused before ASH parses it or hands it to cfn_nag_scan.
             scan_root = (
                 self.context.work_dir
-                if target_type == "converted"
+                if target_type == TargetType.CONVERTED
                 else self.context.source_dir
             )
             # The results directory names already taken in this scan (_unique_name).
@@ -1328,14 +1368,14 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                         f"Not a CloudFormation file: {cfn_file}. "
                         f"Exception: {describe_parse_error(e)}",
                         target_type=target_type,
-                        level=logging.TRACE,
+                        level=TRACE_LEVEL,
                     )
                     continue
                 if cfn_model is None:
                     self._plugin_log(
                         f"Not a CloudFormation file: {cfn_file}",
                         target_type=target_type,
-                        level=logging.TRACE,
+                        level=TRACE_LEVEL,
                     )
                     continue
                 # Counted here rather than at the top of the loop: the two continues above
@@ -1415,6 +1455,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     _restore_cfn_nag_uris(
                         file_sarif, staged_input, cfn_file, self.context.source_dir
                     )
+                    attach_cfn_nag_resources(file_sarif)
                     raised = _rule_exception_lines(proc_resp.get("stderr") or "")
                     if raised:
                         # A rule that raised under --isolate-custom-rule-exceptions:
@@ -1445,7 +1486,10 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                             "cfn_nag reported a failure it could not render "
                             f"(exit code {proc_resp.get('returncode', '?')} with an "
                             "empty result set), which means no rule was evaluated "
-                            "against this template"
+                            "against this template. The FATAL violation that "
+                            "explains it is left out of cfn_nag's SARIF output; "
+                            "`cfn_nag_scan --output-format json` on this template "
+                            f"shows it. {_PSYCH_FATAL_HINT}"
                         )
                         ASH_LOGGER.error(
                             f"CFN Nag did not evaluate {cfn_file}: {reason}"

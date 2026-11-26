@@ -157,7 +157,7 @@ virtual environment inside the project show as MISSING. See
 | Extra | Adds | Needed for |
 |---|---|---|
 | `cdk` | `aws-cdk-lib`, `cdk-nag`, `constructs` | the cdk-nag scanner, which also needs Node.js |
-| `symbols` | tree-sitter grammars for Python, JavaScript, TypeScript, and Java | `symbol` in suppressions; see [Suppress findings](suppress-findings.md) |
+| `symbols` | tree-sitter grammars for Python, JavaScript, TypeScript, and Java | `symbol` in suppressions; see [Suppress findings](suppress-findings.md) and [Symbol resolution](../reference/symbol-resolution.md) |
 
 To install an extra from git, use the direct-reference form `name[extra] @ URL`, as
 the commands on this page do. List several extras with commas, as in
@@ -212,7 +212,7 @@ pinned, so the scanner toolchain matches the code.
 
 No ASH image is published. `ash --mode container` builds an image with every scanner
 on your machine and scans inside it; it rebuilds the image on every run unless you
-pass `--no-build`. `ash build-image` builds one to push to your own registry. See
+pass `--no-build`. `ash container build` builds one to push to your own registry. See
 [Run ASH in a container](run-in-a-container.md).
 
 ## Nix mode

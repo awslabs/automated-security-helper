@@ -8,22 +8,22 @@ Why this file exists
 ``refuse_unresolvable_scanner_selection`` refuses a ``--scanners`` selection no
 project could run before any project starts, with the builders the engine and
 the scan phase share, so the three refuse in the same words. One of those
-builders was missing here: a request naming an alpha scanner ASH ships whose
+builders was missing here: a request naming a scanner ASH ships whose
 plugin module this run did not load (``--scanners snyk-code`` without
 ``ash_snyk_plugins`` listed) was refused as a spelling error, while the engine
 and the scan phase name the module to add
-(``core.scanner_selection.alpha_scanner_refusal``). The operator read the
+(``plugins.enablement.unloaded_opt_in_refusal``). The operator read the
 workspace refusal, checked a name that was right, and got the module hint only
 from a single scan.
 
 The contract these cases pin:
 
 - the workspace pre-check's text for such a request is byte for byte the text
-  ``alpha_scanner_refusal`` builds from the same inputs, so it names the
+  ``unloaded_opt_in_refusal`` builds from the same inputs, so it names the
   module and reads as the engine's;
 - a misspelled name requested beside it is named in the same refusal;
 - a request that resolves to a declared scanner is not refused (control), and a
-  request that names no alpha scanner keeps the spelling refusal (control).
+  request that names no shipped scanner keeps the spelling refusal (control).
 """
 
 from __future__ import annotations
@@ -31,10 +31,8 @@ from __future__ import annotations
 import pytest
 
 from automated_security_helper.core.exceptions import ScannerSelectionError
-from automated_security_helper.core.scanner_selection import (
-    alpha_scanner_refusal,
-)
 from automated_security_helper.plugins import ash_plugin_manager
+from automated_security_helper.plugins.enablement import unloaded_opt_in_refusal
 from automated_security_helper.workspace.execution import (
     ProjectScanSettings,
     refuse_unresolvable_scanner_selection,
@@ -90,10 +88,10 @@ def test_an_unloaded_alpha_scanner_is_refused_in_the_engines_words(
         _precheck(tmp_path, "snyk-code")
 
     text = str(refused.value)
-    assert text == alpha_scanner_refusal(
+    assert text == unloaded_opt_in_refusal(
         ["snyk-code"], ["bandit"], one_declared_scanner
     )
-    assert "alpha scanner" in text
+    assert "is provided by" in text
     assert "ash_snyk_plugins" in text
     assert "--ash-plugin-modules" in text
     assert "check the spelling" not in text
@@ -126,4 +124,4 @@ def test_a_name_that_is_no_alpha_scanner_keeps_the_spelling_refusal(
     with pytest.raises(ScannerSelectionError) as refused:
         _precheck(tmp_path, "no-such-scanner")
 
-    assert "alpha scanner" not in str(refused.value)
+    assert "is provided by" not in str(refused.value)

@@ -278,6 +278,7 @@ $ ash report --format ocsf --log-level ERROR
       "uid": "<UUID>"
     },
     "metadata": {
+      "correlation_uid": "secret/6a02ac4612b8b531b7f32f65af467ba48a7064f553419e13ff9dff90bc08990d",
       "logged_time": 1768480200000,
       "product": {
         "name": "Automated Security Helper",
@@ -291,6 +292,9 @@ $ ash report --format ocsf --log-level ERROR
     "status_id": 1,
     "time": 1768480200000,
     "type_uid": 200201,
+    "unmapped": {
+      "ash/correlationId": "secret/6a02ac4612b8b531b7f32f65af467ba48a7064f553419e13ff9dff90bc08990d"
+    },
     "vulnerabilities": [
       {
         "affected_code": [

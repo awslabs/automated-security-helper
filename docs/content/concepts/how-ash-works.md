@@ -8,7 +8,7 @@ A scan runs up to three phases, always in this order: convert, scan, and report.
 
 ```mermaid
 flowchart LR
-    src[Source directory] --> convert[Convert phase<br/>archive, jupyter]
+    src[Source directory] --> convert[Convert phase<br/>archive, jupyter, mcp_config, sdist-lock-harvester]
     convert --> conv[converted/ target]
     src --> scan
     conv --> scan[Scan phase<br/>scanners in parallel]
@@ -37,7 +37,7 @@ Where the scan runs is a separate choice, the run mode. `local` (the default) ru
 
 ## How scanners are selected
 
-ASH ships 16 built-in scanners, all enabled by default except semgrep and opengrep on Windows. For each scanner it knows about, ASH asks these questions in order and records the first answer that stops the scanner:
+ASH ships 17 built-in scanners, all enabled by default except semgrep and opengrep on Windows. For each scanner it knows about, ASH asks these questions in order and records the first answer that stops the scanner:
 
 1. Is it enabled? `scanners.<name>.enabled: false` in the config turns a scanner off. `--scanners` cannot turn it back on; `ash scan --config-overrides scanners.<name>.enabled=true` can.
 2. Was it selected? `--scanners` is an allowlist and `--exclude-scanners` removes names from it. A scanner that is not selected is recorded SKIPPED.
@@ -81,6 +81,8 @@ ASH does not deduplicate findings, within a scan or across shards. When two scan
 - several scanners evaluate CloudFormation templates.
 
 This has three consequences. Finding counts are counts of scanner results, not of distinct problems. A suppression that names a `rule_id` matches the rule IDs of whichever scanner uses that ID, so the same problem reported by another scanner under another ID stays unsuppressed; a suppression without `rule_id` covers every rule in its path. And the gate counts every unsuppressed duplicate. If two scanners overlap more than you want, turn one of them off; see [Choose scanners](../how-to/choose-scanners.md). [Suppressions, ignore paths, and scanner exclusions](suppressions.md) explains how suppressions match.
+
+For secret detections, the ASFF findings of the `asff` and `aws-security-hub` reporters say which of them are about one secret: they share an `ash/correlationId`, derived from where the secret is and not from who reported it. The findings stay separate. See [AWS reporters](../plugins/aws.md#aws-security-hub).
 
 Sharding splits a scan by scanner, not by file, so `ash merge` of the shards does not count any finding twice. See [Scale to large repositories](../how-to/scale-large-repos.md).
 

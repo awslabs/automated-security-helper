@@ -34,7 +34,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils import content_db_staleness as staleness
 from automated_security_helper.utils.content_databases import (
     CONTENT_DATABASES,
-    STALENESS_FAIL,
+    StalenessPolicy,
 )
 
 pytestmark = pytest.mark.unit
@@ -54,7 +54,7 @@ def _record(name="grype-db", scanner="grype", *, built, max_age, measured_at=_NO
         measured_by="a test",
         max_age=max_age,
         measured_at=measured_at,
-        policy=STALENESS_FAIL,
+        policy=StalenessPolicy.FAIL,
         bound_source="a test",
         bound_is_tool_default=False,
         refresh="refresh it",
@@ -120,7 +120,7 @@ class _Scanner:
 
 def test_a_scan_that_read_no_database_is_graded_against_none_when_the_probe_fails():
     scanner = _Scanner("semgrep", [], RuntimeError("no context"))
-    records = staleness.assess_scanner(scanner, _sarif("semgrep"), STALENESS_FAIL)
+    records = staleness.assess_scanner(scanner, _sarif("semgrep"), StalenessPolicy.FAIL)
     assert records == []
 
 
@@ -128,7 +128,7 @@ def test_a_probe_failure_grades_only_the_databases_the_scan_read_as_unmeasured()
     entry = _entry("semgrep-offline-rules")
     scanner = _Scanner("semgrep", [entry], RuntimeError("no context"))
     records = staleness.assess_scanner(
-        scanner, _sarif("semgrep"), STALENESS_FAIL, now=_NOW
+        scanner, _sarif("semgrep"), StalenessPolicy.FAIL, now=_NOW
     )
     assert [record.name for record in records] == [entry.name]
     (record,) = records
@@ -151,7 +151,7 @@ def test_a_probe_failure_runs_no_measurer(monkeypatch):
     entry = _entry("semgrep-offline-rules")
     scanner = _Scanner("semgrep", [entry], RuntimeError("no context"))
     records = staleness.assess_scanner(
-        scanner, _sarif("semgrep"), STALENESS_FAIL, now=_NOW
+        scanner, _sarif("semgrep"), StalenessPolicy.FAIL, now=_NOW
     )
     (record,) = records
     assert record.built is None

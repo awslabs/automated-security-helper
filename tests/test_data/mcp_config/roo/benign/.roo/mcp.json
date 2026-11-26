@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "docs": {
+      "headers": {
+        "X-Client": "ash-fixture"
+      },
+      "type": "streamable-http",
+      "url": "https://mcp.example.com/docs"
+    },
+    "files": {
+      "alwaysAllow": [],
+      "args": [
+        "--root",
+        "/srv/data"
+      ],
+      "command": "/usr/local/bin/mcp-files",
+      "env": {
+        "LOG_LEVEL": "info"
+      }
+    }
+  }
+}

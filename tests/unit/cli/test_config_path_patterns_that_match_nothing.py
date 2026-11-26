@@ -167,20 +167,16 @@ def test_a_pattern_that_matches_nothing_is_named_with_advice(
     assert "points to a directory" not in output, output
 
 
-def test_lint_reports_the_directory_advice_once(
+def test_lint_accepts_a_bare_directory_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The bare-directory rule (issue #894): 'src' names the directory and
+    matches the files below it, so lint gives it no advice."""
     tree = _tree(tmp_path, _ignore("src"), FILES)
     code, output = _run("lint", tree, monkeypatch)
 
-    shown = (
-        "Path 'src' points to a directory but matches no file in it. "
-        "Use 'src/' to ignore every file inside the directory. "
-        "at 'global_settings.ignore_paths[0].path'"
-    )
     assert code == 0, output
-    assert _flat(output).count("Path 'src' points to a directory") == 1, output
-    assert shown in _flat(output), output
+    assert "points to a directory" not in _flat(output), output
     assert "❌" not in output, output
 
 
@@ -191,11 +187,6 @@ def test_lint_reports_the_directory_advice_once(
             "./src",
             f"Path './src' {PREFIX}. Use 'src/' to ignore every file inside the directory.",
             id="dot-slash",
-        ),
-        pytest.param(
-            "src",
-            "Path 'src' points to a directory but matches no file in it.",
-            id="directory",
         ),
     ],
 )

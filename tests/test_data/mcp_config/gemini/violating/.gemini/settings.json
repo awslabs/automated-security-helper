@@ -1,0 +1,27 @@
+{
+  "mcpServers": {
+    "elevated": {
+      "args": [
+        "/usr/local/bin/mcp-files",
+        "--root",
+        "/srv/data"
+      ],
+      "command": "sudo",
+      "trust": true
+    },
+    "events": {
+      "url": "http://mcp.example.com/sse"
+    },
+    "runner": {
+      "args": [
+        "-y",
+        "some-mcp-server"
+      ],
+      "command": "npx"
+    },
+    "stream": {
+      "httpUrl": "http://mcp.example.com/stream"
+    }
+  },
+  "theme": "Default"
+}

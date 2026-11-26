@@ -20,7 +20,8 @@ produce the same entry, because both reach it through the same
 They do differ on *which scanners exist*, and that difference is intentional.
 Both call :func:`list_scanner_inventory`; they differ only in the provider they
 hand it. MCP passes :func:`_loaded_scanner_classes`, which additionally loads
-:data:`_VENDORED_SCANNER_PLUGIN_PACKAGES`, so it reports the set this build
+every shipped plugin module that needs naming
+(``plugins.enablement.modules_needing_naming``), so it reports the set this build
 *contains*. The CLI passes the classes ``load_plugins(plugin_context)`` resolved,
 which is the set *active for this configuration*. Measured on one machine that is
 13 and 10; the three the CLI does not list are ``ferret_scan``, ``snyk_code`` and
@@ -55,27 +56,6 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.redacted_model import (
     EnvResolvedScalar,
     without_env_scalars,
-)
-
-
-#: Scanner plugin packages that ship inside ASH but are not loaded by
-#: ``load_internal_plugins()``, which imports ``ash_builtin`` only.
-#:
-#: These are package paths, not the module paths inside them, because
-#: ``ASH_SCANNERS`` is declared in each package's ``__init__``. That list is what
-#: ``load_additional_plugin_modules`` returns, and pointing at
-#: ``ash_ferret_plugins.ferret_scanner`` instead imports the scanner but returns
-#: nothing, since the leaf module declares no ``ASH_SCANNERS``. Measured: the leaf
-#: paths yield 0 scanners, the package paths yield every one of the modules'
-#: scanners. tests/unit/cli/mcp/test_list_scanners_import_order.py keeps this list
-#: equal to every in-tree alpha module.
-_VENDORED_SCANNER_PLUGIN_PACKAGES = (
-    "automated_security_helper.plugin_modules.ash_betterleaks_plugins",
-    "automated_security_helper.plugin_modules.ash_ferret_plugins",
-    "automated_security_helper.plugin_modules.ash_guarddog_plugins",
-    "automated_security_helper.plugin_modules.ash_hadolint_plugins",
-    "automated_security_helper.plugin_modules.ash_snyk_plugins",
-    "automated_security_helper.plugin_modules.ash_trivy_plugins",
 )
 
 
@@ -151,17 +131,23 @@ def _loaded_scanner_classes() -> list:
         load_internal_plugins,
     )
 
-    # Load both sources rather than choosing between them. Metadata discovery and
-    # the vendored list find different packages, so picking one on whether
-    # discovery happened to return anything drops whatever the winner does not
-    # cover: install any ash_*_plugins distribution and discovery wins, taking
-    # ferret, snyk and trivy out of the answer. Loading both is safe because
-    # import_module is cached and register_plugin_module skips names already
-    # registered, so the result does not depend on the order either.
+    # Load both sources rather than choosing between them. Metadata discovery
+    # and the shipped opt-in packages find different packages, so picking one on
+    # whether discovery happened to return anything drops whatever the winner
+    # does not cover: install any ash_*_plugins distribution and discovery
+    # wins, taking ferret, snyk and trivy out of the answer. Loading both is
+    # safe because import_module is cached and register_plugin_module skips
+    # names already registered, so the result does not depend on the order
+    # either. The shipped set is every plugin module the manifests do not
+    # enable by default (``plugins.enablement.modules_needing_naming``); the
+    # entries are package paths, not leaf modules, because ``ASH_SCANNERS`` is
+    # declared in each package's ``__init__`` (the leaf paths yield 0 scanners,
+    # measured).
     from automated_security_helper.plugins import ash_plugin_manager
+    from automated_security_helper.plugins.enablement import modules_needing_naming
 
     package_paths = _discover_external_scanner_plugin_packages()
-    package_paths.extend(_VENDORED_SCANNER_PLUGIN_PACKAGES)
+    package_paths.extend(modules_needing_naming())
 
     internal = load_internal_plugins()
     # load_additional_plugin_modules logs a warning when a package fails to
