@@ -1571,29 +1571,39 @@ def _result_paths(result: Any, source: Path) -> Iterable[Path]:
     scanner result inside the scan, so one such location must place the result
     nowhere rather than raise out of the loop.
     """
+    for location in getattr(result, "locations", None) or []:
+        path = _location_path(location, source)
+        if path is not None:
+            yield path
+
+
+def _location_path(location: Any, source: Path) -> Optional[Path]:
+    """The path one location names, in the record form, or None when it names none.
+
+    The per-location step of :func:`_result_paths`, with the same reading rules.
+    """
     # Imported here because sarif_utils imports the models, which this low-level
     # module must not.
     from automated_security_helper.utils.sarif_utils import _file_uri_to_path_text
 
-    for location in getattr(result, "locations", None) or []:
-        physical = getattr(location, "physicalLocation", None)
-        root = getattr(physical, "root", physical)
-        artifact = getattr(root, "artifactLocation", None)
-        uri = getattr(artifact, "uri", None)
-        if not uri:
-            continue
-        if uri.startswith("file:"):
-            uri = _file_uri_to_path_text(uri)
-        elif "://" in uri:
-            continue
-        else:
-            decoded = unquote(uri, errors="surrogateescape")
-            if decoded != uri and not _names_a_file(source / undecodable_of_text(uri)):
-                uri = decoded
-        resolved = resolve_uri_reading(uri, base=source)
-        if resolved is None:
-            continue
-        yield path_in_record_form(resolved)
+    physical = getattr(location, "physicalLocation", None)
+    root = getattr(physical, "root", physical)
+    artifact = getattr(root, "artifactLocation", None)
+    uri = getattr(artifact, "uri", None)
+    if not uri:
+        return None
+    if uri.startswith("file:"):
+        uri = _file_uri_to_path_text(uri)
+    elif "://" in uri:
+        return None
+    else:
+        decoded = unquote(uri, errors="surrogateescape")
+        if decoded != uri and not _names_a_file(source / undecodable_of_text(uri)):
+            uri = decoded
+    resolved = resolve_uri_reading(uri, base=source)
+    if resolved is None:
+        return None
+    return path_in_record_form(resolved)
 
 
 def _names_a_file(path: Path) -> bool:
@@ -1663,23 +1673,71 @@ def mark_converted_results(sarif_report: Any, context: Any) -> int:
 #: span of the original each line of it came from (the MCP config converter does).
 SPAN_MAP_SUFFIX = ".spanmap.json"
 
-#: The result property recording the generated file a mapped result was found in.
-CONVERTED_FROM_PROPERTY = "ash/convertedFrom"
+#: The most a sidecar may hold for ``map_back_converted_results`` to read it. A
+#: converter writes one row per generated line, so a real sidecar is a few kilobytes.
+MAX_SPAN_MAP_BYTES = 4 * 1024 * 1024
 
 _SPAN_ROW_INTS = ("script_line", "line", "col", "end_line", "end_col")
 
 
-def _read_span_rows(sidecar: Path) -> Dict[int, Dict[str, Any]]:
+def _names_a_source_file(source_file: Any, source: Path) -> bool:
+    """Whether *source_file* is a plain relative path to an existing file under *source*.
+
+    Text only is not enough: a scheme (``file:///etc/passwd``, ``https://...``), a
+    drive (``C:/x``), a backslash, an absolute path and a ``..`` segment are all
+    refused, and the path, resolved under *source* with its links followed, must
+    stay inside *source* and be a file.
+    """
+    if (
+        not isinstance(source_file, str)
+        or not source_file
+        or ":" in source_file
+        or "\\" in source_file
+        or "\x00" in source_file
+        or source_file.startswith("/")
+        or ".." in source_file.split("/")
+    ):
+        return False
+    try:
+        resolved = (source / source_file).resolve()
+        return resolved.is_relative_to(source) and resolved.is_file()
+    except (OSError, ValueError, RuntimeError):
+        return False
+
+
+def _read_span_rows(
+    sidecar: Path, source: Path, recorded_source: str
+) -> Dict[int, Dict[str, Any]]:
     """The sidecar's rows by generated line, or an empty mapping for anything unusable.
 
     The sidecar is data a converter wrote from scanned content, so it is read as
-    untrusted: a file that is not a JSON array of objects, a row whose numbers are
-    not positive integers, or a source path that is absolute or leaves the tree
-    names nothing, and that row is left out.
+    untrusted: a file that is not a regular file, is over
+    :data:`MAX_SPAN_MAP_BYTES`, or is not a JSON array of objects names nothing,
+    and so does a row whose numbers are not positive integers, whose end comes
+    before its start, or whose ``source_file`` is not *recorded_source* (the
+    source the converter recorded for the generated file) naming an existing file
+    inside *source* (:func:`_names_a_source_file`). Any failure to read it is
+    logged at debug and leaves the file unmapped; none may fail the scan.
     """
     try:
-        loaded = json.loads(sidecar.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        if sidecar.is_symlink() or not sidecar.is_file():
+            return {}
+        with sidecar.open("rb") as handle:
+            data = handle.read(MAX_SPAN_MAP_BYTES + 1)
+        if len(data) > MAX_SPAN_MAP_BYTES:
+            ASH_LOGGER.debug(
+                f"Not mapping findings through {sidecar.name}: it is over "
+                f"{MAX_SPAN_MAP_BYTES} bytes"
+            )
+            return {}
+        loaded = json.loads(data.decode("utf-8"))
+    except Exception:
+        # Not only OSError and ValueError: a deeply nested array raises
+        # RecursionError, and the caller runs once per scanner result.
+        ASH_LOGGER.debug(
+            f"Not mapping findings through {sidecar.name}: it could not be read",
+            exc_info=True,
+        )
         return {}
     if not isinstance(loaded, list):
         return {}
@@ -1693,13 +1751,11 @@ def _read_span_rows(sidecar: Path) -> Dict[int, Dict[str, Any]]:
             for number in numbers
         ):
             continue
-        source = row.get("source_file")
-        if (
-            not isinstance(source, str)
-            or not source
-            or source.startswith("/")
-            or "\\" in source
-            or ".." in source.split("/")
+        if (row["end_line"], row["end_col"]) < (row["line"], row["col"]):
+            continue
+        source_file = row.get("source_file")
+        if source_file != recorded_source or not _names_a_source_file(
+            source_file, source
         ):
             continue
         rows.setdefault(row["script_line"], row)
@@ -1715,31 +1771,46 @@ def map_back_converted_results(sarif_report: Any, context: Any) -> int:
     artifact uri becomes the original's path, and the region its recorded start and
     end line and column. The result then carries no ``converted_path``, so the
     finding is keyed by the original path and line (a suppression written against
-    the original file matches it), and ``ash/convertedFrom`` names the generated
-    file it was found in.
+    the original file matches it), and ``converted_from`` names the generated
+    file it was found in (the finding's identity keeps it, so a result mapped to
+    ``.mcp.json`` stays distinct from a source-tree scanner's result at the same
+    place).
 
-    A result with no sidecar beside its file, a file the sidecar has no row for,
+    Only a sidecar the converter itself recorded is read: the generated file and
+    its sidecar must both be named, exactly, in a ``converted-sources.json`` under
+    the work directory (:func:`converted_sources_of`), and each row's
+    ``source_file`` must be the source recorded for the generated file. A
+    ``.spanmap.json`` that arrives any other way (inside an extracted archive, say)
+    maps nothing. A result with no such sidecar, a file the sidecar has no row for,
     or no start line is left exactly as it is: every converter without a sidecar
     (the notebook and archive converters) is untouched by this.
 
-    Run after :func:`mark_converted_results`, which writes the ``converted_path``
-    this removes from a mapped result.
+    A mapped location also loses what described the generated file: its context
+    region and its artifact index. A mapped result's related locations and code
+    flows are cleared too, since they are positions in the generated script and the
+    sidecar maps one line only.
+
+    Run before :func:`mark_converted_results`: a location it moved is no longer in
+    the work directory, so the marking skips it, and a result that still has a
+    location in the generated file (a line with no row) is marked and keeps an
+    identity independent of the output directory.
 
     Returns:
         The number of results mapped.
     """
-    from types import SimpleNamespace
-
     from automated_security_helper.schemas.sarif_schema_model import (
         PropertyBag,
         Region,
     )
     from automated_security_helper.utils.finding_identity import (
-        CONVERTED_PATH_PROPERTY,
+        CONVERTED_FROM_PROPERTY,
     )
 
     runs = getattr(sarif_report, "runs", None) or []
     if not runs or getattr(context, "output_dir", None) is None:
+        return 0
+    recorded = converted_sources_of(context)
+    if not recorded:
         return 0
     source = Path(context.source_dir).resolve()
     work = path_in_record_form(_work_dir_of(context))
@@ -1756,10 +1827,7 @@ def map_back_converted_results(sarif_report: Any, context: Any) -> int:
                 start_line = getattr(region, "startLine", None)
                 if root is None or artifact is None or not isinstance(start_line, int):
                     continue
-                candidates = _result_paths(
-                    SimpleNamespace(locations=[location]), source
-                )
-                candidate = next(iter(candidates), None)
+                candidate = _location_path(location, source)
                 if (
                     candidate is None
                     or candidate == work
@@ -1767,31 +1835,62 @@ def map_back_converted_results(sarif_report: Any, context: Any) -> int:
                 ):
                     continue
                 if candidate not in sidecars:
-                    sidecars[candidate] = _read_span_rows(
-                        candidate.with_name(candidate.name + SPAN_MAP_SUFFIX)
+                    relative = candidate.relative_to(work).as_posix()
+                    recorded_source = recorded.get(relative)
+                    # Both names must be recorded as files, not only covered by a
+                    # directory a converter recorded (an extracted archive).
+                    sidecars[candidate] = (
+                        _read_span_rows(
+                            candidate.with_name(candidate.name + SPAN_MAP_SUFFIX),
+                            source,
+                            recorded_source,
+                        )
+                        if recorded_source is not None
+                        and relative + SPAN_MAP_SUFFIX in recorded
+                        else {}
                     )
                 row = sidecars[candidate].get(start_line)
                 if row is None:
                     continue
                 artifact.uri = row["source_file"]
+                # The generated file's entry in run.artifacts.
+                artifact.index = None
                 root.region = Region(
                     startLine=row["line"],
                     startColumn=row["col"],
                     endLine=row["end_line"],
                     endColumn=row["end_col"],
                 )
+                # Its lines and snippet are the script's.
+                root.contextRegion = None
                 if converted_from is None:
                     converted_from = candidate.relative_to(work).as_posix()
             if converted_from is None:
                 continue
+            result.relatedLocations = None
+            result.codeFlows = None
             if result.properties is None:
                 result.properties = PropertyBag()
-            extras = result.properties.__pydantic_extra__
-            if extras is not None:
-                extras.pop(CONVERTED_PATH_PROPERTY, None)
             setattr(result.properties, CONVERTED_FROM_PROPERTY, converted_from)
             mapped += 1
     return mapped
+
+
+def place_converted_results(sarif_report: Any, context: Any) -> Tuple[int, int]:
+    """Map back, then mark, the results located in a converted file.
+
+    The one call a scan makes at the converter result boundary, so the order is
+    kept here: :func:`map_back_converted_results` first, so that
+    :func:`mark_converted_results` finds in the converted tree only the locations
+    that are still there.
+
+    Returns:
+        The number of results mapped back and the number marked.
+    """
+    return (
+        map_back_converted_results(sarif_report, context),
+        mark_converted_results(sarif_report, context),
+    )
 
 
 #: Written by a converter beside its output, at the top of its results directory:
