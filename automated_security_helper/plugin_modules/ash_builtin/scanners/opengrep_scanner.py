@@ -528,14 +528,15 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         a config naming a custom version must still load, so a host that already has
         opengrep can scan with it, and only the install is refused.
         """
-        version = self.config.options.version
+        config = self._require_config()
+        version = config.options.version
         if _is_pinned_release(version):
             self.custom_install_commands.update(
                 pinned_tool_install_commands("opengrep")
             )
             return self
 
-        digests = self.config.options.sha256
+        digests = config.options.sha256
         # TODO: detect manylinux vs musllinux. Only matters for a 1.x version: from
         # 2.0.0 the Linux build is one static executable (get_opengrep_url).
         for platform_key, target_platform, arch in _OPENGREP_PLATFORMS:
@@ -745,6 +746,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         write instead, and a run that did not select opengrep records it as not
         selected, as for any other construction-time refusal.
         """
-        if self.config.options.patterns:
-            raise ScannerError(patterns_mode_refusal(self.config.options.patterns))
+        patterns = self._require_config().options.patterns
+        if patterns:
+            raise ScannerError(patterns_mode_refusal(patterns))
         return super()._process_config_options()

@@ -958,7 +958,9 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
     ) -> List[McpServerEntry]:
         """The entries of one config file; a file that cannot be read adds a note."""
         try:
-            with open_in_scanned_tree(path, self.context.source_dir) as handle:
+            with open_in_scanned_tree(
+                path, self._require_context().source_dir
+            ) as handle:
                 data = handle.read(MAX_CONFIG_BYTES + 1)
         except TreeInputRefused:
             notes.append(
@@ -1013,7 +1015,7 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
             tags=[
                 "mcp-config",
                 "security",
-                f"tool_name::{self.config.name}",
+                f"tool_name::{self._require_config().name}",
                 f"tool_type::{tool_type}",
             ],
         )
@@ -1122,20 +1124,23 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
             self._post_scan(target=target, target_type=target_type)
             return False
 
-        results_file = self.results_dir.joinpath(target_type, "results_sarif.sarif")
+        results_file = self._require_results_dir().joinpath(
+            target_type, "results_sarif.sarif"
+        )
         results_file.parent.mkdir(exist_ok=True, parents=True)
         notes: List[str] = []
         results: List[Result] = []
         if target_type == "source":
+            context = self._require_context()
             candidates = scan_set(
-                source=self.context.source_dir,
-                output=self.context.output_dir,
-                honor_ignore_files=honors_ignore_files(self.context.config),
-                run_id=getattr(self.context, "run_id", None),
+                source=context.source_dir,
+                output=context.output_dir,
+                honor_ignore_files=honors_ignore_files(context.config),
+                run_id=getattr(context, "run_id", None),
             )
             files: Dict[str, str] = {}
             for path in candidates:
-                display = relative_display(path, self.context.source_dir)
+                display = relative_display(path, context.source_dir)
                 if detect_format(display) is not None:
                     files[display] = path
             results = self.evaluate_files(files, notes)

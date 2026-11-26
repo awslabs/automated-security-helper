@@ -961,7 +961,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
 
     def nothing_to_scan_reason(self) -> str | None:
         """None when either tree holds a CloudFormation template; see the base class."""
-        return cloudformation_nothing_to_scan_reason(self.context)
+        return cloudformation_nothing_to_scan_reason(self._require_context())
 
     def _process_config_options(self):
         # Add any additional config option parsing here, if necessary
@@ -1127,7 +1127,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             # --input-path by name, so a staged copy under a relative --output-dir
             # was looked for relative to the source directory and not found.
             target_results_dir = Path(
-                os.path.abspath(self.results_dir.joinpath(target_type))
+                os.path.abspath(self._require_results_dir().joinpath(target_type))
             )
 
             # Every JSON and YAML file in the tree; shared with cdk-nag and with
@@ -1135,7 +1135,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             # selection drops the files the global ignore paths ignore and honors
             # the repository's ignore files as the scan set does.
             scannable = cloudformation_candidate_files(
-                self.context, target_type, global_ignore_paths
+                self._require_context(), target_type, global_ignore_paths
             )
             joined_files = "\n- ".join(scannable)
             ASH_LOGGER.debug(
@@ -1174,9 +1174,9 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             # scanned-tree rule against it, so a symlink or a file outside it is
             # refused before ASH parses it or hands it to cfn_nag_scan.
             scan_root = (
-                self.context.work_dir
+                self._require_work_dir()
                 if target_type == TargetType.CONVERTED
-                else self.context.source_dir
+                else self._require_context().source_dir
             )
             # The results directory names already taken in this scan (_unique_name).
             results_dir_names: Dict[str, int] = {}
@@ -1453,7 +1453,10 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     file_sarif = SarifReport.model_validate_json(json_data=sarif_text)
                     parsed_sarif += 1
                     _restore_cfn_nag_uris(
-                        file_sarif, staged_input, cfn_file, self.context.source_dir
+                        file_sarif,
+                        staged_input,
+                        cfn_file,
+                        self._require_context().source_dir,
                     )
                     attach_cfn_nag_resources(file_sarif)
                     raised = _rule_exception_lines(proc_resp.get("stderr") or "")

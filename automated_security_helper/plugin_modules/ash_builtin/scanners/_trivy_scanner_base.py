@@ -810,8 +810,8 @@ def _verified_message_lines(result: Any) -> Optional[List[str]]:
     which a name carrying a line break cannot satisfy. Split on ``\\n`` alone,
     the separator trivy writes, for the reason ``trivy_severity`` gives.
     """
-    message = result.message.root.text if result.message else None
-    lines = (message or "").split("\n")
+    message: Optional[str] = result.message.root.text if result.message else None
+    lines: List[str] = [*(message or "").split("\n")]
     uri = _decoded_single_uri(result)
     if uri is None or lines[0] != f"Artifact: {uri}":
         return None
@@ -1369,7 +1369,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         (``_TRIVY_SCANNER_ALIASES``), so a set written with the old name is still
         seen to turn the checks on.
         """
-        options: Any = self.config.options
+        options: Any = self._require_config().options
         chosen = [name for name in (options.scanners or []) if name]
         if chosen:
             return self._canonical_scanners(chosen)
@@ -1899,7 +1899,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             raise ScannerError(f"{self.__class__.__name__} has no plugin context")
         source_dir = Path(self.context.source_dir)
         name = self.config.name if self.config is not None else "trivy"
-        options: Any = self.config.options
+        options: Any = self._require_config().options
         value = getattr(options, option)
         if value:
             path = self._operator_path(
@@ -2164,7 +2164,8 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         """
         if self.context is None:
             raise ScannerError(f"{self.__class__.__name__} has no plugin context")
-        name = self.config.name if self.config is not None else "trivy"
+        config_name = self.config.name if self.config is not None else None
+        name = config_name if config_name is not None else "trivy"
         key = f"scanners.{name}.options.{option}"
         # A configuration the embedding caller built is the operator's own write,
         # as for syft, bandit, checkov and grype (operator_wrote_value): the
@@ -2398,7 +2399,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         line is unchanged.
         """
         # Read by attribute: both trivy config classes declare these fields.
-        options: Any = self.config.options
+        options: Any = self._require_config().options
         if len(options.scanners) > 0:
             self.args.extra_args.append(
                 ToolExtraArg(

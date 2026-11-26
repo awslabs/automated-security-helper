@@ -422,7 +422,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     # ---------------------------------------------------------------
 
     def _process_config_options(self):
-        opts = self.config.options  # type: ignore[union-attr]
+        opts = self._require_config().options
 
         # Drop any --metrics already pushed into extra_args (some scanners
         # re-call this and we want a clean state).
@@ -591,7 +591,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         the tool the same file for the same configuration, and the refusal names the
         same cause in both.
         """
-        configured = getattr(self.config.options, "config", None)  # type: ignore[union-attr]
+        configured = getattr(self._require_config().options, "config", None)
         if not configured or not isinstance(configured, str):
             return _ConfiguredRules("unset", None, None)
         if self._passes_through_as_written(configured):
@@ -824,7 +824,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         )
 
     def _configure_online_mode(self) -> None:
-        opts = self.config.options  # type: ignore[union-attr]
+        opts = self._require_config().options
         # The configured rules: a registry entry or URL as written; a local rule
         # file or directory through the same resolver offline uses
         # (_local_rules_configured), so the two modes hand the tool one file and a

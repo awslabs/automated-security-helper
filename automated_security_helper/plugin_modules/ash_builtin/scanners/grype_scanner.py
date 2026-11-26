@@ -863,9 +863,10 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         # A blank value names no file: Path("") joined to the source directory is
         # the source directory itself, which exists, so grype would be handed
         # --config <source_dir> and fail. Blank reads as unset.
+        scanner_config = self._require_config()
         possible_config_paths = [
             item
-            for item in [self.config.options.config_file]
+            for item in [scanner_config.options.config_file]
             if item is not None and str(item).strip()
         ]
 
@@ -882,7 +883,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         # exited 1 in under 100ms with "invalid application config: file does not
         # exist: .ash/.grype.yaml", producing no SARIF -- so the scanner reported
         # EXECUTION FAILED with zero findings while grype itself was fine.
-        source_dir = Path(self.context.source_dir)
+        source_dir = Path(self._require_context().source_dir)
         # The config's environment values, each also as Path() spells it: the
         # lines below name the config through Path().
         environment_values = _with_path_spellings(self._environment_values())
@@ -916,7 +917,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
 
         context_config = getattr(self.context, "config", None)
         for index, conf_path in enumerate(possible_config_paths):
-            configured = index == 0 and self.config.options.config_file is not None
+            configured = index == 0 and scanner_config.options.config_file is not None
             # As grype will read it: "~" expanded, a relative path taken from the
             # source directory, symlinks resolved (path_trust.resolved_path, the
             # resolution refused_derived_product checks). Joining the value as
@@ -1013,7 +1014,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 ASH_LOGGER.warning(
                     text_without_values(
                         f"Configured grype config file does not exist: "
-                        f"{self.config.options.config_file}. Grype will run "
+                        f"{scanner_config.options.config_file}. Grype will run "
                         "with an empty config file that ASH writes; no config "
                         "file is discovered from the scanned tree in its place.",
                         environment_values,
@@ -1133,9 +1134,9 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         # output directory (``ash --output-dir out``) would put results_sarif.sarif
         # under the scanned tree, where the scan reads it as source and the
         # results file ASH then opens does not exist.
-        target_results_dir = Path(os.path.abspath(self.results_dir)).joinpath(
-            target_type
-        )
+        target_results_dir = Path(
+            os.path.abspath(self._require_results_dir())
+        ).joinpath(target_type)
         results_file = target_results_dir.joinpath("results_sarif.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
         # The target too: a relative one would be read from grype's working
@@ -1155,7 +1156,9 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 *(
                     ToolExtraArg(key="--exclude", value=pattern)
                     for pattern in syft_excludes(
-                        target, self.context.source_dir, global_ignore_paths
+                        target,
+                        self._require_context().source_dir,
+                        global_ignore_paths,
                     )
                 ),
             ]
@@ -1190,7 +1193,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 "grype",
                 cache,
                 offline=False,
-                source_dir=self.context.source_dir,
+                source_dir=self._require_context().source_dir,
                 results_dir=self.results_dir or results_file.parent,
                 config=getattr(self.context, "config", None),
                 scan_id=scan_id_for(self.context),
@@ -1219,7 +1222,9 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             stereoscope_target,
         )
 
-        target_results_dir = Path(os.path.abspath(self.results_dir)).joinpath("image")
+        target_results_dir = Path(
+            os.path.abspath(self._require_results_dir())
+        ).joinpath("image")
         results_file = target_results_dir.joinpath("results_sarif.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
 
@@ -1256,7 +1261,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 "grype",
                 cache,
                 offline=False,
-                source_dir=self.context.source_dir,
+                source_dir=self._require_context().source_dir,
                 results_dir=self.results_dir or results_file.parent,
                 config=getattr(self.context, "config", None),
                 scan_id=scan_id_for(self.context),
