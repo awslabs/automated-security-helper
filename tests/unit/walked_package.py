@@ -61,6 +61,7 @@ PACKAGE_DIRS = frozenset(
         "plugin_modules/ash_hadolint_plugins",
         "plugin_modules/ash_kics_plugins",
         "plugin_modules/ash_kingfisher_plugins",
+        "plugin_modules/ash_pip_audit_plugins",
         "plugin_modules/ash_polaris_plugins",
         "plugin_modules/ash_secretlint_plugins",
         "plugin_modules/ash_snyk_plugins",

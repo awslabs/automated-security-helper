@@ -1575,6 +1575,9 @@ def _denied_plugin_option_defaults() -> Dict[tuple, Any]:
     from automated_security_helper.plugin_modules.ash_hadolint_plugins.hadolint_scanner import (
         HadolintScannerConfigOptions,
     )
+    from automated_security_helper.plugin_modules.ash_pip_audit_plugins.pip_audit_scanner import (
+        PipAuditScannerConfigOptions,
+    )
     from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
         SnykCodeScannerConfigOptions,
     )
@@ -1590,6 +1593,7 @@ def _denied_plugin_option_defaults() -> Dict[tuple, Any]:
         ("guarddog", GuardDogScannerConfigOptions()),
         ("hadolint", HadolintScannerConfigOptions()),
         ("betterleaks", BetterleaksScannerConfigOptions()),
+        ("pip-audit", PipAuditScannerConfigOptions()),
         ("snyk-code", SnykCodeScannerConfigOptions()),
         ("trivy-repo", TrivyRepoScannerConfigOptions()),
     ):

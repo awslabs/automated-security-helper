@@ -500,6 +500,9 @@ class TestThePythonTools:
         from automated_security_helper.plugin_modules.ash_guarddog_plugins import (
             guarddog_scanner,
         )
+        from automated_security_helper.plugin_modules.ash_pip_audit_plugins import (
+            pip_audit_scanner,
+        )
         from automated_security_helper.plugin_modules.ash_builtin.scanners import (
             zizmor_scanner,
         )
@@ -523,6 +526,7 @@ class TestThePythonTools:
                 cfn_lint_scanner.CfnLintScannerConfigOptions().tool_version
             ),
             "guarddog": lambda: guarddog_scanner.GUARDDOG_DEFAULT_VERSION_CONSTRAINT,
+            "pip-audit": lambda: pip_audit_scanner.PIP_AUDIT_DEFAULT_VERSION_CONSTRAINT,
             "zizmor": lambda: zizmor_scanner.ZizmorScannerConfigOptions().tool_version,
         }[tool]()
         assert default, f"{tool} has no default constraint to check the pin against"
@@ -581,7 +585,7 @@ class TestThePythonTools:
         core = _core_stage(DOCKERFILE.read_text())
         staged = core.index(
             "install-pinned-tool --licenses-only bandit cfn-lint checkov "
-            "ggshield guarddog polaris semgrep zizmor"
+            "ggshield guarddog pip-audit polaris semgrep zizmor"
         )
         assert core.index('ash dependencies install --bin-path "${ASH_BIN_PATH}"') < (
             staged

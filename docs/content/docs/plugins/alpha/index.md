@@ -16,12 +16,13 @@ This section covers the alpha plugins for ASH: the opt-in scanner packages (`ash
 - **[hadolint Plugin](hadolint-plugin.md)** (`ash_hadolint_plugins`) - Lints Dockerfiles and Containerfiles with hadolint and its ShellCheck integration (pending licensing review)
 - **[KICS Plugin](kics-plugin.md)** (`ash_kics_plugins`) - Infrastructure-as-code misconfiguration scanning with Checkmarx KICS
 - **[Kingfisher Plugin](kingfisher-plugin.md)** (`ash_kingfisher_plugins`) - Secret detection with MongoDB's Kingfisher
+- **[pip-audit Plugin](pip_audit-plugin.md)** (`ash_pip_audit_plugins`) - Known-vulnerability audit of the pinned dependencies in Python requirements files with PyPA's pip-audit
 - **[Polaris Plugin](polaris-plugin.md)** (`ash_polaris_plugins`) - Kubernetes manifest best-practice and security checks with Fairwinds Polaris
 - **[Secretlint Plugin](secretlint-plugin.md)** (`ash_secretlint_plugins`) - Secret detection with Secretlint
 - **[Snyk Code Plugin](snyk-plugin.md)** - Integrates Snyk Code for static application security testing (SAST) of source code vulnerabilities
 - **[Trivy Plugin](trivy-plugin.md)** - Integrates Aquasec's Trivy for vulnerability, misconfiguration, secret, and license scanning
 
-These fourteen ship inside ASH. Each takes part in a scan only when that scan names its
+These fifteen ship inside ASH. Each takes part in a scan only when that scan names its
 plugin module in `ash_plugin_modules` or `--ash-plugin-modules`, as its page shows.
 The MCP `list_scanners` tool reports them either way; listing one does not add it to
 any scan.

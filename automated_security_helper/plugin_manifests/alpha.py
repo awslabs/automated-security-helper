@@ -84,6 +84,7 @@ _DENIED_OPTION_DEFAULTS: dict[str, dict[str, Any]] = {
         "verify": False,
     },
     "hadolint": {"config_file": None, "offline": False},
+    "pip-audit": {"offline": False, "tool_version": None},
     "snyk-code": {
         "honor_tree_exclusions": False,
         "offline": False,
@@ -216,6 +217,14 @@ MANIFESTS = (
         "KingfisherScanner",
         "KingfisherScannerConfigOptions",
         owned=(f"{_DOCS}/kingfisher-plugin.md", f"{_FIXTURES}/kingfisher"),
+    ),
+    _alpha(
+        "pip-audit",
+        "ash_pip_audit_plugins",
+        "pip_audit_scanner",
+        "PipAuditScanner",
+        "PipAuditScannerConfigOptions",
+        owned=(f"{_DOCS}/pip_audit-plugin.md", f"{_FIXTURES}/pip-audit"),
     ),
     _alpha(
         "polaris",

@@ -1138,6 +1138,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "openssl/LICENSE.txt": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",  # pragma: allowlist secret
     "pcre commit": "c8dd39955982faaf63176bedc456746e5cf43e2f",  # pragma: allowlist secret
     "pcre/LICENCE": "f998c0f52eb704eff28f503580cfca3f2547280aa212994f6cf2d8e317587c1c",  # pragma: allowlist secret
+    "pip-audit commit": "8894eb8cee033531a1fbd9f2fb160892531c14e3",  # pragma: allowlist secret
     "polaris commit": "6e76dd36aea6a5d8dd380ddf3e9199a83d252c55",  # pragma: allowlist secret
     "polaris/LICENSE": "85c0a67ceecf745307029604127ff16e674d2900f94aa79dd6f486fbc2685dca",  # pragma: allowlist secret
     "pygit2 commit": "d88fa3dcbab21a7eb33ff354222c4ec8e5ff6ece",  # pragma: allowlist secret
@@ -1551,6 +1552,19 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         version_probe=_pygit2_bundled_library_probe(
             "libpcre-*", rb"([0-9]+\.[0-9]+) [0-9]{4}-[0-9]{2}-[0-9]{2}", ""
         ),
+    ),
+    # The alpha pip-audit scanner's uv tool. The wheel's dist-info carries
+    # licenses/LICENSE (Apache-2.0), byte-identical to the repository's LICENSE at
+    # the tag commit and the file whose sha256 the scanner's register cites. The
+    # repository has no NOTICE.
+    "pip-audit": ThirdPartyLicense(
+        tool="pip-audit",
+        version="v2.10.1",
+        license="Apache-2.0",
+        repository="https://github.com/pypa/pip-audit",
+        commit=_THIRD_PARTY_HASHES["pip-audit commit"],
+        files=(LicenseFile("LICENSE"),),
+        distribution="pip-audit",
     ),
     # A GuardDog dependency, in GuardDog's uv tool environment. Its version is held
     # to this one in the image by the uv constraint the Dockerfile writes
