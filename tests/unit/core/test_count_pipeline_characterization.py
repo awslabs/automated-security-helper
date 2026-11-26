@@ -279,6 +279,70 @@ def test_a_scanner_name_with_a_lone_surrogate_is_counted_under_itself():
 
 
 # --------------------------------------------------------------------------
+# The names the SARIF holds, and the counts read for every name of the union.
+# --------------------------------------------------------------------------
+
+
+def oracle_sarif_names(model):
+    # ``_get_scanner_names_from_sarif`` as it stood (its debug logging dropped):
+    # a set of the exact spellings, listed in the set's order.
+    names = set()
+    if model.sarif and model.sarif.runs:
+        for run in model.sarif.runs:
+            if not run.results:
+                continue
+            for result in run.results:
+                name = ScannerStatisticsCalculator._get_scanner_name_from_result(result)
+                if name:
+                    names.add(name)
+    return list(names)
+
+
+def oracle_union_counts(model):
+    # The union loop of ``extract_scanner_statistics`` over a model whose names come
+    # from the SARIF alone, one name per case-folded spelling, each counted by the
+    # per-name walk. Keyed by the folded name: which spelling of two the set listed
+    # first follows string hashing, so it is not part of what is pinned here.
+    counts = {}
+    for name in oracle_sarif_names(model):
+        folded = name.lower()
+        if folded in counts:
+            continue
+        counts[folded] = oracle_sarif_counts(model, name)
+    return counts
+
+
+def _stats_counts(model):
+    stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
+    return {
+        name.lower(): tuple(
+            row[field]
+            for field in ("suppressed", "critical", "high", "medium", "low", "info")
+        )
+        for name, row in stats.items()
+    }
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_every_union_name_reads_the_counts_the_per_name_walk_gives(seed):
+    results = _corpus(seed)
+    expected = _outcome(lambda: oracle_union_counts(_model(results)))
+    actual = _outcome(lambda: _stats_counts(_model(results)))
+    assert actual == expected, seed
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_the_names_found_in_the_sarif_equal_the_old_names_as_a_set(seed):
+    model = _model(_corpus(seed))
+    assert set(ScannerStatisticsCalculator._get_scanner_names_from_sarif(model)) == set(
+        oracle_sarif_names(model)
+    )
+    assert len(ScannerStatisticsCalculator._get_scanner_names_from_sarif(model)) == len(
+        oracle_sarif_names(model)
+    )
+
+
+# --------------------------------------------------------------------------
 # get_severity_metrics_from_sarif.
 # --------------------------------------------------------------------------
 
