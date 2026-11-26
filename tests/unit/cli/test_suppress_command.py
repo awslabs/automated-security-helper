@@ -263,7 +263,7 @@ class TestRoundTrip:
         # already locked file (another rule, a broader symbol) was never
         # reviewed, so verify reports it and a scan refuses it.
         assert _add(repo).exit_code == 0
-        config = repo / ".ash" / ".ash.yaml"
+        config = repo / ".ash.yaml"
         config.write_text(
             config.read_text(encoding="utf-8")
             + "    - rule_id: B605\n      path: src/app.py\n      symbol: risky\n"
