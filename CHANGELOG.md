@@ -174,7 +174,12 @@
   escape codes. Both now use "auto" when color is on, as the logger already did, so Rich
   checks whether the output is a terminal, and no color when `--no-color` is given.
   Output into a pipe is plain text.
-
+- **A stored suppression with an empty `scope` no longer applies.** A results file
+  that held `{"resource_id": "X", "scope": {}}` was read with its empty scope kept as
+  inert, then the entry-level `resource_id` was written into that scope, so the entry
+  suppressed findings on resource `X` while its note said the scope was empty. A config
+  file refuses this shape and still does. The stored entry now stays inert, and the
+  empty-scope note is recorded once for it.
 - **A cancelled scan no longer appears in `ash trend`.** The run's history record is
   removed on every path a cancel takes the run's results back: a cancel that lands
   during the final results rewrite or before the MCP server's own check now has the
@@ -182,7 +187,6 @@
   escapes the orchestrator's write step after the record was appended is discarded by
   the orchestrator itself. A discard that fails leaves a debug-level line saying why
   the stale record stayed, instead of nothing.
-
 - **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**
   It passes `GITHUB_ACTIONS`, `TF_BUILD` and `TEAMCITY_VERSION` into the container when
   set (by name, or with their values when `OCI_RUNNER_WRAPPER` is set; a value that holds
