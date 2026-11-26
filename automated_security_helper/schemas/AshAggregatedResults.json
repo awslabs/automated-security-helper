@@ -1752,6 +1752,8 @@
                   "/global_settings/exclusions",
                   "/global_settings/mcp",
                   "/global_settings/mcp/**",
+                  "/global_settings/history",
+                  "/global_settings/history/**",
                   "/scanners/opengrep/options/exclude_rule",
                   "/scanners/semgrep/options/exclude_rule",
                   "/scanners/bandit/options/confidence_level",
@@ -2477,6 +2479,8 @@
                 "/global_settings/exclusions",
                 "/global_settings/mcp",
                 "/global_settings/mcp/**",
+                "/global_settings/history",
+                "/global_settings/history/**",
                 "/scanners/opengrep/options/exclude_rule",
                 "/scanners/semgrep/options/exclude_rule",
                 "/scanners/bandit/options/confidence_level",
@@ -2625,7 +2629,7 @@
         },
         "fold": {
           "default": false,
-          "description": "When true, the HTML, Markdown and text reports show one row per duplicate cluster (the primary finding, with a note naming the other scanners that reported it) in their findings tables, detailed findings, finding cards and hotspots, and add deduplicated counts beside, never in place of, the per-scanner counts. Only clusters of the same CVE and package, or the same line and CWE, fold; IaC resource clusters are annotated only. Finding ids, SARIF, per-scanner metrics, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. CLI: `--fold-duplicates` on `ash scan` and `ash report`.",
+          "description": "When true, the human-readable reports (HTML, Markdown, text, and the Bedrock summary) show one row per duplicate cluster (the primary finding, with a note naming the other scanners that reported it) in their findings tables, detailed findings, finding cards and hotspots, and add deduplicated counts beside, never in place of, the per-scanner counts. Findings fold when they share a CVE and package, or when overlapping lines share a CWE; line overlaps chain, so two findings can fold through a third that overlaps both. IaC resource clusters are annotated only. Finding ids, SARIF, per-scanner metrics, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. CLI: `--fold-duplicates` on `ash scan` and `ash report`.",
           "title": "Fold",
           "type": "boolean"
         }
@@ -2768,6 +2772,8 @@
               "/global_settings/exclusions",
               "/global_settings/mcp",
               "/global_settings/mcp/**",
+              "/global_settings/history",
+              "/global_settings/history/**",
               "/scanners/opengrep/options/exclude_rule",
               "/scanners/semgrep/options/exclude_rule",
               "/scanners/bandit/options/confidence_level",
@@ -20222,7 +20228,7 @@
           "type": "array"
         },
         "denied_paths": {
-          "description": "JSON-Pointer glob patterns that are never allowed (denied wins over allowed). Each entry starts with '/'. The defaults block the fields that decide whether a scan fails, what it runs and reports, where findings are sent, the scanner sandbox, and this policy. A list equal to a default ASH has shipped counts as the current default list. Any other list is added to the current defaults, unless replace_default_denied_paths is true. When it is added, a list that holds some default entries and leaves others out still gets them, and a warning names the ones it leaves out. Whatever the list, and with replace_default_denied_paths too, the entries ASH always denies (the scanner sandbox, ash_plugin_modules, the detect-secrets verification, plugin and baseline settings, the archive converter's extraction limits, and the sections of the plugins that send data off the host: the s3, aws-security-hub, cloudwatch-logs and bedrock-summary-reporter reporters and the detect-secrets, npm-audit, opengrep, semgrep, snyk-code, trivy, trivy-repo and zizmor scanners) are added to it.",
+          "description": "JSON-Pointer glob patterns that are never allowed (denied wins over allowed). Each entry starts with '/'. The defaults block the fields that decide whether a scan fails, what it runs and reports, where findings are sent, the scanner sandbox, the run history's recording and retention, and this policy. A list equal to a default ASH has shipped counts as the current default list. Any other list is added to the current defaults, unless replace_default_denied_paths is true. When it is added, a list that holds some default entries and leaves others out still gets them, and a warning names the ones it leaves out. Whatever the list, and with replace_default_denied_paths too, the entries ASH always denies (the scanner sandbox, ash_plugin_modules, the detect-secrets verification, plugin and baseline settings, the archive converter's extraction limits, and the sections of the plugins that send data off the host: the s3, aws-security-hub, cloudwatch-logs and bedrock-summary-reporter reporters and the detect-secrets, npm-audit, opengrep, semgrep, snyk-code, trivy, trivy-repo and zizmor scanners) are added to it.",
           "items": {
             "type": "string"
           },

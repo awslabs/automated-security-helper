@@ -83,20 +83,25 @@ def coverage_shortfall_text(attempted: int | None, failed: int | None) -> str:
 
 
 def deduplicated_summary_text(summary: Dict[str, Any]) -> str | None:
-    """The line that gives the fold's counts, or None when the fold is off.
+    """The line that gives the fold's counts, or None when it has none to give.
 
-    One sentence for the HTML, Markdown and text reports. It follows the
-    per-scanner figures and says they are unchanged: the fold's counts sit
-    beside them, never in their place.
+    One sentence for the HTML, Markdown, text and Bedrock summary reports. It
+    follows the per-scanner figures and says they are unchanged: the fold's
+    counts sit beside them, never in their place. None when the fold is off,
+    and when it is on but folded nothing: "(0 duplicate rows folded)" told the
+    reader nothing the per-scanner counts did not. The folded count is of live
+    (unsuppressed) rows, which the sentence says, since the cards also fold
+    suppressed duplicates under a suppressed representative.
     """
     folded = summary.get("deduplicated")
-    if not folded:
+    if not folded or not folded["folded_rows"]:
         return None
     rows = folded["folded_rows"]
     noun = "row" if rows == 1 else "rows"
     return (
         f"Deduplicated: {folded['actionable']} actionable, {folded['active']} active "
-        f"({rows} duplicate {noun} folded into the finding that stands for it). "
+        f"({rows} live duplicate {noun} folded into the finding that stands for it; "
+        "suppressed duplicates fold apart). "
         "The per-scanner counts are unchanged."
     )
 
@@ -287,6 +292,10 @@ class ReportContentEmitter:
             if self.fold
             else {}
         )
+        # The positions a fold prefers as a cluster's representative (the
+        # actionable rows), filled on first fold: grading needs the threshold
+        # tables read below.
+        self._fold_prefer: set[int] | None = None
         # Each project's recorded gate, read once: is_finding_actionable runs
         # several times per finding (summary, hotspots, cards, detailed
         # findings), and the project list is scanned here instead of there.
@@ -328,12 +337,31 @@ class ReportContentEmitter:
         that stands for others, keyed by ``id(row)``. With the fold off the rows
         come back as they are and there are no notes. Only the rows in *vulns*
         fold, so a view that is already filtered (the actionable findings) folds
-        what it holds; the note names those rows only.
+        what it holds; the note names those rows only. The representative of a
+        cluster with an actionable member in the view is actionable, so a
+        finding the gate fails the scan for is never hidden under a
+        below-threshold or not-gating card. *vulns* are this emitter's own
+        rows; a copied or foreign row is refused by name rather than raising a
+        bare KeyError.
         """
         if not self.fold:
             return list(vulns), {}
-        shown = [self._positions[id(vuln)] for vuln in vulns]
-        kept = fold_positions(self.flat_vulns, self._clusters, shown)
+        try:
+            shown = [self._positions[id(vuln)] for vuln in vulns]
+        except KeyError:
+            raise ValueError(
+                "fold_findings folds this emitter's own rows; a copied or "
+                "foreign row has no position in the model's finding list"
+            ) from None
+        if self._fold_prefer is None:
+            self._fold_prefer = {
+                position
+                for position, vuln in enumerate(self.flat_vulns)
+                if self.is_finding_actionable(vuln)
+            }
+        kept = fold_positions(
+            self.flat_vulns, self._clusters, shown, prefer=self._fold_prefer
+        )
         notes = {}
         for position, others in kept:
             note = provenance_note(provenance_entries(self.flat_vulns, others))
@@ -350,24 +378,34 @@ class ReportContentEmitter:
         actionable = [v for v in self.flat_vulns if self.is_finding_actionable(v)]
         return len(self.fold_findings(actionable)[0])
 
+    def policy_not_gating_count(self) -> int:
+        """How many rows the not-gating list draws from, folded like the list.
+
+        The "of M" of that section's "Showing N of M": the summary's own
+        not-gating figure counts every row unfolded, so against the folded list
+        it read as a truncation, and the note then sent the reader to an HTML
+        report that folds the same way.
+        """
+        left_out = [v for v in self.flat_vulns if self.is_policy_not_gating(v)]
+        return len(self.fold_findings(left_out)[0])
+
     def _deduplicated_counts(self) -> Dict[str, Any]:
         """The fold's counts, for the line beside the per-scanner counts.
 
         Active (unsuppressed) rows and actionable rows, each counting a cluster
-        once at its representative's severity, with how many rows were folded
-        away and into how many clusters. Counted over the finding rows, so they
-        sit beside the scanner figures and never replace them.
+        once, with how many live rows were folded away (the cards also fold
+        suppressed duplicates, which this count leaves out and the summary line
+        says so). Counted over the finding rows, so they sit beside the scanner
+        figures and never replace them. No per-severity breakdown: no reporter
+        rendered the one this used to carry, and a dict nothing reads is a
+        schema to keep for nobody.
         """
         live = [v for v in self.flat_vulns if not v.is_suppressed]
         active_rows, _ = self.fold_findings(live)
         actionable_rows, _ = self.fold_findings(
             [v for v in live if self.is_finding_actionable(v)]
         )
-        counts = dict.fromkeys(("critical", "high", "medium", "low", "info"), 0)
-        for vuln in active_rows:
-            _count_severity(counts, vuln.severity)
         return {
-            "counts": counts,
             "active": len(active_rows),
             "actionable": len(actionable_rows),
             "folded_rows": len(live) - len(active_rows),

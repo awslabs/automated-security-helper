@@ -233,6 +233,77 @@ def test_ash_report_honors_the_recorded_setting_and_the_override(tmp_path):
     assert tuple(header[-3:]) == ANNOTATION_COLUMNS
 
 
+def test_an_explicit_false_override_turns_the_recorded_setting_off(tmp_path):
+    _write(tmp_path, _model(annotate=True))
+    header = _cli_csv(
+        tmp_path, "--config-overrides", "global_settings.deduplication.annotate=false"
+    )
+    assert not set(ANNOTATION_COLUMNS) & set(header)
+    # Left unnamed by the operator's configuration, the recorded setting stands.
+    assert tuple(_cli_csv(tmp_path)[-3:]) == ANNOTATION_COLUMNS
+
+
+def test_an_override_that_does_not_name_the_field_leaves_the_recorded_setting(tmp_path):
+    # Any override round-trips the whole configuration through a dump and a
+    # validate, which marks every default as set; the recorded True must not be
+    # taken for the operator's explicit False.
+    _write(tmp_path, _model(annotate=True))
+    header = _cli_csv(
+        tmp_path, "--config-overrides", "global_settings.severity_threshold=HIGH"
+    )
+    assert tuple(header[-3:]) == ANNOTATION_COLUMNS
+
+
+def test_a_config_file_naming_false_still_turns_the_recorded_setting_off_with_an_unrelated_override(
+    tmp_path,
+):
+    _write(tmp_path, _model(annotate=True))
+    config = tmp_path / "ash.yaml"
+    config.write_text(
+        "project_name: p\nglobal_settings:\n  deduplication:\n    annotate: false\n",
+        encoding="utf-8",
+    )
+    header = _cli_csv(
+        tmp_path,
+        "--config",
+        str(config),
+        "--config-overrides",
+        "global_settings.severity_threshold=HIGH",
+    )
+    assert not set(ANNOTATION_COLUMNS) & set(header)
+
+
+def test_a_request_the_results_cannot_record_is_said_not_swallowed(tmp_path, caplog):
+    import logging
+
+    # A workspace's merged results record no ash_config, so the request has
+    # nowhere to land; the reporters then render without it, which must be
+    # said, never a silent no-op.
+    _write(tmp_path, AshAggregatedResults())
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        result = CliRunner().invoke(
+            app,
+            [
+                "report",
+                "--format",
+                "csv",
+                "--output-dir",
+                str(tmp_path),
+                "--log-level",
+                "INFO",
+                "--annotate-duplicates",
+                "--fold-duplicates",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    message = next(
+        (r.message for r in caplog.records if "changed nothing" in r.message), None
+    )
+    assert message is not None
+    assert "--annotate-duplicates" in message and "--fold-duplicates" in message
+    assert "record no" in message
+
+
 def test_scan_and_report_declare_the_flag_off_by_default():
     import inspect
 

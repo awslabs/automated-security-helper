@@ -1146,7 +1146,8 @@ class RuntimeOverridesConfig(RedactedSection):
                 "JSON-Pointer glob patterns that are never allowed (denied wins over allowed). "
                 "Each entry starts with '/'. The defaults block the fields that decide "
                 "whether a scan fails, what it runs and reports, where findings are "
-                "sent, the scanner sandbox, and this policy. A list equal to a default "
+                "sent, the scanner sandbox, the run history's recording and "
+                "retention, and this policy. A list equal to a default "
                 "ASH has shipped counts as the current default list. Any other list "
                 "is added to the current defaults, unless replace_default_denied_paths "
                 "is true. When it is added, a list that holds some default entries and "
@@ -1202,6 +1203,11 @@ class RuntimeOverridesConfig(RedactedSection):
         # through patch_ops could then lift every other entry here.
         "/global_settings/mcp",
         "/global_settings/mcp/**",
+        # The run history: enabled turns on writes beside the output on every
+        # scan, and keep_runs bounds what pruning may delete (keep_runs=1 prunes
+        # a kept history down to one record), so neither is a client's to change.
+        "/global_settings/history",
+        "/global_settings/history/**",
         # Scanner options that drop findings by rule ID, by a baseline, or by a
         # whole category (a framework, a severity, a rule set, a detector, a
         # confidence level, a cap on the number reported) rather than by path. A
@@ -1778,13 +1784,16 @@ class AshDeduplicationConfig(RedactedSection):
         bool,
         Field(
             description=(
-                "When true, the HTML, Markdown and text reports show one row per "
+                "When true, the human-readable reports (HTML, Markdown, text, "
+                "and the Bedrock summary) show one row per "
                 "duplicate cluster (the primary finding, with a note naming the "
                 "other scanners that reported it) in their findings tables, "
                 "detailed findings, finding cards and hotspots, and add "
                 "deduplicated counts beside, never in place of, the per-scanner "
-                "counts. Only clusters of the same CVE and package, or the same "
-                "line and CWE, fold; IaC resource clusters are annotated only. "
+                "counts. Findings fold when they share a CVE and package, or "
+                "when overlapping lines share a CWE; line overlaps chain, so "
+                "two findings can fold through a third that overlaps both. IaC "
+                "resource clusters are annotated only. "
                 "Finding ids, SARIF, per-scanner metrics, suppressions, "
                 "baselines, the CSV, flat-JSON and JUnit reports and the exit "
                 "code are unchanged. Off by default because it changes row "

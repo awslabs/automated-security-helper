@@ -123,15 +123,15 @@ def discard_watch(monkeypatch):
         made = _DiscardWatch(expected)
         real = execution._discard_project_output
 
-        def wrapped(project_output):
+        def wrapped(project_output, report_id=None):
             if Path(project_output) != made.expected:
                 made.other_outputs.append(Path(project_output))
-                return real(project_output)
+                return real(project_output, report_id)
             made.had_results = (
                 Path(project_output) / "ash_aggregated_results.json"
             ).exists()
             try:
-                real(project_output)
+                real(project_output, report_id)
             finally:
                 made.done.set()
 
