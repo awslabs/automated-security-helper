@@ -267,6 +267,7 @@ from automated_security_helper.config.ash_config import (
     AshConfig,
     EnvReferenceNotResolved,
     _PluginConfigSegment,
+    fold_document_scanner_aliases,
     load_yaml_config,
     plugin_key_lookup_names,
     resolve_env_references,
@@ -5133,9 +5134,22 @@ def _resolve(
                     f"{state.shown(real)}, must be a mapping once its own "
                     f"'{PATCH_KEY}' is applied, got {type(base_document).__name__}"
                 )
-            merged = deep_merge(merged, base_document, AshConfig)
+            # A retired scanner's section is the overlay inside one document,
+            # but across documents the extending file has to win. Each base is
+            # folded before it is layered, so the layering is the ordinary
+            # later-over-earlier one whichever spelling either file uses. The
+            # file's own sections are left for the model to fold, so its patch
+            # still names them in the spelling it wrote. The unconfined view
+            # mirrors a document that was folded and logged just above.
+            merged = deep_merge(
+                merged, fold_document_scanner_aliases(base_document), AshConfig
+            )
             if unconfined is not None:
-                unconfined = deep_merge(unconfined, base_unconfined, AshConfig)
+                unconfined = deep_merge(
+                    unconfined,
+                    fold_document_scanner_aliases(base_unconfined, log=False),
+                    AshConfig,
+                )
             if owned is not None and base_owned:
                 for segment_key, keys in base_owned.items():
                     owned.setdefault(segment_key, set()).update(keys)

@@ -35,6 +35,7 @@ import yaml
 from automated_security_helper.config.ash_config import (
     AshConfig,
     SandboxConfig,
+    fold_document_scanner_aliases,
     plugin_key_lookup_names,
     reduced_plugin_name,
     sandbox_mode_in_document,
@@ -1392,6 +1393,25 @@ def _record_overlay_reads(
     )
 
 
+def _layered_over(
+    document: Any, overlay: ResolvedConfigDocument, *, log: bool = True
+) -> Any:
+    """``document`` with the operator's overlay layered over it.
+
+    The one merge the load validates and the record of the configuration
+    repeats, so the two cannot differ. The project's document is folded first
+    (``fold_document_scanner_aliases``): a retired scanner name it wrote is
+    read as the serving plugin's own section before the operator's file is
+    layered over it, so the operator's file wins whichever spelling either one
+    uses. The overlay is the topmost document and is left for the model to
+    fold. ``log=False`` for the repeat, which mirrors a load that logged the
+    fold already.
+    """
+    return deep_merge(
+        fold_document_scanner_aliases(document, log=log), overlay.data, AshConfig
+    )
+
+
 def load_config_file(
     config_path: Path | str,
     source_dir: Path | str | None = None,
@@ -1511,7 +1531,7 @@ def load_config_file(
     if overlay is not None and isinstance(data, dict):
         # A document that is not a mapping is left as it is, so its validation
         # error is still raised rather than replaced by the overlay's content.
-        data = deep_merge(data, overlay.data, AshConfig)
+        data = _layered_over(data, overlay)
     try:
         return document, build_config(data, config_overrides)
     except ValidationError as e:
@@ -5392,10 +5412,9 @@ def _resolve_config(
                 data_for_record = document.data
                 if overlay is not None and isinstance(data_for_record, dict):
                     # The same merge the load validated (deep_merge is pure),
-                    # so the record holds the overlaid document.
-                    data_for_record = deep_merge(
-                        data_for_record, overlay.data, AshConfig
-                    )
+                    # so the record holds the overlaid document. The fold of
+                    # the project's document was logged by that load.
+                    data_for_record = _layered_over(data_for_record, overlay, log=False)
                 merged.append(data_for_record)
             if documents_out is not None:
                 documents_out.update(document.documents)
