@@ -392,6 +392,9 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                     opsf.Fetched.VULN_DB,
                     opsf.Fetched.CHECKS_BUNDLE,
                     opsf.Fetched.MODULE_SOURCES,
+                    # The one-manifest registry read that keys this scanner's
+                    # image finding ids (utils/image_digest_resolver).
+                    opsf.Fetched.IMAGE_DIGEST,
                 ),
                 prefetch=(opsf.Prefetch.CONTENT_DB_REFRESH,),
                 offline_outcome=opsf.OfflineOutcome.DEGRADED,
@@ -408,7 +411,11 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                 source=(
                     "_trivy_scanner_base.py offline_strategy, sandbox_requirements, "
                     "SCAN_FLAGS (--offline-scan always) and OFFLINE_FLAGS; "
-                    "utils/content_databases.py trivy-db (also_read_by trivy)"
+                    "utils/content_databases.py trivy-db (also_read_by trivy); "
+                    "IMAGE_DIGEST is the scan phase's read, not trivy's: "
+                    "core/phases/scan_phase.py ScanPhase._execute_phase calls "
+                    "utils/image_digest_resolver.resolve_image_locator before any "
+                    "scanner is built, and its registry rung runs crane digest"
                 ),
                 unconfirmed=(
                     "module sources are fetched only when the opt-in misconfig scanner "
@@ -695,22 +702,6 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         )
         return final_args, results_file, subprocess_env
 
-    def _unsupported_image_shape_reason(self, image: ImageLocator) -> Optional[str]:
-        """trivy reads a reference or a saved archive; an OCI layout is neither.
-
-        ``trivy image`` takes a reference (resolved through its --image-src
-        order) or ``--input`` with a saved tarball; it has no input mode for an
-        image-layout directory. The scan is then a reported clean skip, and
-        grype and syft, whose stereoscope reads ``oci-dir:``, still scan it.
-        """
-        if image.oci_layout is not None:
-            return (
-                f"container image at {image.shown()} was not scanned by trivy: "
-                "trivy image reads a reference or a saved archive (--input), "
-                "not an OCI image-layout directory"
-            )
-        return None
-
     def _execute_image_scan(
         self, image: ImageLocator
     ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
@@ -758,7 +749,19 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             for glob in self._image_exclude_globs()
         )
 
-        if image.oci_archive is not None:
+        if image.oci_layout is not None:
+            # trivy image has no input mode for a layout directory, so the layout
+            # is re-packed as a docker-archive in the results directory this scan
+            # owns and trivy reads that (utils/oci_layout_archive.py).
+            from automated_security_helper.utils.oci_layout_archive import (
+                layout_to_docker_archive,
+            )
+
+            repacked = layout_to_docker_archive(
+                image.oci_layout, results_file.parent / "layout-repacked.tar"
+            )
+            target_token = f"--input={repacked.absolute().as_posix()}"
+        elif image.oci_archive is not None:
             target_token = f"--input={Path(image.oci_archive).absolute().as_posix()}"
         elif image.ref is not None:
             engine = detect_container_engine()
@@ -768,8 +771,9 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                 extra.append(f"--image-src={engine.value}")
             target_token = image.ref
         else:
-            # An OCI layout: _unsupported_image_shape_reason refuses that shape,
-            # so scan_image does not hand one to this resolution.
+            # An ImageLocator holds a reference, a saved archive or a layout; the
+            # layout and the archive are handled above, so this is unreachable
+            # for a well-formed locator and narrows ``image.ref`` for typing.
             raise ScannerError(
                 f"container image at {image.shown()} has neither a reference nor "
                 "a saved archive for trivy image to read"

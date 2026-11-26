@@ -637,7 +637,9 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         pointed at a subdirectory of a checkout names the checkout's top level as
         well: the first parent that holds a ``.git`` the scanned directory's owner
         also owns, and never a filesystem root (``safe_directories_for``). Outside a
-        checkout only the scanned directory is named.
+        checkout only the scanned directory is named. Where the platform has no user
+        ids (Windows) no owner can be compared, so the top is not named and git's own
+        ownership check decides it.
 
         A sandboxed spawn reads the same list from the policy, which computes it
         from the scan target with the same function, and rebuilds the entries

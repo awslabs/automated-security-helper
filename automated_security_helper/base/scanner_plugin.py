@@ -2698,10 +2698,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """Why this scanner cannot read *image*'s locator SHAPE, or None.
 
         A scanner that claims the container_image kind but reads only some of
-        the three locator shapes (trivy takes a reference or a saved archive,
-        not an OCI layout directory) answers with one sentence; the scan is
-        then a reported clean skip, not a tool failure. None, the default,
-        means every shape is readable.
+        the three locator shapes answers with one sentence; the scan is then a
+        reported clean skip, not a tool failure. None, the default, means every
+        shape is readable, which holds for every wired scanner today: trivy
+        reads an OCI layout through a docker-archive re-pack of it.
         """
         return None
 

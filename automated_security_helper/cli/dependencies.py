@@ -50,7 +50,7 @@ from automated_security_helper.base.scanner_plugin import (
     plugin_missing_dependency_reason,
 )
 from automated_security_helper.cli.dependency_check import check_dependencies
-from automated_security_helper.cli.params import from_environment
+from automated_security_helper.cli.params import from_command_line
 from automated_security_helper.config.named_config import (
     refuse_a_named_config_that_does_not_exist,
 )
@@ -110,10 +110,10 @@ from automated_security_helper.utils.python_child import (
 from automated_security_helper.utils.python_installer import environment_rebuild_note
 from automated_security_helper.utils.redacted_model import value_tuple
 from automated_security_helper.utils.subprocess_utils import (
-    _warn_relative_bin_path,
     clear_find_executable_cache,
     find_executable_for_scan,
     shown_arguments,
+    usable_bin_path,
 )
 from automated_security_helper.utils.uv_tool_runner import UV_NO_CONFIG
 from automated_security_helper.utils.install_providers import (
@@ -1290,23 +1290,28 @@ def install_dependencies(
     # environment already reaches every scan that inherits it. Blank is unset.
     bin_path_from_environment = ash_bin_path_from_environment()
     # The default when no bin path was given, or a blank one, from the option or
-    # from a whitespace-only ASH_BIN_PATH that click passes through as given.
+    # from a whitespace-only ASH_BIN_PATH that click passes through as given. It is
+    # ASH_BIN_PATH as ASH read it at import, and a relative one is not installed
+    # into: it names a directory under the working directory, usually the
+    # repository being scanned, so it follows the one rule for every reader of the
+    # variable (subprocess_utils.usable_bin_path): one warning, then ~/.ash/bin.
     target_bin_path: Optional[Path]
     if bin_path is None or is_blank_bin_path(bin_path):
-        target_bin_path = ASH_BIN_PATH
+        target_bin_path = usable_bin_path(ASH_BIN_PATH)
     elif (
-        from_environment(ctx, "bin_path")
+        not from_command_line(ctx, "bin_path")
         and not is_anchored(bin_path)
         # A "~" is expanded from the home below, as the environment reading does.
         and not _is_under_tilde(bin_path)
     ):
-        # A relative ASH_BIN_PATH is not used, here as in a scan's lookups: it is
-        # warned about and ~/.ash/bin is the target. A relative --bin-path typed
-        # on the command line is read where it was typed (the branch below), even
-        # when ASH_BIN_PATH holds the same text: the source is asked of click
-        # (cli.params.from_environment), not guessed from the text.
-        _warn_relative_bin_path(bin_path)
-        target_bin_path = home_bin_path()
+        # The same rule for a relative value that was not typed: the option's
+        # default is ASH_BIN_PATH as read at import, and a value click took from
+        # the environment is ASH_BIN_PATH itself, so both follow it as a blank one
+        # does. A relative --bin-path typed on the command line is read where it
+        # was typed (the tilde and else branches below), even when ASH_BIN_PATH
+        # holds the same text: the source is asked of click
+        # (cli.params.from_command_line), not guessed from the text.
+        target_bin_path = usable_bin_path(bin_path)
     elif _is_under_tilde(bin_path):
         # A "~" a shell left unexpanded (a quoted --bin-path, or ASH_BIN_PATH set
         # to it) is expanded from the home directory only when there is a usable

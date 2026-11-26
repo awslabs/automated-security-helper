@@ -564,7 +564,9 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             scanner_name="grype",
             network=opsf.NetworkFacet(
                 fetch_kind=opsf.FetchKind.CONTENT_FETCH,
-                fetches=(opsf.Fetched.VULN_DB,),
+                # IMAGE_DIGEST: the one-manifest registry read that keys this
+                # scanner's image finding ids (utils/image_digest_resolver).
+                fetches=(opsf.Fetched.VULN_DB, opsf.Fetched.IMAGE_DIGEST),
                 prefetch=(
                     opsf.Prefetch.CONTENT_DB_REFRESH,
                     opsf.Prefetch.CI_CACHE,
@@ -582,7 +584,11 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 source=(
                     "grype_scanner.py offline_strategy and sandbox_requirements; "
                     "utils/content_databases.py grype-db; utils/content_db_refresh.py "
-                    "refreshes it outside the sandbox before an online scan"
+                    "refreshes it outside the sandbox before an online scan; "
+                    "IMAGE_DIGEST is the scan phase's read, not grype's: "
+                    "core/phases/scan_phase.py ScanPhase._execute_phase calls "
+                    "utils/image_digest_resolver.resolve_image_locator before any "
+                    "scanner is built, and its registry rung runs crane digest"
                 ),
             ),
             output=opsf.OutputFacet(

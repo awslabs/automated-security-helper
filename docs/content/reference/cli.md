@@ -758,7 +758,9 @@ platform, pinned provisioning, and docs generated from the manifest. A row that 
 be evaluated here reads not-run, which is not a pass.
 
 Exit status: 0 when every named plugin passes, 1 when any row is red, 3 when none is red
-but some row was not run, 2 for a usage error (an unknown plugin, no transcript root).
+but some row was not run, 2 for a usage error (an unknown plugin, no transcript root, a
+plugin that cannot be loaded). A red row outranks a load error: a run that found both
+exits 1, so a red verdict is never masked by an unrelated plugin's import failure.
 
 ```text
 ash plugin verify [OPTIONS] [names]...
@@ -1111,7 +1113,8 @@ Record a new review: re-hash locked files whose bytes changed.
 
 Run it after reading what changed in a file and confirming its suppressions
 still hold. It prints each file whose hash changed. A locked file that no
-longer exists is reported and left as it was; exit code 1 then.
+longer exists is reported and left as it was (exit code 1), unless
+--drop-missing removes its dead entry.
 
 ```text
 ash suppress refresh [OPTIONS] [paths]...
@@ -1120,11 +1123,13 @@ ash suppress refresh [OPTIONS] [paths]...
 <!-- doctest: options of=cli.suppress.refresh -->
 | Argument | Type | Default | Environment variable | Description |
 |----------|------|---------|----------------------|-------------|
-| <a id="suppress-refresh--arg-paths"></a>`paths` | text, any number | not set |  | Locked files to re-hash. Every locked file when none is named. |
+| <a id="suppress-refresh--arg-paths"></a>`paths` | text, any number | not set |  | Locked files to re-hash. Pass --all for every locked file. |
 
 <!-- doctest: options of=cli.suppress.refresh -->
 | Option | Type | Default | Environment variable | Description |
 |--------|------|---------|----------------------|-------------|
+| <a id="suppress-refresh--all"></a>`--all` | flag | off |  | Re-hash every locked file. A refresh re-approves each changed file it touches, so the whole-lock run is asked for explicitly. |
+| <a id="suppress-refresh--drop-missing"></a>`--drop-missing` | flag | off |  | Remove the entry of a named file that no longer exists, instead of leaving it and exiting 1. |
 | <a id="suppress-refresh--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash.lock. Defaults to the current directory. |
 
 ### <a id="suppress-verify"></a>`ash suppress verify`
@@ -1132,8 +1137,12 @@ ash suppress refresh [OPTIONS] [paths]...
 Check the lock against the tree. Exits 1 when anything is out of date.
 
 Lists every locked file whose bytes changed or that is gone, and every
-symbol suppression in the named configs whose file has no lock entry. Exit
-code 0 means a scan applies every symbol suppression.
+symbol suppression in the checked configs that the lock does not record
+(no entry for its file, or no recorded (rule_id, symbol) scope). It checks
+the named --config files, or the one config file a scan of the source
+directory discovers, and prints which; suppressions an `extends` base
+contributes are not read, so exit code 0 covers the checked files, not
+every config a scan could merge.
 
 ```text
 ash suppress verify [OPTIONS]

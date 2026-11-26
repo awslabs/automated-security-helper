@@ -1147,6 +1147,32 @@ def venue_for_virtualenv(
 
 FORCED_BINARIES_RECORD = "forced-binaries.json"
 
+#: The names Windows starts a file under: ``.exe`` and ``.com`` images, which
+#: ``CreateProcess`` runs, and the ``.bat`` and ``.cmd`` files it runs through
+#: cmd.exe. A file with any other name, a shell script with a shebang line or a text
+#: file, is not a program there (``[WinError 193] %1 is not a valid Win32
+#: application``).
+WINDOWS_PROGRAM_SUFFIXES = (".exe", ".com", ".bat", ".cmd")
+
+
+def _executable_by_this_process(path: Path, info: os.stat_result) -> bool:
+    """Whether the file at ``path``, with ``info`` its open descriptor's stat, is a
+    program this process can start.
+
+    POSIX: the execute bits on ``info`` and the kernel's access check
+    (``download_utils._executable_by_caller``). Windows keeps no execute permission
+    a check can read there: ``os.access(X_OK)`` is true of every file that exists,
+    and a descriptor's stat carries no execute bits, so the bits test would refuse
+    every file. What says a file is a program on Windows is its name
+    (:data:`WINDOWS_PROGRAM_SUFFIXES`), the name of the path being judged, so a file
+    swapped in at that path cannot change the answer.
+    """
+    if sys.platform == "win32":
+        return path.suffix.lower() in WINDOWS_PROGRAM_SUFFIXES
+    from automated_security_helper.utils import download_utils as du
+
+    return du._executable_by_caller(path, info)
+
 
 @dataclass(frozen=True)
 class ForcedBinary:
@@ -1232,7 +1258,8 @@ def validate_forced_binary(
     """Validate one forced binary, returning it or the refusal text.
 
     The path must be absolute, name a regular file that is not a symlink, and be
-    executable by this process. All three are judged on ONE open descriptor
+    executable by this process (:func:`_executable_by_this_process`; on Windows, a
+    name Windows starts as a program). All three are judged on ONE open descriptor
     (``O_NOFOLLOW``), the way the pinned-copy check judges a candidate, so a link
     swapped in after the check is not followed. The file is hashed (read), never run,
     and a path inside the scanned tree is refused unless the in-tree opt-in is set:
@@ -1262,12 +1289,17 @@ def validate_forced_binary(
     except FileNotFoundError:
         return f"{shown}: the path does not exist"
     except OSError as e:
+        # Windows opens no directory with os.open (it answers EACCES), so there a
+        # directory is refused here and not by the S_ISREG check below. It is named
+        # for what it is; the answer only words a refusal, it never admits a path.
+        if os.path.isdir(path):
+            return f"{shown}: the path is not a regular file"
         return f"{shown}: the path cannot be opened ({e.strerror or e})"
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
             return f"{shown}: the path is not a regular file"
-        if sys.platform != "win32" and not du._executable_by_caller(path, info):
+        if not _executable_by_this_process(path, info):
             return f"{shown}: the file is not executable"
         digest = du._sha256_of_open_file(fd)
     except OSError as e:
@@ -1304,7 +1336,7 @@ def forced_binary_still_usable(binary: ForcedBinary) -> bool:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
             return False
-        if sys.platform != "win32" and not du._executable_by_caller(binary.path, info):
+        if not _executable_by_this_process(binary.path, info):
             return False
         return du._sha256_of_open_file(fd) == binary.sha256.lower()
     except OSError:

@@ -37,6 +37,14 @@ pytestmark = pytest.mark.unit
 
 IMAGE_REF = "registry.example.com/team/app:1.2.3"
 
+#: A row that binds an engine socket of its own: a Python without
+#: socket.AF_UNIX (Windows' CPython) cannot, and the probe it exercises only
+#: finds unix sockets, so the row does not apply there.
+needs_unix_sockets = pytest.mark.skipif(
+    not hasattr(socket, "AF_UNIX"),
+    reason="no socket.AF_UNIX (Windows), so no unix-socket engine can be faked",
+)
+
 
 def _context(tmp_path) -> PluginContext:
     source = tmp_path / "src"
@@ -86,7 +94,18 @@ def _docker_engine(monkeypatch, tmp_path):
     _no_engine(monkeypatch, tmp_path)
     sock_path = tmp_path / "docker.sock"
     server = socket.socket(socket.AF_UNIX)
-    server.bind(str(sock_path))
+    # Bound by a relative name from inside the directory, as the podman row
+    # does: an AF_UNIX path holds about 100 bytes, and a deep basetemp (the
+    # macOS runners' tmp_path, or xdist's per-worker one) makes the full path
+    # too long for the bind. The probe only stats DOCKER_HOST's full path,
+    # which has no such limit.
+    try:
+        with monkeypatch.context() as scoped:
+            scoped.chdir(tmp_path)
+            server.bind(sock_path.name)
+    except BaseException:
+        server.close()
+        raise
     monkeypatch.setenv("DOCKER_HOST", f"unix://{sock_path}")
     return server
 
@@ -96,6 +115,7 @@ class TestEngineDetection:
         _no_engine(monkeypatch, tmp_path)
         assert detect_container_engine() == ContainerEngine.NONE
 
+    @needs_unix_sockets
     def test_a_docker_host_unix_socket_is_docker(self, monkeypatch, tmp_path):
         server = _docker_engine(monkeypatch, tmp_path)
         try:
@@ -108,6 +128,7 @@ class TestEngineDetection:
         monkeypatch.setenv("DOCKER_HOST", "tcp://127.0.0.1:2375")
         assert detect_container_engine() == ContainerEngine.NONE
 
+    @needs_unix_sockets
     def test_a_podman_runtime_socket_is_podman(self, monkeypatch, tmp_path):
         _no_engine(monkeypatch, tmp_path)
         runtime = tmp_path / "runtime"
@@ -214,6 +235,7 @@ class TestGrypeImageArgv:
         assert not any(str(value).startswith("dir:") for value in argv)
         assert results_file.parent.name == "image"
 
+    @needs_unix_sockets
     def test_a_ref_with_a_daemon_is_a_docker_target(self, monkeypatch, tmp_path):
         server = _docker_engine(monkeypatch, tmp_path)
         try:
@@ -279,6 +301,7 @@ class TestTrivyImageArgv:
         assert argv.index("--image-src=remote") < argv.index(IMAGE_REF)
         assert results_file.parent.name == "image"
 
+    @needs_unix_sockets
     def test_a_ref_with_a_daemon_scans_through_it(self, monkeypatch, tmp_path):
         server = _docker_engine(monkeypatch, tmp_path)
         try:
@@ -303,14 +326,34 @@ class TestTrivyImageArgv:
         assert IMAGE_REF not in argv
         assert not any(value.startswith("--image-src") for value in argv)
 
-    def test_a_layout_is_a_reported_clean_skip(self, tmp_path):
+    def test_a_layout_is_repacked_and_goes_through_input(self, monkeypatch, tmp_path):
+        from tests.utils.image_archive_fixture import (
+            archive_to_layout,
+            build_secret_image_archive,
+        )
+
+        _no_engine(monkeypatch, tmp_path)
+        layout = archive_to_layout(
+            build_secret_image_archive(tmp_path / "saved.tar"), tmp_path / "real-layout"
+        )
         scanner = self._scanner(tmp_path)
-        layout = _layout(tmp_path)
-        reason = scanner._unsupported_image_shape_reason(
+        argv, results_file, _env = scanner._execute_image_scan(
             ImageLocator(oci_layout=layout)
         )
-        assert reason is not None
-        assert "OCI image-layout" in reason
+        repacked = results_file.parent / "layout-repacked.tar"
+        assert repacked.is_file()
+        assert f"--input={repacked.absolute().as_posix()}" in argv
+        assert argv[:2] == ["trivy", "image"]
+        assert not any(token.startswith("--image-src") for token in argv)
+
+    def test_a_layout_is_no_longer_a_clean_skip(self, tmp_path):
+        scanner = self._scanner(tmp_path)
+        assert (
+            scanner._unsupported_image_shape_reason(
+                ImageLocator(oci_layout=_layout(tmp_path))
+            )
+            is None
+        )
 
     def test_a_layout_handed_to_the_resolution_is_refused_by_name(
         self, monkeypatch, tmp_path
