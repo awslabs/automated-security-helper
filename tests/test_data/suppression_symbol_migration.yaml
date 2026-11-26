@@ -712,21 +712,23 @@ kept:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: .ash.yaml
-  line_start: 654
-  line_end: 654
-  remeasured_at: c15148192f4
+  line_start: 656
+  line_end: 656
+  remeasured_at: dae04a84e95
   kept_because: no symbol grammar for this file type; the target file is now the root .ash.yaml (it was
-    .ash/.ash.yaml, where this pin sat at line 1050, then line 774, then line 715 of the root file), and
-    its lines moved again, so the pin was re-measured against main c15148192f4
+    .ash/.ash.yaml, where this pin sat at line 1050, then line 774, then line 715 of the root file, then
+    line 654 against main c15148192f4), and the zizmor entry above it in .ash.yaml gained its line range
+    (two lines), so the pin was re-measured against dae04a84e95 with that change
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: .ash.yaml
-  line_start: 901
-  line_end: 901
-  remeasured_at: c15148192f4
+  line_start: 903
+  line_end: 903
+  remeasured_at: dae04a84e95
   kept_because: no symbol grammar for this file type; the target file is now the root .ash.yaml (it was
-    .ash/.ash.yaml, where this pin sat at line 1297, then line 1021, then line 962 of the root file), and
-    its lines moved again, so the pin was re-measured against main c15148192f4
+    .ash/.ash.yaml, where this pin sat at line 1297, then line 1021, then line 962 of the root file, then
+    line 901 against main c15148192f4), and the zizmor entry above it in .ash.yaml gained its line range
+    (two lines), so the pin was re-measured against dae04a84e95 with that change
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: .github/workflows/ash-repo-docs.yml
