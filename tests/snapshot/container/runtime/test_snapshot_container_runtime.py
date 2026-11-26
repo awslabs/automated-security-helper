@@ -232,9 +232,11 @@ def test_bash_wrapper_scan_of_the_fixture(snapshot, fixture_repo, in_tmp):
         timeout=600,
         check=False,
     )
+    # ./ash writes its own status lines to stderr: stdout is the container's alone,
+    # so `./ash report --format json > file` holds the report and nothing else.
     assert {
         "exit_code": result.returncode,
-        "announced_the_run": "Running ASH scan using built image..." in result.stdout,
+        "announced_the_run": "Running ASH scan using built image..." in result.stderr,
         "last_line": _last_line(result.stdout),
     } == snapshot
 
