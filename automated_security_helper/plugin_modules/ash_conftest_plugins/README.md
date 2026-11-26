@@ -34,7 +34,7 @@ Conftest has nothing to test without policies. Its own convention is a `policy/`
 ash dependencies install --config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_conftest_plugins"]' --tool conftest
 ```
 
-This installs the pinned Conftest release (v0.62.0), refusing a download that does not hash to its pin. The ASH container image carries the same binary. If `conftest` is already on `PATH`, ASH uses it. The scanner is reported `MISSING` until it is there.
+This installs the pinned Conftest release (v0.62.0), refusing a download that does not hash to its pin. The ASH container image carries the same binary. In Nix mode the repository flake supplies `conftest` from nixpkgs, at nixpkgs' version rather than the v0.62.0 pin. If `conftest` is already on `PATH`, ASH uses it. The scanner is reported `MISSING` until it is there.
 
 ## Configuration
 

@@ -10,6 +10,11 @@ The conftest register declares the pinned shape (runtime PINNED_BINARY,
 ``tool_versions_key`` ``conftest``, all six platforms); these tests hold the pin
 tables to it. The archive digests are transcribed from the release's own
 ``checksums.txt`` and were re-verified by downloading each asset.
+
+Nix mode and Homebrew do not install the pin. The repository flake supplies
+nixpkgs' conftest, whose version the flake records beside it, and the Nix CI leg
+proves it runs; the install-package facet names the flake and the Homebrew formula
+for ``--providers``.
 """
 
 from __future__ import annotations
@@ -37,7 +42,10 @@ PLATFORMS = [
     ("windows", "arm64"),
 ]
 
-DOCKERFILE = Path(__file__).resolve().parents[3] / "Dockerfile"
+ROOT = Path(__file__).resolve().parents[3]
+DOCKERFILE = ROOT / "Dockerfile"
+FLAKE = ROOT / "flake.nix"
+NIX_ACTION = ROOT / ".github" / "actions" / "validate-nix" / "action.yml"
 
 
 @pytest.mark.parametrize("platform_arch", PLATFORMS)
@@ -126,3 +134,51 @@ def test_the_digest_tables_agree_on_the_assets():
     for filename in tool_downloads._CONFTEST_ASSETS.values():
         assert filename in tool_downloads._DIGESTS
         assert filename in tool_downloads._EXECUTABLE_DIGESTS
+
+
+def _comment_above(text: str, line: str) -> str:
+    """The run of ``#`` comment lines directly above ``line`` in ``text``."""
+    lines = text.splitlines()
+    index = lines.index(line)
+    note = []
+    while index > 0 and lines[index - 1].lstrip().startswith("#"):
+        index -= 1
+        note.insert(0, lines[index].strip())
+    return " ".join(note)
+
+
+def test_the_flake_supplies_conftest_and_records_the_version_gap():
+    flake = FLAKE.read_text(encoding="utf-8")
+    scanners = flake.split("scannersFor = system:", 1)[1].split("in\n    {", 1)[0]
+    assert "\n          pkgs.conftest\n" in scanners
+    note = _comment_above(flake, "          pkgs.conftest")
+    # nixpkgs' version at the locked revision, and the pin it differs from.
+    assert "0.63.0" in note and TOOL_VERSIONS["conftest"] in note, note
+
+
+def test_the_nix_leg_loads_the_module_seeds_a_policy_and_requires_conftest():
+    text = NIX_ACTION.read_text(encoding="utf-8")
+    module = "automated_security_helper.plugin_modules.ash_conftest_plugins"
+    assert f"--ash-plugin-modules {module}" in text
+    # Without Rego the policy gate reads SKIPPED with or without a binary, so the leg
+    # writes one; its deny fires on the fixture template.
+    assert "/tmp/ash-nix-selftest/policy/fixture.rego" in text
+    assert "deny contains msg if {" in text
+    listing = text.split("flake_supplied = [", 1)[1].split("]", 1)[0]
+    assert '"conftest",' in listing
+    assert 'statuses["conftest"].upper() != "FAILED"' in text
+
+
+def test_the_install_facet_offers_the_nix_and_brew_routes():
+    from automated_security_helper.base.install_package_facets import (
+        INSTALL_PACKAGE_FACETS,
+        NIX_FLAKE_OUTPUT,
+        install_package_facet,
+    )
+
+    facet = install_package_facet("conftest")
+    assert facet is INSTALL_PACKAGE_FACETS["conftest"]
+    nix = facet.row_for("nix")
+    assert nix is not None and nix.package == NIX_FLAKE_OUTPUT and nix.caveat
+    brew = facet.row_for("brew")
+    assert brew is not None and brew.package == "conftest" and brew.caveat

@@ -19,6 +19,11 @@ archive per platform, a SHA256 for each archive and for the executable inside it
 and the license entry). ``ash dependencies install --tool conftest`` installs it and
 the container image carries it; a ``conftest`` already on ``PATH`` is used as is.
 
+In Nix mode the repository flake supplies Conftest from nixpkgs instead, at the
+version the flake lock carries: 0.63.0 at the locked revision, not the v0.62.0 pin.
+None of the files "Invocation" below is read from differs between the v0.62.0 and
+v0.63.0 tags; v0.63.0 is built with OPA 1.9.0 where v0.62.0 has OPA 1.6.0.
+
 The policy gate
 ---------------
 Like ``snyk-code``, which waits for its credential, this scanner has a precondition
@@ -31,8 +36,9 @@ missing, so a tree with no policies reads SKIPPED, not MISSING. The directory is
 
 Invocation
 ----------
-Read from the Conftest source (``internal/commands/test.go``, ``output/sarif.go``,
-``output/output.go``, ``parser/parser.go`` at the ``master`` branch, 2026-11-19):
+Read from the Conftest source at v0.62.0, the pinned release (tag commit
+``ebb167d2``): ``internal/commands/test.go``, ``runner/test.go``, ``output/sarif.go``,
+``output/output.go``, ``output/result.go``, ``parser/parser.go`` and ``main.go``.
 
 * ``--output=sarif``: SARIF 2.1.0 on stdout. The scanner writes it to its results
   file, where the template ``scan()`` reads it. An output name Conftest does not know
@@ -44,19 +50,25 @@ Read from the Conftest source (``internal/commands/test.go``, ``output/sarif.go`
 * ``--no-color``, ``--policy=<dir>``, ``--all-namespaces`` (default on, because
   Conftest tests only the ``main`` namespace otherwise and a policy package named
   anything else would never run).
-* The files follow ``--``. Conftest does not skip a file it has no parser for: one
-  unknown extension fails the whole run (``unknown parser``). So ASH lists the files
-  itself, from the extensions Conftest parses, and does not pass the directory.
+* The files follow ``--``. A file named on the command line is always parsed, and one
+  no parser claims fails the whole run (``unknown parser``). A directory argument
+  would be walked by Conftest itself: it follows symbolic links, out of the tree too,
+  walks ``.git``, ``node_modules``, the policy directory and ASH's output alike, and
+  reads a file with no extension that is not a Dockerfile (a ``Makefile``, a
+  ``LICENSE``) as YAML, so one such file that is not YAML fails the run. So ASH lists
+  the files itself, by the names and extensions v0.62.0 routes to a parser
+  (``SUPPORTED_EXTENSIONS``, ``SUPPORTED_NAMES``), and passes no directory.
 * The working directory is the source directory and paths are passed relative to it,
   so reported URIs are source-relative.
 
 Severity
 --------
 Conftest SARIF carries a ``level`` per result: ``deny`` rules are ``error``, ``warn``
-rules ``warning``, ``allow`` exceptions ``note``, and a passed or skipped file gets a
-``none`` result ("Policy was satisfied successfully"). ASH drops the ``note`` and
-``none`` results, since they are not findings, and rates the rest so that
-``issue_severity`` and the SARIF level agree:
+rules ``warning``, ``allow`` exceptions ``note``, and a file with no failure and no
+warning gets one ``none`` result, "Policy was satisfied successfully" when a rule
+passed or an exception applied and "Policy check was skipped" when none did. ASH
+drops the ``note`` and ``none`` results, since they are not findings, and rates the
+rest so that ``issue_severity`` and the SARIF level agree:
 
 * ``error`` -> HIGH / ``error`` (policy violation, not the CRITICAL a generic error
   maps to: the policy author's rule is a requirement, not a proven exploit)
@@ -145,7 +157,11 @@ CONFTEST_TOOL_NAME = "conftest"
 #: The directory Conftest reads policies from when ``--policy`` is not passed.
 DEFAULT_POLICY_DIR = "policy"
 
-#: Extensions Conftest has a parser for (``parser/parser.go``).
+#: Extensions the pinned Conftest routes to a parser (``NewFromPath`` in
+#: ``parser/parser.go`` at the v0.62.0 tag commit, ebb167d2). The release parses a
+#: few more that ASH does not list (``.env``, ``.textproto``, ``.textpb``, ``.spdx``,
+#: ``.gitignore``); a file left out is not scanned, while a file listed that no
+#: parser claims fails the whole run.
 SUPPORTED_EXTENSIONS = frozenset(
     {
         ".yaml",
@@ -168,8 +184,12 @@ SUPPORTED_EXTENSIONS = frozenset(
     }
 )
 
-#: File names with a parser whatever their extension.
-SUPPORTED_NAMES = frozenset({"dockerfile", "nginx.conf"})
+#: File names the pinned Conftest routes to a parser whatever their extension (the
+#: same ``NewFromPath``). Later releases also route ``nginx.conf`` (v0.71.1 does);
+#: v0.62.0 has no such parser and fails the whole run on a listed ``nginx.conf``
+#: ("unknown parser: conf"), so it is not listed. Moving the pin means reading
+#: ``NewFromPath`` again at the new tag before this set or the one above changes.
+SUPPORTED_NAMES = frozenset({"dockerfile"})
 
 #: Directories never walked.
 SKIPPED_DIRS = frozenset({".git", "node_modules", ".venv", "__pycache__"})
@@ -307,7 +327,8 @@ class ConftestScanner(ScannerPluginBase[ConftestScannerConfig]):
         ),
         references=FacetDecl(
             state=FacetState.NA,
-            reason="the SARIF rules list is empty; no reference URLs",
+            reason="the SARIF rules carry an id, a short description and "
+            "properties, but no help URI or reference URL",
         ),
         tags=FacetDecl(
             state=FacetState.MAPPED,
@@ -348,8 +369,9 @@ class ConftestScanner(ScannerPluginBase[ConftestScannerConfig]):
             targets=opsf.TargetsFacet(
                 kinds=(opsf.TargetKind.IAC_OTHER,),
                 tool_type=ScannerToolType.IAC,
-                selection="the files under the target whose extension Conftest "
-                "parses, listed by _config_files and passed after `--`",
+                selection="the files under the target whose name or extension the "
+                "pinned Conftest routes to a parser, listed by _config_files and "
+                "passed after `--`",
                 covers_note="an alpha scanner; it declares no covers display string",
             ),
             runtime=opsf.RuntimeFacet(

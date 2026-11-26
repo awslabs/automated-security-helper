@@ -73,6 +73,21 @@ runs:
         # For hadolint, an alpha scanner whose module the scan below lists. Unpinned base
         # image tag, so DL3007 fires and the scanner has something to report.
         printf 'FROM ubuntu:latest\nRUN echo fixture\n' > /tmp/ash-nix-selftest/Dockerfile
+        # For conftest, an alpha scanner whose module the scan below lists. Conftest
+        # ships no rules, and with no Rego under policy/ the scanner reads SKIPPED
+        # whether or not the flake supplied the binary, so the participation check
+        # below could not tell the two apart. This policy denies the template's
+        # bucket, which has no versioning configuration, so conftest runs and reports.
+        mkdir -p /tmp/ash-nix-selftest/policy
+        cat > /tmp/ash-nix-selftest/policy/fixture.rego <<'REGO'
+        package main
+
+        deny contains msg if {
+          input.Resources.Bucket.Type == "AWS::S3::Bucket"
+          not input.Resources.Bucket.Properties.VersioningConfiguration
+          msg := "fixture: the bucket has no versioning configuration"
+        }
+        REGO
 
     - name: "nix: scan"
       shell: bash
@@ -103,6 +118,7 @@ runs:
           --output-dir /tmp/ash-nix-selftest/output \
           --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins \
           --ash-plugin-modules automated_security_helper.plugin_modules.ash_betterleaks_plugins \
+          --ash-plugin-modules automated_security_helper.plugin_modules.ash_conftest_plugins \
           --simple
         rc=$?
         set -e
@@ -154,13 +170,16 @@ runs:
         # Rules Registry seeded by the shellHook; trivy's vulnerability database is
         # seeded the same way. Without the seeding both would be MISSING here.
         #
-        # hadolint and betterleaks are alpha scanners, so the scan above lists their
-        # modules with --ash-plugin-modules; otherwise they would be absent from the
-        # report and this list could not check that the flake supplies them. The GuardDog
-        # module is not listed: nixpkgs has no GuardDog package, so the flake does not
-        # supply it. betterleaks comes from nixpkgs at the version flake.lock locks,
-        # which is older than ASH's pin (see the comment at pkgs.betterleaks in
-        # flake.nix); this check says it runs, not that it is the pinned version.
+        # hadolint, betterleaks and conftest are alpha scanners, so the scan above lists
+        # their modules with --ash-plugin-modules; otherwise they would be absent from
+        # the report and this list could not check that the flake supplies them. The
+        # GuardDog module is not listed: nixpkgs has no GuardDog package, so the flake
+        # does not supply it. betterleaks comes from nixpkgs at the version flake.lock
+        # locks, which is older than ASH's pin (see the comment at pkgs.betterleaks in
+        # flake.nix), and conftest at one newer than its pin (see pkgs.conftest); this
+        # check says each runs, not that it is the pinned version. conftest runs only
+        # because the fixture above has a Rego policy; without one it reads SKIPPED,
+        # which would pass this check with no binary at all.
         flake_supplied = [
             "actionlint",
             "bandit",
@@ -169,6 +188,7 @@ runs:
             "cfn-lint",
             "cfn-nag",
             "checkov",
+            "conftest",
             "detect-secrets",
             "gitleaks",
             "grype",
@@ -196,6 +216,15 @@ runs:
             sys.exit(f"FAIL: scanners absent from the report entirely: {absent}")
         if missing:
             sys.exit(f"FAIL: flake-supplied scanners reported MISSING: {missing}")
+        # Not MISSING is too weak for conftest: when its policy gate finds no Rego it
+        # reads SKIPPED, binary or not. The fixture's policy denies the bucket, so a
+        # conftest the flake supplied reports FAILED, and any other status means it
+        # did not run the policy.
+        if statuses["conftest"].upper() != "FAILED":
+            sys.exit(
+                f"FAIL: conftest reported {statuses['conftest']}, not FAILED for the "
+                "fixture policy's deny"
+            )
 
         print(f"PASS: all {len(flake_supplied)} flake-supplied scanners participated")
         PY

@@ -106,6 +106,40 @@ def test_the_page_states_the_argv_the_scanner_builds(tmp_path):
     ]
 
 
+def test_the_page_names_the_nix_route_the_flake_carries():
+    from automated_security_helper.base.install_package_facets import (
+        INSTALL_PACKAGE_FACETS,
+        NIX_FLAKE_OUTPUT,
+    )
+    from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
+
+    assert_on_page(
+        CONFTEST_PLUGIN,
+        "**Nix mode:** the flake supplies `conftest` from nixpkgs, at nixpkgs' "
+        f"version rather than the {TOOL_VERSIONS['conftest']} pin.",
+    )
+    flake = (Path(__file__).resolve().parents[3] / "flake.nix").read_text(
+        encoding="utf-8"
+    )
+    scanners = flake.split("scannersFor = system:", 1)[1].split("in\n    {", 1)[0]
+    assert "\n          pkgs.conftest\n" in scanners
+    row = INSTALL_PACKAGE_FACETS["conftest"].row_for("nix")
+    assert row is not None and row.package == NIX_FLAKE_OUTPUT
+
+
+def test_the_page_says_a_file_named_nginx_conf_is_not_listed(tmp_path):
+    assert_on_page(
+        CONFTEST_PLUGIN,
+        "the pinned v0.62.0 has none for `nginx.conf`, so ASH does not list files "
+        "with that name.",
+    )
+    source = tmp_path / "src"
+    (source / "policy").mkdir(parents=True)
+    (source / "nginx.conf").write_text("events {}\n", encoding="utf-8")
+    (source / "app.yaml").write_text("kind: Pod\n", encoding="utf-8")
+    assert _scanner(source, tmp_path)._config_files(source) == ["app.yaml"]
+
+
 def test_the_policy_gate_skips_a_tree_without_rego(tmp_path):
     assert_on_page(
         CONFTEST_PLUGIN,

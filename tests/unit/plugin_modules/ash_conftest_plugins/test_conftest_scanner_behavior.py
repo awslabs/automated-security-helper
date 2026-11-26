@@ -202,6 +202,59 @@ def _run(scanner, fake, monkeypatch, target_type="source"):
     )
 
 
+#: The parser names ``New`` accepts in ``parser/parser.go`` at the pinned v0.62.0
+#: (tag commit ebb167d2). There is no nginx parser among them.
+_PINNED_PARSERS = frozenset(
+    {
+        "cue",
+        "cyclonedx",
+        "dockerfile",
+        "dotenv",
+        "edn",
+        "hcl1",
+        "hcl2",
+        "hocon",
+        "ignore",
+        "ini",
+        "json",
+        "jsonc",
+        "jsonnet",
+        "properties",
+        "spdx",
+        "textproto",
+        "toml",
+        "vcl",
+        "xml",
+        "yaml",
+    }
+)
+
+
+def _pinned_parser_for(path: str) -> Optional[str]:
+    """The parser v0.62.0's ``NewFromPath`` picks for a named file, or None.
+
+    Transcribed from ``parser/parser.go`` at the pinned tag commit, rule for rule
+    and in its order. None is Conftest's "unknown parser", which fails the whole run.
+    A name with no dot is read as YAML, as Conftest reads it.
+    """
+    name = path.rsplit("/", 1)[-1].lower()
+    dot = name.rfind(".")
+    ext = name[dot + 1 :] if dot >= 0 else "yml"
+    if name == "dockerfile" or name.startswith("dockerfile.") or ext == "dockerfile":
+        return "dockerfile"
+    if ext in ("yml", "yaml"):
+        return "yaml"
+    if ext in ("hcl", "tf", "tfvars"):
+        return "hcl2"
+    if ext in ("gitignore", "dockerignore"):
+        return "ignore"
+    if name == ".env" or name.startswith(".env.") or ext == "env":
+        return "dotenv"
+    if ext in ("textproto", "textpb"):
+        return "textproto"
+    return ext if ext in _PINNED_PARSERS else None
+
+
 class TestAlphaPlugin:
     def test_scanner_is_on_by_default_once_its_module_is_listed(self):
         assert ConftestScannerConfig().enabled is True
@@ -347,6 +400,15 @@ class TestInvocation:
         files = _scanner(tree, tmp_path)._config_files(tree)
         assert files == ["Dockerfile", "deploy/app.yaml", "ok.json"]
 
+    def test_a_file_named_nginx_conf_is_not_listed(self, tree, tmp_path):
+        # The pinned v0.62.0 has no nginx parser: a listed nginx.conf fails the whole
+        # run with "unknown parser: conf". A later release parsing it does not make it
+        # listable while the pin stays.
+        (tree / "nginx.conf").write_text("events {}\n")
+        (tree / "deploy" / "NGINX.CONF").write_text("events {}\n")
+        files = _scanner(tree, tmp_path)._config_files(tree)
+        assert files == ["Dockerfile", "deploy/app.yaml", "ok.json"]
+
     def test_a_tree_with_nothing_parsable_is_skipped_not_failed(
         self, tmp_path, on_path, monkeypatch
     ):
@@ -382,6 +444,59 @@ class TestInvocation:
         monkeypatch.setattr(cs, "MAX_ARGV_CHARS", 10)
         with pytest.raises(ScannerError, match="do not fit on one command line"):
             _run(_scanner(tree, tmp_path), FakeConftest(), monkeypatch)
+
+
+class TestPinnedParserRouting:
+    """Every file the scanner lists has a parser in the release it pins.
+
+    A listed file no parser claims fails the whole Conftest run, so the scanner's
+    names and extensions are held to ``_pinned_parser_for``, a second reading of the
+    pinned ``parser/parser.go``. Leaving a parsable file out costs coverage, not the
+    run, so only that direction is required.
+    """
+
+    def test_the_routing_is_the_pinned_releases(self):
+        from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
+
+        # _pinned_parser_for is v0.62.0's NewFromPath. A pin move reads it again at the
+        # new tag, and updates it and the scanner's two sets, before this passes.
+        assert TOOL_VERSIONS["conftest"] == "v0.62.0"
+
+    @pytest.mark.parametrize("extension", sorted(cs.SUPPORTED_EXTENSIONS))
+    def test_every_listed_extension_has_a_parser(self, extension):
+        assert _pinned_parser_for(f"deploy/app{extension}") is not None
+
+    @pytest.mark.parametrize("name", sorted(cs.SUPPORTED_NAMES))
+    def test_every_listed_name_has_a_parser(self, name):
+        assert _pinned_parser_for(name) is not None
+        assert _pinned_parser_for(name.upper()) is not None
+
+    def test_names_the_pinned_release_refuses_have_no_parser(self):
+        # The planted negatives: "unknown parser: conf" is the measured refusal.
+        for name in ("nginx.conf", "site.conf", "app.py", "foo."):
+            assert _pinned_parser_for(name) is None, name
+
+    def test_every_file_the_scanner_lists_has_a_parser(self, tmp_path):
+        src = tmp_path / "src"
+        (src / "policy").mkdir(parents=True)
+        (src / "policy" / "p.rego").write_text("package main\n")
+        names = [f"a{ext}" for ext in sorted(cs.SUPPORTED_EXTENSIONS)] + [
+            "Dockerfile",
+            "Dockerfile.dev",
+            "nginx.conf",
+            "site.conf",
+            "Makefile",
+            "LICENSE",
+            ".env",
+            "app.py",
+            "msg.textproto",
+        ]
+        for name in names:
+            (src / name).write_text("x\n")
+        listed = _scanner(src, tmp_path)._config_files(src)
+        assert len(listed) == len(cs.SUPPORTED_EXTENSIONS) + 2, listed
+        assert [f for f in listed if _pinned_parser_for(f) is None] == []
+        assert "nginx.conf" not in listed
 
 
 class TestReport:

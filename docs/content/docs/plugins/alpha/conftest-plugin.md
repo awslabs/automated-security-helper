@@ -38,6 +38,7 @@ ASH pins Conftest v0.62.0: one release archive per platform, with a SHA256 for e
 
 - **Local mode:** `ash dependencies install --tool conftest`, with the module listed in `ash_plugin_modules` (or added with `--config-overrides`, as below), downloads the pinned release archive from GitHub and verifies it against the SHA256 digest pinned in ASH. A download that does not hash to its pin is refused. Linux, macOS and Windows on x86_64 and arm64 are supported.
 - **Container mode:** the ASH container image installs the same pinned binary.
+- **Nix mode:** the flake supplies `conftest` from nixpkgs, at nixpkgs' version rather than the v0.62.0 pin.
 - Any `conftest` already on `PATH` is also used.
 
 <!-- doctest: illustrative reason="downloads a release binary" -->
@@ -47,7 +48,7 @@ ash dependencies install --config-overrides 'ash_plugin_modules+=["automated_sec
 
 ## What is scanned
 
-ASH lists the files under the scan target that Conftest has a parser for (YAML, JSON, TOML, HCL, Terraform, Dockerfile, INI, XML, properties, CUE, Jsonnet, EDN, VCL and HOCON) and hands them to Conftest after `--`. It does not hand over the directory, because Conftest stops on the first file it has no parser for. Symbolic links, `.git`, `node_modules`, `.venv`, `__pycache__`, the policy directory and ASH's own output directory are skipped.
+ASH lists the files under the scan target that Conftest has a parser for (YAML, JSON, TOML, HCL, Terraform, Dockerfile, INI, XML, properties, CUE, Jsonnet, EDN, VCL and HOCON) and hands them to Conftest after `--`. Conftest fails the whole run on a named file it has no parser for, and the pinned v0.62.0 has none for `nginx.conf`, so ASH does not list files with that name. It does not hand over the directory either: Conftest's own walk follows symbolic links out of the tree and reads a file with no extension other than a Dockerfile (a `Makefile`, a `LICENSE`) as YAML, so one such file that is not YAML would fail the run. Symbolic links, `.git`, `node_modules`, `.venv`, `__pycache__`, the policy directory and ASH's own output directory are skipped.
 
 ASH runs `conftest test --output=sarif --no-fail --no-color --policy=<dir> --all-namespaces -- <files>` with the source directory as its working directory, so reported paths are source-relative. `--no-fail` makes Conftest exit 0 when a policy fails, so any other exit code means the run itself failed. Conftest makes no network call unless a policy does, and ASH never passes `--update`.
 

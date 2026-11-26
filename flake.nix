@@ -117,6 +117,15 @@
           # `betterleaks --version` with the pin in utils/tool_downloads.py after a bump.
           pkgs.betterleaks
           pkgs.checkov
+          # alpha scanner; runs when its module is listed and its policy directory
+          # holds Rego. nixpkgs ships 0.63.0 at the locked revision (34ab9907, checked
+          # 2026-11-26 in pkgs/by-name/co/conftest), newer than the v0.62.0 the image
+          # and `ash dependencies install` pin. The two tags differ in none of the
+          # files the scanner's invocation is read from (its flags, file routing and
+          # SARIF writer); v0.63.0 is built with OPA 1.9.0 where v0.62.0 has 1.6.0.
+          # Compare `conftest --version` with the pin in utils/tool_downloads.py
+          # after a bump.
+          pkgs.conftest
           pkgs.detect-secrets
           (cfnGuardFor system) # its rules are seeded by the shellHook below
           pkgs.gitleaks

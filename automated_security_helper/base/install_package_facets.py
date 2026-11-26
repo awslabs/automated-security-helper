@@ -103,9 +103,10 @@ def _facet(tool: str, *, brew: bool, nix: bool) -> InstallPackageFacet:
 
 
 #: Tools whose Homebrew formula exists (read from formulae.brew.sh/api/formula/<name>
-#: .json on 2026-11-25: 200 for every name below with ``brew=True``, 404 for
-#: cfn-guard, opengrep and cfn-nag, which therefore have no brew row) and that the
-#: repository flake's ``ash-scanners`` output carries (``flake.nix``, ``scannersFor``).
+#: .json on 2026-11-25, conftest on 2026-11-26: 200 for every name below with
+#: ``brew=True``, 404 for cfn-guard, opengrep and cfn-nag, which therefore have no brew
+#: row) and that the repository flake's ``ash-scanners`` output carries (``flake.nix``,
+#: ``scannersFor``).
 INSTALL_PACKAGE_FACETS: Mapping[str, InstallPackageFacet] = {
     f.tool: f
     for f in (
@@ -116,6 +117,7 @@ INSTALL_PACKAGE_FACETS: Mapping[str, InstallPackageFacet] = {
         _facet("cfn-lint", brew=True, nix=True),
         _facet("cfn-nag", brew=False, nix=True),
         _facet("checkov", brew=True, nix=True),
+        _facet("conftest", brew=True, nix=True),
         _facet("detect-secrets", brew=True, nix=True),
         _facet("gitleaks", brew=True, nix=True),
         _facet("grype", brew=True, nix=True),
