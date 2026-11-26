@@ -1372,6 +1372,14 @@ class RuntimeOverridesConfig(RedactedSection):
         "/scanners/gitleaks/options/baseline_path",
         "/scanners/trivy/options/scanners",
         "/scanners/trivy/options/ignore_unfixed",
+        # And mcp-config's checks: each of these, set false, drops a whole kind of
+        # finding (privilege escalation, unpinned package runners, auto-approved
+        # tool calls, literal secrets in env). Its require_local and its two
+        # prefix lists only add findings, so they are not listed.
+        "/scanners/mcp-config/options/forbid_privilege_escalation",
+        "/scanners/mcp-config/options/forbid_unpinned_runners",
+        "/scanners/mcp-config/options/forbid_auto_approval",
+        "/scanners/mcp-config/options/flag_env_secrets",
         # Options that can leave findings out without naming them. A scanner
         # set offline runs on whatever data is cached, and npm audit keeps no
         # advisory data: offline it skips the advisory request, reports none

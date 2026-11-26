@@ -389,6 +389,7 @@ _SHIPPED_PLUGIN_KEYS: Dict[str, FrozenSet[str]] = {
             "grype",
             "guarddog",
             "hadolint",
+            "mcp-config",
             "npm-audit",
             "opengrep",
             "semgrep",
@@ -423,7 +424,9 @@ _SHIPPED_PLUGIN_KEYS: Dict[str, FrozenSet[str]] = {
             "yaml",
         }
     ),
-    PluginKind.CONVERTER.section: frozenset({"archive", "jupyter"}),
+    PluginKind.CONVERTER.section: frozenset(
+        {"archive", "jupyter", "mcp_config", "sdist-lock-harvester"}
+    ),
 }
 
 #: Config keys of known plugins, per plugin section.
