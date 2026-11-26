@@ -135,6 +135,12 @@
 
 ### Fixes
 
+- **A stored suppression with an empty `scope` no longer applies.** A results file
+  that held `{"resource_id": "X", "scope": {}}` was read with its empty scope kept as
+  inert, then the entry-level `resource_id` was written into that scope, so the entry
+  suppressed findings on resource `X` while its note said the scope was empty. A config
+  file refuses this shape and still does. The stored entry now stays inert, and the
+  empty-scope note is recorded once for it.
 - **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**
   It passes `GITHUB_ACTIONS`, `TF_BUILD` and `TEAMCITY_VERSION` into the container when
   set (by name, or with their values when `OCI_RUNNER_WRAPPER` is set; a value that holds

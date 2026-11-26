@@ -1148,7 +1148,8 @@ class AshSuppression(IgnorePathWithReason):
         An equal duplicate is accepted; a disagreement is refused with which
         key to keep. Under TOLERATE_STORED_CONFIG a disagreement is recorded
         and the entry kept but never applied, as every other unreadable stored
-        entry is.
+        entry is. A stored scope kept as empty (``selects_nothing``) is left
+        as it is: the sugar value is not written into it.
 
         The fold runs under the SAME context the outer validation carries: a
         plain attribute write skips SuppressionScope's validators
@@ -1168,6 +1169,13 @@ class AshSuppression(IgnorePathWithReason):
             self.scope = SuppressionScope.model_validate(
                 {"resource_id": self.resource_id}, context=info.context
             )
+        elif self.scope.selects_nothing:
+            # Only reachable under the tolerance: a config refuses this scope.
+            # SuppressionScope kept it as an empty scope and recorded the note
+            # once. Writing the sugar value into it would turn the kept-inert
+            # entry into an active scope on that resource, so leave it alone;
+            # nothing more to record.
+            return self
         elif self.scope.resource_id is None:
             if empty:
                 # The scope was validated before the fold wrote into it, so
