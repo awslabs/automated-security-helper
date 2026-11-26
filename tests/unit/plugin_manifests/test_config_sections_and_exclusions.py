@@ -14,12 +14,15 @@ sections were written out by hand.
 
 from __future__ import annotations
 
+import importlib
+import pkgutil
 import typing
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from automated_security_helper.base.converter_plugin import ConverterPluginConfigBase
+from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.plugin_manifest import (
     ConfigSection,
     ExclusionOption,
@@ -34,6 +37,14 @@ from automated_security_helper.config.ash_config import (
 )
 from automated_security_helper.config.client_scanner_exclusions import (
     SCANNER_EXCLUSION_OPTIONS,
+)
+from automated_security_helper.config.plugin_option_check import (
+    _config_class,
+    _options_class,
+)
+from automated_security_helper.config.plugin_section_names import (
+    declared_section_names,
+    folded_section_name,
 )
 from automated_security_helper.plugin_manifests import (
     exclusion_options,
@@ -279,3 +290,142 @@ def test_resolve_ref_refuses_what_is_not_a_reference():
         resolve_ref("not a reference")
     with pytest.raises(AttributeError):
         resolve_ref("automated_security_helper.base.plugin_manifest:NoSuchName")
+
+
+# -- list defaults of the plugins whose section the config does not type ------------
+
+#: Where a plugin package lists the plugins of each kind it ships, by config segment.
+_PLUGIN_LISTS = {
+    "scanners": "ASH_SCANNERS",
+    "reporters": "ASH_REPORTERS",
+    "converters": "ASH_CONVERTERS",
+}
+
+#: One row of the table: (config segment, plugin name, option path under its section).
+_Row = tuple[str, str, tuple[str, ...]]
+
+
+def _untyped_list_option_table():
+    """``UNTYPED_LIST_OPTION_DEFAULTS``, imported here so that this module still
+    collects where the table does not exist, and fails these tests with a message."""
+    try:
+        from automated_security_helper.plugin_manifests import (
+            UNTYPED_LIST_OPTION_DEFAULTS,
+        )
+    except ImportError:
+        pytest.fail(
+            "automated_security_helper.plugin_manifests has no "
+            "UNTYPED_LIST_OPTION_DEFAULTS: --config-overrides KEY+=VALUE has no "
+            "default list to add to for a plugin whose section the config does "
+            "not type"
+        )
+    return UNTYPED_LIST_OPTION_DEFAULTS
+
+
+def _table_rows(table) -> dict[_Row, tuple]:
+    return {
+        (segment, plugin, path): tuple(items)
+        for segment, plugins in table.items()
+        for plugin, options in plugins.items()
+        for path, items in options.items()
+    }
+
+
+def _shipped_plugin_packages() -> list:
+    """``ash_builtin`` and each ``ash_*_plugins`` package under ``plugin_modules``,
+    found by walking it, so a package added later is covered without being listed."""
+    import automated_security_helper.plugin_modules as plugin_modules
+
+    return [
+        importlib.import_module(f"{plugin_modules.__name__}.{info.name}")
+        for info in pkgutil.iter_modules(plugin_modules.__path__)
+        if info.name == "ash_builtin"
+        or (info.name.startswith("ash_") and info.name.endswith("_plugins"))
+    ]
+
+
+def _list_defaults(
+    options_class: type[BaseModel], path: tuple[str, ...]
+) -> typing.Iterator[tuple[tuple[str, ...], tuple]]:
+    """``(path, items)`` for each field of the options model whose default is a list
+    or a tuple, the items as JSON values, descending into a field whose default is a
+    model of its own."""
+    for name, field in options_class.model_fields.items():
+        default = field.get_default(call_default_factory=True)
+        if isinstance(default, (list, tuple)):
+            yield (
+                (*path, name),
+                tuple(
+                    item.model_dump(mode="json")
+                    if isinstance(item, BaseModel)
+                    else item
+                    for item in default
+                ),
+            )
+        elif isinstance(default, BaseModel):
+            yield from _list_defaults(type(default), (*path, name))
+
+
+def _declared_rows() -> dict[_Row, tuple]:
+    """The rows the plugins' own option models give: every list option of every
+    shipped plugin whose section is not a typed field of its segment."""
+    rows: dict[_Row, tuple] = {}
+    for package in _shipped_plugin_packages():
+        for segment, attribute in _PLUGIN_LISTS.items():
+            for plugin_class in getattr(package, attribute, None) or ():
+                plugin = plugin_config_key(plugin_class)
+                if folded_section_name(plugin) in declared_section_names(segment):
+                    continue
+                config_class = _config_class(plugin_class)
+                options_class = (
+                    _options_class(config_class) if config_class is not None else None
+                )
+                if options_class is None:
+                    continue
+                for path, items in _list_defaults(options_class, ("options",)):
+                    rows[(segment, plugin, path)] = items
+    return rows
+
+
+def test_the_walk_reaches_the_plugin_packages_it_is_meant_to_read():
+    """Control: a walk that listed no package would find no row, and the table, if
+    it held none either, would equal it."""
+    names = {
+        package.__name__.rpartition(".")[2] for package in _shipped_plugin_packages()
+    }
+    assert {"ash_builtin", "ash_aws_plugins", "ash_guarddog_plugins"} <= names
+
+
+def test_the_untyped_list_option_table_is_what_the_plugins_declare():
+    """``resolve_config`` imports no plugin package, so the list defaults it adds a
+    ``+=`` to are mirrored as data; this holds them equal to the option models."""
+    table = _table_rows(_untyped_list_option_table())
+    declared = _declared_rows()
+
+    assert declared, "control: the walk found no list option of an untyped plugin"
+    missing = sorted(declared.keys() - table.keys())
+    extra = sorted(table.keys() - declared.keys())
+    changed = sorted(
+        (key, table[key], declared[key])
+        for key in declared.keys() & table.keys()
+        if table[key] != declared[key]
+    )
+    assert (missing, extra, changed) == ([], [], []), (
+        "UNTYPED_LIST_OPTION_DEFAULTS and the plugins' option models disagree: "
+        f"options the table lacks {missing}, rows for options no untyped plugin "
+        f"declares {extra}, rows whose default differs {changed}"
+    )
+
+
+def test_every_row_of_the_untyped_list_option_table_names_an_untyped_plugin():
+    table = _untyped_list_option_table()
+    assert table, "control: the table has no rows"
+
+    for segment, plugins in table.items():
+        assert segment in _PLUGIN_LISTS, segment
+        typed = declared_section_names(segment)
+        for plugin in plugins:
+            assert folded_section_name(plugin) not in typed, (
+                f"{segment}.{plugin} is a typed section of the config, whose "
+                "default the document already holds"
+            )
