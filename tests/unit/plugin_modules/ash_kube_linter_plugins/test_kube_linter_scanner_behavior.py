@@ -639,3 +639,36 @@ class TestFacets:
     def test_the_adapter_never_writes_a_resource_id(self):
         source = Path(kls.__file__).read_text(encoding="utf-8")
         assert "ash_resource_id" not in source
+
+
+class TestSilencingDeclaration:
+    """The register's silencing row names each surface the scanned repository can
+    write that KubeLinter v0.8.3 reads ("Ignore annotations" and "Configuration" in
+    the module docstring give the source lines)."""
+
+    @staticmethod
+    def _layer(kind):
+        layers = KubeLinterScanner.operational_facets.silencing.tool_side
+        [layer] = [layer for layer in layers if layer.layer is kind]
+        return layer
+
+    def test_both_ignore_annotations_are_declared_honored(self):
+        from automated_security_helper.base import scanner_operational_facets as opsf
+
+        layer = self._layer(opsf.SilencingLayerKind.INLINE_COMMENT)
+        assert layer.writer is opsf.SilencingWriter.REPOSITORY
+        assert layer.honored is opsf.Honored.YES
+        assert "ignore-check.kube-linter.io/<check>" in layer.surface
+        assert "kube-linter.io/ignore-all" in layer.surface
+        assert "pkg/ignore/ignore.go" in layer.cite
+        assert "pkg/run/run.go" in layer.cite
+
+    def test_the_tree_config_file_is_declared_not_honored(self):
+        from automated_security_helper.base import scanner_operational_facets as opsf
+
+        layer = self._layer(opsf.SilencingLayerKind.IGNORE_FILE)
+        assert layer.writer is opsf.SilencingWriter.REPOSITORY
+        assert layer.honored is opsf.Honored.NO
+        assert ".kube-linter.yaml" in layer.surface
+        assert ".kube-linter.yml" in layer.surface
+        assert "pkg/config/config.go" in layer.cite

@@ -33,6 +33,12 @@ The scanner takes the common scanner options (`severity_threshold`, `scan_timeou
 with an empty config of its own, so a `.kube-linter.yaml` in the scanned repository
 cannot switch checks off. Tune findings with ASH suppressions.
 
+Annotations in the scanned manifests can still drop findings: KubeLinter skips a check
+on an object annotated `ignore-check.kube-linter.io/<check>`, and every check on one
+annotated `kube-linter.io/ignore-all`, before ASH sees the report, so those findings are
+neither reported nor counted as suppressed. KubeLinter has no option that turns the
+annotations off.
+
 ## Severity
 
 KubeLinter has no severity. ASH rates by check name: privileged containers, host

@@ -22,10 +22,25 @@ Invocation
 
 Configuration
     ASH always passes ``--config`` with a stub holding ``{}``, so the checks run are
-    KubeLinter's defaults and a ``.kube-linter.yaml`` that the scanned repository holds
-    cannot switch checks off. KubeLinter's own docs describe ``--config`` as the way to
-    name a config; whether it also reads one from the working directory on its own was
-    not verified, which is why the stub is passed rather than relied on.
+    KubeLinter's defaults. Without ``--config``, KubeLinter reads ``.kube-linter.yaml``
+    or ``.kube-linter.yml`` from its working directory (pkg/config/config.go:42 and
+    :55-62), and ASH runs it from the source directory, so the stub is what keeps a
+    config the scanned repository holds from switching checks off
+    (``checks.exclude``, ``checks.doNotAutoAddDefaults``) or skipping paths
+    (``checks.ignorePaths``).
+
+Ignore annotations
+    KubeLinter skips one check on an object annotated
+    ``ignore-check.kube-linter.io/<check>``, and every check on an object annotated
+    ``kube-linter.io/ignore-all``. Only the annotation key is compared; its value is
+    never read (pkg/ignore/ignore.go:9-27). The comparison runs for every object and
+    check with no config or flag condition (pkg/run/run.go:54-62), and no flag turns
+    it off: none of ``lint``'s own flags (pkg/command/lint/command.go:207-216), the
+    config flags it adds at :219 (pkg/config/flags.go:13-34) or the root command's
+    one persistent flag (``--with-color``, pkg/command/root/command.go:38) touches
+    annotations. So the scanned repository can drop findings this way and ASH cannot
+    stop it: such a finding never reaches the report, so it is neither reported nor
+    counted as suppressed.
 
 Exit status
     ``lint`` returns an error, which the ``kube-linter`` program turns into exit 1, in
@@ -368,12 +383,30 @@ class KubeLinterScanner(ScannerPluginBase[KubeLinterScannerConfig]):
                     opsf.SilencingLayer(
                         layer=opsf.SilencingLayerKind.INLINE_COMMENT,
                         writer=opsf.SilencingWriter.REPOSITORY,
-                        honored=opsf.Honored.UNCONFIRMED,
-                        surface="ignore-check.kube-linter.io/<check> annotations "
-                        "on the scanned object",
-                        cite="kube_linter_scanner.py module header (Configuration)",
-                        reason="a run over a manifest carrying the annotation "
-                        "would settle whether the stub config leaves it honored",
+                        honored=opsf.Honored.YES,
+                        surface="annotations on a scanned object: "
+                        "ignore-check.kube-linter.io/<check> skips that check on it "
+                        "and kube-linter.io/ignore-all skips every check on it; "
+                        "v0.8.3 has no flag that turns either off",
+                        cite="pkg/ignore/ignore.go:9-27 and pkg/run/run.go:54-62 at "
+                        "v0.8.3 (commit 10ae0030): applied to every object and check "
+                        "with no config or flag condition; the flags are "
+                        "pkg/command/lint/command.go:207-219, "
+                        "pkg/config/flags.go:13-34 and "
+                        "pkg/command/root/command.go:38 (module header, Ignore "
+                        "annotations)",
+                    ),
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface=".kube-linter.yaml or .kube-linter.yml in the source "
+                        "directory, whose checks.exclude and "
+                        "checks.doNotAutoAddDefaults would switch checks off and "
+                        "checks.ignorePaths would skip paths",
+                        cite="pkg/config/config.go:42 and :55-62 at v0.8.3 read it "
+                        "only when --config is empty; ASH always passes --config "
+                        "with a stub holding {} (module header, Configuration)",
                     ),
                 ),
             ),

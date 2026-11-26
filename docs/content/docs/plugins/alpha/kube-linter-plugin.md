@@ -93,7 +93,10 @@ global_settings:
 
 KubeLinter's own `ignore-check.kube-linter.io/<check>` annotations in a manifest are
 read by KubeLinter and drop the finding before ASH sees it, so it is neither reported
-nor counted as suppressed.
+nor counted as suppressed. A `kube-linter.io/ignore-all` annotation does the same for
+every check on the object that carries it. KubeLinter reads only the key of either
+annotation, never its value, and has no option that turns them off, so ASH cannot stop
+them.
 
 ## Exit status
 
