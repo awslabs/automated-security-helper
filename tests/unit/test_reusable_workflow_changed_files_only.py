@@ -100,15 +100,23 @@ def test_a_step_resolves_the_base_and_the_scan_uses_it():
 def test_the_scan_passes_the_resolved_base_and_nothing_else():
     """ASH must diff against the ref the step resolved, not a literal.
 
-    Read from the uvx command line itself, with its continuation lines joined: the
-    step's ash-args check names --base-ref too, in its list of options that take a
-    value, and that list passes nothing to ASH.
+    Read from the uvx command lines themselves, with their continuation lines joined:
+    the step's ash-args check names --base-ref too, in its list of options that take
+    a value, and that list passes nothing to ASH. There are two, one for an ASH with
+    the `ash scan fs` spelling and one for an older ASH, and each passes it.
     """
     script = _step(name="Run ASH")["run"].replace("\\\n", " ")
-    (scan,) = [line for line in script.splitlines() if line.lstrip().startswith("uvx ")]
+    scans = [
+        " ".join(line.split())
+        for line in script.splitlines()
+        if line.lstrip().startswith("uvx ")
+    ]
 
-    assert scan.count("--base-ref") == 1, scan
-    assert '--base-ref "${BASE_REF}"' in scan, scan
+    assert len(scans) == 2, scans
+    assert " ash scan fs " in scans[0] and " ash --source-dir " in scans[1], scans
+    for scan in scans:
+        assert scan.count("--base-ref") == 1, scan
+        assert '--base-ref "${BASE_REF}"' in scan, scan
 
 
 posix_only = pytest.mark.skipif(

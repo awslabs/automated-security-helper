@@ -552,9 +552,13 @@ def workflow_invocations() -> list[Invocation]:
 #: positive control: a reader that silently stopped matching would otherwise pass.
 #: The targets that scan or merge run each command both ways, ASH 3.9's spelling
 #: (`scan fs`, `results merge`) and the older one (`scan`, `merge`) for an ASH that
-#: predates it, so both paths are required.
+#: predates it, so both paths are required. The reusable workflow's older spellings
+#: are bare `ash` for the scan and the top-level `report`.
 SOURCES: dict[str, tuple[Callable[[], list[Invocation]], set[str]]] = {
-    "reusable workflow": (workflow_invocations, {"", "dependencies install", "report"}),
+    "reusable workflow": (
+        workflow_invocations,
+        {"", "scan fs", "dependencies install", "report", "results report"},
+    ),
     "CDK templates": (
         cdk_template_invocations,
         {"scan", "scan fs", "merge", "results merge", "mcp"},
