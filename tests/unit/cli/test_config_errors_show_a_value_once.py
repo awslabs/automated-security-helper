@@ -53,6 +53,7 @@ def _merge_with_config(tmp_path: Path, config_text: str) -> subprocess.Completed
         importing_this_checkout(
             "from automated_security_helper.cli.main import app; app()"
         ),
+        "results",
         "merge",
     ]
     for shard in shards:

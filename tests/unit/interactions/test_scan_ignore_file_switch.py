@@ -483,6 +483,7 @@ class TestTheRecordOfWhatIgnoreFilesExcluded:
         run = scans("default")
         completed = run_ash(
             run.output.parent,
+            "results",
             "report",
             "--format",
             report_format,

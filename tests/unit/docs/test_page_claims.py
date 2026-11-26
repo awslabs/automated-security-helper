@@ -1553,15 +1553,16 @@ _AWS_PLUGIN_MODULE = "automated_security_helper.plugin_modules.ash_aws_plugins"
 #: the S3 reporter, the file being /etc/ash/ash.yaml.
 _REPORT_IGNORES_THE_FILE = (
     "WARNING Ignoring reporters.s3.options.aws_region, reporters.s3.options.bucket_name, "
-    "reporters.s3.enabled from /etc/ash/ash.yaml: ashx report cannot tell that config "
-    "from the scanned repository's own, since stored results do not record which tree "
-    "was scanned, and these options choose whether findings are sent, where they are "
-    "sent or written, and which credentials send them. To send findings off the host "
-    "from ashx report, pass each of these settings with --config-overrides instead."
+    "reporters.s3.enabled from /etc/ash/ash.yaml: ashx results report cannot tell that "
+    "config from the scanned repository's own, since stored results do not record which "
+    "tree was scanned, and these options choose whether findings are sent, where they "
+    "are sent or written, and which credentials send them. To send findings off the "
+    "host from ashx results report, pass each of these settings with --config-overrides "
+    "instead."
 )
 _REPORT_REFUSES_THE_REPORTER = (
-    "Error: reporter 's3' sends findings off the host and is not enabled. ashx report "
-    "takes whether it runs, and where it sends, from --config-overrides: pass "
+    "Error: reporter 's3' sends findings off the host and is not enabled. ashx results "
+    "report takes whether it runs, and where it sends, from --config-overrides: pass "
     "--config-overrides reporters.s3.enabled=true and its destination options."
 )
 #: The settings of the S3 reporter that aws.md's example turns on, as overrides.
@@ -1838,6 +1839,7 @@ def test_ash_merge_takes_no_aws_reporter_setting_from_its_config_file(
 
     result = _ash_with_no_aws_credentials(
         [
+            "results",
             "merge",
             "--results",
             str(output / "ash_aggregated_results.json"),
@@ -1852,9 +1854,9 @@ def test_ash_merge_takes_no_aws_reporter_setting_from_its_config_file(
     text = _squeezed(result.stdout + result.stderr)
     warning = (
         "Ignoring reporters.s3.options.aws_region, reporters.s3.options.bucket_name, "
-        "reporters.s3.enabled from {path}: ashx merge cannot tell that config from the "
-        "scanned repository's own, since the shards do not record which tree was "
-        "scanned, and these options choose whether findings are sent"
+        "reporters.s3.enabled from {path}: ashx results merge cannot tell that config "
+        "from the scanned repository's own, since the shards do not record which tree "
+        "was scanned, and these options choose whether findings are sent"
     )
 
     assert result.returncode == 0, _output_tail(result)
@@ -1907,6 +1909,7 @@ def test_ash_merge_runs_the_aws_reporters_only_with_their_package_named_for_it(
 
     result = _ash_with_no_aws_credentials(
         [
+            "results",
             "merge",
             "--results",
             str(output / "ash_aggregated_results.json"),
@@ -14537,10 +14540,10 @@ _CONTAINER_LINKED_OUTPUT = (
 _CONTAINER_SCAN_REFUSES_A_LINKED_OUTPUT = (
     "An output directory that is a symlink, or that a symlink below the source "
     "directory leads to, such as a committed `.ash` link for the default "
-    "`.ash/ash_output`, stops `ashx scan --mode container` and `ash build-image` with exit "
-    "code 3 ([Exit codes](../reference/exit-codes.md#container)), because the scan "
-    "inside the container would write wherever the link points. The refusal comes before "
-    "a container runtime is looked up, with `--no-run` too, so nothing is built, "
+    "`.ash/ash_output`, stops `ashx scan --mode container` and `ashx container build` "
+    "with exit code 3 ([Exit codes](../reference/exit-codes.md#container)), because the "
+    "scan inside the container would write wherever the link points. The refusal comes "
+    "before a container runtime is looked up, with `--no-run` too, so nothing is built, "
     "created, or mounted."
 )
 
@@ -14814,7 +14817,7 @@ _AN_UNMATCHED_SCANNERS_NAME_IS_RECORDED = (
 _REQUESTED_SCANNERS_NOT_RUN_FIELD = (
     "`requested_scanners_not_run` (the names in `--scanners` or `ASH_SCANNERS` that "
     "matched no scanner, or `null` when every name matched or no list was given; `ashx "
-    "merge` records the names of all the shards)"
+    "results merge` records the names of all the shards)"
 )
 
 
@@ -19419,7 +19422,7 @@ _UNWRAPPED = {"COLUMNS": "4096"}
 _REPORT_WITH_A_NUL_IN_THE_OUTPUT_DIR = (
     "import sys\n"
     "from automated_security_helper.cli.entrypoint import main\n"
-    "sys.argv = ['ash', 'report', '--output-dir', 'out\\x00dir']\n"
+    "sys.argv = ['ash', 'results', 'report', '--output-dir', 'out\\x00dir']\n"
     "main()\n"
 )
 
@@ -19499,9 +19502,9 @@ def test_ash_report_with_no_results_file_names_the_paths_it_checked_and_exits_1(
 
     if where == "under-an-unsearchable-directory":
         with _without_search_permission(locked):
-            result = _ash(["report", *args], cwd=cwd, **_UNWRAPPED)
+            result = _ash(["results", "report", *args], cwd=cwd, **_UNWRAPPED)
     else:
-        result = _ash(["report", *args], cwd=cwd, **_UNWRAPPED, **env)
+        result = _ash(["results", "report", *args], cwd=cwd, **_UNWRAPPED, **env)
 
     shown = result.stdout + result.stderr
     after = _tree_entries(tmp_path)
@@ -19706,7 +19709,8 @@ def test_ash_report_refuses_an_unknown_format_before_it_reads_the_results(
     assert doctest is not None, "no doctest block right after the sentence"
     assert doctest[1] == "5", doctest[0]
     command = shlex.split(doctest[2])
-    assert command[:2] == [DOCS_COMMAND, "report"] and "--format" in command, command
+    assert command[:3] == [DOCS_COMMAND, "results", "report"], command
+    assert "--format" in command, command
     name = command[command.index("--format") + 1]
     cwd = tmp_path / "work"
     cwd.mkdir()
@@ -19823,6 +19827,7 @@ def _report_through(
         "-c",
         importing_this_checkout(_RECORDING_REPORT, root=_IMPORTED_ROOT),
         str(record),
+        "results",
         "report",
         *args,
     ]
@@ -22247,6 +22252,7 @@ def test_merge_output_formats_take_a_shipped_reporters_name(tmp_path: Path) -> N
 
     result = _ash(
         [
+            "results",
             "merge",
             "--results",
             str(shard / "ash_aggregated_results.json"),
