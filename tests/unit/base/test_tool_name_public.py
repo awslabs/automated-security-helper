@@ -16,6 +16,10 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PACKAGE = REPO_ROOT / "automated_security_helper"
 MIXIN = PACKAGE / "base" / "uv_tool_mixin.py"
