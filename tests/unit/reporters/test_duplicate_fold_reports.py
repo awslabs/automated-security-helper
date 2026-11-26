@@ -210,7 +210,7 @@ class TestOnShowsOneRowPerCluster:
         off = _markdown(context, _model())
         on = _markdown(context, _model(fold=True))
         assert "Deduplicated: " in on
-        assert "1 duplicate row folded" in on
+        assert "1 live duplicate row folded" in on
         assert "The per-scanner counts are unchanged." in on
         # The line the scanners' own counts are in is the same either way.
         count_line = next(line for line in off.splitlines() if "actionable** ·" in line)
@@ -230,12 +230,46 @@ class TestOnShowsOneRowPerCluster:
         assert "2 findings in this report" in html
 
     def test_top_hotspots_count_a_cluster_once(self):
-        def paths(fold):
-            emitter = ReportContentEmitter(_model(fold=fold), human_presentation=True)
+        # The pair shares a file here, so the folded count must differ from the
+        # unfolded one: the earlier form of this test used the shared model,
+        # whose pair carries no file, and so passed whatever the fold did.
+        from automated_security_helper.schemas.sarif_schema_model import Location
+
+        where = Location.model_validate(
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": "src/app.py"},
+                    "region": {"startLine": 1},
+                }
+            }
+        )
+
+        def model(fold):
+            left_pad = {
+                "package_name": "left-pad",
+                "package_path": "node_modules/left-pad",
+            }
+            built = AshAggregatedResults()
+            built.ash_config = get_default_config()
+            built.ash_config.global_settings.deduplication.fold = fold
+            runs = [
+                _run("grype", CVE, "error", package_version="1.0.0", **left_pad),
+                _run("trivy", CVE, "warning", package_version="1.0.1", **left_pad),
+            ]
+            for run in runs:
+                run.results[0].locations = [where]
+            built.sarif = SarifReport(runs=runs)
+            return built
+
+        def hotspots(fold):
+            emitter = ReportContentEmitter(model(fold), human_presentation=True)
             return emitter.get_top_hotspots(10)
 
-        # The pair shares no file in this model; the lists agree.
-        assert paths(True) == paths(False)
+        (off,) = hotspots(False)
+        (on,) = hotspots(True)
+        assert off["location"] == on["location"]
+        assert off["count"] == 2
+        assert on["count"] == 1
 
     def test_the_fold_counts_sit_beside_the_scanner_counts(self):
         off = ReportContentEmitter(_model(), human_presentation=True)
@@ -245,7 +279,8 @@ class TestOnShowsOneRowPerCluster:
         assert folded["folded_rows"] == 1
         assert folded["active"] == 2
         assert folded["actionable"] == off_summary["actionable"] - 1
-        assert sum(folded["counts"].values()) == folded["active"]
+        # No per-severity breakdown: no reporter rendered the one this carried.
+        assert set(folded) == {"active", "actionable", "folded_rows"}
         for key in ("actionable", "active", "counts", "suppressed", "below_threshold"):
             assert on_summary[key] == off_summary[key], key
         assert on.get_scanner_results() == off.get_scanner_results()
@@ -306,6 +341,44 @@ class TestTheRepresentativeIsActionableFirst:
         foreign = _model().to_flat_vulnerabilities()[:1]
         with pytest.raises(ValueError, match="emitter's own rows"):
             emitter.fold_findings(foreign)
+
+
+class TestTheSummaryLineSaysSomethingOrNothing:
+    def test_the_line_is_silent_when_the_fold_folded_nothing(self):
+        from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+            deduplicated_summary_text,
+        )
+
+        model = _model(fold=True)
+        # Only the lone finding: the fold is armed and folds nothing.
+        model.sarif = SarifReport(
+            runs=[
+                _run(
+                    "grype",
+                    "CVE-2024-0002",
+                    "note",
+                    package_name="other",
+                    package_path="node_modules/other",
+                )
+            ]
+        )
+        emitter = ReportContentEmitter(model, human_presentation=True)
+        summary = emitter.get_scan_summary()
+        assert summary["deduplicated"]["folded_rows"] == 0
+        assert deduplicated_summary_text(summary) is None
+        assert deduplicated_summary_text({}) is None
+
+    def test_the_line_says_it_counts_live_rows(self):
+        from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+            deduplicated_summary_text,
+        )
+
+        emitter = ReportContentEmitter(_model(fold=True), human_presentation=True)
+        line = deduplicated_summary_text(emitter.get_scan_summary())
+        assert line is not None
+        assert "1 live duplicate row folded" in line
+        assert "suppressed duplicates fold apart" in line
+        assert "The per-scanner counts are unchanged." in line
 
 
 class TestWhatTheFoldNeverTouches:

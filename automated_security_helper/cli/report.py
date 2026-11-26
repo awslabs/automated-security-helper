@@ -737,7 +737,7 @@ def report_command(
         bool,
         typer.Option(
             "--fold-duplicates",
-            help="Show one row per duplicate cluster in the HTML, Markdown and text reports, with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Off by default because it changes row counts. Sets `global_settings.deduplication.fold`.",
+            help="Show one row per duplicate cluster in the human-readable reports (HTML, Markdown, text, and the Bedrock summary), with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Findings fold when they share a CVE and package, or when overlapping lines share a CWE; line overlaps chain, so two findings can fold through a third that overlaps both. Off by default because it changes row counts. Sets `global_settings.deduplication.fold`.",
         ),
     ] = False,
     verbose: Annotated[
@@ -1191,11 +1191,13 @@ def report_command(
         _print_refusal("[red]Invalid configuration: {}[/red]", e)
         raise typer.Exit(AshExitCode.INVALID_CONFIG)
 
-    # The reports read the duplicate annotation from the results' recorded
-    # configuration, so a request made to this command (the flag, or the
-    # operator's own configuration) is written there. It only ever turns the
-    # annotation on: a scan that recorded it keeps it, and nothing here turns it
-    # off.
+    # The reports read the duplicate annotation and the fold from the results'
+    # recorded configuration, so a request made to this command (the flag, or
+    # the operator's own configuration) is written there. The flag turns a
+    # setting on; a value the operator's configuration sets EXPLICITLY is
+    # honored as given, false included, so a consumer that needs the old
+    # column shape back can get it (only a field the configuration names
+    # counts: a defaulted False never turns a recorded setting off).
     recorded_dedup = getattr(
         getattr(getattr(model, "ash_config", None), "global_settings", None),
         "deduplication",
@@ -1204,15 +1206,34 @@ def report_command(
     own_dedup = getattr(
         getattr(ash_config, "global_settings", None), "deduplication", None
     )
-    if recorded_dedup is not None and (
-        annotate_duplicates or getattr(own_dedup, "annotate", False) is True
-    ):
-        recorded_dedup.annotate = True
-    # The fold request travels the same way, and likewise only turns it on.
-    if recorded_dedup is not None and (
-        fold_duplicates or getattr(own_dedup, "fold", False) is True
-    ):
-        recorded_dedup.fold = True
+    own_set = set(getattr(own_dedup, "model_fields_set", ()) or ())
+    requested = {
+        "annotate": annotate_duplicates,
+        "fold": fold_duplicates,
+    }
+    if recorded_dedup is None:
+        # A workspace's merged results record no configuration, so the request
+        # has nowhere to land and the reporters would silently render without
+        # it; say so instead of no-opping.
+        asked = sorted(
+            name
+            for name, flagged in requested.items()
+            if flagged or (name in own_set and getattr(own_dedup, name) is True)
+        )
+        if asked:
+            flags = " and ".join(f"--{name}-duplicates" for name in asked)
+            ASH_LOGGER.warning(
+                f"{flags} changed nothing: these results record no "
+                "configuration (a workspace's merged results do not), and the "
+                "reporters read the annotation and the fold from the recorded "
+                "configuration only."
+            )
+    else:
+        for name, flagged in requested.items():
+            if flagged:
+                setattr(recorded_dedup, name, True)
+            elif name in own_set:
+                setattr(recorded_dedup, name, getattr(own_dedup, name) is True)
 
     # A reporter that sends findings off the host runs only when the operator
     # enables it, which here means --config-overrides: stored results do not

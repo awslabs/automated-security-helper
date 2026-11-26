@@ -303,6 +303,62 @@ class TestTheTextAndMarkdownSummariesCountItApart:
         assert "not gating" not in out
 
 
+class TestTheSectionTotalIsTheFoldedCount:
+    def test_a_folded_not_gating_pair_is_one_of_one_not_a_truncation(
+        self, tmp_path, test_plugin_context
+    ):
+        # With the fold on, the section's list shows one row for the pair; its
+        # "of" total read the summary's per-row figure, so the fold read as a
+        # truncation ("Showing 1 of 2") and the pointer note sent the reader to
+        # an HTML report that folds the same way.
+        from automated_security_helper.config.default_config import (
+            get_default_config,
+        )
+
+        shared = {
+            "origin": "workspace-policy",
+            "package_name": "left-pad",
+            "package_path": "node_modules/left-pad",
+        }
+        model = _model(
+            tmp_path,
+            [
+                _result("CVE-2024-0001", "error", scanner_name="grype", **shared),
+                _result("CVE-2024-0001", "warning", scanner_name="trivy", **shared),
+            ],
+            policy_scanners_gate=False,
+            policy_origin_finding_count=2,
+        )
+        model.ash_config = get_default_config()
+        model.ash_config.global_settings.deduplication.fold = True
+        emitter = ReportContentEmitter(model, human_presentation=True)
+        # The summary's figure stays per-row; the section's total is folded.
+        assert emitter.get_scan_summary()["policy_not_gating"] == 2
+        assert emitter.policy_not_gating_count() == 1
+
+        text = TextReporter(
+            config=TextReporterConfig(
+                options=TextReporterConfigOptions(
+                    include_findings_table=True, include_detailed_findings=True
+                )
+            ),
+            context=test_plugin_context,
+        ).report(model)
+        assert "Showing 1 of 1 findings reported and left out" in text, text
+        assert "The HTML report lists the rest" not in text
+
+        markdown = MarkdownReporter(
+            config=MarkdownReporterConfig(
+                options=MarkdownReporterConfigOptions(
+                    include_findings_table=True, include_detailed_findings=True
+                )
+            ),
+            context=test_plugin_context,
+        ).report(model)
+        assert "Showing 1 of 1 findings reported and left out" in markdown, markdown
+        assert 'choose the "Not gating" scope' not in markdown
+
+
 _NO_POLICY_DESCRIPTION = (
     "Completed scanners reported no findings at or above their configured thresholds."
 )

@@ -83,20 +83,25 @@ def coverage_shortfall_text(attempted: int | None, failed: int | None) -> str:
 
 
 def deduplicated_summary_text(summary: Dict[str, Any]) -> str | None:
-    """The line that gives the fold's counts, or None when the fold is off.
+    """The line that gives the fold's counts, or None when it has none to give.
 
-    One sentence for the HTML, Markdown and text reports. It follows the
-    per-scanner figures and says they are unchanged: the fold's counts sit
-    beside them, never in their place.
+    One sentence for the HTML, Markdown, text and Bedrock summary reports. It
+    follows the per-scanner figures and says they are unchanged: the fold's
+    counts sit beside them, never in their place. None when the fold is off,
+    and when it is on but folded nothing: "(0 duplicate rows folded)" told the
+    reader nothing the per-scanner counts did not. The folded count is of live
+    (unsuppressed) rows, which the sentence says, since the cards also fold
+    suppressed duplicates under a suppressed representative.
     """
     folded = summary.get("deduplicated")
-    if not folded:
+    if not folded or not folded["folded_rows"]:
         return None
     rows = folded["folded_rows"]
     noun = "row" if rows == 1 else "rows"
     return (
         f"Deduplicated: {folded['actionable']} actionable, {folded['active']} active "
-        f"({rows} duplicate {noun} folded into the finding that stands for it). "
+        f"({rows} live duplicate {noun} folded into the finding that stands for it; "
+        "suppressed duplicates fold apart). "
         "The per-scanner counts are unchanged."
     )
 
@@ -373,24 +378,34 @@ class ReportContentEmitter:
         actionable = [v for v in self.flat_vulns if self.is_finding_actionable(v)]
         return len(self.fold_findings(actionable)[0])
 
+    def policy_not_gating_count(self) -> int:
+        """How many rows the not-gating list draws from, folded like the list.
+
+        The "of M" of that section's "Showing N of M": the summary's own
+        not-gating figure counts every row unfolded, so against the folded list
+        it read as a truncation, and the note then sent the reader to an HTML
+        report that folds the same way.
+        """
+        left_out = [v for v in self.flat_vulns if self.is_policy_not_gating(v)]
+        return len(self.fold_findings(left_out)[0])
+
     def _deduplicated_counts(self) -> Dict[str, Any]:
         """The fold's counts, for the line beside the per-scanner counts.
 
         Active (unsuppressed) rows and actionable rows, each counting a cluster
-        once at its representative's severity, with how many rows were folded
-        away and into how many clusters. Counted over the finding rows, so they
-        sit beside the scanner figures and never replace them.
+        once, with how many live rows were folded away (the cards also fold
+        suppressed duplicates, which this count leaves out and the summary line
+        says so). Counted over the finding rows, so they sit beside the scanner
+        figures and never replace them. No per-severity breakdown: no reporter
+        rendered the one this used to carry, and a dict nothing reads is a
+        schema to keep for nobody.
         """
         live = [v for v in self.flat_vulns if not v.is_suppressed]
         active_rows, _ = self.fold_findings(live)
         actionable_rows, _ = self.fold_findings(
             [v for v in live if self.is_finding_actionable(v)]
         )
-        counts = dict.fromkeys(("critical", "high", "medium", "low", "info"), 0)
-        for vuln in active_rows:
-            _count_severity(counts, vuln.severity)
         return {
-            "counts": counts,
             "active": len(active_rows),
             "actionable": len(actionable_rows),
             "folded_rows": len(live) - len(active_rows),

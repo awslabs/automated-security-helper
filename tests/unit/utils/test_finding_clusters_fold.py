@@ -253,6 +253,21 @@ class TestAViewFoldsWhatItShows:
         # A preferred primary is still the representative.
         assert dict(fold_positions(rows, clusters, shown, prefer={0, 1})) == {0: (1, 2)}
 
+    def test_a_chain_folds_through_a_bridge_filtered_out_of_the_view(self):
+        # Overlap is not transitive: a location cluster is a connected
+        # component, so A-B-C makes one cluster though A and C never overlap,
+        # and with the bridge B filtered out of the view A and C still fold.
+        # The help and config text describe this chaining; a change that folds
+        # only direct matches to the representative turns this red.
+        rows = [
+            sast("a", "bandit", line=10, line_end=20),
+            sast("b", "semgrep", line=18, line_end=30),
+            sast("c", "osv", line=28, line_end=40),
+        ]
+        clusters = cluster_findings(rows)
+        assert [c.members for c in clusters] == [(0, 1, 2)]
+        assert dict(fold_positions(rows, clusters, [0, 2])) == {0: (2,)}
+
     def test_a_suppressed_preferred_row_never_stands_for_live_ones(self):
         rows = [
             row("a", "grype", "HIGH"),
