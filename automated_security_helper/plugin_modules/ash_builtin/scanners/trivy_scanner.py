@@ -185,7 +185,18 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    ClassVar,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Set,
+    Tuple,
+)
 
 from pydantic import Field
 
@@ -216,6 +227,9 @@ from automated_security_helper.utils.config_trust import (
 )
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+
+if TYPE_CHECKING:
+    from automated_security_helper.core.asset import ImageLocator
 
 # UNBOUNDED_TRIVY_TIMEOUT and trivy_timeout live in the shared base since trivy-repo
 # passes the same bound; both names stay importable from this module.
@@ -681,7 +695,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         )
         return final_args, results_file, subprocess_env
 
-    def _unsupported_image_shape_reason(self, image) -> Optional[str]:
+    def _unsupported_image_shape_reason(self, image: ImageLocator) -> Optional[str]:
         """trivy reads a reference or a saved archive; an OCI layout is neither.
 
         ``trivy image`` takes a reference (resolved through its --image-src
@@ -698,7 +712,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         return None
 
     def _execute_image_scan(
-        self, image
+        self, image: ImageLocator
     ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Resolve the argv, results path and environment for one image run.
 
@@ -746,13 +760,20 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
 
         if image.oci_archive is not None:
             target_token = f"--input={Path(image.oci_archive).absolute().as_posix()}"
-        else:
+        elif image.ref is not None:
             engine = detect_container_engine()
             if engine == ContainerEngine.NONE:
                 extra.append("--image-src=remote")
             else:
                 extra.append(f"--image-src={engine.value}")
             target_token = image.ref
+        else:
+            # An OCI layout: _unsupported_image_shape_reason refuses that shape,
+            # so scan_image does not hand one to this resolution.
+            raise ScannerError(
+                f"container image at {image.shown()} has neither a reference nor "
+                "a saved archive for trivy image to read"
+            )
 
         original_subcommands = self.subcommands
         try:
@@ -823,9 +844,9 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         )
         from automated_security_helper.utils.subprocess_utils import spawn_run
 
-        json_path = getattr(self, "_image_layers_json", None)
+        json_path: Optional[Path] = getattr(self, "_image_layers_json", None)
         argv = json_argv(final_args, json_path) if json_path is not None else None
-        if argv is None:
+        if json_path is None or argv is None:
             self._plugin_log(
                 "The image scan's layer attribution is skipped: the invocation "
                 "names no --format and --output to ask for trivy's JSON report.",

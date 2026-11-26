@@ -414,6 +414,7 @@ def _advisory_location(
     line. With no lockfile known (a report converted on its own) the install
     location the scanner always wrote is kept.
     """
+    region: Region | None
     if lockfile is None:
         uri = _synthetic_uri(package_location)
         region = Region(startLine=1, startColumn=1)
@@ -1071,6 +1072,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         )
         workspace_output = getattr(self.context, "workspace_output_dir", None)
         ignored_lockfiles: Set[Path] = set()
+        orig_scannable: Sequence[str | Path]
         if target_type == TargetType.CONVERTED:
             tree_root = Path(self.context.work_dir)
             orig_scannable = list(self.context.work_dir.glob("**/*.*"))

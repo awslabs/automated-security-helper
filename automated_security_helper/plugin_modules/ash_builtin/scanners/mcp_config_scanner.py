@@ -101,7 +101,7 @@ from typing import (
 )
 from urllib.parse import urlsplit
 
-from pydantic import Field
+from pydantic import AnyUrl, Field
 
 from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -116,6 +116,7 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -908,7 +909,7 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
         )
     )
 
-    def model_post_init(self, context):
+    def model_post_init(self, context: Any) -> None:
         if self.config is None:
             self.config = McpConfigScannerConfig()
         self.command = "ash-mcp-config-scanner"
@@ -939,7 +940,12 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
             options.model_dump() if options is not None else {}
         )
 
-    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+    def _execute_scan(
+        self,
+        target: Path,
+        target_type: TargetType,
+        global_ignore_paths: List[IgnorePathWithReason],
+    ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Abstract stub: this scanner overrides scan() directly; it is unreachable."""
         raise NotImplementedError(
             f"{self.__class__.__name__} overrides scan() directly."
@@ -1056,7 +1062,9 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
                 fullName="ASH MCP server config policy scanner",
                 organization="awslabs",
                 version=self.tool_version,
-                informationUri="https://github.com/awslabs/automated-security-helper",
+                informationUri=AnyUrl(
+                    "https://github.com/awslabs/automated-security-helper"
+                ),
                 rules=[],
             )
         )
@@ -1069,21 +1077,21 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
             exitCode=self.exit_code,
             exitCodeDescription="\n".join([*self.errors[errors_before:], *notes]),
             workingDirectory=ArtifactLocation(uri=get_shortest_name(input=target)),
-            properties=PropertyBag(tool=tool),
+            properties=PropertyBag.model_validate({"tool": tool}),
         )
         return SarifReport(
             version="2.1.0",
             runs=[Run(tool=tool, invocations=[invocation], results=results)],
         )
 
-    def scan(  # type: ignore[override]
+    def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: Any = None,
-        *args,
-        **kwargs,
+        *args: Any,
+        **kwargs: Any,
     ) -> SarifReport | bool:
         """Read every MCP config file of the scan set and report policy violations.
 

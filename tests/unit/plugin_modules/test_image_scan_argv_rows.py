@@ -312,6 +312,21 @@ class TestTrivyImageArgv:
         assert reason is not None
         assert "OCI image-layout" in reason
 
+    def test_a_layout_handed_to_the_resolution_is_refused_by_name(
+        self, monkeypatch, tmp_path
+    ):
+        # scan_image skips a layout before it resolves one (the reason above), so
+        # only a direct call reaches this: the resolution names the shape instead
+        # of building an argv around a reference the locator does not have.
+        from automated_security_helper.core.exceptions import ScannerError
+
+        _no_engine(monkeypatch, tmp_path)
+        scanner = self._scanner(tmp_path)
+        with pytest.raises(
+            ScannerError, match="neither a reference nor a saved archive"
+        ):
+            scanner._execute_image_scan(ImageLocator(oci_layout=_layout(tmp_path)))
+
     def test_the_filesystem_subcommand_is_unchanged(self, monkeypatch, tmp_path):
         _no_engine(monkeypatch, tmp_path)
         scanner = self._scanner(tmp_path)
