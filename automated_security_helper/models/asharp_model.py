@@ -1612,9 +1612,9 @@ class AshAggregatedResults(RecordModel):
         if sarif and sarif.runs:
             # A scanner can mark a secret finding on its rule alone (trivy tags
             # its secret rules ``secret`` and writes nothing on the result), so
-            # every result is classified with the report's rule ids, read once
-            # here, as the secret masking and the Bedrock summary reporter read
-            # them.
+            # every result's fallback snippet is classified with the report's
+            # rule ids, read once here as the secret masking reads them; the
+            # secret-detection flag reads each result's own rule.
             secret_rules = report_secret_rule_ids(sarif)
             for run in sarif.runs:
                 if not run.results:

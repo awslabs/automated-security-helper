@@ -857,6 +857,15 @@ def secret_detection_rule_ids(sarif_report: Any) -> Set[str]:
     return _rule_ids_tagged(sarif_report, _is_detection_tag)
 
 
+def _is_detection_rule_id(rule_id: str) -> bool:
+    """Whether a rule id alone marks a detection: the ``CKV_SECRET_`` prefix
+    (checkov's secrets framework) or a ``secrets`` segment (semgrep's and
+    opengrep's ``generic.secrets.*`` rules)."""
+    return bool(
+        rule_id.startswith(_SECRET_RULE_PREFIXES) or _SECRET_RULE_ID.search(rule_id)
+    )
+
+
 def is_secret_detection(
     result: Any, detection_rule_ids: AbstractSet[str] = frozenset()
 ) -> bool:
@@ -877,11 +886,47 @@ def is_secret_detection(
     rule_id = _rule_id_of(result)
     if rule_id in detection_rule_ids:
         return True
-    if rule_id.startswith(_SECRET_RULE_PREFIXES) or _SECRET_RULE_ID.search(rule_id):
+    if _is_detection_rule_id(rule_id):
         return True
     if any(_is_detection_tag(tag) for tag in result_tags(result)):
         return True
     return SECRETS_TOOL_TYPE in result_tool_types(result)
+
+
+def is_secret_detection_of_rule(result: Any, rule: Any) -> bool:
+    """Whether ``result``, read with ``rule``, the descriptor it names in its own
+    run and tool component (``sarif_rule_descriptors.rule_of_result``), comes from
+    a rule that detects a credential or key: the flattened findings' reading.
+
+    It reads the result's own rule, not every rule of the report that shares its
+    id: grype, trivy and npm-audit can name one advisory by one id, and one
+    scanner's rule says nothing about another scanner's finding. A secrets
+    scanner's finding is one, and so is one whose rule id has a ``secrets.``
+    segment or the ``CKV_SECRET_`` prefix. A ``secret`` or ``secrets`` tag on the
+    result or on its rule marks one too: trivy marks its secret rules that way,
+    and nothing on the result. So does CWE-798 or CWE-321, except on a dependency
+    advisory or inventory entry (``_DEPENDENCY_TOOL_TYPES``). npm-audit writes an
+    advisory's CWEs as rule tags, and they name a weakness of the dependency, not
+    a value in the scanned files.
+    """
+    from automated_security_helper.utils.scanner_tool_types import (
+        SECRETS_TOOL_TYPE,
+        result_tags,
+        result_tool_types,
+    )
+
+    tool_types = result_tool_types(result)
+    if SECRETS_TOOL_TYPE in tool_types:
+        return True
+    if _is_detection_rule_id(_rule_id_of(result)):
+        return True
+    rule_tags = getattr(getattr(rule, "properties", None), "tags", None) or []
+    tags = [*result_tags(result), *rule_tags]
+    if any(isinstance(tag, str) and tag.lower() in _SECRET_TAGS for tag in tags):
+        return True
+    if _is_dependency_finding(tool_types):
+        return False
+    return any(_is_detection_tag(tag) for tag in tags)
 
 
 def secret_rule_ids(sarif_report: Any) -> Set[str]:
@@ -899,33 +944,38 @@ def secret_rule_ids(sarif_report: Any) -> Set[str]:
 
 
 class SecretRuleIds(NamedTuple):
-    """The ids of the rules a report's rule metadata marks, in the sets the two
-    secret predicates take: ``secret`` and ``described_only`` are what
-    ``is_secret_finding`` takes, as the masking passes them (``_index_secrets``),
-    and ``detection`` is what ``is_secret_detection`` takes, as the Bedrock
-    summary reporter passes it. The default holds none, and a predicate given
-    none reads the result alone."""
+    """The sets of rule ids a report's rule metadata marks, as the masking's
+    ``is_secret_finding`` reads them in ``_index_secrets``.
+
+    ``secret`` is the ids of the rules tagged as secret rules plus the ids of the
+    rules described as about a credential in code (``secret_rule_ids``).
+    ``described`` is the ids of the rules whose name or description is about a
+    credential in code (``_rule_ids_described``). ``described_only`` is
+    ``described`` less the tagged ids: the members of ``secret`` that are there
+    for what the rule says about itself. The default holds none, and a predicate
+    given none reads the result alone."""
 
     secret: FrozenSet[str] = frozenset()
+    described: FrozenSet[str] = frozenset()
     described_only: FrozenSet[str] = frozenset()
-    detection: FrozenSet[str] = frozenset()
 
 
 def report_secret_rule_ids(sarif_report: Any) -> SecretRuleIds:
     """The :class:`SecretRuleIds` of *sarif_report*, read from the rules of every
-    run's tool components, for a caller that classifies the report's results one
-    at a time.
+    run's tool components. ``_index_secrets`` and
+    ``AshAggregatedResults.to_flat_vulnerabilities`` read them once per report,
+    for a caller that classifies the report's results one at a time.
 
     A scanner can mark a secret finding on its rule alone: trivy tags its secret
     rules ``secret`` and writes no mark on the result, so a result classified
-    without its report's rules is not a secret to either predicate.
+    without its report's rules is not a secret to ``is_secret_finding``.
     """
     tagged = _rule_ids_tagged(sarif_report, _is_secret_tag)
     described = _rule_ids_described(sarif_report)
     return SecretRuleIds(
         secret=frozenset(tagged | described),
+        described=frozenset(described),
         described_only=frozenset(described - tagged),
-        detection=frozenset(secret_detection_rule_ids(sarif_report)),
     )
 
 
@@ -1866,9 +1916,7 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
 
     index = _SecretIndex()
     _resolve_artifact_uris(sarif_report, index)
-    rule_ids = secret_rule_ids(sarif_report)
-    described = _rule_ids_described(sarif_report)
-    described_only = described - _rule_ids_tagged(sarif_report, _is_secret_tag)
+    rule_ids, described, described_only = report_secret_rule_ids(sarif_report)
     known: Optional[_KnownLines] = None
     for result in _all_results(sarif_report):
         if not is_secret_finding(result, rule_ids, described_only):
