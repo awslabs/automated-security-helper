@@ -219,6 +219,21 @@ repos:
         # deploy/cdk/tsconfig.json has comments, which tsc allows and JSON does not,
         # so this hook cannot parse it and failed on every run.
         #
+        # tests/test_data/scanners/*/captured/ is recorded tool output, kept as the
+        # tool wrote it: the transcripts.json of each scanner's fixture directory
+        # pins its recordings by sha256, and
+        # tests/unit/plugin_conformance/test_the_committed_transcripts_are_sound_and_fresh.py
+        # refuses a recording whose bytes moved, so this hook's rewrite of three of
+        # them (bandit's, cfn-lint's and trivy's M0 JSON runs) would fail that gate.
+        #
+        # tests/unit/*/golden/*.json are characterization goldens: output of the code
+        # under test, recorded rather than written by hand. The GitLab SAST
+        # projection golden is written by its own test from the reporter
+        # (ASH_WRITE_GOLDEN=1, keys in the reporter's order) and compared in that
+        # order, so a key sort fails the test and the next recording undoes it. The
+        # finding-diff golden is the observed output its test compares, which that
+        # module says is never edited to make a change pass.
+        #
         # tests/unit/test_pre_commit_json_scope.py checks each of these against the
         # tracked tree, and that the hand-written files stay in scope.
         exclude: |
@@ -228,6 +243,8 @@ repos:
             |deploy/[^/]+/package(-lock)?\.json
             |deploy/cdk/tsconfig\.json
             |tests/snapshot/.*/__snapshots__/.*
+            |tests/test_data/scanners/[^/]+/captured/.*
+            |tests/unit/[^/]+/golden/.*\.json
             |ash-agent-plugins/agentic-coding/plugins/.*
             |ash-agent-plugins/agentic-coding/transpiler/_base/mcp\.json
             |ash-agent-plugins/agentic-coding/transpiler/schemas/.*\.schema\.json

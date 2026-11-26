@@ -478,9 +478,11 @@ class TestTheBashEntrypoint:
         wrapper go through the real CLI, and its overrides through resolve_config
         over that repository, as the scan in the image would resolve them. Without
         the wrapper's flag the same resolution gives the repository's mode, so the
-        file is read.
+        file is read. sandbox.mode is a SandboxMode member, so it is compared as one:
+        ``str()`` of a ``(str, Enum)`` member is ``SandboxMode.off``, not its name.
         """
         from automated_security_helper.config.resolve_config import resolve_config
+        from automated_security_helper.core.enums import SandboxMode
 
         proc, _ = _run_ash(tmp_path, *command, build_status=0)
         calls = _argv_lists(tmp_path)
@@ -496,8 +498,8 @@ class TestTheBashEntrypoint:
         resolved = resolve_config(source_dir=repository, config_overrides=overrides)
         without_the_flag = resolve_config(source_dir=repository, config_overrides=[])
 
-        assert str(resolved.sandbox.mode) == "off", overrides
-        assert str(without_the_flag.sandbox.mode) == "landlock"
+        assert resolved.sandbox.mode is SandboxMode.off, overrides
+        assert without_the_flag.sandbox.mode is SandboxMode.landlock
 
     def test_a_double_dash_after_the_command_leaves_the_sandbox_off(self, tmp_path):
         """--sandbox off goes right after the command, ahead of the caller's words.

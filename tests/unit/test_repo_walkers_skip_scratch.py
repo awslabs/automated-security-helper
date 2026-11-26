@@ -801,6 +801,111 @@ _EXEMPT.update(
     }
 )
 
+_MCP_CONFIG_FIXTURES = (
+    "FIXTURES is the committed tests/test_data/mcp_config tree and the format and "
+    "kind name one of its fixture directories, copied into the test's own plugin "
+    "context; the walk never leaves the committed fixture data."
+)
+_CORPUS_GLOB = (
+    "The pattern is a CorpusSpec.sarif entry: a literal of the module's CORPORA "
+    "table, or a planted control's one file name, none with `**`, so the glob lists "
+    "one fixed depth of a committed directory under tests/test_data/scanners (or of "
+    "the control's tmp_path) and never descends. "
+    "test_every_corpus_glob_lists_one_directory_level asserts that."
+)
+
+#: The MCP config converter and scanner tests, the sdist harvester's and the facets
+#: register gate's: committed fixture data under tests/test_data, a corpus glob of
+#: fixed depth, and trees the tests build for themselves. Same rules as _EXEMPT.
+_EXEMPT.update(
+    {
+        (
+            "tests/unit/plugin_modules/ash_builtin/converters/test_mcp_config_converter.py",
+            "stage_fixture",
+            "FIXTURES / fmt / kind",
+        ): _MCP_CONFIG_FIXTURES,
+        (
+            "tests/unit/plugin_modules/ash_builtin/converters/test_mcp_config_converter.py",
+            "golden_tree",
+            "root",
+        ): (
+            "GOLDENS / fmt / kind: one fixture's directory of the committed "
+            "tests/test_data/mcp_config_converted goldens, which no test writes into."
+        ),
+        (
+            "tests/unit/plugin_modules/ash_builtin/converters/test_mcp_config_converter.py",
+            "output_tree",
+            "root",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/plugin_modules/ash_builtin/converters/test_mcp_config_converter.py",
+            "test_every_script_line_has_a_row_and_the_rows_land_on_the_entry",
+            "root",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/plugin_modules/ash_builtin/converters/test_mcp_config_converter.py",
+            "test_a_json_span_encloses_exactly_the_entry_the_script_was_made_from",
+            "root",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/plugin_modules/ash_builtin/converters/test_mcp_config_converter.py",
+            "test_the_converted_sources_record_names_the_config_each_file_came_from",
+            "Path(converter.results_dir)",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/plugin_modules/ash_builtin/scanners/test_mcp_config_scanner.py",
+            "stage_tree",
+            "source",
+        ): _MCP_CONFIG_FIXTURES,
+        (
+            "tests/unit/plugin_modules/ash_builtin/scanners/test_mcp_config_scanner.py",
+            "test_the_committed_corpus_is_what_the_scanner_writes",
+            "FIXTURES / fmt / 'violating'",
+        ): _MCP_CONFIG_FIXTURES,
+        (
+            "tests/unit/plugin_modules/ash_builtin/converters/test_sdist_lock_harvester.py",
+            "test_tree_shipped_cache_entry_is_never_served",
+            "converter.results_dir",
+        ): (
+            "The harvester's results directory under the output directory the test "
+            "chose inside its own tmp_path (harvest_env's source tree)."
+        ),
+        (
+            "tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py",
+            "_materialized",
+            "template",
+        ): (
+            "The committed fixture_repo of a scanner's directory under "
+            "tests/test_data/scanners, copied into a tempfile.TemporaryDirectory "
+            "the prep made."
+        ),
+        **{
+            (
+                "tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py",
+                function,
+                "_FIXTURES / spec.directory",
+            ): _CORPUS_GLOB
+            for function in (
+                "_prep_betterleaks",
+                "_prep_cfn_guard",
+                "_prep_cfn_lint",
+                "_prep_cfn_nag",
+                "_prep_checkov",
+                "_prep_ferret_scan",
+                "_prep_gitleaks",
+                "_prep_grype",
+                "_prep_snyk_code",
+                "_prep_trivy",
+            )
+        },
+        (
+            "tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py",
+            "_results_with_runs",
+            "fixtures_root / spec.directory",
+        ): _CORPUS_GLOB,
+    }
+)
+
 
 @pytest.fixture(scope="module")
 def sweep() -> Sweep:

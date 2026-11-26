@@ -754,6 +754,21 @@ def test_the_registry_and_the_corpus_table_agree() -> None:
             assert spec.missing, f"{name}: a corpus-less spec names what to author"
 
 
+def test_every_corpus_glob_lists_one_directory_level() -> None:
+    """No corpus glob descends, which is the condition the walk guard exempts them on.
+
+    tests/unit/test_repo_walkers_skip_scratch.py cannot read a pattern that comes
+    from CORPORA rather than a literal at the call, so it flags the globs over
+    ``spec.sarif`` and exempts them because each lists the files of one committed
+    fixture directory: a pattern with ``**`` would walk the tree under it, and one
+    with ``..`` would leave it.
+    """
+    patterns = [p for spec in CORPORA.values() if spec is not None for p in spec.sarif]
+    assert patterns, "no corpus glob to check"
+    descending = [p for p in patterns if "**" in p or ".." in p.split("/")]
+    assert descending == [], descending
+
+
 def test_discovery_does_not_depend_on_which_tier_declares_a_scanner() -> None:
     """The gate reads every plugin package's ``ASH_SCANNERS`` the same way.
 

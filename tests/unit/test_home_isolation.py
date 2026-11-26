@@ -103,6 +103,15 @@ def _run_with_sentinel_home(
     value "user" turned the guard's "wrote under the real user's ~/.ash" into
     text the assertion missed. The values this function itself sets are paths of
     this run's own, which the asserted words never hold.
+
+    What Windows needs includes the processor architecture. Python 3.11 reads
+    ``platform.machine()`` there from PROCESSOR_ARCHITEW6432 or
+    PROCESSOR_ARCHITECTURE alone (3.12 asks WMI first), and polars refuses to load
+    when the machine is unnamed ("unknown feature flag: 'sse3'"). The builtin
+    reporters import polars, and a tests/conftest.py fixture's import of the MCP
+    package reaches them, so on Windows 3.11 the probe errored at setup and never
+    made the write the guard refuses. The variables' values (AMD64, ARM64, x86)
+    are no word the asserted text holds.
     """
     sentinel = tmp_path / "sentinel"
     home = sentinel / "home"
@@ -112,7 +121,14 @@ def _run_with_sentinel_home(
     else:
         env = {
             name: os.environ[name]
-            for name in ("PATH", "SYSTEMROOT", "COMSPEC", "PATHEXT")
+            for name in (
+                "PATH",
+                "SYSTEMROOT",
+                "COMSPEC",
+                "PATHEXT",
+                "PROCESSOR_ARCHITECTURE",
+                "PROCESSOR_ARCHITEW6432",
+            )
             if name in os.environ
         }
     env.update(

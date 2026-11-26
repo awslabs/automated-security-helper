@@ -22,6 +22,12 @@ The hand-written files among the 24 (``_base/manifest.json``, ``schemas/schemas.
 deploy/ configs, a CI exclusion list and two test fixtures) were formatted once instead,
 and stay in the hook's scope.
 
+Two families joined the exclusions later, each JSON a tool writes: the scanners' recorded
+output under ``tests/test_data/scanners/*/captured/``, whose bytes each ``transcripts.json``
+pins by sha256 (the hook would have rewritten three M0 runs and failed the transcript
+gate), and the characterization goldens under ``tests/unit/*/golden/``, recorded from the
+code under test (the GitLab SAST one is compared in its writer's key order).
+
 Files are listed with ``git ls-files``, never by walking the tree.
 """
 
@@ -76,6 +82,12 @@ EXCLUDED_FAMILIES = {
     r"deploy/[^/]+/package(-lock)?\.json": "npm manifests",
     r"deploy/cdk/tsconfig\.json": "tsc config with comments",
     r"tests/snapshot/.*/__snapshots__/.*": "snapshot bytes",
+    r"tests/test_data/scanners/[^/]+/captured/.*": (
+        "recorded tool output, pinned by sha256 in the scanner's transcripts.json"
+    ),
+    r"tests/unit/[^/]+/golden/.*\.json": (
+        "characterization goldens recorded from the code under test"
+    ),
     r"ash-agent-plugins/agentic-coding/plugins/.*": "transpiler output, byte-compared",
     BASE_MCP.replace(".", r"\."): "copied byte for byte into transpiler output",
     r"ash-agent-plugins/agentic-coding/transpiler/schemas/.*\.schema\.json": "vendored",
