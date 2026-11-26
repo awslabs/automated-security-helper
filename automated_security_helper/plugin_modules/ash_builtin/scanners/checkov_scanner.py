@@ -118,9 +118,11 @@ CheckFrameworks = Literal[
 # cwd rather than scanning repository files. They are skipped unless explicitly
 # requested (_process_config_options), and their remote fetches are disabled
 # for offline scans (_execute_scan), which then warn for each one that runs.
-# Rather than hardcoding the vendor list, the environment variables are derived
-# from the skip set by checkov's naming rule (checkov_vcs_frameworks has the
-# rule and its measurements).
+# Each one's API token reaches checkov only when that framework runs in an
+# online scan (_without_unused_vcs_tokens). Rather than hardcoding the vendor
+# list, the environment variables are derived from the skip set by checkov's
+# naming rule, and the token variables, which follow none, are a measured table
+# (checkov_vcs_frameworks has the rule, the table and their measurements).
 #
 # The skip set is the measured floor and does NOT follow the CheckFrameworks
 # mirror: the mirror tracks the newest checkov, while checkov ends the run with
@@ -165,6 +167,17 @@ _CHECKOV_VCS_CONF_DIR_ENV = dict(
 # framework removes its directory when it exists.
 _VCS_CONF_ROOT_NAME = "vcs-config"
 
+# The variable each VCS configuration framework in the skip set reads its API
+# token from (checkov_vcs_frameworks.VCS_TOKEN_ENV_VARS has the measurements).
+# checkov reads all three when it starts, whichever frameworks run, so a token
+# reaches checkov only for a framework that runs in an online scan
+# (_without_unused_vcs_tokens). A framework added to the skip set without an
+# entry there fails at import, so its token is never passed through unnoticed.
+_CHECKOV_VCS_TOKEN_ENV = {
+    framework: checkov_vcs_frameworks.VCS_TOKEN_ENV_VARS[framework]
+    for framework in _VCS_CONFIGURATION_FRAMEWORKS
+}
+
 
 def _vcs_frameworks_that_run(
     frameworks: Sequence[str], skip_frameworks: Sequence[str]
@@ -192,6 +205,25 @@ def _ash_named_vcs_conf_dirs(
         variable: conf_root.joinpath(name)
         for variable, name in _CHECKOV_VCS_CONF_DIR_ENV.items()
         if variable not in environment
+    }
+
+
+def _without_unused_vcs_tokens(
+    environment: Mapping[str, str], frameworks_run: Sequence[str], offline: bool
+) -> dict[str, str]:
+    """``environment`` without the API token of each VCS configuration framework
+    that cannot use it: every one in an offline scan, which fetches nothing, and
+    in an online scan each one that does not run (``frameworks_run`` is the set
+    ``_vcs_frameworks_that_run`` gives). A framework that runs online keeps its
+    token. Names are compared without case, as Windows reads them, so a variable
+    spelled in another case is left out with the token it names."""
+    unused = {
+        variable.upper()
+        for framework, variable in _CHECKOV_VCS_TOKEN_ENV.items()
+        if offline or framework not in frameworks_run
+    }
+    return {
+        name: value for name, value in environment.items() if name.upper() not in unused
     }
 
 
@@ -1653,7 +1685,13 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # names the resource of each record (attach_checkov_resources).
         for item in dict.fromkeys([*self.config.options.additional_formats, "json"]):
             self.args.extra_args.append(ToolExtraArg(key="--output", value=item))
-        frameworks = list(self.config.options.frameworks)
+        # An empty list is read as checkov reads it, as all: checkov's parser gives
+        # --framework no default, and its normalization sets ['all'] when none is
+        # given (checkov 3.3.26 common/util/ext_argument_parser.py:248 and
+        # main.py:248-250). So it is passed as all is, with the config file's
+        # frameworks in its place and the VCS configuration frameworks left out
+        # (below); passed as nothing, it ran all three.
+        frameworks = list(self.config.options.frameworks) or ["all"]
         file_frameworks = file_values.get("framework")
         if isinstance(file_frameworks, str):
             file_frameworks = [file_frameworks]
@@ -1663,9 +1701,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             and all(isinstance(item, str) for item in file_frameworks)
         )
         if frameworks == ["all"] and file_names_frameworks:
-            # The option is at its default and the operator's file names the
-            # frameworks: the file's would have been overridden by the default
-            # on the command line, so the file's are passed instead.
+            # The option is at its default, or empty and read as it, and the
+            # operator's file names the frameworks: the file's would have been
+            # overridden by the default on the command line, so the file's are
+            # passed instead.
             frameworks = list(file_frameworks)
         for item in frameworks:
             self.args.extra_args.append(ToolExtraArg(key="--framework", value=item))
@@ -1695,14 +1734,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             self.args.extra_args.append(
                 ToolExtraArg(key="--skip-framework", value=item)
             )
-        # The frameworks checkov reads: the command line's, or, when it names
-        # none (frameworks: []), the config file's, else checkov's default, all.
-        read_frameworks = frameworks or (
-            list(file_frameworks) if file_names_frameworks else ["all"]
-        )
-        self._vcs_frameworks_run = _vcs_frameworks_that_run(
-            read_frameworks, skip_frameworks
-        )
+        # The frameworks checkov reads are the command line's: it always names at
+        # least one, since an empty list is passed as all (above).
+        self._vcs_frameworks_run = _vcs_frameworks_that_run(frameworks, skip_frameworks)
         file_skips = file_values.get("skip-path")
         if isinstance(file_skips, str):
             file_skips = [file_skips]
@@ -1922,6 +1956,25 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         subprocess_env.update(
             (variable, str(conf_dir)) for variable, conf_dir in ash_named.items()
         )
+        # checkov reads each VCS configuration framework's API token when it
+        # starts, whether or not the framework runs (checkov_vcs_frameworks has the
+        # measurements), so a token it cannot use is not handed to it: offline,
+        # where nothing is fetched, or for a framework that does not run.
+        kept = _without_unused_vcs_tokens(
+            subprocess_env, self._vcs_frameworks_run, offline
+        )
+        left_out = {name.upper() for name in subprocess_env if name not in kept}
+        for framework, variable in _CHECKOV_VCS_TOKEN_ENV.items():
+            if variable.upper() in left_out:
+                ASH_LOGGER.debug(
+                    f"Not passing {variable} to checkov: its {framework} framework "
+                    + (
+                        "fetches nothing in an offline scan."
+                        if offline
+                        else "does not run in this scan."
+                    )
+                )
+        subprocess_env = kept
         if offline:
             # The VCS configuration frameworks fetch remote platform settings
             # over the network; an offline scan turns those fetches off even

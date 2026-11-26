@@ -92,6 +92,16 @@
   emptied before every run, so a framework never reports settings an earlier run
   fetched as this scan's; a directory set in `CKV_GITLAB_CONF_DIR_NAME`,
   `CKV_GITHUB_CONF_DIR_NAME` or `CKV_BITBUCKET_CONF_DIR_NAME` is left as it is.
+- **`frameworks: []` runs checkov as `all` does, and checkov gets a GitLab, GitHub or
+  Bitbucket token only for a configuration framework that runs in an online scan.**
+  checkov reads no `--framework` as all frameworks, and an empty list was passed as no
+  `--framework`, so it ran the three configuration frameworks; it is now passed as `all`
+  is, the config file's `framework` list takes its place the same way, and checkov's
+  `CKV_FRAMEWORK` variable no longer chooses the frameworks for it. checkov reads
+  `CI_JOB_TOKEN`, `GITHUB_TOKEN` and `APP_PASSWORD`, the API tokens of its GitLab, GitHub
+  and Bitbucket configuration frameworks, every time it starts, whichever frameworks
+  run. Each is now left out of checkov's environment in an offline scan and when its
+  framework does not run, and a framework that runs online gets its token as before.
 
 ### Maintenance
 
