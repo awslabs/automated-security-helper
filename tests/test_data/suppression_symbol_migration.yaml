@@ -36,7 +36,9 @@
 #   failing it; `span_at_migration` records the verification at the migration
 #   tip (origin/main b7b85bad79561524ea931ec9374b30a71dc805fb), except on a
 #   row that carries `span_measured_at`, which names the commit that row's span
-#   (and `flagged_line`) were measured at instead.
+#   (and `flagged_line`) were measured at instead. a66965518b0 is the merge of
+#   main c15148192f4 into v4-capabilities: the rows that name it were measured
+#   there, their old lines in that tree's numbering with them.
 # - scripts/verify_symbol_suppressions_extra.py (the CI control, run by the
 #   symbols-extra-control job in .github/workflows/ash-repo-scan.yml) reads the
 #   `symbol` rows of this record and builds a suppression from each row's
@@ -57,7 +59,8 @@
 #   agreement test requires each one to be a line pin in the config it names, so
 #   a pin that moved (or a path that was renamed) fails there until the row is
 #   re-measured; a row that was re-measured against a later commit than the
-#   migration says so in `remeasured_at`.
+#   migration says so in `remeasured_at` (a66965518b0, as above, is the merge
+#   of main c15148192f4 into v4-capabilities).
 #
 # Maintenance
 # -----------
@@ -71,12 +74,13 @@ entries:
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: tests/integration/scanners/test_trivy_real_binary.py
-  old_line_start: 738
-  old_line_end: 738
+  old_line_start: 739
+  old_line_end: 739
+  span_measured_at: a66965518b0
   symbol: test_the_scanned_repos_secret_config_cannot_disable_rules
   span_at_migration:
-  - 724
-  - 776
+  - 725
+  - 777
 - config: .ash.yaml
   rule_id: HIPAA.Security-IAMNoInlinePolicy
   path: deploy/cdk/templates/AshCodeCommitGate.template.json
@@ -164,30 +168,33 @@ entries:
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/interactions/run_ash_container.py
-  old_line_start: 4361
-  old_line_end: 4361
+  old_line_start: 4363
+  old_line_end: 4363
+  span_measured_at: a66965518b0
   symbol: _write_env_file
   span_at_migration:
-  - 4300
-  - 4405
+  - 4302
+  - 4407
 - config: .ash.yaml
   rule_id: threat-filesystem-destruction
   path: tests/snapshot/test_snapshot_normalizer.py
-  old_line_start: 294
-  old_line_end: 294
+  old_line_start: 321
+  old_line_end: 321
+  span_measured_at: a66965518b0
   symbol: TestSurvives.test_panel_width_on_a_masked_line
   span_at_migration:
-  - 290
-  - 298
+  - 317
+  - 325
 - config: .ash.yaml
   rule_id: threat-filesystem-destruction
   path: tests/snapshot/test_snapshot_normalizer.py
-  old_line_start: 302
-  old_line_end: 302
+  old_line_start: 329
+  old_line_end: 329
+  span_measured_at: a66965518b0
   symbol: TestSurvives.test_markdown_table_padding_after_a_masked_value
   span_at_migration:
-  - 300
-  - 303
+  - 327
+  - 330
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: tests/unit/test_artifact_contents_gate.py
@@ -218,12 +225,13 @@ entries:
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: tests/unit/test_pinned_tool_version_check.py
-  old_line_start: 1178
-  old_line_end: 1178
+  old_line_start: 1228
+  old_line_end: 1228
+  span_measured_at: a66965518b0
   symbol: TestOnlyAllowlistedHttpsUrlsAreFetched.test_a_url_outside_the_allowlist_is_refused_unopened
   span_at_migration:
-  - 1175
-  - 1197
+  - 1225
+  - 1247
 - config: .ash.yaml
   rule_id: threat-runtime-obfuscation-base64exec
   path: tests/unit/utils/test_opengrep_pinned_download.py
@@ -473,12 +481,13 @@ entries:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/interactions/run_ash_container.py
-  old_line_start: 4361
-  old_line_end: 4361
+  old_line_start: 4363
+  old_line_end: 4363
+  span_measured_at: a66965518b0
   symbol: _write_env_file
   span_at_migration:
-  - 4300
-  - 4405
+  - 4302
+  - 4407
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
