@@ -127,7 +127,7 @@ loads.
 There is no directory default. A test with no tier marker, or with more than one (a
 module-level `integration` and a function-level `unit` count as two), makes collection
 refuse the whole session with a usage error that lists the first offenders, so nothing
-runs until each one has exactly one. With xdist workers (`-n`, which `pytest.ini` turns
+runs until each one has exactly one. With xdist workers (`pytest -n`, which `pytest.ini` turns
 on) the run stops with the same list instead, as "Interrupted: ..." with exit status 2,
 because a usage error raised in a worker would not reach the output. The check is in
 `tests/conftest.py` and is pinned by
