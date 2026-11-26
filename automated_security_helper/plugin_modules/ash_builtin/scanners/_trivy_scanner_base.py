@@ -1106,6 +1106,21 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 spellings.append(slashed)
         return (*super()._environment_values(), *spellings)
 
+    def _forced_binary_precluded_reason(self) -> Optional[str]:
+        """Offline without a database, a forced trivy must not satisfy validation.
+
+        The database gate below is about what trivy would read, not where trivy
+        is, so a ``--binary-path`` record has no say in it. The same predicate
+        ``validate_plugin_dependencies`` runs after the base check; consulting it
+        here keeps the force from short-circuiting past it.
+        """
+        if self._offline_database_available():
+            return None
+        return (
+            "offline with no trivy vulnerability database in the cache; a forced "
+            "binary cannot supply the database"
+        )
+
     def validate_plugin_dependencies(self) -> bool:
         """The binary, and offline, a vulnerability database for it to read.
 

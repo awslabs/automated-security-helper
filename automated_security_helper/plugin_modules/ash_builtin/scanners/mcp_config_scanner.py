@@ -916,6 +916,17 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
         self.tool_version = None
         super().model_post_init(context)
 
+    def _forced_binary_precluded_reason(self) -> Optional[str]:
+        """mcp-config is entirely Python, so no forced binary satisfies it.
+
+        There is no tool to check for and nothing a ``--binary-path`` record
+        could resolve; the record is never consulted for this scanner and the
+        docs name it as an exception. Validation passes on its own below either
+        way, so the preclusion changes no verdict -- it keeps the debug log from
+        claiming a forced binary satisfied a scanner that runs none.
+        """
+        return "mcp-config runs no external program; there is no binary to force"
+
     def validate_plugin_dependencies(self) -> bool:
         # Entirely Python: there is no tool to check for.
         return True
