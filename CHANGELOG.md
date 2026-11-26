@@ -52,7 +52,8 @@
   commands and `ash build-image` are deprecated and will be removed in ASH v4.0.** Each
   still runs the same command and prints one line to stderr (stdout and the exit code
   are unchanged) that names its replacement. A scan moves under `ash scan fs`:
-  `ash scan --source-dir X` becomes `ash scan fs X`, and `ash --mode container ...`
+  `ash scan --source-dir X` becomes `ash scan fs X` (in a `--cli-json-input`
+  document, the `path` key in place of `source_dir`), and `ash --mode container ...`
   becomes `ash scan fs . --mode container ...`. The commands that read saved results
   move under `ash results`: `ash report`, `ash diff`, `ash trend`, `ash merge` and
   `ash inspect` become `ash results report`, `ash results diff`, `ash results trend`,

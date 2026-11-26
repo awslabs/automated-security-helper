@@ -15,7 +15,9 @@ old spelling keeps working through 3.x:
 ASH 4.0 removes the old spellings. The first half of this file is the record that
 removal starts from: each row there becomes a refusal row in 4.0. The rows were green
 when written, since they pin behavior the scan group, results group and container
-group already deliver.
+group already deliver, except the two that name the directory in a --cli-json-input
+document: ``ash scan fs`` printed no line for a document's ``source_dir`` key until
+those two rows were added.
 
 The second half pins the hints ASH prints, its help text and the markdown it ships in
 the package: each one names the spelling that does not warn, so following a hint never
@@ -29,6 +31,7 @@ arguments, so no image is built.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -95,6 +98,21 @@ def _results_argv(verb: str) -> Callable[[Path], List[str]]:
     return build
 
 
+def _document_naming_the_directory(key: str) -> Callable[[Path], List[str]]:
+    """``ash scan fs`` handed the directory by the *key* of a --cli-json-input document.
+
+    A document key is a parameter's name or one of its long flags, so ``source_dir``
+    and ``--source-dir`` both set the deprecated option.
+    """
+
+    def build(tmp_path: Path) -> List[str]:
+        document = tmp_path / "scan.json"
+        document.write_text(json.dumps({key: "src"}), encoding="utf-8")
+        return ["scan", "fs", "--cli-json-input", str(document), *FAILS_FAST]
+
+    return build
+
+
 SPELLINGS = {
     "bare-ash": Spelling(
         legacy=lambda _: [*FAILS_FAST],
@@ -108,6 +126,16 @@ SPELLINGS = {
     ),
     "source-dir-on-fs": Spelling(
         legacy=lambda _: ["scan", "fs", "--source-dir", "src", *FAILS_FAST],
+        noun=lambda _: ["scan", "fs", "src", *FAILS_FAST],
+        names="ash scan fs",
+    ),
+    "source_dir-key-of-a-json-document": Spelling(
+        legacy=_document_naming_the_directory("source_dir"),
+        noun=lambda _: ["scan", "fs", "src", *FAILS_FAST],
+        names="ash scan fs",
+    ),
+    "source-dir-flag-key-of-a-json-document": Spelling(
+        legacy=_document_naming_the_directory("--source-dir"),
         noun=lambda _: ["scan", "fs", "src", *FAILS_FAST],
         names="ash scan fs",
     ),
@@ -189,6 +217,31 @@ def test_both_build_spellings_start_the_same_build(tmp_path, isolated):
 
     assert len(isolated) == 2
     assert isolated[0] == isolated[1]
+
+
+def test_a_document_without_the_deprecated_key_prints_no_deprecation_line(
+    tmp_path, isolated
+):
+    """The control for the two document rows: the fs skeleton as it is generated
+    (its ``source_dir`` is null, which a document reads as not given) and a document
+    that uses the ``path`` key run as ``ash scan fs src`` runs, and say nothing."""
+    skeleton = _invoke(["scan", "fs", "--generate-cli-skeleton"])
+    assert skeleton.exit_code == 0, skeleton.output
+    noun = _invoke(["scan", "fs", "src", *FAILS_FAST])
+
+    for name, document in (
+        ("skeleton.json", skeleton.stdout),
+        ("path.json", json.dumps({"path": "src"})),
+    ):
+        (tmp_path / name).write_text(document, encoding="utf-8")
+
+        result = _invoke(
+            ["scan", "fs", "--cli-json-input", str(tmp_path / name), *FAILS_FAST]
+        )
+
+        assert result.exit_code == noun.exit_code, (name, result.output)
+        assert _deprecation_lines(result.stderr) == [], (name, result.stderr)
+        assert _deprecation_lines(result.stdout) == [], (name, result.stdout)
 
 
 # --------------------------------------------------------------------------- #

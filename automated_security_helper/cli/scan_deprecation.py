@@ -5,7 +5,8 @@
 
 Three spellings run the same scan as ``ash scan fs <path>`` and are removed in ASH
 v4.0: bare ``ash [options]``, ``ash scan [options]`` with no subject, and
-``--source-dir`` as the way to name the directory. Each prints one line to stderr,
+``--source-dir`` as the way to name the directory, on the command line or as the
+``source_dir`` key of a ``--cli-json-input`` document. Each prints one line to stderr,
 as ``ash dependencies install --tool <old name>`` does, so a script that parses
 stdout is not handed a line it has never seen, and the exit code is unchanged.
 
@@ -36,6 +37,13 @@ SCAN_WITHOUT_SUBJECT_LINE = (
 SOURCE_DIR_LINE = (
     "`--source-dir` is deprecated and will be removed in "
     f"{REMOVAL}. Give the directory as the argument: `ash scan fs <path>`."
+)
+#: ``--source-dir`` given by a ``--cli-json-input`` document, whose keys are the
+#: parameters' names and long flags: the replacement there is the ``path`` key.
+SOURCE_DIR_KEY_LINE = (
+    "`source_dir` in a --cli-json-input document is deprecated and will be removed "
+    f"in {REMOVAL}, as `--source-dir` is. Name the directory with the `path` key, "
+    "the argument of `ash scan fs <path>`."
 )
 
 

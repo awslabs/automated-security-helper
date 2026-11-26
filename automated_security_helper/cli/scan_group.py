@@ -29,6 +29,7 @@ from automated_security_helper.cli.scan import run_ash_scan_cli_command
 from automated_security_helper.cli.scan_deprecation import (
     SCAN_FORM_META,
     SCAN_NOUN_META,
+    SOURCE_DIR_KEY_LINE,
     SOURCE_DIR_LINE,
     warn_deprecated,
 )
@@ -184,9 +185,12 @@ def run_ash_scan_fs_cli_command(*args: Any, **kwargs: Any) -> Any:
     ctx = kwargs["ctx"]
     path = kwargs.pop("path", None)
     routed_without_subject = ctx.meta.get(SCAN_FORM_META) == "scan"
-    from_command_line = (
-        getattr(ctx.get_parameter_source("source_dir"), "name", None) == "COMMANDLINE"
-    )
+    source_dir_source = getattr(ctx.get_parameter_source("source_dir"), "name", None)
+    from_command_line = source_dir_source == "COMMANDLINE"
+    # A --cli-json-input document's values reach click through the context's
+    # default_map (cli/json_input.py), so a document that names the directory with
+    # the deprecated option's key reads as DEFAULT_MAP.
+    from_document = source_dir_source == "DEFAULT_MAP"
     if path is not None:
         if kwargs.get("source_git") is not None:
             ctx.fail(
@@ -212,6 +216,8 @@ def run_ash_scan_fs_cli_command(*args: Any, **kwargs: Any) -> Any:
         ctx.meta[SCAN_NOUN_META] = DEFAULT_SUBJECT
         if from_command_line:
             warn_deprecated(SOURCE_DIR_LINE)
+        elif from_document:
+            warn_deprecated(SOURCE_DIR_KEY_LINE)
     return run_ash_scan_cli_command(*args, **kwargs)
 
 
