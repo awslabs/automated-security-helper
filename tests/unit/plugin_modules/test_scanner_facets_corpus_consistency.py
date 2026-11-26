@@ -188,6 +188,9 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
     "betterleaks": CorpusSpec(
         "betterleaks", sarif=("captured/*.sarif",), prep="betterleaks"
     ),
+    # The committed SARIF is what BinSkim 4.4.9.14 wrote, byte for byte (see the
+    # README in the directory); the prep grades it as the scanner does.
+    "binskim": CorpusSpec("binskim", sarif=("captured/*.sarif",), prep="binskim"),
     "cdk-nag": CorpusSpec("cdk", prep="cdk-nag"),
     "cfn-guard": CorpusSpec(
         "cfn_lint_guard", sarif=("captured/cfn-guard-*.sarif",), prep="cfn-guard"
@@ -445,6 +448,22 @@ def _prep_betterleaks(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Resu
             yield report, [r for run in report.runs or [] for r in run.results or []]
 
 
+def _prep_binskim(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The committed BinSkim logs through the adapter's own grading (failures kept,
+    levels rated, the message text resolved from the rule's messageStrings, URIs made
+    relative to the directory each run scanned, recorded in the capture README)."""
+    from automated_security_helper.plugin_modules.ash_binskim_plugins.binskim_scanner import (
+        BinskimScanner,
+    )
+
+    for pattern in spec.sarif:
+        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+            report = BinskimScanner.normalize_results(
+                _load_sarif(path), Path("/tmp/binskim-capture") / path.stem
+            )
+            yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
 def _prep_actionlint(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
     from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
         build_sarif,
@@ -657,6 +676,7 @@ _PREPS: Mapping[
 ] = {
     "actionlint": _prep_actionlint,
     "betterleaks": _prep_betterleaks,
+    "binskim": _prep_binskim,
     "cdk-nag": _prep_cdk_nag,
     "cfn-guard": _prep_cfn_guard,
     "cfn-lint": _prep_cfn_lint,

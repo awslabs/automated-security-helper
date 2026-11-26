@@ -47,6 +47,7 @@ PACKAGE_DIRS = frozenset(
         "plugin_modules",
         "plugin_modules/ash_aws_plugins",
         "plugin_modules/ash_betterleaks_plugins",
+        "plugin_modules/ash_binskim_plugins",
         "plugin_modules/ash_builtin",
         "plugin_modules/ash_builtin/converters",
         "plugin_modules/ash_builtin/event_handlers",

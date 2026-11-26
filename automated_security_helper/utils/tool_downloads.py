@@ -1108,6 +1108,8 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "aws-guard-rules-registry/NOTICE": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287",  # pragma: allowlist secret
     "bandit commit": "92ae8b82fb422a639f0ed8d99e96cea769594e08",  # pragma: allowlist secret
     "betterleaks commit": "39d5bdcf34db54e944facac5cf6e8b03db5e2b99",  # pragma: allowlist secret
+    "binskim commit": "170f8f8de91851c5196acf8221bd7eb9e6d960f9",  # pragma: allowlist secret
+    "binskim/LICENSE": "2b97f9dcb9395a2780401d86103bda8364ac34578e7e1a140129ab2590bfa47c",  # pragma: allowlist secret
     "cfn-lint commit": "720c5cc3d59094baee65a6f5648c111524545061",  # pragma: allowlist secret
     "checkov commit": "2f107f8613830f773b23fa21104b7ac2885c2581",  # pragma: allowlist secret
     "cfn-guard commit": "db494a17fb6030b365d5a5144a397517c7746797",  # pragma: allowlist secret
@@ -1269,6 +1271,31 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         repository="https://github.com/betterleaks/betterleaks",
         commit=_THIRD_PARTY_HASHES["betterleaks commit"],
         files=(LicenseFile("LICENSE"),),
+    ),
+    # The alpha BinSkim scanner's tool. Pinned and installed by its own module
+    # (``ash_binskim_plugins/binskim_install.py``), not by install-pinned-tool, so
+    # its license is staged from the repository at the commit the v4.4.9.14 tag
+    # names, on the --licenses-only line: the NuGet package holds no license file
+    # (its nuspec names the repository's LICENSE by URL). `BinSkim --version`
+    # prints "BinSkim PE/MSIL Analysis Driver 4.4.9.14", on stderr. The probe runs
+    # it with invariant globalization, as the scanner does: the image has no ICU,
+    # and without the variable the .NET runtime aborts before BinSkim starts
+    # (measured in the image's base on 2026-11-26).
+    "binskim": ThirdPartyLicense(
+        tool="binskim",
+        version="v4.4.9.14",
+        license="MIT",
+        repository="https://github.com/microsoft/binskim",
+        commit=_THIRD_PARTY_HASHES["binskim commit"],
+        files=(
+            _from_source("binskim", "https://github.com/microsoft/binskim", "LICENSE"),
+        ),
+        version_probe=(
+            "env",
+            "DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1",
+            "BinSkim",
+            "--version",
+        ),
     ),
     # The release archive holds the executable and a README, no license file, so
     # both files come from the repository.

@@ -146,6 +146,14 @@ MANIFESTS = (
         owned=(f"{_DOCS}/betterleaks-plugin.md", f"{_FIXTURES}/betterleaks"),
     ),
     _alpha(
+        "binskim",
+        "ash_binskim_plugins",
+        "binskim_scanner",
+        "BinskimScanner",
+        "BinskimScannerConfigOptions",
+        owned=(f"{_DOCS}/binskim-plugin.md", f"{_FIXTURES}/binskim"),
+    ),
+    _alpha(
         "credsweeper",
         "ash_credsweeper_plugins",
         "credsweeper_scanner",
