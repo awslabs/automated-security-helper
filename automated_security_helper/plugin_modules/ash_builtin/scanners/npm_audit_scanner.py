@@ -914,7 +914,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             # point, so the source tree is what is recorded, through the same
             # guarded selection the package-manager check below reads.
             self.inputs_not_scanned = self._offline_skips(
-                self._source_manifests(), "source"
+                self._source_manifests(), TargetType.SOURCE
             )
             return False
         if find_executable(_tool_name(self)):
@@ -935,7 +935,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         when the selection cannot be made (the selection is scan()'s to fail
         loudly, the check only reads it)."""
         try:
-            return self._package_manifests("source")
+            return self._package_manifests(TargetType.SOURCE)
         except Exception as exc:
             ASH_LOGGER.debug(
                 f"npm-audit: could not list the packages for the dependency check: "
@@ -1074,13 +1074,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         ignored_lockfiles: Set[Path] = set()
         orig_scannable: Sequence[str | Path]
         if target_type == TargetType.CONVERTED:
-            tree_root = Path(self.context.work_dir)
-            orig_scannable = list(self.context.work_dir.glob("**/*.*"))
+            work_dir = self._require_work_dir()
+            tree_root = Path(work_dir)
+            orig_scannable = list(work_dir.glob("**/*.*"))
         else:
-            tree_root = Path(self.context.source_dir)
+            context = self._require_context()
+            tree_root = Path(context.source_dir)
             walked = scan_set(
-                source=self.context.source_dir,
-                output=self.context.output_dir,
+                source=context.source_dir,
+                output=context.output_dir,
                 honor_ignore_files=honors_ignore_files(
                     getattr(self.context, "config", None)
                 ),
@@ -1089,7 +1091,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     str(workspace_output) if workspace_output else None
                 ),
             )
-            orig_scannable = drop_ignored(walked, self.context.source_dir, ignore_paths)
+            orig_scannable = drop_ignored(walked, context.source_dir, ignore_paths)
             kept = {Path(f) for f in orig_scannable}
             ignored_lockfiles = {
                 Path(f)
@@ -1173,7 +1175,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         from another selection. See the base class.
         """
         trees = [TargetType.SOURCE]
-        work_dir = Path(self.context.work_dir)
+        work_dir = Path(self._require_work_dir())
         if work_dir.is_dir() and any(work_dir.rglob("*.*")):
             trees.append(TargetType.CONVERTED)
         for target_type in trees:
@@ -1212,10 +1214,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         for the converted target is ASH's work directory.
         """
         config = getattr(self.context, "config", None)
-        scan_root = Path(
-            getattr(config, "_scanned_root", None) or self.context.source_dir
-        )
-        skip = [Path(self.context.output_dir)]
+        context = self._require_context()
+        scan_root = Path(getattr(config, "_scanned_root", None) or context.source_dir)
+        skip = [Path(context.output_dir)]
         workspace_output = getattr(self.context, "workspace_output_dir", None)
         if workspace_output:
             # Left out of the scan set like the project's own output directory
@@ -1237,10 +1238,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
     def _shown_path(self, path: Path, target_type: TargetType) -> str:
         """``path`` as recorded in the results: relative to the target, as named."""
+        context = self._require_context()
         base = Path(
-            self.context.work_dir
+            self._require_work_dir()
             if target_type == TargetType.CONVERTED
-            else self.context.source_dir
+            else context.source_dir
         ).absolute()
         try:
             return Path(path).absolute().relative_to(base).as_posix()
@@ -2039,7 +2041,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         "npm-audit",
                         severity,
                         *_cwe_tags(record["cwe"]),
-                        f"tool_name::{self.config.name}",
+                        f"tool_name::{self._require_config().name}",
                         self.tool_type_tag(),
                     ],
                 }
@@ -2918,7 +2920,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 "npm-audit",
                                 via_severity,
                                 *_cwe_tags(via.get("cwe")),
-                                f"tool_name::{self.config.name}",
+                                f"tool_name::{self._require_config().name}",
                                 self.tool_type_tag(),
                             ],
                         }
@@ -3064,7 +3066,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                     "security",
                                     "npm-audit",
                                     severity,
-                                    f"tool_name::{self.config.name}",
+                                    f"tool_name::{self._require_config().name}",
                                     self.tool_type_tag(),
                                 ],
                                 # No security-severity: a transitive advisory carries no
@@ -3600,7 +3602,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             return False
 
         try:
-            target_results_dir = self.results_dir.joinpath(target_type)
+            target_results_dir = self._require_results_dir().joinpath(target_type)
             results_file = target_results_dir.joinpath("results.json")
             results_file.parent.mkdir(exist_ok=True, parents=True)
 
@@ -3613,7 +3615,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             # ash.log and its JSONL copy (see NO_MARKUP in utils/log.py).
             ASH_LOGGER.log(
                 15,
-                f"({self.config.name} @ {target_type})\tFound {len(scannable)} "
+                f"({self._require_config().name} @ {target_type})\tFound {len(scannable)} "
                 f"package locks:\n- {joined_files}",
                 extra=NO_MARKUP,
             )
@@ -4084,7 +4086,7 @@ if __name__ == "__main__":
         )
     )
     report = scanner.scan(
-        target=scanner.context.source_dir, target_type=TargetType.SOURCE
+        target=scanner._require_context().source_dir, target_type=TargetType.SOURCE
     )
 
     if isinstance(report, SarifReport):
