@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 import json
 import re
-from typing import Dict, List, Any, TYPE_CHECKING
+from typing import Dict, List, Any, Optional, TYPE_CHECKING
 
 import polars as pl
 
@@ -513,21 +513,33 @@ class ReportContentEmitter:
         return results
 
     def get_scanners_not_run(self) -> List[Dict[str, Any]]:
-        """Why the scanners that did not run did not, in scanner-results order.
+        """Why the scanners that did not run or failed did so, in scanner-results order.
 
-        The SKIPPED and MISSING rows of :meth:`get_scanner_results` that record
-        a reason, grouped by status and reason: each entry has the ``scanners``
-        that share them, the ``status``, and the ``reason``, which is the
-        ``skipped_reason`` or ``missing_reason`` of their rows in
-        ``ash_aggregated_results.json``. The scanner table shows only the
-        status, so without this list a report says that npm-audit was skipped
+        The SKIPPED, MISSING and ERROR rows of :meth:`get_scanner_results` that
+        have a reason, grouped by status and reason: each entry has the
+        ``scanners`` that share them, the ``status``, and the ``reason``. For
+        SKIPPED and MISSING it is the ``skipped_reason`` or ``missing_reason`` of
+        their rows in ``ash_aggregated_results.json``. The scanner table shows only
+        the status, so without this list a report says that npm-audit was skipped
         and leaves "no lockfile beside a package.json" in the log.
+
+        For ERROR it is :func:`short_error_reason` of the first error recorded in
+        the scanner's per-target reports: one sentence with no path, no stderr and
+        no validation details, since a summary can be posted where the machine's
+        paths and the tool's output should not be. A scanner whose error has no
+        such sentence has no entry, and a scanner in ERROR only for a stale content
+        database has none either: it is reported under its own heading.
 
         Scanners are grouped because one option often leaves many out: a run
         with ``--scanners npm-audit`` skips every other scanner for the one
         reason, which is one line here and not fifteen. A row that records no
         reason has no entry: the table already says all there is.
         """
+        from automated_security_helper.utils.content_db_staleness import (
+            scanners_in_error_for_a_stale_database,
+        )
+
+        stale = None
         groups: Dict[tuple[str, str], Dict[str, Any]] = {}
         for result in self.get_scanner_results():
             status = result["status"]
@@ -535,6 +547,12 @@ class ReportContentEmitter:
                 reason = result["skipped_reason"] or result["missing_reason"]
             elif status == ScannerStatus.MISSING:
                 reason = result["missing_reason"] or result["skipped_reason"]
+            elif status == ScannerStatus.ERROR:
+                if stale is None:
+                    stale = scanners_in_error_for_a_stale_database(self.model)
+                if result["scanner_name"] in stale:
+                    continue
+                reason = self._error_reason(result["scanner_name"])
             else:
                 continue
             if not reason:
@@ -545,6 +563,24 @@ class ReportContentEmitter:
             )
             group["scanners"].append(result["scanner_name"])
         return list(groups.values())
+
+    def _error_reason(self, scanner_name: str) -> Optional[str]:
+        """The short reason of the first error the scanner's reports record."""
+        reports = self.model.additional_reports.get(scanner_name)
+        if not isinstance(reports, dict):
+            return None
+        for report in reports.values():
+            if not isinstance(report, dict):
+                continue
+            errors = report.get("errors")
+            if not isinstance(errors, list):
+                continue
+            for error in errors:
+                if isinstance(error, str):
+                    reason = short_error_reason(error)
+                    if reason:
+                        return reason
+        return None
 
     def get_scan_summary(self) -> Dict[str, Any]:
         """Describe the outcome for people without changing the scan's exit policy.
@@ -1190,3 +1226,54 @@ def _snippet_text(snippet: Any) -> str | None:
         text = snippet.get("text")
         return text if isinstance(text, str) else None
     return None
+
+
+#: The prefix the scan phase gives a scanner's failure: ``Failed to execute
+#: <scanner> scanner on <target>: `` and, for a failure of the scan itself,
+#: ``<ScannerClass> scan failed: ``.
+_FAILURE_PREFIX = re.compile(r"\AFailed to execute .+? scanner on [^:]+: ")
+_SCAN_FAILED_PREFIX = re.compile(r"\A[A-Za-z0-9_]+ scan failed: ")
+#: A parenthetical aside, innermost first; asides hold paths, exit-code details
+#: and the launch command.
+_ASIDE = re.compile(r"\s*\([^()]*\)")
+#: Where the first sentence ends: a full stop, a colon or a semicolon before a
+#: space, or the end of the text.
+_SENTENCE_END = re.compile(r"[.:;](?:\s|\Z)|\Z")
+#: Anything that looks like a path on the machine that ran the scan.
+_LOCAL_PATH = re.compile(r"(?:\A|[\s'\"=])(?:/|~/|[A-Za-z]:[\\/]|\\\\)")
+#: The longest reason shown; a longer first sentence is not a short reason.
+SHORT_ERROR_REASON_LIMIT = 200
+
+
+def short_error_reason(error: str) -> Optional[str]:
+    """The first sentence of a scanner's recorded failure, for a report, or None.
+
+    ``Failed to execute checkov scanner on source: CheckovScanner scan failed:
+    its tool (launched through ...) exited with code 2, which this scanner does
+    not accept as a completed run, so its results file is not graded (exit code
+    2: ...). Stderr not read: ...`` gives ``its tool exited with code 2, which
+    this scanner does not accept as a completed run, so its results file is not
+    graded``.
+
+    Only a message that opens with the scan phase's prefix is read. The asides in
+    parentheses are removed, and the text is cut at the end of its first
+    sentence, so the stderr, the log paths and validation details that follow are
+    never shown. A result that is empty, longer than
+    :data:`SHORT_ERROR_REASON_LIMIT`, or still holds something that looks like a
+    local path gives None: the report then names the scanner in the table only,
+    as it did before.
+    """
+    match = _FAILURE_PREFIX.match(error)
+    if match is None:
+        return None
+    body = _SCAN_FAILED_PREFIX.sub("", error[match.end() :], count=1)
+    previous = None
+    while previous != body:
+        previous, body = body, _ASIDE.sub("", body)
+    end = _SENTENCE_END.search(body)
+    sentence = body[: end.start() if end else len(body)].strip()
+    if not sentence or len(sentence) > SHORT_ERROR_REASON_LIMIT:
+        return None
+    if _LOCAL_PATH.search(sentence) or "(" in sentence or ")" in sentence:
+        return None
+    return sentence

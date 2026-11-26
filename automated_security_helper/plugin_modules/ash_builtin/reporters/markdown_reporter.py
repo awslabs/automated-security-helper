@@ -568,9 +568,10 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                         "</details>\n",
                     ]
                 )
-            # Why each SKIPPED or MISSING scanner did not run. Compact view
-            # leaves the SKIPPED rows out of the table, so it leaves their
-            # reasons out too; a MISSING scanner needs attention in every view.
+            # Why each SKIPPED or MISSING scanner did not run, and why each
+            # ERROR scanner failed. Compact view leaves the SKIPPED rows out of
+            # the table, so it leaves their reasons out too; a MISSING or ERROR
+            # scanner needs attention in every view.
             not_run = [
                 entry
                 for entry in emitter.get_scanners_not_run()

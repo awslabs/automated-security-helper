@@ -561,7 +561,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
 
     @staticmethod
     def _format_scanners_not_run(not_run: List[Dict[str, Any]]) -> str:
-        """Why each SKIPPED or MISSING scanner did not run, under the table.
+        """Why each SKIPPED or MISSING scanner did not run, or ERROR scanner failed.
 
         Empty when no such scanner records a reason, so a report without one is
         the page it always was. The name and the reason come from the results

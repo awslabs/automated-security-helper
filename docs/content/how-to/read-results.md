@@ -215,8 +215,16 @@ could not start as asked, or `null` when no tool ran.
 
 The HTML, Markdown and text reports list the same reasons under their scanner table, as
 "Scanners that did not run", with the scanners that share a reason on one line. The
-compact Markdown report lists them for `MISSING`
+compact Markdown report lists them for `MISSING` and `ERROR`
 scanners only, since it leaves `SKIPPED` rows out of the table.
+
+An `ERROR` scanner is listed there with the first sentence of its recorded failure, for
+example `checkov (ERROR): its tool exited with code 2, which this scanner does not accept
+as a completed run, so its results file is not graded`. The full text, with the tool's
+command, its exit code and where its stderr was saved, stays in the `errors` of the
+scanner's entries under `additional_reports` in `ash_aggregated_results.json`, and in
+`ash.log`. A failure whose first sentence would show a path, or is longer than 200
+characters, is not listed.
 
 To read the results from a script:
 

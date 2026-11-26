@@ -147,6 +147,16 @@
 
 ### Features
 
+- **The reports say why a scanner ended in ERROR.** "Scanners that did not run" in the
+  HTML, Markdown and text reports now lists an ERROR scanner with the first sentence of
+  its recorded failure, for example `checkov (ERROR): its tool exited with code 2, which
+  this scanner does not accept as a completed run, so its results file is not graded`.
+  The paths, stderr and details that follow that sentence are left out; they stay in
+  `ash.log` and in the `errors` of the scanner's entries in `ash_aggregated_results.json`.
+  A failure whose first sentence would show a path or is longer than 200 characters is
+  not listed, and a scanner in ERROR only for a stale content database stays under its
+  own heading. The compact Markdown report lists ERROR scanners too.
+
 - **Symbol suppressions are bound to their file's content hash in `.ash.lock`.**
   A symbol-scoped suppression whose file has no lock entry is refused when the config is
   validated (`ash scan`, `ash config validate`), with a message that names the command to
