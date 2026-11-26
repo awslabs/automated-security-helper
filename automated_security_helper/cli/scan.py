@@ -1708,12 +1708,16 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--image",
             rich_help_panel="Scan",
+            # No square brackets in this text: --help renders it as Rich
+            # markup, which drops a bracketed word such as "[@sha256:digest]",
+            # and the CLI reference renders it as markdown, which reads
+            # "[x][y]" as a link.
             help=(
-                "Scan a container image named by reference "
-                "(registry/repo[:tag][@sha256:digest]) instead of a source "
-                "directory. ASH fetches nothing itself: the image is prepared "
-                "by a container engine or the scanner tools' own registry "
-                "clients. Repeat it, or give a comma list, to scan several "
+                "Scan a container image named by reference (registry/repo, "
+                "optionally followed by :tag, @sha256:digest or both) instead "
+                "of a source directory. ASH fetches nothing itself: the image "
+                "is prepared by a container engine or the scanner tools' own "
+                "registry clients. Repeat it, or give a comma list, to scan several "
                 "images: each is its own scan, with its own reports under "
                 "<output-dir>/<NN>-<image>-<hash>/, and the exit code is the "
                 "worst of theirs. Exclusive with --source-dir, --image-archive "
