@@ -96,11 +96,14 @@ class SandboxRequirements:
             directory and do not restrict exec, and leave the variable alone.
         git_safe_directory: The tool runs ``git`` itself on the directory it scans
             and fails when git refuses a directory another user owns (opengrep's
-            ``git ls-files``). The scanner hands the directories git should trust
-            to the sandbox through ``SAFE_DIRECTORIES_ENV``, and ``filter_env``
-            turns them into ``GIT_CONFIG_*`` entries for that child alone. No other
-            ``GIT_CONFIG_*`` variable passes, so the child never gets a
-            ``safe.directory`` ASH did not name, and never ``*``.
+            ``git ls-files``). ``build_scanner_policy`` computes the directories git
+            should trust from the scan target (``safe_directories_for``: the target,
+            and the top of its checkout when that ``.git`` has the target's owner),
+            and ``filter_env`` turns them into ``GIT_CONFIG_*`` entries for that
+            child alone. No other ``GIT_CONFIG_*`` variable passes, so the child
+            never gets a ``safe.directory`` ASH did not name, and never ``*``; an
+            environment list that names a ``GIT_CONFIG_*`` variable is refused for
+            this tool.
         read_paths_require_grant: ``read_paths`` and ``cache_paths`` follow the
             scanner's options, which the scanned repository can write (a rules
             file or baseline path, for example). ``read_paths`` are mounted only
@@ -207,12 +210,6 @@ CREDENTIAL_MARKERS = (
 #: credential whatever the variable is called.
 _URL_USERINFO = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://[^/@\s]*@")
 
-#: The private name a scanner that declares ``git_safe_directory`` hands the
-#: directories git should trust under: a JSON list of absolute paths. Under the
-#: sandbox's allowlist ``GIT_CONFIG_*`` never passes, so the scanner's own
-#: ``GIT_CONFIG_*`` entries are stripped; ``filter_env`` reads this name instead,
-#: removes it, and writes the entries itself.
-SAFE_DIRECTORIES_ENV = "ASH_GIT_SAFE_DIRECTORIES"
 _GIT_CONFIG_NAME = re.compile(r"^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$")
 
 
@@ -225,22 +222,41 @@ def _usable_safe_directory(entry: object) -> bool:
     return Path(entry).parent != Path(entry)  # not a filesystem root
 
 
-def safe_directories_from(value: Optional[str]) -> List[str]:
-    """The directories a scanner named in ``SAFE_DIRECTORIES_ENV``, validated.
+def safe_directories_for(target: Path) -> List[str]:
+    """The directories git may trust for a scan of ``target``, validated.
 
-    Anything that is not a JSON list of usable absolute paths names nothing.
+    The real path of ``target``, and, when it sits in a checkout, the checkout's top:
+    the first parent holding a ``.git`` (a directory, or the file a linked work tree
+    and a submodule have). The top is named only when that ``.git`` entry belongs to
+    the user who owns ``target`` (``os.lstat``, so a link is not followed) and the
+    parent is a directory ``_usable_safe_directory`` admits, which a filesystem root
+    never is. A ``.git`` that fails either test ends the walk: git takes the first
+    ``.git`` it meets as the top, so a parent above it is not the checkout's. No
+    ``.git`` above ``target`` names nothing more, the conservative reading.
+
+    The one list both spawn paths read: ``build_scanner_policy`` stores it on the
+    sandbox policy, and the scanner's unsandboxed spawn calls this function itself.
     """
-    import json
-
-    if not value:
-        return []
+    real = Path(os.path.realpath(target))
+    named = [str(real)] if _usable_safe_directory(str(real)) else []
     try:
-        loaded = json.loads(value)
-    except ValueError:
-        return []
-    if not isinstance(loaded, list):
-        return []
-    return list(dict.fromkeys(e for e in loaded if _usable_safe_directory(e)))[:8]
+        owner = os.lstat(real).st_uid
+    except OSError:
+        return named
+    start = real if real.is_dir() else real.parent
+    for parent in (start, *start.parents):
+        git = parent / ".git"
+        if not os.path.lexists(git):
+            continue
+        try:
+            same_owner = os.lstat(git).st_uid == owner
+        except OSError:
+            same_owner = False
+        top = str(parent)
+        if same_owner and _usable_safe_directory(top) and top not in named:
+            named.append(top)
+        break
+    return named
 
 
 def git_config_env(
@@ -498,9 +514,12 @@ class SandboxPolicy:
     env_prefixes: Tuple[str, ...] = ()
     env_names: Tuple[str, ...] = ()
     extra_env: Dict[str, str] = field(default_factory=dict)
-    #: The scanner hands git the directories to trust (``SAFE_DIRECTORIES_ENV``);
-    #: see ``SandboxRequirements.git_safe_directory``.
+    #: The scanner runs git on the directory it scans; see
+    #: ``SandboxRequirements.git_safe_directory``. ``safe_directories`` is the
+    #: validated list ``build_scanner_policy`` computed from the scan target
+    #: (``safe_directories_for``); ``filter_env`` writes it as ``GIT_CONFIG_*``.
     git_safe_directory: bool = False
+    safe_directories: Tuple[str, ...] = ()
     #: Variables a backend points at a private writable directory when it mounts
     #: ``cache`` read-only, which is everywhere but bwrap's throwaway overlay.
     cache_env: Tuple[str, ...] = ()
@@ -546,6 +565,19 @@ class SandboxPolicy:
             parse_environment(self.environment)
         except ValueError as refused:
             raise SandboxUnavailable(str(refused)) from None
+        if self.git_safe_directory:
+            # The scanner's ``GIT_CONFIG_*`` block is written by ``filter_env`` from
+            # ``safe_directories``; a listed entry would be dropped silently or, with
+            # a value, contradict "no other GIT_CONFIG_* variable passes".
+            names, values = parse_environment(self.environment)
+            for name in (*names, *values):
+                if _GIT_CONFIG_NAME.match(name):
+                    raise SandboxUnavailable(
+                        f"the environment list names {name}, which {self.scanner_name} "
+                        "does not take: it runs git on the directory it scans, so ASH "
+                        "writes that scanner's GIT_CONFIG_* block itself. Remove the "
+                        "entry from the environment list."
+                    )
 
     @property
     def results_dir(self) -> Path:
@@ -559,25 +591,18 @@ class SandboxPolicy:
         listed_names, listed_values = parse_environment(self.environment)
         listed = set(listed_names)
         kept = {}
-        # The directories the scanner asks git to trust travel under a private name
-        # and are always consumed here, so the name never reaches the child.
-        safe_directories = (
-            safe_directories_from(env.get(SAFE_DIRECTORIES_ENV))
-            if self.git_safe_directory
-            else []
-        )
         # A NAME=value entry sets the value before anything is screened, so it is
         # held to the same rules as a value the caller has.
         for key, value in {**env, **listed_values}.items():
-            if key in DROPPED_ENV_NAMES or key == SAFE_DIRECTORIES_ENV:
+            if key in DROPPED_ENV_NAMES:
                 continue
             if self.git_safe_directory and _GIT_CONFIG_NAME.match(key):
                 # The caller's block, and the entries the scanner merged into it
                 # against that block, are not passed: the block is rebuilt below
-                # from the operator's listed entries and the named directories, so
-                # its count and indices agree with what the child receives.
-                if key not in listed_values:
-                    continue
+                # from the directories the policy names, so its count and indices
+                # agree with what the child receives. (The environment list may not
+                # name one of these for this scanner; ``__post_init__``.)
+                continue
             if key == "PYTHONPATH":
                 # Passed through for the workers ASH starts with its own
                 # interpreter; a relative or empty entry would be read against the
@@ -603,8 +628,8 @@ class SandboxPolicy:
             if _URL_USERINFO.match(value or ""):
                 continue
             kept[key] = value
-        if safe_directories:
-            kept.update(git_config_env(kept, safe_directories))
+        if self.git_safe_directory and self.safe_directories:
+            kept.update(git_config_env(kept, self.safe_directories))
         kept["HOME"] = self.home.as_posix()
         kept.update(self.extra_env)
         return kept
@@ -2056,6 +2081,11 @@ def build_scanner_policy(
         env_names=tuple(declared_names),
         extra_env=extra_env,
         git_safe_directory=requirements.git_safe_directory,
+        safe_directories=(
+            tuple(safe_directories_for(scan_target))
+            if requirements.git_safe_directory and scan_target is not None
+            else ()
+        ),
         cache_env=cache_env,
         executable=tuple(executable),
         scan_data=tuple(scan_data),
