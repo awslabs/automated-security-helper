@@ -9,7 +9,7 @@ mcp_get_scan_results into smaller, purpose-specific views.
 """
 
 import copy
-from typing import Any, Dict, List, Optional, TypeGuard
+from typing import Any, Dict, List, Optional, TypeGuard, cast
 
 from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.vocab import SEVERITY_BUCKETS
@@ -536,7 +536,9 @@ def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
                         if _actionable_in_view(r, thresholds, projects)
                     ]
                     for r in run["results"]:
-                        kept_buckets.append(wire(_get_finding_severity(r).lower()))
+                        kept_buckets.append(
+                            cast(str, wire(_get_finding_severity(r).lower()))
+                        )
                         kept_names.append(wire(_sarif_scanner_name(r)))
             _fold_kept_results(kept_buckets, kept_names, kept_counts, kept_per_scanner)
             # The SARIF is the one document that holds every finding, so a
@@ -1178,7 +1180,7 @@ def _stats_of_sarif(
                 kinds.append("suppressed")
                 continue
             total += 1
-            kinds.append(wire(_get_finding_severity(result).lower()))
+            kinds.append(cast(str, wire(_get_finding_severity(result).lower())))
             if actionable is not None and _actionable_in_view(
                 result, thresholds, projects
             ):

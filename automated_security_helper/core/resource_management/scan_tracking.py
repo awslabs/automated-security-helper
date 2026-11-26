@@ -1407,7 +1407,7 @@ def _add_aggregated_scanner_progress(
         # only: ASH writes one run for all its scanners, so the driver name
         # there is ASH's, and matched against a scanner name it found nothing.
         finding_scanners.append(
-            wire(result_scanner_name(result) or _run_driver_name(run))
+            cast(str, wire(result_scanner_name(result) or _run_driver_name(run)))
         )
         finding_buckets.append(_severity_bucket(severity))
 
