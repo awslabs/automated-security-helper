@@ -11,8 +11,9 @@ the CLI inside the container does. `-v` after a subcommand is that subcommand's
 --version. `--help`, `--version` and that `-v` run the CLI from the wrapper's own
 directory, not the caller's, so a package planted in a scanned checkout is not what
 runs, and exit with the CLI's own status. The script's own directory is read with CDPATH unset, and the
-container is run with its stdin open only for the subcommands that read it (`mcp`,
-`inspect`, `config`) and for a run given `--cli-json-input -`.
+container is run with its stdin open only for the commands that read it (`mcp`,
+`inspect findings`, `results inspect findings`, `config lint`, `config wizard`; the
+other commands of those groups read nothing) and for a run given `--cli-json-input -`.
 
 A fake OCI runner stands in for docker, as in
 test_ash_bash_entrypoint_container_inputs.py, and records each call's argv
@@ -521,8 +522,8 @@ def test_an_mcp_run_over_a_pipe_keeps_stdin_open_and_asks_for_no_terminal(
 ):
     """An MCP client drives `./ash mcp` over a pipe on the default stdio transport:
     without -i the container got no input. Stdin here is a pipe, the client's shape
-    (the parametrized test below covers mcp, inspect and config, the three
-    subcommands that keep stdin open, with a regular file and /dev/null on stdin);
+    (the parametrized test below covers every command that keeps stdin open, and the
+    commands beside them that do not, with a regular file and /dev/null on stdin);
     this one also pins that a captured stdout asks for no pseudo-terminal and that
     the subcommand reaches the container whole."""
     source, out = _dirs(tmp_path)
@@ -546,12 +547,73 @@ def test_an_mcp_run_over_a_pipe_keeps_stdin_open_and_asks_for_no_terminal(
     [
         pytest.param([], False, id="default-scan"),
         pytest.param(["scan"], False, id="scan"),
+        # The deprecated top-level spelling of results report.
         pytest.param(["report"], False, id="report"),
         pytest.param(["mcp"], True, id="mcp"),
-        pytest.param(["inspect"], True, id="inspect"),
-        pytest.param(["config"], True, id="config"),
+        # inspect is a group: findings is the Textual app, which reads keys, and
+        # sarif-fields writes files. The same two commands sit under results.
+        pytest.param(["inspect", "findings"], True, id="inspect-findings"),
+        pytest.param(["inspect", "sarif-fields"], False, id="inspect-sarif-fields"),
+        pytest.param(["inspect"], False, id="inspect-with-no-command"),
+        pytest.param(
+            ["results", "inspect", "findings"], True, id="results-inspect-findings"
+        ),
+        pytest.param(
+            ["results", "inspect", "sarif-fields"],
+            False,
+            id="results-inspect-sarif-fields",
+        ),
+        pytest.param(
+            ["results", "inspect"], False, id="results-inspect-with-no-command"
+        ),
+        # The rest of the results group reads nothing, so each keeps stdin to the caller.
+        pytest.param(["results", "report"], False, id="results-report"),
+        pytest.param(["results", "diff"], False, id="results-diff"),
+        pytest.param(["results", "trend"], False, id="results-trend"),
+        pytest.param(["results", "merge"], False, id="results-merge"),
+        pytest.param(["results"], False, id="results-with-no-command"),
+        # config asks before it changes a file in lint (with --fix) and in wizard, and
+        # nowhere else.
+        pytest.param(["config", "lint"], True, id="config-lint"),
+        pytest.param(["config", "lint", "--fix"], True, id="config-lint-fix"),
+        pytest.param(["config", "wizard"], True, id="config-wizard"),
+        pytest.param(["config", "get"], False, id="config-get"),
+        pytest.param(["config", "init"], False, id="config-init"),
+        pytest.param(["config", "update"], False, id="config-update"),
+        pytest.param(["config", "validate"], False, id="config-validate"),
+        pytest.param(
+            ["config", "validate-plugin-dependencies"],
+            False,
+            id="config-validate-plugin-dependencies",
+        ),
+        pytest.param(["config"], False, id="config-with-no-command"),
+        pytest.param(["container", "build"], False, id="container-build"),
+        # A later word that spells a reader is not the command: the words from the
+        # subcommand on must spell the whole entry.
+        pytest.param(
+            ["config", "get", "wizard"], False, id="a-later-word-names-config-wizard"
+        ),
+        pytest.param(
+            ["results", "report", "findings"],
+            False,
+            id="a-later-word-names-inspect-findings",
+        ),
+        # The value of a root option can name a command; it is not the subcommand.
+        pytest.param(
+            ["--phases", "mcp", "results", "report"], False, id="a-value-names-mcp"
+        ),
+        pytest.param(
+            ["--phases", "report", "results", "inspect", "findings"],
+            True,
+            id="a-value-names-report-before-the-findings-view",
+        ),
         pytest.param(
             ["scan", "--cli-json-input", "-"], True, id="scan-with-its-json-on-stdin"
+        ),
+        pytest.param(
+            ["results", "report", "--cli-json-input", "-"],
+            True,
+            id="results-report-with-its-json-on-stdin",
         ),
         pytest.param(
             ["report", "--cli-json-input=-"], True, id="report-with-its-json-attached"
@@ -570,11 +632,14 @@ def test_only_the_subcommands_that_read_stdin_keep_the_containers_stdin_open(
     """Stdin is a regular file (the shape of `./ash --source-dir "$d" < dirs.txt`
     inside a `while read` loop, or a job script fed to bash on stdin) or /dev/null.
     A scan given -i consumed that input, so the loop ended after one directory and
-    the script lost the commands after ./ash; only mcp, inspect and config read
-    stdin, and any subcommand given `--cli-json-input -` reads its parameters from
-    it, so only those get -i. The list is checked against the CLI's own readers in
-    test_ash_bash_entrypoint_subcommand_args.py. The file's offset is read after the
-    run: the wrapper itself must consume none of it, whichever way it decides."""
+    the script lost the commands after ./ash. Only the commands that read stdin get
+    -i: mcp, inspect findings, results inspect findings, config lint and config
+    wizard, and any command given `--cli-json-input -`, which reads its parameters
+    from it. The other commands of a group that holds a reader (results report,
+    config get, inspect sarif-fields) read nothing and get none. The list is checked
+    against the CLI's own readers in test_ash_bash_entrypoint_subcommand_args.py. The
+    file's offset is read after the run: the wrapper itself must consume none of it,
+    whichever way it decides."""
     source, out = _dirs(tmp_path)
     arguments = [
         "--no-build",
@@ -604,7 +669,13 @@ def test_only_the_subcommands_that_read_stdin_keep_the_containers_stdin_open(
     ("words", "kept_open"),
     [
         pytest.param([], False, id="scan-in-the-background"),
-        pytest.param(["inspect"], True, id="inspect-at-the-terminal"),
+        pytest.param(["inspect", "findings"], True, id="inspect-at-the-terminal"),
+        pytest.param(
+            ["results", "inspect", "findings"],
+            True,
+            id="results-inspect-at-the-terminal",
+        ),
+        pytest.param(["results", "report"], False, id="results-report-at-the-terminal"),
     ],
 )
 def test_a_terminal_stdin_does_not_keep_the_containers_stdin_open(
@@ -612,8 +683,9 @@ def test_a_terminal_stdin_does_not_keep_the_containers_stdin_open(
 ):
     """`./ash scan &` from an interactive shell: the terminal is on stdin AND stdout.
     With -i the runner reads the terminal and the background job stops on that read,
-    so a scan gets no -i there. `./ash inspect` at the same terminal reads keys, so
-    it keeps -i. The terminal is a real pseudo-terminal on both ends, which is the
+    so a scan gets no -i there, and neither does `./ash results report`. `./ash
+    inspect findings` at the same terminal reads keys, so it keeps -i, as does the
+    same view under `results`. The terminal is a real pseudo-terminal on both ends, which is the
     shape an earlier condition (-i whenever stdout was a terminal) gave -i to for a
     scan; a captured stdout would not tell the shapes apart. The runner's options
     come from the recording runner's log, not from the wrapper's output."""

@@ -13,6 +13,7 @@ A fake OCI runner stands in for docker, as in test_ash_bash_entrypoint_build_fai
 and prints the argv it was given.
 """
 
+import ast
 import inspect
 import os
 import re
@@ -348,72 +349,133 @@ STDIN_READER = re.compile(
 )
 
 
-def _callback_modules(command) -> set[Path]:
-    """The source files of a click command's callback and of every command under it."""
-    found: set[Path] = set()
+#: What a module's own definitions are: the functions and classes at its top level.
+_DEFINITIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+
+
+def _leaves(command, words=()):
+    """Every command with no command under it, and the words that name it from the
+    root down, as ./ash is given them: ("config", "lint")."""
+    subcommands = getattr(command, "commands", None)
+    if not subcommands:
+        yield words, command
+        return
+    for name, sub in subcommands.items():
+        yield from _leaves(sub, (*words, name))
+
+
+def _callback_function(command):
+    """The function a click command runs. typer wraps the one it was given, and the
+    wrapper carries the original."""
     callback = getattr(command, "callback", None)
-    if callback is not None:
-        # typer wraps the function it was given; the wrapper carries the original.
-        module = inspect.getmodule(getattr(callback, "__wrapped__", callback))
-        if module is not None and module.__file__:
-            found.add(Path(module.__file__).resolve())
-    for sub in getattr(command, "commands", {}).values():
-        found |= _callback_modules(sub)
-    return found
+    assert callback is not None, f"the command {command.name!r} has no callback"
+    return inspect.unwrap(callback)
 
 
-def _defaults_its_transport_to_stdio(command) -> bool:
-    """Whether the command, or any command under it, defaults --transport to stdio."""
+def _text_the_function_acts_on(source: str, name: str) -> str:
+    """The text of a module in which one command's behavior can come from, so a
+    command is judged by its own code and not by what its neighbors in the module do.
+
+    That is the top-level function *name*, every function and class of the module
+    that it names, those named by them in turn, and the statements outside any
+    definition: the module's imports and constants, which is where a module that is
+    the Textual app says so. A prompt in a helper that only another command calls is
+    not in it."""
+    tree = ast.parse(source)
+    definitions = {
+        node.name: node for node in tree.body if isinstance(node, _DEFINITIONS)
+    }
+    assert name in definitions, (
+        f"{name} is not a function or class at the top of its module"
+    )
+    reached = {name}
+    pending = [definitions[name]]
+    while pending:
+        node = pending.pop()
+        for used in {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}:
+            if used in definitions and used not in reached:
+                reached.add(used)
+                pending.append(definitions[used])
+    segments = [ast.get_source_segment(source, definitions[n]) for n in sorted(reached)]
+    segments += [
+        ast.get_source_segment(source, node)
+        for node in tree.body
+        if not isinstance(node, _DEFINITIONS)
+    ]
+    return "\n".join(segments)
+
+
+def _source_file(command) -> Path:
+    return Path(inspect.getsourcefile(_callback_function(command))).resolve()
+
+
+def _reads_stdin(command) -> bool:
+    """Whether a command, judged by its own code, reads stdin: it defaults --transport
+    to stdio (its client drives it over stdin), or the code its callback acts on
+    prompts, runs the Textual app, or reads the stream."""
     if any(p.name == "transport" and p.default == "stdio" for p in command.params):
         return True
-    return any(
-        _defaults_its_transport_to_stdio(sub)
-        for sub in getattr(command, "commands", {}).values()
+    text = _text_the_function_acts_on(
+        _source_file(command).read_text(encoding="utf-8"),
+        _callback_function(command).__name__,
     )
+    return STDIN_READER.search(text) is not None
+
+
+def _entries_in(script: str) -> set[tuple[str, ...]]:
+    """The commands ASH_READS_STDIN lists, each as the words that name it."""
+    listed = re.search(r"ASH_READS_STDIN=\"([^\"]*)\"", script).group(1).split()
+    return {tuple(entry.split(":")) for entry in listed}
+
+
+def _drift(script: str, derived) -> tuple[set, set]:
+    """(commands that read stdin and are not listed, commands listed that do not)."""
+    listed = _entries_in(script)
+    return set(derived) - listed, listed - set(derived)
+
+
+@pytest.fixture(scope="module")
+def the_cli():
+    """Every command of the ash CLI with nothing under it: (words, command) pairs."""
+    import typer.main
+
+    from automated_security_helper.cli.main import app
+
+    return list(_leaves(typer.main.get_command(app)))
 
 
 @pytest.mark.unit
-def test_stdin_is_kept_open_for_the_subcommands_that_read_it():
-    """The entrypoint's list of the subcommands whose container keeps stdin open
-    (ASH_READS_STDIN), checked against the CLI so it cannot drift from it: a
-    subcommand reads stdin when its command, or one under it, prompts, runs the
-    Textual app, or defaults its --transport to stdio. The one reader outside the
-    list is `--cli-json-input -`, which every command takes and the entrypoint reads
-    by its flag; every other stdin-reading module under the CLI package belongs to a
-    listed subcommand, so a new reader fails here until the list names it. The
-    scan covers the CLI package only (the callbacks' own modules and everything
-    under automated_security_helper/cli/): a prompt a command reaches through
-    utils/ or core/ is outside it, and a test that runs each command with stdin
-    closed would be the stronger guard."""
-    import typer.main
-
+def test_stdin_is_kept_open_for_the_commands_that_read_it(the_cli):
+    """The entrypoint's list of the commands whose container keeps stdin open
+    (ASH_READS_STDIN), checked against the CLI so it cannot drift from it. A command
+    reads stdin when its code prompts, runs the Textual app, or defaults its
+    --transport to stdio, and it is judged by its own code: `config lint` and `config
+    wizard` ask before they change a file, and `config get` in the same module does
+    not, so listing the group would keep stdin open for every command of it. The one
+    reader outside the list is `--cli-json-input -`, which every command takes and the
+    entrypoint reads by its flag; every other stdin-reading module under the CLI
+    package holds a listed command, so a new reader module fails here until a command
+    of it is listed. The scan covers the CLI package only (the callbacks' own modules
+    and everything under automated_security_helper/cli/): a prompt a command reaches
+    through utils/ or core/ is outside it, and a test that runs each command with
+    stdin closed would be the stronger guard."""
     from automated_security_helper import cli as cli_package
     from automated_security_helper.cli.json_input import CLI_JSON_INPUT_FLAG
-    from automated_security_helper.cli.main import app
 
     script = ASH_SCRIPT.read_text(encoding="utf-8")
-    reads_stdin = set(
-        re.search(r"ASH_READS_STDIN=\"([^\"]*)\"", script).group(1).split()
-    )
     # The flag is read in both spellings, by the CLI's own name for it.
     assert f"{CLI_JSON_INPUT_FLAG})" in script
     assert f"{CLI_JSON_INPUT_FLAG}=-)" in script
 
-    root = typer.main.get_command(app)
-    owned = {
-        name: _callback_modules(command) for name, command in root.commands.items()
-    }
-    assert all(owned.values()), "every subcommand's callback resolves to a source file"
-    derived = {
-        name
-        for name, command in root.commands.items()
-        if _defaults_its_transport_to_stdio(command)
-        or any(
-            STDIN_READER.search(path.read_text(encoding="utf-8"))
-            for path in owned[name]
-        )
-    }
-    assert reads_stdin == derived
+    derived = {words for words, command in the_cli if _reads_stdin(command)}
+    assert derived, "the CLI's stdin readers are found at all"
+    unlisted, stale = _drift(script, derived)
+    assert (unlisted, stale) == (set(), set()), (
+        f"read stdin and are not in ASH_READS_STDIN: {sorted(unlisted)}; "
+        f"are in ASH_READS_STDIN and read none: {sorted(stale)}. The list is "
+        "STDIN_READING_COMMANDS in interactions/wrapper_contract.py; regenerate "
+        "./ash with scripts/generate_wrapper_tables.py."
+    )
 
     cli_dir = Path(cli_package.__file__).resolve().parent
     reading = {
@@ -422,5 +484,74 @@ def test_stdin_is_kept_open_for_the_subcommands_that_read_it():
         if STDIN_READER.search(path.read_text(encoding="utf-8"))
     }
     assert reading, "the CLI's stdin readers are found at all"
-    listed = set().union(*(owned[name] for name in reads_stdin))
+    listed = {_source_file(command) for words, command in the_cli if words in derived}
     assert reading - listed == {cli_dir / "json_input.py"}, sorted(reading - listed)
+
+
+@pytest.mark.unit
+def test_a_command_that_reads_stdin_and_is_not_listed_fails_the_check(the_cli):
+    """The control: with one reader taken out of the entrypoint's list, the check
+    names it, and with a command that reads nothing put in, it names that one, so
+    the equality above is not a check that passes whatever the list says."""
+    script = ASH_SCRIPT.read_text(encoding="utf-8")
+    derived = {words for words, command in the_cli if _reads_stdin(command)}
+    assert _drift(script, derived) == (set(), set())
+
+    assert script.count(" config:wizard") == 1
+    without_wizard = script.replace(" config:wizard", "")
+    assert _drift(without_wizard, derived) == ({("config", "wizard")}, set())
+
+    assert script.count(" mcp results:inspect:findings") == 1
+    with_config_get = script.replace(
+        " mcp results:inspect:findings", " config:get mcp results:inspect:findings"
+    )
+    assert _drift(with_config_get, derived) == (set(), {("config", "get")})
+
+
+_TWO_COMMANDS = """
+from helpers import confirm
+
+
+def asks():
+    return _ask_through_a_helper()
+
+
+def _ask_through_a_helper():
+    return confirm("Apply these fixes?")
+
+
+def tells():
+    return _say_something()
+
+
+def _say_something():
+    return "done"
+"""
+
+
+@pytest.mark.unit
+def test_a_command_is_judged_by_its_own_code_not_by_its_modules():
+    """Two commands of one module, one asking through a helper: the scan reads the one
+    that asks as a reader and the other as not, which a scan of the whole module
+    could not tell apart."""
+    assert STDIN_READER.search(_text_the_function_acts_on(_TWO_COMMANDS, "asks"))
+    assert not STDIN_READER.search(_text_the_function_acts_on(_TWO_COMMANDS, "tells"))
+
+
+@pytest.mark.unit
+def test_a_module_that_is_the_textual_app_reads_stdin_for_every_command_in_it():
+    """The Textual import stands at the top of the module, outside every function,
+    and the commands defined there are the app."""
+    source = "from textual.app import App\n\n\ndef view():\n    return App\n\n\ndef other():\n    return 1\n"
+    assert STDIN_READER.search(_text_the_function_acts_on(source, "other"))
+    # The control: the same module without the import reads nothing.
+    assert not STDIN_READER.search(
+        _text_the_function_acts_on(source.replace("textual.app", "helpers"), "other")
+    )
+
+
+@pytest.mark.unit
+def test_a_callback_that_is_not_a_top_level_function_is_refused_not_guessed():
+    nested = "def outer():\n    def inner():\n        return 1\n    return inner\n"
+    with pytest.raises(AssertionError, match="not a function or class at the top"):
+        _text_the_function_acts_on(nested, "inner")

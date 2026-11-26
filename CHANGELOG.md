@@ -161,6 +161,13 @@
   deprecated `ASH_OCI_RUNNER`), such as `./bin/docker`, is refused with exit 3 instead of
   being run from the working directory, which is usually the repository being scanned.
   The same path given as `-OCIRunner` is used as written, as before.
+- **`./ash` keeps the container's stdin open for the commands that read it, not for
+  whole command groups.** `./ash results inspect findings` now gets its keyboard
+  input, as `./ash inspect findings` does. `config lint`, `config wizard`, `inspect
+  findings`, `results inspect findings` and `mcp` keep stdin open. The other commands
+  of those groups, such as `config get` and `inspect sarif-fields`, read nothing and
+  no longer take the caller's stdin, so a `while read` loop that runs one of them
+  keeps its remaining lines.
 
 ### Features
 
