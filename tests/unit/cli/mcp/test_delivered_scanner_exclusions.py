@@ -1210,6 +1210,10 @@ NON_PATH_EXCLUSIONS = [
     ("trivy", "scanners", ["license"]),
     ("trivy", "ignore_unfixed", True),
     ("trivy", "offline", True),
+    ("mcp-config", "forbid_privilege_escalation", False),
+    ("mcp-config", "forbid_unpinned_runners", False),
+    ("mcp-config", "forbid_auto_approval", False),
+    ("mcp-config", "flag_env_secrets", False),
 ]
 _NON_PATH_IDS = [f"{scanner}.{option}" for scanner, option, _ in NON_PATH_EXCLUSIONS]
 
@@ -1264,6 +1268,9 @@ def _option_defaults() -> Dict[tuple, Any]:
     from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
         GitleaksScannerConfigOptions,
     )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.mcp_config_scanner import (
+        McpConfigScannerConfigOptions,
+    )
     from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
         TrivyScannerConfigOptions,
     )
@@ -1275,6 +1282,7 @@ def _option_defaults() -> Dict[tuple, Any]:
         "cfn-lint": CfnLintScannerConfigOptions(),
         "checkov": CheckovScannerConfigOptions(),
         "gitleaks": GitleaksScannerConfigOptions(),
+        "mcp-config": McpConfigScannerConfigOptions(),
         "trivy": TrivyScannerConfigOptions(),
         "detect-secrets": DetectSecretsScannerConfigOptions(),
         "grype": GrypeScannerConfigOptions(),
@@ -1428,6 +1436,13 @@ _REVIEWED_OPTIONS: Dict[tuple, str] = {
     ("guarddog", "verify_parallelism"): (
         "how many dependencies verify downloads at once; throughput, not findings"
     ),
+    ("mcp-config", "require_local"): "off by default; on reports more",
+    ("mcp-config", "remote_url_prefixes"): (
+        "empty by default, which turns the check off; a list reports more"
+    ),
+    ("mcp-config", "allowed_command_prefixes"): (
+        "empty by default, which turns the check off; a list reports more"
+    ),
 }
 
 
@@ -1443,6 +1458,7 @@ def _scanner_option_models() -> Dict[str, Any]:
         detect_secrets_scanner,
         gitleaks_scanner,
         grype_scanner,
+        mcp_config_scanner,
         npm_audit_scanner,
         opengrep_scanner,
         semgrep_scanner,
@@ -1480,6 +1496,7 @@ def _scanner_option_models() -> Dict[str, Any]:
         "detect-secrets": detect_secrets_scanner.DetectSecretsScannerConfigOptions,
         "gitleaks": gitleaks_scanner.GitleaksScannerConfigOptions,
         "grype": grype_scanner.GrypeScannerConfigOptions,
+        "mcp-config": mcp_config_scanner.McpConfigScannerConfigOptions,
         "npm-audit": npm_audit_scanner.NpmAuditScannerConfigOptions,
         "opengrep": opengrep_scanner.OpengrepScannerConfigOptions,
         "semgrep": semgrep_scanner.SemgrepScannerConfigOptions,
