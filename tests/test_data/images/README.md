@@ -15,6 +15,7 @@ Every mtime is 0 and every owner is root. The deflate output is whatever the
 building zlib writes, so the digest pins this committed file, and the builder is
 checked by what the archive decompresses to. To rebuild it and read the new digest:
 
+<!-- doctest: illustrative reason="rewrites this repository's committed fixture with a script from its tests/utils directory, so it needs a checkout of this repository" -->
 ```bash
 python3 -I -B tests/utils/image_archive_fixture.py tests/test_data/images/secret-image.tar
 ```

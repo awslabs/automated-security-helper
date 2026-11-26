@@ -30,8 +30,21 @@ from automated_security_helper.utils.install_providers import (
     ForcedBinary,
     record_forced_binaries,
 )
+from tests.utils.stand_ins import write_stand_in
 
 pytestmark = pytest.mark.unit
+
+
+def _marker_program(directory, name, marker):
+    """A program named ``name`` that creates ``marker`` if it is ever started.
+
+    In the form the host starts (``tests/utils/stand_ins.py``): the script on POSIX,
+    a ``<name>.bat`` launcher for it on Windows, where a shebang script is no
+    program and so no binary to force. The path returned is the file a start names.
+    """
+    directory.mkdir(exist_ok=True)
+    source = f"open({str(marker)!r}, 'w').close()\n"
+    return write_stand_in(directory, name, source).files[-1]
 
 
 class StubConfig(ScannerPluginConfigBase):
@@ -88,12 +101,7 @@ def scanner(tmp_path):
 
 def _forced_file(tmp_path):
     marker = tmp_path / "FORCED-BINARY-WAS-RUN"
-    tools = tmp_path / "tools"
-    tools.mkdir(exist_ok=True)
-    binary = tools / "stub-tool"
-    binary.write_text(f"#!/bin/sh\ntouch {marker}\n")
-    binary.chmod(0o755)
-    return binary, marker
+    return _marker_program(tmp_path / "tools", "stub-tool", marker), marker
 
 
 def _record(binary):
@@ -150,10 +158,9 @@ def test_an_overriding_scanner_reads_the_record_before_any_lookup(
         checkov_scanner,
     )
 
-    binary = tmp_path / "tools-checkov" / "checkov"
-    binary.parent.mkdir()
-    binary.write_text("#!/bin/sh\nexit 0\n")
-    binary.chmod(0o755)
+    binary = _marker_program(
+        tmp_path / "tools-checkov", "checkov", tmp_path / "CHECKOV-WAS-RUN"
+    )
     record_forced_binaries(
         [
             ForcedBinary(

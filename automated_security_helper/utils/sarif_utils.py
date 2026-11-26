@@ -2309,8 +2309,15 @@ def _apply_suppressions_within_budget(
     )
     written_ids: Dict[int, str] = {}
     # Warn once per rule-less entry that covers an npm-audit finding (see
-    # _apply_config_suppression): per pass, like the written ids above.
-    warned_rule_less: set = set()
+    # _apply_config_suppression): once per RUN, the docs' "once per entry per
+    # run", so the set lives on the context like warned_unmatched_engines does
+    # and a second report pass of the same scan does not warn again. A stand-in
+    # context without the field (a test double) falls back to once per pass.
+    warned_rule_less: set | None = getattr(
+        plugin_context, "warned_rule_less_suppressions", None
+    )
+    if warned_rule_less is None:
+        warned_rule_less = set()
 
     # Exclusions a delivered config gave one scanner in its options, moved out of
     # them before the scan so the files were scanned. Each finding of that scanner
