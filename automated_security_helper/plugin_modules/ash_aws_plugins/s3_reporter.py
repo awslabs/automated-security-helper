@@ -18,6 +18,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterWorkspaceBehaviour,
     write_report_file,
 )
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.error_text import error_text, text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -274,7 +275,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
                 "Error when validating S3 access: "
                 f"{error_text(e, self._environment_values())}",
                 level=logging.ERROR,
-                target_type="source",
+                target_type=TargetType.SOURCE,
                 append_to_stream="stderr",
             )
         return self.dependencies_satisfied

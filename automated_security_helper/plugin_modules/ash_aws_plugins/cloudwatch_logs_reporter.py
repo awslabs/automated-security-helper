@@ -33,6 +33,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 # PutLogEvents caps a request at 1,048,576 bytes, counted as the UTF-8 size of
@@ -224,7 +225,7 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
             self._plugin_log(
                 f"Error when calling STS: {error_text(e, self._environment_values())}",
                 level=logging.ERROR,
-                target_type="source",
+                target_type=TargetType.SOURCE,
                 append_to_stream="stderr",
             )
         return self.dependencies_satisfied
