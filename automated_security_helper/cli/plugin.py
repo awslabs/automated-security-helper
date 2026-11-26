@@ -258,7 +258,7 @@ def list_plugins(
         # would read the registry outside the scan's filter.
         refuse_unknown_plugin_options(ash_config, selected)
 
-        def _registered(plugin_type: str, declared: List) -> List:
+        def _registered(plugin_type: PluginKind, declared: List) -> List:
             registered = list(selected[plugin_type])
             order = {cls: index for index, cls in enumerate(declared)}
             return sorted(

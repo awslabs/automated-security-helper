@@ -185,7 +185,7 @@ def add(
         Optional[str],
         typer.Option("--source-dir", help=_SOURCE_DIR_HELP),
     ] = None,
-):
+) -> None:
     """Add a symbol suppression and lock its file's content hash.
 
     Writes the suppression into the config and the hash of the file's bytes
@@ -307,7 +307,7 @@ def refresh(
         Optional[str],
         typer.Option("--source-dir", help=_SOURCE_DIR_HELP),
     ] = None,
-):
+) -> None:
     """Record a new review: re-hash locked files whose bytes changed.
 
     Run it after reading what changed in a file and confirming its suppressions
@@ -390,7 +390,7 @@ def verify(
         Optional[str],
         typer.Option("--source-dir", help=_SOURCE_DIR_HELP),
     ] = None,
-):
+) -> None:
     """Check the lock against the tree. Exits 1 when anything is out of date.
 
     Lists every locked file whose bytes changed or that is gone, and every
@@ -434,8 +434,8 @@ def verify(
             path = entry.get("path")
             if not symbol or not isinstance(path, str):
                 continue
-            key = lock_key(path)
-            locked = lock.entries.get(key) if key is not None else None
+            entry_key = lock_key(path)
+            locked = lock.entries.get(entry_key) if entry_key is not None else None
             if locked is None or not scope_is_recorded(
                 locked, entry.get("rule_id"), str(symbol)
             ):
