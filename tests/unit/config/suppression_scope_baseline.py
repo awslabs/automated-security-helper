@@ -12,9 +12,14 @@ merge of a513530b dropped the directory globs #724 removed (17 keys) and took
 #717's B108 entry for tests/snapshot/test_snapshot_normalizer.py. The merge of
 origin/main into v4-capabilities (617e17c3629) added the whole-file entries main wrote
 one per rule and file (221 in .ash/.ash.yaml, 108 in the community config), listed in
-the last block of each list, and raised the caps to match. PRE_GUARD_BASELINE holds the
-ones that were already on this branch, from other branches, when the guard was
-added. Each is tagged with the branch that landed it.
+the last block of each list, and raised the caps to match. Main has since moved both
+configs (.ash.yaml at the root, #1112; the community tier renamed alpha,
+.ash/.ash_alpha_plugins.yaml, #1044), so the lists are keyed by those paths. The merge
+of origin/main c15148192f4 dropped the keys main pinned or removed from its configs (1
+from .ash.yaml, 28 from the alpha config), took the whole-file and glob entries main
+wrote since ae28f8411ce (29 and 2, the last block of each list), and set the caps to
+the new sizes. PRE_GUARD_BASELINE holds the ones that were already on this branch, from
+other branches, when the guard was added. Each is tagged with the branch that landed it.
 """
 
 from __future__ import annotations
@@ -575,7 +580,6 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         # never baselined. Sorted by path, then rule. Nothing here is new: none is on
         # v4's side of the merge.
         ("CKV_GHA_7", ".github/workflows/ash-docs-ci-runners.yml"),
-        ("B104", "automated_security_helper/cli/mcp/__init__.py"),
         ("SECRET-SECRET-KEYWORD", "automated_security_helper/utils/scanner_names.py"),
         (
             "SECRET-SECRET-KEYWORD",
@@ -1226,6 +1230,82 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ("B108", "tests/unit/express/test_runtime_paths.py"),
         ("SECRET-SECRET-KEYWORD", "tests/unit/express/test_client_delegation.py"),
         ("generic-api-key", "tests/integration/express/test_express_e2e.py"),
+        # The merge of origin/main c15148192f4 into v4-capabilities: whole-file and
+        # glob entries main wrote after the merge at ae28f8411ce (the sdist-lock
+        # harvester's locks, the dependabot auto-merge workflow, new tests), one per
+        # rule and path. Each is an unpinned entry in origin/main's .ash.yaml; none is
+        # on v4's side of the merge. Sorted by path, then rule.
+        ("GHSA-2mjx-qc3c-rqvc*", "**/sdist-lock-harvester/sdist-locks/**/Cargo.lock"),
+        ("GHSA-36hh-v3qg-5jq4*", "**/sdist-lock-harvester/sdist-locks/**/Cargo.lock"),
+        ("GHSA-c8m5-c952-6cm4*", "**/sdist-lock-harvester/sdist-locks/**/Cargo.lock"),
+        ("GHSA-chgr-c6px-7xpp*", "**/sdist-lock-harvester/sdist-locks/**/Cargo.lock"),
+        (
+            "SECRET-HEX-HIGH-ENTROPY-STRING",
+            "**/sdist-lock-harvester/sdist-locks/**/harvest-manifest.json",
+        ),
+        ("CVE-2026-115905", "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock"),
+        ("CVE-2026-115906", "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock"),
+        ("CVE-2026-115907", "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock"),
+        ("CVE-2026-115908", "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock"),
+        ("CVE-2026-115909", "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock"),
+        (
+            "GHSA-8hxf-qr8p-62x4-zip",
+            "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock",
+        ),
+        (
+            "GHSA-9hj8-73fh-9963-zip",
+            "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock",
+        ),
+        (
+            "GHSA-hjqx-j4rw-g7xv-zip",
+            "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock",
+        ),
+        (
+            "GHSA-m665-v7pm-7grj-zip",
+            "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock",
+        ),
+        (
+            "GHSA-q7v9-x93c-xqv3-zip",
+            "**/sdist-lock-harvester/sdist-locks/ruff/*/Cargo.lock",
+        ),
+        (
+            "zizmor/dangerous-triggers",
+            ".github/workflows/ash-dependabot-auto-merge.yml",
+        ),
+        (
+            "SECRET-BASIC-AUTH-CREDENTIALS",
+            "tests/unit/base/test_a_plugin_with_no_tool_or_directory_fails_closed.py",
+        ),
+        ("B108", "tests/unit/express/test_image_options_classify_as_scans.py"),
+        (
+            "SECRET-HEX-HIGH-ENTROPY-STRING",
+            "tests/unit/plugin_conformance/fixture_plugin/transcripts/transcripts.json",
+        ),
+        (
+            "SECRET-SECRET-KEYWORD",
+            "tests/unit/plugin_manifests/test_config_sections_and_exclusions.py",
+        ),
+        (
+            "SECRET-SECRET-KEYWORD",
+            "tests/unit/plugin_modules/ash_builtin/converters/test_mcp_config_converter.py",
+        ),
+        (
+            "SECRET-SECRET-KEYWORD",
+            "tests/unit/plugin_modules/ash_builtin/scanners/test_mcp_config_scanner.py",
+        ),
+        (
+            "SECRET-BASE64-HIGH-ENTROPY-STRING",
+            "tests/unit/plugin_modules/ash_builtin/scanners/test_opengrep_safe_directory_scope.py",
+        ),
+        (
+            "SECRET-HEX-HIGH-ENTROPY-STRING",
+            "tests/unit/test_ci_ferret_self_scan_pins.py",
+        ),
+        ("SECRET-SECRET-KEYWORD", "tests/unit/utils/mcp_config/test_json_spans.py"),
+        ("SECRET-SECRET-KEYWORD", "tests/unit/utils/mcp_config/test_readers.py"),
+        ("SECRET-SECRET-KEYWORD", "tests/unit/utils/mcp_config/test_toml_spans.py"),
+        ("generic-api-key", "tests/unit/utils/test_finding_trend.py"),
+        ("generic-api-key", "tests/unit/utils/test_scan_history.py"),
     ),
     ".ash/.ash_alpha_plugins.yaml": (
         ("*:Apache-2.0", "**"),
@@ -1236,7 +1316,6 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ("*:PSF-2.0", "**"),
         ("*:Python Software Foundation License", "**"),
         ("*:Unlicense", "**"),
-        ("bash.lang.security.ifs-tampering.ifs-tampering", "**/*.sh"),
         (
             "B404",
             "ash-agent-plugins/agentic-coding/transpiler/tools/generate_models.py",
@@ -1269,34 +1348,7 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ("B603", "ash-agent-plugins/agentic-coding/transpiler/transpiler/core.py"),
         ("B110", "automated_security_helper/**/*.py"),
         ("B311", "automated_security_helper/**/*.py"),
-        ("B404", "automated_security_helper/**/*.py"),
-        ("B603", "automated_security_helper/**/*.py"),
-        ("B607", "automated_security_helper/**/*.py"),
-        (
-            "python.lang.compatibility.python36.python36-compatibility-Popen1",
-            "automated_security_helper/**/*.py",
-        ),
-        (
-            "python.lang.compatibility.python36.python36-compatibility-Popen2",
-            "automated_security_helper/**/*.py",
-        ),
-        (
-            "python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected",
-            "automated_security_helper/**/*.py",
-        ),
-        (
-            "python.lang.security.audit.non-literal-import.non-literal-import",
-            "automated_security_helper/**/*.py",
-        ),
-        (
-            "python.lang.compatibility.python37.python37-compatibility-importlib2",
-            "automated_security_helper/cli/main.py",
-        ),
         ("API_KEY_OR_SECRET", "automated_security_helper/cli/mcp/sessions.py"),
-        (
-            "python.lang.security.audit.non-literal-import.non-literal-import",
-            "automated_security_helper/plugin_modules/ash_builtin/__init__.py",
-        ),
         (
             "API_KEY_OR_SECRET",
             "automated_security_helper/schemas/cyclonedx_bom_1_6_schema/__init__.py",
@@ -1304,15 +1356,6 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         (
             "API_KEY_OR_SECRET",
             "automated_security_helper/schemas/ocsf/ocsf_vulnerability_finding.py",
-        ),
-        ("SECRET-SECRET-KEYWORD", "automated_security_helper/utils/secret_masking.py"),
-        (
-            "python.lang.compatibility.python36.python36-compatibility-Popen1",
-            "automated_security_helper/utils/subprocess_utils.py",
-        ),
-        (
-            "python.lang.compatibility.python36.python36-compatibility-Popen2",
-            "automated_security_helper/utils/subprocess_utils.py",
         ),
         ("case:(MIT OR GPL-3.0-or-later)", "deploy/cdk/package-lock.json"),
         ("minimatch:BlueOak-1.0.0", "deploy/cdk/package-lock.json"),
@@ -1367,11 +1410,8 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ("API_KEY_OR_SECRET", "deploy/terraform/modules/fargate/main.tf"),
         ("AWS-0054", "deploy/terraform/modules/fargate/main.tf"),
         ("AWS-0104", "deploy/terraform/modules/fargate/main.tf"),
-        ("SECRET-SECRET-KEYWORD", "docs/content/docs/plugins/aws/index.md"),
-        ("SECRET-SECRET-KEYWORD", "docs/content/docs/plugins/development-guide.md"),
         ("B110", "hatch_build.py"),
         ("API_KEY_OR_SECRET", "pyproject.toml"),
-        ("SECRET-BASE64-HIGH-ENTROPY-STRING", "pyproject.toml"),
         ("B404", "scripts/*.py"),
         ("B603", "scripts/*.py"),
         ("B101", "tests/**/*.py"),
@@ -1382,16 +1422,6 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ("B404", "tests/**/*.py"),
         ("B603", "tests/**/*.py"),
         ("B607", "tests/**/*.py"),
-        ("SECRET-SECRET-KEYWORD", "tests/integration/cli/conftest.py"),
-        (
-            "SECRET-SECRET-KEYWORD",
-            "tests/integration/cli/test_mcp_file_tracking_integration.py",
-        ),
-        ("SECRET-SECRET-KEYWORD", "tests/integration/cli/test_mcp_integration.py"),
-        (
-            "SECRET-SECRET-KEYWORD",
-            "tests/integration/cli/test_mcp_integration_simple.py",
-        ),
         ("JWT_TOKEN", "tests/unit/cli/mcp/test_session_id_single_component.py"),
         ("API_KEY_OR_SECRET", "tests/unit/cli/mcp/test_sessions.py"),
         ("B104", "tests/unit/cli/test_mcp_sse_host_binding.py"),
@@ -1400,35 +1430,21 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ("B108", "tests/unit/converters/test_converters.py"),
         ("B110", "tests/unit/core/test_base_plugins_regression.py"),
         ("B108", "tests/unit/core/test_orchestrator_regression.py"),
-        (
-            "SECRET-SECRET-KEYWORD",
-            "tests/unit/plugin_modules/ash_aws_plugins/test_cloudwatch_logs_reporter*",
-        ),
         ("API_KEY_OR_SECRET", "tests/unit/test_artifact_contents_gate.py"),
-        ("SECRET-HEX-HIGH-ENTROPY-STRING", "tests/unit/test_defense_in_depth.py"),
         ("B110", "tests/unit/test_environ_mutation_fix.py"),
         ("B108", "tests/unit/utils/*.py"),
-        ("SECRET-SECRET-KEYWORD", "tests/unit/utils/test_secret_masking*.py"),
-        (
-            "SECRET-BASE64-HIGH-ENTROPY-STRING",
-            "tests/unit/utils/test_secret_masking.py",
-        ),
-        ("SECRET-SECRET-KEYWORD", "tests/unit/utils/test_secret_masking.py"),
         ("B404", "tests/unit/utils/test_subprocess_utils_regression.py"),
         ("B311", "tests/utils/*.py"),
         # main's own whole-file entries, carried in by the merge of origin/main
         # (617e17c3629) into v4-capabilities; same provenance and ordering as the block
-        # at the end of the ``.ash/.ash.yaml`` list above.
+        # at the end of the ``.ash.yaml`` list above.
         ("API_KEY_OR_SECRET", ".github/release-notes/*.md"),
         ("API_KEY_OR_SECRET", "CHANGELOG.md"),
-        ("B104", "automated_security_helper/cli/mcp/__init__.py"),
         ("API_KEY_OR_SECRET", "automated_security_helper/config/operator_paths.py"),
-        ("API_KEY_OR_SECRET", "automated_security_helper/config/tool_config_trust.py"),
         (
             "API_KEY_OR_SECRET",
             "automated_security_helper/plugin_modules/ash_ferret_plugins/spec/2026-09-13-ferret-scan-plugin-v2-update-analysis.md",
         ),
-        ("API_KEY_OR_SECRET", "deploy/cdk/templates/*.template.json"),
         ("API_KEY_OR_SECRET", "deploy/cdk/templates/AshAgentCore.template.json"),
         ("API_KEY_OR_SECRET", "deploy/cdk/templates/AshCodeCommitGate.template.json"),
         (
@@ -1671,6 +1687,12 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ),
         ("B604", "tests/utils/home_rule.py"),
         ("B604", "tests/utils/tool_guard.py"),
+        # The merge of origin/main c15148192f4 into v4-capabilities: the two
+        # whole-file gitleaks entries main wrote for its trend and history tests, one
+        # per rule and file; same provenance and ordering as the block at the end of
+        # the .ash.yaml list above.
+        ("generic-api-key", "tests/unit/utils/test_finding_trend.py"),
+        ("generic-api-key", "tests/unit/utils/test_scan_history.py"),
     ),
 }
 
