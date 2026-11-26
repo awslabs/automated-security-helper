@@ -357,7 +357,7 @@ class TestLegitimateMembersShip:
 
     @pytest.mark.parametrize("inner", sorted(gate.DIST_INFO_ALLOWLIST))
     def test_pinned_dist_info_member_is_allowed(self, inner):
-        """The six members hatchling writes into .dist-info, and only those.
+        """The seven members hatchling writes into .dist-info, and only those.
 
         They must also NOT be stripped as if the directory were the sdist wrapper
         -- it too begins `automated_security_helper-`. Stripping
@@ -1885,7 +1885,7 @@ class TestNoVacuousPass:
             gate.check_artifact(str(wheel))
 
     def test_a_wheel_of_only_metadata_is_rejected(self, tmp_path):
-        """No package directory at all must not read as a clean six-member wheel.
+        """No package directory at all must not read as a clean metadata-only wheel.
 
         This was a live hole, and the worst one found: the root-count guard was
         `> 1`, so an artifact with ZERO distribution roots passed it, and every

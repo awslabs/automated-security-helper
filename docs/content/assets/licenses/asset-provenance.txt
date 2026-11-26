@@ -11,7 +11,9 @@ Name records retained: 0, 1, 2, 3, 4, 5, 6, 13, 14, 16, 17 (English 0x409).
 Tools: FontTools 4.66.1 and Brotli 1.2.0 (MIT development tools).
 Save and reopen the width-instantiated font before applying the subset.
 Output SHA-256: ffe4e928956596f5382bc281f60f2006a62830553739c512742b94f7d6175ad2
-The site and HTML reporter use the same font bytes and license notice.
+Copy: docs/content/assets/fonts/ (documentation site)
+Copy: automated_security_helper/plugin_modules/ash_builtin/reporters/assets/fonts/ (HTML reporter, inside the published package)
+Each copy holds open-sans.woff2, the output above, and open-sans-OFL.txt, the full notice; the two copies are byte-identical.
 
 Anime.js 4.5.0
 Source: https://www.npmjs.com/package/animejs/v/4.5.0

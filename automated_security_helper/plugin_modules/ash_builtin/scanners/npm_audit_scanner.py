@@ -766,7 +766,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
-                note="the Node.js toolchain is the user's; ASH installs none of it",
+                note="outside the container image the Node.js toolchain is the user's and ASH installs none of it; the image installs Node.js with apt",
             ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.NATIVE,
@@ -796,9 +796,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 semantics="the base default {0, 1}; the adapter owns the audit-failure handling",
             ),
             provenance=opsf.ProvenanceFacet(
-                source=opsf.ProvenanceSource.USER_INSTALLED,
+                source=opsf.ProvenanceSource.IMAGE_APT_PACKAGE,
                 selection_surfaces=(),
-                upstream_license=opsf.LICENSE_NOT_READ,
+                upstream_license=(
+                    "Artistic-2.0 (source: the npm/cli LICENSE at tag v12.2.3, "
+                    "the newest release on 2026-11-26, SHA-256 begins "
+                    "7610d223851f421d; the same file at tag v10.9.9, the npm "
+                    "that the container image's nodejs 22.23.5 package "
+                    "provides; the scanner pins no npm version)"
+                ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.LOCKFILE, opsf.Prerequisite.NODE_RUNTIME),

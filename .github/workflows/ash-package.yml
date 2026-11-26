@@ -217,7 +217,7 @@ jobs:
       #                                     accepted, because the current build
       #                                     does not produce one
       #   unpinned-dist-info-member         a file in .dist-info/ that is not in
-      #                                     DIST_INFO_ALLOWLIST (6 entries). Most
+      #                                     DIST_INFO_ALLOWLIST (7 entries). Most
       #                                     likely cause is a hatchling upgrade
       #                                     writing something new
       #

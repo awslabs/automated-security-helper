@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """A plugin with no tool, no context or no results directory stops with a named
 error or a plain answer, and a tool's text is not shown when the values to hide
 could not be read.

@@ -606,7 +606,15 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             provenance=opsf.ProvenanceFacet(
                 source=opsf.ProvenanceSource.USER_INSTALLED,
                 selection_surfaces=("ash_snyk_plugins in ash_plugin_modules",),
-                upstream_license=opsf.LICENSE_NOT_READ,
+                upstream_license=(
+                    "Apache-2.0 (source: the snyk/cli LICENSE at tag v1.1309.0, "
+                    "the newest release on 2026-11-26, a short Apache-2.0 "
+                    "notice, SHA-256 begins e5be3529681de6f6, and the npm "
+                    "package snyk 1.1309.0, which declares Apache-2.0; ASH pins "
+                    "no version, and the release binary also embeds modules "
+                    "from repositories that are not public, whose terms were "
+                    "not read)"
+                ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.AUTH_TOKEN,),

@@ -47,8 +47,8 @@ Known limitations
   release binary, so it is provisioned through the committed
   ``assets/Gemfile.lock`` instead -- see ``cfn_nag_scanner``.
 * npm-audit is not here either. It is a subcommand of npm, so its dependency is a
-  Node.js runtime, which ASH does not install. See
-  ``npm_audit_scanner.install_prerequisite_message``.
+  Node.js runtime. Only the container image installs one, with apt, from the version-pinned
+  NodeSource ``nodejs`` package (see the Dockerfile); see ``npm_audit_scanner``.
 * Bumping a version means replacing every digest for that tool, in both tables:
   the archive digests and the executable digests (see ``_EXECUTABLE_DIGESTS``).
   A version bumped without its digests will fail every install with an integrity

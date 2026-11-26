@@ -665,8 +665,10 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 source=opsf.ProvenanceSource.GEMFILE_LOCK,
                 selection_surfaces=(),
                 upstream_license=(
-                    "MIT (source: the cfn-nag row of the 2026-11-24 "
-                    "scanner license check, a live GitHub license read; not pinned to the gem version ASH builds and not in "
+                    "MIT (source: the stelligent/cfn_nag LICENSE.md at tag "
+                    "v0.8.10, SHA-256 begins 5a933d5f1451601c, the gem version "
+                    "assets/Gemfile.lock pins; the gem itself ships no license "
+                    "file, and its gemspec and gem metadata say MIT; not in "
                     "THIRD_PARTY_LICENSES)"
                 ),
             ),

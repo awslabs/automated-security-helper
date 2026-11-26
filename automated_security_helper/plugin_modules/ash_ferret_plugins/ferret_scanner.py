@@ -1264,12 +1264,14 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 semantics="exit 3 is an accepted coverage-accounting outcome",
             ),
             provenance=opsf.ProvenanceFacet(
-                source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
+                source=opsf.ProvenanceSource.PYPI_RANGE_INSTALL,
                 selection_surfaces=("ash_ferret_plugins in ash_plugin_modules",),
                 upstream_license=(
-                    "Apache-2.0 (source: the ferret-scan row of the 2026-11-24 "
-                    "scanner license check, a live GitHub license read; not pinned to the version the plugin "
-                    "installs and not in THIRD_PARTY_LICENSES)"
+                    "Apache-2.0 (source: the awslabs/ferret-scan LICENSE.txt at "
+                    "tag v2.6.2, the newest release inside the plugin's "
+                    ">=2.4.5,<2.7.0 range on 2026-11-26, SHA-256 begins "
+                    "cecff3b7b39b60ec; PyPI declares License-Expression "
+                    "Apache-2.0; not in THIRD_PARTY_LICENSES)"
                 ),
             ),
             prerequisites=opsf.PrerequisitesFacet(

@@ -547,9 +547,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
                 selection_surfaces=("verification (baseline-driven)",),
                 upstream_license=(
-                    "Apache-2.0 (source: the detect-secrets row of the 2026-11-24 "
-                    "scanner license check, a live GitHub license read; not pinned to the version in "
-                    "uv.lock and not in THIRD_PARTY_LICENSES)"
+                    "Apache-2.0 (source: the Yelp/detect-secrets LICENSE at tag "
+                    "v1.5.0, SHA-256 begins cd6e5b5e743ad299, the version "
+                    "uv.lock pins; its package metadata says License: UNKNOWN "
+                    "beside the Apache classifier; not in THIRD_PARTY_LICENSES)"
                 ),
             ),
             prerequisites=opsf.PrerequisitesFacet(

@@ -5,6 +5,10 @@ named there stay in place, and this file aggregates them.
 
 ** Open Sans - https://github.com/google/fonts/tree/main/ofl/opensans
 
+Vendored as docs/content/assets/fonts/open-sans.woff2 (the documentation site) and
+automated_security_helper/plugin_modules/ash_builtin/reporters/assets/fonts/open-sans.woff2
+(the HTML reporter, inside the published package), each with open-sans-OFL.txt beside it.
+
 Copyright 2020 The Open Sans Project Authors (https://github.com/googlefonts/opensans)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.

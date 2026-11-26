@@ -637,7 +637,7 @@ def is_sdist_wrapper(component: str) -> bool:
 
 
 # Complete contents of the wheel's .dist-info directory, as paths relative to it:
-# 6 members, measured from the built wheel. Pinned exactly like assets/, and for
+# 7 members, measured from the built wheel. Pinned exactly like assets/, and for
 # the same reason -- `pip install` copies this directory verbatim into
 # site-packages, so an upstream ruleset dropped in it is delivered precisely like
 # package content. `...dist-info/upstream_rules.yaml` and
@@ -657,6 +657,7 @@ DIST_INFO_ALLOWLIST = frozenset(
         "entry_points.txt",
         "licenses/LICENSE",
         "licenses/NOTICE",
+        "licenses/THIRD-PARTY-LICENSES",
     }
 )
 
@@ -666,7 +667,7 @@ DIST_INFO_ALLOWLIST = frozenset(
 #
 # There is exactly one, and that is the point. The sdist also carries loose FILES
 # at its root -- pyproject.toml, hatch_build.py, LICENSE, NOTICE, README.md,
-# PKG-INFO, Dockerfile, .gitignore -- and those are deliberately NOT pinned,
+# PKG-INFO, Dockerfile, .gitignore, THIRD-PARTY-LICENSES -- and those are deliberately NOT pinned,
 # because the set churns with ordinary work (a CHANGELOG, a CITATION.cff, a
 # SECURITY.md) and none of them is a place a tree can hide. A vendored tree needs
 # a DIRECTORY, and this is the rule that says a new one at the top level fails.
@@ -1824,7 +1825,7 @@ _PACKAGE_MEMBERS = (
 ) + tuple(sorted(ASSETS_ALLOWLIST))
 
 # A wheel: the package plus its .dist-info, and no version-stamped wrapper. All
-# six pinned dist-info members, so these fixtures are also the accept-side
+# seven pinned dist-info members, so these fixtures are also the accept-side
 # control for DIST_INFO_ALLOWLIST.
 LEGITIMATE_WHEEL_MEMBERS = _PACKAGE_MEMBERS + tuple(
     f"{PACKAGE_ROOT}-{FIXTURE_VERSION}.dist-info/{inner}"
