@@ -1572,6 +1572,9 @@ def _denied_plugin_option_defaults() -> Dict[tuple, Any]:
     from automated_security_helper.plugin_modules.ash_betterleaks_plugins.betterleaks_scanner import (
         BetterleaksScannerConfigOptions,
     )
+    from automated_security_helper.plugin_modules.ash_cargo_deny_plugins.cargo_deny_scanner import (
+        CargoDenyScannerConfigOptions,
+    )
     from automated_security_helper.plugin_modules.ash_hadolint_plugins.hadolint_scanner import (
         HadolintScannerConfigOptions,
     )
@@ -1590,6 +1593,7 @@ def _denied_plugin_option_defaults() -> Dict[tuple, Any]:
         ("guarddog", GuardDogScannerConfigOptions()),
         ("hadolint", HadolintScannerConfigOptions()),
         ("betterleaks", BetterleaksScannerConfigOptions()),
+        ("cargo-deny", CargoDenyScannerConfigOptions()),
         ("snyk-code", SnykCodeScannerConfigOptions()),
         ("trivy-repo", TrivyRepoScannerConfigOptions()),
     ):

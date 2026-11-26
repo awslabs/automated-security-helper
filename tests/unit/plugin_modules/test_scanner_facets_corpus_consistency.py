@@ -188,6 +188,9 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
     "betterleaks": CorpusSpec(
         "betterleaks", sarif=("captured/*.sarif",), prep="betterleaks"
     ),
+    # The committed SARIF is the converter's output for a REAL captured cargo-deny
+    # 0.21.0 run (captured/positive.jsonl); a regeneration test keeps it honest.
+    "cargo-deny": CorpusSpec("cargo-deny", sarif=("captured/*.sarif",)),
     "cdk-nag": CorpusSpec("cdk", prep="cdk-nag"),
     "cfn-guard": CorpusSpec(
         "cfn_lint_guard", sarif=("captured/cfn-guard-*.sarif",), prep="cfn-guard"

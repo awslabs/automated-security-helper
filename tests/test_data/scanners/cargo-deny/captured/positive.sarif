@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "cargo-deny",
+          "informationUri": "https://github.com/EmbarkStudios/cargo-deny",
+          "rules": [
+            {
+              "id": "RUSTSEC-2018-0018",
+              "name": "RUSTSEC-2018-0018",
+              "shortDescription": {
+                "text": "smallvec creates uninitialized value of any type"
+              },
+              "helpUri": "https://rustsec.org/advisories/RUSTSEC-2018-0018",
+              "properties": {
+                "tags": [
+                  "cargo-deny",
+                  "rust",
+                  "dependency"
+                ]
+              }
+            },
+            {
+              "id": "RUSTSEC-2021-0003",
+              "name": "RUSTSEC-2021-0003",
+              "shortDescription": {
+                "text": "Buffer overflow in SmallVec::insert_many"
+              },
+              "helpUri": "https://rustsec.org/advisories/RUSTSEC-2021-0003",
+              "properties": {
+                "tags": [
+                  "cargo-deny",
+                  "rust",
+                  "dependency"
+                ]
+              }
+            },
+            {
+              "id": "RUSTSEC-2021-0145",
+              "name": "RUSTSEC-2021-0145",
+              "shortDescription": {
+                "text": "Potential unaligned read"
+              },
+              "helpUri": "https://rustsec.org/advisories/RUSTSEC-2021-0145",
+              "properties": {
+                "tags": [
+                  "cargo-deny",
+                  "rust",
+                  "dependency"
+                ]
+              }
+            },
+            {
+              "id": "RUSTSEC-2024-0375",
+              "name": "RUSTSEC-2024-0375",
+              "shortDescription": {
+                "text": "`atty` is unmaintained"
+              },
+              "helpUri": "https://rustsec.org/advisories/RUSTSEC-2024-0375",
+              "properties": {
+                "tags": [
+                  "cargo-deny",
+                  "rust",
+                  "dependency"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "RUSTSEC-2018-0018",
+          "level": "error",
+          "message": {
+            "text": "smallvec creates uninitialized value of any type (smallvec 0.6.10). https://github.com/servo/rust-smallvec/issues/126"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Cargo.lock"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "cargo-deny/v1": "4597a4a0245be96534c7c3fce8e64065"
+          },
+          "properties": {
+            "issue_severity": "HIGH",
+            "cargo_deny_code": "unsound",
+            "package_name": "smallvec",
+            "package_version": "0.6.10",
+            "advisory_id": "RUSTSEC-2018-0018",
+            "aliases": [
+              "CVE-2018-25023",
+              "GHSA-55m5-whcv-c49c"
+            ],
+            "advisory_kind": "unsound",
+            "advisory_date": "2021-01-08"
+          }
+        },
+        {
+          "ruleId": "RUSTSEC-2021-0003",
+          "level": "error",
+          "message": {
+            "text": "Buffer overflow in SmallVec::insert_many (smallvec 0.6.10). https://github.com/servo/rust-smallvec/issues/252"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Cargo.lock"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "cargo-deny/v1": "e0b8f154b473d378e6ff5d6a204adb50"
+          },
+          "properties": {
+            "issue_severity": "HIGH",
+            "cargo_deny_code": "vulnerability",
+            "package_name": "smallvec",
+            "package_version": "0.6.10",
+            "advisory_id": "RUSTSEC-2021-0003",
+            "aliases": [
+              "CVE-2021-25900"
+            ],
+            "advisory_date": "2021-01-08"
+          }
+        },
+        {
+          "ruleId": "RUSTSEC-2021-0145",
+          "level": "error",
+          "message": {
+            "text": "Potential unaligned read (atty 0.2.14). https://github.com/softprops/atty/issues/50"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Cargo.lock"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "cargo-deny/v1": "e9bede647f9cf5022c06e15ce91f152d"
+          },
+          "properties": {
+            "issue_severity": "HIGH",
+            "cargo_deny_code": "unsound",
+            "package_name": "atty",
+            "package_version": "0.2.14",
+            "advisory_id": "RUSTSEC-2021-0145",
+            "aliases": [
+              "GHSA-g98v-hv3f-hcfr"
+            ],
+            "advisory_kind": "unsound",
+            "advisory_date": "2021-01-08"
+          }
+        },
+        {
+          "ruleId": "RUSTSEC-2024-0375",
+          "level": "error",
+          "message": {
+            "text": "`atty` is unmaintained (atty 0.2.14). https://github.com/softprops/atty/issues/57"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Cargo.lock"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "cargo-deny/v1": "49deccecf96e51e1950ff0e6b41ad310"
+          },
+          "properties": {
+            "issue_severity": "HIGH",
+            "cargo_deny_code": "unmaintained",
+            "package_name": "atty",
+            "package_version": "0.2.14",
+            "advisory_id": "RUSTSEC-2024-0375",
+            "advisory_kind": "unmaintained",
+            "advisory_date": "2021-01-08"
+          }
+        }
+      ]
+    }
+  ]
+}

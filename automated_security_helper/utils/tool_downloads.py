@@ -1108,6 +1108,9 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "aws-guard-rules-registry/NOTICE": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287",  # pragma: allowlist secret
     "bandit commit": "92ae8b82fb422a639f0ed8d99e96cea769594e08",  # pragma: allowlist secret
     "betterleaks commit": "39d5bdcf34db54e944facac5cf6e8b03db5e2b99",  # pragma: allowlist secret
+    "cargo-deny commit": "4b1f2002a11077f25437c2983f0a1a5439a886f4",  # pragma: allowlist secret
+    "cargo-deny/LICENSE-APACHE": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",  # pragma: allowlist secret
+    "cargo-deny/LICENSE-MIT": "090a294a492ab2f41388252312a65cf2f0e423330b721a68c6665ac64766753b",  # pragma: allowlist secret
     "cfn-lint commit": "720c5cc3d59094baee65a6f5648c111524545061",  # pragma: allowlist secret
     "checkov commit": "2f107f8613830f773b23fa21104b7ac2885c2581",  # pragma: allowlist secret
     "cfn-guard commit": "db494a17fb6030b365d5a5144a397517c7746797",  # pragma: allowlist secret
@@ -1269,6 +1272,31 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         repository="https://github.com/betterleaks/betterleaks",
         commit=_THIRD_PARTY_HASHES["betterleaks commit"],
         files=(LicenseFile("LICENSE"),),
+    ),
+    # The alpha cargo-deny scanner's tool. Pinned and installed by its own module
+    # (``ash_cargo_deny_plugins/cargo_deny_install.py``), not by install-pinned-tool,
+    # so its two license texts are staged from the repository at the pinned commit
+    # on the --licenses-only line; every release archive's LICENSE-APACHE and
+    # LICENSE-MIT are byte-identical to those files (compared on 2026-11-26).
+    # ``cargo-deny --version`` prints "cargo-deny 0.21.0".
+    "cargo-deny": ThirdPartyLicense(
+        tool="cargo-deny",
+        version="0.21.0",
+        license="MIT OR Apache-2.0",
+        repository="https://github.com/EmbarkStudios/cargo-deny",
+        commit=_THIRD_PARTY_HASHES["cargo-deny commit"],
+        files=(
+            _from_source(
+                "cargo-deny",
+                "https://github.com/EmbarkStudios/cargo-deny",
+                "LICENSE-APACHE",
+            ),
+            _from_source(
+                "cargo-deny",
+                "https://github.com/EmbarkStudios/cargo-deny",
+                "LICENSE-MIT",
+            ),
+        ),
     ),
     # The release archive holds the executable and a README, no license file, so
     # both files come from the repository.

@@ -56,6 +56,7 @@ _DENIED_OPTION_DEFAULTS: dict[str, dict[str, Any]] = {
         "honor_tree_ignore_files": False,
         "offline": False,
     },
+    "cargo-deny": {"offline": False},
     "credsweeper": {"tool_version": None},
     "ferret-scan": {
         "checks": "all",
@@ -144,6 +145,14 @@ MANIFESTS = (
         "BetterleaksScanner",
         "BetterleaksScannerConfigOptions",
         owned=(f"{_DOCS}/betterleaks-plugin.md", f"{_FIXTURES}/betterleaks"),
+    ),
+    _alpha(
+        "cargo-deny",
+        "ash_cargo_deny_plugins",
+        "cargo_deny_scanner",
+        "CargoDenyScanner",
+        "CargoDenyScannerConfigOptions",
+        owned=(f"{_DOCS}/cargo_deny-plugin.md", f"{_FIXTURES}/cargo-deny"),
     ),
     _alpha(
         "credsweeper",
