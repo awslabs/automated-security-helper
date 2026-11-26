@@ -69,3 +69,10 @@ final newline), kept for the scanner SARIF corpus. `rebuild_audit_sarif()` in
 `tests/unit/plugin_modules/ash_composer_audit_plugins/test_composer_audit_fixture_report.py`
 builds that text and a test there compares it with the committed file, so an adapter
 change that moves the output fails until the file is regenerated from that function.
+
+`../transcripts.json` indexes this capture for the plugin conformance gate: one attested
+transcript carrying the argv and exit status above and the digests of the document and
+of the two project files. The harness reads it through the `composer-audit` adapter prep
+(`core/plugin_conformance.py`), which converts the document with the lock the
+transcript's fixture tree names, as the scanner converts Composer's stdout. Editing any
+of those three files means writing their new digests into the transcript.

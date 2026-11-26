@@ -408,6 +408,50 @@ def _prep_guarddog(
     )
 
 
+#: The names the composer-audit prep accepts for the lock file a recorded run audited.
+#: ``.capture`` is the suffix a committed fixture carries so that a dependency graph
+#: reading files named exactly ``composer.lock`` does not take it for the repository's
+#: own dependencies.
+_COMPOSER_LOCK_NAMES = frozenset({"composer.lock", "composer.lock.capture"})
+
+
+def _prep_composer_audit(
+    transcript: ToolTranscript, base: Path, file: Path
+) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The recorded ``composer audit --format=json`` document through the adapter's own
+    conversion (``parse_audit_document``, then ``convert_audit_document``), the step the
+    scanner applies to Composer's stdout. The package lines and the locked versions come
+    from the lock file the run audited, which the transcript's fixture tree names; the
+    URI is ``composer.lock``, the name Composer read it under."""
+    module = (
+        "automated_security_helper.plugin_modules.ash_composer_audit_plugins."
+        "composer_audit_scanner"
+    )
+    parse = resolve_ref(f"{module}:parse_audit_document")
+    convert = resolve_ref(f"{module}:convert_audit_document")
+    tree = transcript.fixture_tree
+    locks = [
+        path
+        for path in (tree.paths if tree is not None else ())
+        if path.rsplit("/", 1)[-1] in _COMPOSER_LOCK_NAMES
+    ]
+    if len(locks) != 1:
+        raise ValueError(
+            "the composer-audit prep reads the audited lock file from the "
+            f"transcript's fixture tree, which names {len(locks)} lock files; it "
+            f"needs exactly one ({', '.join(sorted(_COMPOSER_LOCK_NAMES))})"
+        )
+    results, rules = convert(
+        parse(file.read_text(encoding="utf-8")),
+        uri="composer.lock",
+        lock_text=(base / locks[0]).read_text(encoding="utf-8"),
+    )
+    yield (
+        _report_with_rules("Composer Audit", [rules[rule] for rule in sorted(rules)]),
+        list(results),
+    )
+
+
 def _prep_actionlint(
     transcript: ToolTranscript, base: Path, file: Path
 ) -> Iterator[tuple[SarifReport, list[Result]]]:
@@ -663,6 +707,7 @@ PREPS: Mapping[str, Prep] = {
     "cfn-lint": _prep_cfn_lint,
     "cfn-nag": _prep_cfn_nag,
     "checkov": _prep_checkov,
+    "composer-audit": _prep_composer_audit,
     "detect-secrets": _prep_detect_secrets,
     "ferret-scan": _prep_ferret_scan,
     "gitleaks": _prep_gitleaks,

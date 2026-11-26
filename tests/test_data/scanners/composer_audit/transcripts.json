@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": "composer-audit",
+      "also_for": [],
+      "argv": [
+        "composer",
+        "audit",
+        "--locked",
+        "--format=json",
+        "--abandoned=report",
+        "--no-plugins",
+        "--no-scripts",
+        "--no-interaction",
+        "--no-ansi",
+        "--working-dir=."
+      ],
+      "env_allowlist": [],
+      "exit_code": 1,
+      "fixture_tree": {
+        "paths": [
+          "captured/composer.json.capture",
+          "captured/composer.lock.capture"
+        ],
+        "sha256": "f22353d7ced91a09e18adcb29037c3e1370c17f9372c534b275fd253bf6fbd10"
+      },
+      "id": "composer-2.11.3-vulnerable-abandoned",
+      "live_input": true,
+      "note": "Composer 2.11.3 under PHP 8.5.13 on Linux (aarch64), over the project committed beside the document under a .capture suffix (copy the two files under their plain names to record again); the run removed COMPOSER_POLICY and COMPOSER_AUDIT_ABANDONED from the environment, as the scanner does. Attested from captured/README.md, which records the argv and the exit status: the document and composer.json were re-serialized by the repository's pretty-format-json hook (sorted keys, two-space indent, content unchanged), and the lock is byte-identical to what Composer wrote.",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": "2026-11-25",
+      "results": [
+        {
+          "format": "json",
+          "path": "captured/composer-2.11.3-vulnerable-abandoned.json",
+          "sha256": "4da6420675c4333fc5faf89f0db47db247a36b923d519a370340c91c5c2bbdd9"
+        }
+      ],
+      "retention": "current",
+      "scanner": "composer-audit",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "composer",
+        "version": "2.11.3"
+      }
+    }
+  ],
+  "unrecorded": []
+}

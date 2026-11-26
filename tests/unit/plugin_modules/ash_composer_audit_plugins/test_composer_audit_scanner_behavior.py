@@ -780,19 +780,114 @@ class TestDependencyCheck:
             ("linux", "arm64"),
             ("darwin", "amd64"),
             ("darwin", "arm64"),
+            ("windows", "amd64"),
+            ("windows", "arm64"),
         ],
     )
-    def test_the_pinned_phar_is_installed_on_linux_and_macos(
+    def test_the_pinned_phar_is_installed_on_every_platform(
         self, platform, arch, tree, tmp_path, monkeypatch
     ):
         monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
         (command,) = _scanner(tree, tmp_path).get_installation_commands(platform, arch)
         assert command.shell is False
         assert "install_composer" in " ".join(command.args)
+        assert command.args[-2] == platform
 
-    def test_windows_is_not_installed(self, tree, tmp_path):
+    def test_an_unknown_platform_is_not_installed(self, tree, tmp_path):
         scanner = _scanner(tree, tmp_path)
-        assert scanner.get_installation_commands("windows", "amd64") == []
+        assert scanner.get_installation_commands("freebsd", "amd64") == []
+
+
+class TestWindowsLaunch:
+    """On Windows the composer found on PATH is a batch launcher; the phar beside it is
+    run with php instead, so cmd.exe never re-reads the audit's arguments."""
+
+    @staticmethod
+    def _layout(tmp_path: Path, launcher: str = "composer.bat", phar: bool = True):
+        bin_dir = tmp_path / "winbin"
+        bin_dir.mkdir()
+        (bin_dir / launcher).write_bytes(b'@php "%~dp0composer.phar" %*\r\n')
+        if phar:
+            (bin_dir / "composer.phar").write_bytes(b"#!/usr/bin/env php\n")
+        return bin_dir
+
+    @staticmethod
+    def _lookup(monkeypatch, found: Dict[str, Optional[str]]):
+        monkeypatch.setattr(cs, "find_executable", lambda cmd: found.get(cmd))
+
+    def test_the_phar_beside_the_launcher_runs_with_php(
+        self, tree, tmp_path, monkeypatch
+    ):
+        bin_dir = self._layout(tmp_path)
+        monkeypatch.setattr(cs, "_windows", lambda: True)
+        self._lookup(
+            monkeypatch,
+            {"composer": str(bin_dir / "composer.bat"), "php": "/php/php.exe"},
+        )
+        scanner = _scanner(tree, tmp_path)
+        fake = FakeComposer()
+        _run(scanner, fake, monkeypatch)
+        argv = fake.calls[0]["argv"]
+        assert argv[:3] == ["/php/php.exe", str(bin_dir / "composer.phar"), "audit"]
+        assert argv[-1] == f"--working-dir={tree.absolute().as_posix()}"
+
+    def test_a_cmd_launcher_is_bypassed_the_same_way(self, tree, tmp_path, monkeypatch):
+        bin_dir = self._layout(tmp_path, launcher="COMPOSER.CMD")
+        monkeypatch.setattr(cs, "_windows", lambda: True)
+        self._lookup(
+            monkeypatch,
+            {"composer": str(bin_dir / "COMPOSER.CMD"), "php": "/php/php.exe"},
+        )
+        scanner = _scanner(tree, tmp_path)
+        assert scanner._argv(tree)[:2] == [
+            "/php/php.exe",
+            str(bin_dir / "composer.phar"),
+        ]
+
+    def test_a_launcher_without_a_phar_beside_it_runs_as_found(
+        self, tree, tmp_path, monkeypatch
+    ):
+        bin_dir = self._layout(tmp_path, phar=False)
+        monkeypatch.setattr(cs, "_windows", lambda: True)
+        self._lookup(
+            monkeypatch,
+            {"composer": str(bin_dir / "composer.bat"), "php": "/php/php.exe"},
+        )
+        assert _scanner(tree, tmp_path)._argv(tree)[:2] == ["composer", "audit"]
+
+    def test_without_php_the_launcher_is_not_bypassed(
+        self, tree, tmp_path, monkeypatch
+    ):
+        bin_dir = self._layout(tmp_path)
+        monkeypatch.setattr(cs, "_windows", lambda: True)
+        self._lookup(monkeypatch, {"composer": str(bin_dir / "composer.bat")})
+        assert _scanner(tree, tmp_path)._argv(tree)[:2] == ["composer", "audit"]
+
+    def test_a_composer_that_is_not_a_batch_file_runs_as_found(
+        self, tree, tmp_path, monkeypatch
+    ):
+        bin_dir = self._layout(tmp_path, launcher="composer.exe")
+        monkeypatch.setattr(cs, "_windows", lambda: True)
+        self._lookup(
+            monkeypatch,
+            {"composer": str(bin_dir / "composer.exe"), "php": "/php/php.exe"},
+        )
+        assert _scanner(tree, tmp_path)._argv(tree)[:2] == ["composer", "audit"]
+
+    def test_off_windows_the_layout_changes_nothing(self, tree, tmp_path, monkeypatch):
+        bin_dir = self._layout(tmp_path)
+        monkeypatch.setattr(cs, "_windows", lambda: False)
+        self._lookup(
+            monkeypatch,
+            {"composer": str(bin_dir / "composer.bat"), "php": "/php/php.exe"},
+        )
+        assert _scanner(tree, tmp_path)._argv(tree)[:2] == ["composer", "audit"]
+
+    def test_the_platform_seam_reads_the_running_system(self, monkeypatch):
+        monkeypatch.setattr(cs.platform, "system", lambda: "Windows")
+        assert cs._windows() is True
+        monkeypatch.setattr(cs.platform, "system", lambda: "Linux")
+        assert cs._windows() is False
 
 
 class TestNothingToScan:

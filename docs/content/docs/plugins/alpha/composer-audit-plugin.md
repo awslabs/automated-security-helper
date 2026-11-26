@@ -31,7 +31,7 @@ ASH pins Composer 2.11.3 in the plugin's own install module (`ash_composer_audit
 ash dependencies install --config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_composer_audit_plugins"]' --tool composer-audit
 ```
 
-- **Local mode:** the command downloads the phar, refuses it unless it hashes to its pin, and places it in ASH's bin directory as `composer`. Linux and macOS are supported. On Windows, install Composer yourself (Composer-Setup or a `composer.bat` beside the phar).
+- **Local mode:** the command downloads the phar, refuses it unless it hashes to its pin, and places it in ASH's bin directory: as `composer` on Linux and macOS, and on Windows as `composer.phar` with a `composer.bat` launcher beside it (`@php "%~dp0composer.phar" %*`, the layout of the manual Windows install in [Composer's introduction](https://getcomposer.org/doc/00-intro.md)). On Windows the scanner runs the phar with `php` directly whenever the `composer.bat` or `composer.cmd` found on `PATH` has `composer.phar` beside it, so cmd.exe does not read the audit's arguments a second time.
 - **PHP:** Composer is a PHP program, and ASH does not install PHP. Composer 2.11.3 needs PHP 7.2.5 or later on `PATH`; with no `php` there the scanner is `MISSING`.
 - **Container and Nix modes:** the image and the flake do not supply Composer or PHP.
 - Any `composer` already on `PATH` is also used. Composer 2.8 or later is needed (the first release with `composer audit --abandoned`).

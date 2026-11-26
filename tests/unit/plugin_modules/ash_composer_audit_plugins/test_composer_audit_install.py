@@ -42,9 +42,7 @@ def test_the_pin_names_one_release_and_full_digests():
     assert ci.PHAR_SHA256 != ci.LICENSE_SHA256
 
 
-def test_the_install_table_covers_linux_and_macos_and_never_windows(
-    tmp_path, monkeypatch
-):
+def test_the_install_table_covers_linux_macos_and_windows(tmp_path, monkeypatch):
     monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
     table = ci.composer_install_commands()
     pairs = {(p, a) for p, arches in table.items() for a in arches}
@@ -54,13 +52,16 @@ def test_the_install_table_covers_linux_and_macos_and_never_windows(
         ("darwin", "arm64"),
         ("linux", "amd64"),
         ("linux", "arm64"),
+        ("windows", "amd64"),
+        ("windows", "arm64"),
     }
-    assert "windows" not in table
-    for arches in table.values():
+    for target_platform, arches in table.items():
         for commands in arches.values():
             (command,) = commands
             assert command.shell is False
             assert "install_composer" in " ".join(command.args)
+            # The platform the entry is for, so a Windows entry places the launcher.
+            assert command.args[-2] == target_platform
             assert command.args[-1] == du._destination_text(
                 (tmp_path / "bin").absolute()
             )
@@ -73,18 +74,95 @@ def test_the_install_table_never_raises_without_a_bin_directory(monkeypatch):
     assert "install_composer" not in " ".join(command.args), "a refusing command"
 
 
-def test_install_places_the_verified_phar_as_composer(tmp_path, monkeypatch):
+def _fake_download(monkeypatch):
+    """Replace the verified download; it records its calls and writes a stand-in."""
     calls = []
 
     def fake_install(url, destination, rename_to=None, expected_sha256=None, **_):
         calls.append((url, destination, rename_to, expected_sha256))
-        return destination / rename_to
+        placed = destination / rename_to
+        placed.write_bytes(b"#!/usr/bin/env php\nstand-in for the phar\n")
+        return placed
 
     monkeypatch.setattr(du, "install_binary_from_url", fake_install)
-    placed = ci.install_composer(tmp_path / "bin")
+    return calls
+
+
+@pytest.mark.parametrize("target_platform", ["linux", "darwin"])
+def test_install_places_the_verified_phar_as_composer(
+    target_platform, tmp_path, monkeypatch
+):
+    calls = _fake_download(monkeypatch)
+    placed = ci.install_composer(tmp_path / "bin", target_platform)
     assert calls == [(ci.PHAR_URL, tmp_path / "bin", "composer", ci.PHAR_SHA256)]
     assert placed == tmp_path / "bin" / "composer"
-    assert (tmp_path / "bin").is_dir()
+    assert not (tmp_path / "bin" / ci.WINDOWS_LAUNCHER_NAME).exists()
+
+
+def test_the_running_platform_is_the_default(tmp_path, monkeypatch):
+    calls = _fake_download(monkeypatch)
+    monkeypatch.setattr(ci.platform, "system", lambda: "Linux")
+    assert ci.install_composer(tmp_path / "bin") == tmp_path / "bin" / "composer"
+    monkeypatch.setattr(ci.platform, "system", lambda: "Windows")
+    assert ci.install_composer(tmp_path / "win") == tmp_path / "win" / "composer.bat"
+    assert [c[2] for c in calls] == ["composer", "composer.phar"]
+
+
+def test_the_windows_launcher_is_composers_documented_line():
+    # doc/00-intro.md at COMPOSER_COMMIT, "Installation - Windows / Manual
+    # Installation": echo @php "%~dp0composer.phar" %*>composer.bat
+    assert ci.WINDOWS_LAUNCHER == b'@php "%~dp0composer.phar" %*\r\n'
+    assert ci.WINDOWS_PHAR_NAME == "composer.phar"
+    assert ci.WINDOWS_LAUNCHER_NAME == "composer.bat"
+    assert ci.WINDOWS_PHAR_NAME.encode() in ci.WINDOWS_LAUNCHER
+
+
+def test_install_on_windows_places_the_phar_and_its_launcher(tmp_path, monkeypatch):
+    calls = _fake_download(monkeypatch)
+    bin_dir = tmp_path / "bin"
+    placed = ci.install_composer(bin_dir, "windows")
+    assert calls == [(ci.PHAR_URL, bin_dir, "composer.phar", ci.PHAR_SHA256)]
+    assert placed == bin_dir / "composer.bat"
+    assert placed.read_bytes() == ci.WINDOWS_LAUNCHER
+    assert (bin_dir / "composer.phar").is_file()
+    # Nothing is left behind by the staged write, and no shebang copy is placed.
+    assert sorted(p.name for p in bin_dir.iterdir()) == [
+        "composer.bat",
+        "composer.phar",
+    ]
+
+
+def test_a_second_windows_install_keeps_the_launcher_it_finds(tmp_path, monkeypatch):
+    _fake_download(monkeypatch)
+    bin_dir = tmp_path / "bin"
+    launcher = ci.install_composer(bin_dir, "windows")
+    before = launcher.stat()
+    assert ci.install_composer(bin_dir, "windows") == launcher
+    after = launcher.stat()
+    assert (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns)
+
+
+def test_a_launcher_with_other_bytes_is_replaced(tmp_path, monkeypatch):
+    _fake_download(monkeypatch)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "composer.bat").write_bytes(b"@echo off\r\nsomething-else.exe %*\r\n")
+    ci.install_composer(bin_dir, "windows")
+    assert (bin_dir / "composer.bat").read_bytes() == ci.WINDOWS_LAUNCHER
+
+
+def test_a_link_at_the_launcher_is_replaced_never_followed(tmp_path, monkeypatch):
+    _fake_download(monkeypatch)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    elsewhere = tmp_path / "elsewhere.txt"
+    elsewhere.write_bytes(b"not ASH's\n")
+    (bin_dir / "composer.bat").symlink_to(elsewhere)
+    ci.install_composer(bin_dir, "windows")
+    launcher = bin_dir / "composer.bat"
+    assert not launcher.is_symlink()
+    assert launcher.read_bytes() == ci.WINDOWS_LAUNCHER
+    assert elsewhere.read_bytes() == b"not ASH's\n"
 
 
 def test_install_refuses_with_no_bin_directory(monkeypatch):

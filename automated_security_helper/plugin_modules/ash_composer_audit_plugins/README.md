@@ -28,7 +28,7 @@ With the module listed, `composer-audit` runs by default. `scanners.composer-aud
 ash dependencies install --config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_composer_audit_plugins"]' --tool composer-audit
 ```
 
-This installs the pinned Composer 2.11.3 phar on Linux and macOS, checked against the SHA-256 Composer publishes for it. ASH does not install PHP: Composer needs PHP 7.2.5 or later on `PATH`. On Windows, install Composer yourself from <https://getcomposer.org/download/>. If `composer` is already on `PATH`, ASH uses it. Without `php` or `composer` the scanner is reported `MISSING`. The ASH container image includes neither.
+This installs the pinned Composer 2.11.3 phar, checked against the SHA-256 Composer publishes for it: as `composer` on Linux and macOS, and on Windows as `composer.phar` with a `composer.bat` launcher beside it, the layout of Composer's own manual Windows install. On Windows the scanner runs that phar with `php` itself rather than through the launcher. ASH does not install PHP: Composer needs PHP 7.2.5 or later on `PATH`. If `composer` is already on `PATH`, ASH uses it. Without `php` or `composer` the scanner is reported `MISSING`. The ASH container image includes neither.
 
 ## Network
 

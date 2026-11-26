@@ -17,9 +17,16 @@ that names the package; each abandoned package is one more.
 This is an alpha plugin. It is on once its module is listed in ``ash_plugin_modules``;
 a scan that does not list it is unchanged. ASH pins Composer 2.11.3 in
 ``composer_install.py``, and ``ash dependencies install`` places that phar as
-``composer`` on Linux and macOS; a ``composer`` already on ``PATH`` is used as well.
+``composer`` on Linux and macOS, and on Windows as ``composer.phar`` with a
+``composer.bat`` launcher beside it; a ``composer`` already on ``PATH`` is used as well.
 ASH never installs PHP: the phar runs with the ``php`` on ``PATH``. The ASH container
 image carries neither.
+
+On Windows a ``composer`` found on ``PATH`` is usually a batch launcher (the one ASH
+writes, or another install's), and Windows starts a batch file by running cmd.exe on it,
+which reads the arguments again. When the launcher has ``composer.phar`` beside it, the
+scanner runs that phar with the ``php`` on ``PATH`` instead (``_program``), so a lock
+directory's path reaches Composer as written.
 
 Invocation
 ----------
@@ -130,6 +137,7 @@ import hashlib
 import json
 import logging
 import os
+import platform
 import stat
 import time
 from pathlib import Path, PurePosixPath
@@ -154,6 +162,7 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.plugin_modules.ash_composer_audit_plugins.composer_install import (
     COMPOSER_VERSION,
+    WINDOWS_PHAR_NAME,
     composer_install_commands,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
@@ -223,6 +232,14 @@ _BINARY = getattr(os, "O_BINARY", 0)
 
 #: The clock the scan's time budget is measured on; a seam for tests.
 _now = time.monotonic
+
+#: The suffixes Windows starts by running cmd.exe on the file.
+_BATCH_SUFFIXES = (".bat", ".cmd")
+
+
+def _windows() -> bool:
+    """Whether this process runs on Windows; a seam for tests."""
+    return platform.system().lower() == "windows"
 
 
 def severity_for(raw: Any) -> Tuple[str, str]:
@@ -732,9 +749,10 @@ class ComposerAuditScanner(ScannerPluginBase[ComposerAuditScannerConfig]):
                 provisionable=(),
                 note="composer.phar 2.11.3 is installed by the plugin's own pinned "
                 "installer (composer_install.py) on linux and darwin, amd64 and "
-                "arm64, not by the shared tool_downloads table, so the register "
-                "lists none; Windows is not installed, PHP is never installed, and "
-                "the container image carries neither",
+                "arm64, as composer, and on windows, amd64 and arm64, as "
+                "composer.phar with a composer.bat launcher beside it; not by the "
+                "shared tool_downloads table, so the register lists none. PHP is "
+                "never installed, and the container image carries neither",
             ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.NATIVE,
@@ -877,9 +895,33 @@ class ComposerAuditScanner(ScannerPluginBase[ComposerAuditScannerConfig]):
             k: v for k, v in snapshot_environ().items() if k not in _INVOCATION_ENV_VARS
         }
 
+    def _program(self) -> List[str]:
+        """The argv prefix that starts Composer: ``[composer]``, or ``[php, phar]``.
+
+        On Windows the ``composer`` found on ``PATH`` is usually a batch launcher (the
+        one ``composer_install.py`` writes, or another install's), and Windows starts a
+        batch file by running cmd.exe on it, which reads the arguments a second time.
+        When the launcher has ``composer.phar`` beside it and ``php`` is found, the phar
+        is run with that ``php`` instead, so the arguments (a lock directory's path is
+        one) reach Composer as written. Anything else runs ``composer`` as found. Both
+        lookups are the scan's own (``find_executable``), so neither program is ever one
+        inside the scanned tree.
+        """
+        command = self.command or "composer"
+        if not _windows():
+            return [command]
+        found = find_executable(command)
+        if not found or not found.lower().endswith(_BATCH_SUFFIXES):
+            return [command]
+        phar = os.path.join(os.path.dirname(found), WINDOWS_PHAR_NAME)
+        php = find_executable("php")
+        if php is None or not os.path.isfile(phar):
+            return [command]
+        return [php, phar]
+
     def _argv(self, lock_dir: Path) -> List[str]:
         return [
-            self.command or "composer",
+            *self._program(),
             "audit",
             "--locked",
             "--format=json",
@@ -1120,8 +1162,8 @@ class ComposerAuditScanner(ScannerPluginBase[ComposerAuditScannerConfig]):
                 "composer executable not found in PATH. Run `ash dependencies "
                 "install --tool composer-audit` with the module listed in "
                 "ash_plugin_modules to install the pinned Composer "
-                f"{COMPOSER_VERSION} on Linux or macOS, or install Composer from "
-                "https://getcomposer.org/download/."
+                f"{COMPOSER_VERSION} on Linux, macOS or Windows, or install Composer "
+                "from https://getcomposer.org/download/."
             )
         return found is not None
 
