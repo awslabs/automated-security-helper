@@ -36,6 +36,7 @@ from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
     SeverityId,
     StatusId,
 )
+from automated_security_helper.utils.finding_identity import CORRELATION_ID_PROPERTY
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Kind1,
@@ -583,6 +584,30 @@ class TestVulnerabilityFindingFaults:
         assert finding.vulnerabilities[0].desc == (
             "Error processing vulnerability details"
         )
+
+    def test_the_fallback_record_keeps_the_correlation_id(
+        self, reporter, metadata, monkeypatch
+    ):
+        """The correlation id is paired before the record's build begins, so a
+        record the fallback built must keep it where the whole record carries
+        it: ``metadata.correlation_uid`` and the raw spelled key in
+        ``unmapped``. Dropping it there made a finding whose OCSF build failed
+        correlate in ASFF and not in OCSF."""
+        monkeypatch.setattr(
+            f"{MODULE}._metadata_for_project",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("attribution failed")),
+        )
+
+        finding = reporter._create_vulnerability_finding(
+            good_result(), metadata, 7, correlation_id="corr-123"
+        )
+
+        assert finding.finding_info.title == "Error processing finding R1", (
+            "the fallback path did not run"
+        )
+        assert finding.metadata.correlation_uid == "corr-123"
+        assert finding.unmapped is not None
+        assert finding.unmapped.model_dump().get(CORRELATION_ID_PROPERTY) == "corr-123"
 
     def test_when_even_the_fallback_cannot_be_built_the_error_is_raised(
         self, reporter, metadata, monkeypatch

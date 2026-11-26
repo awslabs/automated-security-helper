@@ -28,7 +28,10 @@ from unittest.mock import patch
 
 import pytest
 
-from automated_security_helper.core.exceptions import ToolDownloadIntegrityError
+from automated_security_helper.core.exceptions import (
+    DownloadTooLargeError,
+    ToolDownloadIntegrityError,
+)
 from automated_security_helper.utils.download_utils import (
     _DOWNLOAD_MAX_DELAY,
     _DOWNLOAD_SOCKET_TIMEOUT_SECONDS,
@@ -266,6 +269,25 @@ class TestClassification:
         """
         assert (
             _is_transient_download_error(ToolDownloadIntegrityError("SHA256 mismatch"))
+            is False
+        )
+
+    def test_a_size_limit_error_is_never_transient(self):
+        """Belt and braces on the size bound.
+
+        ``DownloadTooLargeError`` is raised inside the retry loop
+        (``_copy_whole_body``), so the classifier is the only thing between a
+        refused oversize body and re-downloading it up to the bound on every
+        remaining attempt. Today the error is a plain ``Exception`` subclass
+        and falls through every transient class anyway; this pins the contract
+        against a reparenting (onto ``OSError``, say, whose transient errnos
+        the classifier retries), as the integrity pin above does for the
+        digest guarantee.
+        """
+        assert (
+            _is_transient_download_error(
+                DownloadTooLargeError("the transfer passed the caller's bound")
+            )
             is False
         )
 
