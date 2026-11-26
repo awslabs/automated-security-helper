@@ -8,8 +8,10 @@ What this covers: ``TrivyScanner.scan_image`` through the real pinned trivy, ove
 nothing; its digest is in the README beside it) and over the OCI image-layout
 directory that same archive is re-packed into. The archive path needs no
 container engine and no registry, so the scan runs wherever trivy does, and it
-finds the one fake token the image holds. The image-layout leg goes through the
-production re-pack (``utils/oci_layout_archive``) that hands trivy an archive.
+finds the one fake token the image holds. The image-layout leg hands the
+pinned trivy the layout directory itself (``--input=<layout dir>``, the route
+its container-image target docs name), so it is the live proof that no
+re-pack is needed.
 
 What it does not cover, by design: a live container engine and a live registry.
 No CI leg has either, no test pulls an image, and the digest resolver and the

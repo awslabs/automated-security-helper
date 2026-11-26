@@ -23,5 +23,6 @@ A unit test checks the committed file against the digest here, and the builder's
 output against the committed archive member by member, so a change to either that
 is not matched by the other fails. The integration test that scans it with the
 real trivy is
-`tests/integration/scanners/test_image_archive_real_scan.py`; the layout
-re-pack of it is covered by `tests/unit/utils/test_oci_layout_archive.py`.
+`tests/integration/scanners/test_image_archive_real_scan.py`, which also
+scans the same bytes as an OCI image-layout directory
+(`tests/utils/image_archive_fixture.archive_to_layout`).

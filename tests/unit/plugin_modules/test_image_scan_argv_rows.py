@@ -87,7 +87,6 @@ def _oci_archive(tmp_path) -> Path:
     return _tar_with(tmp_path, ["oci-layout", "index.json"], "oci-image.tar")
 
 
-
 def _layout(tmp_path) -> Path:
     layout = tmp_path / "layout"
     layout.mkdir(exist_ok=True)
@@ -200,7 +199,9 @@ class TestArchiveScheme:
     def test_a_save_that_holds_both_listings_is_docker_archive(self, tmp_path):
         # A recent `docker save` writes manifest.json and an OCI index;
         # docker-archive: reads that.
-        tar = _tar_with(tmp_path, ["index.json", "oci-layout", "manifest.json"], "both.tar")
+        tar = _tar_with(
+            tmp_path, ["index.json", "oci-layout", "manifest.json"], "both.tar"
+        )
         assert archive_scheme(tar) == "docker-archive"
 
     def test_a_dot_slash_member_name_is_read(self, tmp_path):
