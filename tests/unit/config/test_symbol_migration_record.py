@@ -176,6 +176,54 @@ def test_the_record_and_the_configs_agree_entry_for_entry():
                 assert e.get("line_start") is None and e.get("line_end") is None, e
 
 
+#: Scoped entries both configs carry whose reasons are worded differently on purpose,
+#: by (rule_id, path, symbol), with why. The decision is the same in both.
+_REASONS_THAT_MAY_DIFFER = {
+    (
+        "B104",
+        "automated_security_helper/cli/mcp/__init__.py",
+        "_log_where_the_server_listens",
+    ): (
+        ".ash.yaml also names the guard test and the config it is kept in step with; "
+        "the alpha config says the same in fewer words"
+    ),
+}
+
+
+def _scoped_reasons(config: str) -> dict[tuple[str, str, str], list[str]]:
+    reasons: dict[tuple[str, str, str], list[str]] = {}
+    for entry in _suppressions(config):
+        scope = entry.get("symbol") or entry.get("resource_id")
+        if scope is None:
+            continue
+        reasons.setdefault((entry["rule_id"], entry["path"], scope), []).append(
+            " ".join(str(entry.get("reason", "")).split())
+        )
+    return {key: sorted(texts) for key, texts in reasons.items()}
+
+
+def test_a_scoped_entry_both_configs_carry_gives_the_same_reason_in_each():
+    """The self-scan reads the alpha config, so its reasons are the ones in the reports.
+
+    A reason that says what the flagged text is (here, whether the prose that names a
+    file sits in a function or in the module) is part of the decision, so an entry kept
+    in step across the two configs is kept in step in its words too. An entry whose
+    wording differs on purpose is named in ``_REASONS_THAT_MAY_DIFFER`` with why, and an
+    allowance no entry needs any more fails.
+    """
+    default, alpha = _scoped_reasons(CONFIGS[0]), _scoped_reasons(CONFIGS[1])
+    shared = sorted(set(default) & set(alpha))
+    assert shared, "no scoped entry is shared, so this compares nothing"
+    differing = {key for key in shared if default[key] != alpha[key]}
+    unexplained = sorted(differing - set(_REASONS_THAT_MAY_DIFFER))
+    assert unexplained == [], (
+        f"scoped entries whose reason differs between {CONFIGS[0]} and {CONFIGS[1]}: "
+        f"{unexplained}. Say the same thing in both, or allow the difference with why."
+    )
+    unused = sorted(set(_REASONS_THAT_MAY_DIFFER) - differing)
+    assert unused == [], f"allowances no entry needs any more: {unused}"
+
+
 def test_old_pinned_lines_lie_inside_the_chosen_symbols_span():
     """The per-entry migration oracle (design row T7-4).
 

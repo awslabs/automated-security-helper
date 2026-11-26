@@ -33,8 +33,8 @@ global_settings:
         the detect-secrets scanner with its baseline_file option; the scanner's name
         carries the word "secrets" and the value is an option name, not a credential.
         Pinned to the line so a real value added elsewhere in the file still reports;
-        tests/unit/config/test_tool_config_trust_ferret_pins.py fails if the row
-        moves out of the pinned line.
+        tests/unit/test_ci_ferret_self_scan_pins.py fails if the row moves out of
+        the pinned line.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/plugin_modules/ash_ferret_plugins/spec/2026-09-13-ferret-scan-plugin-v2-update-analysis.md
       reason: >-
@@ -1491,15 +1491,15 @@ global_settings:
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
       symbol: _nearest_real_directory
-      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+      reason: "Function prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
       symbol: _untrusted_ancestor
-      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+      reason: "Function prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
       symbol: _settings_file_ancestor
-      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+      reason: "Function prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
       symbol: _yarn_copy_parent
@@ -1507,7 +1507,7 @@ global_settings:
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
       symbol: _pnpm_workspace_copy
-      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+      reason: "Function prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
       line_start: 1186
@@ -1617,7 +1617,7 @@ global_settings:
       path: tests/unit/utils/test_ash_install_failures_are_logged_redacted.py
       expires: "2027-05-06"
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file. Reviewed at the expiry date."
-    # === Time-boxed: minimatch CVE-2026-118764 / GHSA-g3hv-75wg-m249, bundled in aws-cdk-lib (expires 2027-02-06) ===
+    # === Time-boxed: minimatch CVE-2026-118764 / GHSA-g3hv-75wg-m249, bundled in aws-cdk-lib (expires 2026-12-27) ===
     # The flagged copy is node_modules/aws-cdk-lib/node_modules/minimatch 10.2.5
     # (inBundle: true) in deploy/cdk/package-lock.json. The repository's own override
     # already pins the top-level minimatch to 11.x, but a bundled copy ships inside the
@@ -1632,7 +1632,7 @@ global_settings:
       path: "deploy/cdk/package-lock.json"
       package_name: "minimatch"
       package_version: "10.2.5"
-      expires: "2027-02-06"
+      expires: "2026-12-27"
       reason: >-
         CVE-2026-118764 (GHSA-g3hv-75wg-m249): minimatch 10.2.5 bundled inside aws-cdk-lib
         (inBundle), so the repository's override, which pins the top-level minimatch to 11.x,
