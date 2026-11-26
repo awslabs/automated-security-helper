@@ -1147,6 +1147,9 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "semgrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "semgrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
     "syft commit": "1a72047fd46c72e0a12ee77e24b23d2316753d08",  # pragma: allowlist secret
+    "titus commit": "41874893cbf6932c92d0075aeeed065343d94105",  # pragma: allowlist secret
+    "titus/LICENSE": "c79772859956ceea1389d4f13fc6791d66cf67057cdfda13e137f7e4fe1e5b08",  # pragma: allowlist secret
+    "titus/NOTICE": "41574fe14c49157b42e167d69d0ccf796fe733c501148c6dd380b921678d44e7",  # pragma: allowlist secret
     "trivy commit": "3f6334d223b52188324af3b9923b4249cd206652",  # pragma: allowlist secret
     "trivy/NOTICE": "aed9bc6dab87c6f6567d20bf0f5c0433a8ccd3ad7873322cf79b9244eb720a1f",  # pragma: allowlist secret
     "uv commit": "6b2d39dcc390293d51c9c0d2bbcd650f4bcbfdce",  # pragma: allowlist secret
@@ -1613,6 +1616,26 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         repository="https://github.com/anchore/syft",
         commit=_THIRD_PARTY_HASHES["syft commit"],
         files=(LicenseFile("LICENSE"),),
+    ),
+    # The alpha Titus scanner's tool. Pinned and installed by its own module
+    # (``ash_titus_plugins/titus_install.py``), not by install-pinned-tool, and the
+    # release assets are bare executables, so both files are staged from the
+    # repository at the pinned commit on the --licenses-only line (read on
+    # 2026-11-26). The NOTICE carries Titus' attribution, and that of the rules it
+    # derives from Nosey Parker and Kingfisher. ``titus --version`` is an unknown
+    # flag, so the version check runs ``titus version`` (prints "Titus v1.3.0 (Go
+    # port of NoseyParker)").
+    "titus": ThirdPartyLicense(
+        tool="titus",
+        version="v1.3.0",
+        license="Apache-2.0",
+        repository="https://github.com/praetorian-inc/titus",
+        commit=_THIRD_PARTY_HASHES["titus commit"],
+        files=(
+            _from_source("titus", "https://github.com/praetorian-inc/titus", "LICENSE"),
+            _from_source("titus", "https://github.com/praetorian-inc/titus", "NOTICE"),
+        ),
+        version_probe=("titus", "version"),
     ),
     "trivy": ThirdPartyLicense(
         tool="trivy",

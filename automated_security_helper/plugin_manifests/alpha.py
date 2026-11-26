@@ -242,6 +242,14 @@ MANIFESTS = (
         owned=(f"{_DOCS}/snyk-plugin.md", f"{_DOCS}/snyk-plugin-setup.md"),
     ),
     _alpha(
+        "titus",
+        "ash_titus_plugins",
+        "titus_scanner",
+        "TitusScanner",
+        "TitusScannerConfigOptions",
+        owned=(f"{_DOCS}/titus-plugin.md", f"{_FIXTURES}/titus"),
+    ),
+    _alpha(
         "trivy-repo",
         "ash_trivy_plugins",
         "trivy_repo_scanner",

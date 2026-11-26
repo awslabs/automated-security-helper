@@ -581,7 +581,7 @@ class TestThePythonTools:
         core = _core_stage(DOCKERFILE.read_text())
         staged = core.index(
             "install-pinned-tool --licenses-only bandit cfn-lint checkov "
-            "ggshield guarddog polaris semgrep zizmor"
+            "ggshield guarddog polaris semgrep titus zizmor"
         )
         assert core.index('ash dependencies install --bin-path "${ASH_BIN_PATH}"') < (
             staged

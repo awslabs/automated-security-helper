@@ -64,6 +64,7 @@ PACKAGE_DIRS = frozenset(
         "plugin_modules/ash_polaris_plugins",
         "plugin_modules/ash_secretlint_plugins",
         "plugin_modules/ash_snyk_plugins",
+        "plugin_modules/ash_titus_plugins",
         "plugin_modules/ash_trivy_plugins",
         "plugins",
         "schemas",

@@ -155,6 +155,7 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
     "semgrep": ScannerToolType.SAST.value,
     "snyk-code": ScannerToolType.SAST.value,
     "syft": ScannerToolType.SBOM.value,
+    "titus": ScannerToolType.SECRETS.value,
     "trivy": ScannerToolType.SCA.value,
     "trivy-repo": ScannerToolType.SCA.value,
     "zizmor": ScannerToolType.SAST.value,

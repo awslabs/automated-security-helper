@@ -250,6 +250,9 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
         missing="syft commits its native SBOM JSON only (syft/syft.src.json); "
         "commit a capture of the scanner's SARIF report",
     ),
+    # The committed SARIF is what a REAL Titus v1.3.0 run printed (captured/README.md
+    # names the three edits made to it).
+    "titus": CorpusSpec("titus", sarif=("captured/*.sarif",)),
     "trivy": CorpusSpec("trivy", sarif=("*.sarif", "captured/*.sarif"), prep="trivy"),
     "trivy-repo": CorpusSpec(
         "trivy", sarif=("*.sarif", "captured/*.sarif"), prep="trivy"
