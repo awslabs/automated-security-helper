@@ -521,9 +521,12 @@ def test_every_reserved_spelling_is_one_the_cli_actually_accepts():
     from automated_security_helper.cli.main import app
 
     scan_command = typer.main.get_command(app).commands["scan"]
+    # get_params, not params: click adds its help option there, and --help is a
+    # spelling the gate reserves. Resilient parsing, so no eager callback runs.
+    ctx = scan_command.make_context("scan", [], resilient_parsing=True)
     declared = {
         spelling
-        for param in scan_command.params
+        for param in scan_command.get_params(ctx)
         for spelling in (*param.opts, *param.secondary_opts)
     }
     gate_module = _load_gate()
