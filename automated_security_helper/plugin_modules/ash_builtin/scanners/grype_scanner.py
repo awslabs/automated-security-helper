@@ -524,9 +524,10 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: the survey reads SARIF rule properties.tags "
             "off the conformance tests' presenter shape (rule-level, which "
-            "the flat reader never takes as the tags column anyway); no grype "
-            "SARIF fixture from a real run is committed, so a `grype -o "
-            "sarif` capture settles whether results carry tags",
+            "the flat reader takes as the tags column only when the result "
+            "itself carries none); no grype SARIF fixture from a real run is "
+            "committed, so a `grype -o sarif` capture settles whether results "
+            "carry tags",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
@@ -629,7 +630,10 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 note="read at tests/test_data/scanners/grype/captured/grype-0.122.1-from-syft-sbom.sarif: "
                 "every result carries partialFingerprints.primaryLocationLineHash, which grype writes "
                 "per manifest line (6 distinct values over 21 results), so findings at one line share "
-                "a value; it is not a per-finding hash",
+                "a value; it is not a per-finding hash. One SBOM-input capture: "
+                "stability across runs and for directory or image sources is "
+                "asserted from the hash's line-keyed construction, not from a "
+                "second capture",
             ),
             extensibility=opsf.ExtensibilityFacet(
                 custom_rules=opsf.CustomRules.NONE,
@@ -650,7 +654,11 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.NONE,),
-                note="a directory; no SBOM document input is wired",
+                note=(
+                    "a directory, or a container image (a reference needs an "
+                    "engine or the registry, a saved archive or OCI layout "
+                    "needs neither); no SBOM document input is wired"
+                ),
             ),
         )
     )
@@ -1191,10 +1199,11 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         else: the target is a stereoscope string built from the locator and
         the detected engine (utils/image_tool_targets.py: a payload needs no
         engine; a reference prefers the daemon's content store, else the
-        tool's own registry client), there are no ``--exclude`` patterns
-        because nothing of the source tree is scanned, and the empty config
-        and the database cache are exactly the dir: scan's, so the offline
-        database posture carries over unchanged.
+        tool's own registry client), the ``--exclude`` patterns are the
+        IMAGE's ignore paths (absolute in-image globs; nothing of the source
+        tree is scanned, so no source-tree exclude applies), and the empty
+        config and the database cache are exactly the dir: scan's, so the
+        offline database posture carries over unchanged.
         """
         from automated_security_helper.utils.image_tool_targets import (
             stereoscope_target,
@@ -1321,20 +1330,31 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     ) -> SarifReport:
         """Strip leading slashes from artifact URIs and attach package identity.
 
-        Both steps are host-tree work and are skipped for an image scan: an
-        in-image path stays as grype wrote it (absolute; no host root may
-        rebase it), and joining image packages to the HOST's lockfiles would
-        attribute a copy the image does not hold. ``fix_available`` is read
-        from the report itself and holds for images too.
+        The HOST-TREE steps are skipped for an image scan: an in-image path
+        stays as grype wrote it (absolute; no host root may rebase it), and
+        joining image packages to the HOST's lockfiles would attribute a copy
+        the image does not hold. The package NAME and VERSION are not
+        host-tree work -- they come from grype's own result message, which has
+        the same shape for an image -- so they are attached for images too
+        (``correlation_id_for`` builds the ``dep/`` key from them, which is
+        how a grype image finding correlates with trivy's on the same CVE,
+        and package-scoped suppressions match on them). Only the lockfile
+        join, which yields ``package_path``, is skipped. ``fix_available`` is
+        read from the report itself and holds for images too.
+
+        The in-progress flag is read with a default: the facets corpus
+        harness replays captured reports through ``cls.__new__(cls)``
+        skeletons, which have no pydantic private state, and a skeleton is
+        never mid-image-scan.
         """
-        in_image = self._image_scan_in_progress
+        in_image = bool(getattr(self, "_image_scan_in_progress", False))
         lock_index = None if in_image else NpmLockIndex(target)
         for run in sarif_report.runs or []:
             fixes = _rule_fix_statements(run)
             for result in run.results or []:
                 if not in_image:
                     self._normalize_result_uris(result, target)
-                    self._attach_package_identity(result, lock_index)
+                self._attach_package_identity(result, lock_index)
                 self._attach_fix_available(result, run, fixes)
         return sarif_report
 
@@ -1383,7 +1403,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             setattr(result.properties, "fix_available", True)
 
     @staticmethod
-    def _attach_package_identity(result, lock_index: NpmLockIndex) -> None:
+    def _attach_package_identity(result, lock_index: Optional[NpmLockIndex]) -> None:
         """Record which package copy a grype result is about.
 
         grype's SARIF puts every dependency finding at line 1 of the manifest,
@@ -1396,7 +1416,9 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         For an npm lockfile the name and version are looked up among the
         lockfile's entries; exactly one match gives ``package_path``. Two or
         more (the same version installed at two places) give no path, because
-        grype's output does not say which copy it found.
+        grype's output does not say which copy it found. An image scan passes
+        ``lock_index=None``: the name and version still attach, and no host
+        lockfile is consulted for a path.
         """
         message = result.message.root.text if result.message else None
         match = _GRYPE_PACKAGE_MESSAGE.search(message or "")
@@ -1414,8 +1436,10 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         # followed by a backslashed relative path, "D:/a/r/r/\\deploy\\cdk\\...".
         # sanitize_sarif_paths fixes the location later, but package_path is
         # built here, so the lockfile is relativized here too. None (outside
-        # the scan root) claims no path.
-        lock_rel = lock_index.relative(uri) if uri else None
+        # the scan root, or an image scan with no lockfile index) claims no path.
+        lock_rel = (
+            lock_index.relative(uri) if (lock_index is not None and uri) else None
+        )
         if lock_rel:
             entry = lock_index.unique_by_name_version(lock_rel, name, version)
             if entry is not None:

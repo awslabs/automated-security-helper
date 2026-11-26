@@ -264,3 +264,170 @@ class TestTheFallback:
         assert registry.calls == []
         assert _notice_count(notices) == 1
         assert "crane is not installed" in notices.text
+
+
+class TestThePayloadRung:
+    """A direct payload names its own digest; nothing is asked or fetched.
+
+    A payload scan used to key its ids and its scan scope on the payload's
+    PATH, so the same bytes uploaded twice (the MCP channel writes each upload
+    under a new id) were two subjects, and only trivy's run-recorded imageID
+    keyed on content -- splitting one image's ids between trivy rows and
+    everyone else's.
+    """
+
+    def _layout(self, tmp_path, manifests):
+        import json
+
+        layout = tmp_path / "layout"
+        layout.mkdir(exist_ok=True)
+        (layout / "oci-layout").write_text('{"imageLayoutVersion": "1.0.0"}')
+        (layout / "index.json").write_text(
+            json.dumps({"schemaVersion": 2, "manifests": manifests})
+        )
+        return layout
+
+    def _tar(self, tmp_path, members: dict, name="image.tar"):
+        import io
+        import tarfile
+
+        path = tmp_path / name
+        with tarfile.open(path, "w") as archive:
+            for member, body in members.items():
+                info = tarfile.TarInfo(name=member)
+                info.size = len(body)
+                archive.addfile(info, io.BytesIO(body))
+        return path
+
+    def _docker_archive(self, tmp_path):
+        import json
+
+        return self._tar(
+            tmp_path,
+            {"manifest.json": json.dumps([{"Config": "ab" * 32 + ".json"}]).encode()},
+        )
+
+    def test_a_layouts_one_manifest_digest_is_read(self, tmp_path):
+        from automated_security_helper.utils.image_digest_resolver import (
+            payload_digest,
+        )
+
+        layout = self._layout(tmp_path, [{"digest": DIGEST, "mediaType": "x"}])
+        assert payload_digest(ImageLocator(oci_layout=layout)) == (DIGEST, "")
+
+    def test_a_multi_manifest_index_names_nothing_with_the_reason(self, tmp_path):
+        from automated_security_helper.utils.image_digest_resolver import (
+            payload_digest,
+        )
+
+        layout = self._layout(tmp_path, [{"digest": DIGEST}, {"digest": OTHER}])
+        digest, why = payload_digest(ImageLocator(oci_layout=layout))
+        assert digest is None
+        assert "2 manifests" in why
+
+    @pytest.mark.parametrize(
+        "config_entry",
+        ["blobs/sha256/" + "ab" * 32, "ab" * 32 + ".json"],
+        ids=["recent docker save", "older save"],
+    )
+    def test_a_docker_archives_config_digest_is_read(self, tmp_path, config_entry):
+        import json
+
+        from automated_security_helper.utils.image_digest_resolver import (
+            payload_digest,
+        )
+
+        archive = self._tar(
+            tmp_path,
+            {"manifest.json": json.dumps([{"Config": config_entry}]).encode()},
+        )
+        assert payload_digest(ImageLocator(oci_archive=archive)) == (DIGEST, "")
+
+    def test_an_oci_archives_index_is_read(self, tmp_path):
+        import json
+
+        from automated_security_helper.utils.image_digest_resolver import (
+            payload_digest,
+        )
+
+        archive = self._tar(
+            tmp_path,
+            {
+                "oci-layout": b'{"imageLayoutVersion": "1.0.0"}',
+                "index.json": json.dumps(
+                    {"schemaVersion": 2, "manifests": [{"digest": DIGEST}]}
+                ).encode(),
+            },
+        )
+        assert payload_digest(ImageLocator(oci_archive=archive)) == (DIGEST, "")
+
+    def test_an_oversized_record_is_refused_unread(self, tmp_path):
+        from automated_security_helper.utils import image_digest_resolver as idr
+
+        archive = self._tar(
+            tmp_path,
+            {"manifest.json": b" " * (idr._MAX_PAYLOAD_RECORD_BYTES + 1)},
+        )
+        digest, why = idr.payload_digest(ImageLocator(oci_archive=archive))
+        assert digest is None
+        assert "too large" in why
+
+    def test_the_resolver_fills_the_locator_from_the_payload(self, tmp_path, notices):
+        resolved = resolve_image_locator(
+            ImageLocator(oci_archive=self._docker_archive(tmp_path)), offline=True
+        )
+        assert resolved.resolved_digest == DIGEST
+        assert resolved.resolved_from == "payload"
+        # No warning: the payload answered, and nothing was asked or fetched
+        # (offline=True would have refused a registry rung).
+        assert _notice_count(notices) == 0
+
+    def test_a_payload_digest_never_pins_a_pull(self, tmp_path):
+        resolved = resolve_image_locator(
+            ImageLocator(oci_archive=self._docker_archive(tmp_path)), offline=True
+        )
+        assert resolved.pulled_ref() is None
+
+    def test_the_stamp_and_the_scope_key_on_the_payloads_digest(self, tmp_path):
+        from automated_security_helper.utils.image_attribution import (
+            image_scan_source,
+        )
+
+        resolved = resolve_image_locator(
+            ImageLocator(oci_archive=self._docker_archive(tmp_path)), offline=True
+        )
+        # The scope a reporter compares within is the digest, not the upload
+        # path, so the same bytes delivered twice are one subject...
+        assert image_scan_source(resolved) == f"image:{DIGEST}"
+        # ...and a grype-shaped run (no run digest of its own) gets the same
+        # digest trivy's rows get, so an image: suppression by digest covers
+        # both and their ids share one basis.
+        run = Run.model_validate(
+            {
+                "tool": {"driver": {"name": "grype", "version": "0.0.0"}},
+                "results": [
+                    {
+                        "ruleId": "CVE-2024-0001",
+                        "message": {"text": "libssl is vulnerable"},
+                        "level": "error",
+                        "locations": [
+                            {
+                                "physicalLocation": {
+                                    "artifactLocation": {"uri": "/usr/lib/libssl.so.3"},
+                                    "region": {"startLine": 1},
+                                }
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+        class _Report:
+            runs = [run]
+
+        mark_image_results(_Report(), resolved)
+        flat = FlatVulnerability.from_sarif_result(
+            run.results[0], tool_name="grype", tool_type="SCA", run=run
+        )
+        assert flat.image_digest == DIGEST

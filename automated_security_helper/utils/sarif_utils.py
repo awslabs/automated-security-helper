@@ -1922,9 +1922,13 @@ class _OutputDirExclusion:
 
         An image scan's URI is an in-image path and is never made relative to the
         source directory: it is put in the one matching spelling and returned.
+        The prefix handed on is EMPTY -- the host tree has no say over an
+        in-image path: the percent-decode disambiguation probe (which stats
+        host files under the scan root) never runs, and a backslash is a POSIX
+        name character, not a host-flavored separator.
         """
         if self.in_image:
-            return _matched_path_text(raw_uri, self.source_dir_prefix, decode)
+            return _matched_path_text(raw_uri, "", decode)
         return _normalize_sarif_uri(
             raw_uri,
             self.source_dir_prefix,
@@ -2492,7 +2496,9 @@ def _apply_suppressions_within_budget(
                 ):
                     raw_uri = location.physicalLocation.root.artifactLocation.uri
                     # An in-image path goes through the SAME one-spelling
-                    # reading the ignore step used (_matched_path_text), so the
+                    # reading the ignore step used (_matched_path_text with an
+                    # EMPTY prefix: the host tree has no say over it, so no
+                    # host file is statted and no host prefix is read), so the
                     # two steps cannot read one location differently (decoded
                     # there, raw here was exactly that).
                     uri = (
@@ -2504,7 +2510,7 @@ def _apply_suppressions_within_budget(
                             _source_dir_basename,
                         )
                         if raw_uri and not in_image
-                        else _matched_path_text(raw_uri or "", _source_dir_prefix)
+                        else _matched_path_text(raw_uri or "", "")
                     )
                     # The spelling the report records, escapes kept: a person who
                     # copies ``a%20b.py`` from the report (or saves the dialog's
@@ -2548,7 +2554,11 @@ def _apply_suppressions_within_budget(
                     # same way the location URI is. The basename argument
                     # is None: that case exists for one scanner's location
                     # URIs and would strip a real leading directory here.
-                    if package_path:
+                    # Never for an in-image path: it is matched as the tool
+                    # wrote it, and a working directory such as /app -- a
+                    # common WORKDIR -- shadowing the host source prefix
+                    # would silently relativize an in-image package path.
+                    if package_path and not in_image:
                         package_path = _normalize_sarif_uri(
                             package_path,
                             _source_dir_prefix,

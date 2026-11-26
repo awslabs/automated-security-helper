@@ -6868,7 +6868,10 @@ def _gating_actionable_count(
                 results, metric.scanner_name
             )
             for severity in Severity:
-                count = getattr(counts, severity.bucket)
+                # Default 0: a Severity member whose bucket is not a field of
+                # dict_result_counts (a later SUPPRESSED-like member) must
+                # count nothing, not crash exit-code computation.
+                count = getattr(counts, severity.bucket, 0)
                 if count and severity_fails_threshold(
                     severity.value, threshold_for(metric.scanner_name)
                 ):
@@ -7435,6 +7438,19 @@ def run_ash_scan(
                 shard_index=shard_index,
                 shard_count=shard_count,
             )
+        else:
+            # Only local single-directory mode reads opts.asset, so any other
+            # shape would silently scan source_dir and ignore the subject the
+            # caller named. A FILESYSTEM asset is also refused until something
+            # consumes its root: today source_dir is the one directory
+            # subject, and accepting a second spelling of it would leave two
+            # sources of truth.
+            _printed_refusal(
+                ASH_EXIT_USAGE_ERROR,
+                "asset: only a container-image asset is accepted here; a "
+                "directory scan names its subject with source_dir.",
+                one_line=True,
+            )
     else:
         asset = _image_asset_or_refusal(
             image=image,
@@ -7456,22 +7472,27 @@ def run_ash_scan(
         # other phases stand.
         phases = [
             phase
-            for phase in (
-                phases
-                or [ExecutionPhase.CONVERT, ExecutionPhase.SCAN, ExecutionPhase.REPORT]
-            )
+            for phase in (phases or list(DEFAULT_EXECUTION_PHASES))
             if phase != ExecutionPhase.CONVERT
         ]
         if not phases:
-            # An empty list reads as "no phases given" further down, where the
-            # local mode runs convert, scan and report: a request for the
-            # convert phase alone would run the one phase an image never has.
-            _printed_refusal(
-                ASH_EXIT_USAGE_ERROR,
-                "an image scan has no convert phase, and no other phase was "
-                "asked for: nothing is left to run.",
-                one_line=True,
-            )
+            if inspect:
+                # --phases convert --inspect: convert is dropped, but INSPECT
+                # was asked for, so something IS left to run. Spell it, since
+                # an empty list reads as "no phases given" further down and
+                # would run the local-mode defaults, convert included.
+                phases = [ExecutionPhase.INSPECT]
+            else:
+                # An empty list reads as "no phases given" further down, where
+                # the local mode runs the default phases: a request for the
+                # convert phase alone would run the one phase an image never
+                # has.
+                _printed_refusal(
+                    ASH_EXIT_USAGE_ERROR,
+                    "an image scan has no convert phase, and no other phase "
+                    "was asked for: nothing is left to run.",
+                    one_line=True,
+                )
 
     # Resolve cwd-based defaults at call time (not import time).
     _source_dir: Path = (

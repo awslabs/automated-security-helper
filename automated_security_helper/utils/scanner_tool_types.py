@@ -26,10 +26,14 @@ Declaring ``tool_type`` on the class, or tagging results, makes it known.
 
 from __future__ import annotations
 
+import functools
 from typing import TYPE_CHECKING, Any, Iterable, Optional, Set
 
 from automated_security_helper.core.enums import ScannerToolType
-from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
+from automated_security_helper.utils.scanner_names import (
+    IMAGE_SERVING_SCANNERS,
+    SCANNER_TOOL_TYPES,
+)
 
 if TYPE_CHECKING:
     from automated_security_helper.base.scanner_facets import FacetState
@@ -66,18 +70,29 @@ def normalize_tool_type(value: Any) -> Optional[str]:
     return text
 
 
-def _loaded_class_tool_type(scanner_name: str) -> Optional[str]:
-    """The class-level ``tool_type`` of a loaded scanner class named ``scanner_name``.
+def _loaded_scanner_classes() -> Iterable[type]:
+    """Every loaded plugin subclass of ``ScannerPluginBase``, aliases skipped.
 
-    Found among the subclasses of ``ScannerPluginBase`` already imported, not
-    through the plugin registry: the registry's state is the plugin manager's
-    own (tests/unit/workspace/test_project_isolation.py). Imports nothing else
-    and instantiates nothing.
+    Found among the subclasses already imported, not through the plugin
+    registry: the registry's state is the plugin manager's own
+    (tests/unit/workspace/test_project_isolation.py). Imports nothing else and
+    instantiates nothing.
+
+    A pydantic generic parametrization (``TrivyScannerBase[TrivyScannerConfig]``,
+    ``ScannerPluginBase[GrypeScannerConfig]``) is a real runtime subclass that
+    inherits the concrete config annotation, so it answers to the scanner's
+    config name -- but it is an alias pydantic mints for the annotation, never a
+    plugin, and it declares no register row of its own (the register reads a
+    class's own ``vars()``). Walked as a match, the alias answered for the
+    scanner: ``scanner_serves_container_images("trivy")`` read the alias first
+    and returned False with the real class loaded, which stripped every image
+    finding's attribution. An alias names the class it parametrizes in
+    ``__pydantic_generic_metadata__["origin"]``; skip it.
     """
     try:
         from automated_security_helper.base.scanner_plugin import ScannerPluginBase
     except ImportError:
-        return None
+        return
     pending = list(ScannerPluginBase.__subclasses__())
     seen: Set[type] = set()
     while pending:
@@ -86,6 +101,15 @@ def _loaded_class_tool_type(scanner_name: str) -> Optional[str]:
             continue
         seen.add(cls)
         pending.extend(cls.__subclasses__())
+        metadata = getattr(cls, "__pydantic_generic_metadata__", None) or {}
+        if metadata.get("origin") is not None:
+            continue
+        yield cls
+
+
+def _loaded_class_tool_type(scanner_name: str) -> Optional[str]:
+    """The class-level ``tool_type`` of a loaded scanner class named ``scanner_name``."""
+    for cls in _loaded_scanner_classes():
         if _class_config_name(cls) != scanner_name:
             continue
         field = (getattr(cls, "model_fields", None) or {}).get("tool_type")
@@ -95,8 +119,16 @@ def _loaded_class_tool_type(scanner_name: str) -> Optional[str]:
     return None
 
 
+@functools.lru_cache(maxsize=None)
 def _class_config_name(cls: type) -> Optional[str]:
-    """A scanner class's config name, read from its config model's default."""
+    """A scanner class's config name, read from its config model's default.
+
+    Cached per class: the by-name helpers below run once per finding and per
+    reporter, and this read inspects pydantic ``model_fields`` annotations,
+    which dominated the walk's cost. The cache holds a strong reference to
+    each class it has seen -- a leak only for classes defined and discarded at
+    runtime (test doubles), which is accepted.
+    """
     field = (getattr(cls, "model_fields", None) or {}).get("config")
     annotation = getattr(field, "annotation", None)
     for arg in getattr(annotation, "__args__", None) or (annotation,):
@@ -166,27 +198,19 @@ def scanner_resource_id_state(scanner_name: Any) -> Optional["FacetState"]:
     """The declared ``resource_id`` facet state (a :class:`FacetState` member)
     of the loaded scanner class named ``scanner_name``, or None if unknown.
 
-    Read from the class's ``facets`` declaration, found the way
-    :func:`_loaded_class_tool_type` finds a class: among the already-imported
-    subclasses of ``ScannerPluginBase``, importing and instantiating nothing
-    else. A scanner that is not loaded or declares no facets answers None, and
-    the caller treats that as "cannot decide", not as a declaration.
+    Read from the class's ``facets`` declaration, found among the loaded
+    plugin classes (:func:`_loaded_scanner_classes`), importing and
+    instantiating nothing else. A scanner that is not loaded or declares no
+    facets answers None, and the caller treats that as "cannot decide", not as
+    a declaration.
     """
     if not isinstance(scanner_name, str) or not scanner_name:
         return None
     try:
         from automated_security_helper.base.scanner_facets import FacetState
-        from automated_security_helper.base.scanner_plugin import ScannerPluginBase
     except ImportError:
         return None
-    pending = list(ScannerPluginBase.__subclasses__())
-    seen: Set[type] = set()
-    while pending:
-        cls = pending.pop()
-        if cls in seen:
-            continue
-        seen.add(cls)
-        pending.extend(cls.__subclasses__())
+    for cls in _loaded_scanner_classes():
         if _class_config_name(cls) != scanner_name:
             continue
         decl = getattr(getattr(cls, "facets", None), "resource_id", None)
@@ -215,7 +239,6 @@ def an_image_digest_consumer_is_selected(
     consume the digest either, because consumption IS the declaration.
     """
     try:
-        from automated_security_helper.base.scanner_plugin import ScannerPluginBase
         from automated_security_helper.base import scanner_operational_facets as opsf
         from automated_security_helper.core.asset import AssetKind
     except ImportError:
@@ -230,15 +253,8 @@ def an_image_digest_consumer_is_selected(
         for name in (excluded_scanners or [])
         if str(name).strip()
     }
-    pending = list(ScannerPluginBase.__subclasses__())
-    seen: Set[type] = set()
-    while pending:
-        cls = pending.pop()
-        if cls in seen:
-            continue
-        seen.add(cls)
-        pending.extend(cls.__subclasses__())
-        facets = getattr(cls, "operational_facets", None)
+    for cls in _loaded_scanner_classes():
+        facets = opsf.declared_operational_facets(cls)
         network = getattr(facets, "network", None)
         if opsf.Fetched.IMAGE_DIGEST not in (getattr(network, "fetches", None) or ()):
             continue
@@ -258,34 +274,36 @@ def an_image_digest_consumer_is_selected(
 
 
 def scanner_serves_container_images(scanner_name: Any) -> Optional[bool]:
-    """Whether the loaded scanner class named ``scanner_name`` declares
-    container-image targets in its operational facets, or None if unknown.
+    """Whether the scanner named ``scanner_name`` declares container-image
+    targets in its operational facets, or None if unknown.
 
-    The by-name form of ``serves_asset_kind`` (``base/scanner_operational_facets``),
-    found the way :func:`scanner_resource_id_state` finds a class: among the
-    already-imported subclasses of ``ScannerPluginBase``, importing and
-    instantiating nothing else. The flat extractor reads it to honor the image
-    attribution properties only for a scanner the executor could have stamped;
-    None means "cannot decide", and the caller leaves the properties as read.
+    For a scanner ASH ships the answer is the static
+    ``scanner_names.IMAGE_SERVING_SCANNERS`` table, so it is the same in every
+    process: ``ash merge`` reads results another process wrote, and an answer
+    that depended on which scanner modules this process had imported gave one
+    result two identities (and made it matchable by ``image:`` suppressions in
+    one process and not the other). A test checks the table against each
+    shipped class's own register row.
+
+    A third-party name falls back to the by-name form of ``serves_asset_kind``
+    (``base/scanner_operational_facets``) over the loaded plugin classes
+    (:func:`_loaded_scanner_classes`), importing and instantiating nothing
+    else. The flat extractor reads it to honor the image attribution
+    properties only for a scanner the executor could have stamped; None means
+    "cannot decide", and the caller leaves the properties as read.
     """
     if not isinstance(scanner_name, str) or not scanner_name:
         return None
+    if scanner_name in SCANNER_TOOL_TYPES:
+        return scanner_name in IMAGE_SERVING_SCANNERS
     try:
-        from automated_security_helper.base.scanner_plugin import ScannerPluginBase
         from automated_security_helper.base.scanner_operational_facets import (
             serves_asset_kind,
         )
         from automated_security_helper.core.asset import AssetKind
     except ImportError:
         return None
-    pending = list(ScannerPluginBase.__subclasses__())
-    seen: Set[type] = set()
-    while pending:
-        cls = pending.pop()
-        if cls in seen:
-            continue
-        seen.add(cls)
-        pending.extend(cls.__subclasses__())
+    for cls in _loaded_scanner_classes():
         if _class_config_name(cls) != scanner_name:
             continue
         return serves_asset_kind(cls, AssetKind.CONTAINER_IMAGE)

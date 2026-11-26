@@ -467,6 +467,25 @@ def ensure_session_image_scan_dir(
     return _ensure_dir(session_dir / "image-scan")
 
 
+def is_session_image_scan_dir(path: "os.PathLike | str", session_id: str) -> bool:
+    """Whether *path* names this session's image-scan anchor directory.
+
+    Creates nothing and never raises for a malformed path or session id: a
+    caller is asking "is this that directory?", not making one. The anchor is
+    the directory an image scan is anchored IN -- it holds only the scan's
+    own output -- so a caller that got it back as ``directory_path`` and sends
+    it in again as a ``source_dir`` is not naming a source tree, and the scan
+    tool refuses it rather than scanning an empty directory clean.
+    """
+
+    try:
+        candidate = Path(path).resolve()
+        anchor = _session_workspace(resolve_workspace_root(), session_id) / "image-scan"
+        return candidate == anchor.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def get_session_image_locator(session_id: str) -> Optional["ImageLocator"]:
     """The image this session delivered as its scan subject, or None.
 
@@ -3188,15 +3207,42 @@ _REF_REFUSED = re.compile(r"[\s\x00-\x1f\x7f]")
 #: session registry and in every log line that shows it.
 _MAX_IMAGE_REF_CHARS = 512
 
+#: Source-scheme words the scanner tools read as "not a registry reference":
+#: handed one schemeless (a declared-remote daemon hands grype and syft the
+#: ref as written), the tool reads a LOCAL PATH or another store instead of a
+#: registry, so a remote client could name server files with them. A real
+#: repository that happens to carry one of these names is still reachable
+#: spelled in full (``docker.io/library/docker:latest``).
+_TOOL_SOURCE_SCHEMES = frozenset(
+    {
+        "containerd",
+        "dir",
+        "docker",
+        "docker-archive",
+        "file",
+        "oci",
+        "oci-archive",
+        "oci-dir",
+        "podman",
+        "registry",
+        "sbom",
+        "singularity",
+    }
+)
+
 
 def validate_image_ref(image_ref: str) -> str:
     """The ref as stored, or a ValueError naming what cannot be one.
 
     A grammar floor, not a parser: registries disagree on fine points, and the
     tools that resolve the ref answer malformed ones themselves. What is
-    refused here is only what can never be a reference (empty, whitespace,
-    control characters) or what would read as something else where the ref is
-    later used (a leading ``-``, which is an option to any argv).
+    refused here is what can never be a reference (empty, whitespace, control
+    characters, non-ASCII -- no OCI reference grammar allows any of them) or
+    what would read as something ELSE where the ref is later used: a leading
+    ``-`` (an option to any argv), a ``:`` followed by ``/`` (no port and no
+    tag starts with a slash, but every ``scheme:/path`` spelling does), and a
+    first segment that is a tool source scheme (``docker-archive:x.tar`` would
+    read as a server path, not a registry name).
     """
 
     ref = (image_ref or "").strip()
@@ -3206,6 +3252,11 @@ def validate_image_ref(image_ref: str) -> str:
         raise ValueError(
             f"image_ref is too long: {len(ref)} characters, at most "
             f"{_MAX_IMAGE_REF_CHARS} (no registry reference is longer)"
+        )
+    if not ref.isascii():
+        raise ValueError(
+            "image_ref carries non-ASCII text, which no registry reference "
+            "grammar allows"
         )
     if ref.startswith("-"):
         raise ValueError(
@@ -3217,7 +3268,65 @@ def validate_image_ref(image_ref: str) -> str:
             "image_ref carries whitespace or a control character, which no "
             "registry reference grammar allows"
         )
+    if ":/" in ref:
+        raise ValueError(
+            "image_ref reads as a scheme-and-path, not a registry reference: "
+            "no port and no tag starts with '/'"
+        )
+    scheme_like, colon, _rest = ref.partition(":")
+    if colon and "/" not in scheme_like and scheme_like.lower() in _TOOL_SOURCE_SCHEMES:
+        raise ValueError(
+            f"image_ref starts with {scheme_like!r}:, which the scanner tools "
+            "read as a source scheme (a local path or another store), not a "
+            "registry reference. Spell the repository in full, as "
+            f"docker.io/library/{scheme_like}:<tag>."
+        )
     return ref
+
+
+#: The registries ``set_source_image`` accepts references into, set by the
+#: operator. Comma- or whitespace-separated ``host[:port]`` entries, compared
+#: case-insensitively with a ``:443`` suffix dropped on both sides; bare
+#: Docker Hub references (``alpine:3``) resolve against ``docker.io``, so Hub
+#: must be listed to allow them. Unset or empty means no reference is
+#: allowed: scanning a reference makes the SERVER's tools reach that registry
+#: -- any host a ref can spell, internal addresses included -- through the
+#: server's own network, daemon store and registry credentials, which is the
+#: exact reach ``ASH_MCP_GIT_ALLOWED_HOSTS`` closes for the git channel. The
+#: direct payload shapes (the archive upload) need no registry and are not
+#: gated.
+ASH_MCP_IMAGE_ALLOWED_REGISTRIES_ENV = "ASH_MCP_IMAGE_ALLOWED_REGISTRIES"
+
+
+def image_ref_registry(ref: str) -> str:
+    """The registry host[:port] *ref* resolves against, lower-cased.
+
+    The distribution rule: the text before the first ``/`` is a registry only
+    when it holds a ``.`` or a ``:`` or is ``localhost``; everything else --
+    a bare ``alpine:3``, a namespaced ``team/app`` -- resolves against Docker
+    Hub (``docker.io``). A default ``:443`` is dropped so one spelling
+    matches.
+    """
+    first, slash, _ = ref.partition("/")
+    if slash and ("." in first or ":" in first or first.lower() == "localhost"):
+        host = first.lower().rstrip(".")
+        return host.removesuffix(":443")
+    return "docker.io"
+
+
+def image_registry_allowed(ref: str) -> bool:
+    """Whether the operator's list admits *ref*'s registry; empty admits none."""
+    raw = os.environ.get(ASH_MCP_IMAGE_ALLOWED_REGISTRIES_ENV, "")
+    entries = {
+        entry.strip().lower().rstrip(".").removesuffix(":443")
+        for entry in raw.replace(",", " ").split()
+        if entry.strip()
+    }
+    return image_ref_registry(ref) in entries
+
+
+class ImageRegistryRefused(ValueError):
+    """A reference whose registry the operator's allowlist does not admit."""
 
 
 @_while_no_scan_runs(removes_workspace=False)
@@ -3237,9 +3346,27 @@ def set_source_image(
     Raises:
         ValueError: for a value that can never be a reference
             (:func:`validate_image_ref`).
+        ImageRegistryRefused: for a reference into a registry the operator's
+            ``ASH_MCP_IMAGE_ALLOWED_REGISTRIES`` list does not admit (an empty
+            list admits none): a scan of the ref makes the server's own tools
+            reach that registry -- any host the ref can spell -- with the
+            server's network, daemon store and registry credentials, the same
+            reach the git channel's host allowlist closes.
     """
 
-    locator = ImageLocator(ref=validate_image_ref(image_ref))
+    ref = validate_image_ref(image_ref)
+    if not image_registry_allowed(ref):
+        raise ImageRegistryRefused(
+            f"the reference's registry ({image_ref_registry(ref)!r}) is not in "
+            f"{ASH_MCP_IMAGE_ALLOWED_REGISTRIES_ENV}, the registries the "
+            "operator lets this server's scanners reach. The list is empty "
+            "unless the operator sets it (entries are host[:port]; bare Docker "
+            "Hub references need 'docker.io' listed). Ask the operator to add "
+            "the registry, or deliver the image itself with "
+            "set_source_image_archive_chunk and set_source_image_archive_finalize, "
+            "which reach no registry."
+        )
+    locator = ImageLocator(ref=ref)
     # The session directory exists from this delivery on, although a bare ref
     # writes nothing into it: the TTL sweep finds sessions through their
     # workspace directories, so a session whose only delivery is a ref would

@@ -40,6 +40,9 @@ def workspace(tmp_path, monkeypatch):
     # the developer's own MCP workspace, and a "nothing was created" check looks
     # where the call would have created it.
     monkeypatch.setattr(sd, "resolve_workspace_root", lambda: tmp_path)
+    # The reference rows are about the delivery, not the registry gate, which
+    # admits nothing by default; TestTheRegistryAllowlist clears this again.
+    monkeypatch.setenv("ASH_MCP_IMAGE_ALLOWED_REGISTRIES", "registry.example.com")
     yield tmp_path
     sd.clear_source(_SESSION, workspace_root=tmp_path)
 
@@ -108,6 +111,91 @@ class TestSetSourceImage:
     def test_an_inner_space_is_no_reference(self, workspace):
         with pytest.raises(ValueError, match="whitespace"):
             sd.set_source_image("repo tag", session_id=_SESSION)
+
+    def test_non_ascii_is_no_reference(self, workspace):
+        # C1 controls and bidi overrides reach log lines and tool argv; no OCI
+        # reference grammar allows any non-ASCII text. U+202E is the
+        # right-to-left override, spelled as an escape so no literal control
+        # character sits in this file.
+        with pytest.raises(ValueError, match="non-ASCII"):
+            sd.set_source_image("repo:tag" + chr(0x202E), session_id=_SESSION)
+
+    def test_a_scheme_and_path_is_no_reference(self, workspace):
+        # dir:/etc, oci-archive:/root/x.tar: handed schemeless to a tool, the
+        # text reads as a LOCAL PATH, so a remote client could name server
+        # files with it. No port and no tag starts with "/".
+        with pytest.raises(ValueError, match="scheme-and-path"):
+            sd.set_source_image("dir:/etc", session_id=_SESSION)
+
+    def test_a_tool_source_scheme_is_no_reference(self, workspace):
+        # docker-archive:x.tar parses as repo "docker-archive" tag "x.tar",
+        # which stereoscope reads as an archive at a server-relative path.
+        with pytest.raises(ValueError, match="source scheme"):
+            sd.set_source_image("docker-archive:x.tar", session_id=_SESSION)
+
+    def test_a_port_and_a_tag_still_read_as_references(self, workspace):
+        # The refusals above must not eat real references: a registry with a
+        # port, and a plain tag whose repository is no scheme word.
+        locator = sd.set_source_image(
+            "registry.example.com:5000/team/app:1.2.3", session_id=_SESSION
+        )
+        assert locator.ref == "registry.example.com:5000/team/app:1.2.3"
+
+
+class TestTheRegistryAllowlist:
+    """set_source_image reaches only registries the operator listed.
+
+    A scan of a delivered ref makes the SERVER's own tools reach that
+    registry -- any host the ref can spell, internal addresses included --
+    with the server's network, daemon store and registry credentials: the
+    reach ``ASH_MCP_GIT_ALLOWED_HOSTS`` closes for the git channel, closed
+    here the same way. Empty (the default) admits nothing; the archive
+    upload needs no registry and is not gated.
+    """
+
+    def test_an_empty_list_admits_no_reference(self, workspace, monkeypatch):
+        monkeypatch.delenv("ASH_MCP_IMAGE_ALLOWED_REGISTRIES", raising=False)
+        with pytest.raises(sd.ImageRegistryRefused, match="not in"):
+            sd.set_source_image(IMAGE_REF, session_id=_SESSION)
+        assert sd.get_session_image_locator(_SESSION) is None
+
+    def test_a_listed_registry_is_admitted_with_ports_normalized(
+        self, workspace, monkeypatch
+    ):
+        monkeypatch.setenv(
+            "ASH_MCP_IMAGE_ALLOWED_REGISTRIES",
+            "other.example.com, registry.example.com:443",
+        )
+        locator = sd.set_source_image(IMAGE_REF, session_id=_SESSION)
+        assert locator.ref == IMAGE_REF
+
+    def test_a_bare_hub_reference_needs_docker_io_listed(self, workspace, monkeypatch):
+        monkeypatch.setenv("ASH_MCP_IMAGE_ALLOWED_REGISTRIES", "registry.example.com")
+        with pytest.raises(sd.ImageRegistryRefused, match="docker.io"):
+            sd.set_source_image("alpine:3.20", session_id=_SESSION)
+        monkeypatch.setenv("ASH_MCP_IMAGE_ALLOWED_REGISTRIES", "docker.io")
+        assert sd.set_source_image("alpine:3.20", session_id=_SESSION).ref == (
+            "alpine:3.20"
+        )
+
+    def test_the_refusals_error_type_is_its_own(self, workspace, monkeypatch):
+        # A client branches on error_type, so the gate's refusal is not the
+        # generic ValueError answer.
+        from automated_security_helper.cli.mcp_tools import mcp_set_source_image
+
+        monkeypatch.delenv("ASH_MCP_IMAGE_ALLOWED_REGISTRIES", raising=False)
+        answer = mcp_set_source_image(IMAGE_REF, session_id=_SESSION)
+        assert answer["success"] is False
+        assert answer["error_type"] == "image_registry_not_permitted"
+
+    def test_the_registry_of_a_ref_is_the_distribution_reading(self, workspace):
+        assert sd.image_ref_registry("alpine:3.20") == "docker.io"
+        assert sd.image_ref_registry("team/app:1") == "docker.io"
+        assert sd.image_ref_registry("localhost/app:1") == "localhost"
+        assert sd.image_ref_registry("reg.example.com:5000/app") == (
+            "reg.example.com:5000"
+        )
+        assert sd.image_ref_registry("Reg.Example.com:443/app") == "reg.example.com"
 
 
 class TestOneSubjectPerSession:

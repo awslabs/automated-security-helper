@@ -98,7 +98,7 @@ than looking clean.
 When *nothing* scanned the image -- no selected scanner declares the kind, or
 the subject is a reference in `--offline` mode, where every reference is
 skipped (see Engine delegation below) -- the report carries one
-informational SARIF result (`kind=informational`, `level=note`, rule
+informational SARIF result (`kind=informational`, `level=none`, rule
 `ASH-container-image-not-scanned`) naming the image. It is information, not a finding:
 it never grades, never fails a threshold and never lands in a SIEM as a vulnerability,
 so an offline CI run stays green by contract and visibly incomplete rather than
@@ -142,12 +142,22 @@ rungs in order and stopping at the first that answers:
 
 1. **The local engine.** ASH asks the detected docker or podman daemon, over its unix
    socket, for the image's inspect record and takes the `RepoDigests` entry of the
-   reference's own repository (Docker Hub names are normalized), else the image ID. This
-   works offline and fetches nothing, but only for an image the engine already holds.
+   reference's own repository (Docker Hub names are normalized), else the image ID --
+   which is the *config* digest, the same value as trivy's `imageID`, used because a
+   locally built, never-pushed image has no manifest digest to name. This works offline
+   and fetches nothing, but only for an image the engine already holds.
 2. **The registry.** `crane digest <ref>`, a registry request for the manifest's digest
    that needs no engine and fetches no layer. `crane` is a pinned tool like grype, and
    the container image carries it. It is skipped when ASH is offline (`--offline`,
    `ASH_OFFLINE`) or `crane` is not installed.
+
+A daemon that is only *declared* (a `tcp://` or `ssh://` `DOCKER_HOST`, a remote
+`CONTAINER_HOST`) stops the ladder instead: ASH has no socket to ask it over, and the
+scanners read the image through that daemon, so a digest from the registry could name
+other bytes than the ones scanned -- a CI job that builds `app:latest` inside a
+docker-in-docker daemon and scans it before pushing must not key its findings on the
+registry's *previous* `latest`. The ids then key on the reference text, and the one
+warning says so.
 
 The digest is recorded for the scan, so finding ids and the scan's identity scope key on
 it, and one log line names the rung that answered. Ids stay the same when the tag is moved
@@ -155,14 +165,23 @@ to another name and change when the tag moves to a different image; a re-tagged 
 therefore never archives or overwrites the findings of the image it replaced. Only when
 every rung fails do the ids and the scope key on the reference text; ASH then logs one
 warning that lists why each rung failed, and the scan itself is never failed or skipped by
-it. A reference that begins with `-` is refused before any rung runs.
+it. A reference that begins with `-` skips the lookup (nothing is handed to an engine or
+to `crane` as a word that could read as one of their options); the submission checks
+refuse such a reference before a scan starts, so the skip is the resolver's own guard,
+not the scan's.
 
 ## Over the MCP server
 
 The MCP server carries both shapes beside its git and zip channels:
 
 - `set_source_image` records a reference on the session; nothing is fetched at
-  delivery time.
+  delivery time. The reference's registry must be on the operator's
+  `ASH_MCP_IMAGE_ALLOWED_REGISTRIES` list (`host[:port]` entries; bare Docker
+  Hub references need `docker.io` listed; empty, the default, admits none):
+  scanning a delivered reference makes the *server's* tools reach that
+  registry with the server's network, daemon store and registry credentials,
+  the same reach `ASH_MCP_GIT_ALLOWED_HOSTS` closes for the git channel. The
+  archive upload needs no registry and is not gated.
 - `set_source_image_archive_chunk` + `set_source_image_archive_finalize` upload a
   saved image in the zip channel's exact shape: ordered base64 chunks of at most
   1 MiB, a SHA-256 verified at finalize, the same size caps -- and no extraction,
@@ -185,16 +204,23 @@ as written. Three attribution columns say which image it came from:
 | `image_digest` | The image's sha256 **manifest digest**, when one is named, read from these sources in order: the tool's own run output (trivy records `repoDigests`), the digest the lookup ladder resolved for a tag-only reference (the local engine, then `crane digest`; see above) or the digest a pinned reference (`repo@sha256:...`) states, else trivy's config-blob `imageID` -- last because it is a *different* value for the same image, used only when nothing names the manifest, as for a locally built, never-pushed image. Empty only when every source failed, as for a tag-only reference with no engine record whose registry read also failed (`crane` missing, or the registry unreachable). |
 | `layer_digest` | The digest of the layer the finding comes from, for trivy findings. trivy's SARIF carries no layer data, so ASH runs trivy once more with JSON output, joins each result to the SARIF by finding (vulnerability: CVE and package; secret: rule, target and start line; misconfiguration: check ID and target), and writes the layer's `Digest`, else its `DiffID`. A finding two layers both report, or one the JSON pass cannot match, stays empty. If the second pass fails the scan still succeeds with the column empty. syft reports no findings and grype's output has no layer data, so their findings carry none. Attribution only. |
 
-**The id-stability contract.** A finding's id keys on the in-image path and the image's
-digest; when no digest is named anywhere, it keys on the submitted reference. So:
+**The id-stability contract.** A finding's id keys on the in-image path and the scan's
+one subject key: the digest the scan start resolved (the ladder above, a pinned
+reference, or -- for a saved archive or layout -- the digest the payload itself names),
+else the submitted reference. The key is per scan, so every scanner's ids in one scan
+share one basis -- a digest that only one tool's run output names stays in the
+`image_digest` column and never re-keys half a scan. So:
 
 - a **pinned reference** gives ids that agree across machines, output directories and
   scanners (the manifest digest is one value everywhere);
 - a **tag with no resolvable digest** gives ids stable across rescans of that tag --
-  until a scan names a digest, which re-keys the findings to the image's content;
-- a **rebuild pushed to the same tag** is a new subject wherever a digest is named:
+  until a scan resolves a digest, which re-keys the findings to the image's content;
+- a **rebuild pushed to the same tag** is a new subject wherever a digest resolves:
   its contents changed, and diffs showing old findings closed and new ones opened is
   the intended reading. Pin by digest when ids must survive a tag moving.
+- a **saved archive or layout** keys on the digest its own index or manifest names
+  (an OCI index's manifest digest; a `docker save` tarball's config digest), so the
+  same payload uploaded twice is one subject wherever it lands on disk.
 
 An image finding never shares an id with a source finding at the same path. The layer
 digest is not part of the id: a rebuilt layer that still carries the same vulnerable

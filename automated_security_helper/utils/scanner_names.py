@@ -157,3 +157,16 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
 #: Derived-and-compared by tests/unit/utils/test_scanner_names_registry_agreement.py.
 #: Add a scanner to the registry without adding it here and that test fails.
 SCANNER_TAG_NAMES: FrozenSet[str] = frozenset(SCANNER_TOOL_TYPES)
+
+#: The shipped scanners whose operational-facets row declares the
+#: ``container_image`` target kind, by config name. The flat extractor and the
+#: SARIF suppression pass honor the image attribution properties only for a
+#: scanner that could have been handed an image, and they must answer the same
+#: in every process -- ``ash scan`` and ``ash merge`` over another process's
+#: results alike -- so for shipped scanners the answer cannot depend on which
+#: scanner modules the current process happens to have imported
+#: (``scanner_tool_types.scanner_serves_container_images`` consults this table
+#: before any loaded-class walk). Same leaf-module reasoning as the two tables
+#: above; tests/unit/utils/test_image_attribution_flows_into_identity_and_suppressions.py
+#: checks each entry against the loaded class's own register row.
+IMAGE_SERVING_SCANNERS: FrozenSet[str] = frozenset({"grype", "syft", "trivy"})

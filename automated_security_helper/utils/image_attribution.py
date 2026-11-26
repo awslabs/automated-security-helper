@@ -11,7 +11,8 @@ properties are the subject itself:
 - ``imageRef``: the locator as submitted (``ImageLocator.shown()``), always;
 - ``imageDigest``: the image's sha256 MANIFEST digest wherever one is named,
   in order: the run's own ``repoDigests``, else the locator's
-  ``resolved_digest`` (the digest-resolver ladder fills it at scan start) or
+  ``resolved_digest`` (the digest-resolver ladder fills it at scan start; for
+  a direct payload, the digest the payload's own index or manifest names) or
   the digest a pinned reference (``repo@sha256:...``) states, else the run's
   bare ``imageID`` -- last because it is the config-blob digest, a DIFFERENT
   value for the same image, read only when nothing names the manifest (a
@@ -23,9 +24,13 @@ properties are the subject itself:
   property name is the contract: any tool or plugin post-process that writes it
   flows through to the flat columns.
 
-The identity keys on the digest when there is one, else the submitted ref
-(``finding_identity``'s ``image`` argument), so two scans of one pinned image
-agree across machines while a bare tag rescan after a push is a new subject.
+The identity keys on ``imageScope``, one value per scan: the digest the scan
+START resolved (the ladder, a pinned reference, a payload's own record), else
+the submitted ref (``finding_identity``'s ``image`` argument). Two scans of
+one pinned image agree across machines, a resolved tag's rescan after a push
+is a new subject, and every scanner's ids in one scan share one basis -- the
+basis ``image_scan_source`` labels the scan with, which is what the diff
+gate's basis check reads.
 """
 
 import re
@@ -35,6 +40,7 @@ from automated_security_helper.core.asset import ImageLocator
 from automated_security_helper.utils.finding_identity import (
     IMAGE_DIGEST_PROPERTY,
     IMAGE_REF_PROPERTY,
+    IMAGE_SCOPE_PROPERTY,
 )
 
 #: A resolved image digest as tools write it: ``sha256:`` then 64 hex digits.
@@ -110,11 +116,12 @@ def _run_digest(run: Any, names: "tuple[str, ...]") -> Optional[str]:
 def mark_image_results(sarif_report: Any, image: Optional[ImageLocator]) -> int:
     """Record, on each result of an image scan, which image it is about.
 
-    ``imageRef`` on every result, and ``imageDigest`` where any source names
-    one (the run's ``repoDigests``, then the locator, then the run's bare
-    ``imageID``). Runs before suppressions are
-    applied, so an ``image:``-scoped suppression can match, and before the flat
-    extractor keys the result, so the identity carries the image component.
+    ``imageRef`` and ``imageScope`` (the scan's one id basis: the locator's
+    digest else the ref) on every result, and ``imageDigest`` where any source
+    names one (the run's ``repoDigests``, then the locator, then the run's
+    bare ``imageID``). Runs before suppressions are applied, so an
+    ``image:``-scoped suppression can match, and before the flat extractor
+    keys the result, so the identity carries the image component.
 
     Returns:
         The number of results marked.
@@ -132,6 +139,13 @@ def mark_image_results(sarif_report: Any, image: Optional[ImageLocator]) -> int:
     # image, so letting it beat a known manifest digest re-split one image's
     # attribution between trivy rows and everyone else's.
     fallback = _digest_text(image.resolved_digest) or _digest_text(image.ref)
+    # The KEY is per scan, never per run: the digest the scan START resolved,
+    # else the locator as submitted -- the exact value image_scan_source labels
+    # the scan with. A digest only one tool's RUN names (trivy records one,
+    # grype never does) stays attribution: keyed, it split one scan's ids
+    # between a digest basis and a reference basis, which no scan_source value
+    # could describe and the diff gate's basis check then misread.
+    scope = fallback or shown
     for run in getattr(sarif_report, "runs", None) or []:
         digest = (
             _run_digest(run, ("repoDigests",))
@@ -144,6 +158,7 @@ def mark_image_results(sarif_report: Any, image: Optional[ImageLocator]) -> int:
             # Extra properties: PropertyBag allows them, as converted_path and
             # the workspace aggregator's workspace_project already are.
             setattr(result.properties, IMAGE_REF_PROPERTY, shown)
+            setattr(result.properties, IMAGE_SCOPE_PROPERTY, scope)
             if digest is not None:
                 setattr(result.properties, IMAGE_DIGEST_PROPERTY, digest)
             marked += 1

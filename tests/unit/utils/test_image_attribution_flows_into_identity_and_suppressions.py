@@ -187,16 +187,45 @@ def test_two_ref_spellings_that_resolve_to_one_digest_share_an_id():
     assert one.id == other.id
 
 
-def test_two_digests_of_one_ref_are_two_findings():
+def test_two_resolved_digests_of_one_ref_are_two_findings():
+    # The SCAN's basis keys the id: the same tag resolved to two different
+    # digests (a rebuild pushed between two scans) is two subjects.
+    one = _stamped(_run(), ImageLocator(ref=REF, resolved_digest=DIGEST))
+    other = _stamped(_run(), ImageLocator(ref=REF, resolved_digest=OTHER_DIGEST))
+    assert one.id != other.id
+
+
+def test_a_run_named_digest_is_attribution_never_the_key():
+    # An UNRESOLVED tag's ids key on the reference text -- the resolver's own
+    # fallback warning promises exactly that -- for every scanner in the scan.
+    # trivy's run records an imageID and grype's records nothing, so a
+    # run-named digest in the key gave one scan's ids two bases (trivy rows on
+    # the digest, grype rows on the ref), which no scan_source value could
+    # label and the diff gate's basis check then misread. The digest still
+    # lands in the attribution column.
     one = _stamped(_run(imageID=DIGEST), ImageLocator(ref=REF))
     other = _stamped(_run(imageID=OTHER_DIGEST), ImageLocator(ref=REF))
-    assert one.id != other.id
+    bare = _stamped(_run(), ImageLocator(ref=REF))
+    assert one.id == other.id == bare.id
+    assert (one.image_digest, other.image_digest) == (DIGEST, OTHER_DIGEST)
+    assert bare.image_digest is None
 
 
 def test_without_a_digest_the_submitted_ref_keys_the_finding():
     one = _stamped(_run(), ImageLocator(ref=REF))
     other = _stamped(_run(), ImageLocator(ref="registry.example.com/team/app:9"))
     assert one.id != other.id
+
+
+def test_every_attribution_field_is_a_flat_finding_field():
+    # IMAGE_ATTRIBUTION_FIELDS is spelled in literals (the network-fetch
+    # vocabulary's "image_digest" member is a coincidence of value, not the
+    # field's name); this is the drift gate the literals lean on.
+    from automated_security_helper.models.flat_vulnerability import (
+        IMAGE_ATTRIBUTION_FIELDS,
+    )
+
+    assert set(IMAGE_ATTRIBUTION_FIELDS) <= set(FlatVulnerability.model_fields)
 
 
 def test_an_image_finding_never_collides_with_a_source_finding_at_the_same_path():
@@ -347,6 +376,79 @@ def test_a_wired_image_scanners_stamp_is_honored():
 
     flat = _stamped(_run(imageID=DIGEST), ImageLocator(ref=REF))
     assert (flat.image_ref, flat.image_digest) == (REF, DIGEST)
+
+
+def test_a_shipped_scanners_gate_answer_is_the_static_table():
+    # A shipped scanner's answer must be the same in every process, imported
+    # or not ("ash merge" reads results another process wrote), so it comes
+    # from scanner_names.IMAGE_SERVING_SCANNERS, never from which modules this
+    # process loaded.
+    from automated_security_helper.utils.scanner_tool_types import (
+        scanner_serves_container_images,
+    )
+
+    assert scanner_serves_container_images("grype") is True
+    assert scanner_serves_container_images("syft") is True
+    assert scanner_serves_container_images("trivy") is True
+    assert scanner_serves_container_images("bandit") is False
+    assert scanner_serves_container_images("unheard-of-plugin") is None
+
+
+def test_the_static_table_agrees_with_each_shipped_register_row():
+    # The drift gate for the table: each shipped image scanner's own register
+    # row must say what the table says, in both directions (bandit is the
+    # negative control).
+    from automated_security_helper.base.scanner_operational_facets import (
+        serves_asset_kind,
+    )
+    from automated_security_helper.core.asset import AssetKind
+    from automated_security_helper.utils.scanner_names import IMAGE_SERVING_SCANNERS
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
+        BanditScanner,
+    )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
+        GrypeScanner,
+    )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
+        SyftScanner,
+    )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+        TrivyScanner,
+    )
+
+    rows = {
+        "grype": GrypeScanner,
+        "syft": SyftScanner,
+        "trivy": TrivyScanner,
+        "bandit": BanditScanner,
+    }
+    for name, cls in rows.items():
+        assert serves_asset_kind(cls, AssetKind.CONTAINER_IMAGE) == (
+            name in IMAGE_SERVING_SCANNERS
+        ), name
+
+
+def test_a_parametrized_generic_alias_never_walks_as_a_plugin():
+    # The regression the desk run caught: pydantic mints a real subclass for
+    # every generic parametrization (TrivyScannerBase[TrivyScannerConfig]); it
+    # inherits the config annotation, so it answers to the scanner's config
+    # name, but it declares no register row, and walked as a match it answered
+    # False for "trivy" with the real class loaded. The walk skips aliases.
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (  # noqa: F401
+        TrivyScanner,
+    )
+    from automated_security_helper.utils.scanner_tool_types import (
+        _loaded_scanner_classes,
+    )
+
+    walked = list(_loaded_scanner_classes())
+    assert walked, "the walk saw no loaded scanner classes"
+    aliases = [
+        cls
+        for cls in walked
+        if (getattr(cls, "__pydantic_generic_metadata__", None) or {}).get("origin")
+    ]
+    assert aliases == []
 
 
 def test_marking_with_no_locator_changes_nothing():

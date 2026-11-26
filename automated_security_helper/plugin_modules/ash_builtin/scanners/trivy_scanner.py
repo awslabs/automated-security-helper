@@ -566,7 +566,10 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                 NOT_THE_OPERATORS,
             ),
         )
-        if granted is chosen:
+        # Equality, not identity: _operator_gated answering with a copy of the
+        # granted list must not read as a refusal, which would silently
+        # replace the operator's chosen set with the default.
+        if granted == chosen:
             return
         if self.config is not None:
             self.config.options = options.model_copy(update={"scanners": default})
@@ -738,10 +741,15 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         # carries them all: measured on trivy 0.76.2, --skip-dirs removes
         # nothing from an image scan, while --skip-files globs do (a directory
         # is its "/**" glob; utils/image_ignore_paths).
+        operator_skips = self._operator_skip_plan(extra)
         extra.extend(
             f"--skip-files={skip_files_glob_value(glob)}"
             for glob in self._image_exclude_globs()
         )
+        # The operator's own skip lists, which ASH's --skip-files flag would
+        # otherwise replace -- trivy reads a list flag from one source only --
+        # exactly as the fs resolution re-adds them.
+        extra.extend(self._operator_skip_args(extra, operator_skips))
 
         if image.oci_archive is not None:
             target_token = f"--input={Path(image.oci_archive).absolute().as_posix()}"
@@ -779,6 +787,12 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             self.subcommands = original_subcommands
         target_index = len(final_args) - 1 - final_args[::-1].index(target_token)
         final_args[target_index:target_index] = extra
+        if self._offline():
+            # A payload scan (--input) runs offline; with misconfig opted in,
+            # trivy's Terraform checks would still fetch module sources, so
+            # the offline resolution drops them here exactly as the fs one
+            # does (TrivyScannerBase._offline_misconfig_args).
+            final_args = self._offline_misconfig_args(final_args)
 
         subprocess_env = (
             {**snapshot_environ(), **self.extra_env} if self.extra_env else None
@@ -807,10 +821,19 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         host-tree work (it joins results to the TARGET's lockfiles) and is
         skipped for an image scan: joining image packages to the host's
         lockfiles would attribute a copy the image does not hold.
+
+        Both image decisions read ONE signal, ``_image_scan_in_progress``: the
+        layer pass used to key on ``final_args[1]``, so anything placed before
+        the subcommand would have skipped it silently while the package join
+        still skipped, splitting the two halves of "this is an image scan".
+        The flag is read with a default because the facets corpus harness
+        replays captured reports through ``cls.__new__(cls)`` skeletons, which
+        have no pydantic private state and are never mid-image-scan.
         """
-        if len(final_args) > 1 and final_args[1] == _TRIVY_IMAGE_SUBCOMMAND:
+        in_image = bool(getattr(self, "_image_scan_in_progress", False))
+        if in_image:
             self._attach_image_layers(sarif_report, final_args)
-        if not self._image_scan_in_progress:
+        else:
             # The package-identity join reads the source tree's lockfiles,
             # which an image's results are not about.
             sarif_report = self._attach_package_identity(sarif_report, target)
@@ -847,6 +870,26 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             self._plugin_log(
                 "The image scan's layer attribution is skipped: the invocation "
                 "names no --format and --output to ask for trivy's JSON report.",
+                level=logging.WARNING,
+            )
+            return 0
+        # The join is sound only when the second read is of the same bytes.
+        # A payload (--input) and a digest-pinned reference are; so is a tag
+        # an engine's own store serves (one store, read twice within one
+        # scan). A bare tag read remotely -- no consultable engine socket --
+        # can resolve to a different manifest on the second pull, and layers
+        # joined across two images would attribute the wrong build.
+        subject = final_args[-1] if final_args else ""
+        reads_a_payload = any(
+            arg == "--input" or arg.startswith("--input=") for arg in final_args
+        )
+        engine_socket = getattr(self, "_image_engine_socket", None)
+        if not reads_a_payload and "@" not in subject and engine_socket is None:
+            self._plugin_log(
+                "The image scan's layer attribution is skipped: the reference "
+                "is a tag without a digest and no local engine store serves "
+                "it, so a second remote read could name another build's "
+                "layers. Pin the reference by digest to attribute layers.",
                 level=logging.WARNING,
             )
             return 0

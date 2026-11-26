@@ -60,6 +60,12 @@ class TailScanner(ScannerPluginBase):
     canned_response: ClassVar[dict] = {}
     #: What the run leaves in the results file; None leaves it unwritten.
     canned_results: ClassVar[dict | None] = None
+    #: The results file's exact text, for the empty-file rows: an EMPTY file
+    #: is a different case from an UNWRITTEN one (_read_results_file answers
+    #: None for empty, which scan() hands to _handle_empty_results, and MUST
+    #: raise for missing -- a tool that died must not read clean). Beats
+    #: canned_results when set.
+    canned_results_text: ClassVar[str | None] = None
 
     def model_post_init(self, context):
         self.command = "image-tail-tool"
@@ -88,7 +94,9 @@ class TailScanner(ScannerPluginBase):
 
     def _run_subprocess(self, command, results_dir, cwd=None, env=None, timeout=None):
         results_file = Path(results_dir) / "results_sarif.sarif"
-        if type(self).canned_results is not None:
+        if type(self).canned_results_text is not None:
+            results_file.write_text(type(self).canned_results_text)
+        elif type(self).canned_results is not None:
             results_file.write_text(json.dumps(type(self).canned_results))
         # The stderr log a real run leaves beside the results: the rejected
         # contract says it is never read for the message.
@@ -118,9 +126,12 @@ def _scanner(tmp_path) -> TailScanner:
     return scanner
 
 
-def _row(tmp_path, *, response: dict, results: dict | None):
+def _row(
+    tmp_path, *, response: dict, results: dict | None, results_text: str | None = None
+):
     TailScanner.canned_response = response
     TailScanner.canned_results = results
+    TailScanner.canned_results_text = results_text
     return _scanner(tmp_path)
 
 
@@ -172,7 +183,9 @@ class TestATimedOutRun:
 
 class TestAnEmptyResultsFile:
     def test_the_image_run_warns_and_defers_to_the_empty_hook(self, tmp_path, caplog):
-        scanner = _row(tmp_path, response={"returncode": 0}, results=None)
+        scanner = _row(
+            tmp_path, response={"returncode": 0}, results=None, results_text=""
+        )
         with caplog.at_level("WARNING", logger="ash"):
             result = scanner.scan_image(ImageLocator(ref=REF))
         # The default empty-results hook answers a clean empty report, which
@@ -184,7 +197,9 @@ class TestAnEmptyResultsFile:
         ), "the empty-results warning scan() writes was not written here"
 
     def test_the_filesystem_control_warns_the_same(self, tmp_path, caplog):
-        scanner = _row(tmp_path, response={"returncode": 0}, results=None)
+        scanner = _row(
+            tmp_path, response={"returncode": 0}, results=None, results_text=""
+        )
         with caplog.at_level("WARNING", logger="ash"):
             result = scanner.scan(Path(scanner.context.source_dir), "source", [])
         assert isinstance(result, SarifReport)

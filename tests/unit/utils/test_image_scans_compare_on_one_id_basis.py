@@ -81,3 +81,20 @@ def test_a_truncated_digest_is_a_reference_basis():
     # keys as text, exactly as the identity does.
     with pytest.raises(ComparabilityRefusal):
         check_same_id_basis(_results(f"image:{DIGEST}"), _results("image:sha256:abcd"))
+
+
+def test_two_different_image_subjects_compare_with_a_warning():
+    # One basis (both digests), two subjects: nothing can pair, so everything
+    # reads new or resolved. That IS the intended rebuild reading -- the doc's
+    # contract says so -- so the pair is admitted and the coverage warnings
+    # name the two subjects instead of refusing.
+    from automated_security_helper.utils.finding_diff import coverage_warnings
+
+    other = "sha256:" + "cd" * 32
+    baseline, current = _results(f"image:{DIGEST}"), _results(f"image:{other}")
+    check_same_id_basis(baseline, current)
+    warnings = coverage_warnings(baseline, current)
+    assert any("two different images" in warning for warning in warnings)
+    # The control: one subject warns nothing of the kind.
+    same = coverage_warnings(_results(f"image:{DIGEST}"), _results(f"image:{DIGEST}"))
+    assert not any("two different images" in warning for warning in same)

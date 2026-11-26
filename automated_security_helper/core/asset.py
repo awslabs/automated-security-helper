@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -76,11 +76,14 @@ class ImageLocator(_Frozen):
     #: digest; carried into identity and attribution, never required.
     resolved_digest: Optional[str] = None
     #: Which rung of ``utils/image_digest_resolver`` named ``resolved_digest``:
-    #: ``"engine"`` (the local daemon's record, possibly its config-blob Id)
-    #: or ``"registry"`` (the manifest digest ``crane digest`` read). Only a
-    #: registry-named digest may pin what the tools pull (:meth:`pulled_ref`):
-    #: an engine's Id is not a registry lookup key.
-    resolved_from: Optional[str] = None
+    #: ``"engine"`` (the local daemon's record, possibly its config-blob Id),
+    #: ``"registry"`` (the manifest digest ``crane digest`` read) or
+    #: ``"payload"`` (the digest a direct payload's own index or manifest
+    #: names). Only a registry-named digest may pin what the tools pull
+    #: (:meth:`pulled_ref`): an engine's Id is not a registry lookup key, and
+    #: a payload is read in place. A Literal, not str: a producer's typo here
+    #: must fail validation, not silently stop the pinning.
+    resolved_from: Optional[Literal["engine", "registry", "payload"]] = None
 
     def pulled_ref(self) -> Optional[str]:
         """The reference the scanner tools are handed, digest-pinned where safe.

@@ -313,11 +313,16 @@ def test_the_hook_is_wired_after_the_marking_in_the_scanner_executor():
 
     from automated_security_helper.core.phases import scanner_executor
 
+    import re
+
     source = inspect.getsource(scanner_executor)
-    mark = source.index("mark_converted_results(raw_results")
-    mapback = source.index("map_back_converted_results(raw_results")
-    suppress = source.index("apply_suppressions_to_sarif(", mapback)
-    assert mark < mapback < suppress
+    # The needles tolerate the formatter wrapping a call across lines (the
+    # image branch pushed these one indent deeper, past the line length).
+    mark = re.search(r"mark_converted_results\(\s*raw_results", source)
+    mapback = re.search(r"map_back_converted_results\(\s*raw_results", source)
+    assert mark is not None and mapback is not None
+    suppress = source.index("apply_suppressions_to_sarif(", mapback.start())
+    assert mark.start() < mapback.start() < suppress
 
 
 def test_the_plugin_context_type_is_what_the_hook_reads(test_plugin_context):

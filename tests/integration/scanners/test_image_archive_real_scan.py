@@ -112,6 +112,9 @@ def test_an_ignore_path_keeps_the_tool_from_reading_the_file(
         ImageLocator(oci_archive=ARCHIVE),
         ignore_paths=[IgnorePathWithReason(path=path, reason="test")],
     )
+    # The scan RAN: an empty or refused report would pass the absence check
+    # while measuring nothing (a rejected --skip-files spelling among them).
+    assert report.runs and report.runs[0].results is not None
     assert "github-pat" not in _rule_ids(report)
 
 

@@ -11,7 +11,7 @@ The C3 rows of the container-targets design, driven through the real
   declaration, before the scanner's platform, dependency or tool checks run,
   and queues nothing for it;
 - a scan on which nothing scanned the image gets ONE informational SARIF
-  result (kind=informational, level=note) on the model's own ASH run, so the
+  result (kind=informational, level=none) on the model's own ASH run, so the
   report is green by contract and visibly incomplete rather than silently
   clean;
 - the control: a scan with no asset (every caller that predates assets)
@@ -189,7 +189,9 @@ class TestAnImageAssetSkipsUnservingScanners:
         note = notes[0]
         assert note.ruleId == ScanPhase.IMAGE_NOT_SCANNED_RULE_ID
         assert getattr(note.kind, "value", note.kind) == "informational"
-        assert getattr(note.level, "value", note.level) == "note"
+        # SARIF 3.27.10: with any kind but "fail", a present level SHALL be
+        # "none"; a note-level result shows as an alert in level-graded viewers.
+        assert getattr(note.level, "value", note.level) == "none"
         text = note.message.root.text
         assert IMAGE_REF in text
         assert "was not scanned" in text
@@ -484,13 +486,24 @@ class TestATagIsResolvedOnceBeforeAnyScannerRuns:
             # These rows measure the resolution, not the consumer gate: the
             # gate reads LOADED scanner classes, which depend on what the
             # test process imported before this file. The gate's own rows
-            # (below) import the real consumers and leave this unforced.
+            # (below) pin the class source instead and leave this unforced.
             monkeypatch.setattr(
                 "automated_security_helper.utils.scanner_tool_types."
                 "an_image_digest_consumer_is_selected",
                 lambda *args, **kwargs: True,
             )
         return calls
+
+    def _gate_reads_exactly(self, monkeypatch, *classes):
+        # The real gate over an EXPLICIT class set: the walk otherwise reads
+        # every loaded ScannerPluginBase subclass, so another declarer
+        # imported by an earlier test in this worker would open the gate and
+        # flip the never-asks rows on test order alone.
+        monkeypatch.setattr(
+            "automated_security_helper.utils.scanner_tool_types."
+            "_loaded_scanner_classes",
+            lambda: iter(classes),
+        )
 
     def test_the_resolved_digest_is_on_the_asset_the_scanners_are_given(
         self, scan_phase, monkeypatch
@@ -584,6 +597,7 @@ class TestATagIsResolvedOnceBeforeAnyScannerRuns:
             TrivyScanner,
         )
 
+        self._gate_reads_exactly(monkeypatch, GrypeScanner, TrivyScanner)
         calls = self._patched(monkeypatch, lambda image: image, consumers_selected=None)
         scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
 
@@ -604,6 +618,7 @@ class TestATagIsResolvedOnceBeforeAnyScannerRuns:
             TrivyScanner,
         )
 
+        self._gate_reads_exactly(monkeypatch, GrypeScanner, TrivyScanner)
         calls = self._patched(monkeypatch, lambda image: image, consumers_selected=None)
         scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
 
@@ -623,6 +638,7 @@ class TestATagIsResolvedOnceBeforeAnyScannerRuns:
             GrypeScanner,
         )
 
+        self._gate_reads_exactly(monkeypatch, GrypeScanner)
         calls = self._patched(monkeypatch, lambda image: image, consumers_selected=None)
         scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
 

@@ -11875,6 +11875,25 @@ def test_while_a_scan_of_the_session_runs_delivery_is_refused_and_chunks_accepte
     assert cloned["success"] is True, cloned
     assert (Path(cloned["source_dir"]) / "cloned.txt").is_file(), cloned
     assert url in git_calls.read_text(encoding="utf-8")
+    # The two image tools' controls: the SAME calls once the lock is free must
+    # answer something other than busy, or a tool that always said busy would
+    # have passed the refusal arm above. The ref delivers (its registry is
+    # allowed for this control); the finalize of the never-uploaded id now
+    # reaches the upload lookup and is refused for THAT, not for the lock.
+    monkeypatch.setenv("ASH_MCP_IMAGE_ALLOWED_REGISTRIES", "registry.example.com")
+    imaged = _delivery_tool(
+        "set_source_image", image_ref="registry.example.com/team/app:1"
+    )
+    assert imaged["success"] is True, imaged
+    finalize_missing = _delivery_tool(
+        "set_source_image_archive_finalize",
+        upload_id="never-uploaded",
+        expected_sha256="0" * 64,
+    )
+    assert finalize_missing["success"] is False, finalize_missing
+    assert finalize_missing.get("error_type") != "source_delivery_busy", (
+        finalize_missing
+    )
     cleared = _delivery_tool("clear_source")
     assert cleared["success"] is True, cleared
 

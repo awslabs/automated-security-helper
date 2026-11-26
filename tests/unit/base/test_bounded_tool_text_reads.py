@@ -118,6 +118,12 @@ _ALLOWED_SIZED_READS = {
     "_MAX_INSPECT_BYTES + 1, refused over the cap and parsed as JSON for one "
     "digest field; structured engine output, no text shown",
     (
+        "utils/image_digest_resolver.py",
+        "payload_digest",
+    ): "a payload's own index.json or manifest.json (a layout file and a tar "
+    "member) at _MAX_PAYLOAD_RECORD_BYTES + 1, refused over the cap and "
+    "parsed as JSON for one digest; structured records, no text shown",
+    (
         "utils/sdist_harvest.py",
         "harvest_lockfiles_from_sdist",
     ): "an embedded lockfile member of a hash-verified sdist, read at "
@@ -195,8 +201,9 @@ _ALLOWED_SIZED_READS = {
     (
         "utils/image_payload_refusals.py",
         "image_archive_refusal",
-    ): "the 2-byte gzip head and the 8-byte tar magic of the operator's own saved "
-    "image, compared with fixed byte strings; bytes compared, not shown",
+    ): "the 2-byte gzip head and the 5-byte ustar prefix at offset 257 of the "
+    "operator's own saved image, compared with fixed byte strings; bytes "
+    "compared, not shown",
     (
         "cli/scan.py",
         "_marker_head",

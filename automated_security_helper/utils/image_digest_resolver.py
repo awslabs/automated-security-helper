@@ -163,16 +163,146 @@ def inspect_digest(ref: str, socket_path: str) -> "Tuple[Optional[str], str]":
     return None, "the engine's record names no digest"
 
 
-def _engine_inspector() -> "Optional[tuple[str, Inspector]]":
-    """The detected engine's name and an inspector bound to its socket, or None."""
+#: The most of a payload's index or manifest record that is read: both are a
+#: few hundred bytes of JSON naming blobs; a bigger one is refused unread.
+_MAX_PAYLOAD_RECORD_BYTES = 1024 * 1024
+
+
+def _single_index_digest(document: object) -> Tuple[Optional[str], str]:
+    """The one manifest digest an OCI index names, or why there is not one."""
+    manifests = document.get("manifests") if isinstance(document, dict) else None
+    if not isinstance(manifests, list):
+        return None, "its index names no manifests"
+    digests = []
+    for entry in manifests:
+        digest = entry.get("digest") if isinstance(entry, dict) else None
+        if isinstance(digest, str) and _DIGEST.fullmatch(digest):
+            digests.append(digest)
+    if len(digests) == 1:
+        return digests[0], ""
+    if not digests:
+        return None, "its index names no sha256 manifest digest"
+    return (
+        None,
+        (
+            f"its index names {len(digests)} manifests, and which one the "
+            "scan is about is not said"
+        ),
+    )
+
+
+def _single_config_digest(document: object) -> Tuple[Optional[str], str]:
+    """The one config digest a docker-archive manifest names, or why not."""
+    if not isinstance(document, list):
+        return None, "its manifest.json is not a list of image records"
+    if len(document) != 1:
+        return (
+            None,
+            (
+                f"its manifest.json records {len(document)} images, and "
+                "which one the scan is about is not said"
+            ),
+        )
+    entry = document[0]
+    config = entry.get("Config") if isinstance(entry, dict) else None
+    if not isinstance(config, str):
+        return None, "its manifest.json names no config blob"
+    # "blobs/sha256/<hex>" (recent docker) or "<hex>.json" (older saves).
+    stem = config.rsplit("/", 1)[-1].removesuffix(".json")
+    if re.fullmatch(r"[0-9a-f]{64}", stem):
+        return f"sha256:{stem}", ""
+    return None, "its manifest.json's config entry names no sha256 digest"
+
+
+def payload_digest(image: ImageLocator) -> Tuple[Optional[str], str]:
+    """The content digest a direct payload names, read from the payload itself.
+
+    A payload scan used to key its finding ids and its scan scope on the
+    payload's PATH, so the same bytes uploaded twice (the MCP channel writes
+    each upload under a new id) were two subjects, and only the runs that
+    record a digest themselves (trivy's ``imageID``) keyed on content --
+    splitting one image's ids between trivy rows and everyone else's. The
+    payload names its own digest:
+
+    - an OCI image layout's ``index.json`` (and an ``oci-archive`` tar's)
+      names its one manifest's digest -- the MANIFEST digest, the value a
+      pinned reference states;
+    - a ``docker save`` tarball's ``manifest.json`` names the config blob,
+      whose name is the CONFIG digest -- the same value as the tools'
+      ``imageID``, the honest key for a never-pushed local build, which has
+      no manifest digest anywhere.
+
+    Only the record file is read (one bounded member read; no layer), and an
+    index that names several manifests answers nothing with the reason: which
+    of them the scan is about is not this module's guess to make.
+    """
+    import tarfile
+    from pathlib import Path
+
+    if image.oci_layout is not None:
+        index = Path(image.oci_layout) / "index.json"
+        try:
+            # Sized: an index is a few hundred bytes; read(cap + 1) so a
+            # bigger file is seen as over the cap rather than truncated.
+            with open(index, "rb") as handle:
+                body = handle.read(_MAX_PAYLOAD_RECORD_BYTES + 1)
+            if len(body) > _MAX_PAYLOAD_RECORD_BYTES:
+                return None, "its index.json is too large to be an image index"
+            return _single_index_digest(json.loads(body))
+        except (OSError, ValueError) as error:
+            return None, f"its index.json could not be read ({type(error).__name__})"
+    if image.oci_archive is None:
+        return None, "not a direct payload"
+    try:
+        with tarfile.open(image.oci_archive, "r:") as saved:
+            records: dict = {}
+            for member in saved:
+                name = member.name.lstrip("./")
+                if name not in ("manifest.json", "index.json"):
+                    continue
+                if member.size > _MAX_PAYLOAD_RECORD_BYTES:
+                    return None, f"its {name} is too large to be an image record"
+                handle = saved.extractfile(member)
+                if handle is None:
+                    continue
+                with handle:
+                    records[name] = json.loads(
+                        handle.read(_MAX_PAYLOAD_RECORD_BYTES + 1)
+                    )
+                # manifest.json decides (a recent docker save writes BOTH, and
+                # is read as a docker archive, exactly as archive_scheme
+                # routes it); nothing later in the tar changes that.
+                if name == "manifest.json":
+                    break
+    except (tarfile.TarError, OSError, ValueError) as error:
+        return None, f"the archive could not be read ({type(error).__name__})"
+    if "manifest.json" in records:
+        return _single_config_digest(records["manifest.json"])
+    if "index.json" in records:
+        return _single_index_digest(records["index.json"])
+    return None, "the archive holds no manifest.json or index.json"
+
+
+def _engine_inspector() -> "Optional[tuple[str, Optional[Inspector]]]":
+    """The detected engine's name and an inspector bound to its socket.
+
+    None when no engine is declared or found. ``(name, None)`` for an engine
+    that is DECLARED with no local socket to ask (a ``tcp://`` or ``ssh://``
+    ``DOCKER_HOST``, a remote ``CONTAINER_HOST``): the caller must know the
+    difference, because the scanners read the image through that daemon, and
+    a digest resolved from anywhere else could name other bytes than the ones
+    scanned.
+    """
     from automated_security_helper.core.container_engine import (
         ContainerEngine,
         detect_engine_socket,
     )
 
     engine, socket_path = detect_engine_socket()
-    if engine == ContainerEngine.NONE or socket_path is None:
+    if engine == ContainerEngine.NONE:
         return None
+    if socket_path is None:
+        return engine.value, None
     return engine.value, lambda ref: inspect_digest(ref, socket_path)
 
 
@@ -196,10 +326,30 @@ def resolve_image_locator(
     sandbox-routed spawn, the ``crane`` the pinned-tool install put on the
     search path, and the engine the detection found. ``detect_engine=False``
     leaves the engine rung out when no *inspector* is given.
+
+    A direct payload takes its own one rung, :func:`payload_digest` (the
+    digest the payload itself names; no engine, no network), and never falls
+    through to the reference rungs.
     """
-    if image.ref is None or _pinned_by_digest(image.ref):
-        return image
     if image.resolved_digest is not None:
+        return image
+    if image.ref is None:
+        if image.oci_archive is None and image.oci_layout is None:
+            return image
+        digest, why = payload_digest(image)
+        if digest is not None:
+            ASH_LOGGER.info(
+                f"Read the digest of {image.shown()} from the payload itself: {digest}."
+            )
+            return image.model_copy(
+                update={"resolved_digest": digest, "resolved_from": "payload"}
+            )
+        ASH_LOGGER.info(
+            f"{image.shown()} names no single digest ({why}); its finding ids "
+            "key on the payload path."
+        )
+        return image
+    if _pinned_by_digest(image.ref):
         return image
 
     ref = image.ref
@@ -230,6 +380,22 @@ def resolve_image_locator(
         inspector = _engine_inspector()
     if inspector is not None:
         name, inspect = inspector
+        if inspect is None:
+            # The engine is declared (tcp:// or ssh:// DOCKER_HOST, a remote
+            # CONTAINER_HOST) with no local socket to ask. The SCANNERS read
+            # the image through that daemon, so a digest from the registry
+            # could pin bytes the daemon never built -- the docker-in-docker
+            # CI job that scans a fresh local build under a tag the registry
+            # still holds an older image for would key, and pull, the OLD
+            # image. No rung can answer for the daemon's copy, so the ladder
+            # stops here and the ids key on the reference text.
+            reasons.append(
+                f"the declared {name} daemon has no local socket to ask, and "
+                "the registry is not asked in its place: the scanners read "
+                "that daemon's copy of the image, which a registry digest "
+                "could misname"
+            )
+            return fall_back()
         try:
             digest, why = inspect(ref)
         except Exception as error:  # noqa: BLE001 - a rung failing falls to the next

@@ -21,6 +21,8 @@ for the bind.
 from __future__ import annotations
 
 import io
+import os
+import re
 import socket
 import tarfile
 from pathlib import Path
@@ -73,8 +75,16 @@ def _tar_with(tmp_path, names, file_name="image.tar") -> Path:
     return path
 
 
-def _archive(tmp_path) -> Path:
-    return _tar_with(tmp_path, ["manifest.json"])
+#: One run's own tool-config directory: every _execute_scan writes its
+#: neutralizing config files into a fresh directory (utils/tool_config_dir
+#: gives each run its own, removed with the run), so two resolutions of one
+#: target differ in that one path component BY CONSTRUCTION. The filesystem
+#: controls mask it and assert whole-argv equality on everything else.
+_PER_RUN_CONFIG_DIR = re.compile(r"(ash-tool-config-)[0-9A-Za-z_]+")
+
+
+def _per_run_dirs_masked(argv) -> list:
+    return [_PER_RUN_CONFIG_DIR.sub(r"\1X", str(token)) for token in argv]
 
 
 def _docker_archive(tmp_path) -> Path:
@@ -434,18 +444,19 @@ class TestGrypeImageArgv:
         assert f"oci-dir:{layout.absolute().as_posix()}" in argv
 
     def test_the_filesystem_argv_is_unchanged(self, monkeypatch, tmp_path):
-        # The control, whole-argv: the image dispatch leaves the dir: scan's
-        # resolution exactly as it was, no token added, dropped or moved.
+        # The control, whole-argv modulo the per-run config directory: the
+        # image dispatch leaves the dir: scan's resolution exactly as it was,
+        # no token added, dropped or moved. Nothing resets the in-progress
+        # flag by hand: a resolution-only image call must not set it (and the
+        # assertion below would name the leak if it did).
         _no_engine(monkeypatch, tmp_path)
         scanner = self._scanner(tmp_path)
         source = Path(scanner.context.source_dir)
         before, _results, _env = scanner._execute_scan(source, "source", [])
         scanner._execute_image_scan(ImageLocator(ref=IMAGE_REF))
-        scanner._image_scan_in_progress = False
+        assert scanner._image_scan_in_progress is False
         after, _results2, _env2 = scanner._execute_scan(source, "source", [])
-        assert after == before
-        import os
-
+        assert _per_run_dirs_masked(after) == _per_run_dirs_masked(before)
         assert f"dir:{Path(os.path.abspath(source)).as_posix()}" in before
 
 
@@ -517,16 +528,18 @@ class TestTrivyImageArgv:
         )
 
     def test_the_filesystem_argv_is_unchanged(self, monkeypatch, tmp_path):
-        # The control, whole-argv: the image resolution swaps the subcommand
-        # for itself only and leaves the fs resolution untouched.
+        # The control, whole-argv modulo the per-run config directory: the
+        # image resolution swaps the subcommand for itself only and leaves the
+        # fs resolution untouched. Nothing resets the in-progress flag by
+        # hand: a resolution-only image call must not set it.
         _no_engine(monkeypatch, tmp_path)
         scanner = self._scanner(tmp_path)
         source = Path(scanner.context.source_dir)
         before, _results, _env = scanner._execute_scan(source, "source", [])
         scanner._execute_image_scan(ImageLocator(ref=IMAGE_REF))
-        scanner._image_scan_in_progress = False
+        assert scanner._image_scan_in_progress is False
         after, _results2, _env2 = scanner._execute_scan(source, "source", [])
-        assert after == before
+        assert _per_run_dirs_masked(after) == _per_run_dirs_masked(before)
         assert scanner.subcommands == ["fs"]
 
 

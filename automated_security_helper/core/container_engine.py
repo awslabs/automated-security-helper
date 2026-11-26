@@ -105,6 +105,11 @@ def detect_engine_socket(
             return ContainerEngine.PODMAN, None
         if _is_unix_socket(socket_path):
             return ContainerEngine.PODMAN, socket_path
+        # Declared but dead: stop, exactly as a dead DOCKER_HOST never probes
+        # the default docker socket. Falling through to podman's default
+        # sockets would have ASH inspect a store (possibly root's) other than
+        # the one tools that honor CONTAINER_HOST will use.
+        return ContainerEngine.NONE, None
 
     runtime_dir = env.get("XDG_RUNTIME_DIR", "").strip()
     if runtime_dir:

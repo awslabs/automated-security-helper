@@ -44,6 +44,7 @@ from automated_security_helper.base.scanner_plugin import (
     plugin_missing_dependency_reason,
 )
 from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.core.cancellation import raise_if_cancelled
 from automated_security_helper.utils.get_shortest_name import home_as_tilde
@@ -950,12 +951,13 @@ class ScanPhase(EnginePhase):
         which scanners did not look; this is the one line that says the IMAGE
         was not looked at, on the report itself.
 
-        ``kind=informational`` with ``level=note``, which SARIF 3.27.9 defines
-        as information only: every reporter reads it as not-a-finding
-        (utils/sarif_utils.NON_FINDING_KINDS), so it can never grade, never
-        fail a threshold and never put a vulnerability row in a SIEM -- the
-        green-by-contract half -- while it stays in ash.sarif and the
-        aggregated results for any reader -- the visibly-incomplete half.
+        ``kind=informational`` with ``level=none``: SARIF 3.27.9 defines the
+        kind as information only, and 3.27.10 requires a present ``level`` to
+        be ``none`` for any kind but ``fail``. Every reporter reads it as
+        not-a-finding (utils/sarif_utils.NON_FINDING_KINDS), so it can never
+        grade, never fail a threshold and never put a vulnerability row in a
+        SIEM -- the green-by-contract half -- while it stays in ash.sarif and
+        the aggregated results for any reader -- the visibly-incomplete half.
 
         Appended to the model's own ASH run (the default ``sarif`` skeleton's
         one run); when a caller supplied a model with no SARIF or no runs,
@@ -1034,7 +1036,11 @@ class ScanPhase(EnginePhase):
             Result(
                 ruleId=self.IMAGE_NOT_SCANNED_RULE_ID,
                 kind=Kind.informational,
-                level=Level.note,
+                # SARIF 2.1.0 3.27.10: with any kind but "fail", a present
+                # level SHALL be "none". A note-level result would show as an
+                # alert in viewers that grade on level alone, which is exactly
+                # what this record must never do.
+                level=Level.none,
                 message=Message(root=Message1(text=text)),
                 properties=PropertyBag.model_validate({"image": shown}),
             )
@@ -1172,7 +1178,11 @@ class ScanPhase(EnginePhase):
                 an_image_digest_consumer_is_selected,
             )
 
-            if an_image_digest_consumer_is_selected(
+            # A direct payload's rung reads the payload's own record file --
+            # no engine ask, no network -- so it is not behind the consumer
+            # gate, which exists to keep the REGISTRY request off a scan
+            # whose operator deselected the scanners that key on it.
+            if subject.image.ref is None or an_image_digest_consumer_is_selected(
                 enabled_scanners,
                 excluded_scanners,
                 python_based_plugins_only=python_based_plugins_only,
@@ -2382,21 +2392,21 @@ class ScanPhase(EnginePhase):
                             task_list = [
                                 {
                                     "path": self.plugin_context.source_dir,
-                                    "type": "image",
+                                    "type": TargetType.IMAGE.value,
                                 },
                             ]
                         else:
                             task_list = [
                                 {
                                     "path": self.plugin_context.source_dir,
-                                    "type": "source",
+                                    "type": TargetType.SOURCE.value,
                                 },
                             ]
                             if self._include_work_dir:
                                 task_list.append(
                                     {
                                         "path": self.plugin_context.work_dir,
-                                        "type": "converted",
+                                        "type": TargetType.CONVERTED.value,
                                     }
                                 )
                         self._scanner_tasks.append(

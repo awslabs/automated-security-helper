@@ -11019,6 +11019,11 @@
         "resolved_from": {
           "anyOf": [
             {
+              "enum": [
+                "engine",
+                "registry",
+                "payload"
+              ],
               "type": "string"
             },
             {

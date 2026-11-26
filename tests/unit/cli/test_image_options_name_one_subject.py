@@ -30,8 +30,15 @@ IMAGE_REF = "registry.example.com/team/app:1.2.3"
 
 @pytest.fixture(autouse=True)
 def _here(tmp_path, monkeypatch):
-    for name in ("ASH_SOURCE_DIR", "ASH_OUTPUT_DIR", "ASH_CONFIG", "ASH_WORKSPACE"):
-        monkeypatch.delenv(name, raising=False)
+    # EVERY ASH_* variable, not a named few: a PR pipeline exports
+    # ASH_CHANGED_FILES_ONLY (an env-set scope the CLI refuses with an image,
+    # which one row here pins), and any shell that exports one of those would
+    # otherwise flip the positive rows to exit 5.
+    import os
+
+    for name in list(os.environ):
+        if name.startswith("ASH_"):
+            monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("COLUMNS", "400")
     monkeypatch.setenv("NO_COLOR", "1")
     monkeypatch.chdir(tmp_path)

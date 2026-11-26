@@ -228,13 +228,21 @@ IMAGE_COMPONENT = TargetType.IMAGE.value
 #: SARIF result properties carrying an image finding's attribution, written by
 #: the scanner executor on every image-scan result (``utils/image_attribution``)
 #: and read back by the flat extractor: the locator as submitted, the image's
-#: resolved sha256 digest where the scan's own output names one, and the layer
-#: digest where the scanner reports one. The digest, or failing it the
-#: reference, is the key's ``image`` component; the ref and layer digest are
-#: attribution only.
+#: resolved sha256 digest where the scan's own output names one, the layer
+#: digest where the scanner reports one, and the SCOPE -- the one value this
+#: scan's ids key on, the digest the scan start resolved (the ladder, a pinned
+#: reference, a payload's own record) else the locator as submitted. The scope
+#: is the key's ``image`` component: one basis per scan, the same value
+#: ``image_scan_source`` labels the scan with, so the diff gate's basis check
+#: reads the ids' real basis and every scanner's ids in one scan share it (a
+#: digest only a tool's RUN named -- trivy records one, grype never does --
+#: used to key trivy's rows on the digest and grype's on the reference). The
+#: ref, digest and layer digest are attribution; results stamped before the
+#: scope property existed fall back to digest-else-ref.
 IMAGE_REF_PROPERTY = "imageRef"
 IMAGE_DIGEST_PROPERTY = "imageDigest"
 IMAGE_LAYER_DIGEST_PROPERTY = "layerDigest"
+IMAGE_SCOPE_PROPERTY = "imageScope"
 
 _DRIVE = re.compile(r"^[A-Za-z]:/")
 

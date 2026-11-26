@@ -1327,6 +1327,31 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             if self.use_uv_tool is False:
                 self.use_uv_tool = True
 
+    def _apply_scan_config(self, config: Any) -> None:
+        """Swap *config* in as this scanner's config where it differs.
+
+        A config that says what the current one already says is not swapped
+        in: building it again from its dump makes every nested entry a new
+        object (an entry that carries an identity the dump does not write got
+        a new one on each scan) and drops the private state the first build
+        recorded. Only a config that differs replaces it, and that resets the
+        dependency verdict and the route it decided.
+
+        Called by ``_pre_scan`` for a directory target, and by ``scan_image``
+        BEFORE its skip decision: ``_image_not_scanned_reason`` reads
+        ``options.offline`` (and the subclass shape hooks read their own
+        options), so deciding the skip against the config being replaced
+        could run the tool -- and its registry fetches -- for a caller whose
+        config said offline.
+        """
+        if config is None:
+            return
+        if hasattr(config, "model_dump") and callable(config.model_dump):
+            config = config.model_dump(by_alias=True)
+        if config != self.config.model_dump(by_alias=True):
+            self.config = self.config.__class__.model_validate(config)
+            self._reset_dependency_validation()
+
     def _pre_scan(
         self,
         target: Path,
@@ -1350,18 +1375,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # after the check, which meant the current target was checked against
         # the verdict of the config it was replacing; with the verdict now
         # memoized, it would also have left the memo answering for the old
-        # config on this very target. A config that says what this one already
-        # says is not swapped in: building it again from its dump makes every
-        # nested entry a new object (an entry that carries an identity the dump
-        # does not write got a new one on each scan) and drops the private
-        # state the first build recorded. Only a config that differs replaces
-        # it, and that resets the dependency verdict and the route it decided.
-        if config is not None:
-            if hasattr(config, "model_dump") and callable(config.model_dump):
-                config = config.model_dump(by_alias=True)
-            if config != self.config.model_dump(by_alias=True):
-                self.config = self.config.__class__.model_validate(config)
-                self._reset_dependency_validation()
+        # config on this very target.
+        self._apply_scan_config(config)
 
         # Honors the setup phase's validation of this instance (memoized above)
         # instead of re-probing per target: the probes ran after start_time, so
@@ -2332,6 +2347,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self._image_scan_in_progress = False
         self._image_engine = None
         self._image_engine_socket = None
+        self._image_ignore_paths = []
         staged_targets = self._staged_scope_paths(target, target_type)
         if staged_targets is not None:
             if not staged_targets:
@@ -2576,8 +2592,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     # through the same bounded subprocess, exit-code and results readings the
     # filesystem template uses -- shared hooks, called in the same order, so
     # the two dispatches cannot drift on what a flagged run or a rejected exit
-    # code means. scan() keeps its Literal["source","converted"] signature and
-    # every filesystem scanner is untouched.
+    # code means. scan() keeps its directory-target signature (target_type is
+    # SOURCE or CONVERTED there; IMAGE never reaches it) and every filesystem
+    # scanner is untouched.
     # ------------------------------------------------------------------
 
     def _execute_image_scan(
@@ -2701,6 +2718,13 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         )
 
         self._image_engine, self._image_engine_socket = detect_engine_socket()
+
+        # The caller's config BEFORE the skip decision: the decision reads
+        # options.offline and the subclass shape hooks, and reading them off
+        # the config being replaced could run the tool for a caller whose
+        # config said offline (or skip for one whose config lifted it).
+        # _pre_scan applies the same config again, which is then a no-op.
+        self._apply_scan_config(config)
 
         not_scanned = self._image_not_scanned_reason(image)
         if not_scanned is not None:

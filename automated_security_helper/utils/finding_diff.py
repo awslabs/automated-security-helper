@@ -181,6 +181,27 @@ def coverage_warnings(
             )
         if result.metadata.inputs_not_scanned:
             warnings.append(f"{label} scan records inputs that were not scanned.")
+    sources = (
+        getattr(baseline.metadata, "scan_source", None),
+        getattr(current.metadata, "scan_source", None),
+    )
+    if (
+        all(isinstance(s, str) and s.startswith("image:") for s in sources)
+        and sources[0] != sources[1]
+    ):
+        # Two different image subjects share one basis (check_same_id_basis
+        # admits them) but their ids key on different values, so nothing
+        # pairs: everything reads new and everything old reads resolved.
+        # Comparing two builds IS the intended rebuild reading -- the contract
+        # documents it -- so this is a warning naming the subjects, never a
+        # refusal.
+        warnings.append(
+            f"The scans are of two different images ({sources[0]} vs "
+            f"{sources[1]}): no finding of one can pair with the other's, so "
+            "every finding reads as new or resolved. That is the intended "
+            "reading for a rebuild; for anything else, compare scans of one "
+            "subject."
+        )
     return warnings
 
 

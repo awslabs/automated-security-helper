@@ -289,6 +289,17 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             scanner_name="syft",
             network=opsf.NetworkFacet(
                 fetch_kind=opsf.FetchKind.TOOL_UPDATES_ONLY,
+                # An IMAGE scan by reference pulls manifests and layers (the
+                # engine's store where one is present, else syft's own
+                # registry client) -- network use this row owns in its source
+                # text below. Not Fetched.IMAGE_DIGEST: syft reports no
+                # findings, so no id keys on the digest ladder and the scan
+                # phase must not count syft as a reason to ask a registry.
+                # The vocabulary has no member yet for the image pull itself
+                # (grype's and trivy's rows carry the same gap); adding one to
+                # all three rows together is the register owner's edit. A
+                # reference is skipped offline (the base template's skip), so
+                # offline_outcome stays UNCHANGED for what actually runs.
                 fetches=(),
                 prefetch=(),
                 offline_outcome=opsf.OfflineOutcome.UNCHANGED,
@@ -299,7 +310,8 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                     "utils/content_databases.py SCANNERS_WITHOUT_CONTENT_DATABASE['syft']: "
                     "it catalogs packages and matches nothing against advisories; the "
                     "remote license, maven and vcpkg lookups are forced off by "
-                    "OFFLINE_TOOL_ENVIRONMENT"
+                    "OFFLINE_TOOL_ENVIRONMENT; scan_image with a reference pulls the "
+                    "image through the engine or syft's own registry client"
                 ),
             ),
             output=opsf.OutputFacet(
@@ -367,7 +379,11 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.NONE,),
-                note="a directory",
+                note=(
+                    "a directory; or a container image (a reference needs an "
+                    "engine or the registry, a saved archive or OCI layout "
+                    "needs neither)"
+                ),
             ),
         )
     )
@@ -965,6 +981,19 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             # would filter in-image paths that happen to match a source-tree
             # glob. This is what makes the docstring's "no exclude set" true.
             # The in-image excludes are added below, from the ignore paths.
+            # Said here because _process_config_options just logged each
+            # entry as "excluded from syft scan", which this removal makes
+            # untrue for THIS scan.
+            removed_excludes = sum(
+                1 for arg in self.args.extra_args if arg.key == "--exclude"
+            )
+            if removed_excludes:
+                self._plugin_log(
+                    f"The {removed_excludes} configured exclude pattern(s) are "
+                    "directory-relative and do not apply to an image scan; the "
+                    "image's ignore paths are passed instead.",
+                    level=logging.DEBUG,
+                )
             self.args.extra_args = [
                 arg for arg in self.args.extra_args if arg.key != "--exclude"
             ]

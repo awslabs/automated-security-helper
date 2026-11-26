@@ -4833,6 +4833,16 @@
         "resolved_from": {
           "anyOf": [
             {
+              "enum": [
+                "engine",
+                "registry",
+                "payload"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {

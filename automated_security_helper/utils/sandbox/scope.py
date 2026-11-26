@@ -531,9 +531,11 @@ def scanner_sandbox_scope(
     # payload, the combination is refused with the reason; the scan runs
     # without a sandbox or not at all (ERROR, as every non-availability
     # refusal grades).
+    from automated_security_helper.core.asset import AssetKind
+
     asset = getattr(context, "asset", None)
     asset_kind = getattr(asset, "kind", None)
-    if getattr(asset_kind, "value", asset_kind) == "container_image":
+    if asset_kind == AssetKind.CONTAINER_IMAGE:
         raise SandboxUnavailable(
             f"{name}: a container-image scan cannot run sandboxed yet: the "
             "sandbox's read scope is built from the source tree and the "

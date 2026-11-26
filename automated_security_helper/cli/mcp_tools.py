@@ -7699,9 +7699,15 @@ def mcp_set_source_image(
         ``{"success": True, "image_ref": str}`` on success;
         ``{"success": False, "error": str}`` for a value that can never be a
         reference, with ``error_type`` ``source_delivery_busy`` while a scan
-        of the session runs or another change to its source is in progress.
+        of the session runs or another change to its source is in progress,
+        ``image_registry_not_permitted`` for a registry the operator's
+        ``ASH_MCP_IMAGE_ALLOWED_REGISTRIES`` list does not admit (the list is
+        empty unless the operator sets it; the archive upload needs no
+        registry and is not gated), or ``session_workspace_unavailable`` when
+        the session's workspace directory cannot be created.
     """
     from automated_security_helper.cli.mcp.source_delivery import (
+        ImageRegistryRefused,
         SessionWorkspaceError,
         SourceDeliveryBusyError,
         set_source_image,
@@ -7723,6 +7729,14 @@ def mcp_set_source_image(
             "success": False,
             "error": raw_controls_on_one_line(error_text(e)),
             "error_type": McpErrorType.SESSION_WORKSPACE_UNAVAILABLE.value,
+        }
+    except ImageRegistryRefused as e:
+        # Before the plain ValueError arm: this one is the clone-host rule's
+        # image twin, and a client branches on its error_type.
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(error_text(e)),
+            "error_type": McpErrorType.IMAGE_REGISTRY_NOT_PERMITTED.value,
         }
     except ValueError as e:
         return {"success": False, "error": raw_controls_on_one_line(error_text(e))}
