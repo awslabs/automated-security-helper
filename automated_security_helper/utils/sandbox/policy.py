@@ -228,7 +228,8 @@ def safe_directories_for(target: Path) -> List[str]:
     The real path of ``target``, and, when it sits in a checkout, the checkout's top:
     the first parent holding a ``.git`` (a directory, or the file a linked work tree
     and a submodule have). The top is named only when that ``.git`` entry belongs to
-    the user who owns ``target`` (``os.lstat``, so a link is not followed) and the
+    the user who owns ``target`` or to the effective uid (``os.lstat``, so a link
+    is not followed) and the
     parent is a directory ``_usable_safe_directory`` admits, which a filesystem root
     never is. A ``.git`` that fails either test ends the walk: git takes the first
     ``.git`` it meets as the top, so a parent above it is not the checkout's. No
@@ -249,12 +250,26 @@ def safe_directories_for(target: Path) -> List[str]:
         if not os.path.lexists(git):
             continue
         try:
-            same_owner = os.lstat(git).st_uid == owner
+            git_owner: int | None = os.lstat(git).st_uid
+            same_owner = git_owner in (owner, os.geteuid())
         except OSError:
+            git_owner = None
             same_owner = False
         top = str(parent)
         if same_owner and _usable_safe_directory(top) and top not in named:
             named.append(top)
+        elif not same_owner:
+            from automated_security_helper.utils.log import ASH_LOGGER
+
+            ASH_LOGGER.debug(
+                "safe_directories_for: not naming %s: %s is owned by uid %s "
+                "(target owner %s, effective uid %s)",
+                top,
+                str(git),
+                git_owner,
+                owner,
+                os.geteuid(),
+            )
         break
     return named
 
