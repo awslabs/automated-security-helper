@@ -4811,13 +4811,13 @@ SOFTWARE.
 <td><a id="scanners.checkov.options.frameworks"></a><code>frameworks</code></td>
 <td>list of one of <code>all</code>, <code>ansible</code>, <code>argo_workflows</code>, <code>arm</code>, <code>azure_pipelines</code>, <code>bicep</code>, <code>bitbucket_pipelines</code>, <code>cdk</code>, <code>circleci_pipelines</code>, <code>cloudformation</code>, <code>dockerfile</code>, <code>github_configuration</code>, <code>github_actions</code>, <code>gitlab_configuration</code>, <code>gitlab_ci</code>, <code>bitbucket_configuration</code>, <code>helm</code>, <code>json</code>, <code>yaml</code>, <code>kubernetes</code>, <code>kustomize</code>, <code>openapi</code>, <code>sca_package</code>, <code>sca_image</code>, <code>secrets</code>, <code>serverless</code>, <code>terraform</code>, <code>terraform_json</code>, <code>terraform_plan</code>, <code>sast</code>, <code>sast_python</code>, <code>sast_java</code>, <code>sast_javascript</code>, <code>sast_typescript</code>, <code>sast_golang</code>, <code>3d_policy</code></td>
 <td><code>["all"]</code></td>
-<td>Specific frameworks to include with Checkov. Defaults to <code>all</code>.</td>
+<td>Specific frameworks to include with Checkov. Defaults to <code>all</code>, which leaves out checkov's <code>github_configuration</code>, <code>gitlab_configuration</code> and <code>bitbucket_configuration</code> frameworks: they check the repository host's settings through its API, not files in the scanned tree. Name one of them here, with or without <code>all</code>, to run it.</td>
 </tr>
 <tr>
 <td><a id="scanners.checkov.options.skip_frameworks"></a><code>skip_frameworks</code></td>
 <td>list of one of <code>all</code>, <code>ansible</code>, <code>argo_workflows</code>, <code>arm</code>, <code>azure_pipelines</code>, <code>bicep</code>, <code>bitbucket_pipelines</code>, <code>cdk</code>, <code>circleci_pipelines</code>, <code>cloudformation</code>, <code>dockerfile</code>, <code>github_configuration</code>, <code>github_actions</code>, <code>gitlab_configuration</code>, <code>gitlab_ci</code>, <code>bitbucket_configuration</code>, <code>helm</code>, <code>json</code>, <code>yaml</code>, <code>kubernetes</code>, <code>kustomize</code>, <code>openapi</code>, <code>sca_package</code>, <code>sca_image</code>, <code>secrets</code>, <code>serverless</code>, <code>terraform</code>, <code>terraform_json</code>, <code>terraform_plan</code>, <code>sast</code>, <code>sast_python</code>, <code>sast_java</code>, <code>sast_javascript</code>, <code>sast_typescript</code>, <code>sast_golang</code>, <code>3d_policy</code></td>
 <td><code>[]</code></td>
-<td>Specific frameworks to exclude with Checkov. Defaults to none.</td>
+<td>Specific frameworks to exclude with Checkov. Defaults to none, though <code>all</code> in <code>frameworks</code> leaves out <code>github_configuration</code>, <code>gitlab_configuration</code> and <code>bitbucket_configuration</code> unless <code>frameworks</code> names them.</td>
 </tr>
 <tr>
 <td><a id="scanners.checkov.options.skip_ash_output_dir"></a><code>skip_ash_output_dir</code></td>

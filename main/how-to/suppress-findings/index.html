@@ -3981,7 +3981,7 @@ SOFTWARE.
 <tr>
 <td><code>resource_id</code></td>
 <td>no</td>
-<td>Only findings about this resource, for the scanners that name one: cdk-nag (the construct path) and checkov (for Terraform, a Terraform plan, CloudFormation and Kubernetes; the name checkov gives it, such as <code>aws_db_instance.this</code>, <code>module.db.aws_db_instance.this</code> or <code>AWS::S3::Bucket.Bucket</code>). A finding with no resource never matches</td>
+<td>Only findings about this resource, for the scanners that name one: cdk-nag (the construct path) and checkov (for Terraform, a Terraform plan, CloudFormation, Kubernetes and Bicep; the name checkov gives it, such as <code>aws_db_instance.this</code>, <code>module.db.aws_db_instance.this</code> or <code>AWS::S3::Bucket.Bucket</code>, unless checkov gives that name to two resources of one file). A finding with no resource never matches</td>
 </tr>
 </tbody>
 </table>
