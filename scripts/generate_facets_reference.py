@@ -88,18 +88,22 @@ def runtime_compat_section(rows: list) -> list[str]:
     Each scanner's rows say which range of the tool's versions needs which range
     of its language runtime's versions, how that is resolved (an interpreter
     pin, or a launch-time shim), and, for an unsolved upstream issue, the issue
-    and the open end of the row. A scanner whose class declares no operational
-    row, or an empty one, is counted and not listed: no known incompatibility.
+    and the open end of the row. The rows are read exactly as the installer
+    reads them (``declared_runtime_compat``, which walks the MRO), so a
+    subclass that inherits a declaring base is listed with the rows it installs
+    under -- the page never says "no incompatibility known" of a scanner the
+    installer pins. A scanner whose MRO declares no operational row, or an
+    empty one, is counted and not listed: no known incompatibility.
     """
     from automated_security_helper.base.scanner_operational_facets import (
-        declared_operational_facets,
+        declared_runtime_compat,
     )
     from automated_security_helper.utils.runtime_compat_ranges import RANGE_GRAMMARS
 
     declared = []
     for p, _facets in rows:
-        operational = declared_operational_facets(p.cls)
-        compat_rows = operational.runtime_compat.rows if operational else ()
+        compat = declared_runtime_compat(p.cls)
+        compat_rows = compat.rows if compat else ()
         declared.append((p, compat_rows))
     with_rows = [(p, compat_rows) for p, compat_rows in declared if compat_rows]
 
@@ -132,8 +136,9 @@ def runtime_compat_section(rows: list) -> list[str]:
         ),
         (
             "- open-ended: the incompatibility is unsolved upstream. The row declares "
-            "only the bounds that are proved, links the upstream issue, and is "
-            "re-read whenever the tool's version constraint moves."
+            "only the bounds that are proved, links the upstream issue (or says what "
+            "was searched when none exists to cite), and is re-read whenever the "
+            "tool's version constraint moves."
         ),
         "",
     ]
@@ -151,10 +156,18 @@ def runtime_compat_section(rows: list) -> list[str]:
                         f"{md_prose(row.pin_insufficient)}"
                     )
                 tool_versions = code(row.tool_versions) if row.tool_versions else "all"
-                if row.open_ended:
+                # A row carrying both fields renders the URL alone: the
+                # recheck_note is the URL's stand-in, not a second link (the
+                # model refuses a blank-but-non-None upstream_issue, so a
+                # truthy value here is a real URL).
+                if row.open_ended and row.upstream_issue:
                     open_ended = (
                         f"yes, [{md_prose(row.upstream_issue)}]({row.upstream_issue})"
                     )
+                elif row.open_ended:
+                    # No upstream issue exists to cite; the row's recheck_note
+                    # says what was searched in the URL's place.
+                    open_ended = f"yes, {md_prose(row.recheck_note)}"
                 elif row.upstream_issue:
                     open_ended = (
                         f"no, [{md_prose(row.upstream_issue)}]({row.upstream_issue})"

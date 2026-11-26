@@ -1077,10 +1077,16 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                             "https://github.com/bridgecrewio/checkov/issues/7777"
                         ),
                         # Unsolved upstream: re-read whenever the checkov
-                        # version constraint moves (the consistency gate holds
-                        # this row to covering the default constraint), and
-                        # drop the upper bound once a release passes array_hook.
+                        # version constraint moves. The re-check is the
+                        # recorded default constraint below -- the consistency
+                        # gate reds the moment _get_tool_version_constraint's
+                        # default no longer equals it (the bump that follows an
+                        # upstream fix), and the fix then drops the upper bound
+                        # and closes the row.
                         open_ended=True,
+                        # _get_tool_version_constraint's default, as of this
+                        # row's writing.
+                        recorded_default_constraint=">=3.2.0,<4.0.0",
                     ),
                 ),
             ),
