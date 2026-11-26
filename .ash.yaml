@@ -3872,27 +3872,40 @@ global_settings:
     # extracts, and detect-secrets' hex detector reports the sdist's sha256 digest
     # in it. That digest is the pin uv.lock carries, a content hash and not a
     # secret. A secret rule may not be suppressed by a directory glob
-    # (tests/unit/config/test_no_directory_glob_secret_suppressions.py), so there is
-    # one entry per manifest the self-scan reports, each pinned to the digest line.
-    # HarvestManifest.to_json writes the digest on line 6, and
+    # (tests/unit/config/test_no_directory_glob_secret_suppressions.py), so each
+    # manifest the self-scan reports is named in its own entries, each pinned to the
+    # digest line. HarvestManifest.to_json writes the digest on line 6, and
     # tests/unit/config/test_harvest_manifest_suppressions_pin_the_digest_line.py
     # fails and names the line to use if that moves.
     #
-    # Each path is <output dir>/converted/sdist-lock-harvester/sdist-locks/
-    # <package>/<version>/harvest-manifest.json for the default output directory,
-    # .ash/ash_output, inside the scanned tree. A scan that writes its output
-    # elsewhere reports a manifest under that directory, which these entries do
-    # not cover: the manual pre-commit hook writes to
-    # .ash/ash_output_precommit_local, and a container scan to /out, where it
-    # reports /out/converted/sdist-lock-harvester/....
+    # A manifest is reported by the path the scan that wrote it gives it, and a
+    # glob-free path matches only itself, so each package version has two entries,
+    # one after the other. Each path is <output dir>/converted/sdist-lock-harvester/
+    # sdist-locks/<package>/<version>/harvest-manifest.json, with the output
+    # directory being:
+    #   - .ash/ash_output, the default, inside the scanned tree: a scan that
+    #     writes there reports the path relative to the tree.
+    #   - /out, for a container scan. The scan inside the image runs with
+    #     --source-dir /src --output-dir /out (_assemble_run_command in
+    #     automated_security_helper/interactions/run_ash_container.py), so its
+    #     output is outside the source directory, and a converted file there keeps
+    #     its absolute path (_finding_uri in the detect-secrets scanner): only the
+    #     source directory is stripped from a reported path (_normalize_sarif_uri in
+    #     automated_security_helper/utils/sarif_utils.py).
+    # That test also fails when a manifest has an entry for one spelling and not the
+    # other. `ash config validate` and `ash config lint` warn that each /out path is
+    # absolute and matches nothing. It does match: it is the path the container scan
+    # reports, so the warning is expected (validate exits 0 with it) and the entries
+    # stay. An output directory other than these two is not covered: the manual
+    # pre-commit hook writes to .ash/ash_output_precommit_local.
     #
     # Taking a new version of a package named here, or a newly harvested package:
     # the required self-scan reads this file from the pull request's base commit,
     # so an entry added in the pull request that takes the version applies only once
     # that merges, and the scan reports the new manifest until then. Merge a change
-    # that adds the entry first (copy one, change the version in the path and in the
-    # reason), then the change that takes the version, which also deletes the old
-    # version's entry.
+    # that adds both entries first (copy the pair, change the version in both paths
+    # and in both reasons), then the change that takes the version, which also
+    # deletes the old version's two entries.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/ast-serialize/0.12.1/harvest-manifest.json
       line_start: 6
@@ -3901,12 +3914,32 @@ global_settings:
         False positive. Line 6 is the sha256 digest of the ast-serialize 0.12.1
         sdist that uv.lock pins; a content digest, not a secret.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/ast-serialize/0.12.1/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        ast-serialize 0.12.1: the scan inside the image writes its output to /out,
+        outside its source directory, so the converted file is reported by its
+        absolute path. Line 6 is the sha256 digest of the sdist that uv.lock pins;
+        a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/cryptography/50.0.2/harvest-manifest.json
       line_start: 6
       line_end: 6
       reason: >-
         False positive. Line 6 is the sha256 digest of the cryptography 50.0.2
         sdist that uv.lock pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/cryptography/50.0.2/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        cryptography 50.0.2: the scan inside the image writes its output to /out,
+        outside its source directory, so the converted file is reported by its
+        absolute path. Line 6 is the sha256 digest of the sdist that uv.lock pins;
+        a content digest, not a secret.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/hypothesis/6.170.15/harvest-manifest.json
       line_start: 6
@@ -3915,12 +3948,32 @@ global_settings:
         False positive. Line 6 is the sha256 digest of the hypothesis 6.170.15
         sdist that uv.lock pins; a content digest, not a secret.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/hypothesis/6.170.15/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        hypothesis 6.170.15: the scan inside the image writes its output to /out,
+        outside its source directory, so the converted file is reported by its
+        absolute path. Line 6 is the sha256 digest of the sdist that uv.lock pins;
+        a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/orjson/3.12.0/harvest-manifest.json
       line_start: 6
       line_end: 6
       reason: >-
         False positive. Line 6 is the sha256 digest of the orjson 3.12.0 sdist
         that uv.lock pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/orjson/3.12.0/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        orjson 3.12.0: the scan inside the image writes its output to /out, outside
+        its source directory, so the converted file is reported by its absolute
+        path. Line 6 is the sha256 digest of the sdist that uv.lock pins; a content
+        digest, not a secret.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/polars-runtime-32/1.44.2/harvest-manifest.json
       line_start: 6
@@ -3929,12 +3982,32 @@ global_settings:
         False positive. Line 6 is the sha256 digest of the polars-runtime-32
         1.44.2 sdist that uv.lock pins; a content digest, not a secret.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/polars-runtime-32/1.44.2/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        polars-runtime-32 1.44.2: the scan inside the image writes its output to
+        /out, outside its source directory, so the converted file is reported by
+        its absolute path. Line 6 is the sha256 digest of the sdist that uv.lock
+        pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/pydantic-core/2.46.5/harvest-manifest.json
       line_start: 6
       line_end: 6
       reason: >-
         False positive. Line 6 is the sha256 digest of the pydantic-core 2.46.5
         sdist that uv.lock pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/pydantic-core/2.46.5/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        pydantic-core 2.46.5: the scan inside the image writes its output to /out,
+        outside its source directory, so the converted file is reported by its
+        absolute path. Line 6 is the sha256 digest of the sdist that uv.lock pins;
+        a content digest, not a secret.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/pydantic-core/2.50.4/harvest-manifest.json
       line_start: 6
@@ -3944,6 +4017,17 @@ global_settings:
         sdist that ash-agent-plugins/agentic-coding/transpiler/uv.lock pins; a
         content digest, not a secret.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/pydantic-core/2.50.4/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        pydantic-core 2.50.4: the scan inside the image writes its output to /out,
+        outside its source directory, so the converted file is reported by its
+        absolute path. Line 6 is the sha256 digest of the sdist that
+        ash-agent-plugins/agentic-coding/transpiler/uv.lock pins; a content digest,
+        not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/rpds-py/0.30.0/harvest-manifest.json
       line_start: 6
       line_end: 6
@@ -3952,12 +4036,33 @@ global_settings:
         that uv.lock and ash-agent-plugins/agentic-coding/transpiler/uv.lock
         both pin; a content digest, not a secret.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/rpds-py/0.30.0/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        rpds-py 0.30.0: the scan inside the image writes its output to /out,
+        outside its source directory, so the converted file is reported by its
+        absolute path. Line 6 is the sha256 digest of the sdist that uv.lock and
+        ash-agent-plugins/agentic-coding/transpiler/uv.lock both pin; a content
+        digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/rtoml/0.13.0/harvest-manifest.json
       line_start: 6
       line_end: 6
       reason: >-
         False positive. Line 6 is the sha256 digest of the rtoml 0.13.0 sdist
         that uv.lock pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/rtoml/0.13.0/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        rtoml 0.13.0: the scan inside the image writes its output to /out, outside
+        its source directory, so the converted file is reported by its absolute
+        path. Line 6 is the sha256 digest of the sdist that uv.lock pins; a content
+        digest, not a secret.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/ruff/0.16.10/harvest-manifest.json
       line_start: 6
@@ -3966,12 +4071,32 @@ global_settings:
         False positive. Line 6 is the sha256 digest of the ruff 0.16.10 sdist
         that uv.lock pins; a content digest, not a secret.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/ruff/0.16.10/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        ruff 0.16.10: the scan inside the image writes its output to /out, outside
+        its source directory, so the converted file is reported by its absolute
+        path. Line 6 is the sha256 digest of the sdist that uv.lock pins; a content
+        digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/uv/0.13.5/harvest-manifest.json
       line_start: 6
       line_end: 6
       reason: >-
         False positive. Line 6 is the sha256 digest of the uv 0.13.5 sdist that
         uv.lock pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/uv/0.13.5/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for uv
+        0.13.5: the scan inside the image writes its output to /out, outside its
+        source directory, so the converted file is reported by its absolute path.
+        Line 6 is the sha256 digest of the sdist that uv.lock pins; a content
+        digest, not a secret.
     # Harvested third-party Cargo.lock advisories. The sdist-lock harvester
     # extracts the Cargo.lock embedded in a dependency's PyPI sdist so grype
     # and trivy can read the upstream project's own build pins. Those pins are
