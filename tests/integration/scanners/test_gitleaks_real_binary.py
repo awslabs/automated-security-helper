@@ -924,6 +924,17 @@ def test_a_symbol_scoped_suppression_applies_to_a_gitleaks_finding(
         f'MODULE_TOKEN = "{token}"\n',
         encoding="utf-8",
     )
+    # A symbol suppression needs its (rule_id, symbol) scope recorded on its
+    # file's .ash.lock entry; the scan refuses the config otherwise (exit 3). The
+    # key is built with lock_key, the normalization `ash suppress add` and the
+    # scan's resolver share.
+    from automated_security_helper.utils.ash_lock import AshLock, LockScope, lock_key
+
+    key = lock_key("client.py")
+    assert key is not None
+    lock = AshLock(source_dir=source)
+    lock.bind(key, LockScope("github-pat", "build_client"))
+    lock.save()
     config = {
         "project_name": "gitleaks-symbol-e2e",
         "fail_on_findings": False,
