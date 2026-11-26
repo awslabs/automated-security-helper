@@ -3978,22 +3978,69 @@ global_settings:
         2.46.5, rpds-py 0.30.0 and rtoml 0.13.0 (trivy's bare GHSA id and
         grype's -pyo3 suffixed id alike). The pin is each upstream's build
         input.
-    - rule_id: "GHSA-2mjx-qc3c-rqvc*"
-      path: "**/sdist-lock-harvester/sdist-locks/**/Cargo.lock"
-      package_name: rustls
+    # rustls in polars' harvested Cargo.lock: rustls 0.23.43 is statically
+    # linked into the polars-runtime-32 wheel, so only a polars release built
+    # against a fixed rustls (0.23.45 for GHSA-2mjx-qc3c-rqvc, 0.23.46 for
+    # GHSA-c8m5-c952-6cm4) removes it. One entry per scanner spelling: trivy
+    # reports the bare GHSA id, grype the id with the package name appended. The
+    # path names the harvest directory with a `*` version segment, so the entries
+    # survive a polars bump, and the rustls version pin with the expires date
+    # forces the revisit. tests/utils/sdist_harvest_oracle.py holds these four
+    # to the paths syft reports for the harvested lockfile and checks that no
+    # entry over the harvest layout covers another crate or another rustls
+    # version there.
+    - rule_id: "GHSA-2mjx-qc3c-rqvc"
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
+      package_name: "rustls"
+      package_version: "0.23.43"
       expires: "2026-12-27"
       reason: >-
-        rustls advisory inside polars-runtime-32 1.44.2's sdist-embedded
-        Cargo.lock (trivy's bare GHSA id and grype's -rustls suffixed id
-        alike). Upstream polars' build input.
+        GHSA-2mjx-qc3c-rqvc (RUSTSEC-2026-0285, trivy spelling): rustls 0.23.43,
+        statically linked into the polars-runtime-32 1.44.2 wheel, accepts TLS 1.3
+        handshake messages across encryption-state changes; fixed in rustls
+        0.23.45. The crate is compiled into the upstream wheel, so no local pin or
+        override can replace it; only a polars release built against the fixed
+        rustls does. Revisit on the next polars bump.
+    - rule_id: "GHSA-2mjx-qc3c-rqvc-rustls"
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
+      package_name: "rustls"
+      package_version: "0.23.43"
+      expires: "2026-12-27"
+      reason: >-
+        GHSA-2mjx-qc3c-rqvc (grype spelling): the same rustls 0.23.43 TLS 1.3
+        handshake finding as the trivy entry above, in the harvested lockfile of
+        the compiled polars wheel. Removable only by a polars release built
+        against rustls 0.23.45 or later. Revisit on the next polars bump.
+    - rule_id: "GHSA-c8m5-c952-6cm4"
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
+      package_name: "rustls"
+      package_version: "0.23.43"
+      expires: "2026-12-27"
+      reason: >-
+        GHSA-c8m5-c952-6cm4 (RUSTSEC-2026-0346, trivy spelling): rustls 0.23.43
+        Debug formatting of Session values can expose TLS master secrets in logs;
+        fixed in rustls 0.23.46. Statically linked into the polars-runtime-32
+        1.44.2 wheel; polars does not log rustls Session debug output on ASH's
+        read paths, and only a polars release built against the fixed rustls
+        removes the code. Revisit on the next polars bump.
+    - rule_id: "GHSA-c8m5-c952-6cm4-rustls"
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
+      package_name: "rustls"
+      package_version: "0.23.43"
+      expires: "2026-12-27"
+      reason: >-
+        GHSA-c8m5-c952-6cm4 (grype spelling): the same rustls 0.23.43 Session
+        Debug formatting finding as the trivy entry above, in the harvested
+        lockfile of the compiled polars wheel. Removable only by a polars release
+        built against rustls 0.23.46 or later. Revisit on the next polars bump.
     - rule_id: "GHSA-c8m5-c952-6cm4*"
-      path: "**/sdist-lock-harvester/sdist-locks/**/Cargo.lock"
+      path: "**/sdist-lock-harvester/sdist-locks/uv/*/Cargo.lock"
       package_name: rustls
       expires: "2026-12-27"
       reason: >-
-        rustls advisory inside the sdist-embedded Cargo.locks of
-        polars-runtime-32 1.44.2 and uv 0.13.5 (trivy's bare GHSA id and
-        grype's -rustls suffixed id alike). Each upstream's build input.
+        rustls advisory inside uv 0.13.5's sdist-embedded Cargo.lock (trivy's
+        bare GHSA id and grype's -rustls suffixed id alike). Upstream uv's build
+        input; polars' copy of the same advisory has its own entries above.
     # No GitHub Actions entries. `yaml.github-actions.security.*` was suppressed
     # over every workflow on the claim that interpolations were author-defined;
     # removing it surfaced shell injection through `${{ inputs.* }}` in
