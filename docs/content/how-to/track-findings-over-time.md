@@ -72,8 +72,8 @@ These runs add a record:
 These runs add none:
 
 - a scan stopped before it finished: cancelled or timed out over MCP, or stopped by a
-  SIGTERM to `ash scan`. A record already written for it is taken back with the run's
-  results;
+  SIGTERM to `ash scan`. A record already written for it is removed, unless git tracks
+  it or `history/` is in a git repository whose index git cannot list;
 - a scan that fails after its scan phase, which leaves its results file but no record;
 - `ash scan --use-existing`, which runs only the report phase;
 - the runs a comparison would refuse: an un-merged shard, the combined results of an

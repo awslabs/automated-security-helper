@@ -770,14 +770,106 @@ def test_a_run_a_comparison_would_refuse_is_not_recorded(tmp_path, caplog):
     assert not (out / "history").exists()
 
 
-def test_a_taken_back_run_leaves_no_record(tmp_path):
-    """A record written for a run that is then taken back is removed with its results.
+@pytest.fixture
+def _mcp_server(tmp_path, monkeypatch):
+    """The MCP server state the cancelled-scan tests set up, for the tests that use it."""
+    from automated_security_helper.cli.mcp import sessions
+    from automated_security_helper.cli.mcp.profile_registry import (
+        clear_all_session_state,
+        clear_profile_registry,
+    )
 
-    The cancel paths that call these two functions are driven by the core, interactions
-    and MCP unit tests; this pins that each removes exactly the run's own record.
+    monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "ws"))
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
+    clear_profile_registry()
+    clear_all_session_state()
+    sessions.reset_default_registry_for_tests()
+    try:
+        yield
+    finally:
+        sessions.reset_default_registry_for_tests()
+        clear_profile_registry()
+        clear_all_session_state()
+
+
+def test_a_scan_that_exits_1_for_incomplete_coverage_keeps_its_record(
+    tmp_path, monkeypatch, _mcp_server
+):
+    """Both endings of an incomplete scan, the CLI's and the MCP runner's, keep the record."""
+    assert_on_page(
+        PAGE,
+        "A scan with incomplete scanner coverage is recorded too, including one that "
+        "exits 1 because `fail_on_incomplete_scanners` is on, and its record notes the "
+        "gap, so the boundaries on either side of it are marked as not like for like",
+    )
+    from automated_security_helper.interactions import run_ash_scan as ras
+    from tests.unit.cli.mcp.test_a_cancelled_mcp_scan_leaves_no_history_record import (
+        RECORD_ID,
+        _run,
+        _scan_with_a_recorded_run,
+    )
+
+    # The CLI ending: run_ash_scan itself, with the orchestrator's recording standing in.
+    model = _model(_results(second=1, bandit="MISSING"))
+    source = tmp_path / "repo"
+    output = source / ".ash" / "ash_output"
+    output.mkdir(parents=True)
+
+    def fake_local_mode(opts, logger):
+        scan_history.write_run_record(model, output)
+        return model, None
+
+    with monkeypatch.context() as patched:
+        patched.setattr(
+            ras, "_setup_logger", lambda opts: logging.getLogger("trend-page-claims")
+        )
+        patched.setattr(ras, "time", SimpleNamespace(time=lambda: 1_000.0))
+        patched.setattr(ras, "_run_local_mode", fake_local_mode)
+        with pytest.raises(ras.ScanIncompleteExit) as excinfo:
+            ras.run_ash_scan(source_dir=source, output_dir=output, progress=False)
+    assert excinfo.value.code == 1
+    assert _names(output) == [_name(1)]
+
+    # The MCP ending: the runner settles a scan that ended in the same exit.
+    from automated_security_helper.interactions import run_ash_scan as run_module
+
+    incomplete = _model(_results(second=1, bandit="MISSING", report_id=RECORD_ID))
+    incompleteness = ras.scan_incompleteness(incomplete, gate=True)
+    assert incompleteness
+
+    def case(name, *, cancel):
+        directory = tmp_path / name
+        directory.mkdir()
+        registry, scan_id, project, out = _scan_with_a_recorded_run(directory)
+
+        def fake(**_kwargs):
+            if cancel:
+                registry.get_scan(scan_id).cancel_event.set()
+            raise ras.ScanIncompleteExit(incompleteness, incomplete)
+
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(run_module, "run_ash_scan", fake)
+            _run(registry, scan_id, project, out)
+        return out / "history" / f"{RECORD_ID}.json"
+
+    assert case("kept", cancel=False).exists()
+    assert not case("removed", cancel=True).exists()
+
+
+def test_a_taken_back_run_leaves_no_record(tmp_path, monkeypatch, _mcp_server):
+    """A cancelled run's record is removed, through each ending that removes it.
+
+    Drives the orchestrator's discard and the CLI's helper directly, then the CLI's
+    local-mode cancel arm (``_run_local_mode``) and the MCP runner's settle. The
+    orchestrator's own write-step arm is driven in
+    ``tests/unit/core/test_a_cancel_after_the_history_record_discards_it.py``.
     """
     assert_on_page(
-        PAGE, "A record already written for it is taken back with the run's results;"
+        PAGE,
+        "A record already written for it is removed, unless git tracks it or `history/` "
+        "is in a git repository whose index git cannot list;",
     )
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
     from automated_security_helper.interactions import run_ash_scan
@@ -804,6 +896,71 @@ def test_a_taken_back_run_leaves_no_record(tmp_path):
     assert _names(out) == [_name(1), _name(3)]
     run_ash_scan.discard_history_record(_parsed(third), out)
     assert _names(out) == [_name(1)]
+
+    # The CLI's local-mode cancel arm: the last cancel check fires after the
+    # orchestrator recorded the run.
+    from automated_security_helper.interactions.run_ash_scan import (
+        ScanOptions,
+        _run_local_mode,
+    )
+
+    source = tmp_path / "src"
+    source.mkdir()
+    local_out = tmp_path / "local"
+    local_out.mkdir()
+    earlier = _model(_results(_finding("B102"), second=2))
+    this_run = _model(_results(_finding("B101"), second=3))
+
+    class _Cancelled(BaseException):
+        pass
+
+    class _Orchestrator:
+        config = None
+
+        def add_metadata(self, **values):
+            pass
+
+        def execute_scan(self, phases=None, **kwargs):
+            scan_history.write_run_record(earlier, local_out)
+            scan_history.write_run_record(this_run, local_out)
+            return this_run
+
+    def cancelled():
+        raise _Cancelled
+
+    with monkeypatch.context() as patched:
+        patched.setattr(
+            ASHScanOrchestrator,
+            "create",
+            staticmethod(lambda **kwargs: _Orchestrator()),
+        )
+        patched.setattr(run_ash_scan, "raise_if_cancelled", cancelled)
+        with pytest.raises(_Cancelled):
+            _run_local_mode(
+                ScanOptions(source_dir=source, output_dir=local_out),
+                logging.getLogger("ash"),
+            )
+    assert _names(local_out) == [_name(2)]
+
+    # The MCP runner's settle: the cancel lands after the scan returned.
+    from tests.unit.cli.mcp.test_a_cancelled_mcp_scan_leaves_no_history_record import (
+        RECORD_ID,
+        _run,
+        _scan_with_a_recorded_run,
+    )
+
+    directory = tmp_path / "mcp"
+    directory.mkdir()
+    registry, scan_id, project, mcp_out = _scan_with_a_recorded_run(directory)
+
+    def settled(**_kwargs):
+        registry.get_scan(scan_id).cancel_event.set()
+        return {"metadata": {"report_id": RECORD_ID}}
+
+    monkeypatch.setattr(run_ash_scan, "run_ash_scan", settled)
+    assert (mcp_out / "history" / f"{RECORD_ID}.json").exists()
+    _run(registry, scan_id, project, mcp_out)
+    assert not (mcp_out / "history" / f"{RECORD_ID}.json").exists()
 
 
 def test_a_merge_records_the_merged_run_in_its_own_output_directory(tmp_path):
