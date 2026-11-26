@@ -66,7 +66,7 @@ from automated_security_helper.utils.uv_tool_runner import (
 _UV_TOOL_RUNNER_MODULE = "automated_security_helper.utils.uv_tool_runner"
 
 if TYPE_CHECKING:
-    pass
+    from automated_security_helper.models.vocab import TargetType
 
 #: "The stderr log's identity before the run was not read": the default of
 #: ``_uv_response`` and ``_explain_offline_resolve_failure`` for a caller that
@@ -331,15 +331,11 @@ class UVToolMixin:
             self,
             *msg: str,
             level: int = 15,
-            target_type: Optional[str] = "source",
+            target_type: Optional[TargetType] = None,
             append_to_stream: Literal["stderr", "stdout", "none"] = "none",
         ) -> None: ...
 
         def _process_command_response(self, response: dict) -> None: ...
-
-    def _tool_command(self) -> str:
-        """The tool's executable name, ``""`` for a plugin that sets none."""
-        return _tool_name(self)
 
     # ------------------------------------------------------------------
     # Version detection
@@ -370,8 +366,12 @@ class UVToolMixin:
         extras = self._get_tool_package_extras()
         constraint = self._get_tool_version_constraint()
         package = self._uv_package()
+        if not package:
+            # A plugin with no tool and no package has no spec: the empty
+            # stand-in ``_tool_name`` gives is never handed on as one.
+            return None
         if not extras and not constraint:
-            return package if package != self.command else None
+            return package if package != _tool_name(self) else None
         base = f"{package}[{','.join(extras)}]" if extras else package
         return f"{base}{constraint}" if constraint else base
 
