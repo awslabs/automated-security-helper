@@ -28,8 +28,8 @@
 │ --config-overrides                      <str>  Configuration overrides specified as key-value    │
 │                                                pairs (e.g.,                                      │
 │                                                'global_settings.severity_threshold=LOW')         │
-│ --source-dir                            <str>  The directory a scan would scan, as `ash scan     │
-│                                                --source-dir`: the config is discovered there     │
+│ --source-dir                            <str>  The directory a scan would scan, as `ash scan fs  │
+│                                                <path>` names it: the config is discovered there  │
 │                                                unless --config names one, and a config inside it │
 │                                                may only extend files inside it. Defaults to the  │
 │                                                current directory.                                │

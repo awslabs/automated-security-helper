@@ -57,8 +57,8 @@
 │                                              'global_settings.severity_threshold=LOW'), checked  │
 │                                              as a scan given the same --config-overrides would   │
 │                                              apply them.                                         │
-│ --source-dir                          <str>  The directory a scan would scan, as `ash scan       │
-│                                              --source-dir`: the config is discovered there       │
+│ --source-dir                          <str>  The directory a scan would scan, as `ash scan fs    │
+│                                              <path>` names it: the config is discovered there    │
 │                                              unless --config names one, and a config inside it   │
 │                                              may only extend files inside it. Defaults to the    │
 │                                              current directory.                                  │

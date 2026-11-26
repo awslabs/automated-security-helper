@@ -33,10 +33,10 @@
 │                                          pairs (e.g.,                                           │
 │                                          'global_settings.severity_threshold=LOW'). Supports    │
 │                                          lists with , append mode with key+=, and JSON syntax.  │
-│ --source-dir                      <str>  The directory a scan would scan, as `ash scan          │
-│                                          --source-dir`: the config is discovered there unless   │
-│                                          --config names one, and a config inside it may only    │
-│                                          extend files inside it. Defaults to the current        │
+│ --source-dir                      <str>  The directory a scan would scan, as `ash scan fs       │
+│                                          <path>` names it: the config is discovered there       │
+│                                          unless --config names one, and a config inside it may  │
+│                                          only extend files inside it. Defaults to the current   │
 │                                          directory.                                             │
 │                                          [env var: ASH_SOURCE_DIR]                              │
 │ --verbose     -v  --no-verbose           Enable verbose logging [default: no-verbose]           │

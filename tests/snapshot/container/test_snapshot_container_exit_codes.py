@@ -22,12 +22,12 @@ from tests.snapshot.container.conftest import FakeStep
 
 SCAN = [
     "scan",
+    "fs",
+    "src",
     "--mode",
     "container",
     "--no-build",
     "--no-progress",
-    "--source-dir",
-    "src",
     "--output-dir",
     "out",
 ]

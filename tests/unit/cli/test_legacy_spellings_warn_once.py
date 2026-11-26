@@ -493,6 +493,82 @@ def test_comparing_sharded_results_is_refused_naming_results_merge():
     )
 
 
+#: A terminal color sequence, which the console may write around a hint's markup.
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def test_the_next_steps_after_a_scan_with_findings_name_results_report_and_inspect(
+    tmp_path, monkeypatch, capsys
+):
+    """The block every scan with actionable findings ends with: each command it
+    tells the reader to run is one that prints no deprecation line."""
+    from automated_security_helper.interactions.run_ash_scan import (
+        ScanOptions,
+        _print_summary,
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ASH_ACTUAL_OUTPUT_DIR", raising=False)
+    opts = ScanOptions(source_dir=tmp_path, output_dir=tmp_path / "out")
+
+    _print_summary(None, opts, scan_start_time=0.0, actionable_findings=1)
+
+    lines = [
+        _one_line(line) for line in _ANSI.sub("", capsys.readouterr().out).splitlines()
+    ]
+    assert (
+        "2. Use ash results report to view a short text summary of the scan in your "
+        "terminal"
+    ) in lines, lines
+    assert (
+        "3. Use ash results inspect findings to explore the findings interactively"
+    ) in lines, lines
+    assert [line for line in lines if _is_legacy(line)] == []
+
+
+def test_the_scan_help_says_to_review_the_result_with_results_inspect():
+    from automated_security_helper.cli.scan import run_ash_scan_cli_command
+    from automated_security_helper.cli.scan_group import run_ash_scan_fs_cli_command
+
+    for args in (["scan", "fs", "--help"], ["scan", "--help"]):
+        result = _invoke(args)
+        assert result.exit_code == 0, result.output
+        assert "Review the result with: ash results inspect findings" in (
+            _one_line(result.stdout)
+        ), args
+    # The root's scan callback carries the same docstring as `fs`, which is built
+    # from it; `ash --help` shows the app's own help instead.
+    for function in (run_ash_scan_fs_cli_command, run_ash_scan_cli_command):
+        assert "Review the result with: ash results inspect findings" in (
+            _one_line(function.__doc__)
+        ), function.__name__
+
+
+def test_the_shard_index_help_says_to_recombine_the_shards_with_results_merge():
+    root = typer.main.get_command(app)
+    for command in (root, root.commands["scan"].commands["fs"]):
+        (option,) = [p for p in command.params if "--shard-index" in p.opts]
+
+        assert "recombine them with 'ash results merge'" in option.help, option.help
+
+
+def test_the_merge_warning_about_ignore_paths_names_scan_fs(monkeypatch):
+    from automated_security_helper.cli import merge
+
+    logger = MagicMock()
+    monkeypatch.setattr(merge, "ASH_LOGGER", logger)
+    config = SimpleNamespace(
+        global_settings=SimpleNamespace(
+            ignore_paths=[SimpleNamespace(path="vendor/", client_supplied=False)]
+        )
+    )
+
+    merge._warn_ignore_paths_the_flag_cannot_lift(config)
+
+    (message,) = [call.args[0] for call in logger.warning.call_args_list]
+    assert "where ash scan fs --ignore-suppressions keeps them" in message, message
+
+
 #: The legacy spellings: a scan with no subject, a bare root with an option, and the
 #: top-level commands that moved.
 _LEGACY_COMMAND = re.compile(

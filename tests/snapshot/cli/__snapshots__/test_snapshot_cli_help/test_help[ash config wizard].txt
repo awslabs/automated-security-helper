@@ -15,11 +15,10 @@
 │                                        directory when --source-dir is not given), or a new       │
 │                                        .ash.yaml in that directory when there is none.           │
 │                                        [env var: ASH_CONFIG]                                     │
-│ --source-dir                    <str>  The directory a scan would scan, as `ash scan             │
-│                                        --source-dir`: the config is discovered there unless      │
-│                                        --config names one, and a config inside it may only       │
-│                                        extend files inside it. Defaults to the current           │
-│                                        directory.                                                │
+│ --source-dir                    <str>  The directory a scan would scan, as `ash scan fs <path>`  │
+│                                        names it: the config is discovered there unless --config  │
+│                                        names one, and a config inside it may only extend files   │
+│                                        inside it. Defaults to the current directory.             │
 │                                        [env var: ASH_SOURCE_DIR]                                 │
 │ --verbose     -v                       Enable verbose logging                                    │
 │ --debug       -d                       Enable debug logging                                      │

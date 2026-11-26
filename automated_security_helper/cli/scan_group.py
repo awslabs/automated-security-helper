@@ -177,7 +177,7 @@ def run_ash_scan_fs_cli_command(*args: Any, **kwargs: Any) -> Any:
 
     Start with: ash scan fs . --mode container
 
-    Review the result with: ash inspect findings
+    Review the result with: ash results inspect findings
 
     Options are grouped by workflow below. `fs` is the only subject of `ash scan`
     today; `ash scan` with no subject runs it, but that form is deprecated.

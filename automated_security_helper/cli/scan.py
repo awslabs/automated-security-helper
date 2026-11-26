@@ -1525,7 +1525,7 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--shard-index",
             rich_help_panel="CI and sharding",
-            help="Zero-based index of this shard when one scan is split across several executors. Requires --shard-count. A 3-way split uses indices 0, 1 and 2. Each shard runs a disjoint subset of the scanners and records which ones in its results; recombine them with 'ash merge'.",
+            help="Zero-based index of this shard when one scan is split across several executors. Requires --shard-count. A 3-way split uses indices 0, 1 and 2. Each shard runs a disjoint subset of the scanners and records which ones in its results; recombine them with 'ash results merge'.",
             envvar="ASH_SHARD_INDEX",
         ),
     ] = None,
@@ -1794,7 +1794,7 @@ def run_ash_scan_cli_command(
 
     Start with: ash scan fs . --mode container
 
-    Review the result with: ash inspect findings
+    Review the result with: ash results inspect findings
 
     Options are grouped by workflow below. Running ash without a subcommand starts a scan, but that form is deprecated.
     """
