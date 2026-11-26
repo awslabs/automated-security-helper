@@ -14126,7 +14126,7 @@ _CHECKS_WARN_ABOUT_A_PATH_THAT_MATCHES_NOTHING = [
     (
         SUPPRESS_FINDINGS,
         (
-            "`ash config validate` and `ash config lint` warn, saying what to write "
+            "`ashx config validate` and `ashx config lint` warn, saying what to write "
             "instead, about a path that starts with `./` (`./src/app.py` is "
             "`src/app.py`) and about an empty path or `.`, and exit 0. A path whose "
             "leading names match the tree only in another case (`tests/**` against "
