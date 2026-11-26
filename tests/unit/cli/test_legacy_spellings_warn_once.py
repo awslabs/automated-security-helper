@@ -440,8 +440,8 @@ def test_comparing_sharded_results_is_refused_naming_results_merge():
     )
 
 
-#: The legacy spellings, as the topology plan counts them: a scan with no subject,
-#: a bare root with an option, and the top-level commands that moved.
+#: The legacy spellings: a scan with no subject, a bare root with an option, and the
+#: top-level commands that moved.
 _LEGACY_COMMAND = re.compile(
     r"\b(?:ash|ashv3) scan\b(?! (?:fs|workspace|image|git)\b)"
     r"|(?<![\w./-])(?:\./)?(?:ash|ashv3|automated-security-helper) "
