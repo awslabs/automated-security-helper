@@ -543,7 +543,9 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             scanner_name="grype",
             network=opsf.NetworkFacet(
                 fetch_kind=opsf.FetchKind.CONTENT_FETCH,
-                fetches=(opsf.Fetched.VULN_DB,),
+                # IMAGE_DIGEST: the one-manifest registry read that keys this
+                # scanner's image finding ids (utils/image_digest_resolver).
+                fetches=(opsf.Fetched.VULN_DB, opsf.Fetched.IMAGE_DIGEST),
                 prefetch=(
                     opsf.Prefetch.CONTENT_DB_REFRESH,
                     opsf.Prefetch.CI_CACHE,

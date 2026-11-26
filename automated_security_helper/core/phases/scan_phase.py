@@ -1156,13 +1156,34 @@ class ScanPhase(EnginePhase):
             # A tag-only reference gets the digest the registry says it points
             # at, so its finding ids key on that digest (utils/image_digest_resolver).
             # Once per scan, before any scanner is built; a failure or offline
-            # mode leaves the locator as submitted and logs one notice.
+            # mode leaves the locator as submitted and logs one notice. The
+            # ladder keys FINDING ids, so it runs only when a selected scanner
+            # that declares the registry read (Fetched.IMAGE_DIGEST) will:
+            # deselecting the consumers deselects the network use with them,
+            # as their operational-facets declarations promise.
             from automated_security_helper.core.constants import is_offline_mode
             from automated_security_helper.utils.image_digest_resolver import (
                 resolve_image_locator,
             )
+            from automated_security_helper.utils.scanner_tool_types import (
+                an_image_digest_consumer_is_selected,
+            )
 
-            resolved = resolve_image_locator(subject.image, offline=is_offline_mode())
+            if an_image_digest_consumer_is_selected(
+                enabled_scanners,
+                excluded_scanners,
+                python_based_plugins_only=python_based_plugins_only,
+            ):
+                resolved = resolve_image_locator(
+                    subject.image, offline=is_offline_mode()
+                )
+            else:
+                ASH_LOGGER.info(
+                    "No selected scanner declares the image-digest registry "
+                    "read, so no digest is resolved; what runs keys nothing "
+                    "on it and the ids stay on the reference as submitted."
+                )
+                resolved = subject.image
             if resolved is not subject.image:
                 self.plugin_context.asset = Asset.for_image(resolved)
                 # The scope a reporter that archives resolved findings compares

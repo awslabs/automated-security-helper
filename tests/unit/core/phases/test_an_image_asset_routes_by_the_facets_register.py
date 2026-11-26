@@ -469,7 +469,7 @@ class TestATagIsResolvedOnceBeforeAnyScannerRuns:
 
     DIGEST = "sha256:" + "ab" * 32
 
-    def _patched(self, monkeypatch, answer):
+    def _patched(self, monkeypatch, answer, consumers_selected=True):
         calls = []
 
         def resolver(image, *, offline, **_):
@@ -480,6 +480,16 @@ class TestATagIsResolvedOnceBeforeAnyScannerRuns:
             "automated_security_helper.utils.image_digest_resolver.resolve_image_locator",
             resolver,
         )
+        if consumers_selected:
+            # These rows measure the resolution, not the consumer gate: the
+            # gate reads LOADED scanner classes, which depend on what the
+            # test process imported before this file. The gate's own rows
+            # (below) import the real consumers and leave this unforced.
+            monkeypatch.setattr(
+                "automated_security_helper.utils.scanner_tool_types."
+                "an_image_digest_consumer_is_selected",
+                lambda *args, **kwargs: True,
+            )
         return calls
 
     def test_the_resolved_digest_is_on_the_asset_the_scanners_are_given(
@@ -557,3 +567,67 @@ class TestATagIsResolvedOnceBeforeAnyScannerRuns:
         )
 
         assert calls == []
+
+    def test_a_scan_with_every_digest_consumer_excluded_never_asks(
+        self, scan_phase, monkeypatch
+    ):
+        # The ladder keys FINDING ids, and only a scanner declaring
+        # Fetched.IMAGE_DIGEST produces ids the digest keys: with all of them
+        # excluded, no engine is asked and no registry request is made, as
+        # their operational-facets declarations promise the operator. The
+        # real consumer classes are imported, so the exclusion, not an
+        # unloaded class, is what the gate reads.
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (  # noqa: F401
+            GrypeScanner,
+        )
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (  # noqa: F401
+            TrivyScanner,
+        )
+
+        calls = self._patched(monkeypatch, lambda image: image, consumers_selected=None)
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+
+        scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(),
+            parallel=False,
+            excluded_scanners=["grype", "trivy"],
+        )
+
+        assert calls == []
+
+    def test_python_based_plugins_only_never_asks(self, scan_phase, monkeypatch):
+        # The declaring scanners are pinned binaries, which this run excludes.
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (  # noqa: F401
+            GrypeScanner,
+        )
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (  # noqa: F401
+            TrivyScanner,
+        )
+
+        calls = self._patched(monkeypatch, lambda image: image, consumers_selected=None)
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+
+        scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(),
+            parallel=False,
+            python_based_plugins_only=True,
+        )
+
+        assert calls == []
+
+    def test_a_selected_consumer_opens_the_gate_for_real(self, scan_phase, monkeypatch):
+        # The positive control for the two rows above, through the REAL gate:
+        # with the consumers loaded and nothing deselecting them, the
+        # resolution runs.
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (  # noqa: F401
+            GrypeScanner,
+        )
+
+        calls = self._patched(monkeypatch, lambda image: image, consumers_selected=None)
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+
+        scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        assert len(calls) == 1

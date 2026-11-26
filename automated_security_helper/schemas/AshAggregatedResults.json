@@ -11015,6 +11015,18 @@
           ],
           "default": null,
           "title": "Resolved Digest"
+        },
+        "resolved_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved From"
         }
       },
       "title": "ImageLocator",

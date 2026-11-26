@@ -81,8 +81,11 @@ def stereoscope_target(
         return f"oci-dir:{Path(image.oci_layout).absolute().as_posix()}"
     if engine is None:
         engine = detect_container_engine()
+    # Digest-pinned where the REGISTRY named the digest (ImageLocator.pulled_ref):
+    # the tool then pulls exactly the manifest the finding ids key on.
+    ref = image.pulled_ref()
     if engine == ContainerEngine.DOCKER:
-        return f"docker:{image.ref}"
+        return f"docker:{ref}"
     if engine == ContainerEngine.PODMAN:
-        return f"podman:{image.ref}"
-    return f"registry:{image.ref}"
+        return f"podman:{ref}"
+    return f"registry:{ref}"

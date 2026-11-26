@@ -196,6 +196,67 @@ def scanner_resource_id_state(scanner_name: Any) -> Optional["FacetState"]:
     return None
 
 
+def an_image_digest_consumer_is_selected(
+    enabled_scanners: Optional[Iterable[Any]] = None,
+    excluded_scanners: Optional[Iterable[Any]] = None,
+    python_based_plugins_only: bool = False,
+) -> bool:
+    """Whether a selected scanner's finding ids the digest resolution would key.
+
+    The digest ladder (``utils/image_digest_resolver``) exists to key FINDING
+    ids, and only a loaded scanner that serves container images and declares
+    the registry read (``Fetched.IMAGE_DIGEST``) produces such ids. With every
+    such scanner excluded, left out of a non-empty allowlist, or dropped by
+    ``python_based_plugins_only`` (the declaring scanners are pinned
+    binaries), the ladder would resolve a digest nobody keys on, so the scan
+    phase does not run it and no registry request is made for a scan whose
+    operator deselected the consumers. The walk is the loaded-classes walk
+    every helper here uses; a scanner this process has not imported cannot
+    consume the digest either, because consumption IS the declaration.
+    """
+    try:
+        from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+        from automated_security_helper.base import scanner_operational_facets as opsf
+        from automated_security_helper.core.asset import AssetKind
+    except ImportError:
+        return False
+    allow = {
+        str(name).lower().strip()
+        for name in (enabled_scanners or [])
+        if str(name).strip()
+    }
+    deny = {
+        str(name).lower().strip()
+        for name in (excluded_scanners or [])
+        if str(name).strip()
+    }
+    pending = list(ScannerPluginBase.__subclasses__())
+    seen: Set[type] = set()
+    while pending:
+        cls = pending.pop()
+        if cls in seen:
+            continue
+        seen.add(cls)
+        pending.extend(cls.__subclasses__())
+        facets = getattr(cls, "operational_facets", None)
+        network = getattr(facets, "network", None)
+        if opsf.Fetched.IMAGE_DIGEST not in (getattr(network, "fetches", None) or ()):
+            continue
+        if not opsf.serves_asset_kind(cls, AssetKind.CONTAINER_IMAGE):
+            continue
+        if python_based_plugins_only and not getattr(
+            getattr(facets, "runtime", None), "python_only", False
+        ):
+            continue
+        name = (_class_config_name(cls) or "").lower()
+        if not name or name in deny:
+            continue
+        if allow and name not in allow:
+            continue
+        return True
+    return False
+
+
 def scanner_serves_container_images(scanner_name: Any) -> Optional[bool]:
     """Whether the loaded scanner class named ``scanner_name`` declares
     container-image targets in its operational facets, or None if unknown.

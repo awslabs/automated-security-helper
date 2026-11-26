@@ -259,6 +259,81 @@ class TestStereoscopeTargets:
         )
 
 
+DIGEST = "sha256:" + "ab" * 32
+
+
+class TestARegistryResolvedTagIsPulledByDigest:
+    """What the tools pull is what the ids key on (the digest-vs-scanned row).
+
+    A tag-only reference whose digest the REGISTRY named is handed to the
+    tools as ``repo@<digest>``: a tag moved between the resolution and the
+    pull cannot make the report describe bytes nobody keyed. An ENGINE-named
+    digest pins nothing (it may be the config-blob Id, which no registry
+    serves), and a pinned reference is already itself.
+    """
+
+    PINNED = f"registry.example.com/team/app@{DIGEST}"
+
+    def _registry_resolved(self, ref=IMAGE_REF):
+        return ImageLocator(ref=ref, resolved_digest=DIGEST, resolved_from="registry")
+
+    def test_the_stereoscope_target_is_digest_pinned(self):
+        assert stereoscope_target(self._registry_resolved(), ContainerEngine.NONE) == (
+            f"registry:{self.PINNED}"
+        )
+        assert stereoscope_target(
+            self._registry_resolved(), ContainerEngine.DOCKER
+        ) == (f"docker:{self.PINNED}")
+
+    def test_a_port_carrying_registry_keeps_its_port(self):
+        pinned = ImageLocator(
+            ref="registry.example.com:5000/team/app:1.2",
+            resolved_digest=DIGEST,
+            resolved_from="registry",
+        ).pulled_ref()
+        assert pinned == f"registry.example.com:5000/team/app@{DIGEST}"
+
+    def test_an_engine_named_digest_pins_nothing(self):
+        # The engine's answer may be the config-blob Id: not a registry
+        # lookup key, and the engine's store is already one copy.
+        locator = ImageLocator(
+            ref=IMAGE_REF, resolved_digest=DIGEST, resolved_from="engine"
+        )
+        assert locator.pulled_ref() == IMAGE_REF
+        assert (
+            stereoscope_target(locator, ContainerEngine.DOCKER) == f"docker:{IMAGE_REF}"
+        )
+
+    def test_a_pinned_ref_is_left_as_written(self):
+        locator = ImageLocator(
+            ref=self.PINNED, resolved_digest=DIGEST, resolved_from="registry"
+        )
+        assert locator.pulled_ref() == self.PINNED
+
+    def test_trivys_target_is_digest_pinned(self, monkeypatch, tmp_path):
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+            TrivyScanner,
+            TrivyScannerConfig,
+        )
+
+        _no_engine(monkeypatch, tmp_path)
+        scanner = TrivyScanner(context=_context(tmp_path), config=TrivyScannerConfig())
+        argv, _results, _env = scanner._execute_image_scan(self._registry_resolved())
+        assert self.PINNED in argv
+        assert IMAGE_REF not in argv
+
+    def test_grypes_target_is_digest_pinned(self, monkeypatch, tmp_path):
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
+            GrypeScanner,
+            GrypeScannerConfig,
+        )
+
+        _no_engine(monkeypatch, tmp_path)
+        scanner = GrypeScanner(context=_context(tmp_path), config=GrypeScannerConfig())
+        argv, _results, _env = scanner._execute_image_scan(self._registry_resolved())
+        assert f"registry:{self.PINNED}" in argv
+
+
 class TestGrypeImageArgv:
     def _scanner(self, tmp_path):
         from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (

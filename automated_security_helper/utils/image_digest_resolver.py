@@ -19,9 +19,12 @@ order, and the first that answers wins:
    is read. An image the daemon does not hold answers 404 and the ladder goes on.
 2. **The registry.** ``crane digest`` (the pinned ``crane`` of
    ``utils/tool_downloads``) reads the manifest's digest from the registry. It
-   is a registry read, so it is network use: offline mode never makes it, and
-   the three scanners that read images declare the fetch in their
-   operational-facets rows (``Fetched.IMAGE_DIGEST``).
+   is a registry read, so it is network use: offline mode never makes it,
+   grype and trivy -- the image scanners whose FINDING ids the digest keys --
+   declare the fetch in their operational-facets rows
+   (``Fetched.IMAGE_DIGEST``; syft reports no findings, so it declares none),
+   and the scan phase runs the ladder only when a selected scanner declaring
+   it will run (``utils/scanner_tool_types.an_image_digest_consumer_is_selected``).
 
 Which rung answered is logged once, at INFO. When EVERY rung fails the locator
 is returned unchanged, the ids key on the reference text exactly as they did
@@ -210,9 +213,11 @@ def resolve_image_locator(
         )
         return image
 
-    def resolved(digest: str, rung: str) -> ImageLocator:
+    def resolved(digest: str, rung: str, source: str) -> ImageLocator:
         ASH_LOGGER.info(f"Resolved {ref} to {digest} through {rung}.")
-        return image.model_copy(update={"resolved_digest": digest})
+        return image.model_copy(
+            update={"resolved_digest": digest, "resolved_from": source}
+        )
 
     if ref.startswith("-"):
         # Never handed to an engine or to crane as a word that could read as one
@@ -233,7 +238,7 @@ def resolve_image_locator(
                 f"the engine could not be asked ({type(error).__name__})",
             )
         if digest is not None:
-            return resolved(digest, f"the local {name} engine")
+            return resolved(digest, f"the local {name} engine", "engine")
         reasons.append(f"the local {name} engine: {why}")
 
     # Rung 2: the registry.
@@ -267,4 +272,4 @@ def resolve_image_locator(
     if _DIGEST.fullmatch(digest) is None:
         reasons.append("crane digest printed no sha256 digest")
         return fall_back()
-    return resolved(digest, "the registry (crane digest)")
+    return resolved(digest, "the registry (crane digest)", "registry")

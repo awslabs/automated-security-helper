@@ -378,6 +378,9 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                     opsf.Fetched.VULN_DB,
                     opsf.Fetched.CHECKS_BUNDLE,
                     opsf.Fetched.MODULE_SOURCES,
+                    # The one-manifest registry read that keys this scanner's
+                    # image finding ids (utils/image_digest_resolver).
+                    opsf.Fetched.IMAGE_DIGEST,
                 ),
                 prefetch=(opsf.Prefetch.CONTENT_DB_REFRESH,),
                 offline_outcome=opsf.OfflineOutcome.DEGRADED,
@@ -754,7 +757,10 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             sources = [] if engine == ContainerEngine.NONE else [engine.value]
             sources.append("remote")
             extra.append(f"--image-src={','.join(sources)}")
-            target_token = image.ref
+            # Digest-pinned where the REGISTRY named the digest
+            # (ImageLocator.pulled_ref): the remote source then pulls exactly
+            # the manifest the finding ids key on, however the tag has moved.
+            target_token = image.pulled_ref()
 
         original_subcommands = self.subcommands
         try:

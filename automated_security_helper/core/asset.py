@@ -75,6 +75,38 @@ class ImageLocator(_Frozen):
     #: Filled at scan start when an engine can resolve the submitted ref to a
     #: digest; carried into identity and attribution, never required.
     resolved_digest: Optional[str] = None
+    #: Which rung of ``utils/image_digest_resolver`` named ``resolved_digest``:
+    #: ``"engine"`` (the local daemon's record, possibly its config-blob Id)
+    #: or ``"registry"`` (the manifest digest ``crane digest`` read). Only a
+    #: registry-named digest may pin what the tools pull (:meth:`pulled_ref`):
+    #: an engine's Id is not a registry lookup key.
+    resolved_from: Optional[str] = None
+
+    def pulled_ref(self) -> Optional[str]:
+        """The reference the scanner tools are handed, digest-pinned where safe.
+
+        For a tag-only reference whose digest the REGISTRY named, the pinned
+        form ``repo@sha256:...``: the tools then pull exactly the manifest the
+        ids key on, so a tag moved between the resolution and the pull cannot
+        make the report describe bytes nobody keyed, and a tag's whereabouts
+        cannot drift between two tools' pulls. An engine-named digest pins
+        nothing (it may be the config-blob Id, which no registry serves, and
+        the engine's store is already one copy); every other case is the
+        reference as submitted.
+        """
+        if self.ref is None:
+            return None
+        if (
+            self.resolved_digest is None
+            or self.resolved_from != "registry"
+            or "@" in self.ref
+        ):
+            return self.ref
+        name = self.ref
+        last = name.rsplit("/", 1)[-1]
+        if ":" in last:
+            name = name[: len(name) - len(last)] + last.split(":", 1)[0]
+        return f"{name}@{self.resolved_digest}"
 
     @model_validator(mode="after")
     def _exactly_one_shape(self) -> "ImageLocator":
