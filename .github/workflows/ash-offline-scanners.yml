@@ -182,7 +182,9 @@ jobs:
       # Offline pair only. --require makes a required scanner that is absent,
       # MISSING, ERROR or SKIPPED unsandboxed a failure, so "completed" means it ran,
       # not that it was absent. The proxy variables reach only the unsandboxed run's
-      # scanners; see the header.
+      # scanners; see the header. GitHub reads `env:` keys without regard to case, so
+      # the lowercase proxy variables cannot sit beside the uppercase ones there (the
+      # workflow file is refused as defining each twice); the script exports them.
       - name: Scan offline with no network
         env:
           TMPDIR: ${{ runner.temp }}
@@ -191,13 +193,13 @@ jobs:
           HTTP_PROXY: http://127.0.0.1:9
           HTTPS_PROXY: http://127.0.0.1:9
           ALL_PROXY: http://127.0.0.1:9
-          http_proxy: http://127.0.0.1:9
-          https_proxy: http://127.0.0.1:9
-          all_proxy: http://127.0.0.1:9
           NO_PROXY: ""
-          no_proxy: ""
         run: |
           : "${REQUIRED_SCANNERS:?the register step wrote no required list}"
+          export http_proxy=http://127.0.0.1:9
+          export https_proxy=http://127.0.0.1:9
+          export all_proxy=http://127.0.0.1:9
+          export no_proxy=
           python scripts/verify_sandbox_scanner_parity.py \
             --sandbox bwrap --ash ash \
             --require "$REQUIRED_SCANNERS" \
