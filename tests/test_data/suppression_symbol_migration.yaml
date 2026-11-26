@@ -573,14 +573,16 @@ kept:
 - config: .ash.yaml
   rule_id: SECRET-SECRET-KEYWORD
   path: automated_security_helper/utils/scanner_tool_types.py
-  line_start: 34
-  line_end: 34
+  line_start: 38
+  line_end: 38
+  remeasured_at: c15148192f4
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash.yaml
   rule_id: SECRET-SECRET-KEYWORD
   path: automated_security_helper/utils/scanner_names.py
-  line_start: 133
-  line_end: 133
+  line_start: 136
+  line_end: 136
+  remeasured_at: c15148192f4
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash.yaml
   rule_id: threat-runtime-environment-read
@@ -640,20 +642,23 @@ kept:
 - config: .ash.yaml
   rule_id: B104
   path: automated_security_helper/utils/secret_masking.py
-  line_start: 458
-  line_end: 458
+  line_start: 463
+  line_end: 463
+  remeasured_at: c15148192f4
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash.yaml
   rule_id: SECRET-BASIC-AUTH-CREDENTIALS
   path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-  line_start: 155
-  line_end: 155
+  line_start: 171
+  line_end: 171
+  remeasured_at: c15148192f4
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash.yaml
   rule_id: SECRET-SECRET-KEYWORD
   path: automated_security_helper/plugin_modules/ash_builtin/reporters/gitlab_sast_reporter.py
-  line_start: 50
-  line_end: 50
+  line_start: 82
+  line_end: 82
+  remeasured_at: c15148192f4
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
@@ -667,16 +672,16 @@ kept:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: Dockerfile
-  line_start: 823
-  line_end: 825
-  remeasured_at: e19cc22a5d6
+  line_start: 834
+  line_end: 836
+  remeasured_at: c15148192f4
   kept_because: no symbol grammar for this file type
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: automated_security_helper/assets/Dockerfile
-  line_start: 823
-  line_end: 825
-  remeasured_at: e19cc22a5d6
+  line_start: 834
+  line_end: 836
+  remeasured_at: c15148192f4
   kept_because: no symbol grammar for this file type
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
@@ -707,26 +712,27 @@ kept:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: .ash.yaml
-  line_start: 715
-  line_end: 715
-  remeasured_at: adc5e7c2270
+  line_start: 654
+  line_end: 654
+  remeasured_at: c15148192f4
   kept_because: no symbol grammar for this file type; the target file is now the root .ash.yaml (it was
-    .ash/.ash.yaml, where this pin sat at line 1050, then line 774), and its lines moved again, so the
-    pin was re-measured in the merge of main adc5e7c2270 into the facets fold branch
+    .ash/.ash.yaml, where this pin sat at line 1050, then line 774, then line 715 of the root file), and
+    its lines moved again, so the pin was re-measured against main c15148192f4
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: .ash.yaml
-  line_start: 962
-  line_end: 962
-  remeasured_at: adc5e7c2270
+  line_start: 901
+  line_end: 901
+  remeasured_at: c15148192f4
   kept_because: no symbol grammar for this file type; the target file is now the root .ash.yaml (it was
-    .ash/.ash.yaml, where this pin sat at line 1297, then line 1021), and its lines moved again, so the
-    pin was re-measured in the merge of main adc5e7c2270 into the facets fold branch
+    .ash/.ash.yaml, where this pin sat at line 1297, then line 1021, then line 962 of the root file), and
+    its lines moved again, so the pin was re-measured against main c15148192f4
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: .github/workflows/ash-repo-docs.yml
-  line_start: 158
-  line_end: 158
+  line_start: 159
+  line_end: 159
+  remeasured_at: c15148192f4
   kept_because: no symbol grammar for this file type
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
