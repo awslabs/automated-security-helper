@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """``ash merge`` records the merged run in its own output directory's history.
 
-The gap these tests close (the second half of TH18, documented as excluded in
+The gap these tests close (documented as excluded in
 the scan-history hardening change): a sharded CI's only completed run is the
 merged one, and the merge recorded nothing, so ``global_settings.history.enabled``
 built no history there at all. The merge now records the way a scan does
@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Sequence
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.merge import RESULTS_FILE_NAME
@@ -34,6 +35,8 @@ from tests.unit.cli.merge_shard_support import (
     build_shards,
     write_shards,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _invoke(args: Sequence[str]):
