@@ -147,19 +147,29 @@ class TestIdleSetting:
 
 
 class TestPlatformNeutralHelpers:
-    def test_a_platform_without_posix_permissions_skips_owner_and_mode(
+    """Helpers whose tests need no express support, run on every platform the
+    unit tier covers, Windows included. No production caller reaches them where
+    express_supported() is False: runtime_dir() refuses an unsupported platform
+    before any socket, log or directory is named, the daemon (posix only) is the
+    one writer of the retirement marker, and every reader of the marker takes
+    its path from socket_path(). So these tests call the helpers directly, and
+    pin that each fails closed where the posix model is missing (no owner and
+    mode bits, no getuid) and that the marker's clock tolerance holds."""
+
+    def test_a_platform_without_posix_permissions_is_refused(
         self, tmp_path, monkeypatch
     ):
         """On Windows chmod cannot set 0700 and st_uid is always 0, so the
-        owner and mode checks could never hold; the link check still runs."""
+        owner and mode checks could never show the directory is private. It is
+        refused, not skipped, and no mode is set on the way."""
         target = tmp_path / "ash-express"
         target.mkdir()
         monkeypatch.setattr(runtime, "_has_posix_permissions", lambda: False)
         monkeypatch.setattr(
             os, "chmod", lambda *_a, **_k: pytest.fail("no mode is set")
         )
-        monkeypatch.setattr(runtime, "current_uid", lambda: -1)  # would mismatch
-        assert runtime._ensure_private_dir(target) == target
+        with pytest.raises(runtime.ExpressUnavailable, match="owner\\s+and\\s+mode"):
+            runtime._ensure_private_dir(target)
 
     def test_the_link_check_still_runs_without_posix_permissions(
         self, tmp_path, monkeypatch
@@ -175,12 +185,13 @@ class TestPlatformNeutralHelpers:
         with pytest.raises(runtime.ExpressUnavailable, match="without\\s+following"):
             runtime._ensure_private_dir(link)
 
-    """The naming and marker helpers run before express_supported() answers,
-    so a platform without user ids must still get through them."""
-
-    def test_a_platform_without_getuid_reads_as_uid_zero(self, monkeypatch):
+    def test_a_platform_without_getuid_reads_as_a_uid_no_process_has(self, monkeypatch):
+        """Without os.getuid the helper answers -1 instead of raising, so the
+        socket key can still be computed. No kernel uid is negative (a peer's
+        is read unsigned, an owner's never is), so every check against it
+        fails closed; 0, the earlier stand-in, is root."""
         monkeypatch.delattr(os, "getuid", raising=False)
-        assert runtime.current_uid() == 0
+        assert runtime.current_uid() == -1
         assert len(runtime.socket_key(version="1", prefix="/p")) == 16
 
     def test_a_marker_stamped_slightly_ahead_of_the_clock_is_fresh(self, tmp_path):

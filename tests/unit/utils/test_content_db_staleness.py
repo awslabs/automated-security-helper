@@ -689,14 +689,19 @@ def offline_grype(tmp_path, monkeypatch, test_plugin_context):
 
     monkeypatch.setattr(subprocess_utils, "_find_executable_cache", {})
 
-    def make(age: timedelta, policy: str = cdb.DEFAULT_STALENESS_POLICY):
+    def make(
+        age: timedelta, policy: cdb.StalenessPolicy = cdb.DEFAULT_STALENESS_POLICY
+    ):
         launcher = fake_grype(bin_dir, datetime.now(UTC) - age)
         # The scanner must find THIS fake by its own lookup, not some other grype on PATH.
         found = subprocess_utils.find_executable("grype")
         assert found and Path(found).samefile(launcher), (found, launcher)
         config = GrypeScannerConfig(options=GrypeScannerConfigOptions(offline=True))
+        # The override text carries the member's value, as content_db_staleness_override
+        # writes it: an f-string of a (str, Enum) member is "StalenessPolicy.FAIL" on
+        # Python 3.11 and later, which the config field refuses.
         test_plugin_context.config = apply_config_overrides(
-            get_default_config(), [f"content_db_staleness={policy}"]
+            get_default_config(), [f"{cdb.STALENESS_CONFIG_FIELD}={policy.value}"]
         )
         scanner = GrypeScanner(context=test_plugin_context, config=config)
         return scanner

@@ -141,9 +141,20 @@ def test_guarddog_derives_its_interpreter_request_from_its_compat_row(tmp_path) 
     assert scanner._uv_python_kwargs() == {"python_request": ">=3.10,<3.14"}
 
 
-def test_guarddog_row_is_closed_because_both_bounds_are_proved() -> None:
+def test_guarddog_row_is_open_ended_because_its_upstream_gap_is_unsolved() -> None:
+    """yara-python publishes no cp314 wheel and no upstream issue exists to
+    cite, so the row is open-ended: a recheck_note stands in the issue URL's
+    place, and the row records the default tool constraint it was written
+    against, which the consistency gate's re-check compares at a guarddog
+    bump. The interpreter pin stays the resolution."""
     (row,) = GuardDogScanner.operational_facets.runtime_compat.rows
-    assert not row.open_ended
+    assert row.open_ended
+    assert row.upstream_issue is None
+    assert row.recheck_note is not None and row.recheck_note.strip()
+    assert (
+        row.recorded_default_constraint
+        == guarddog_scanner.GUARDDOG_DEFAULT_VERSION_CONSTRAINT
+    )
     assert row.resolution is opsf.CompatResolution.PIN
 
 
