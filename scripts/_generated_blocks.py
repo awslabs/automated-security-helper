@@ -380,7 +380,7 @@ def _body_lines(file: str, name: str, body: Body) -> list[str]:
     A string is its lines joined with ``\\n``, with one trailing ``\\n`` ignored.
     """
     if isinstance(body, str):
-        text = body[:-1] if body.endswith("\n") else body
+        text = body.removesuffix("\n")
         lines = text.split("\n") if body else []
     else:
         lines = list(body)
