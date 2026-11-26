@@ -31,7 +31,11 @@ only place the truth lives. There is no suppression list, skip list or
 allowlist in this gate; the one waiver is REDECLARING the cell in the
 scanner's own register row (with the reason the register requires), which is
 itself reviewed. A failure message names the cell and both exits: fix the
-adapter, or redeclare the cell.
+adapter, or redeclare the cell. One module table is not a waiver and is named
+here so it cannot be read as one: ``_ONLY_A_HISTORICAL_RECORDING_FILLS`` is
+an expected-gap list the current-only test asserts EXACTLY, in both
+directions -- a new gap fails the test, and a gap that closes fails it too
+until its entry is deleted -- so it ratchets and suppresses nothing.
 
 What is observed, said plainly. The observation surface is the flat row built
 by ``FlatVulnerability.from_sarif_result`` from each result of the scanner's
@@ -1129,6 +1133,7 @@ def test_the_current_only_reading_is_not_vacuous() -> None:
     current recording that reads as results; otherwise the test above checks nothing."""
     from automated_security_helper.core.plugin_conformance import (
         discover_transcript_files,
+        observed_frame as transcript_frame,
         transcripts_of,
     )
 
@@ -1140,6 +1145,18 @@ def test_the_current_only_reading_is_not_vacuous() -> None:
         == {"current", "historical"}
     ]
     assert mixed, "no scanner keeps both a current and a historical recording"
+    current_readable = [
+        _name(cls)
+        for cls in SCANNER_CLASSES
+        if transcript_frame(
+            _name(cls), transcripts_of(_name(cls), files), current_only=True
+        )
+        is not None
+    ]
+    assert current_readable, "no current recording reads as results"
+    # the two halves overlap: at least one mixed scanner's CURRENT recordings read
+    # as results, or the current-only gap test never judges a real gap
+    assert set(mixed) & set(current_readable), (mixed, current_readable)
 
 
 if __name__ == "__main__":  # pragma: no cover
