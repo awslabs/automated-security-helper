@@ -369,7 +369,7 @@ ASH_SUBCOMMANDS="scan build-image report diff trend merge mcp get-genai-guide co
 # BEGIN generated: sh-scan-subjects (scripts/generate_wrapper_tables.py)
 ASH_SCAN_SUBJECTS="fs"
 ASH_SCAN_VALUE_OPTIONS="--cli-json-input"
-ASH_ROOT_OPTIONS="--add-scanners --all-enabled-plugins --all-enabled-scanners --allow-in-tree-tools --allow-missing-projects --allow-stale-content-db --annotate-duplicates --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build --build-target --changed-files-only --cleanup --cli-json-input --color --compact-report --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --debug --dry-run --exclude-scanners --express --fail-on-findings --fail-on-incomplete-scanners --fold-duplicates --force --format --formats --full --generate-cli-skeleton --honor-ignore-files --ignore-suppressions --inspect --install-completion --log-level --min-severity --mode --no-allow-stale-content-db --no-build --no-cleanup --no-color --no-express --no-fail-on-findings --no-fail-on-incomplete-scanners --no-honor-ignore-files --no-ignore-suppressions --no-inspect --no-offline --no-progress --no-quiet --no-run --no-show-summary --no-simple --no-use-existing --oci --oci-runner --offline --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --progress --python-based-plugins-only --python-based-scanners-only --python-only --quiet --require-scanner-selection --run --runner --sandbox --scanners --shard-count --shard-index --show-completion --show-summary --simple --source-dir --staged --strategy --use-existing --verbose --version --workspace --workspace-config"
+ASH_ROOT_OPTIONS="--add-scanners --all-enabled-plugins --all-enabled-scanners --allow-in-tree-tools --allow-missing-projects --allow-stale-content-db --annotate-duplicates --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build --build-target --changed-files-only --cleanup --cli-json-input --color --compact-report --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --debug --dry-run --exclude-scanners --express --fail-on-findings --fail-on-incomplete-scanners --fold-duplicates --force --format --formats --full --generate-cli-skeleton --honor-ignore-files --ignore-suppressions --inspect --log-level --min-severity --mode --no-allow-stale-content-db --no-build --no-cleanup --no-color --no-express --no-fail-on-findings --no-fail-on-incomplete-scanners --no-honor-ignore-files --no-ignore-suppressions --no-inspect --no-offline --no-progress --no-quiet --no-run --no-show-summary --no-simple --no-use-existing --oci --oci-runner --offline --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --progress --python-based-plugins-only --python-based-scanners-only --python-only --quiet --require-scanner-selection --run --runner --sandbox --scanners --shard-count --shard-index --show-completion --show-summary --simple --source-dir --staged --strategy --use-existing --verbose --version --workspace --workspace-config"
 # END generated: sh-scan-subjects
 # The bash completion function `./ash --show-completion` prints, for hosts with no
 # Python to run the CLI's own completion.
@@ -407,14 +407,18 @@ ASH_BASH_COMPLETION
       subject="${word}"
     fi
   done
+  COMPREPLY=()
   if [[ "${cur}" == -* ]]; then
-    mapfile -t COMPREPLY < <(compgen -W "${options}" -- "${cur}")
+    if [[ -z "${subcommand}" || "${subcommand}" = "scan" ]]; then
+      COMPREPLY=($(compgen -W "${options}" -- "${cur}"))
+    fi
   elif [[ -z "${subcommand}" ]]; then
-    mapfile -t COMPREPLY < <(compgen -W "${subcommands}" -- "${cur}")
+    COMPREPLY=($(compgen -W "${subcommands}" -- "${cur}"))
   elif [[ "${subcommand}" = "scan" && -z "${subject}" ]]; then
-    mapfile -t COMPREPLY < <(compgen -W "${subjects}" -- "${cur}")
+    COMPREPLY=($(compgen -W "${subjects}" -- "${cur}"))
   else
-    mapfile -t COMPREPLY < <(compgen -d -- "${cur}")
+    local IFS=$'\n'
+    COMPREPLY=($(compgen -d -- "${cur}"))
   fi
 }
 complete -o default -F _ash_completion ash ./ash
@@ -1060,6 +1064,11 @@ forward_word() {
     INNER_VALUE_PENDING="YES"
   elif [[ "${SUBCOMMAND_WORD}" = "scan" && " ${ASH_SCAN_VALUE_OPTIONS} " == *" $1 "* ]]; then
     INNER_VALUE_PENDING="YES"
+  elif [[ "${SUBCOMMAND_WORD}" = "scan" && "$1" != -* && "${SCAN_PATH_SEEN}" = "YES" ]]; then
+    # The directory was named already, and `scan <subject>` takes one: the CLI refuses
+    # a second word as an unexpected extra argument. Forwarded, it would be read by
+    # the scan inside as its PATH and win over the mounted directory.
+    refuse_usage "Unexpected extra argument '$(shown "$1")': scan ${SCAN_SUBJECT} takes one directory."
   elif [[ "${SUBCOMMAND_WORD}" = "scan" && "$1" != -* && "${SCAN_PATH_SEEN}" = "NO" ]]; then
     # `scan <subject> [PATH]`: the first word after scan that is not an option or an
     # option's value names the subject (ASH_SCAN_SUBJECTS), and the next one is the
@@ -1124,7 +1133,6 @@ while (("$#")); do
       fi
       SOURCE_DIR="${OWN_VALUE}"
       SOURCE_DIR_GIVEN="YES"
-      echo "Deprecated: --source-dir is deprecated and will be removed in ASH v4.0. Give the directory as the argument: ./ash scan fs <path>" >&2
       ;;
     --output-dir | --output-dir=*)
       own_value "$1" "$#" "${2-}"
@@ -1332,6 +1340,13 @@ done
 # stands next to a --workspace: in one quoted argument, a --workspace ahead of it gave
 # 3 and one after it 5. A separate --sandbox is refused while the options are read,
 # before either pass, and Invoke-ASH runs its passes in the same order.
+#
+# --source-dir is deprecated on `scan <subject>` only. Without a subject the scan inside
+# prints its own one line for the subject-less form, which names the same replacement,
+# so printing this one too would give two lines for one command.
+if [[ "${SOURCE_DIR_GIVEN}" = "YES" && "${SCAN_SUBJECT}" != "" ]]; then
+  echo "Deprecated: --source-dir is deprecated and will be removed in ASH v4.0. Give the directory as the argument: ./ash scan ${SCAN_SUBJECT} <path>" >&2
+fi
 read -r -d '' -a ASH_ARG_WORDS <<< "${ASH_ARGS}"
 for ((ASH_WORD_AT = 0; ASH_WORD_AT < ${#ASH_ARG_WORDS[@]}; ASH_WORD_AT++)); do
   case "${ASH_ARG_WORDS[ASH_WORD_AT]}" in

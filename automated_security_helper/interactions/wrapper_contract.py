@@ -208,6 +208,9 @@ def contract() -> WrapperContract:
             if param.param_type_name == "option"
             for spelling in (*param.opts, *param.secondary_opts)
             if spelling.startswith("--")
+            # The wrapper has no shell of its own to install into: forwarded, this
+            # one would run in a throwaway container.
+            and spelling != "--install-completion"
         }
     )
 

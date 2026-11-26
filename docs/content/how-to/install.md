@@ -321,7 +321,7 @@ reads its arguments with, so it offers the same subcommands and options:
 
 <!-- doctest: illustrative reason="loads a completion function into the reader's shell" -->
 ```bash
-source <(./ash --show-completion)
+eval "$(./ash --show-completion)"
 ```
 
 Add that line to `~/.bashrc` to keep it. In PowerShell, `Invoke-ASH` completes the

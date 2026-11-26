@@ -150,7 +150,7 @@ def test_scan_help_imports_no_forbidden_module():
     """
     report = _version_run_report(("scan", "--help"))
     assert report["exit_code"] == 0, report["output"]
-    assert "fs" in report["output"]
+    assert "Subjects of `ash scan`: fs" in report["output"]
     assert report["present"] == [], (
         "`ash scan --help` imported modules that must stay lazy: "
         f"{report['present']}. Defer the import that pulled them (cli/scan_group.py "

@@ -46,20 +46,6 @@
 
 ## Unreleased
 
-### Features
-
-- **`ash scan` takes a subject: `ash scan fs [PATH]` scans a directory.** `scan` is now
-  a group, and `fs` is its first subject. The directory is its argument (it defaults to
-  the working directory), and `--source-dir` and `ASH_SOURCE_DIR` still name it. `fs`
-  takes every option `ash scan` took, and `ash scan --help` lists the subjects.
-- **Tab completion is covered for both ways of running ASH.** `ash scan <TAB>` offers
-  `fs`, and `fs`'s options complete; `ash --install-completion` and `ash
-  --show-completion` are documented. `./ash --show-completion` prints a bash completion
-  function and `Invoke-ASH` completes `-AshArgs`, both generated from the tables the
-  wrappers parse with (`scripts/generate_wrapper_tables.py`), so they cannot name a
-  subcommand or option the CLI does not have. See
-  [Enable tab completion](docs/content/how-to/install.md#enable-tab-completion).
-
 ### Breaking changes
 
 - **Bare `ash`, `ash scan` with no subject, and `--source-dir` are deprecated and will
@@ -67,10 +53,13 @@
   (stdout and the exit code are unchanged) that names the replacement:
   `ash scan --source-dir X` becomes `ash scan fs X`, and `ash --mode container ...`
   becomes `ash scan fs . --mode container ...`. `ASH_SOURCE_DIR` is not deprecated, and
-  `ash scan --workspace` has no subject to move to yet, so it prints nothing. Check
-  `ash-args`, `ASH_SCAN_EXTRA_ARGS` and similar pass-through settings, which are not
-  rewritten for you. `./ash` accepts `scan fs <path>` and reads the path as the
-  directory to mount.
+  `ash scan --workspace` and `ash --workspace` have no subject to move to yet, so they
+  print nothing. Check `ash-args`, `ASH_SCAN_EXTRA_ARGS` and similar pass-through
+  settings, which are not rewritten for you. ASH's own workflows, actions, pre-commit
+  hooks and docs examples still use the old spellings and move in a later change.
+  `./ash` accepts `scan fs <path>` and reads the path as the directory to mount (a
+  second path is refused). `Invoke-ASH` takes the directory as `-SourceDir`, and refuses
+  a path after `scan fs`.
 - **A 3.8 `ash` cannot drive a 3.9 image, or the reverse.** The command ASH runs inside
   its container (container mode) and inside a Nix shell (nix mode) is now `ash scan fs`,
   which a 3.8 `ash` does not parse, so `--ash-revision-to-install` and a published image
@@ -108,8 +97,7 @@
 
 ### Fixes
 
-- `trend` is now in the subcommand tables of `./ash` and `utils/ash_helpers.ps1`, which
-  stopped before it, and in the express client's list of commands that are not scans, so
+- `trend` is now in the express client's list of commands that are not scans, so
   `ash trend` is no longer sent to an express daemon as a scan.
 - **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**
   It passes `GITHUB_ACTIONS`, `TF_BUILD` and `TEAMCITY_VERSION` into the container when
@@ -123,6 +111,19 @@
 
 ### Features
 
+- **`ash scan` takes a subject: `ash scan fs [PATH]` scans a directory.** `scan` is now
+  a group, and `fs` is its first subject. The directory is its argument (it defaults to
+  the working directory), and `--source-dir` and `ASH_SOURCE_DIR` still name it. `fs`
+  takes every option `ash scan` took. `ash scan --help` shows `fs`'s help, which ends
+  with the list of subjects.
+- **Tab completion is covered for both ways of running ASH.** `ash scan <TAB>` offers
+  `fs`, and `fs`'s options complete; `ash --install-completion` and `ash
+  --show-completion` are documented. `./ash --show-completion` prints a bash completion
+  function (it runs on bash 3.2) and `Invoke-ASH` completes `-AshArgs`, both generated
+  from the tables the wrappers parse with (`scripts/generate_wrapper_tables.py`). They
+  offer subcommands, subjects and the options of the wrapper and of `scan`, which is all
+  the tables hold, and no other subcommand's options. See
+  [Enable tab completion](docs/content/how-to/install.md#enable-tab-completion).
 - **`default_scanners` sets the default scanners in a trusted config.** `only`
   replaces a mode's default selection in every mode and `add` extends a fixed one such as
   precommit's; a repository config, an MCP client or a patch cannot set it. The command

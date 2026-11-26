@@ -937,6 +937,18 @@ function Invoke-ASH {
                     continue
                 }
                 if ($word -clike '-*') {
+                    if ($word -cmatch '^-[^-].') {
+                        # Clustered short options, as click reads them: the first
+                        # letter that takes a value takes the rest of the word, or the
+                        # next word when it is last (`-df sarif`).
+                        for ($at = 1; $at -lt $word.Length; $at++) {
+                            $letter = '-' + $word[$at]
+                            if ($letter -cin $ashRootValueOptions -or $letter -cin $ashScanValueOptions) {
+                                $skipValue = ($at + 1 -eq $word.Length)
+                                break
+                            }
+                        }
+                    }
                     continue
                 }
                 if ($scanSubject -eq '') {
@@ -2464,7 +2476,7 @@ $ashArgumentCompleter = {
     param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameter)
     $subcommands = @('scan', 'build-image', 'report', 'diff', 'trend', 'merge', 'mcp', 'get-genai-guide', 'config', 'dependencies', 'inspect', 'plugin', 'express')
     $subjects = @('fs')
-    $options = @('--add-scanners', '--all-enabled-plugins', '--all-enabled-scanners', '--allow-in-tree-tools', '--allow-missing-projects', '--allow-stale-content-db', '--annotate-duplicates', '--ash-config-from-host', '--ash-plugin-modules', '--ash-revision-to-install', '--base-ref', '--baseline', '--build', '--build-target', '--changed-files-only', '--cleanup', '--cli-json-input', '--color', '--compact-report', '--config', '--config-file-from-another-checkout', '--config-file-from-scanned-repository', '--config-from-scanned-repository', '--config-overrides', '--container-gid', '--container-uid', '--custom-build-arg', '--custom-containerfile', '--debug', '--dry-run', '--exclude-scanners', '--express', '--fail-on-findings', '--fail-on-incomplete-scanners', '--fold-duplicates', '--force', '--format', '--formats', '--full', '--generate-cli-skeleton', '--honor-ignore-files', '--ignore-suppressions', '--inspect', '--install-completion', '--log-level', '--min-severity', '--mode', '--no-allow-stale-content-db', '--no-build', '--no-cleanup', '--no-color', '--no-express', '--no-fail-on-findings', '--no-fail-on-incomplete-scanners', '--no-honor-ignore-files', '--no-ignore-suppressions', '--no-inspect', '--no-offline', '--no-progress', '--no-quiet', '--no-run', '--no-show-summary', '--no-simple', '--no-use-existing', '--oci', '--oci-runner', '--offline', '--offline-semgrep-rulesets', '--only-scanners', '--output-dir', '--output-format', '--output-formats', '--phases', '--progress', '--python-based-plugins-only', '--python-based-scanners-only', '--python-only', '--quiet', '--require-scanner-selection', '--run', '--runner', '--sandbox', '--scanners', '--shard-count', '--shard-index', '--show-completion', '--show-summary', '--simple', '--source-dir', '--staged', '--strategy', '--use-existing', '--verbose', '--version', '--workspace', '--workspace-config')
+    $options = @('--add-scanners', '--all-enabled-plugins', '--all-enabled-scanners', '--allow-in-tree-tools', '--allow-missing-projects', '--allow-stale-content-db', '--annotate-duplicates', '--ash-config-from-host', '--ash-plugin-modules', '--ash-revision-to-install', '--base-ref', '--baseline', '--build', '--build-target', '--changed-files-only', '--cleanup', '--cli-json-input', '--color', '--compact-report', '--config', '--config-file-from-another-checkout', '--config-file-from-scanned-repository', '--config-from-scanned-repository', '--config-overrides', '--container-gid', '--container-uid', '--custom-build-arg', '--custom-containerfile', '--debug', '--dry-run', '--exclude-scanners', '--express', '--fail-on-findings', '--fail-on-incomplete-scanners', '--fold-duplicates', '--force', '--format', '--formats', '--full', '--generate-cli-skeleton', '--honor-ignore-files', '--ignore-suppressions', '--inspect', '--log-level', '--min-severity', '--mode', '--no-allow-stale-content-db', '--no-build', '--no-cleanup', '--no-color', '--no-express', '--no-fail-on-findings', '--no-fail-on-incomplete-scanners', '--no-honor-ignore-files', '--no-ignore-suppressions', '--no-inspect', '--no-offline', '--no-progress', '--no-quiet', '--no-run', '--no-show-summary', '--no-simple', '--no-use-existing', '--oci', '--oci-runner', '--offline', '--offline-semgrep-rulesets', '--only-scanners', '--output-dir', '--output-format', '--output-formats', '--phases', '--progress', '--python-based-plugins-only', '--python-based-scanners-only', '--python-only', '--quiet', '--require-scanner-selection', '--run', '--runner', '--sandbox', '--scanners', '--shard-count', '--shard-index', '--show-completion', '--show-summary', '--simple', '--source-dir', '--staged', '--strategy', '--use-existing', '--verbose', '--version', '--workspace', '--workspace-config')
     $valueOptions = @('--add-scanners', '--ash-config-from-host', '--ash-plugin-modules', '--ash-revision-to-install', '--base-ref', '--baseline', '--build-target', '--config', '--config-file-from-another-checkout', '--config-file-from-scanned-repository', '--config-overrides', '--container-gid', '--container-uid', '--custom-build-arg', '--custom-containerfile', '--exclude-scanners', '--format', '--formats', '--log-level', '--min-severity', '--mode', '--oci', '--oci-runner', '--offline-semgrep-rulesets', '--only-scanners', '--output-dir', '--output-format', '--output-formats', '--phases', '--require-scanner-selection', '--runner', '--sandbox', '--scanners', '--shard-count', '--shard-index', '--source-dir', '--strategy', '--workspace', '--workspace-config', '-c', '-f', '-g', '-o', '-u', '--cli-json-input')
     if ($parameterName -eq 'AshArgs') {
         # -AshArgs is one string: complete its last word and keep the rest.
@@ -2514,7 +2526,7 @@ $ashArgumentCompleter = {
             $subject = $word
         }
     }
-    $candidates = if ($typed -like '-*') { $options }
+    $candidates = if ($typed -like '-*') { if ($subcommand -eq '' -or $subcommand -eq 'scan') { $options } else { @() } }
     elseif ($subcommand -eq '') { $subcommands }
     elseif ($subcommand -eq 'scan' -and $subject -eq '') { $subjects }
     else { @() }

@@ -179,11 +179,9 @@ def run_ash_scan_fs_cli_command(*args: Any, **kwargs: Any) -> Any:
         getattr(ctx.get_parameter_source("source_dir"), "name", None) == "COMMANDLINE"
     )
     if path is not None:
-        if routed_without_subject:
-            ctx.fail(
-                f"'{path}' is not a scan subject. "
-                f"To scan a directory, run 'ash scan {DEFAULT_SUBJECT} {path}'."
-            )
+        # On the command line a word that is not a subject never reaches here (the
+        # group refuses it), so a path in the subject-less form came from a
+        # --cli-json-input document, whose skeleton lists `path`.
         if from_command_line and kwargs.get("source_dir") != path:
             ctx.fail(
                 "Name the directory once: as the PATH argument or with --source-dir, "
@@ -221,5 +219,11 @@ def build_scan_app() -> typer.Typer:
         name=DEFAULT_SUBJECT,
         cls=CliJsonInputCommand,
         no_args_is_help=False,
+        # `ash scan --help` is this subject's help (see ScanTyperGroup._routed), so
+        # the list of subjects is shown here, where that help ends.
+        epilog=(
+            f"Subjects of `ash scan`: {DEFAULT_SUBJECT} (scan a directory). "
+            "Run `ash scan <subject> --help` for a subject's own options."
+        ),
     )(run_ash_scan_fs_cli_command)
     return scan_app

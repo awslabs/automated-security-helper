@@ -214,6 +214,36 @@ def test_the_subject_less_form_still_forwards_its_words(runner, tmp_path):
     run_argv = _run_argv(result)
 
     assert _inner_argv(run_argv) == ["ash", "scan", "--sandbox", "off"]
+    assert "Deprecated" not in result.stderr, (
+        "the scan inside prints the one line for a subject-less scan, and it names "
+        "the same replacement, so the entrypoint adds none of its own"
+    )
+
+
+@pytest.mark.integration
+def test_a_second_word_after_the_path_is_refused_not_forwarded(runner, tmp_path):
+    source = tmp_path / "project"
+    other = tmp_path / "other"
+    source.mkdir()
+    other.mkdir()
+
+    result = _ash(runner, tmp_path, "scan", "fs", str(source), str(other))
+
+    assert result.returncode == 5, result.stdout + result.stderr
+    assert "Unexpected extra argument" in result.stderr
+    assert "FAKE-RUNNER-INVOKED-WITH" not in result.stdout
+
+
+@pytest.mark.integration
+def test_an_option_value_after_the_path_is_not_a_second_path(runner, tmp_path):
+    source = tmp_path / "project"
+    source.mkdir()
+
+    run_argv = _run_argv(
+        _ash(runner, tmp_path, "scan", "fs", str(source), "--scanners", "bandit")
+    )
+
+    assert _inner_argv(run_argv)[-2:] == ["--scanners", "bandit"]
 
 
 def _table(name):
@@ -300,6 +330,17 @@ def test_show_completion_prints_a_function_and_exits_without_a_runner(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "_ash_completion()" in result.stdout
     assert "complete -o default -F _ash_completion ash ./ash" in result.stdout
+    assert "mapfile" not in result.stdout, "bash 3.2, the macOS default, has no mapfile"
+
+
+@pytest.mark.integration
+def test_completion_offers_no_scan_option_after_another_subcommand(tmp_path):
+    assert _completions(tmp_path, ["ash", "report", "--shard-"], 2) == []
+
+
+@pytest.mark.integration
+def test_completion_does_not_offer_the_install_completion_option(tmp_path):
+    assert _completions(tmp_path, ["ash", "scan", "fs", "--install-"], 3) == []
 
 
 @pytest.mark.integration

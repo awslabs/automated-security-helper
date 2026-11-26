@@ -58,6 +58,19 @@ def test_scan_help_still_lists_the_scan_options():
     assert "Usage: ash scan fs [OPTIONS] [PATH]" in result.output
     assert "--shard-count" in result.output
     assert "--mode" in result.output
+    # The subjects are listed in the epilog: this help is `fs`'s, so the group's own
+    # command list is never printed.
+    assert "Subjects of `ash scan`: fs" in result.output
+
+
+def test_a_path_key_in_a_json_document_is_accepted_without_a_subject(engine, tmp_path):
+    document = tmp_path / "params.json"
+    document.write_text(json.dumps({"path": "from/json"}), encoding="utf-8")
+
+    result = _invoke(["scan", "--cli-json-input", str(document)])
+
+    assert result.exit_code == 0, result.output
+    assert [call["source_dir"] for call in engine.calls] == ["from/json"]
 
 
 def test_fs_help_takes_a_path_argument_and_every_scan_option():
