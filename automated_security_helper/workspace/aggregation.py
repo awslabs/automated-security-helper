@@ -1453,7 +1453,7 @@ class WorkspaceAggregator:
             outcome.actionable_finding_count
         )
         by_scanner: Dict[str, List[Mapping[str, Any]]] = {}
-        wired_names: List[str] = []
+        wired_names: List[Optional[str]] = []
         counted_flags: List[bool] = []
         for result in rebased.get("results") or []:
             if not isinstance(result, Mapping):
