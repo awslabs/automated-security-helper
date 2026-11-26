@@ -742,9 +742,35 @@ def _kind(pins: Any, tool: str) -> str:
         return "uv-tool"
     if entry is not None and getattr(entry, "bundled_in", None):
         return "bundled-library"
+    if entry is not None and getattr(entry, "pin_module", None):
+        return "plugin-release"
     if entry is not None and _dockerfile_args(tool):
         return "dockerfile-arg"
     return "unknown"
+
+
+def _pin_module_text(pins: Any, tool: str) -> str:
+    """The text of the install module a plugin-pinned tool's license entry names."""
+    return (REPO_ROOT / pins.THIRD_PARTY_LICENSES[tool].pin_module).read_text(
+        encoding="utf-8"
+    )
+
+
+def _pin_module_tables(pins: Any, tool: str, version: str) -> list[str]:
+    """The module-level names of a plugin-pinned tool's install module a bump changes.
+
+    Read from the module's text, not its syntax tree as the script reads it: each
+    top-level assignment whose text holds the pinned version or a SHA256.
+    """
+    bare = version.lstrip("v")
+    names = []
+    for block in re.split(r"\n(?=\S)", _pin_module_text(pins, tool)):
+        assignment = re.match(r"([A-Za-z_][A-Za-z0-9_]*)\s*(?::[^=\n]*)?=", block)
+        if assignment is None or block.startswith(("def ", "class ")):
+            continue
+        if bare in block or re.search(r"\b[0-9a-f]{64}\b", block):
+            names.append(assignment.group(1))
+    return names
 
 
 def _archives(pins: Any, tool: str) -> list[str]:
@@ -767,6 +793,8 @@ def _pinned_digests(pins: Any, tool: str) -> set[str]:
     for key, value in pins._THIRD_PARTY_HASHES.items():
         if key == f"{tool} commit" or key.startswith(f"{tool}/"):
             values.add(value)
+    if _kind(pins, tool) == "plugin-release":
+        values |= set(re.findall(r"\b[0-9a-f]{64}\b", _pin_module_text(pins, tool)))
     return values
 
 
@@ -801,12 +829,18 @@ def _tracked_text() -> dict[str, str]:
 
 
 def _copies_elsewhere(pins: Any, tool: str) -> list[str]:
-    """Tracked files outside the pins module that hold one of ``tool``'s digests."""
+    """Tracked files outside the pins module that hold one of ``tool``'s digests.
+
+    A plugin-pinned tool's own install module is where its digests are pinned, not a
+    copy of them; its tables are needles of their own (``_pin_module_tables``).
+    """
     spellings = {s for d in _pinned_digests(pins, tool) for s in _spellings(d)}
+    entry = pins.THIRD_PARTY_LICENSES.get(tool)
+    own = getattr(entry, "pin_module", None) if entry is not None else None
     return sorted(
         name
         for name, text in _tracked_text().items()
-        if any(s in text for s in spellings)
+        if name != own and any(s in text for s in spellings)
     )
 
 
@@ -890,6 +924,9 @@ def _needles(pins: Any, tool: str, version: str) -> list[str]:
         if constant:
             needles.append(constant)
         needles += ["rules_bundles.extract_bundle", "contents_digest"]
+    if kind == "plugin-release":
+        needles.append(pins.THIRD_PARTY_LICENSES[tool].pin_module)
+        needles += _pin_module_tables(pins, tool, version)
     for archive in _archives(pins, tool):
         for table in ("_DIGESTS", "_EXECUTABLE_DIGESTS", "_BUNDLE_CONTENTS_DIGESTS"):
             if archive in getattr(pins, table, {}):
@@ -958,6 +995,7 @@ class TestBumpStepsNameEveryValueABumpChanges:
             "bundled-library",
             "dockerfile-arg",
             "gem",
+            "plugin-release",
             "release-binary",
             "rules-bundle",
             "uv-tool",
@@ -1118,6 +1156,109 @@ class TestBumpStepsNameEveryValueABumpChanges:
         assert f"{pin.package}={pin.version} -> {pin.package}=9.9.9-1" in report
         for number in pin.lines:
             assert f"Dockerfile:{number}" in report
+
+
+class TestAToolAPluginPinsInItsOwnInstallModule:
+    """A license entry whose ``pin_module`` names the alpha plugin module that pins it.
+
+    The tool is in no download table of tool_downloads.py: the version, the release
+    asset per platform and both digest tables are in the plugin's install module, and
+    the script reads them there. The refusals are planted on the real yara-x entry.
+    """
+
+    @staticmethod
+    def _module_pins(pins: Any) -> dict[str, Any]:
+        return {
+            p.tool: p
+            for p in checker.enumerate_pins(pins)
+            if p.kind == checker.PLUGIN_RELEASE
+        }
+
+    @staticmethod
+    def _planted(pins: Any, monkeypatch: pytest.MonkeyPatch, **fields: Any) -> None:
+        entry = pins.THIRD_PARTY_LICENSES["yara-x"]
+        monkeypatch.setitem(
+            pins.THIRD_PARTY_LICENSES, "yara-x", dataclasses.replace(entry, **fields)
+        )
+
+    @pytest.mark.unit
+    def test_each_entry_with_a_pin_module_is_read_from_that_module(self, pins):
+        named = {
+            tool
+            for tool, entry in pins.THIRD_PARTY_LICENSES.items()
+            if getattr(entry, "pin_module", None)
+        }
+        # Positive control: the population the assertions below range over is real.
+        assert {"polaris", "yara-x"} <= named, named
+        found = self._module_pins(pins)
+        assert set(found) == named
+        for tool, pin in found.items():
+            entry = pins.THIRD_PARTY_LICENSES[tool]
+            assert pin.version == entry.version, tool
+            assert pin.ecosystem == checker.GITHUB, tool
+            assert pin.pinned_in == (entry.pin_module, "THIRD_PARTY_LICENSES"), tool
+            assert pin.project == entry.repository.removeprefix("https://github.com/")
+
+    @pytest.mark.unit
+    def test_a_module_version_the_entry_does_not_record_is_a_half_applied_bump(
+        self, pins, monkeypatch
+    ):
+        self._planted(pins, monkeypatch, version="v0.0.1")
+        with pytest.raises(checker.PinEnumerationError, match="half-applied"):
+            checker.enumerate_pins(pins)
+
+    @pytest.mark.unit
+    def test_a_pin_module_that_is_no_file_is_refused(self, pins, monkeypatch):
+        self._planted(
+            pins, monkeypatch, pin_module="automated_security_helper/no_such_pin.py"
+        )
+        with pytest.raises(checker.PinEnumerationError, match="names no file"):
+            checker.enumerate_pins(pins)
+
+    @pytest.mark.unit
+    def test_a_pin_module_without_the_version_constant_is_refused(
+        self, pins, monkeypatch
+    ):
+        """The plugin package's ``__init__`` declares no ``YARA_X_VERSION``."""
+        self._planted(
+            pins,
+            monkeypatch,
+            pin_module=(
+                "automated_security_helper/plugin_modules/ash_yara_x_plugins/__init__.py"
+            ),
+        )
+        with pytest.raises(checker.PinEnumerationError, match="YARA_X_VERSION"):
+            checker.enumerate_pins(pins)
+
+    @pytest.mark.unit
+    def test_a_tool_pinned_by_its_module_and_a_download_table_is_refused(
+        self, pins, monkeypatch
+    ):
+        monkeypatch.setitem(pins.TOOL_VERSIONS, "yara-x", "v1.23.0")
+        with pytest.raises(checker.PinEnumerationError, match="pick one"):
+            checker.enumerate_pins(pins)
+
+    @pytest.mark.integration
+    def test_the_steps_name_the_module_and_each_table_a_bump_changes(self, pins):
+        pin = self._module_pins(pins)["yara-x"]
+        module = pins.THIRD_PARTY_LICENSES["yara-x"].pin_module
+        steps = "\n".join(
+            checker.bump_steps(pins, checker.Result(pin, "v9.9.9", "outdated"))
+        )
+        for needle in (
+            f"YARA_X_VERSION in {module} -> v9.9.9",
+            (
+                f"ASSETS in {module}: the 5 asset file names of yara-x that carry the "
+                "version, 1.23.0 -> 9.9.9"
+            ),
+            f"ARCHIVE_SHA256 in {module}: 5 digest(s)",
+            f"MEMBER_SHA256 in {module}: 5 digest(s)",
+            'THIRD_PARTY_LICENSES["yara-x"].version -> v9.9.9',
+            "gh api repos/VirusTotal/yara-x/commits/v9.9.9",
+        ):
+            assert needle in steps, f"{needle!r} missing from:\n{steps}"
+        # The module holds the digests by design; it is not listed as a copy of them.
+        assert not re.search(rf"^{re.escape(module)}:\d", steps, re.MULTILINE), steps
 
 
 @pytest.mark.unit

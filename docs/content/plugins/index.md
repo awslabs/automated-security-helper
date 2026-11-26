@@ -7,7 +7,7 @@ ASH's converters, scanners, and reporters are plugins, and so are event subscrib
 | Source | Loaded | What it provides |
 |---|---|---|
 | Built in: `automated_security_helper.plugin_modules.ash_builtin` | on every run | the default scanners, reporters, and converters, and two event subscribers, listed in the [scanner](../reference/scanners.md), [reporter](../reference/reporters.md), and [converter](../reference/converters.md) references |
-| Plugin modules that ship with ASH, under `automated_security_helper.plugin_modules` | when a module list names them (for the MCP server, see [What a plugin can do](#what-a-plugin-can-do)) | the [alpha plugins](../docs/plugins/alpha/index.md) (`betterleaks`, `ferret-scan`, `guarddog`, `hadolint`, `snyk-code`, and `trivy-repo`) and the [AWS reporters](aws.md) |
+| Plugin modules that ship with ASH, under `automated_security_helper.plugin_modules` | when a module list names them (for the MCP server, see [What a plugin can do](#what-a-plugin-can-do)) | the [alpha plugins](../docs/plugins/alpha/index.md) (`betterleaks`, `credsweeper`, `dependency-check`, `ferret-scan`, `ggshield`, `gosec`, `guarddog`, `hadolint`, `kics`, `kingfisher`, `polaris`, `secretlint`, `snyk-code`, `trivy-repo`, and `yara-x`) and the [AWS reporters](aws.md) |
 | Third-party packages | when a module list names them | anything you or someone else writes, installed in the same Python environment as ASH |
 
 ASH has no automatic discovery. Installing a package does nothing until a module list names it, and `ash scan` imports none of the optional modules that ship with ASH unless a module list names them.

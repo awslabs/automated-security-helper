@@ -22667,17 +22667,27 @@ def test_betterleaks_is_pinned_where_the_page_says_with_both_digests_on_every_pl
 
 _HOMEPAGE = "index.md"
 _HOMEPAGE_ALPHA_SENTENCE = (
-    "Six more scanners ship with ASH as alpha plugins: "
-    "[Betterleaks](docs/plugins/alpha/betterleaks-plugin.md) and "
-    "[Ferret Scan](docs/plugins/alpha/ferret-scan-plugin.md) for secrets, "
+    "Fifteen more scanners ship with ASH as alpha plugins: "
+    "[Betterleaks](docs/plugins/alpha/betterleaks-plugin.md), "
+    "[CredSweeper](docs/plugins/alpha/credsweeper-plugin.md), "
+    "[Ferret Scan](docs/plugins/alpha/ferret-scan-plugin.md), "
+    "[ggshield](docs/plugins/alpha/ggshield-plugin.md), "
+    "[Kingfisher](docs/plugins/alpha/kingfisher-plugin.md), and "
+    "[Secretlint](docs/plugins/alpha/secretlint-plugin.md) for secrets, "
     "[GuardDog](docs/plugins/alpha/guarddog-plugin.md) for malicious packages, "
+    "[OWASP Dependency-Check](docs/plugins/alpha/dependency_check-plugin.md) for "
+    "dependencies, "
     "[hadolint](docs/plugins/alpha/hadolint-plugin.md) for Dockerfiles, "
-    "[Snyk Code](docs/plugins/alpha/snyk-plugin.md) for SAST, and "
+    "[KICS](docs/plugins/alpha/kics-plugin.md) for infrastructure as code, "
+    "[Polaris](docs/plugins/alpha/polaris-plugin.md) for Kubernetes manifests, "
+    "[gosec](docs/plugins/alpha/gosec-plugin.md) and "
+    "[Snyk Code](docs/plugins/alpha/snyk-plugin.md) for SAST, "
+    "[YARA-X](docs/plugins/alpha/yara-x-plugin.md) for YARA rules you supply, and "
     "[Trivy](docs/plugins/alpha/trivy-plugin.md) for repository scanning. "
     "A scan runs one only when its module is named in `ash_plugin_modules` or "
     "`--ash-plugin-modules`. See the "
     "[alpha plugins](docs/plugins/alpha/index.md) and the "
-    "[scanners reference](reference/scanners.md) for all 23 scanners."
+    "[scanners reference](reference/scanners.md) for all 32 scanners."
 )
 
 
@@ -22693,14 +22703,14 @@ def _shipped_scanner_split(
 
 
 @pytest.mark.unit
-def test_the_homepage_says_asha_ships_six_alpha_scanners_and_links_each(
+def test_the_homepage_counts_the_alpha_scanners_and_links_each(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """index.md (Scanners).
 
-    The sentence is on the page. Its count of six is the number of scanners the
-    vendored alpha plugin packages declare, which is every in-tree alpha
-    module; its 23 is built in plus alpha; and each link it carries resolves to
+    The sentence is on the page. Its count of fifteen is the number of scanners
+    the vendored alpha plugin packages declare, which is every in-tree alpha
+    module; its 32 is built in plus alpha; and each link it carries resolves to
     a page under docs/content, the alpha index and the scanners reference
     included.
     """
@@ -22708,13 +22718,13 @@ def test_the_homepage_says_asha_ships_six_alpha_scanners_and_links_each(
 
     assert_on_page(_HOMEPAGE, _HOMEPAGE_ALPHA_SENTENCE)
     builtin, alpha = _shipped_scanner_split(tmp_path, monkeypatch)
-    assert len(modules_needing_naming()) == len(alpha) == 6, (
+    assert len(modules_needing_naming()) == len(alpha) == 15, (
         len(modules_needing_naming()),
         sorted(alpha),
     )
-    assert len(builtin) + len(alpha) == 23, (len(builtin), len(alpha))
+    assert len(builtin) + len(alpha) == 32, (len(builtin), len(alpha))
     links = re.findall(r"\]\(([^)#]+\.md)", _HOMEPAGE_ALPHA_SENTENCE)
-    assert len(links) == 8, links
+    assert len(links) == 17, links
     for link in links:
         assert (CONTENT / link).is_file(), link
     # Each alpha scanner's own page is one of the links, by its name.
@@ -22745,3 +22755,67 @@ def test_the_plugins_overview_names_every_alpha_scanner_and_no_other(
     assert row, "the alpha plugins row no longer has the listed form"
     named = set(re.findall(r"`([^`]+)`", row.group(1)))
     assert named == alpha, (sorted(named - alpha), sorted(alpha - named))
+
+
+#: An alpha scanner's page, the plugin package its enabling block and its install
+#: command name, and the scanner name the install command passes to ``--tool``.
+_ALPHA_SCANNER_PAGES = (
+    (
+        "docs/plugins/alpha/credsweeper-plugin.md",
+        "ash_credsweeper_plugins",
+        "credsweeper",
+    ),
+    (
+        "docs/plugins/alpha/dependency_check-plugin.md",
+        "ash_dependency_check_plugins",
+        "dependency-check",
+    ),
+    ("docs/plugins/alpha/ggshield-plugin.md", "ash_ggshield_plugins", "ggshield"),
+    ("docs/plugins/alpha/gosec-plugin.md", "ash_gosec_plugins", "gosec"),
+    ("docs/plugins/alpha/kics-plugin.md", "ash_kics_plugins", "kics"),
+    ("docs/plugins/alpha/kingfisher-plugin.md", "ash_kingfisher_plugins", "kingfisher"),
+    ("docs/plugins/alpha/polaris-plugin.md", "ash_polaris_plugins", "polaris"),
+    ("docs/plugins/alpha/secretlint-plugin.md", "ash_secretlint_plugins", "secretlint"),
+    ("docs/plugins/alpha/yara-x-plugin.md", "ash_yara_x_plugins", "yara-x"),
+)
+
+
+@pytest.mark.parametrize(
+    ("page", "package", "scanner"),
+    _ALPHA_SCANNER_PAGES,
+    ids=[scanner for _, _, scanner in _ALPHA_SCANNER_PAGES],
+)
+@pytest.mark.unit
+def test_each_alpha_scanner_page_names_the_module_that_ships_its_scanner(
+    page: str, package: str, scanner: str
+) -> None:
+    """credsweeper-, dependency_check-, ggshield-, gosec-, kics-, kingfisher-,
+    polaris-, secretlint- and yara-x-plugin.md (Enabling it, the install command).
+
+    Each page's enabling block lists the plugin module, and its install command adds
+    the same module and names the scanner with ``--tool``. The module is imported and
+    declares exactly that scanner, and the scanner's manifest names the module as its
+    plugin module, so a renamed package or scanner fails here with the page named.
+    The scanner reference links the page, so a page named where the reference
+    generator does not look for it fails here too.
+    """
+    from automated_security_helper.plugin_manifests import manifest_for
+
+    module = f"automated_security_helper.plugin_modules.{package}"
+    assert_on_page(page, f"ash_plugin_modules: - {module}")
+    assert_on_page(page, f"--config-overrides 'ash_plugin_modules+=[\"{module}\"]'")
+    assert_on_page(page, f"--tool {scanner}")
+    # Raw text: _normalize drops the link target this line is matched by.
+    link = f"- Scanner page: [`{scanner}` scanner page](../{page})"
+    assert link in _page_text(SCANNERS_PAGE), (SCANNERS_PAGE, link)
+
+    declared = [
+        typing.get_args(cls.model_fields["config"].annotation)[0]
+        .model_fields["name"]
+        .default
+        for cls in importlib.import_module(module).ASH_SCANNERS
+    ]
+    assert declared == [scanner], (module, declared)
+    manifest = manifest_for(scanner)
+    assert manifest is not None, scanner
+    assert manifest.plugin_module == module, (scanner, manifest.plugin_module)

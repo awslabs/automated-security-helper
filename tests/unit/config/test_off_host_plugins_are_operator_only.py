@@ -151,6 +151,41 @@ LOCAL: Dict[Plugin, str] = {
         "reads the Dockerfiles in the scan set (hadolint_scanner.py:391-448); "
         "declares no network (:284)"
     ),
+    ("scanners", "credsweeper"): (
+        "reads the files; its rules and ML model ship in the package, ASH passes no "
+        "validation option, and it declares no network (credsweeper_scanner.py "
+        "sandbox_requirements, the network facet)"
+    ),
+    ("scanners", "gosec"): (
+        "reads the Go sources; ASH passes no -ai-api-* flag and never runs `go mod "
+        "download`, and it declares no network (gosec_scanner.py "
+        "sandbox_requirements, the network facet)"
+    ),
+    ("scanners", "kics"): (
+        "reads the files with the queries installed beside the binary; declares no "
+        "network (kics_scanner.py sandbox_requirements). Its crash reporter's reach "
+        "to its vendor, which the sandbox blocks, is recorded unconfirmed in the "
+        "network facet"
+    ),
+    ("scanners", "kingfisher"): (
+        "reads the files; ASH passes --no-validate and --no-update-check, and the "
+        "validate_credentials option that drops --no-validate takes effect only when "
+        "the operator set it (kingfisher_scanner.py set_by_operator, "
+        "_build_arguments); declares no network"
+    ),
+    ("scanners", "polaris"): (
+        "reads the manifests with its compiled-in checks (`polaris audit "
+        "--audit-path`); declares no network (polaris_scanner.py "
+        "sandbox_requirements, the network facet)"
+    ),
+    ("scanners", "secretlint"): (
+        "reads the files with the rules its npm packages ship; declares no network "
+        "(secretlint_scanner.py sandbox_requirements, the network facet)"
+    ),
+    ("scanners", "yara-x"): (
+        "reads the files with rules read from disk (`yr scan`); declares no network "
+        "(yara_x_scanner.py sandbox_requirements, the network facet)"
+    ),
     ("reporters", "asff"): "writes a file",
     ("reporters", "csv"): "writes a file",
     ("reporters", "cyclonedx"): "writes a file",

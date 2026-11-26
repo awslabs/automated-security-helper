@@ -12,7 +12,7 @@
 
 This page is generated from the scanner plugins in the ASH source code by `scripts/generate_scanner_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH ships 23 scanners. The built-in ones are loaded on every scan. The others are alpha scanners, each in a plugin module that `ash scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
+ASH ships 32 scanners. The built-in ones are loaded on every scan. The others are alpha scanners, each in a plugin module that `ash scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
 
 <!-- doctest: options of=scanners -->
 | Scanner | Tool type | Enabled by default | Provided by | Command | Runs with `--python-only` |
@@ -35,11 +35,20 @@ ASH ships 23 scanners. The built-in ones are loaded on every scan. The others ar
 | [`trivy`](#trivy) | SCA | yes | built in | `trivy` | no |
 | [`zizmor`](#zizmor) | SAST | yes | built in | `zizmor` | yes |
 | [`betterleaks`](#betterleaks) | SECRETS | yes | alpha module `ash_betterleaks_plugins` | `betterleaks` | no |
+| [`credsweeper`](#credsweeper) | SECRETS | yes | alpha module `ash_credsweeper_plugins` | `credsweeper` | no |
+| [`dependency-check`](#dependency-check) | SCA | yes | alpha module `ash_dependency_check_plugins` | `dependency-check` | no |
 | [`ferret-scan`](#ferret-scan) | SECRETS | yes | alpha module `ash_ferret_plugins` | `ferret-scan` | no |
+| [`ggshield`](#ggshield) | SECRETS | no | alpha module `ash_ggshield_plugins` | `ggshield` | no |
+| [`gosec`](#gosec) | SAST | yes | alpha module `ash_gosec_plugins` | `gosec` | no |
 | [`guarddog`](#guarddog) | SCA | yes | alpha module `ash_guarddog_plugins` | `guarddog` | yes |
 | [`hadolint`](#hadolint) | IAC | yes | alpha module `ash_hadolint_plugins` | `hadolint` | no |
+| [`kics`](#kics) | IAC | yes | alpha module `ash_kics_plugins` | `kics` | no |
+| [`kingfisher`](#kingfisher) | SECRETS | yes | alpha module `ash_kingfisher_plugins` | `kingfisher` | no |
+| [`polaris`](#polaris) | IAC | yes | alpha module `ash_polaris_plugins` | `polaris` | no |
+| [`secretlint`](#secretlint) | SECRETS | yes | alpha module `ash_secretlint_plugins` | `secretlint` | no |
 | [`snyk-code`](#snyk-code) | SAST | yes | alpha module `ash_snyk_plugins` | `snyk` | no |
 | [`trivy-repo`](#trivy-repo) | SCA | yes | alpha module `ash_trivy_plugins` | `trivy` | no |
+| [`yara-x`](#yara-x) | SAST | yes | alpha module `ash_yara_x_plugins` | `yr` | no |
 
 Tool type is the scanner's own `ScannerToolType`. `--python-only` keeps a scanner when its `is_python_only()` is true: the scanner class's own `python_only` when it states one; otherwise only when the scanner runs its tool through uv, declares no install commands, and has only pip dependencies. A scanner it does not keep is SKIPPED.
 
@@ -216,7 +225,7 @@ Options, under `scanners.cfn-nag.options`. An option not listed here refuses the
 - Enabled by default: yes
 - Tool type: IAC
 - Command: `checkov`
-- Install: `uv tool install` on first use (`checkov>=3.2.0,<4.0.0`)
+- Install: `uv tool install` on first use (`checkov>=3.2.0,<4.0.0` with Python `>=3.10,<3.15`)
 - Offline strategy: `cache_flags`
 - Network in the sandbox, by default: no
 - Environment passed into the sandbox: `CHECKOV_*`, `CKV_*`
@@ -232,7 +241,7 @@ Options, under `scanners.checkov.options`. An option not listed here refuses the
 | <a id="scanners.checkov.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, disabling policy downloads. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 | <a id="scanners.checkov.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to a Checkov configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Only a file the operator names and that lies outside the scanned tree is passed to Checkov; a `.checkov.yaml` or `.checkov.yml` found in the scanned tree is not read, and the scan tells Checkov to read none from its working directory either, because such a file can change what is reported. |
 | <a id="scanners.checkov.options.skip_path"></a>`skip_path` | list of mapping | `[]` | Path (file or directory) to skip, as a regular expression Checkov searches for in each path it walks, and also as a substring of that path. The paths Checkov walks start with the absolute path of the scanned directory. Word boundaries are not implicit: "dir1" skips any directory or subdirectory whose path holds "dir1". An entry whose path is empty is ignored (it would skip every file). Can be specified multiple times. |
-| <a id="scanners.checkov.options.additional_formats"></a>`additional_formats` | list of one of `cli`, `csv`, `cyclonedx`, `cyclonedx_json`, `json`, `junitxml`, `github_failed_only`, `gitlab_sast`, `sarif`, `spdx` | `["cyclonedx_json"]` | List of additional formats to output. Defaults to including CycloneDX JSON. checkov's JSON report is written whatever this lists: ASH reads the resource of each finding from it. |
+| <a id="scanners.checkov.options.additional_formats"></a>`additional_formats` | list of one of `cli`, `csv`, `cyclonedx`, `cyclonedx_json`, `json`, `junitxml`, `github_failed_only`, `gitlab_sast`, `sarif`, `spdx` | `["cyclonedx_json"]` | List of additional formats to output. Defaults to including CycloneDX JSON. checkov's JSON report is written whatever this lists: ASH reads the resource of each finding from it, and rewrites its paths to the source-relative form the SARIF uses. |
 | <a id="scanners.checkov.options.frameworks"></a>`frameworks` | list of one of `all`, `ansible`, `argo_workflows`, `arm`, `azure_pipelines`, `bicep`, `bitbucket_pipelines`, `cdk`, `circleci_pipelines`, `cloudformation`, `dockerfile`, `github_configuration`, `github_actions`, `gitlab_configuration`, `gitlab_ci`, `bitbucket_configuration`, `helm`, `json`, `yaml`, `kubernetes`, `kustomize`, `openapi`, `sca_package`, `sca_image`, `secrets`, `serverless`, `terraform`, `terraform_json`, `terraform_plan`, `sast`, `sast_python`, `sast_java`, `sast_javascript`, `sast_typescript`, `sast_golang`, `3d_policy` | `["all"]` | Specific frameworks to include with Checkov. Defaults to `all`. |
 | <a id="scanners.checkov.options.skip_frameworks"></a>`skip_frameworks` | list of one of `all`, `ansible`, `argo_workflows`, `arm`, `azure_pipelines`, `bicep`, `bitbucket_pipelines`, `cdk`, `circleci_pipelines`, `cloudformation`, `dockerfile`, `github_configuration`, `github_actions`, `gitlab_configuration`, `gitlab_ci`, `bitbucket_configuration`, `helm`, `json`, `yaml`, `kubernetes`, `kustomize`, `openapi`, `sca_package`, `sca_image`, `secrets`, `serverless`, `terraform`, `terraform_json`, `terraform_plan`, `sast`, `sast_python`, `sast_java`, `sast_javascript`, `sast_typescript`, `sast_golang`, `3d_policy` | `[]` | Specific frameworks to exclude with Checkov. Defaults to none. |
 | <a id="scanners.checkov.options.skip_ash_output_dir"></a>`skip_ash_output_dir` | boolean | `true` | Tell Checkov to skip ASH's own output directories inside the scanned directory (this run's output directory and .ash/ash_output), so it does not parse ASH's previous reports. Defaults to true; set to false to let Checkov read them. Either way ASH drops the findings located there after the scan. Has no effect on Windows, where Checkov's --skip-path matching is unreliable. |
@@ -540,6 +549,54 @@ Options, under `scanners.betterleaks.options`. An option not listed here refuses
 | <a id="scanners.betterleaks.options.honor_inline_ignores"></a>`honor_inline_ignores` | boolean | `false` | Honor inline `betterleaks:allow` and `gitleaks:allow` comments. Off by default: ASH runs `betterleaks --ignore-gitleaks-allow`, so every finding reaches ASH, where suppressions are reported and counted. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning. |
 | <a id="scanners.betterleaks.options.honor_tree_ignore_files"></a>`honor_tree_ignore_files` | boolean | `false` | Run Betterleaks over a tree that holds a .betterleaksignore or .gitleaksignore, which Betterleaks always reads and which drops the findings it lists before ASH sees them, so they are neither reported nor counted as suppressed. Off by default: such a tree fails the scan before Betterleaks runs. Move the entries to ASH suppressions, or turn this on. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning. |
 
+## `credsweeper`
+
+- Scanner page: [`credsweeper` scanner page](../docs/plugins/alpha/credsweeper-plugin.md)
+- Class: `automated_security_helper.plugin_modules.ash_credsweeper_plugins.credsweeper_scanner.CredSweeperScanner`
+- Provided by: alpha module `ash_credsweeper_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_credsweeper_plugins`
+- Enabled by default: yes
+- Tool type: SECRETS
+- Command: `credsweeper`
+- Install: `uv tool install` on first use (`credsweeper>=1.19.6,<2.0.0` with Python `>=3.11,<3.14`)
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.credsweeper.options`. An option not listed here refuses the configuration.
+
+<!-- doctest: options of=scanners.credsweeper -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.credsweeper.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.credsweeper.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.credsweeper.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
+| <a id="scanners.credsweeper.options.tool_version"></a>`tool_version` | string or null | `null` | Version constraint for the credsweeper installation, in pip requirement syntax. Leave unset to use the scanner's own default constraint. |
+| <a id="scanners.credsweeper.options.install_timeout"></a>`install_timeout` | integer | `300` | Timeout in seconds for tool installation |
+
+## `dependency-check`
+
+- Scanner page: [`dependency-check` scanner page](../docs/plugins/alpha/dependency_check-plugin.md)
+- Class: `automated_security_helper.plugin_modules.ash_dependency_check_plugins.dependency_check_scanner.DependencyCheckScanner`
+- Provided by: alpha module `ash_dependency_check_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_dependency_check_plugins`
+- Enabled by default: yes
+- Tool type: SCA
+- Command: `dependency-check`
+- Install: custom command by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64
+- Offline strategy: `skip_offline`
+- Network in the sandbox, by default: yes, unless the scan is offline
+- Environment passed into the sandbox: `JAVA_*`, `NVD_API_KEY`
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.dependency-check.options`. An option not listed here refuses the configuration.
+
+<!-- doctest: options of=scanners.dependency-check -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.dependency-check.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.dependency-check.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.dependency-check.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
+
 ## `ferret-scan`
 
 Ferret Scan is a sensitive data detection tool that scans files for potential sensitive information such as credit card numbers, passport numbers, SSNs, API keys, and other secrets.
@@ -584,6 +641,57 @@ Options, under `scanners.ferret-scan.options`. An option not listed here refuses
 | <a id="scanners.ferret-scan.options.ferret_verbose"></a>`ferret_verbose` | boolean | `false` | Enable ferret-scan's verbose output (detailed finding info). This controls ferret-scan's own output, not ASH logging. |
 | <a id="scanners.ferret-scan.options.tool_version"></a>`tool_version` | string or null | `null` | Version constraint for ferret-scan installation (e.g., '&gt;=1.0.0,&lt;2.0.0', '==1.2.0'). If not specified, uses the plugin's default compatible version range: &gt;=2.4.5,&lt;2.7.0. Supported versions: 2.4.5 to 2.7.0 (exclusive). |
 | <a id="scanners.ferret-scan.options.skip_version_check"></a>`skip_version_check` | boolean | `false` | Skip version compatibility check. Use with caution - incompatible versions may cause unexpected behavior or errors. |
+
+## `ggshield`
+
+ggshield detects secrets through the GitGuardian API. It sends the scanned files to GitGuardian and needs GITGUARDIAN_API_KEY.
+
+- Scanner page: [`ggshield` scanner page](../docs/plugins/alpha/ggshield-plugin.md)
+- Class: `automated_security_helper.plugin_modules.ash_ggshield_plugins.ggshield_scanner.GgshieldScanner`
+- Provided by: alpha module `ash_ggshield_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_ggshield_plugins`
+- Enabled by default: no
+- Tool type: SECRETS
+- Command: `ggshield`
+- Install: `uv tool install` on first use (`ggshield==1.56.1`)
+- Offline strategy: `skip_offline`
+- Network in the sandbox, by default: yes, unless the scan is offline
+- Environment passed into the sandbox: `GITGUARDIAN_*`, `GITGUARDIAN_API_KEY`
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.ggshield.options`. An option not listed here refuses the configuration.
+
+<!-- doctest: options of=scanners.ggshield -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.ggshield.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.ggshield.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.ggshield.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
+| <a id="scanners.ggshield.options.tool_version"></a>`tool_version` | string or null | `null` | Version constraint for ggshield installation, in pip requirement syntax. Leave unset to use the scanner's own default constraint, the ggshield release the report reader was written against. A value that is not a version constraint is ignored with a warning. |
+| <a id="scanners.ggshield.options.install_timeout"></a>`install_timeout` | integer | `300` | Timeout in seconds for tool installation |
+
+## `gosec`
+
+- Scanner page: [`gosec` scanner page](../docs/plugins/alpha/gosec-plugin.md)
+- Class: `automated_security_helper.plugin_modules.ash_gosec_plugins.gosec_scanner.GosecScanner`
+- Provided by: alpha module `ash_gosec_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_gosec_plugins`
+- Enabled by default: yes
+- Tool type: SAST
+- Command: `gosec`
+- Install: pinned, checksum-verified release of `gosec` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.gosec.options`. An option not listed here refuses the configuration.
+
+<!-- doctest: options of=scanners.gosec -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.gosec.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.gosec.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.gosec.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
+| <a id="scanners.gosec.options.include_tests"></a>`include_tests` | boolean | `false` | Also scan Go test files (gosec -tests). Off by default, as in gosec. |
 
 ## `guarddog`
 
@@ -646,6 +754,99 @@ Options, under `scanners.hadolint.options`. An option not listed here refuses th
 | <a id="scanners.hadolint.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
 | <a id="scanners.hadolint.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to a hadolint configuration file; a relative path is taken from the source directory. The file has to be outside the scanned tree. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning. When it is not used, hadolint gets an empty config, so a .hadolint.yaml in the scanned repository is not read. A path that is used and does not exist fails the scan rather than running with hadolint's defaults. |
 
+## `kics`
+
+- Scanner page: [`kics` scanner page](../docs/plugins/alpha/kics-plugin.md)
+- Class: `automated_security_helper.plugin_modules.ash_kics_plugins.kics_scanner.KicsScanner`
+- Provided by: alpha module `ash_kics_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_kics_plugins`
+- Enabled by default: yes
+- Tool type: IAC
+- Command: `kics`
+- Install: none declared
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.kics.options`. An option not listed here refuses the configuration.
+
+<!-- doctest: options of=scanners.kics -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.kics.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.kics.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.kics.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
+
+## `kingfisher`
+
+- Scanner page: [`kingfisher` scanner page](../docs/plugins/alpha/kingfisher-plugin.md)
+- Class: `automated_security_helper.plugin_modules.ash_kingfisher_plugins.kingfisher_scanner.KingfisherScanner`
+- Provided by: alpha module `ash_kingfisher_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_kingfisher_plugins`
+- Enabled by default: yes
+- Tool type: SECRETS
+- Command: `kingfisher`
+- Install: pinned, checksum-verified release of `kingfisher` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.kingfisher.options`. An option not listed here refuses the configuration.
+
+<!-- doctest: options of=scanners.kingfisher -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.kingfisher.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.kingfisher.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.kingfisher.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
+| <a id="scanners.kingfisher.options.validate_credentials"></a>`validate_credentials` | boolean | `false` | Let Kingfisher validate each finding against the provider's live API. Off by default: ASH runs `kingfisher scan --no-validate`, because validation sends the candidate credential to a third party. The scanner sandbox grants no network, so validation only works outside it. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning. |
+
+## `polaris`
+
+- Scanner page: [`polaris` scanner page](../docs/plugins/alpha/polaris-plugin.md)
+- Class: `automated_security_helper.plugin_modules.ash_polaris_plugins.polaris_scanner.PolarisScanner`
+- Provided by: alpha module `ash_polaris_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_polaris_plugins`
+- Enabled by default: yes
+- Tool type: IAC
+- Command: `polaris`
+- Install: custom command by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.polaris.options`. An option not listed here refuses the configuration.
+
+<!-- doctest: options of=scanners.polaris -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.polaris.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.polaris.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.polaris.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
+
+## `secretlint`
+
+- Scanner page: [`secretlint` scanner page](../docs/plugins/alpha/secretlint-plugin.md)
+- Class: `automated_security_helper.plugin_modules.ash_secretlint_plugins.secretlint_scanner.SecretlintScanner`
+- Provided by: alpha module `ash_secretlint_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_secretlint_plugins`
+- Enabled by default: yes
+- Tool type: SECRETS
+- Command: `secretlint`
+- Install: declared packages `PackageManager.NPM: @secretlint/secretlint-formatter-sarif`, `PackageManager.NPM: secretlint`
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.secretlint.options`. An option not listed here refuses the configuration.
+
+<!-- doctest: options of=scanners.secretlint -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.secretlint.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.secretlint.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.secretlint.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
+
 ## `snyk-code`
 
 - Scanner page: [`snyk-code` scanner page](../docs/plugins/alpha/snyk-plugin.md)
@@ -700,3 +901,27 @@ Options, under `scanners.trivy-repo.options`. An option not listed here refuses 
 | <a id="scanners.trivy-repo.options.module_dir"></a>`module_dir` | path, string, or null | `null` | A directory of trivy modules, passed as --module-dir. Unset, ASH passes an empty directory of its own. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The directory is used, and a relative path taken, as for config_file. A path that is not a directory fails the scan. |
 | <a id="scanners.trivy-repo.options.ignore_file"></a>`ignore_file` | string or null | `null` | A trivy ignore file, passed as --ignorefile. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; a relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides and the environment variable. Unset, TRIVY_IGNOREFILE is used the same way, and otherwise trivy gets an empty one, so a .trivyignore in the scanned repository does not remove findings. |
 | <a id="scanners.trivy-repo.options.secret_config_file"></a>`secret_config_file` | string or null | `null` | A trivy secret scanning config (trivy-secret.yaml), passed as --secret-config. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; a relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides and the environment variable. Unset, TRIVY_SECRET_CONFIG is used the same way, and otherwise trivy gets an empty one, so a trivy-secret.yaml in the scanned repository does not disable secret rules. |
+
+## `yara-x`
+
+- Scanner page: [`yara-x` scanner page](../docs/plugins/alpha/yara-x-plugin.md)
+- Class: `automated_security_helper.plugin_modules.ash_yara_x_plugins.yara_x_scanner.YaraXScanner`
+- Provided by: alpha module `ash_yara_x_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_yara_x_plugins`
+- Enabled by default: yes
+- Tool type: SAST
+- Command: `yr`
+- Install: custom command by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.yara-x.options`. An option not listed here refuses the configuration.
+
+<!-- doctest: options of=scanners.yara-x -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.yara-x.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.yara-x.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.yara-x.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
+| <a id="scanners.yara-x.options.rules_path"></a>`rules_path` | path, string, or null | `null` | Path to the YARA rules to scan with: one .yar or .yara file, or a directory searched recursively for them. YARA-X ships no rules, so with this unset the scanner does nothing and says so at INFO. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. A path that is set and does not exist fails the scan; a path containing a colon is refused. |

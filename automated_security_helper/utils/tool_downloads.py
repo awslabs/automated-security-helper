@@ -850,9 +850,11 @@ def get_rules_bundle(name: str) -> RulesBundle:
 #
 # ``scripts/check_pinned_tool_versions.py`` reads new entries from these tables and
 # needs no edit to start reporting the tool's upstream releases and what a bump of it
-# changes, as long as ``TOOL_VERSIONS`` or ``RULES_BUNDLES`` pins its download or it
-# has a ``distribution``. An entry none of those name is refused until the script is
-# taught what kind of pin it is.
+# changes, as long as ``TOOL_VERSIONS`` or ``RULES_BUNDLES`` pins its download, it has
+# a ``distribution``, or its ``pin_module`` names the alpha plugin's install module
+# that pins it (``<TOOL>_VERSION``, ``_RELEASE_BASE``, an asset table and its digest
+# tables). An entry none of those name is refused until the script is taught what
+# kind of pin it is.
 #
 # Known limitations
 # -----------------
@@ -977,6 +979,10 @@ class ThirdPartyLicense:
     # Set for a library another wheel bundles: what bundles it, for SOURCE. Its version
     # is that wheel's choice, so the pin checker lists it without looking it up.
     bundled_in: "str | None" = None
+    # Set for a tool an alpha plugin pins and installs itself: the repository-relative
+    # path of the plugin's install module, which holds the version, the release asset
+    # per platform and the digests. The pin checker reads the pin from that module.
+    pin_module: "str | None" = None
 
     @property
     def executable_names(self) -> tuple[str, ...]:
@@ -1591,6 +1597,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             ),
         ),
         version_probe=("polaris", "version"),
+        pin_module="automated_security_helper/plugin_modules/ash_polaris_plugins/polaris_install.py",
     ),
     # The wheel's dist-info holds no license file, only METADATA's
     # `License-Expression: LGPL-2.1-or-later`, so both files come from the
@@ -1658,6 +1665,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             _from_source("yara-x", "https://github.com/VirusTotal/yara-x", "LICENSE"),
         ),
         executables=("yr",),
+        pin_module="automated_security_helper/plugin_modules/ash_yara_x_plugins/yara_x_install.py",
     ),
     # The zizmor scanner's uv tool, a compiled Rust binary in a wheel. The
     # wheel's dist-info carries licenses/LICENSE.

@@ -321,7 +321,12 @@ def test_the_helper_adds_no_directory_of_the_child_to_sys_path(tmp_path):
 #: which starts each Python one through ``python_child`` (tested above). The pip
 #: install that plugin_base, cdk-nag and ferret declare is built in one place,
 #: ``python_package_install_command``, and a command that can only refuse by
-#: ``refusing_install_command``.
+#: ``refusing_install_command``. An alpha plugin that pins its own tool builds its
+#: install table in its own module (dependency-check's ``_install_commands``,
+#: polaris's and yara-x's ``*_install_commands``): the same argv lists, run the same
+#: way. So is the virtualenv that ``--create-virtualenv`` asks the ``python -m venv``
+#: provider for (``venv_create_command``), which ``_create_virtualenv`` runs through
+#: ``_run_install_command`` and so ``run_command``.
 #:
 #: ``_ash_environment_install`` compares an install command's prefix with this
 #: list and starts nothing. ``_with_path_imported`` rebuilds a declared opengrep
@@ -348,6 +353,16 @@ RAW_PYTHON_ARGV_ALLOWED = {
     ),
     ("cli/dependencies.py", "_with_path_imported"),
     ("utils/cdk_nag_worker.py", "_run_child"),
+    (
+        "plugin_modules/ash_dependency_check_plugins/dependency_check_scanner.py",
+        "_install_commands",
+    ),
+    (
+        "plugin_modules/ash_polaris_plugins/polaris_install.py",
+        "polaris_install_commands",
+    ),
+    ("plugin_modules/ash_yara_x_plugins/yara_x_install.py", "yara_x_install_commands"),
+    ("utils/install_providers.py", "venv_create_command"),
 }
 
 #: Spawn helpers a Python child may be handed to.

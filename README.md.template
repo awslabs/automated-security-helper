@@ -310,9 +310,10 @@ for new capabilities.
 | [actionlint](https://github.com/rhysd/actionlint) | GitHub Actions workflows | `ash dependencies install` (pinned release binary) |
 | [zizmor](https://github.com/zizmorcore/zizmor) | GitHub Actions workflows and composite actions | Managed through uv tool isolation |
 
-Six more scanners ship as alpha plugin modules (Betterleaks, Ferret Scan,
-GuardDog, hadolint, Snyk Code, and Trivy repository scanning). Alpha scanners are
-opt-in: ASH ships them but does not yet promote them as supported. A scan runs one only
+Fifteen more scanners ship as alpha plugin modules (Betterleaks, CredSweeper, OWASP
+Dependency-Check, Ferret Scan, ggshield, gosec, GuardDog, hadolint, KICS, Kingfisher,
+Polaris, Secretlint, Snyk Code, Trivy repository scanning, and YARA-X). Alpha scanners
+are opt-in: ASH ships them but does not yet promote them as supported. A scan runs one only
 when `ash_plugin_modules` or `--ash-plugin-modules` names its module; see the
 [alpha plugins](docs/content/docs/plugins/alpha/index.md).
 

@@ -65,9 +65,11 @@ def scanner_page(plugin, docs_root: Path) -> Optional[Path]:
     several scanners and names them in its file name joined by ``-and-``
     (``cfn-lint-and-cfn-guard.md``). An alpha scanner's page is
     ``ALPHA_PAGES/<name>-plugin.md``, or ``<module>-plugin.md`` after the
-    module name's ``ash_`` and ``_plugins`` (``ash_snyk_plugins`` is
-    ``snyk-plugin.md``). Read from the files present, so a link appears in the
-    same change that adds the page.
+    module name's ``ash_`` and ``_plugins``, its underscores turned into hyphens
+    or kept (``ash_snyk_plugins`` is ``snyk-plugin.md``,
+    ``ash_dependency_check_plugins`` is ``dependency_check-plugin.md``). Read
+    from the files present, so a link appears in the same change that adds the
+    page.
     """
     from _plugin_reference import module_name
 
@@ -85,6 +87,7 @@ def scanner_page(plugin, docs_root: Path) -> Optional[Path]:
         candidates = [
             folder / f"{plugin.name}-plugin.md",
             folder / f"{module.replace('_', '-')}-plugin.md",
+            folder / f"{module}-plugin.md",
         ]
     return next((page for page in candidates if page.is_file()), None)
 
