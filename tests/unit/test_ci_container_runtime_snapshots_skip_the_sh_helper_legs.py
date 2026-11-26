@@ -3,19 +3,24 @@
 
 """The container-runtime snapshot step does not rerun on the sh-helper legs.
 
-``utils/ash_helpers.sh`` forwards to ``./ash``. The sh-helper legs of the scan matrix
+``utils/ash_helpers.sh``'s ``invoke-ash`` runs ``ashx --mode container``, the container
+mode the ``python-container`` legs run directly. The sh-helper legs of the scan matrix
 exist to run that forwarding end to end, and the container-runtime snapshot modules
 (``tests/snapshot/container/runtime``) never source the helper, so on those legs the
-step repeats what the ``bash`` leg with the same OS and runner already compared, at
-the cost of the leg's runtime on every pull request, merge-queue run and push.
+step repeats what the ``python-container`` leg with the same OS and runner already
+compared, at the cost of the leg's runtime on every pull request, merge-queue run and
+push. (Before v4 the helper forwarded to the ``./ash`` bash script and the covering
+leg was the ``bash`` one; v4 removed the script and that matrix method with it.)
 
 Two things are pinned: the step's condition excludes ``sh-helper``, and every
-``sh-helper`` row has a ``bash`` row with the same OS and OCI runner, so the runtime
-output the step compares is still compared for each runner the helper is used with.
+``sh-helper`` row has a ``python-container`` row with the same OS and OCI runner, so
+the runtime output the step compares is still compared for each runner the helper is
+used with.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -64,10 +69,12 @@ def test_the_snapshot_step_is_not_run_by_the_sh_helper_method():
     assert "||" not in condition, condition
 
 
-def test_every_sh_helper_row_has_a_bash_row_on_the_same_os_and_runner():
+def test_every_sh_helper_row_has_a_python_container_row_on_the_same_os_and_runner():
     rows = _scan_matrix_rows()
-    bash = {
-        (row["os"], row.get("oci-runner")) for row in rows if row["method"] == "bash"
+    python_container = {
+        (row["os"], row.get("oci-runner"))
+        for row in rows
+        if row["method"] == "python-container"
     }
     sh_helper = {
         (row["os"], row.get("oci-runner"))
@@ -75,7 +82,19 @@ def test_every_sh_helper_row_has_a_bash_row_on_the_same_os_and_runner():
         if row["method"] == "sh-helper"
     }
     assert sh_helper, "the matrix has no sh-helper row; this guard has nothing to check"
-    assert sh_helper <= bash, (
-        "an sh-helper row whose OS and runner no bash row covers would lose its "
-        f"container-runtime snapshot comparison: {sorted(sh_helper - bash)}"
+    assert sh_helper <= python_container, (
+        "an sh-helper row whose OS and runner no python-container row covers would "
+        "lose its container-runtime snapshot comparison: "
+        f"{sorted(sh_helper - python_container)}"
+    )
+
+
+def test_the_helper_runs_the_container_mode_the_covering_legs_run():
+    # The premise of the rows above: invoke-ash is container mode, which is what makes
+    # a python-container row a stand-in for the helper's own snapshot comparison. The
+    # command line itself, not the comment above it that names the flag.
+    helper = (REPO_ROOT / "utils" / "ash_helpers.sh").read_text(encoding="utf-8")
+    assert re.search(r'^\s*ashx --mode container "\$@"$', helper, re.MULTILINE), (
+        "invoke_ash no longer runs `ashx --mode container`; the python-container rows "
+        "no longer stand in for the sh-helper legs' snapshot comparison"
     )

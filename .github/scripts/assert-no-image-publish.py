@@ -31,8 +31,9 @@ account; that is the product, not this repository's CI.
 EXEMPTIONS
 
 A line that matches a shape without publishing anything (a planted fixture inside
-another gate's self-test) is listed in EXEMPT with its file, its exact stripped text and
-a reason. An exemption that no longer matches a line fails, so one cannot outlive the
+another gate's self-test, a push into a registry container the job itself runs on the
+loopback address) is listed in EXEMPT with its file, its exact stripped text and a
+reason. An exemption that no longer matches a line fails, so one cannot outlive the
 line it was written for. This file holds the shapes as data and is excluded by path.
 
 NO VACUOUS PASS
@@ -128,6 +129,15 @@ EXEMPT: Dict[Tuple[str, str], str] = {
     ): (
         "prose in the docs deploy script's docstring naming mike's own --push flag; it "
         "is not a command and publishes no container image"
+    ),
+    (
+        ".github/workflows/ash-image-scan-live-engine.yml",
+        'docker push "$IMAGE_TAG"',
+    ): (
+        "pushes the fixture image to the job's own registry container, started a step "
+        "earlier on 127.0.0.1:5000 (the job env sets IMAGE_TAG to localhost:5000/...), so "
+        "the registry the image-scan's digest ladder reads is a live one; the image never "
+        "leaves the runner, and the job holds contents: read only"
     ),
 }
 

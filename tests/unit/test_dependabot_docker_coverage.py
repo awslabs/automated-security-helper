@@ -41,6 +41,14 @@ EXEMPT = {
         "tests/integration/docs/ci_runners/runners.toml (test_docs_ci_runner_launchers.py "
         "checks the two agree), so a Dependabot bump of this file alone would break that"
     ),
+    "tests/test_data/images/live-engine": (
+        "the throwaway image ash-image-scan-live-engine.yml builds and pushes to its own "
+        "loopback registry; it only has to be a real image with a layer of its own, and the "
+        "job reads the digest the registry holds on every run, so nothing compares against "
+        "the base. Its FROM pins busybox 1.37's multi-platform index by digest with no tag, "
+        "and Dependabot's docker updater moves a tagless digest pin to whatever `latest` "
+        "resolves to, which would replace that pin rather than refresh it"
+    ),
 }
 
 
