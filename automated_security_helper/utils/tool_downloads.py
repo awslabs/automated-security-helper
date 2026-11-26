@@ -1037,6 +1037,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "cfn-guard commit": "db494a17fb6030b365d5a5144a397517c7746797",  # pragma: allowlist secret
     "cfn-guard/LICENSE": "28878a48de57252ed2c9119db71b2fc9766833a0c159d9f5df54cba4dea52dba",  # pragma: allowlist secret
     "cfn-guard/NOTICE": "ba249a48f79f76c72cffea8689eb7a5ce450a4a67ad6b1e44e8ff15a95b2b751",  # pragma: allowlist secret
+    "crane commit": "8a72a424fdecb4caa14f2d525e5d2503331442b5",  # pragma: allowlist secret
     "gitleaks commit": "83d9cd684c87d95d656c1458ef04895a7f1cbd8e",  # pragma: allowlist secret
     "grype commit": "8f3ddeddc4a4ed6314248aaf0a7c510f98db8882",  # pragma: allowlist secret
     "guarddog commit": "3da172679cb58b1c9a780f9f5d640f855be016dc",  # pragma: allowlist secret
@@ -1231,6 +1232,14 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         commit=_THIRD_PARTY_HASHES["checkov commit"],
         files=(LicenseFile("LICENSE"),),
         distribution="checkov",
+    ),
+    "crane": ThirdPartyLicense(
+        tool="crane",
+        version="v0.22.1",
+        license="Apache-2.0",
+        repository="https://github.com/google/go-containerregistry",
+        commit=_THIRD_PARTY_HASHES["crane commit"],
+        files=(LicenseFile("LICENSE"),),
     ),
     "gitleaks": ThirdPartyLicense(
         tool="gitleaks",
