@@ -347,3 +347,64 @@ def test_the_json_output_carries_the_per_cell_verdicts(
     result = _verify(transcripts_copy, "fixture-lint", "--json")
     report = json.loads(result.output)[0]
     assert len(report["verdicts"]) == 20
+
+
+# ---- free text in the output is shown on one line ---------------------------------
+
+
+def test_a_row_detail_is_shown_on_one_line(
+    one_scanner, monkeypatch, transcripts_copy
+) -> None:
+    """A row detail quotes repository text (paths, transcript notes, exception
+    text). Printed raw, a newline in it would start a line of this command's own
+    output (a forged green row) and an escape would reach the terminal; the detail
+    is shown on one line, as the other print sites of this module show theirs."""
+    import dataclasses
+
+    from automated_security_helper.core import plugin_conformance as pc
+
+    forged = "a reason\n  1. [green] forged row \x1b[31mpainted"
+    real = pc.verify_plugin
+
+    def poisoned(manifest, root, **kwargs):
+        report = real(manifest, root, **kwargs)
+        rows = tuple(
+            dataclasses.replace(row, status=pc.RowStatus.RED, details=(forged,))
+            if row.number == 1
+            else row
+            for row in report.rows
+        )
+        return dataclasses.replace(report, rows=rows)
+
+    monkeypatch.setattr(pc, "verify_plugin", poisoned)
+    result = _verify(transcripts_copy, "fixture-lint")
+    assert result.exit_code == 1, result.output
+    assert "\x1b" not in result.output
+    lines = result.output.splitlines()
+    assert not any(line.startswith("  1. [green] forged") for line in lines)
+    assert any("a reason" in line and "forged row" in line for line in lines)
+
+
+def test_a_load_errors_free_text_is_shown_on_one_line(
+    one_scanner, monkeypatch, transcripts_copy
+) -> None:
+    """The load error quotes the manifest's entry point and the import error's own
+    text; shown on one line for the same reason as the row details."""
+    from automated_security_helper.core import plugin_conformance as pc
+
+    message = (
+        "fixture-lint's scanner entry point cannot be loaded "
+        "(\n\x1b[31mError: a forged error line)"
+    )
+
+    def refused(manifest, root, **kwargs):
+        raise pc.PluginLoadError(message)
+
+    monkeypatch.setattr(pc, "verify_plugin", refused)
+    result = _verify(transcripts_copy, "fixture-lint")
+    assert result.exit_code == 2, result.output
+    assert "\x1b" not in result.output
+    assert any(
+        "cannot be loaded" in line and "a forged error line" in line
+        for line in result.output.splitlines()
+    )
