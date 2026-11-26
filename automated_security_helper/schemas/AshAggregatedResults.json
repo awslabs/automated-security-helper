@@ -4394,7 +4394,7 @@
           "default": [
             "all"
           ],
-          "description": "Specific frameworks to include with Checkov. Defaults to `all`.",
+          "description": "Specific frameworks to include with Checkov. Defaults to `all`, which leaves out checkov's `github_configuration`, `gitlab_configuration` and `bitbucket_configuration` frameworks: they check the repository host's settings through its API, not files in the scanned tree. Name one of them here, with or without `all`, to run it.",
           "items": {
             "anyOf": [
               {
@@ -4521,7 +4521,7 @@
         },
         "skip_frameworks": {
           "default": [],
-          "description": "Specific frameworks to exclude with Checkov. Defaults to none.",
+          "description": "Specific frameworks to exclude with Checkov. Defaults to none, though `all` in `frameworks` leaves out `github_configuration`, `gitlab_configuration` and `bitbucket_configuration` unless `frameworks` names them.",
           "items": {
             "anyOf": [
               {
