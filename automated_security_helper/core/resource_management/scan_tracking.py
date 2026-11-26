@@ -68,13 +68,13 @@ _logger = ASH_LOGGER
 # canonical per-scanner counts in the aggregated results file are typed by
 # ScannerTargetStatusInfo and have a fixed field set; this constant governs only
 # the MCP progress and summary views assembled in this module.
-SEVERITY_BUCKETS = (*_LADDER_BUCKETS, SUPPRESSED_COUNT_KEY)
+SEVERITY_TALLY_BUCKETS = (*_LADDER_BUCKETS, SUPPRESSED_COUNT_KEY)
 UNKNOWN_SEVERITY = "unknown"
 
 
 def empty_severity_counts() -> Dict[str, int]:
     """A zeroed severity breakdown, including the catch-all bucket."""
-    counts = dict.fromkeys(SEVERITY_BUCKETS, 0)
+    counts = dict.fromkeys(SEVERITY_TALLY_BUCKETS, 0)
     counts[UNKNOWN_SEVERITY] = 0
     return counts
 
@@ -197,7 +197,7 @@ class ScannerProgress:
         self.severity_counts = (
             dict(severity_counts)
             if severity_counts
-            else dict.fromkeys(SEVERITY_BUCKETS, 0)
+            else dict.fromkeys(SEVERITY_TALLY_BUCKETS, 0)
         )
         self.start_time: Optional[datetime] = None
         self.end_time: Optional[datetime] = None
@@ -1744,7 +1744,7 @@ def get_scan_progress_info(
     every SARIF result it rose by the suppressed count the moment the scan
     completed.
     ``findings_summary`` has one shape in every state: the severity buckets
-    (``SEVERITY_BUCKETS`` and ``unknown``). For a completed scan they are
+    (``SEVERITY_TALLY_BUCKETS`` and ``unknown``). For a completed scan they are
     ``metadata.summary_stats``' counts, or, with no summary stats, the SARIF
     results graded by ``result_severity``, a suppressed result counted in
     ``suppressed`` and not by its severity, so the buckets other than
@@ -2023,7 +2023,7 @@ def extract_findings_summary(findings: List[Dict[str, Any]]) -> Dict[str, int]:
 
     Returns:
         Dictionary mapping severity levels to counts, keyed by the lowercase
-        buckets in SEVERITY_BUCKETS plus UNKNOWN_SEVERITY. A finding whose
+        buckets in SEVERITY_TALLY_BUCKETS plus UNKNOWN_SEVERITY. A finding whose
         severity is missing or is not one of the named buckets counts under
         UNKNOWN_SEVERITY, so ``sum(result.values()) == len(findings)``.
     """
@@ -2353,7 +2353,7 @@ def extract_scan_summary(results: Dict[str, Any]) -> Dict[str, Any]:
         "scanners_completed": results.get("scanners_completed", []),
         "scanner_summaries": scanner_summaries,
         # extract_findings_summary keys its counts by the lowercase buckets in
-        # SEVERITY_BUCKETS; read with uppercase keys these were always False.
+        # SEVERITY_TALLY_BUCKETS; read with uppercase keys these were always False.
         "has_critical": severity_counts.get("critical", 0) > 0,
         "has_high": severity_counts.get("high", 0) > 0,
         "completion_time": results.get("completion_time"),

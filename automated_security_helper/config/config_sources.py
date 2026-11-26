@@ -4515,6 +4515,9 @@ def _split_references(
             and 0 <= index < len(ops)
             and reference.path[2] == "value"
             and isinstance(ops[index], dict)
+            # A YAML ``op: [add]`` is unhashable; test the type before membership
+            # so the operation's own validation refuses it, not a TypeError here.
+            and isinstance(ops[index].get("op"), str)
             and ops[index].get("op") in VALUE_WRITING_OPS
         ):
             from_ops.append((index, tuple(reference.path[3:]), reference))

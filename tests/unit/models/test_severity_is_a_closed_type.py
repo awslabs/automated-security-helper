@@ -59,6 +59,10 @@ OFF_LADDER = [
     "High",
     "9.0",
     "Severity.HIGH",
+    # On the ladder once stripped: the field used to accept it and stored the
+    # padded text; it is refused now, on purpose.
+    " HIGH ",
+    "HIGH\n",
 ]
 
 
@@ -152,7 +156,7 @@ def test_a_ladder_finding_round_trips_through_the_enum_column():
     assert frame["severity"].dtype == pl.Enum(LADDER)
 
 
-@pytest.mark.parametrize("value", ["WEIRD", "high", "", "SÄVERE\udcff"])
+@pytest.mark.parametrize("value", ["WEIRD", "high", "", "SÄVERE\udcff", None])
 def test_an_off_ladder_value_raises_at_frame_build(value):
     finding = build("LOW")
     finding.__dict__["severity"] = value  # built around the model's validation

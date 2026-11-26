@@ -27,7 +27,7 @@ import ast
 import io
 import tokenize
 from pathlib import Path
-from typing import Iterable, List, Set, Tuple
+from typing import Iterable, List, Optional, Set, Tuple
 
 import pytest
 
@@ -184,9 +184,113 @@ def test_planted_positive_control_negative_mode(tmp_path):
     ]
 
 
-def test_planted_positive_control_positive_mode():
-    planted = 'x.update(enablement_status="excluded")'
-    assert any(fragment in planted for _, fragment in FORBIDDEN_FRAGMENTS)
+def _fragment_hits(path: Path) -> List[str]:
+    """The forbidden fragments the file's comment-stripped source holds."""
+    source = _source_without_comments(path)
+    return [
+        fragment
+        for scoped, fragment in FORBIDDEN_FRAGMENTS
+        if scoped == ENUM_MODULE and fragment in source
+    ]
+
+
+def test_planted_positive_control_positive_mode(tmp_path):
+    # Mirrors the negative control: a planted FILE runs through the same
+    # comment-stripper the real scan uses, so a stripper that broke (dropping
+    # code with the comment, or keeping the comment) fails here, not silently.
+    planted = tmp_path / "planted.py"
+    planted.write_text(
+        '# a comment may quote enablement_status == "excluded" freely\n'
+        'x.update(enablement_status="excluded")\n',
+        encoding="utf-8",
+    )
+    stripped = _source_without_comments(planted)
+    assert "a comment may quote" not in stripped
+    assert 'x.update(enablement_status="excluded")' in stripped
+
+    assert 'enablement_status="' in _fragment_hits(planted)
+    assert 'enablement_status == "' not in _fragment_hits(planted)
+
+
+#: The vocabulary fields whose literal spellings the cure replaced with members.
+STATUS_FIELDS = {"registration_status", "enablement_status", "checkpoint_name"}
+
+
+def _field_name(node: ast.AST) -> Optional[str]:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _is_str_literal(node: ast.AST) -> bool:
+    return isinstance(node, ast.Constant) and isinstance(node.value, str)
+
+
+def bare_status_literal_sites(path: Path) -> List[Tuple[int, str]]:
+    """``(line, field)`` where a status field is set or compared to a bare str.
+
+    The AST shape of the fragments above, so a formatter that wraps a comparison
+    over lines, or a spaced assignment, cannot slip past a substring match: a
+    keyword argument, an assignment or a comparison whose field is one of
+    ``STATUS_FIELDS`` and whose other side is a string literal.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    hits: List[Tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword):
+            if node.arg in STATUS_FIELDS and _is_str_literal(node.value):
+                hits.append((node.value.lineno, node.arg))
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if node.value is not None and _is_str_literal(node.value):
+                for target in targets:
+                    if _field_name(target) in STATUS_FIELDS:
+                        hits.append((node.value.lineno, _field_name(target)))
+        elif isinstance(node, ast.Compare):
+            operands = [node.left, *node.comparators]
+            fields = {_field_name(o) for o in operands} & STATUS_FIELDS
+            if fields and any(_is_str_literal(o) for o in operands):
+                hits.append((node.lineno, min(fields)))
+    return sorted(hits)
+
+
+@pytest.mark.parametrize("path", SCOPE, ids=lambda p: p.name)
+def test_no_status_field_is_set_or_compared_to_a_bare_literal(path: Path):
+    assert bare_status_literal_sites(path) == []
+
+
+@pytest.mark.parametrize(
+    "source,field",
+    [
+        ('x.update(enablement_status="excluded")\n', "enablement_status"),
+        ('x.enablement_status = "excluded"\n', "enablement_status"),
+        (
+            "ok = (\n    state.registration_status\n    == 'registered'\n)\n",
+            "registration_status",
+        ),
+        ('f(a, checkpoint_name = "task_queue_validation")\n', "checkpoint_name"),
+        ('if "enabled" != s.enablement_status:\n    pass\n', "enablement_status"),
+    ],
+)
+def test_planted_positive_control_ast_mode(tmp_path, source, field):
+    planted = tmp_path / "planted.py"
+    planted.write_text(source, encoding="utf-8")
+    assert [f for _, f in bare_status_literal_sites(planted)] == [field]
+
+
+def test_the_ast_mode_leaves_members_and_other_fields_alone(tmp_path):
+    clean = tmp_path / "clean.py"
+    clean.write_text(
+        "x.update(enablement_status=EnablementStatus.EXCLUDED)\n"
+        'y = {"enablement_status": "excluded"}\n'
+        'other = "registered"\n'
+        "if state.registration_status == RegistrationStatus.REGISTERED:\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+    assert bare_status_literal_sites(clean) == []
 
 
 def test_summary_buckets_are_derived_from_the_outcome_enum():

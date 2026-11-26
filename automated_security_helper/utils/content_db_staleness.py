@@ -985,7 +985,10 @@ def assess_scanner(
     databases it did not read. Such a record is unmeasurable, not ``absent``: nothing was
     learned about whether the database exists, so the policy still decides what it does.
     """
-    policy = StalenessPolicy(policy)
+    # The scan-wide policy is config text, so it is read leniently here (any case,
+    # unknown text falls back to the default) rather than raising past "never
+    # raises".
+    policy = StalenessPolicy.from_text(policy) or DEFAULT_STALENESS_POLICY
     scanner_name = str(
         getattr(getattr(scanner_plugin, "config", None), "name", "") or ""
     )

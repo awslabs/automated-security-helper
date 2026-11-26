@@ -93,18 +93,6 @@ class SeverityThreshold(str, Enum):
     HIGH = "HIGH"
     CRITICAL = "CRITICAL"
 
-    @classmethod
-    def from_text(cls, text: object) -> Optional["SeverityThreshold"]:
-        """The member *text* names in any case, or ``None`` when it names none."""
-        if isinstance(text, SeverityThreshold):
-            return text
-        if not isinstance(text, str):
-            return None
-        try:
-            return cls(text.strip().upper())
-        except ValueError:
-            return None
-
 
 class PluginKind(str, Enum):
     """The three plugin kinds ASH loads: converter, scanner and reporter.

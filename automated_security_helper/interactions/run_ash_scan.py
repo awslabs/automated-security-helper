@@ -331,11 +331,7 @@ class ScanOptions(BaseModel):
     output_formats: Optional[List[ExportFormat]] = Field(default_factory=list)
     cleanup: bool = False
     phases: Optional[List[ExecutionPhase]] = Field(
-        default_factory=lambda: [
-            ExecutionPhase.CONVERT,
-            ExecutionPhase.SCAN,
-            ExecutionPhase.REPORT,
-        ]
+        default_factory=lambda: list(DEFAULT_EXECUTION_PHASES)
     )
     inspect: bool = False
     existing_results: Optional[str] = None
@@ -432,7 +428,7 @@ class ScanOptions(BaseModel):
     @classmethod
     def _phases_default(cls, v):
         if v is None:
-            return [ExecutionPhase.CONVERT, ExecutionPhase.SCAN, ExecutionPhase.REPORT]
+            return list(DEFAULT_EXECUTION_PHASES)
         return v
 
 
