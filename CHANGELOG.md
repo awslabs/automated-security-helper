@@ -135,6 +135,16 @@
 
 ### Fixes
 
+- **The Terraform CodeCommit gate also reserves `--only-scanners` and
+  `--add-scanners`.** Both choose the scanner selection, as `--scanners` does, and
+  the gate's completeness check covers only the scanners that were selected, so the
+  gate decides the selection and `ash_scan_extra_args` cannot. `--only-scanners`
+  states the whole selection; outside `--mode precommit`, `--add-scanners` means what
+  `--scanners` means, so with no `default_scanners` in the base config the scanners
+  it names are the whole selection. A deployment that sets either one in
+  `ash_scan_extra_args` reports an error on every pull request until it is removed,
+  as one that sets `--scanners` does. A unit test now reads the `ash scan` options
+  and fails when one whose spelling names scanners is not reserved by the gate.
 - **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**
   It passes `GITHUB_ACTIONS`, `TF_BUILD` and `TEAMCITY_VERSION` into the container when
   set (by name, or with their values when `OCI_RUNNER_WRAPPER` is set; a value that holds

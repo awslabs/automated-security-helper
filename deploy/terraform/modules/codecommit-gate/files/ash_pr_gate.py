@@ -215,6 +215,11 @@ SCAN_ENV_DROPPED_VARIABLES = frozenset(
 #: --no-fail-on-incomplete leaves the parameter at its default. The --opt=value form
 #: is split on the first = in `_is_gate_owned_option`, because `click` accepts it for
 #: options that take a value, --min-severity among them.
+#:
+#: The set is still written out by hand, so it can fall behind the CLI. The test
+#: test_every_option_that_names_scanners_is_reserved, in
+#: tests/unit/deploy/test_codecommit_gate_fails_closed.py, reads the real click
+#: command and fails when an option whose spelling names scanners is missing here.
 GATE_OWNED_SCAN_OPTIONS = frozenset(
     {
         # Passed by this gate, so a repeat here would resolve last and win.
@@ -231,6 +236,11 @@ GATE_OWNED_SCAN_OPTIONS = frozenset(
         # scanners.
         "--scanners",
         "--exclude-scanners",
+        # --only-scanners states the whole selection. Outside --mode precommit,
+        # --add-scanners means what --scanners means, so with no default_scanners in
+        # the config the scanners it names are the whole selection too.
+        "--only-scanners",
+        "--add-scanners",
         "--python-only",
         "--python-based-scanners-only",
         "--python-based-plugins-only",
