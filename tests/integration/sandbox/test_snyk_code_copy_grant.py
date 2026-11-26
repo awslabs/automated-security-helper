@@ -148,10 +148,9 @@ def _scan(tmp_path: Path, mode: str) -> dict:
     source = tmp_path / "src"
     (source / "app").mkdir(parents=True)
     (source / "app" / "main.js").write_text("console.log('hello');\n")
-    (source / ".ash").mkdir()
     # No ignore path: snyk-code does not run on a tree that holds a file one
     # matches, so a tree with one never reaches the copy.
-    (source / ".ash" / ".ash.yaml").write_text("project_name: snyk-copy-grant\n")
+    (source / ".ash.yaml").write_text("project_name: snyk-copy-grant\n")
     output = tmp_path / "out"
     # TMPDIR inside a stand-in $HOME: firejail hides only what is in $HOME or /tmp
     # and not whitelisted, so a neighbor anywhere else would be visible to it
@@ -238,7 +237,7 @@ def _assert_tested_the_copy(saw: dict) -> None:
     assert target.parent == saw["temp_root"], target
     assert not target.is_relative_to(saw["source"]), target
     assert not target.is_relative_to(saw["output"]), target
-    assert saw["files"] == ["./.ash/.ash.yaml", "./app/main.js"], saw["files"]
+    assert saw["files"] == ["./.ash.yaml", "./app/main.js"], saw["files"]
     assert saw["leftover"] == [], "the copy outlived the run"
 
 

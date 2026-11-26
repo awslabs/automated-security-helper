@@ -175,7 +175,7 @@ def test_an_invalid_config_is_refused_on_the_host_before_the_container_starts(
     # run_ash_scan refuses a config the scan inside the image would refuse, with exit 3,
     # before it builds, runs or mounts anything (_outer_mode_config_refusal). So the
     # host prints the refusal itself and there is no container exit to report.
-    (fixture_repo / ".ash" / ".ash.yaml").write_text(BAD_CONFIG, encoding="utf-8")
+    (fixture_repo / ".ash.yaml").write_text(BAD_CONFIG, encoding="utf-8")
     result = run_cli(
         [
             "scan",

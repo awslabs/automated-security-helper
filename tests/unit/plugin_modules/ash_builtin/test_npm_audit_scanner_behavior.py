@@ -14,6 +14,7 @@ would still produce a plausible-looking report.
 
 import json
 import logging
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -32,7 +33,10 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
     NpmAuditScannerConfig,
     NpmAuditScannerConfigOptions,
 )
-from automated_security_helper.utils import offline_mode_validator
+from automated_security_helper.utils import (
+    offline_mode_validator,
+    package_manager_child,
+)
 from tests.utils.env_assertions import differing_names
 
 pytestmark = pytest.mark.unit
@@ -108,6 +112,29 @@ def plugin_context(tmp_path):
     context.output_dir.mkdir(parents=True)
     context.work_dir.mkdir(parents=True)
     return context
+
+
+@pytest.fixture
+def yarn_runs_from_its_private_copy(monkeypatch, tmp_path):
+    """yarn is recorded as running from its private copy, whatever the host's layout.
+
+    utils/package_manager_child.py passes a candidate location for yarn's copy over
+    when it is under the system temporary directory or below a directory another
+    account can write. tmp_path is under the system temporary directory, so on a
+    host whose cache and runtime directories are not usable either, yarn 1 runs in
+    place with ``--no-default-rc`` added and the recorded argv and working directory
+    depend on the host. Standing the placement checks down (they are read on their
+    own in tests/unit/utils/test_package_manager_child.py) pins the contract these
+    tests are about: the tool's own argv, run from a copy of the lock file's
+    directory.
+    """
+    system_tmp = tmp_path / "system-tmp"
+    system_tmp.mkdir()
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(system_tmp))
+    monkeypatch.setattr(package_manager_child, "_untrusted_ancestor", lambda path: None)
+    monkeypatch.setattr(
+        package_manager_child, "_settings_file_ancestor", lambda path: None
+    )
 
 
 @pytest.fixture
@@ -430,7 +457,13 @@ def test_package_json_without_any_lock_file_is_not_audited(
     ],
 )
 def test_lock_file_selects_the_matching_package_manager(
-    scanner, npm_on_path, node_project, subprocess_double, lock_name, expected_binary
+    scanner,
+    npm_on_path,
+    node_project,
+    subprocess_double,
+    yarn_runs_from_its_private_copy,
+    lock_name,
+    expected_binary,
 ):
     """Each lock file dialect is audited with its own tool, and the stub
     answers in that tool's own report shape."""
@@ -453,7 +486,12 @@ def test_lock_file_selects_the_matching_package_manager(
     "lock_name", ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"]
 )
 def test_audit_runs_in_the_lock_files_own_directory(
-    scanner, npm_on_path, node_project, subprocess_double, lock_name
+    scanner,
+    npm_on_path,
+    node_project,
+    subprocess_double,
+    yarn_runs_from_its_private_copy,
+    lock_name,
 ):
     """pnpm and yarn only find their lock file in their working directory.
 

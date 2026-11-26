@@ -13,7 +13,7 @@ scan judges it (config/sandbox_grants.py, ``files_inside``).
 
 Both places judge such a file by the path that reached it:
 - the plan records a project's config by its path in the project, so a project
-  whose ``.ash/.ash.yaml`` links out is held to the limits of a config inside
+  whose ``.ash.yaml`` links out is held to the limits of a config inside
   the scanned tree;
 - the operator's ``--config`` is the trusted base only when the path given is
   outside the workspace, so a ``--config`` inside the workspace that links out
@@ -96,10 +96,7 @@ def _sends_to_the_repositorys_bucket(section: Any) -> bool:
 
 def test_a_project_config_that_links_out_does_not_choose_the_upload(tmp_path):
     workspace = _workspace(tmp_path)
-    (workspace.parent / "app" / ".ash").mkdir()
-    _symlink_or_skip(
-        workspace.parent / "app" / ".ash" / ".ash.yaml", _outside(tmp_path)
-    )
+    _symlink_or_skip(workspace.parent / "app" / ".ash.yaml", _outside(tmp_path))
 
     section = _s3_section(workspace, None, tmp_path)
 
@@ -113,8 +110,7 @@ def test_the_plan_names_a_linked_project_config_by_its_path_in_the_project(
     from automated_security_helper.workspace.resolver import resolve_workspace
 
     workspace = _workspace(tmp_path)
-    (workspace.parent / "app" / ".ash").mkdir()
-    link = workspace.parent / "app" / ".ash" / ".ash.yaml"
+    link = workspace.parent / "app" / ".ash.yaml"
     _symlink_or_skip(link, _outside(tmp_path))
 
     (project,) = resolve_workspace(workspace).projects
@@ -159,8 +155,7 @@ def test_control_a_project_with_its_own_config_gets_the_operators_upload(tmp_pat
     is confined from, and its upload goes ahead. Without this, a trusted base
     that was always the defaults would pass the no-trusted-base test above."""
     workspace = _workspace(tmp_path)
-    (workspace.parent / "app" / ".ash").mkdir()
-    (workspace.parent / "app" / ".ash" / ".ash.yaml").write_text(
+    (workspace.parent / "app" / ".ash.yaml").write_text(
         "project_name: app\n", encoding="utf-8"
     )
 

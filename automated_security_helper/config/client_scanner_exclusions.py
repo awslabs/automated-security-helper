@@ -436,34 +436,40 @@ def bandit_would_skip(
     #
     # The builder is the one declared on this entry's own option (``scanner`` and
     # ``option``, which the exclusion carries), so two scanners that share the
-    # kind with different builders are each matched by their own. A caller that
-    # names no option gets the first bandit-kind builder in manifest order.
+    # kind with different builders are each matched by their own. Whatever the
+    # caller names (the scanner, the option, or both) limits the builders
+    # considered to the declarations that match it, and none matching is the
+    # error below: another tool's globs carry another tool's exclude semantics,
+    # and matching with them would decide which findings are hidden. Only a
+    # caller that names neither gets the first bandit-kind builder in manifest
+    # order.
     #
     # ``next`` with no default would let a manifest set that declares no bandit
     # builder end this call as a bare ``StopIteration``: PEP 479 turns that into
     # a ``RuntimeError`` inside a generator, and a ``map`` callback or a custom
     # ``__next__`` ends its iteration silently, which drops findings with no
     # error. A missing declaration is a configuration fault, named as one.
-    own = (
-        _declared_option(scanner, option)
-        if scanner is not None and option is not None
-        else None
+    named = scanner is not None or option is not None
+    builder_ref: Optional[str] = next(
+        (
+            declared.glob_builder
+            for name, declared in exclusion_options()
+            if (scanner is None or name == scanner)
+            and (option is None or declared.option == option)
+            and declared.kind == "bandit"
+            and declared.glob_builder is not None
+        ),
+        None,
     )
-    if own is not None and own.kind == "bandit" and own.glob_builder is not None:
-        builder_ref: Optional[str] = own.glob_builder
-    else:
-        builder_ref = next(
-            (
-                declared.glob_builder
-                for _, declared in exclusion_options()
-                if declared.kind == "bandit" and declared.glob_builder is not None
-            ),
-            None,
-        )
     if builder_ref is None:
+        where = (
+            f"the exclusion option 'scanners.{scanner or '*'}.options.{option or '*'}'"
+            if named
+            else "any scanner manifest"
+        )
         raise ScannerError(
-            "no scanner manifest declares a glob_builder for an exclusion option "
-            "of kind 'bandit', so a client-supplied bandit exclusion cannot be "
+            f"{where} does not declare a glob_builder for an exclusion option of "
+            "kind 'bandit', so a client-supplied bandit exclusion cannot be "
             "matched. Declare one on the option (ExclusionOption.glob_builder)."
         )
     bandit_excluded_path_globs = resolve_ref(builder_ref)

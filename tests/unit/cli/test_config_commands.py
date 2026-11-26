@@ -32,7 +32,7 @@ class TestConfigInit:
     """Tests for the config init command."""
 
     def test_init_creates_config_file(self, tmp_path):
-        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         result = runner.invoke(
             config_app,
             ["init", "--config", str(config_path)],
@@ -41,8 +41,7 @@ class TestConfigInit:
         assert config_path.exists()
 
     def test_init_refuses_overwrite_without_force(self, tmp_path):
-        config_path = tmp_path / ".ash" / ".ash.yaml"
-        config_path.parent.mkdir(parents=True)
+        config_path = tmp_path / ".ash.yaml"
         config_path.write_text("existing: true")
 
         result = runner.invoke(
@@ -52,8 +51,7 @@ class TestConfigInit:
         assert result.exit_code == 1
 
     def test_init_overwrites_with_force(self, tmp_path):
-        config_path = tmp_path / ".ash" / ".ash.yaml"
-        config_path.parent.mkdir(parents=True)
+        config_path = tmp_path / ".ash.yaml"
         config_path.write_text("existing: true")
 
         result = runner.invoke(
@@ -65,7 +63,23 @@ class TestConfigInit:
         assert "project_name" in content or "project-name" in content
 
     def test_init_creates_gitignore(self, tmp_path):
+        """Legacy location: this test's subject is the deprecated .ash/.ash.yaml path.
+
+        The ``.gitignore`` is written beside a config in a ``.ash/`` directory.
+        """
         config_path = tmp_path / ".ash" / ".ash.yaml"
+        result = runner.invoke(
+            config_app,
+            ["init", "--config", str(config_path)],
+        )
+        assert result.exit_code == 0
+        gitignore_path = tmp_path / ".ash" / ".gitignore"
+        assert gitignore_path.exists()
+        assert "ash_output" in gitignore_path.read_text()
+
+    def test_init_at_the_canonical_root_creates_gitignore(self, tmp_path):
+        """The canonical ``.ash.yaml`` at the root also gets ``.ash/.gitignore``."""
+        config_path = tmp_path / ".ash.yaml"
         result = runner.invoke(
             config_app,
             ["init", "--config", str(config_path)],
@@ -150,12 +164,11 @@ class TestConfigGetRefusesUnparseableFiles:
         self._assert_refused(result, config_path)
 
     def test_a_discovered_file_with_a_yaml_syntax_error(self, tmp_path, monkeypatch):
-        (tmp_path / ".ash").mkdir()
-        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         config_path.write_text(self.INVALID_YAML, encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(config_app, ["get"])
-        self._assert_refused(result, Path(".ash") / ".ash.yaml")
+        self._assert_refused(result, Path(".ash.yaml"))
 
     def test_a_json_file_that_does_not_parse(self, tmp_path):
         config_path = tmp_path / "ash.json"
@@ -251,9 +264,7 @@ class TestConfigUpdate:
 
     def test_update_finds_config_auto(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        ash_dir = tmp_path / ".ash"
-        ash_dir.mkdir()
-        config_path = ash_dir / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         config_path.write_text("project-name: test-project\n")
 
         with patch(

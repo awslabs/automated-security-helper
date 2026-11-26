@@ -79,7 +79,7 @@ def test_an_override_the_base_cannot_take_leaves_the_other_keys_resolved(
     trusted = {"scanners": {"bandit": {"enabled": True}, "semgrep": {"enabled": True}}}
     config = _Config(
         ConfigProvenance(
-            in_tree=(tmp_path / ".ash" / ".ash.yaml",),
+            in_tree=(tmp_path / ".ash.yaml",),
             trusted=trusted,
             overrides=(
                 "scanners.plugin-only.options.x=1",
@@ -103,7 +103,7 @@ def test_an_override_the_base_cannot_take_leaves_the_other_keys_resolved(
 def _bandit_config(tmp_path, override_key: str) -> _Config:
     return _Config(
         ConfigProvenance(
-            in_tree=(tmp_path / ".ash" / ".ash.yaml",),
+            in_tree=(tmp_path / ".ash.yaml",),
             trusted={
                 "scanners": {"bandit": {"options": {"config_file": "/ops/base.yaml"}}}
             },
@@ -167,7 +167,7 @@ def test_operator_paths_accepts_the_entry_the_operator_appended(
     key = "scanners.guard.options.rules_paths"
     config = _Config(
         ConfigProvenance(
-            in_tree=(repo / ".ash" / ".ash.yaml",),
+            in_tree=(repo / ".ash.yaml",),
             trusted={"scanners": {"guard": {"options": {"rules_paths": []}}}},
             overrides=(f"{key}+={json.dumps(str(operators))}",),
         )
@@ -213,7 +213,7 @@ def test_overrides_valid_only_together_are_the_operators(
     trusted = {"scanners": {"x": {"options": {"mode": "off"}}}}
     config = _Config(
         ConfigProvenance(
-            in_tree=(tmp_path / ".ash" / ".ash.yaml",),
+            in_tree=(tmp_path / ".ash.yaml",),
             trusted=trusted,
             overrides=(
                 'scanners.x.options.mode="file"',
@@ -236,7 +236,7 @@ def test_a_batch_that_fails_still_replays_the_rest_one_at_a_time(
     trusted = {"scanners": {"bandit": {"enabled": True}, "semgrep": {"enabled": True}}}
     config = _Config(
         ConfigProvenance(
-            in_tree=(tmp_path / ".ash" / ".ash.yaml",),
+            in_tree=(tmp_path / ".ash.yaml",),
             trusted=trusted,
             overrides=(
                 "scanners.plugin-only.options.x=1",
@@ -270,7 +270,7 @@ def test_operator_paths_refuses_a_list_that_leaves_the_operators_entries_out(
     key = "scanners.guard.options.rules_paths"
     config = _Config(
         ConfigProvenance(
-            in_tree=(repo / ".ash" / ".ash.yaml",),
+            in_tree=(repo / ".ash.yaml",),
             trusted={"scanners": {"guard": {"options": {"rules_paths": []}}}},
             overrides=(f"{key}={json.dumps([str(first), str(second)])}",),
         )

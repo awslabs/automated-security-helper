@@ -17,12 +17,21 @@ the migration record, and builds a suppression from each row's rule_id, path and
 symbol. It does not read the two configs; tests/unit/config/
 test_symbol_migration_record.py ties the record to them entry for entry.
 
-`fail-closed` proves the failure mode is live: each row, probed at the line its
-old pin named, matches nothing without the extra. A row that fails to match for
-some OTHER reason would pass that check on its own (an old pin that drifted out
-of its definition, a missing line, a path or rule mismatch), so each row is also
-probed with its `symbol` removed in the same environment: that entry MUST match,
+`fail-closed` proves the failure mode is live: each row, probed at a line known
+to sit inside its definition, matches nothing without the extra. The probe line
+is the row's `flagged_line` (a row whose old pin was already stale when it was
+converted names the line its flagged code really sits on) or else its
+`old_line_start`, and it must lie inside the row's `span_at_migration`: a
+non-match at a line OUTSIDE the definition would be the line's doing, not the
+missing extra's, and passes whether or not the resolver works, so such a row is
+refused here rather than probed. The line is also checked against the span
+because the symbol-less probe below cannot do it: it matches on rule and path
+alone. Each row is then probed with its `symbol` removed in the same
+environment: that entry MUST match (rule and path agree with the finding),
 which leaves the `symbol` clause as the only thing that can be rejecting it.
+Without the extra the span itself cannot be resolved, so the record's span is
+what bounds the probe line; `resolves` and tests/unit/config/
+test_symbol_migration_record.py check the span against the current tree.
 
 `resolves` proves, with the extra installed, that each row's symbol still names
 a definition in its file and that the entry matches a finding on that
@@ -81,6 +90,37 @@ def _finding(row: dict, line: int):
     )
 
 
+def probe_line(row: dict) -> Any:
+    """The line the fail-closed probe uses: where the flagged code really sits.
+
+    ``flagged_line`` when the row has one (a stale-pin row, whose old line was
+    never inside its definition), else the old pin's ``old_line_start``.
+    """
+    flagged = row.get("flagged_line")
+    return flagged if flagged is not None else row.get("old_line_start")
+
+
+def _span_problem(row: dict, line: int) -> Optional[str]:
+    """Why ``line`` cannot serve as a probe line for ``row``, or None if it can."""
+    span = row.get("span_at_migration")
+    if (
+        not isinstance(span, (list, tuple))
+        or len(span) != 2
+        or not all(isinstance(n, int) for n in span)
+    ):
+        return (
+            "the row has no span_at_migration to show the probe line sits inside "
+            "the definition"
+        )
+    if not span[0] <= line <= span[1]:
+        return (
+            f"probe line {line} is outside its span_at_migration "
+            f"{list(span)}, so a non-match there would not show that the missing "
+            "extra rejected it (a stale-pin row needs a flagged_line inside the span)"
+        )
+    return None
+
+
 def check_fail_closed(rows: list[dict], resolver: Any) -> list[str]:
     """Rows whose entry matched with the extra missing, or that prove nothing."""
     from automated_security_helper.utils.suppression_frame import matches
@@ -89,9 +129,16 @@ def check_fail_closed(rows: list[dict], resolver: Any) -> list[str]:
     for row in rows:
         where = f"{row.get('path')} {row.get('symbol')}"
         try:
-            line = row["old_line_start"]
+            line = probe_line(row)
             if not isinstance(line, int):
-                bad.append(f"{where}: the row has no old_line_start to probe")
+                bad.append(
+                    f"{where}: the row has no old_line_start to probe (and no "
+                    "flagged_line)"
+                )
+                continue
+            problem = _span_problem(row, line)
+            if problem is not None:
+                bad.append(f"{where}: {problem}")
                 continue
             if matches(
                 _suppression(row), _finding(row, line), symbol_resolver=resolver
@@ -115,8 +162,6 @@ def check_resolves(rows: list[dict], resolver: Any, repo: Path = REPO) -> list[s
     """Rows whose symbol does not resolve, or whose entry does not match there."""
     from automated_security_helper.utils.suppression_frame import matches
     from automated_security_helper.utils.symbol_spans import (
-        SymbolParseError,
-        SymbolsUnavailableError,
         grammar_for_path,
         index_symbols,
     )
@@ -140,7 +185,7 @@ def check_resolves(rows: list[dict], resolver: Any, repo: Path = REPO) -> list[s
                 _suppression(row), _finding(row, line), symbol_resolver=resolver
             ):
                 bad.append(f"{where}:{line} did NOT match with the extra")
-        except (OSError, SymbolParseError, SymbolsUnavailableError, KeyError) as exc:
+        except Exception as exc:  # one broken row must not hide the others
             bad.append(f"{where}: could not be probed ({type(exc).__name__}: {exc})")
     return bad
 
@@ -185,8 +230,8 @@ def run(
             out(f"  - {line}")
         return 1
     expectation = (
-        "failed closed (matched nothing) without the extra, and matched once "
-        "their symbol was removed"
+        "failed closed (matched nothing) at a line inside their recorded span "
+        "without the extra, and matched once their symbol was removed"
         if mode == "fail-closed"
         else "resolved and matched with the extra"
     )

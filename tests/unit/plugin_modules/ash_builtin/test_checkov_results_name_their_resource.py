@@ -600,11 +600,11 @@ class TestTheScannerReadsBothReports:
     absolute path without its leading ``/``. The resources are matched on those
     paths and the paths are then rewritten relative to the source directory."""
 
-    def _reports(self, tmp_path):
+    def _reports(self, tmp_path, **opts):
         source = tmp_path / "src"
         source.mkdir()
         (source / "tfplan.json").write_text("{}", encoding="utf-8")
-        scanner = _scanner(source, tmp_path / "out")
+        scanner = _scanner(source, tmp_path / "out", **opts)
         results_dir = Path(scanner.results_dir) / "source"
         results_dir.mkdir(parents=True, exist_ok=True)
         written = (source / "tfplan.json").as_posix()
@@ -647,6 +647,51 @@ class TestTheScannerReadsBothReports:
             for r in results
         } == {"tfplan.json"}
 
+    def test_a_default_run_rewrites_the_json_report_checkov_always_writes(
+        self, tmp_path
+    ):
+        # additional_formats is left at its default (CycloneDX JSON only), yet
+        # checkov writes results_json.json on every run. Left as checkov wrote
+        # it, its paths would be the host's root-relative ones, which match
+        # neither the SARIF nor a suppression.
+        scanner, results_file, records = self._reports(tmp_path)
+        assert "json" not in scanner.config.options.additional_formats
+        json_report = results_file.parent / "results_json.json"
+        json_report.write_text(
+            json.dumps([_report("terraform_plan", failed=records)]), encoding="utf-8"
+        )
+        scanner._checkov_cwd = Path("/")
+        scanner._checkov_target = tmp_path / "src"
+
+        raw = scanner._read_results_file(results_file)
+
+        assert [_resource(r) for r in raw["runs"][0]["results"]] == [
+            "module.db.x.this",
+            "module.db2.x.this",
+        ]
+        rewritten = json.loads(json_report.read_text(encoding="utf-8"))
+        assert {
+            r["repo_file_path"] for r in rewritten[0]["results"]["failed_checks"]
+        } == {"/tfplan.json"}
+
+    def test_a_json_report_the_operator_asked_for_is_rewritten(self, tmp_path):
+        scanner, results_file, records = self._reports(
+            tmp_path, additional_formats=["json"]
+        )
+        json_report = results_file.parent / "results_json.json"
+        json_report.write_text(
+            json.dumps([_report("terraform_plan", failed=records)]), encoding="utf-8"
+        )
+        scanner._checkov_cwd = Path("/")
+        scanner._checkov_target = tmp_path / "src"
+
+        scanner._read_results_file(results_file)
+
+        rewritten = json.loads(json_report.read_text(encoding="utf-8"))
+        assert {
+            r["repo_file_path"] for r in rewritten[0]["results"]["failed_checks"]
+        } == {"/tfplan.json"}
+
     def test_without_a_json_report_the_results_are_read_as_before(self, tmp_path):
         scanner, results_file, _ = self._reports(tmp_path)
         scanner._checkov_cwd = Path("/")
@@ -672,3 +717,104 @@ class TestTheScannerReadsBothReports:
         raw = scanner._read_results_file(results_file)
 
         assert [_resource(r) for r in raw["runs"][0]["results"]] == [None, None]
+
+
+class TestANameThatIsNotUtf8CostsNothing:
+    """json.load turns the ``\\udcXX`` escape of a non-UTF-8 file name into a lone
+    surrogate. The key of its record is built as checkov builds the SARIF URI, the
+    bytes percent-encoded, as the path rewrite already reads them."""
+
+    def test_the_key_percent_encodes_the_bytes_of_the_name(self):
+        found = checkov_resources(
+            [
+                _report(
+                    "terraform", failed=[_record("C", "/d/bad\udcff.tf", (1, 2), "r.x")]
+                )
+            ]
+        )
+
+        assert found == {("C", "d/bad%FF.tf", 1, 2): ["r.x"]}
+
+    @pytest.mark.parametrize("check_type", [["terraform"], {"a": 1}, 7, None])
+    def test_a_check_type_that_is_not_text_names_none_and_still_counts(
+        self, check_type
+    ):
+        found = checkov_resources(
+            [_report(check_type, failed=[_record("C", "/a.tf", (1, 2), "r.x")])]
+        )
+
+        assert found == {("C", "a.tf", 1, 2): [None]}
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX paths")
+    def test_the_scanner_keeps_the_rewrite_and_the_resource(self, tmp_path):
+        source = tmp_path / "src"
+        source.mkdir()
+        scanner = _scanner(source, tmp_path / "out", additional_formats=["json"])
+        results_dir = Path(scanner.results_dir) / "source"
+        results_dir.mkdir(parents=True, exist_ok=True)
+        written = (source / "bad\udcff.tf").as_posix()
+        results_file = results_dir / "results_sarif.sarif"
+        results_file.write_text(
+            json.dumps(
+                _sarif(
+                    _result(
+                        "CKV_AWS_17",
+                        quote(written.lstrip("/"), errors="surrogateescape"),
+                        1,
+                        2,
+                    )
+                )
+            ),
+            encoding="utf-8",
+        )
+        record = {
+            **_record("CKV_AWS_17", written, (1, 2), "aws_db_instance.this"),
+            "file_abs_path": written,
+        }
+        json_report = results_file.parent / "results_json.json"
+        json_report.write_text(
+            json.dumps([_report("terraform", failed=[record])]), encoding="utf-8"
+        )
+        scanner._checkov_cwd = Path("/")
+        scanner._checkov_target = source
+
+        raw = scanner._read_results_file(results_file)
+
+        assert [_resource(r) for r in raw["runs"][0]["results"]] == [
+            "aws_db_instance.this"
+        ]
+        rewritten = json.loads(json_report.read_text(encoding="utf-8"))
+        assert rewritten[0]["results"]["failed_checks"][0]["repo_file_path"] == (
+            "/bad\udcff.tf"
+        )
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX paths")
+    def test_a_failure_reading_the_resources_leaves_the_path_rewrite(
+        self, tmp_path, monkeypatch
+    ):
+        scanner, results_file, records = TestTheScannerReadsBothReports()._reports(
+            tmp_path, additional_formats=["json"]
+        )
+        json_report = results_file.parent / "results_json.json"
+        json_report.write_text(
+            json.dumps([_report("terraform_plan", failed=records)]), encoding="utf-8"
+        )
+        scanner._checkov_cwd = Path("/")
+        scanner._checkov_target = tmp_path / "src"
+
+        def fails(document):
+            raise UnicodeEncodeError("utf-8", "x", 0, 1, "planted")
+
+        monkeypatch.setattr(
+            "automated_security_helper.plugin_modules.ash_builtin.scanners."
+            "checkov_scanner.checkov_resources",
+            fails,
+        )
+
+        raw = scanner._read_results_file(results_file)
+
+        assert [_resource(r) for r in raw["runs"][0]["results"]] == [None, None]
+        rewritten = json.loads(json_report.read_text(encoding="utf-8"))
+        assert {
+            r["repo_file_path"] for r in rewritten[0]["results"]["failed_checks"]
+        } == {"/tfplan.json"}

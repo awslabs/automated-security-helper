@@ -120,7 +120,7 @@ def _scanned_checkout(w: Path) -> Path:
     repo = w / "repo"
     mark_git_checkout(repo)
     _write(repo / "a.py", "x = 1\n")
-    _write(repo / ".ash" / ".ash.yaml", REPOSITORY)
+    _write(repo / ".ash.yaml", REPOSITORY)
     return repo
 
 

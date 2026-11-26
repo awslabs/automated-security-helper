@@ -151,9 +151,8 @@ def test_a_project_config_linking_to_the_operators_file_is_still_refused(
     own = layout["granted"] / "api" / "conf" / "own.yaml"
     own.parent.mkdir()
     own.write_text("project_name: api\n", encoding="utf-8")
-    link = layout["granted"] / "api" / ".ash" / ".ash.yaml"
-    link.parent.mkdir()
-    os.symlink(Path("../conf/own.yaml"), link)
+    link = layout["granted"] / "api" / ".ash.yaml"
+    os.symlink(Path("conf/own.yaml"), link)
     plan = _plan(layout, operator, operator)
     (project,) = [p for p in plan.active_projects if p.key == "api"]
     link.unlink()
@@ -170,8 +169,7 @@ def test_a_project_config_linking_to_the_operators_file_is_refused_at_plan_time(
     layout,
 ) -> None:
     operator = layout["operator"]
-    link = layout["granted"] / "api" / ".ash" / ".ash.yaml"
-    link.parent.mkdir()
+    link = layout["granted"] / "api" / ".ash.yaml"
     os.symlink(operator, link)
 
     with pytest.raises(Exception) as refused:

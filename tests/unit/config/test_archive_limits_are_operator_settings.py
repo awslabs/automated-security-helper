@@ -5,7 +5,7 @@
 
 ``max_members``, ``max_member_bytes``, ``max_total_bytes`` and
 ``max_compression_ratio`` bound what extracting an archive in the scanned tree can
-write. A config file the scanned repository wrote (``.ash/.ash.yaml`` in the tree, or
+write. A config file the scanned repository wrote (``.ash.yaml`` in the tree, or
 a project's config in workspace mode) and a config an MCP client delivered cannot
 raise them above the trusted base: the defaults, ``ASH_CONFIG``'s file, or the
 operator's default config in workspace mode. The trusted value is kept, and the
@@ -138,7 +138,7 @@ def layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """A scanned tree, a directory outside it for operator files, and no ASH_CONFIG."""
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     tree = tmp_path / "repo"
-    (tree / ".ash").mkdir(parents=True)
+    tree.mkdir(parents=True)
     outside = tmp_path / "operator"
     outside.mkdir()
     monkeypatch.chdir(tree)
@@ -191,7 +191,7 @@ class TestRepositoryConfig:
         self, layout, monkeypatch
     ):
         tree, _ = layout
-        (tree / ".ash" / ".ash.yaml").write_text(options_yaml(RAISED))
+        (tree / ".ash.yaml").write_text(options_yaml(RAISED))
         archive = declared_archive(tree)
 
         config = resolve_config(source_dir=tree)
@@ -203,7 +203,7 @@ class TestRepositoryConfig:
         self, layout, ash_log
     ):
         tree, _ = layout
-        (tree / ".ash" / ".ash.yaml").write_text(options_yaml(RAISED))
+        (tree / ".ash.yaml").write_text(options_yaml(RAISED))
 
         resolve_config(source_dir=tree)
 
@@ -221,7 +221,7 @@ class TestRepositoryConfig:
         operator = outside / "ash.yaml"
         operator.write_text(options_yaml({option: trusted}, project_name="operator"))
         monkeypatch.setenv("ASH_CONFIG", str(operator))
-        (tree / ".ash" / ".ash.yaml").write_text(options_yaml({option: raised}))
+        (tree / ".ash.yaml").write_text(options_yaml({option: raised}))
         archive = tree / "a.zip"
         archive.write_bytes(zip_bytes(members))
 
@@ -245,7 +245,7 @@ class TestRepositoryConfig:
         operator = outside / "ash.yaml"
         operator.write_text(options_yaml({option: trusted}, project_name="operator"))
         monkeypatch.setenv("ASH_CONFIG", str(operator))
-        (tree / ".ash" / ".ash.yaml").write_text(options_yaml({option: empty}))
+        (tree / ".ash.yaml").write_text(options_yaml({option: empty}))
         archive = tree / "a.zip"
         archive.write_bytes(zip_bytes(members))
 
@@ -267,9 +267,7 @@ class TestRepositoryConfig:
             options_yaml({"max_member_bytes": 1000}, project_name="operator")
         )
         monkeypatch.setenv("ASH_CONFIG", str(operator))
-        (tree / ".ash" / ".ash.yaml").write_text(
-            options_yaml({"max-member-bytes": 1_000_000})
-        )
+        (tree / ".ash.yaml").write_text(options_yaml({"max-member-bytes": 1_000_000}))
         archive = tree / "a.zip"
         archive.write_bytes(zip_bytes({"large.py": incompressible(2000)}))
 
@@ -283,14 +281,14 @@ class TestRepositoryConfig:
         assert "Unknown key 'max-member-bytes'" in message, message
         assert "max_member_bytes" in message, message
         assert ".ash.yaml" in message, message
-        assert [p.name for p in tree.iterdir() if p.is_dir() and p.name != ".ash"] == []
+        assert [p.name for p in tree.iterdir() if p.is_dir()] == []
 
     def test_config_overrides_set_a_limit_over_a_repository_config(
         self, layout, monkeypatch
     ):
         """--config-overrides is the operator's, whatever the repository config says."""
         tree, _ = layout
-        (tree / ".ash" / ".ash.yaml").write_text(options_yaml({"max_members": 1000}))
+        (tree / ".ash.yaml").write_text(options_yaml({"max_members": 1000}))
         archive = tree / "a.zip"
         archive.write_bytes(zip_bytes({f"m{i}.py": f"N = {i}\n" for i in range(3)}))
 
@@ -308,7 +306,7 @@ class TestRepositoryConfig:
         tree, outside = layout
         operator = outside / "ash.yaml"
         operator.write_text(options_yaml(RAISED, project_name="operator"))
-        (tree / ".ash" / ".ash.yaml").write_text("project_name: scanned\n")
+        (tree / ".ash.yaml").write_text("project_name: scanned\n")
         archive = declared_archive(tree)
 
         config = resolve_config(config_path=operator, source_dir=tree)
@@ -321,7 +319,7 @@ class TestRepositoryConfig:
 
     def test_positive_control_the_repository_config_is_read(self, layout, monkeypatch):
         tree, _ = layout
-        (tree / ".ash" / ".ash.yaml").write_text(options_yaml({"max_members": 1000}))
+        (tree / ".ash.yaml").write_text(options_yaml({"max_members": 1000}))
         archive = tree / "a.zip"
         archive.write_bytes(zip_bytes({"ok.py": "print('ok')\n"}))
 
@@ -406,8 +404,8 @@ class TestWorkspaceProjectConfig:
         monkeypatch.delenv("ASH_CONFIG", raising=False)
         workspace = tmp_path / "workspace"
         project = workspace / "services" / "api"
-        (project / ".ash").mkdir(parents=True)
-        project_config = project / ".ash" / ".ash.yaml"
+        project.mkdir(parents=True)
+        project_config = project / ".ash.yaml"
         project_config.write_text(options_yaml({option: raised}))
         operator = tmp_path / "operator" / "default.yaml"
         operator.parent.mkdir()

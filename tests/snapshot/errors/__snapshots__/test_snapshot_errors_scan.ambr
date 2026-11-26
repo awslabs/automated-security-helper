@@ -37,6 +37,7 @@
   dict({
     'exit_code': 5,
     'stderr': '''
+      DeprecationWarning: 'ash report' is deprecated and is removed in 4.0. Use 'ash results report' instead; 'ash report' keeps its current behavior until then.
       Usage: ash [OPTIONS] COMMAND [ARGS]...
       Try 'ash --help' for help.
       Error: 'ash report' does not take --source-dir, given before it (see 'ash report --help'). Options given before a subcommand are passed to it only when it takes them: drop it, give it after a subcommand that takes it, or leave out 'report' to scan with it.
@@ -360,7 +361,7 @@
     'stdout': '''
       INFO     Initializing ASH v<ASH_VERSION>
       INFO     Initializing execution engine
-      ERROR (5) None of the requested scanners exist: not-a-scanner. Registered scanners: actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
+      ERROR (5) None of the requested scanners exist: not-a-scanner. Registered scanners: actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, mcp-config, npm-audit, opengrep, semgrep, syft, trivy, zizmor. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
   
     ''',
   })
@@ -420,7 +421,7 @@
     'exit_code': 3,
     'stderr': '''
       Configuration validation failed: Invalid value at 'fail_on_findings': Input should be a valid boolean
-      Project 'service-a' at '<TMP>/service-a' has an invalid configuration: Configuration validation failed for '<TMP>/service-a/.ash/.ash.yaml': Invalid value at 'fail_on_findings': Input should be a valid boolean. Run: ash config lint --config <TMP>/service-a/.ash/.ash.yaml --source-dir <TMP>/service-a
+      Project 'service-a' at '<TMP>/service-a' has an invalid configuration: Configuration validation failed for '<TMP>/service-a/.ash.yaml': Invalid value at 'fail_on_findings': Input should be a valid boolean. Run: ash config lint --config <TMP>/service-a/.ash.yaml --source-dir <TMP>/service-a
   
     ''',
     'stdout': '',

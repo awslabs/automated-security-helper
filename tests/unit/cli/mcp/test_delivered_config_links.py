@@ -4,7 +4,7 @@
 """A config file reached through a symlink is judged by every name it has.
 
 ``set_source_git`` clones a tree as it is, symlinks included, so a delivered
-tree's ``.ash/.ash.yaml`` can be a link to a file outside the MCP workspace
+tree's ``.ash.yaml`` can be a link to a file outside the MCP workspace
 root. Each file of a config's chain is judged by the name it was found or named
 by, by each symlink followed on the way to it, and by the file it resolves to. A
 file is a client's when any of those names is, and the repository's when any of
@@ -187,9 +187,9 @@ def _clone(tmp: Path, files: Dict[str, str], links: Dict[str, Path]) -> Path:
 
 
 def _linked_tree(server: Dict[str, Path], text: str) -> Path:
-    """A delivered tree whose ``.ash/.ash.yaml`` links to a host file holding ``text``."""
+    """A delivered tree whose ``.ash.yaml`` links to a host file holding ``text``."""
     host_file = _write(server["host"] / "ash.yaml", text)
-    return _clone(server["tmp"], {"app.py": "x = 1\n"}, {".ash/.ash.yaml": host_file})
+    return _clone(server["tmp"], {"app.py": "x = 1\n"}, {".ash.yaml": host_file})
 
 
 def _scan_resolution(target: Path, session_id: Optional[str] = SESSION) -> Any:
@@ -367,6 +367,8 @@ def test_a_linked_configs_scanner_exclusion_is_moved_out_of_the_options(
 @pytest.mark.integration
 def test_a_linked_config_directory_is_judged_by_the_link(_server) -> None:
     """A symlinked ``.ash`` directory: the file sits in the host directory.
+
+    Legacy location: this test's subject is the deprecated ``.ash/`` directory.
 
     The MCP scan refuses such a tree before it reads a config, because its
     output directory is under ``.ash``; any other resolve of the tree's config
@@ -637,7 +639,7 @@ def test_a_remote_scan_refuses_a_discovered_config_linking_out(_server) -> None:
 
     assert result.get("success") is False, result
     assert result.get("error_type") == "config_input_not_permitted", result
-    assert (source / ".ash" / ".ash.yaml").as_posix() in result["error"], result
+    assert (source / ".ash.yaml").as_posix() in result["error"], result
     assert str(_server["host"]) not in repr(result)
     assert CANARY not in repr(result)
     assert host_file.resolve() not in read
@@ -681,7 +683,7 @@ def test_the_scan_itself_refuses_it_without_reading_it(_server) -> None:
     # The code, then the text the CLI showed for the refusal
     # (mcp_tools._exit_message); it names the link by its in-tree path.
     assert entry.error_message.startswith("ASH exited with code 3"), entry.to_dict()
-    assert (source / ".ash" / ".ash.yaml").as_posix() in entry.error_message
+    assert (source / ".ash.yaml").as_posix() in entry.error_message
     assert str(_server["host"]) not in repr(entry.to_dict())
     assert (_server["host"] / "ash.yaml").resolve() not in read
     assert CANARY not in repr(entry.to_dict())
@@ -781,7 +783,7 @@ def test_stdio_keeps_a_local_repositorys_linked_config(_server) -> None:
     host_file = _write(_server["host"] / "ash.yaml", LINK_OUT)
     repo = _server["tmp"] / "home" / "repo"
     _write(repo / "app.py", "x = 1\n")
-    _symlink(repo / ".ash" / ".ash.yaml", host_file)
+    _symlink(repo / ".ash.yaml", host_file)
 
     started = _start_scan(repo, session_id=None)
     config = _scan_resolution(repo, session_id=None)
@@ -800,14 +802,12 @@ def test_a_link_that_stays_inside_the_allowed_roots_is_followed(
     if where == "in a config root":
         monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(_server["host"]))
         target = _write(_server["host"] / "ash.yaml", "project_name: linked\n")
-        source = _clone(
-            _server["tmp"], {"app.py": "x = 1\n"}, {".ash/.ash.yaml": target}
-        )
+        source = _clone(_server["tmp"], {"app.py": "x = 1\n"}, {".ash.yaml": target})
     else:
         source = _clone(
             _server["tmp"],
             {"app.py": "x = 1\n", "conf/real.yaml": "project_name: linked\n"},
-            {".ash/.ash.yaml": Path("../conf/real.yaml")},
+            {".ash.yaml": Path("conf/real.yaml")},
         )
 
     started = _start_scan(source)

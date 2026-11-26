@@ -385,9 +385,7 @@ def test_an_off_host_reporter_the_repository_turned_on_is_listed_off(tmp_path):
             },
         }
     )
-    record_operator_reporters(
-        config, AshConfig(), [tmp_path / "src" / ".ash" / ".ash.yaml"]
-    )
+    record_operator_reporters(config, AshConfig(), [tmp_path / "src" / ".ash.yaml"])
 
     result = _listing(
         tmp_path,

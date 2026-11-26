@@ -21,6 +21,7 @@ from __future__ import annotations
 import importlib.util
 import json.decoder
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -43,6 +44,7 @@ ALTERNATIVE_ROW = opsf.RuntimeCompatRow(
     "checkov's Decoder.json_array does not pass it",
     upstream_issue="https://github.com/bridgecrewio/checkov/issues/7777",
     open_ended=True,
+    recorded_default_constraint="",
     polyfill=SHIM,
     pin_insufficient="hypothesis for the test: no interpreter below 3.15 is "
     "installable on the host",
@@ -131,6 +133,109 @@ def test_the_shim_ships_where_the_row_says() -> None:
     assert directory.parent.name == "polyfills"
 
 
+# ---- the sitecustomize chain -----------------------------------------------
+#
+# Python imports ONE module named ``sitecustomize`` -- the first on
+# ``sys.path`` -- and the injector prepends the shim's directory, so without a
+# chain-import the shim would silently shadow a caller's own sitecustomize
+# (subprocess coverage via ``COVERAGE_PROCESS_START`` rides one). These run a
+# real interpreter because the chain acts only at startup, when the shim IS
+# the module named ``sitecustomize``.
+
+
+def _startup(env_additions: dict[str, str]) -> subprocess.CompletedProcess:
+    probe = (
+        "import sys\n"
+        "module = sys.modules.get('sitecustomize')\n"
+        "print('SITECUSTOMIZE-FILE:' + getattr(module, '__file__', 'none'))\n"
+        "print('PLANTED-RAN:' + str(getattr(sys, '_ash_planted_sitecustomize', False)))\n"
+    )
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key
+        not in ("PYTHONPATH", "PYTHONNOUSERSITE", "PYTHONSAFEPATH", "PYTHONVERBOSE")
+    }
+    return subprocess.run(  # noqa: S603 - our own interpreter, our own files
+        [sys.executable, "-c", probe],
+        env={**env, **env_additions},
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+
+def test_the_shim_chains_to_the_callers_sitecustomize(tmp_path) -> None:
+    """Both sitecustomizes run: the shim first (it is first on PYTHONPATH),
+    then the caller's, which ends up owning the module name."""
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    planted = caller / "sitecustomize.py"
+    planted.write_text("import sys\nsys._ash_planted_sitecustomize = True\n")
+    shim_dir = str(env_module.polyfill_directory(SHIM))
+    result = _startup(
+        {"PYTHONPATH": shim_dir + os.pathsep + str(caller)},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "PLANTED-RAN:True" in result.stdout, (
+        "the caller's sitecustomize never ran: the shim shadowed it\n"
+        + result.stdout
+        + result.stderr
+    )
+    assert f"SITECUSTOMIZE-FILE:{planted}" in result.stdout, (
+        "the chained module owns the name\n" + result.stdout
+    )
+
+
+def test_the_shim_alone_still_owns_the_module_name(tmp_path) -> None:
+    """The no-next control: with nothing to chain to, startup succeeds and the
+    shim stays registered, so a later ``import sitecustomize`` is a no-op."""
+    shim_dir = env_module.polyfill_directory(SHIM)
+    result = _startup({"PYTHONPATH": str(shim_dir)})
+    assert result.returncode == 0, result.stderr
+    assert f"SITECUSTOMIZE-FILE:{shim_dir / 'sitecustomize.py'}" in result.stdout
+    assert "PLANTED-RAN:False" in result.stdout
+    assert "Error in sitecustomize" not in result.stderr, (
+        "an absent next sitecustomize is the silent case\n" + result.stderr
+    )
+
+
+def test_a_broken_chained_sitecustomize_is_reported_not_swallowed(tmp_path) -> None:
+    """A next ``sitecustomize`` that EXISTS but raises a genuine ImportError
+    of its own (a coverage rider whose ``import coverage`` fails in the tool
+    venv is the canonical shape) is distinguished from "no next sitecustomize"
+    by ``exc.name``, the way stock ``site.execsitecustomize`` does it: the
+    error is reported with the site.py-style stderr diagnostic, and startup
+    goes on. The pre-fix chain read every ImportError as absence and reported
+    nothing."""
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    (caller / "sitecustomize.py").write_text(
+        "import sys\n"
+        "sys._ash_planted_sitecustomize = True\n"
+        "import _ash_absent_coverage_rider\n"
+    )
+    shim_dir = env_module.polyfill_directory(SHIM)
+    result = _startup({"PYTHONPATH": str(shim_dir) + os.pathsep + str(caller)})
+    assert result.returncode == 0, (
+        "a broken chained sitecustomize never crashes startup\n" + result.stderr
+    )
+    assert "PLANTED-RAN:True" in result.stdout, (
+        "the chain reached the caller's sitecustomize before it broke\n"
+        + result.stdout
+        + result.stderr
+    )
+    assert "Error in sitecustomize; set PYTHONVERBOSE for traceback:" in result.stderr
+    assert "_ash_absent_coverage_rider" in result.stderr, (
+        "the diagnostic names the error\n" + result.stderr
+    )
+    assert f"SITECUSTOMIZE-FILE:{shim_dir / 'sitecustomize.py'}" in result.stdout, (
+        "the shim keeps the module name so a later import does not re-execute\n"
+        + result.stdout
+    )
+
+
 # ---- the injector ---------------------------------------------------------
 
 
@@ -208,7 +313,12 @@ def test_a_class_with_no_register_row_is_left_alone() -> None:
 
 def test_a_row_outside_the_tool_constraint_is_not_injected() -> None:
     bounded = opsf.RuntimeCompatRow(
-        **{**ALTERNATIVE_ROW.model_dump(), "tool_versions": "<3.5", "open_ended": False}
+        **{
+            **ALTERNATIVE_ROW.model_dump(),
+            "tool_versions": "<3.5",
+            "open_ended": False,
+            "recorded_default_constraint": None,
+        }
     )
     assert (
         env_module.runtime_compat_environment(

@@ -89,7 +89,7 @@ def _env_chain(tmp_path, monkeypatch, twin):
 
 
 def _checked(src):
-    return _write(src / ".ash" / ".ash.yaml", {"project_name": "checked"})
+    return _write(src / ".ash.yaml", {"project_name": "checked"})
 
 
 def _scan_takes_it(src, checked):
@@ -233,7 +233,7 @@ def test_an_operator_key_joined_under_the_repository_s_swap_spelling_is_owned(
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
     repository = _write(
-        checkout / ".ash" / ".ash.yaml",
+        checkout / ".ash.yaml",
         {
             "project_name": "repository",
             "reporters": _section("aws_security_hub", False, "repo-r0"),

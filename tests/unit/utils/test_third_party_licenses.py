@@ -550,10 +550,12 @@ class TestThePythonTools:
             text.count('RUN pins="$(install-pinned-tool --uv-tool-pins)" && \\\n') == 2
         )
         # Both load the alpha modules that bring tools of their own, so those
-        # tools are installed and pinned too.
+        # tools are installed and pinned too. The ${modules} value comes from the
+        # __UNSET__ sentinel dance that tests/unit/
+        # test_community_spellings_stay_aliases_of_the_alpha_tier.py owns.
         assert (
             text.count(
-                '    --config-overrides "ash_plugin_modules+=[${ASH_COMMUNITY_PLUGIN_MODULES:-${ASH_ALPHA_PLUGIN_MODULES}}]"; \\\n'
+                '    --config-overrides "ash_plugin_modules+=[${modules}]"; \\\n'
             )
             == 2
         )

@@ -38,8 +38,9 @@ def _no_uv_probe():
 
 def _tree(tmp_path: Path, config: str) -> Path:
     source = tmp_path / "repo"
+    # Some tests plant tool configs under .ash/, so the directory stays.
     (source / ".ash").mkdir(parents=True)
-    (source / ".ash" / ".ash.yaml").write_text(f"project_name: scanned\n{config}")
+    (source / ".ash.yaml").write_text(f"project_name: scanned\n{config}")
     (source / "app.py").write_text("x = 1\n")
     return source
 

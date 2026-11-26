@@ -11,9 +11,7 @@ lives in :mod:`_grep_scanner_base`. This module only customises:
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import platform
 import sys
 from pathlib import Path
@@ -22,9 +20,9 @@ from typing import Annotated, ClassVar, Dict, List, Literal
 from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.utils.sandbox.policy import (
-    SAFE_DIRECTORIES_ENV,
     SandboxRequirements,
     git_config_env,
+    safe_directories_for,
 )
 from automated_security_helper.base.options import ScannerOptionsBase, release_tag
 from automated_security_helper.base.plugin_base import CustomCommand
@@ -35,6 +33,7 @@ from automated_security_helper.base.scanner_facets import (
     ScannerFacets,
 )
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.base.uv_tool_mixin import _tool_name
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import ToolArgs
@@ -59,24 +58,6 @@ from automated_security_helper.utils.subprocess_utils import (
     spawn_run,
 )
 from automated_security_helper.utils.process_env import snapshot_environ
-
-
-def _safe_directories(target: Path) -> list[str]:
-    """The real path of ``target`` and, when it sits in a checkout, the checkout's top.
-
-    The top is the first parent holding a ``.git`` (a directory, or the file a
-    linked work tree and a submodule have). No ``.git`` above it names nothing
-    more: the conservative reading, as the scanner's prerequisites facet says.
-    """
-    real = Path(os.path.realpath(target))
-    named = [str(real)]
-    start = real if real.is_dir() else real.parent
-    for parent in (start, *start.parents):
-        if os.path.lexists(parent / ".git"):
-            if str(parent) not in named:
-                named.append(str(parent))
-            break
-    return named
 
 
 class OpengrepScannerConfigOptions(ScannerOptionsBase):
@@ -323,7 +304,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         read_path_env=("OPENGREP_RULES_CACHE_DIR",),
         # extra_subprocess_env's safe.directory entries: the sandbox's allowlist
         # passes no GIT_CONFIG_* variable, so it writes them from the directories
-        # the scanner names (SAFE_DIRECTORIES_ENV) instead.
+        # it computes from the scan target (safe_directories_for) instead.
         git_safe_directory=True,
     )
 
@@ -641,22 +622,23 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
 
         Git compares ``safe.directory`` with the top of the work tree, so a scan
         pointed at a subdirectory of a checkout names the checkout's top level as
-        well: the first parent that holds a ``.git``. Outside a checkout only the
-        scanned directory is named.
+        well: the first parent that holds a ``.git`` the scanned directory's owner
+        also owns, and never a filesystem root (``safe_directories_for``). Outside a
+        checkout only the scanned directory is named.
 
-        The same directories travel under ``SAFE_DIRECTORIES_ENV`` for a sandboxed
-        spawn, whose allowlist drops every ``GIT_CONFIG_*`` name and rebuilds the
-        entries from that list (``SandboxPolicy.filter_env``). The direct spawn
-        uses the ``GIT_CONFIG_*`` entries built here, numbered after the caller's
-        own block when that block is whole.
+        A sandboxed spawn reads the same list from the policy, which computes it
+        from the scan target with the same function, and rebuilds the entries
+        itself (``SandboxPolicy.filter_env``); no environment variable carries it.
+        The direct spawn uses the ``GIT_CONFIG_*`` entries built here, numbered
+        after the caller's own block when that block is whole.
         """
         target = self._scan_target_path
         if target is None:
             return None
-        directories = _safe_directories(target)
-        env = git_config_env(snapshot_environ(), directories)
-        env[SAFE_DIRECTORIES_ENV] = json.dumps(directories)
-        return env
+        directories = safe_directories_for(target)
+        if not directories:
+            return None
+        return git_config_env(snapshot_environ(), directories)
 
     # ---------------------------------------------------------------
     # Dependency resolution
@@ -675,10 +657,10 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         it, so the row says where the copy is and how to allow it rather than
         "not installed".
         """
-        found = find_executable(self._tool_command())
+        found = find_executable(_tool_name(self))
         ASH_LOGGER.verbose(f"Found opengrep executable at: {found}")
         if found is None:
-            refusal = in_tree_refusal(self._tool_command())
+            refusal = in_tree_refusal(_tool_name(self))
             if refusal is not None:
                 self.dependency_unavailable_reason = refusal
                 self._plugin_log(refusal, level=logging.WARNING)
@@ -699,7 +681,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
     def _get_opengrep_version(self) -> tuple[int, int, int] | None:
         try:
             result = spawn_run(  # nosec B603 — list args, executable from find_executable()
-                [self._tool_command(), "--version"],
+                [_tool_name(self), "--version"],
                 capture_output=True,
                 text=True,
                 timeout=5,

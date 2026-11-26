@@ -228,26 +228,26 @@ def _assert_carries_no_probe(result: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
-# A delivered tree's own .ash/.ash.yaml
+# A delivered tree's own .ash.yaml
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("text", [TAGGED, UNTAGGED], ids=["tagged", "untagged"])
 def test_a_delivered_tree_config_using_env_refuses_the_scan(_server, text, capsys):
-    source = _upload({".ash/.ash.yaml": text, "app.py": "x = 1\n"})
+    source = _upload({".ash.yaml": text, "app.py": "x = 1\n"})
 
     entry, outcomes = _scan(source)
 
-    _assert_refused_scan(entry, outcomes, ".ash/.ash.yaml")
+    _assert_refused_scan(entry, outcomes, ".ash.yaml")
     assert PROBE not in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("raw", [False, True], ids=["resolved", "raw"])
 @pytest.mark.parametrize("text", [TAGGED, UNTAGGED], ids=["tagged", "untagged"])
 def test_get_config_returns_nothing_from_the_environment(_server, text, raw):
-    source = _upload({".ash/.ash.yaml": text})
+    source = _upload({".ash.yaml": text})
 
-    result = _get_config(source / ".ash" / ".ash.yaml", raw=raw)
+    result = _get_config(source / ".ash.yaml", raw=raw)
 
     if raw:
         # The document as written, the reference marked and never read: the
@@ -255,7 +255,7 @@ def test_get_config_returns_nothing_from_the_environment(_server, text, raw):
         assert result == {"project_name": AS_WRITTEN}, result
     else:
         assert result.get("error_type") == ENV_REFUSED, result
-        assert ".ash/.ash.yaml" in result["error"]
+        assert ".ash.yaml" in result["error"]
     _assert_carries_no_probe(result)
 
 
@@ -271,9 +271,9 @@ def test_a_delivered_json_config_is_read_without_interpolation(_server):
 
 @pytest.mark.parametrize("text", [TAGGED, UNTAGGED], ids=["tagged", "untagged"])
 def test_validate_config_reports_the_refusal(_server, text):
-    source = _upload({".ash/.ash.yaml": text})
+    source = _upload({".ash.yaml": text})
 
-    result = _validate_config(config_path=str(source / ".ash" / ".ash.yaml"))
+    result = _validate_config(config_path=str(source / ".ash.yaml"))
 
     assert result["valid"] is False
     assert [e["type"] for e in result["errors"]] == [ENV_REFUSED], result
@@ -307,11 +307,18 @@ def test_a_delivered_toml_config_is_refused_naming_the_key(_server):
     _assert_carries_no_probe(raw)
 
 
-def test_a_delivered_base_using_env_is_refused(_server):
+@pytest.mark.parametrize(
+    "config_name,base_name",
+    [(".ash.yaml", "base.yaml"), (".ash/.ash.yaml", ".ash/base.yaml")],
+    ids=["canonical", "legacy-location"],
+)
+def test_a_delivered_base_using_env_is_refused(_server, config_name, base_name):
+    """The base sits beside the config, at the scan root or, for the deprecated
+    ``.ash/.ash.yaml`` location, inside ``.ash/``; both are refused."""
     source = _upload(
         {
-            ".ash/.ash.yaml": "extends: base.yaml\nfail_on_findings: false\n",
-            ".ash/base.yaml": TAGGED,
+            config_name: "extends: base.yaml\nfail_on_findings: false\n",
+            base_name: TAGGED,
         }
     )
 
@@ -338,13 +345,13 @@ def _run_ash_scan(**kwargs: Any) -> Tuple[Dict[str, Any], AsyncMock]:
 
 
 def test_run_ash_scan_refuses_a_delivered_tree_before_starting(_server):
-    source = _upload({".ash/.ash.yaml": TAGGED, "app.py": "x = 1\n"})
+    source = _upload({".ash.yaml": TAGGED, "app.py": "x = 1\n"})
 
     result, started = _run_ash_scan(source_dir=str(source))
 
     assert result["success"] is False
     assert result["error_type"] == ENV_REFUSED, result
-    assert ".ash/.ash.yaml" in result["error"]
+    assert ".ash.yaml" in result["error"]
     _assert_carries_no_probe(result)
     started.assert_not_called()
 
@@ -362,7 +369,7 @@ def test_run_ash_scan_refuses_an_uploaded_config_path_before_starting(_server):
 
 
 def test_run_ash_scan_still_starts_for_a_delivered_tree_without_env(_server):
-    source = _upload({".ash/.ash.yaml": "project_name: delivered\n"})
+    source = _upload({".ash.yaml": "project_name: delivered\n"})
 
     result, started = _run_ash_scan(source_dir=str(source))
 
@@ -428,11 +435,11 @@ def test_a_delivered_symlink_to_a_host_file_is_refused(_server):
     source = _upload({"app.py": "x = 1\n"})
     # A zip upload refuses symlinks; a git clone keeps them, so a delivered tree
     # can hold one. Planted after the upload to stand in for that.
-    _symlink(source / ".ash" / ".ash.yaml", host)
+    _symlink(source / ".ash.yaml", host)
 
     entry, outcomes = _scan(source)
 
-    _assert_refused_scan(entry, outcomes, ".ash/.ash.yaml")
+    _assert_refused_scan(entry, outcomes, ".ash.yaml")
     assert host.as_posix() not in str(outcomes[-1])
 
 
@@ -490,8 +497,7 @@ def test_an_operator_config_outside_the_workspace_resolves_env(_server):
 def test_a_repository_config_scanned_from_the_cli_resolves_env(_server):
     from automated_security_helper.config.resolve_config import resolve_config
 
-    config = _server["target"] / ".ash" / ".ash.yaml"
-    config.parent.mkdir()
+    config = _server["target"] / ".ash.yaml"
     config.write_text(UNTAGGED, encoding="utf-8")
 
     resolved = resolve_config(source_dir=_server["target"])

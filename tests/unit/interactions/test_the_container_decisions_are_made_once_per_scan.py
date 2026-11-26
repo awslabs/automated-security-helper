@@ -122,9 +122,7 @@ def _config_flags(cmd: List[str]) -> List[str]:
 def test_a_config_discovered_when_judged_stays_the_scans_config(layout, monkeypatch):
     env_config = _write(layout["operator"] / "env.yaml", "project_name: env\n")
     monkeypatch.setenv("ASH_CONFIG", str(env_config))
-    discovered = _write(
-        layout["source"] / ".ash" / ".ash.yaml", "project_name: found\n"
-    )
+    discovered = _write(layout["source"] / ".ash.yaml", "project_name: found\n")
     reads = rac.OperatorConfigReads()
     _judge(layout, reads)
 
@@ -146,7 +144,7 @@ def test_a_config_not_discovered_when_judged_leaves_the_environments_file_the_sc
     reads = rac.OperatorConfigReads()
     _judge(layout, reads)
 
-    _write(layout["source"] / ".ash" / ".ash.yaml", "project_name: later\n")
+    _write(layout["source"] / ".ash.yaml", "project_name: later\n")
     cmd = _assemble(layout, reads)
 
     assert _config_flags(cmd) == [

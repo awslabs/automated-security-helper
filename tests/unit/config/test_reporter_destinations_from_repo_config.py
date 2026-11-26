@@ -115,7 +115,7 @@ def test_an_in_tree_config_does_not_choose_a_reporters_destination(
 ):
     source = tmp_path / "repo"
     _write_config(
-        source / ".ash" / ".ash.yaml",
+        source / ".ash.yaml",
         {reporter: {"options": dict(REPO_VALUES[reporter])}},
     )
 
@@ -137,7 +137,7 @@ def test_security_hubs_import_scope_and_archiving_are_the_operators(
     """Which findings the reporter imports and archives decides what the account sees."""
     source = tmp_path / "repo"
     _write_config(
-        source / ".ash" / ".ash.yaml",
+        source / ".ash.yaml",
         {"aws-security-hub": {"options": {name: "repo-value"}}},
     )
 
@@ -179,7 +179,7 @@ def test_a_repository_config_does_not_choose_what_bedrock_is_sent(
 ):
     source = tmp_path / "repo"
     _write_config(
-        source / ".ash" / ".ash.yaml",
+        source / ".ash.yaml",
         {"bedrock-summary-reporter": {"options": {name: _BEDROCK_CONTENT[name]}}},
     )
 
@@ -203,7 +203,7 @@ def test_a_hyphenated_spelling_of_a_bedrock_option_is_ignored_too(
     spelled = name.replace("_", "-")
     source = tmp_path / "repo"
     _write_config(
-        source / ".ash" / ".ash.yaml",
+        source / ".ash.yaml",
         {section: {"options": {spelled: _BEDROCK_CONTENT[name]}}},
     )
 
@@ -223,7 +223,7 @@ def test_a_repository_config_repeating_the_operators_bedrock_content_applies(
     """The same value is no change: it applies, with no warning."""
     section = {"bedrock-summary-reporter": {"options": {name: _BEDROCK_CONTENT[name]}}}
     source = tmp_path / "repo"
-    project = _write_config(source / ".ash" / ".ash.yaml", section)
+    project = _write_config(source / ".ash.yaml", section)
     operator = _write_config(tmp_path / "operator" / "ash.yaml", section)
 
     config = resolve_config(
@@ -249,7 +249,7 @@ def test_a_repository_config_does_not_tune_a_reporters_retries(
 ):
     """How long a reporter keeps calling AWS with the operator's credentials."""
     source = tmp_path / "repo"
-    _write_config(source / ".ash" / ".ash.yaml", {reporter: {"options": {name: 7}}})
+    _write_config(source / ".ash.yaml", {reporter: {"options": {name: 7}}})
 
     config = resolve_config(source_dir=source)
 
@@ -284,7 +284,7 @@ def test_a_repository_config_repeating_the_operators_value_applies(
     value = REPO_VALUES[reporter][name]
     section = {reporter: {"options": {name: value}}}
     source = tmp_path / "repo"
-    project = _write_config(source / ".ash" / ".ash.yaml", section)
+    project = _write_config(source / ".ash.yaml", section)
     operator = _write_config(tmp_path / "operator" / "ash.yaml", section)
 
     config = resolve_config(
@@ -317,7 +317,7 @@ def test_another_spelling_of_the_reporters_section_is_covered(
     """get_plugin_config reads each of these as bedrock-summary-reporter's section."""
     source = tmp_path / "repo"
     _write_config(
-        source / ".ash" / ".ash.yaml",
+        source / ".ash.yaml",
         {spelling: {"options": {"aws_region": "repo-region-1"}}},
     )
 
@@ -333,7 +333,7 @@ def test_another_spelling_of_the_reporters_section_is_covered(
 def test_other_reporter_options_in_the_tree_still_apply(tmp_path, ash_log):
     source = tmp_path / "repo"
     _write_config(
-        source / ".ash" / ".ash.yaml",
+        source / ".ash.yaml",
         {
             "bedrock-summary-reporter": {
                 "options": {
@@ -357,9 +357,7 @@ def test_other_reporter_options_in_the_tree_still_apply(tmp_path, ash_log):
 @pytest.mark.unit
 def test_no_warning_when_the_tree_sets_no_destination(tmp_path, ash_log):
     source = tmp_path / "repo"
-    _write_config(
-        source / ".ash" / ".ash.yaml", {"s3": {"options": {"file_format": "yaml"}}}
-    )
+    _write_config(source / ".ash.yaml", {"s3": {"options": {"file_format": "yaml"}}})
 
     resolve_config(source_dir=source)
 
@@ -370,7 +368,7 @@ def test_no_warning_when_the_tree_sets_no_destination(tmp_path, ash_log):
 def test_an_operator_config_outside_the_tree_is_honored(tmp_path, ash_log):
     source = tmp_path / "repo"
     _write_config(
-        source / ".ash" / ".ash.yaml",
+        source / ".ash.yaml",
         {"s3": {"options": {"bucket_name": "repo-bucket"}}},
     )
     operator = _write_config(
@@ -391,7 +389,7 @@ def test_an_operator_default_config_replaced_by_the_tree_supplies_the_value(
     """Workspace mode: the project's own config replaces the operator's."""
     source = tmp_path / "repo"
     project = _write_config(
-        source / ".ash" / ".ash.yaml",
+        source / ".ash.yaml",
         {"s3": {"options": {"bucket_name": "repo-bucket"}}},
     )
     operator = _write_config(
@@ -410,7 +408,7 @@ def test_an_operator_default_config_replaced_by_the_tree_supplies_the_value(
 def test_config_overrides_are_honored(tmp_path, ash_log):
     source = tmp_path / "repo"
     _write_config(
-        source / ".ash" / ".ash.yaml",
+        source / ".ash.yaml",
         {"s3": {"options": {"bucket_name": "repo-bucket"}}},
     )
 
@@ -446,9 +444,7 @@ def test_an_in_tree_config_does_not_turn_on_a_reporter_the_operator_turned_off(
 ):
     """Each of these sends findings off the host, so running it is the operator's choice."""
     source = tmp_path / "repo"
-    project = _write_config(
-        source / ".ash" / ".ash.yaml", {reporter: {"enabled": True}}
-    )
+    project = _write_config(source / ".ash.yaml", {reporter: {"enabled": True}})
 
     config = resolve_config(
         config_path=project,
@@ -469,9 +465,7 @@ def test_an_in_tree_config_that_leaves_the_reporter_out_keeps_it_off(
     """The tree's config replaces the operator's, and leaving a section out would
     return the reporter to its own default; the operator's off still holds."""
     source = tmp_path / "repo"
-    project = _write_config(
-        source / ".ash" / ".ash.yaml", {"markdown": {"enabled": True}}
-    )
+    project = _write_config(source / ".ash.yaml", {"markdown": {"enabled": True}})
 
     config = resolve_config(
         config_path=project,
@@ -542,7 +536,7 @@ def test_the_operators_ash_config_turning_one_off_holds_too(
     """The CLI's trusted base outside workspace mode is ASH_CONFIG's file."""
     monkeypatch.setenv("ASH_CONFIG", str(_operator_off(tmp_path, "s3")))
     source = tmp_path / "repo"
-    _write_config(source / ".ash" / ".ash.yaml", {"s3": {"enabled": True}})
+    _write_config(source / ".ash.yaml", {"s3": {"enabled": True}})
 
     config = resolve_config(source_dir=source)
 
@@ -559,9 +553,7 @@ def test_an_in_tree_config_cannot_turn_one_off(tmp_path, ash_log, reporter, oper
     these reporters is off by default, so with no operator setting the tree's
     ``false`` changes nothing and is not named."""
     source = tmp_path / "repo"
-    project = _write_config(
-        source / ".ash" / ".ash.yaml", {reporter: {"enabled": False}}
-    )
+    project = _write_config(source / ".ash.yaml", {reporter: {"enabled": False}})
     trusted = (
         {"trusted_config_path": _operator(tmp_path, reporter, True)}
         if operator == "operator-on"
@@ -584,7 +576,7 @@ def test_a_tree_enabled_read_as_false_is_confined_too(tmp_path, ash_log, value):
     """Not only ``false`` itself: any value the reporter reads as off is the tree's
     choice too, and is ignored with a warning where the operator has it on."""
     source = tmp_path / "repo"
-    project = _write_config(source / ".ash" / ".ash.yaml", {"s3": {"enabled": value}})
+    project = _write_config(source / ".ash.yaml", {"s3": {"enabled": value}})
 
     config = resolve_config(
         config_path=project,
@@ -601,9 +593,7 @@ def test_a_tree_enabled_read_as_false_is_confined_too(tmp_path, ash_log, value):
 def test_a_tree_repeating_the_operators_off_is_not_warned(tmp_path, ash_log, reporter):
     """``enabled: false`` where the operator has the reporter off changes nothing."""
     source = tmp_path / "repo"
-    project = _write_config(
-        source / ".ash" / ".ash.yaml", {reporter: {"enabled": False}}
-    )
+    project = _write_config(source / ".ash.yaml", {reporter: {"enabled": False}})
 
     config = resolve_config(
         config_path=project,
@@ -620,9 +610,7 @@ def test_a_tree_repeating_the_operators_off_is_not_warned(tmp_path, ash_log, rep
 def test_an_override_turns_one_off(tmp_path, ash_log, reporter):
     """``--config-overrides`` are the operator's, in both directions."""
     source = tmp_path / "repo"
-    project = _write_config(
-        source / ".ash" / ".ash.yaml", {reporter: {"enabled": True}}
-    )
+    project = _write_config(source / ".ash.yaml", {reporter: {"enabled": True}})
 
     config = resolve_config(
         config_path=project,
@@ -641,9 +629,7 @@ def test_enabled_true_where_the_operator_has_it_on_changes_nothing(
     tmp_path, ash_log, reporter
 ):
     source = tmp_path / "repo"
-    project = _write_config(
-        source / ".ash" / ".ash.yaml", {reporter: {"enabled": True}}
-    )
+    project = _write_config(source / ".ash.yaml", {reporter: {"enabled": True}})
 
     config = resolve_config(
         config_path=project,
@@ -682,7 +668,7 @@ def test_a_reporter_off_by_its_default_gets_no_section_added(section):
 def test_an_operator_off_written_another_way_still_counts(tmp_path, trusted_value):
     """The operator's value is read as the reporter's model reads it."""
     source = tmp_path / "repo"
-    project = _write_config(source / ".ash" / ".ash.yaml", {"s3": {"enabled": True}})
+    project = _write_config(source / ".ash.yaml", {"s3": {"enabled": True}})
     operator = _write_config(
         tmp_path / "operator" / "ash.yaml", {"s3": {"enabled": trusted_value}}
     )
@@ -715,7 +701,7 @@ def test_off_by_default_an_in_tree_config_cannot_enable_it(
 ):
     """No operator config: the trusted base is the defaults, which have it off."""
     source = tmp_path / "repo"
-    _write_config(source / ".ash" / ".ash.yaml", {reporter: {"enabled": True}})
+    _write_config(source / ".ash.yaml", {reporter: {"enabled": True}})
 
     config = resolve_config(source_dir=source)
 
@@ -788,7 +774,7 @@ def test_a_section_without_enabled_does_not_turn_on_a_reporter_the_operator_has_
     source = tmp_path / "repo"
     source.mkdir()
     if route == "tree":
-        written = _write_config(source / ".ash" / ".ash.yaml", section)
+        written = _write_config(source / ".ash.yaml", section)
         delivered = {}
     else:
         written = _write_config(tmp_path / "upload" / "ash.yaml", section)
@@ -856,9 +842,7 @@ def test_off_by_their_models_default_the_loaded_reporters_stay_off(tmp_path):
     """Once the plugin package is loaded, its models' own defaults decide."""
     names = sorted(REPORTER_ENABLED_DEFAULTS)
     source = tmp_path / "repo"
-    _write_config(
-        source / ".ash" / ".ash.yaml", {name: {"enabled": True} for name in names}
-    )
+    _write_config(source / ".ash.yaml", {name: {"enabled": True} for name in names})
 
     result = subprocess.run(
         [
@@ -910,7 +894,7 @@ def test_every_operator_only_reporter_setting_is_a_default_denied_path():
 @pytest.mark.unit
 def test_an_override_turns_one_on(tmp_path, ash_log):
     source = tmp_path / "repo"
-    project = _write_config(source / ".ash" / ".ash.yaml", {"s3": {"enabled": False}})
+    project = _write_config(source / ".ash.yaml", {"s3": {"enabled": False}})
 
     config = resolve_config(
         config_path=project,
@@ -930,7 +914,7 @@ def test_a_base_the_tree_extends_sets_no_destination_either(tmp_path, ash_log):
         source / "shared" / "base.yaml",
         {"s3": {"options": {"bucket_name": "base-bucket"}}},
     )
-    _write_config(source / ".ash" / ".ash.yaml", {}, extends="../shared/base.yaml")
+    _write_config(source / ".ash.yaml", {}, extends="shared/base.yaml")
 
     config = resolve_config(source_dir=source)
 

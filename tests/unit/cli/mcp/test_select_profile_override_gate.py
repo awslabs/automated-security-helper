@@ -435,6 +435,25 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
             }
         },
     ),
+    # The run history joined the shipped defaults with the history section
+    # (ash_config.py: enabled turns on writes beside the output on every scan,
+    # and keep_runs bounds what pruning may delete), so each entry gets a case.
+    "/global_settings/history": (
+        {
+            "op": "replace",
+            "path": "/global_settings/history",
+            "value": {"enabled": True, "keep_runs": 50},
+        },
+        {"global_settings": {"history": {"enabled": True, "keep_runs": 50}}},
+    ),
+    "/global_settings/history/**": (
+        {
+            "op": "replace",
+            "path": "/global_settings/history/keep_runs",
+            "value": 1,
+        },
+        {"global_settings": {"history": {"keep_runs": 1}}},
+    ),
     "/scanners/opengrep/options/exclude_rule": (
         {
             "op": "replace",

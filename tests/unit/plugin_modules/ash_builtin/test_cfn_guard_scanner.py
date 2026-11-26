@@ -191,7 +191,7 @@ def _scanner(repo: Path, *, operator: bool = True, **options) -> CfnGuardScanner
     config = get_default_config()
     record_provenance(
         config,
-        in_tree=[] if operator else [repo / ".ash" / ".ash.yaml"],
+        in_tree=[] if operator else [repo / ".ash.yaml"],
         trusted=AshConfig(),
     )
     context = PluginContext(

@@ -1,4 +1,4 @@
-$ ash report --format ocsf --log-level ERROR
+$ ash results report --format ocsf --log-level ERROR
 [exit 0]
 [
   {

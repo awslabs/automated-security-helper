@@ -541,18 +541,55 @@ def test_an_open_ended_row_still_covers_the_default_tool_constraint(
     cls, _instances
 ) -> None:
     """The re-check at a tool bump. An open-ended row records an UNSOLVED
-    upstream issue; when the scanner's default version constraint moves out of
-    the row's tool range this goes red, which is the prompt to read the row's
-    upstream issue and close or re-bound the row."""
+    upstream issue and the default tool constraint it was written against;
+    when the live default moves (the bump that follows an upstream fix) this
+    goes red, which is the prompt to read the row's upstream issue (or
+    recheck_note) and close or re-bound the row. The equality is what makes
+    the gate able to fire at all for the shipped shape -- a blank tool range
+    and a range default constraint -- where ``applies_to`` alone can never go
+    red; ``test_the_recheck_fires_when_the_default_constraint_moves`` proves
+    the red case at the same predicate this gate calls."""
     instance = _instances[cls]
     constraint = instance._get_tool_version_constraint()
     for row in _ops(cls).runtime_compat.rows:
         if row.open_ended:
+            where = row.upstream_issue or row.recheck_note
+            assert not row.recheck_fires(constraint), (
+                f"{_ops(cls).scanner_name}: the default tool constraint moved "
+                f"from the recorded {row.recorded_default_constraint!r} to "
+                f"{constraint!r}; the tool bumped, so re-read the open-ended "
+                f"row ({where}) and close or re-bound it, then re-record the "
+                "constraint"
+            )
             assert row.applies_to(constraint), (
                 f"{_ops(cls).scanner_name}: the default tool constraint "
                 f"{constraint!r} is outside the open-ended row's tool range "
-                f"{row.tool_versions!r}; has {row.upstream_issue} been fixed?"
+                f"{row.tool_versions!r}; has {where} been fixed?"
             )
+
+
+def test_the_gate_reds_on_a_simulated_default_bump(_instances, monkeypatch) -> None:
+    """The committed witness that the LIVE gate above can fire, not only its
+    predicate (``test_the_recheck_fires_when_the_default_constraint_moves``
+    proves ``recheck_fires`` on a fixture row): bump one shipped scanner's
+    default tool constraint and the gate reds, naming the recorded and live
+    constraints in its message."""
+    with_open_ended = [
+        cls
+        for cls in SCANNER_CLASSES
+        if any(row.open_ended for row in _ops(cls).runtime_compat.rows)
+    ]
+    assert with_open_ended, "no shipped open-ended row: the control has no subject"
+    cls = with_open_ended[0]
+    row = next(r for r in _ops(cls).runtime_compat.rows if r.open_ended)
+    bumped = "==999.0.0"
+    assert bumped != (row.recorded_default_constraint or "")
+    monkeypatch.setattr(_instances[cls], "_get_tool_version_constraint", lambda: bumped)
+    with pytest.raises(AssertionError) as excinfo:
+        test_an_open_ended_row_still_covers_the_default_tool_constraint(cls, _instances)
+    message = str(excinfo.value)
+    assert repr(row.recorded_default_constraint) in message
+    assert repr(bumped) in message
 
 
 @pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)

@@ -125,7 +125,7 @@ class TestEveryReaderRefusesAnAlias:
         _assert_refused_at_parse(str(excinfo.value))
 
     def test_a_discovered_config_file(self, tmp_path):
-        _write(tmp_path / ".ash" / ".ash.yaml", _chain(4))
+        _write(tmp_path / ".ash.yaml", _chain(4))
 
         with pytest.raises(ASHConfigSourceError) as excinfo:
             resolve_config(source_dir=tmp_path)

@@ -40,7 +40,7 @@ def _write(path: Path, document) -> Path:
 
 
 def _project(tmp_path: Path, document) -> Path:
-    return _write(tmp_path / "repo" / ".ash" / ".ash.yaml", document)
+    return _write(tmp_path / "repo" / ".ash.yaml", document)
 
 
 def _operator(tmp_path: Path, document) -> Path:
@@ -204,7 +204,7 @@ def test_a_named_project_config_that_is_missing_is_refused(tmp_path):
     """Not answered with the overlay alone: the project's own settings would be lost."""
     from automated_security_helper.core.exceptions import ASHConfigFileNotFoundError
 
-    missing = tmp_path / "repo" / ".ash" / ".ash.yaml"
+    missing = tmp_path / "repo" / ".ash.yaml"
     (tmp_path / "repo").mkdir()
     operator = _operator(tmp_path, {"project_name": "operator"})
 
@@ -270,7 +270,7 @@ def test_an_overlay_extending_a_base_inside_the_scanned_tree_is_refused(tmp_path
     operator = _write(
         ops / "ash.yaml", {"extends": "ws/shared/base.yaml", "project_name": "op"}
     )
-    project = _write(ops / "ws" / "repo" / ".ash" / ".ash.yaml", {})
+    project = _write(ops / "ws" / "repo" / ".ash.yaml", {})
 
     with pytest.raises(ASHConfigValidationError, match=_NOT_THE_OPERATORS) as raised:
         resolve_config(
@@ -289,7 +289,7 @@ def test_the_same_overlay_layers_when_its_base_is_outside_the_scanned_tree(tmp_p
     ops = tmp_path / "ops"
     _write(ops / "shared" / "base.yaml", {"fail_on_findings": False})
     operator = _write(ops / "ash.yaml", {"extends": "shared/base.yaml"})
-    project = _write(ops / "ws" / "repo" / ".ash" / ".ash.yaml", {})
+    project = _write(ops / "ws" / "repo" / ".ash.yaml", {})
 
     config = resolve_config(
         config_path=project,
@@ -335,7 +335,7 @@ def test_the_overlays_extends_chain_counts_as_set(tmp_path):
 def test_a_project_config_that_cannot_be_read_is_refused(tmp_path):
     """Not replaced by the overlay alone, nor by the built-in defaults: either
     would scan with the project's own settings dropped."""
-    project = tmp_path / "repo" / ".ash" / ".ash.yaml"
+    project = tmp_path / "repo" / ".ash.yaml"
     project.parent.mkdir(parents=True)
     project.write_text("fail_on_findings: [unclosed\n", encoding="utf-8")
     operator = _operator(tmp_path, {"fail_on_incomplete_scanners": False})
@@ -411,7 +411,7 @@ def test_an_overlay_that_does_not_validate_is_refused_and_named(tmp_path):
 def test_an_invalid_overlay_is_refused_when_the_project_config_is_unreadable(
     tmp_path,
 ):
-    project = tmp_path / "repo" / ".ash" / ".ash.yaml"
+    project = tmp_path / "repo" / ".ash.yaml"
     project.parent.mkdir(parents=True)
     project.write_text("x: [unclosed\n", encoding="utf-8")
     operator = _operator(tmp_path, {"fail_on_findings": "sometimes"})

@@ -1374,6 +1374,22 @@ def _matching_exclusion(
     return None
 
 
+def _is_install_location_uri(uri: str | None) -> bool:
+    """Whether *uri* is npm-audit's pre-lockfile install location.
+
+    The shape a report converted on its own (no lockfile known) still writes:
+    ``node_modules/<package>/package.json``, the package possibly nested under
+    further ``node_modules/`` segments. No audited lockfile is named
+    ``package.json``, so the tail alone cannot misread a lockfile-located
+    finding.
+    """
+    if not uri:
+        return False
+    return uri.endswith("/package.json") and (
+        uri.startswith("node_modules/") or "/node_modules/" in uri
+    )
+
+
 def _apply_config_suppression(
     result: Result,
     suppressions: list,
@@ -1384,10 +1400,24 @@ def _apply_config_suppression(
     recorded_fields: Dict[int, Dict[str, Any]] | None = None,
     written_ids: Dict[int, str] | None = None,
     warned_engines: set | None = None,
+    warned_rule_less: set | None = None,
 ) -> bool:
     """Apply a config-based suppression to *result* if one matches *flat_finding*.
 
     Mutates result.suppressions on match. Returns True when a suppression was applied.
+    ``warned_rule_less`` is the pass's warn-once set for a suppression that names
+    no rule and matches an npm-audit finding: npm-audit findings moved from
+    ``node_modules/<package>/package.json`` locations into the audited lockfile,
+    so a rule-less entry whose path scope matches a lockfile (``deploy/**``,
+    ``**/package-lock.json``) can newly cover advisories it never covered when it
+    was written, with no config change. The warning names the entry once so the
+    operator can audit it; ``None`` (a direct caller) warns nothing. An entry
+    that names a ``package_name`` is scoped on purpose, which is exactly the
+    acknowledgment the warning's remedy asks for, so it is not warned about.
+    Neither is a match on a finding still located at
+    ``node_modules/<package>/package.json`` (a report converted on its own, with
+    no lockfile known): that is the pre-move shape, which a rule-less entry
+    covered before the move too, so nothing is newly widened there.
     ``written_reasons`` (``suppression_matcher.written_suppression_reasons``) gives
     the reason quoted for a suppression whose reason was read from the environment.
     ``recorded_fields`` (``suppression_matcher.recorded_suppressions``) gives the
@@ -1402,6 +1432,29 @@ def _apply_config_suppression(
     )
     if not should_suppress:
         return False
+
+    if (
+        warned_rule_less is not None
+        and matching_suppression is not None
+        and not (getattr(matching_suppression, "rule_id", None) or "").strip()
+        and not (getattr(matching_suppression, "package_name", None) or "").strip()
+        and flat_finding.scanner == "npm-audit"
+        and not _is_install_location_uri(flat_finding.file_path)
+        and id(matching_suppression) not in warned_rule_less
+    ):
+        warned_rule_less.add(id(matching_suppression))
+        ASH_LOGGER.warning(
+            f"A suppression that names no rule_id (path "
+            f"'{escape_markup(getattr(matching_suppression, 'path', None) or '')}') "
+            f"covers npm-audit findings, first at rule "
+            f"'{escape_markup(result.ruleId)}' in "
+            f"'{escape_markup(flat_finding.file_path)}'. npm-audit findings "
+            "moved from node_modules/<package>/package.json into the audited "
+            "lockfile, so an entry written before that change may cover "
+            "advisories it never covered; see the migration note under "
+            "how-to/suppress-findings.",
+            extra=MARKUP,
+        )
 
     if used_suppressions is not None and matching_suppression:
         written_id = (
@@ -1579,8 +1632,13 @@ def _suppress_transitive_of_suppressed_roots(
     scan, so each needed its own entry.
 
     A root reference is satisfied only by a result in this report with the same
-    rule id and the same ``package_path`` (the URI when the reference has no
-    path) that is itself suppressed. A reference with no such result -- the
+    rule id and the same ``package_path``; for a reference with no path (a root
+    npm lists no install location for), by one with the same URI and the same
+    ``package_name``, since results at a lockfile share its URI and the URI
+    alone would let another package's suppressed result under the same rule
+    stand in for a root whose own advisory is live. A reference with neither a
+    path nor a name (one written before the name was recorded) matches by URI
+    alone. A reference with no such result -- the
     root was dropped by an ignore path, or reported by nothing -- or one whose
     result is not suppressed leaves the transitive finding visible. Rule ids are
     not changed, so existing suppressions on transitive findings keep matching.
@@ -1590,6 +1648,7 @@ def _suppress_transitive_of_suppressed_roots(
     """
     by_path: dict[tuple[str, str], list[Result]] = {}
     by_uri: dict[tuple[str, str], list[Result]] = {}
+    by_uri_name: dict[tuple[str, str, str], list[Result]] = {}
     transitive: list[Result] = []
     for run in sarif_report.runs:
         for result in run.results or []:
@@ -1597,7 +1656,7 @@ def _suppress_transitive_of_suppressed_roots(
                 continue
             if extract_root_advisories(result.properties):
                 transitive.append(result)
-            _, _, package_path = extract_package_identity(result.properties)
+            package_name, _, package_path = extract_package_identity(result.properties)
             if package_path:
                 key = (result.ruleId, normalize(package_path, False))
                 by_path.setdefault(key, []).append(result)
@@ -1612,6 +1671,10 @@ def _suppress_transitive_of_suppressed_roots(
                 by_uri.setdefault((result.ruleId, normalize(uri, True)), []).append(
                     result
                 )
+                if package_name:
+                    by_uri_name.setdefault(
+                        (result.ruleId, normalize(uri, True), package_name), []
+                    ).append(result)
 
     for result in transitive:
         if is_result_suppressed(result):
@@ -1635,6 +1698,16 @@ def _suppress_transitive_of_suppressed_roots(
                 key = (rule_id, normalize(ref["package_path"], False))
                 matches = by_path.get(key, [])
                 where = ref["package_path"]
+            elif "package_name" in ref:
+                # A path-less root: results at its lockfile share the URI, so
+                # the URI alone matched another package's suppressed result
+                # under the same rule while this root's advisory was live. The
+                # name keeps the reference on the root's own by-name result,
+                # and with that result absent the reference matches nothing,
+                # which leaves the transitive finding visible.
+                key = (rule_id, normalize(ref["uri"], True), ref["package_name"])
+                matches = by_uri_name.get(key, [])
+                where = f"{ref['package_name']} in {ref['uri']}"
             else:
                 key = (rule_id, normalize(ref["uri"], True))
                 matches = by_uri.get(key, [])
@@ -2107,6 +2180,10 @@ def _suppression_scanner_identity(result, run, scanner_name):
     return run.tool.driver.name if run.tool and run.tool.driver else "unknown"
 
 
+#: The roots whose broken ``.ash.lock`` was already warned about in this process.
+_BROKEN_LOCK_WARNED: set = set()
+
+
 def _symbol_resolver_for(
     source_dir: Any, suppressions: Iterable[Any]
 ) -> SymbolResolver | None:
@@ -2122,8 +2199,19 @@ def _symbol_resolver_for(
     try:
         lock = AshLock.load(source_dir)
     except AshLockError as e:
-        ASH_LOGGER.warning(f"Symbol suppressions do not apply: {e}.", extra=NO_MARKUP)
-        lock = AshLock(source_dir=Path(source_dir))
+        # Warned once per process and root: this factory runs once per
+        # suppression pass (each scanner's, then the merged one), and the
+        # resolver carries the error so its per-file notices do not claim the
+        # files "have no entry" in a lock that exists and is broken.
+        noticed = ("broken-lock", str(source_dir))
+        if noticed not in _BROKEN_LOCK_WARNED:
+            _BROKEN_LOCK_WARNED.add(noticed)
+            ASH_LOGGER.warning(
+                f"Symbol suppressions do not apply: {e}.", extra=NO_MARKUP
+            )
+        return SymbolResolver(
+            source_dir, lock=AshLock(source_dir=Path(source_dir)), lock_error=str(e)
+        )
     return SymbolResolver(source_dir, lock=lock)
 
 
@@ -2216,6 +2304,9 @@ def _apply_suppressions_within_budget(
         plugin_context.config, recorded_fields
     )
     written_ids: Dict[int, str] = {}
+    # Warn once per rule-less entry that covers an npm-audit finding (see
+    # _apply_config_suppression): per pass, like the written ids above.
+    warned_rule_less: set = set()
 
     # Exclusions a delivered config gave one scanner in its options, moved out of
     # them before the scan so the files were scanned. Each finding of that scanner
@@ -2578,6 +2669,7 @@ def _apply_suppressions_within_budget(
                         recorded_fields,
                         written_ids,
                         warned_engines=warned_engines,
+                        warned_rule_less=warned_rule_less,
                     )
                     if not config_suppressed and uri_as_written is not None:
                         config_suppressed = _apply_config_suppression(
@@ -2592,6 +2684,7 @@ def _apply_suppressions_within_budget(
                             recorded_fields,
                             written_ids,
                             warned_engines=warned_engines,
+                            warned_rule_less=warned_rule_less,
                         )
                     if config_suppressed and suppressions_in_effect(
                         result.suppressions

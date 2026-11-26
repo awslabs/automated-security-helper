@@ -16,7 +16,7 @@
           "symbol": "version_output"
         }
       ],
-      "sha256": "df54c8f38f22b4fc7ddb70b71e40a6034753a1dc6e91d7f11c1ec21e4530ee36"
+      "sha256": "bc3a2e1873bc84ed9766e42e2ad22d38cfb8825554509836cf133dc2427bfd39"
     },
     "automated_security_helper/cli/dependencies.py": {
       "created": "2026-11-25T17:03:21Z",
@@ -46,7 +46,7 @@
           "symbol": "_validate_zip_member"
         }
       ],
-      "sha256": "b0b5c6e44e6a661b1d1d8f61abd39faa07b374ff68be48ea1e6e19cad1dfbd4e"
+      "sha256": "9b992ac28862590ca04d5d53c6d9c650db2526e3887852a601a2adbb8f1ad992"
     },
     "automated_security_helper/interactions/run_ash_container.py": {
       "created": "2026-11-25T17:02:59Z",
@@ -76,7 +76,7 @@
           "symbol": "NpmAuditScanner._probe_npm_version"
         }
       ],
-      "sha256": "c335468d4ea9691659a9bc6db95dbb047f361f3f6c390a9280a6e8f905a89a78"
+      "sha256": "8f1053578a57d93dc454fe9f65ab735eb7754b1144d20f422fa4f3a20cddcb2f"
     },
     "automated_security_helper/utils/content_db_refresh.py": {
       "created": "2026-11-25T17:03:23Z",

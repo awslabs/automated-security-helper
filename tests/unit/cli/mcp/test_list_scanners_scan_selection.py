@@ -463,8 +463,7 @@ class TestListScannersDoesNotSelectScanners:
         workspace = tmp_path / "ws"
         projects = [_source(workspace, key) for key in ("api", "web")]
         for project in projects:
-            (project / ".ash").mkdir()
-            (project / ".ash" / ".ash.yaml").write_text(
+            (project / ".ash.yaml").write_text(
                 f"project_name: {project.name}\n", encoding="utf-8"
             )
         workspace_file = workspace / "dev.code-workspace"

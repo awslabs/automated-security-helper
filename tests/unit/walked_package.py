@@ -31,6 +31,7 @@ PACKAGE_DIRS = frozenset(
     {
         "",
         "assets",
+        "assets/polyfills/checkov_json_array_hook",
         "base",
         "cli",
         "cli/inspect",

@@ -174,6 +174,7 @@ def test_both_declarations_carry_the_enum_built_help_as_a_plain_str() -> None:
         (param,) = [p for p in command.params if p.name == "transport"]
         assert param.help == _HELP_BEFORE
         assert param.default == "stdio"
+        assert param.default == DEFAULT_TRANSPORT.value
         assert type(param.default) is str
         # A plain string option, not an Enum choice: click keeps its type name
         # (the metavar the help renders) and does not refuse a value itself.
@@ -230,6 +231,15 @@ def _transport_literals_in(source: str) -> List[int]:
         elif isinstance(node, (ast.Tuple, ast.Set, ast.List)):
             if sum(1 for e in node.elts if _is_spelling(e)) >= 2:
                 found.append(node.lineno)
+        elif isinstance(node, ast.Dict):
+            # A table keyed by a spelling is a second definition of the set.
+            for key in node.keys:
+                if key is not None and _is_spelling(key):
+                    found.append(key.lineno)
+        elif isinstance(node, ast.MatchValue):
+            # ``case "sse":`` compares against the spelling like ``==`` does.
+            if _is_spelling(node.value):
+                found.append(node.value.lineno)
     return sorted(set(found))
 
 
@@ -239,12 +249,17 @@ _PLANTS = {
     "not-in-tuple": 'ok = transport not in ("stdio", "sse")\n',
     "tuple": 'VALID = ("stdio", "streamable-http", "sse")\n',
     "frozenset": 'NET = frozenset({"streamable-http", "sse"})\n',
+    "dict-key": 'PORTS = {"sse": 8000, "other": 1}\n',
+    "match-arm": 'match transport:\n    case "streamable-http":\n        pass\n',
+    "one-element-membership": 'ok = transport in ("sse",)\n',
 }
 
 _MUST_NOT_FLAG = {
     "prose": 'msg = "use the streamable-http transport"\n',
     "one-literal-default": 'transport = "stdio"\n',
     "member": "if transport is Transport.SSE:\n    pass\n",
+    "dict-of-members": "PORTS = {Transport.SSE: 8000}\n",
+    "dict-value": 'DEFAULTS = {"name": "stdio"}\n',
 }
 
 

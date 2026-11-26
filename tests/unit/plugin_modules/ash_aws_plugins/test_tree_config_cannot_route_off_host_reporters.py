@@ -4,7 +4,7 @@
 """A repository's own config can neither turn on an off-host reporter nor point it.
 
 The four AWS reporters send findings off the host with the operator's
-credentials. A config file inside the scanned tree (``.ash/.ash.yaml``) can
+credentials. A config file inside the scanned tree (``.ash.yaml``) can
 neither turn one on that the trusted base has off nor turn off one it has on, and
 cannot set any of its operator-only options (config/reporter_trust.py): S3's
 bucket and key prefix,
@@ -212,7 +212,7 @@ def _workspace(
         if scan_settings.trusted_config_path
         else None,
     )
-    project_dir = project_config.parent.parent
+    project_dir = project_config.parent
     project = ProjectPlan(
         key="api",
         relative_path=project_dir.name,
@@ -241,7 +241,7 @@ def test_the_cli_route_keeps_the_trees_destinations_and_off_switch(
 ):
     repo = tmp_path / "workspace" / "repo"
     project = _write(
-        repo / ".ash" / ".ash.yaml",
+        repo / ".ash.yaml",
         {"reporters": {section: _tree_section(reporter, hyphenated)}},
     )
 
@@ -266,7 +266,7 @@ def test_the_cli_route_with_no_operator_config_keeps_the_trees_destinations(
     """The reporter's own default decides whether it runs; the tree points nothing."""
     repo = tmp_path / "workspace" / "repo"
     _write(
-        repo / ".ash" / ".ash.yaml",
+        repo / ".ash.yaml",
         {"reporters": {section: _tree_section(reporter, hyphenated)}},
     )
 
@@ -287,7 +287,7 @@ def test_the_workspace_route_keeps_the_trees_destinations_and_off_switch(
     every field the operator sets does: the reporter is off and no ``enabled``
     warning names the tree. Its destination options are confined and named."""
     project = _write(
-        tmp_path / "workspace" / "api" / ".ash" / ".ash.yaml",
+        tmp_path / "workspace" / "api" / ".ash.yaml",
         {"reporters": {section: _tree_section(reporter, hyphenated)}},
     )
 
@@ -310,7 +310,7 @@ def test_the_workspace_routes_warning_quotes_the_trees_section_spelling(
     section both write is kept under the operator's spelling. The warning names the
     project's file, so it quotes the section as that file spelled it."""
     project = _write(
-        tmp_path / "workspace" / "api" / ".ash" / ".ash.yaml",
+        tmp_path / "workspace" / "api" / ".ash.yaml",
         {"reporters": {section: _tree_section(reporter, hyphenated)}},
     )
 
@@ -355,7 +355,7 @@ def _null_section_configs(tmp_path: Path, reporter: str, section: str, on: bool)
         {"reporters": {reporter: {"enabled": on, "options": {name: value}}}},
     )
     repo = tmp_path / "workspace" / "repo"
-    project = _write(repo / ".ash" / ".ash.yaml", {"reporters": {section: None}})
+    project = _write(repo / ".ash.yaml", {"reporters": {section: None}})
     return (
         _cli(repo, config_path=project, trusted_config_path=operator),
         _workspace(tmp_path, project, operator),
@@ -394,7 +394,7 @@ def test_a_tree_config_without_the_section_keeps_the_operators_options(
         {"reporters": {reporter: {"options": {n: _REPO_VALUES[n] for n in names}}}},
     )
     repo = tmp_path / "workspace" / "repo"
-    project = _write(repo / ".ash" / ".ash.yaml", {"project_name": "repo"})
+    project = _write(repo / ".ash.yaml", {"project_name": "repo"})
 
     for config in (
         _cli(repo, config_path=project, trusted_config_path=operator),
@@ -426,9 +426,7 @@ def test_neither_route_lets_the_tree_turn_one_off(tmp_path, ash_log, reporter, s
     ``enabled: false`` is ignored with a warning, as its ``true`` is."""
     operator = _operator_on(tmp_path, reporter)
     repo = tmp_path / "workspace" / "repo"
-    project = _write(
-        repo / ".ash" / ".ash.yaml", {"reporters": {section: {"enabled": False}}}
-    )
+    project = _write(repo / ".ash.yaml", {"reporters": {section: {"enabled": False}}})
 
     for config in (
         _cli(repo, config_path=project, trusted_config_path=operator),
@@ -468,7 +466,7 @@ def test_a_clients_workspace_override_does_not_choose_whether_one_runs(
         {"reporters": {reporter: {"enabled": on}}},
     )
     project = _write(
-        tmp_path / "workspace" / "api" / ".ash" / ".ash.yaml", {"project_name": "api"}
+        tmp_path / "workspace" / "api" / ".ash.yaml", {"project_name": "api"}
     )
 
     config = _workspace(
@@ -487,7 +485,7 @@ def test_a_clients_workspace_override_does_not_choose_whether_one_runs(
 def test_the_operators_workspace_override_turns_one_off(tmp_path, ash_log, reporter):
     """On the CLI the overrides are the operator's, and turn the reporter off."""
     project = _write(
-        tmp_path / "workspace" / "api" / ".ash" / ".ash.yaml",
+        tmp_path / "workspace" / "api" / ".ash.yaml",
         {"reporters": {reporter: {"enabled": True}}},
     )
 
@@ -516,9 +514,7 @@ def test_an_operator_enabled_the_model_refuses_reads_as_off(
     )
     monkeypatch.setenv("ASH_CONFIG", str(operator))
     repo = tmp_path / "workspace" / "repo"
-    project = _write(
-        repo / ".ash" / ".ash.yaml", {"reporters": {reporter: {"enabled": True}}}
-    )
+    project = _write(repo / ".ash.yaml", {"reporters": {reporter: {"enabled": True}}})
 
     for config in (_cli(repo), _workspace(tmp_path, project, operator)):
         built = _built(config, reporter, tmp_path / "context")
@@ -547,7 +543,7 @@ def test_off_by_default_neither_route_lets_the_tree_turn_one_on(
     )
     repo = tmp_path / "workspace" / "repo"
     project = _write(
-        repo / ".ash" / ".ash.yaml",
+        repo / ".ash.yaml",
         {"reporters": {reporter: _tree_section(reporter, False)}},
     )
 

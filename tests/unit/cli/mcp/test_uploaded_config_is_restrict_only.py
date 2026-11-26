@@ -218,7 +218,7 @@ def test_server_written_and_operator_configs_are_not(_server) -> None:
     assert Path(bound).parent == session_sandbox(SESSION).config_dir
     assert not config_is_client_supplied(bound)
     assert not config_is_client_supplied(_server["tmp"] / "operator" / "ash.yaml")
-    assert not config_is_client_supplied(_server["target"] / ".ash" / ".ash.yaml")
+    assert not config_is_client_supplied(_server["target"] / ".ash.yaml")
 
 
 # ---------------------------------------------------------------------------
@@ -429,7 +429,7 @@ def test_get_config_discovering_an_uploaded_config_does_not_show_its_grants(
     from automated_security_helper.cli.mcp_tools import mcp_get_config
 
     _bind_profile(_server["tmp"], _PROFILE_WITH_GRANTS)
-    source = _upload({".ash/.ash.yaml": "sandbox:\n  network_scanners: [grype]\n"})
+    source = _upload({".ash.yaml": "sandbox:\n  network_scanners: [grype]\n"})
 
     result = mcp_get_config(search_dir=str(source), session_id=SESSION)
 

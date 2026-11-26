@@ -92,6 +92,13 @@
           'dependencies_satisfied': True,
           'enabled': True,
           'installs_on_first_scan': False,
+          'name': 'mcp_config',
+          'version': None,
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
           'name': 'npm_audit',
           'version': None,
         }),
@@ -665,6 +672,12 @@
             'tool_version': '>=7.16.0,<8.0.0',
           }),
         }),
+        'mcp_config': dict({
+          'enabled': True,
+          'name': 'mcp_config',
+          'options': dict({
+          }),
+        }),
       }),
       'default_scanners': dict({
         'add': list([
@@ -717,6 +730,8 @@
               '/global_settings/exclusions',
               '/global_settings/mcp',
               '/global_settings/mcp/**',
+              '/global_settings/history',
+              '/global_settings/history/**',
               '/scanners/opengrep/options/exclude_rule',
               '/scanners/semgrep/options/exclude_rule',
               '/scanners/bandit/options/confidence_level',
@@ -1179,6 +1194,24 @@
             'severity_threshold': None,
           }),
         }),
+        'mcp_config': dict({
+          'enabled': True,
+          'name': 'mcp-config',
+          'options': dict({
+            'allowed_command_prefixes': list([
+            ]),
+            'flag_env_secrets': True,
+            'forbid_auto_approval': True,
+            'forbid_privilege_escalation': True,
+            'forbid_unpinned_runners': True,
+            'offline': False,
+            'remote_url_prefixes': list([
+            ]),
+            'require_local': False,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
         'npm_audit': dict({
           'enabled': True,
           'name': 'npm-audit',
@@ -1245,6 +1278,19 @@
             ]),
             'offline': False,
             'scan_timeout': 1800,
+            'sdist_harvest': dict({
+              'cache_dir': None,
+              'ecosystems': list([
+                'cargo',
+                'gomod',
+                'npm',
+              ]),
+              'enabled': True,
+              'lockfiles': list([
+                'uv.lock',
+              ]),
+              'max_sdist_mb': 100,
+            }),
             'severity_threshold': None,
           }),
         }),
@@ -1321,6 +1367,12 @@
             'tool_version': '>=7.16.0,<8.0.0',
           }),
         }),
+        'mcp_config': dict({
+          'enabled': True,
+          'name': 'mcp_config',
+          'options': dict({
+          }),
+        }),
       }),
       'default_scanners': dict({
         'add': list([
@@ -1373,6 +1425,8 @@
               '/global_settings/exclusions',
               '/global_settings/mcp',
               '/global_settings/mcp/**',
+              '/global_settings/history',
+              '/global_settings/history/**',
               '/scanners/opengrep/options/exclude_rule',
               '/scanners/semgrep/options/exclude_rule',
               '/scanners/bandit/options/confidence_level',
@@ -1835,6 +1889,24 @@
             'severity_threshold': None,
           }),
         }),
+        'mcp_config': dict({
+          'enabled': True,
+          'name': 'mcp-config',
+          'options': dict({
+            'allowed_command_prefixes': list([
+            ]),
+            'flag_env_secrets': True,
+            'forbid_auto_approval': True,
+            'forbid_privilege_escalation': True,
+            'forbid_unpinned_runners': True,
+            'offline': False,
+            'remote_url_prefixes': list([
+            ]),
+            'require_local': False,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
         'npm_audit': dict({
           'enabled': True,
           'name': 'npm-audit',
@@ -1901,6 +1973,19 @@
             ]),
             'offline': False,
             'scan_timeout': 1800,
+            'sdist_harvest': dict({
+              'cache_dir': None,
+              'ecosystems': list([
+                'cargo',
+                'gomod',
+                'npm',
+              ]),
+              'enabled': True,
+              'lockfiles': list([
+                'uv.lock',
+              ]),
+              'max_sdist_mb': 100,
+            }),
             'severity_threshold': None,
           }),
         }),
@@ -2058,6 +2143,14 @@
         'enabled': True,
         'installs_on_first_scan': False,
         'name': 'hadolint',
+        'offline_strategy': 'bundled',
+        'version': None,
+      }),
+      'mcp_config': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'installs_on_first_scan': False,
+        'name': 'mcp_config',
         'offline_strategy': 'bundled',
         'version': None,
       }),

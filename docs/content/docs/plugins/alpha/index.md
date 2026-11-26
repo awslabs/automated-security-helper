@@ -1,6 +1,6 @@
 # Alpha Plugins
 
-This section covers the alpha plugins for ASH. Alpha plugins extend ASH's functionality with additional scanners, reporters, converters, and event handlers. Alpha is a maturity label, not a trust level: these are opt-in plugins that ASH ships but does not yet promote as supported.
+This section covers the alpha plugins for ASH: the opt-in scanner packages (`ash_*_plugins`) that ship with ASH but are not built in. Alpha is a maturity label, not a trust level: ASH ships these scanners but does not yet promote them as supported. The `ash_aws_plugins` reporters load the same opt-in way but are not alpha plugins (see [AWS reporters](../../../plugins/aws.md)).
 
 ## Available Alpha Plugins
 
@@ -19,11 +19,13 @@ plugin module in `ash_plugin_modules` or `--ash-plugin-modules`, as its page sho
 The MCP `list_scanners` tool reports them either way; listing one does not add it to
 any scan.
 
-## Contributing an Alpha Plugin
+## Contributing a third-party plugin
 
 We encourage the community to develop and share plugins that extend ASH's capabilities.
+A plugin you host yourself is a third-party plugin, not one of the alpha plugins that
+ship with ASH.
 
-To contribute an alpha plugin:
+To contribute a third-party plugin:
 
 1. Develop your plugin following the [Plugin Development Guide](../../../plugins/write-a-scanner.md)
 2. Host your plugin in a public repository
@@ -37,7 +39,7 @@ To contribute an alpha plugin:
 
 ## Plugin Submission Guidelines
 
-To ensure quality and security, alpha plugins should:
+To ensure quality and security, a third-party plugin should:
 
 - Be open source with a compatible license
 - Include comprehensive documentation
@@ -62,7 +64,6 @@ Replace `<my-plugin-package-name>` with the actual name of the plugin package yo
 ## Plugin Name
 
 **Description**: Brief description of what the plugin does and its key features.
-\*Description\*\*: Brief description of what the plugin does and its key features.
 
 **Repository**: [Link to GitHub/GitLab/etc. repository](https://github.com/username/plugin-repo)
 
@@ -76,14 +77,12 @@ Replace `<my-plugin-package-name>` with the actual name of the plugin package yo
 # Installation instructions
 pip install <my-plugin-package-name>
 ```
-````
 
 ### Configuration
 
-<!-- doctest: config kind=other reason="a template for a plugin page, whose plugin name and options are placeholders" -->
 ```yaml
 # Example configuration in your ASH config file (.ash.yaml in a new project)
-plugins:
+scanners:
   my-plugin:
     enabled: true
     options:
@@ -98,10 +97,10 @@ plugins:
 
 ### Example Usage
 
-<!-- doctest: illustrative reason="my_plugin is a placeholder for the module of a plugin you installed" -->
 ```bash
 # Example command line usage
 ash scan --ash-plugin-modules my_plugin
 ```
+````
 
 > [!CAUTION] > **Alpha Plugin Security**: The alpha plugins listed above ship with ASH, in `automated_security_helper/plugin_modules`, and need no separate package. `ash scan` loads one only when its module is listed in `ash_plugin_modules` or passed with `--ash-plugin-modules`. Each runs an external tool: the container image includes trivy, Betterleaks, GuardDog and hadolint, and you install the Snyk CLI, ferret-scan and TruffleHog yourself, so check where each tool comes from. A plugin published outside ASH is a third-party package you install separately (for example with `pip install`), and ASH imports it into its own process, so verify its source and trustworthiness before installing it.

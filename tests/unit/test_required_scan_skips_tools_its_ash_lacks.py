@@ -177,7 +177,7 @@ def test_any_other_caller_still_has_an_unknown_tool_refused(tmp_path):
             "external caller with config-ref",
             context,
             ga.call_inputs(
-                {"with": {"config": ".ash/.ash.yaml", "config-ref": "1" * 40}},
+                {"with": {"config": ".ash.yaml", "config-ref": "1" * 40}},
                 called,
                 context,
             ),

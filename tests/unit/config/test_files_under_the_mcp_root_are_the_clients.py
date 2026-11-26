@@ -39,10 +39,7 @@ def _repo(tmp_path: Path, document: dict | None = None) -> Path:
     repo = tmp_path / "repo"
     mark_git_checkout(repo)
     if document is not None:
-        (repo / ".ash").mkdir()
-        (repo / ".ash" / ".ash.yaml").write_text(
-            yaml.safe_dump(document), encoding="utf-8"
-        )
+        (repo / ".ash.yaml").write_text(yaml.safe_dump(document), encoding="utf-8")
     return repo
 
 

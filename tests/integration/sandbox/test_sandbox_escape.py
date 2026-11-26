@@ -274,8 +274,7 @@ def _scan(
     (source / "link_to_home").symlink_to(outside / "secret.txt")
     (source / "link_elsewhere").symlink_to(elsewhere / "secret.txt")
     shutil.copy(FIXTURE / "escape_probe.py", source / "escape_probe.py")
-    (source / ".ash").mkdir()
-    (source / ".ash" / ".ash.yaml").write_text("project_name: sandbox-escape\n")
+    (source / ".ash.yaml").write_text("project_name: sandbox-escape\n")
     output = source / output_in_source if output_in_source else tmp_path / "out"
     if plant is not None:
         plant(source)

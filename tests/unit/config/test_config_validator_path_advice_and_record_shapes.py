@@ -147,11 +147,25 @@ class TestPathPatternAdvice:
             "suppress the findings in every file inside the directory."
         )
 
-    @pytest.mark.parametrize("pattern", ["**/nothing-here", "src/**", "**/*.py", "**"])
+    @pytest.mark.parametrize(
+        "pattern",
+        ["**/nothing-here", "src/**", "**/*.py", "**", "**/node_modules/"],
+    )
     def test_control_a_recursive_pattern_that_matches_gets_no_advice(
         self, tmp_path, pattern
     ):
         assert path_pattern_advice(pattern, _tree(tmp_path), ignore_path=True) is None
+
+    def test_the_advised_trailing_slash_spelling_gets_no_advice_itself(self, tmp_path):
+        # '**/node_modules/' is exactly what the directory advice recommends
+        # (the test above this control), so advising it again would send the
+        # operator in a circle: applying the advice must clear the warning.
+        root = _tree(tmp_path)
+        for ignore_path in (True, False):
+            assert (
+                path_pattern_advice("**/node_modules/", root, ignore_path=ignore_path)
+                is None
+            )
 
 
 class TestChangedInput:

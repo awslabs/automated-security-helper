@@ -19,13 +19,15 @@ from automated_security_helper.config import session_paths as _moved
 
 if TYPE_CHECKING:
     # For type checkers and IDEs only, which do not follow the ``sys.modules``
-    # swap below and would see a module that defines nothing. A star import skips
-    # names with a leading underscore, so the private names the tests reach
-    # through this path are listed.
+    # swap below and would see a module that defines nothing. The star import
+    # follows the module's ``__all__``, which ``config.session_paths`` defines, so
+    # it brings the public names listed there and no underscore name. The private
+    # names the tests reach through this path are therefore listed, each as
+    # ``_a as _a`` to mark it a deliberate re-export.
     from automated_security_helper.config.session_paths import *  # noqa: F401,F403
     from automated_security_helper.config.session_paths import (  # noqa: F401
-        _ALLOWED_COMPONENT,
-        _listable_parents_warned,
+        _ALLOWED_COMPONENT as _ALLOWED_COMPONENT,
+        _listable_parents_warned as _listable_parents_warned,
     )
 
 sys.modules[__name__] = _moved

@@ -37,7 +37,7 @@ def _write(path, document):
 def _workspace(tmp_path, document):
     ws = tmp_path / "ws"
     mark_git_checkout(ws)
-    _write(ws / ".ash" / ".ash.yaml", document)
+    _write(ws / ".ash.yaml", document)
     return ws
 
 
@@ -115,7 +115,7 @@ def test_an_operator_config_beside_a_twin_loads_for_the_workspace_as_for_the_sca
     root = _write(
         tmp_path / "operator.yaml",
         {
-            "extends": [(ws / ".ash" / ".ash.yaml").as_posix(), own.as_posix()],
+            "extends": [(ws / ".ash.yaml").as_posix(), own.as_posix()],
             "patch": [
                 {
                     "op": "replace",

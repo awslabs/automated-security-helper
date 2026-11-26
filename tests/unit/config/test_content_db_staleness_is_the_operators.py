@@ -91,10 +91,10 @@ def _write(path: Path, document: Dict[str, Any]) -> Path:
 
 
 def _repo(tmp_path: Path, document: Dict[str, Any]) -> Path:
-    """A checkout whose own .ash/.ash.yaml holds ``document``."""
+    """A checkout whose own .ash.yaml holds ``document``."""
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
-    _write(repo / ".ash" / ".ash.yaml", document)
+    _write(repo / ".ash.yaml", document)
     return repo
 
 
@@ -104,7 +104,7 @@ def _operator(tmp_path: Path, document: Dict[str, Any]) -> Path:
 
 def _workspace_project(repo: Path, operator: Path, **kwargs: Any):
     return resolve_config(
-        config_path=repo / ".ash" / ".ash.yaml",
+        config_path=repo / ".ash.yaml",
         source_dir=repo,
         trusted_config_path=operator,
         overlay_config_path=operator,

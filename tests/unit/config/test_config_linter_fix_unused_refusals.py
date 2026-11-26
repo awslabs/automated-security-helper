@@ -29,8 +29,7 @@ pytestmark = pytest.mark.unit
 
 
 def _write(tmp_path: Path, config_text: str) -> tuple[Path, Path]:
-    config_path = tmp_path / ".ash" / ".ash.yaml"
-    config_path.parent.mkdir(parents=True)
+    config_path = tmp_path / ".ash.yaml"
     # Bytes, so the file holds the text as written on Windows too (write_text
     # would turn its "\n" into "\r\n" there, and the fixer keeps the file's
     # own breaks, so ``fixed_content == before`` compared two line endings).

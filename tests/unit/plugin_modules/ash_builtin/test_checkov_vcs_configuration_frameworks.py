@@ -240,6 +240,20 @@ class TestVcsConfDirEnvironment:
             assert source not in configured.parents
             assert environ_value(var_name) is None
 
+    def test_execute_scan_preserves_operator_vcs_conf_dir_env_var(
+        self, tmp_path, monkeypatch
+    ):
+        custom_dir = str(tmp_path / "custom-gitlab-conf")
+        monkeypatch.setenv("CKV_GITLAB_CONF_DIR_NAME", custom_dir)
+
+        source = tmp_path / "src"
+        source.mkdir()
+        scanner = _scanner(source, tmp_path / "out")
+
+        _, _, env = scanner._execute_scan(source, "source", [])
+        assert env is not None
+        assert env["CKV_GITLAB_CONF_DIR_NAME"] == custom_dir
+
     def test_offline_scan_disables_vcs_config_fetch(self, tmp_path, monkeypatch):
         for fetch_var in _VCS_CONFIG_FETCH_ENV_VARS:
             monkeypatch.delenv(fetch_var, raising=False)

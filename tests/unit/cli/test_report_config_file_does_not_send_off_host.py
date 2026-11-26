@@ -4,9 +4,9 @@
 
 Stored results do not record which tree they were scanned from. A config file
 ``ash report`` reads (``--config``, or ``ASH_CONFIG``) may be that tree's own
-``.ash/.ash.yaml``, and when the tree is neither a git checkout nor under the
+``.ash.yaml``, and when the tree is neither a git checkout nor under the
 working directory nothing marks it as the repository's: a CI job that scans a
-directory and then runs ``ash report --format s3 --config <tree>/.ash/.ash.yaml``
+directory and then runs ``ash report --format s3 --config <tree>/.ash.yaml``
 from elsewhere uploaded the findings to the bucket the repository chose.
 
 So in ``ash report`` a config file's ``enabled`` and destination options of the
@@ -155,9 +155,9 @@ def _layout(tmp_path: Path, tree_config: str) -> tuple:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 
     tree = tmp_path / "data" / "src"
-    (tree / ".ash").mkdir(parents=True)
+    tree.mkdir(parents=True)
     (tree / "app.py").write_text("value = 1\n", encoding="utf-8")
-    tree_file = tree / ".ash" / ".ash.yaml"
+    tree_file = tree / ".ash.yaml"
     tree_file.write_text(tree_config, encoding="utf-8")
     _outside_every_checkout(tree_file)
 
@@ -233,7 +233,7 @@ class TestAConfigFileDoesNotTurnAnOffHostReporterOn:
         monkeypatch.chdir(work)
 
         code = _report(
-            "s3", output_dir, config="../data/src/.ash/.ash.yaml", overrides=overrides
+            "s3", output_dir, config="../data/src/.ash.yaml", overrides=overrides
         )
 
         assert code == 1
@@ -299,7 +299,7 @@ class TestTheOperatorsOverridesStillDecide:
         _report(
             "s3",
             output_dir,
-            config="../data/src/.ash/.ash.yaml",
+            config="../data/src/.ash.yaml",
             overrides=[
                 "reporters.s3.enabled=true",
                 "reporters.s3.options.bucket_name=operator-bucket",
@@ -328,7 +328,7 @@ class TestTheOperatorsOverridesStillDecide:
         work, _, output_dir = _layout(tmp_path, tree_config)
         monkeypatch.chdir(work)
 
-        code = _report("text", output_dir, config="../data/src/.ash/.ash.yaml")
+        code = _report("text", output_dir, config="../data/src/.ash.yaml")
 
         assert code == 0
         assert ("SUMMARY" in capsys.readouterr().out) is summary_shown
@@ -340,7 +340,7 @@ def _mcp_delivered(tmp_path: Path) -> tuple:
 
     The zip is in ``<root>/<session>/incoming/``, extracted into
     ``<root>/<session>/source/`` (``cli/mcp/source_delivery.py``), in no git
-    checkout. Its ``.ash/.ash.yaml`` turns S3 on with the client's bucket and
+    checkout. Its ``.ash.yaml`` turns S3 on with the client's bucket and
     names the AWS module. Returns (workspace root, that file, output directory,
     a working directory outside the session).
     """
@@ -356,12 +356,12 @@ def _mcp_delivered(tmp_path: Path) -> tuple:
     with zipfile.ZipFile(upload, "w") as bundle:
         bundle.writestr("app.py", "value = 1\n")
         bundle.writestr(
-            ".ash/.ash.yaml",
+            ".ash.yaml",
             _module_list() + _s3_section("client-bucket", "eu-west-1"),
         )
     with zipfile.ZipFile(upload) as bundle:
         bundle.extractall(session / "source")
-    delivered = session / "source" / ".ash" / ".ash.yaml"
+    delivered = session / "source" / ".ash.yaml"
     _outside_every_checkout(delivered)
 
     output_dir = session / "output"

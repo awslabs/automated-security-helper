@@ -522,8 +522,7 @@ def test_a_workspace_root_config_that_does_not_parse_is_refused_on_one_line(
     (root / "api").mkdir(parents=True)
     workspace = root / "dev.code-workspace"
     workspace.write_text(json.dumps({"folders": [{"path": "api"}]}), encoding="utf-8")
-    (root / ".ash").mkdir()
-    (root / ".ash" / ".ash.yaml").write_text(UNPARSED, encoding="utf-8")
+    (root / ".ash.yaml").write_text(UNPARSED, encoding="utf-8")
 
     result = CliRunner().invoke(
         app, ["scan", "--workspace", str(workspace), "--dry-run"]
@@ -531,7 +530,7 @@ def test_a_workspace_root_config_that_does_not_parse_is_refused_on_one_line(
 
     assert result.exit_code == WorkspaceExitCode.INVALID_PROJECT_CONFIG, result.output
     assert "could not be parsed (" in result.output, result.output
-    _assert_one_line(result.output, "root/.ash/.ash.yaml")
+    _assert_one_line(result.output, "root/.ash.yaml")
 
 
 def test_scan_names_an_ash_config_that_does_not_parse_on_one_line(
@@ -821,8 +820,8 @@ def test_plugin_list_names_the_config_it_found_on_one_line(
 ):
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     project = tmp_path / "a\nproject"
-    (project / ".ash").mkdir(parents=True)
-    (project / ".ash" / ".ash.yaml").write_text("project_name: t\n", encoding="utf-8")
+    project.mkdir(parents=True)
+    (project / ".ash.yaml").write_text("project_name: t\n", encoding="utf-8")
     monkeypatch.chdir(project)
 
     result = CliRunner().invoke(app, ["plugin", "list"])
@@ -845,8 +844,8 @@ def test_plugin_list_refuses_a_config_that_does_not_parse_on_one_line(
         args, tail = ["plugin", "list", "--config", str(config)], "unparsed.yaml"
     else:
         project = tmp_path / "a\nproject"
-        (project / ".ash").mkdir(parents=True)
-        (project / ".ash" / ".ash.yaml").write_text(UNPARSED, encoding="utf-8")
+        project.mkdir(parents=True)
+        (project / ".ash.yaml").write_text(UNPARSED, encoding="utf-8")
         monkeypatch.chdir(project)
         args, tail = ["plugin", "list"], "project"
 

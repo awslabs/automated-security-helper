@@ -406,12 +406,12 @@ def _meta_row(rows: _Rows, request: pytest.FixtureRequest) -> None:
 
 
 def _linked_tree(server: Dict[str, Path], text: str) -> Path:
-    """A delivered tree whose ``.ash/.ash.yaml`` links to a host file holding ``text``."""
+    """A delivered tree whose ``.ash.yaml`` links to a host file holding ``text``."""
     from tests.utils.delivered_trees import clone, write
 
     host_file = write(server["host"] / "ash.yaml", text)
     return clone(
-        server["tmp"], {"app.py": "x = 1\n"}, {".ash/.ash.yaml": host_file}, SESSION
+        server["tmp"], {"app.py": "x = 1\n"}, {".ash.yaml": host_file}, SESSION
     )
 
 
@@ -422,7 +422,7 @@ def _scenario_row(rows: _Rows, server: Dict[str, Path], source: Path) -> bool:
         config_base_gate,
     )
 
-    link = source / ".ash" / ".ash.yaml"
+    link = source / ".ash.yaml"
     host_file = server["host"] / "ash.yaml"
     built = link.is_symlink() and host_file.is_file()
     rows.add(
@@ -1129,7 +1129,7 @@ def _named_variant(rows: _Rows, source: Path) -> None:
     from automated_security_helper.config import resolve_config as rc
 
     kwargs: Dict[str, Any] = {
-        "config_path": source / ".ash" / ".ash.yaml",
+        "config_path": source / ".ash.yaml",
         "source_dir": source,
         "permit_base": config_base_gate(SESSION),
         "untrusted_config": True,

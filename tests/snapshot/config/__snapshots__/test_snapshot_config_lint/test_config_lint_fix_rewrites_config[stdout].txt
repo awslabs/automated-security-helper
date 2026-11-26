@@ -1,5 +1,5 @@
 $ ash config lint --fix --non-interactive
-Linting configuration file: <TMP>/demo-project/.ash/.ash.yaml
+Linting configuration file: <TMP>/demo-project/.ash.yaml
 
 Found 20 issue(s):
   ❌ Invalid value at 'global_settings.suppressions[2].symbol': Value error, symbol must be a dotted qualified name such as 'MyClass.my_method' (identifiers joined by '.', no spaces, wildcards or call syntax) [blocks the scan]
@@ -37,7 +37,7 @@ Found 20 issue(s):
   • Remove expired suppression
   • Rename scanners.'cdk_nag' to the canonical form 'cdk-nag'
 
-✅ Fixed 8 issue(s) in <TMP>/demo-project/.ash/.ash.yaml
+✅ Fixed 8 issue(s) in <TMP>/demo-project/.ash.yaml
 
 Remaining after the fixes:
   ❌ Invalid value at 'global_settings.suppressions[1].symbol': Value error, symbol must be a dotted qualified name such as 'MyClass.my_method' (identifiers joined by '.', no spaces, wildcards or call syntax) [blocks the scan]

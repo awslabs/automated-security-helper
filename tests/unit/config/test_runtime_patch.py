@@ -776,6 +776,30 @@ class TestDenyListIsSubtreeClosed:
             with pytest.raises(RuntimePatchDeniedError):
                 apply_runtime_patch(base, ops, allowlist=allowlist)
 
+    def test_the_run_history_cannot_be_changed_by_a_runtime_patch(self) -> None:
+        """`/global_settings/history` is the shipped denylist's: `enabled` turns
+        on writes beside the output, and `keep_runs` bounds what pruning may
+        delete (`keep_runs: 1` prunes a kept history down to one record)."""
+        base = _base_config()
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/global_settings/**"],
+            denied_paths=_shipped_denied_paths(),
+        )
+        for ops in (
+            [{"op": "add", "path": "/global_settings/history/enabled", "value": True}],
+            [{"op": "add", "path": "/global_settings/history/keep_runs", "value": 1}],
+            [
+                {
+                    "op": "add",
+                    "path": "/global_settings/history",
+                    "value": {"enabled": True, "keep_runs": 1},
+                }
+            ],
+        ):
+            with pytest.raises(RuntimePatchDeniedError):
+                apply_runtime_patch(base, ops, allowlist=allowlist)
+
     def test_root_swap_cannot_flip_fail_on_findings(self) -> None:
         """Same mechanism at the top: a whole-config swap sets `fail_on_findings`
         and the suppression list in one op, and `/**` reaches the root because

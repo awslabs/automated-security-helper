@@ -63,7 +63,7 @@ def test_an_env_read_key_of_a_loaded_plugin(
     elif source == "ASH_CONFIG":
         monkeypatch.setenv("ASH_CONFIG", str(_write(in_tmp / "env.yaml", text)))
     else:
-        _write(in_tmp / "src" / ".ash" / ".ash.yaml", text)
+        _write(in_tmp / "src" / ".ash.yaml", text)
     seen = run_cli(args)
 
     printed = (

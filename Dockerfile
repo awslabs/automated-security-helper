@@ -715,13 +715,24 @@ ENV _ASH_EXEC_MODE="local"
 # snyk and ferret are not in the list: their tools come another way.
 ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
 # The pre-rename name of the build argument, honored until ASH 3.9.0: a value given
-# for it wins over ASH_ALPHA_PLUGIN_MODULES below.
-ARG ASH_COMMUNITY_PLUGIN_MODULES=""
+# for it, an explicitly empty one included, wins over ASH_ALPHA_PLUGIN_MODULES below.
+# The default is a sentinel because an empty-string default cannot tell "not given"
+# from --build-arg ASH_COMMUNITY_PLUGIN_MODULES="". A build that gives the old name
+# warns on stderr.
+ARG ASH_COMMUNITY_PLUGIN_MODULES="__UNSET__"
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     uv_tmp="$(mktemp -d)" && \
+    if [ "${ASH_COMMUNITY_PLUGIN_MODULES}" = "__UNSET__" ]; then \
+        modules="${ASH_ALPHA_PLUGIN_MODULES}"; \
+    else \
+        echo "WARNING: the ASH_COMMUNITY_PLUGIN_MODULES build argument is deprecated:" \
+            "the community tier is now called alpha, so use ASH_ALPHA_PLUGIN_MODULES." \
+            "The old name is accepted until ASH 3.9.0." >&2 && \
+        modules="${ASH_COMMUNITY_PLUGIN_MODULES}"; \
+    fi && \
     { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 ASH_OFFLINE=NO \
     ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins} \
-    --config-overrides "ash_plugin_modules+=[${ASH_COMMUNITY_PLUGIN_MODULES:-${ASH_ALPHA_PLUGIN_MODULES}}]"; \
+    --config-overrides "ash_plugin_modules+=[${modules}]"; \
     status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
 ENV PATH="${ASH_BIN_PATH}:$PATH"
 
@@ -865,13 +876,24 @@ ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 # is declared again (a unit test keeps the two equal).
 ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
 # The pre-rename name of the build argument, honored until ASH 3.9.0: a value given
-# for it wins over ASH_ALPHA_PLUGIN_MODULES below.
-ARG ASH_COMMUNITY_PLUGIN_MODULES=""
+# for it, an explicitly empty one included, wins over ASH_ALPHA_PLUGIN_MODULES below.
+# The default is a sentinel because an empty-string default cannot tell "not given"
+# from --build-arg ASH_COMMUNITY_PLUGIN_MODULES="". A build that gives the old name
+# warns on stderr.
+ARG ASH_COMMUNITY_PLUGIN_MODULES="__UNSET__"
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     uv_tmp="$(mktemp -d)" && \
+    if [ "${ASH_COMMUNITY_PLUGIN_MODULES}" = "__UNSET__" ]; then \
+        modules="${ASH_ALPHA_PLUGIN_MODULES}"; \
+    else \
+        echo "WARNING: the ASH_COMMUNITY_PLUGIN_MODULES build argument is deprecated:" \
+            "the community tier is now called alpha, so use ASH_ALPHA_PLUGIN_MODULES." \
+            "The old name is accepted until ASH 3.9.0." >&2 && \
+        modules="${ASH_COMMUNITY_PLUGIN_MODULES}"; \
+    fi && \
     { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 ASH_OFFLINE=NO \
     ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins} \
-    --config-overrides "ash_plugin_modules+=[${ASH_COMMUNITY_PLUGIN_MODULES:-${ASH_ALPHA_PLUGIN_MODULES}}]"; \
+    --config-overrides "ash_plugin_modules+=[${modules}]"; \
     status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
 # GuardDog again, for the non-root user's own uv tool install.
 RUN guarddog --version

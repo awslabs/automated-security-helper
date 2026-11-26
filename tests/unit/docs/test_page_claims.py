@@ -324,13 +324,13 @@ def mcp_workspace_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _tree_with_config(parent: Path, config: Dict[str, Any] | str) -> Path:
-    """A source tree under ``parent`` whose ``.ash/.ash.yaml`` holds ``config``."""
+    """A source tree under ``parent`` whose ``.ash.yaml`` holds ``config``."""
     tree = parent / "session" / "source"
-    (tree / ".ash").mkdir(parents=True)
+    tree.mkdir(parents=True)
     text = (
         config if isinstance(config, str) else yaml.safe_dump(config, sort_keys=False)
     )
-    (tree / ".ash" / ".ash.yaml").write_text(text, encoding="utf-8")
+    (tree / ".ash.yaml").write_text(text, encoding="utf-8")
     return tree
 
 
@@ -868,12 +868,12 @@ def test_a_delivered_config_may_not_set_any_option_the_mcp_page_lists(
 
     trusted = get_default_config()
     rules = rules_from(trusted)
-    delivered = mcp_workspace_root / "session" / "source" / ".ash" / ".ash.yaml"
+    delivered = mcp_workspace_root / "session" / "source" / ".ash.yaml"
 
     def refused(document: Dict[str, Any]) -> bool:
         return bool(
             client_file_denials(
-                {delivered: document}, rules, scanned_root=delivered.parent.parent
+                {delivered: document}, rules, scanned_root=delivered.parent
             )
         )
 
@@ -2211,7 +2211,7 @@ _ARCHIVE_LIMITS = (
 
 def _resolved_from_tier(tmp_path: Path, tier: str, document: Dict[str, Any]) -> Any:
     """``document`` resolved for a scan of a project that is a checkout: as the
-    project's own ``.ash/.ash.yaml``, or as an operator config outside every
+    project's own ``.ash.yaml``, or as an operator config outside every
     checkout passed with ``--config``."""
     from automated_security_helper.config.resolve_config import resolve_config
 
@@ -2219,10 +2219,7 @@ def _resolved_from_tier(tmp_path: Path, tier: str, document: Dict[str, Any]) -> 
     project.mkdir(parents=True)
     _mark_git_checkout(project)
     if tier == "repository":
-        (project / ".ash").mkdir()
-        (project / ".ash" / ".ash.yaml").write_text(
-            yaml.safe_dump(document), encoding="utf-8"
-        )
+        (project / ".ash.yaml").write_text(yaml.safe_dump(document), encoding="utf-8")
         return resolve_config(source_dir=project)
     operator = tmp_path / "etc" / "ash.yaml"
     operator.parent.mkdir()
@@ -2715,9 +2712,9 @@ def test_resolve_ash_workspace_does_not_check_plugin_names(tmp_path: Path) -> No
     module_text = _NAMED_REPORTER_MODULE.replace("NAME", repr("csv_"))
     python_path = _plugin_path(tmp_path, _NAMES_MODULE, module_text)
     project = tmp_path / "ws" / "api"
-    (project / ".ash").mkdir(parents=True)
+    project.mkdir(parents=True)
     (project / "main.py").write_text("x = 1\n", encoding="utf-8")
-    (project / ".ash" / "ash.yaml").write_text(
+    (project / ".ash.yaml").write_text(
         yaml.safe_dump({"project_name": "api", "ash_plugin_modules": [_NAMES_MODULE]}),
         encoding="utf-8",
     )
@@ -2783,7 +2780,7 @@ def test_resolve_ash_workspace_does_not_check_plugin_names(tmp_path: Path) -> No
     projects = response.get("projects") or []
     assert [entry.get("project") for entry in projects] == ["api"], response
     config_source = str(projects[0].get("config_source") or "")
-    assert config_source.replace("\\", "/").endswith("api/.ash/ash.yaml"), projects
+    assert config_source.replace("\\", "/").endswith("api/.ash.yaml"), projects
 
     # The sentence's last claim: the scan tool refuses the clash before it
     # scans anything, naming both reporters and their modules.
@@ -3794,8 +3791,7 @@ def _workspace_in_a_checkout(tmp_path: Path, checkout: bool = True) -> Path:
     for name in ("api", "web"):
         (root / name).mkdir(parents=True)
         (root / name / "main.py").write_text("x = 1\n", encoding="utf-8")
-    (root / "web" / ".ash").mkdir()
-    (root / "web" / ".ash" / ".ash.yaml").write_text(
+    (root / "web" / ".ash.yaml").write_text(
         yaml.safe_dump({"project_name": "web"}), encoding="utf-8"
     )
     workspace = root / "services.code-workspace"
@@ -4701,7 +4697,7 @@ def test_the_operators_workspace_config_is_final_over_a_projects_own(
     """scale-large-repos.md (Workspaces).
 
     A workspace inside a git checkout has two projects: ``api`` with no config of its
-    own, and ``web`` with its own ``.ash/.ash.yaml``, which sets a LOW threshold. The
+    own, and ``web`` with its own ``.ash.yaml``, which sets a LOW threshold. The
     operator's ``--config`` sets a HIGH one, and grants grype a network and a read
     path, settings only an operator may make. The workspace is resolved as ``ash scan
     --workspace`` plans it, and each project's config is read where the planner
@@ -4731,7 +4727,7 @@ def test_the_operators_workspace_config_is_final_over_a_projects_own(
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     workspace = _workspace_in_a_checkout(tmp_path)
-    (workspace.parent / "web" / ".ash" / ".ash.yaml").write_text(
+    (workspace.parent / "web" / ".ash.yaml").write_text(
         yaml.safe_dump(
             {"project_name": "web", "global_settings": {"severity_threshold": "LOW"}}
         ),
@@ -5523,15 +5519,14 @@ def _outputs_project(
     parent: Path, *, secret: bool = True, config: str | None = None
 ) -> Path:
     """A source tree under ``parent``: the sample's app.py, and ``config`` as its
-    ``.ash/.ash.yaml`` when given."""
+    ``.ash.yaml`` when given."""
     source = parent / "source"
     source.mkdir(parents=True)
     (source / "app.py").write_text(
         _OUTPUTS_APP if secret else _OUTPUTS_CLEAN_APP, encoding="utf-8"
     )
     if config is not None:
-        (source / ".ash").mkdir()
-        (source / ".ash" / ".ash.yaml").write_text(config, encoding="utf-8")
+        (source / ".ash.yaml").write_text(config, encoding="utf-8")
     return source
 
 
@@ -5694,8 +5689,9 @@ def _outputs_known_file_names() -> Set[str]:
     import automated_security_helper.plugin_modules as plugin_modules
     from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 
-    # ash.lock is the committed suppression lock (utils/ash_lock.py), an input
-    # ASH reads and ``ash suppress`` writes under .ash/, not a report.
+    # .ash.lock is the committed suppression lock (utils/ash_lock.py), an input
+    # ASH reads and ``ash suppress`` writes at the scan root; the bare ash.lock
+    # spelling is its deprecated .ash/ash.lock location, still read until v4.0.
     known = {
         "ash.log",
         "ash.log.jsonl",
@@ -6415,6 +6411,8 @@ _CONFIG_ACCEPTED = "project_name: demo\nglobal_settings:\n  severity_threshold: 
         pytest.param(
             {}, ["--config", "no-such-config.yaml"], 3, None, [], id="a-missing-path"
         ),
+        # Legacy location: this case's subject is the .ash directory itself, so the
+        # config sits at the deprecated .ash/.ash.yaml path.
         pytest.param(
             {".ash/.ash.yaml": _CONFIG_ACCEPTED},
             ["--config", ".ash"],
@@ -6645,12 +6643,11 @@ def _scan_with_nothing_to_scan(
     *extra: str,
 ) -> Tuple[subprocess.CompletedProcess, Dict[str, str]]:
     """``ash scan --scanners <scanners>`` of a tree holding ``files``, with ``config``
-    as its own ``.ash/.ash.yaml``: the result, and each scanner's status in the
+    as its own ``.ash.yaml``: the result, and each scanner's status in the
     results file."""
     tree = _config_scan_tree(tmp_path, files)
     if config is not None:
-        (tree / ".ash").mkdir()
-        (tree / ".ash" / ".ash.yaml").write_text(yaml.safe_dump(config), "utf-8")
+        (tree / ".ash.yaml").write_text(yaml.safe_dump(config), "utf-8")
     result = _ash(
         [
             "scan",
@@ -10751,9 +10748,9 @@ def test_get_config_shows_a_value_read_from_the_environment_as_its_reference(
     from automated_security_helper.config.resolve_config import resolve_config
 
     repo = tmp_path / "repo"
-    (repo / ".ash").mkdir(parents=True)
+    repo.mkdir(parents=True)
     (repo / "app.py").write_text("x = 1\n", encoding="utf-8")
-    config = repo / ".ash" / ".ash.yaml"
+    config = repo / ".ash.yaml"
     config.write_text(f"project_name: {written}\n", encoding="utf-8")
     monkeypatch.setenv(_ENV_PROBE, _ENV_PROBE_VALUE)
     control = resolve_config(config_path=config, source_dir=repo)
@@ -12359,7 +12356,7 @@ def test_a_config_in_any_checkout_cannot_grant_and_the_warning_names_it(
 
     repository = _tree_with_config(tmp_path / "repository", _SANDBOX_GRANTS)
     _mark_git_checkout(repository)
-    in_repository = repository / ".ash" / ".ash.yaml"
+    in_repository = repository / ".ash.yaml"
     ops = tmp_path / "ops" / "ash.yaml"
     _mark_git_checkout(ops.parent)
     ops.write_text(yaml.safe_dump(_SANDBOX_GRANTS), encoding="utf-8")
@@ -12437,12 +12434,12 @@ def _repository_warnings(
     document: Dict[str, Any],
     quoted: str,
 ) -> List[str]:
-    """The warnings a scan of a checkout logs when its own ``.ash/.ash.yaml`` holds
+    """The warnings a scan of a checkout logs when its own ``.ash.yaml`` holds
     ``document``, with the file's path written as ``quoted``."""
     ash_log.clear()
     resolved = _resolved_from_tier(tmp_path, "repository", document)
     assert resolved is not None
-    config = tmp_path / "project" / ".ash" / ".ash.yaml"
+    config = tmp_path / "project" / ".ash.yaml"
     warnings = []
     for message in _messages(r for r in ash_log if r.levelno == logging.WARNING):
         for spelling in {str(config.resolve()), str(config), config.as_posix()}:
@@ -13880,8 +13877,7 @@ def test_a_bare_directory_suppression_path_covers_the_findings_below_it(
             for name in ("build", "lib", "tests", "pkg/tests")
         },
     )
-    (tree / ".ash").mkdir()
-    (tree / ".ash" / ".ash.yaml").write_text(
+    (tree / ".ash.yaml").write_text(
         yaml.safe_dump(
             {
                 "project_name": "page-claims",
@@ -13962,8 +13958,7 @@ def test_config_checks_accept_a_path_that_names_an_existing_directory(
     tree = _config_scan_tree(
         tmp_path, {f"{name}/app.py": "x = 1\n" for name in ("vendor", "tests", "build")}
     )
-    (tree / ".ash").mkdir()
-    (tree / ".ash" / ".ash.yaml").write_text(
+    (tree / ".ash.yaml").write_text(
         yaml.safe_dump(
             {
                 "project_name": "page-claims",
@@ -14039,8 +14034,7 @@ def test_a_suppression_path_matches_case_sensitively_and_not_with_a_leading_dot(
     for page, sentence in _SUPPRESSION_PATHS_MATCH_CASE_SENSITIVELY:
         assert_on_page(page, sentence)
     tree = _config_scan_tree(tmp_path, {"Tests/secret.py": _CONFIG_SECRET})
-    (tree / ".ash").mkdir()
-    (tree / ".ash" / ".ash.yaml").write_text(
+    (tree / ".ash.yaml").write_text(
         yaml.safe_dump(
             {
                 "project_name": "page-claims",
@@ -14135,8 +14129,7 @@ def test_config_checks_warn_and_exit_0_on_a_path_that_matches_nothing(
     tree = _config_scan_tree(
         tmp_path, {"src/app.py": "x = 1\n", "Tests/secret.py": "x = 1\n"}
     )
-    (tree / ".ash").mkdir()
-    (tree / ".ash" / ".ash.yaml").write_text(
+    (tree / ".ash.yaml").write_text(
         yaml.safe_dump(
             {
                 "project_name": "page-claims",
@@ -14173,7 +14166,7 @@ def _source_dir_tree(parent: Path) -> Dict[str, Path]:
         for name in ("repo", "bounded", "plain", "operator", "elsewhere")
     }
     files = {
-        "repo/.ash/.ash.yaml": "project_name: demo\n",
+        "repo/.ash.yaml": "project_name: demo\n",
         "repo/vendor/a.txt": "x\n",
         "bounded/config/ash.yaml": "extends: ../shared/base.yaml\nproject_name: demo\n",
         "bounded/shared/base.yaml": "fail_on_findings: false\n",
@@ -14212,7 +14205,7 @@ def test_config_checks_judge_a_config_against_the_source_dir(
     def check(*args: str, **env: str) -> subprocess.CompletedProcess:
         return _ash(["config", command, *args], cwd=elsewhere, **env)
 
-    repo_config = (paths["repo"] / ".ash" / ".ash.yaml").as_posix()
+    repo_config = (paths["repo"] / ".ash.yaml").as_posix()
     for result in (
         check("--source-dir", str(paths["repo"])),
         check(ASH_SOURCE_DIR=str(paths["repo"])),
@@ -16865,10 +16858,10 @@ def test_a_container_scan_passes_only_the_aws_settings_the_operators_config_read
     from automated_security_helper.interactions import run_ash_container as container
 
     source = tmp_path / "source"
-    (source / ".ash").mkdir(parents=True)
+    source.mkdir(parents=True)
     (source / "app.py").write_text("x = 1\n", encoding="utf-8")
     if where == "a-config-in-the-tree":
-        config = source / ".ash" / ".ash.yaml"
+        config = source / ".ash.yaml"
         config.write_text(_A_CONFIG_READING_THE_AWS_VARIABLES, encoding="utf-8")
     else:
         config = _operator_config(tmp_path, _A_CONFIG_READING_THE_AWS_VARIABLES)
@@ -20585,8 +20578,7 @@ def test_a_workspace_dry_run_refuses_what_the_run_refuses_before_any_project(
         case, _NAMES_MODULE
     )
     if case == "project":
-        (project / ".ash").mkdir()
-        (project / ".ash" / ".ash.yaml").write_text(
+        (project / ".ash.yaml").write_text(
             yaml.safe_dump({"project_name": "api", "ash_plugin_modules": [module]}),
             encoding="utf-8",
         )
@@ -20679,9 +20671,8 @@ def test_a_path_matches_a_name_that_is_not_utf8_as_the_report_writes_it(
     assert_on_page(SUPPRESS_FINDINGS, _A_NAME_THAT_IS_NOT_UTF8)
     tree = _config_scan_tree(tmp_path, {"control.py": _CONFIG_SECRET})
     _write_non_utf8_name(tree)
-    (tree / ".ash").mkdir()
     entry = {"path": pattern, "reason": "page claims"}
-    (tree / ".ash" / ".ash.yaml").write_text(
+    (tree / ".ash.yaml").write_text(
         yaml.safe_dump(
             {"project_name": "page-claims", "global_settings": {setting: [entry]}}
         ),
@@ -20730,9 +20721,8 @@ def test_a_utf8_name_that_spells_the_escape_reads_as_the_same_name(
     tree = _config_scan_tree(tmp_path, {_REPORTED_NAME: _CONFIG_SECRET})
     _write_non_utf8_name(tree)
     if suppressed_by is not None:
-        (tree / ".ash").mkdir()
         entry = {"path": suppressed_by, "reason": "page claims"}
-        (tree / ".ash" / ".ash.yaml").write_text(
+        (tree / ".ash.yaml").write_text(
             yaml.safe_dump(
                 {
                     "project_name": "page-claims",

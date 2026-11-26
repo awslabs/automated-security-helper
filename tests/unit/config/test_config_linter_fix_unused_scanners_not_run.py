@@ -38,8 +38,7 @@ CONFIG = (
 
 
 def _write(tmp_path: Path, report: dict) -> Path:
-    config_path = tmp_path / ".ash" / ".ash.yaml"
-    config_path.parent.mkdir(parents=True)
+    config_path = tmp_path / ".ash.yaml"
     config_path.write_bytes(CONFIG.encode("utf-8"))
     reports = tmp_path / ".ash" / "ash_output" / "reports"
     reports.mkdir(parents=True)

@@ -1,4 +1,4 @@
-$ ash report --format dict --log-level ERROR
+$ ash results report --format dict --log-level ERROR
 [exit 5]
 
 [stderr]

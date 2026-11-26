@@ -97,8 +97,7 @@ def _project(root: Path, relative: str, config: str | None = None) -> Path:
     project = root / relative
     project.mkdir(parents=True, exist_ok=True)
     if config is not None:
-        (project / ".ash").mkdir(exist_ok=True)
-        (project / ".ash" / "ash.yaml").write_text(config, encoding="utf-8")
+        (project / ".ash.yaml").write_text(config, encoding="utf-8")
     return project
 
 
@@ -258,7 +257,7 @@ class TestTheOperatorsConfig:
     ):
         operator = tmp_path / "operator.yaml"
         operator.write_text("project_name: operator\n", encoding="utf-8")
-        own = tmp_path / "api" / ".ash" / "ash.yaml"
+        own = tmp_path / "api" / ".ash.yaml"
         own.parent.mkdir(parents=True)
         own.write_text("project_name: api\n", encoding="utf-8")
         seen = {}
@@ -291,7 +290,7 @@ class TestTheOperatorsConfig:
         client_copy.write_text("project_name: copy\n", encoding="utf-8")
         registered = tmp_path / "registered.yaml"
         registered.write_text("project_name: registered\n", encoding="utf-8")
-        own = tmp_path / "api" / ".ash" / "ash.yaml"
+        own = tmp_path / "api" / ".ash.yaml"
         own.parent.mkdir(parents=True)
         own.write_text("project_name: api\n", encoding="utf-8")
         seen = {}

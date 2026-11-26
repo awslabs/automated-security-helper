@@ -33,8 +33,7 @@ def test_fix_unused_on_a_file_that_does_not_parse_exits_3(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
-    config_path = tmp_path / ".ash" / ".ash.yaml"
-    config_path.parent.mkdir()
+    config_path = tmp_path / ".ash.yaml"
     unparsed = "global_settings: [unclosed\n"
     config_path.write_text(unparsed, encoding="utf-8")
     reports = tmp_path / ".ash" / "ash_output" / "reports"

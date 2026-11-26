@@ -24,9 +24,13 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
-import pytest
-
-pytestmark = pytest.mark.unit
+try:
+    import pytest
+except ImportError:  # the direct-run driver at the bottom needs no pytest
+    pytest = None  # type: ignore[assignment]
+    pytestmark = None
+else:
+    pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -63,6 +67,8 @@ def plant(
     yml: dict[str, str] | None = None,
     history: list[str] | None = None,
     pages: tuple[str, ...] = ("how-to/install.md",),
+    renames: list[tuple[str, str]] | None = None,
+    counts: dict[str, int] | None = None,
 ) -> Path:
     """A miniature checkout with the three inputs the validator reads."""
     root = tmp_path / "repo"
@@ -74,9 +80,11 @@ def plant(
     docs.mkdir(parents=True, exist_ok=True)
     history_dir = root / "docs" / "url-history"
     history_dir.mkdir(parents=True, exist_ok=True)
+    document: dict = {"redirects": redirects or {}, "tombstones": tombstones or []}
+    if counts is not None:
+        document["counts"] = counts
     (history_dir / "url-redirect-map.json").write_text(
-        json.dumps({"redirects": redirects or {}, "tombstones": tombstones or []}),
-        encoding="utf-8",
+        json.dumps(document), encoding="utf-8"
     )
     lines = ["redirects:"] + [f"  {old}: {new}" for old, new in (yml or {}).items()]
     (root / "docs" / "redirects.yml").write_text(
@@ -84,6 +92,7 @@ def plant(
     )
     rows = ["tag-range\tkind\told-url\tnew-url-or-empty"]
     rows += [f"v1..v2\tD\t{url}" for url in history or []]
+    rows += [f"v1..v2\tR\t{old}\t{new}" for old, new in renames or []]
     (history_dir / "historical-urls.tsv").write_text(
         "\n".join(rows) + "\n", encoding="utf-8"
     )
@@ -180,6 +189,116 @@ def test_planted_shadowed_url_fails(tmp_path: Path) -> None:
     )
     findings, _summary = vuh.run(root)
     assert any("would overwrite it" in f for f in findings), findings
+
+
+def test_planted_pair_of_old_pages_serving_one_url_fails(tmp_path: Path) -> None:
+    vuh = _load()
+    # ``x.md`` and ``x/index.md`` are one URL, ``/x/``; their redirect pages
+    # would overwrite each other and the later entry would win unannounced.
+    root = plant(
+        tmp_path,
+        yml={"x.md": "how-to/install.md", "x/index.md": "other.md"},
+        pages=("how-to/install.md", "other.md"),
+    )
+    findings, _summary = vuh.run(root)
+    matching = [f for f in findings if "already serves" in f]
+    assert len(matching) == 1, findings
+    assert "redirects.yml:3:" in matching[0] and "(line 2)" in matching[0], matching
+
+
+def test_distinct_old_pages_serving_distinct_urls_pass(tmp_path: Path) -> None:
+    vuh = _load()
+    root = plant(
+        tmp_path,
+        yml={"x.md": "how-to/install.md", "y/index.md": "how-to/install.md"},
+    )
+    findings, _summary = vuh.run(root)
+    assert not [f for f in findings if "already serves" in f], findings
+
+
+def test_planted_wrong_map_counts_fail(tmp_path: Path) -> None:
+    vuh = _load()
+    redirects = {"/a/": "/how-to/install/", "/b/": "/how-to/install/"}
+    yml = {"a.md": "how-to/install.md", "b.md": "how-to/install.md"}
+    wrong = plant(
+        tmp_path,
+        redirects=redirects,
+        yml=yml,
+        counts={"dead": 2, "mapped": 3, "distinct_targets": 2},
+    )
+    findings, _summary = vuh.run(wrong)
+    assert any("counts.mapped says 3" in f for f in findings), findings
+    assert any("counts.distinct_targets says 2" in f for f in findings), findings
+    assert not any("counts.dead" in f for f in findings), findings
+
+
+def test_right_map_counts_and_unchecked_classification_keys_pass(
+    tmp_path: Path,
+) -> None:
+    vuh = _load()
+    root = plant(
+        tmp_path,
+        redirects={"/a/": "/how-to/install/", "/b/": "/how-to/install/"},
+        yml={"a.md": "how-to/install.md", "b.md": "how-to/install.md"},
+        counts={
+            "dead": 2,
+            "mapped": 2,
+            "distinct_targets": 1,
+            "tombstones": 0,
+            "rename_chain": 99,  # classification only: never checked
+            "fallbacks": 99,
+        },
+    )
+    findings, _summary = vuh.run(root)
+    assert findings == []
+
+
+def test_planted_unresolvable_rename_target_fails(tmp_path: Path) -> None:
+    vuh = _load()
+    root = plant(
+        tmp_path,
+        renames=[("old-page/", "no-such-page/")],
+        yml={"old-page.md": "how-to/install.md"},
+    )
+    findings, _summary = vuh.run(root)
+    assert any(
+        "historical-urls.tsv:2:" in f and "/no-such-page/" in f for f in findings
+    ), findings
+
+
+def test_planted_malformed_rename_target_fails(tmp_path: Path) -> None:
+    vuh = _load()
+    root = plant(
+        tmp_path,
+        renames=[("old-page/", "how-to/install/?x=1")],
+        yml={"old-page.md": "how-to/install.md"},
+    )
+    findings, _summary = vuh.run(root)
+    assert any("is not a /path/ page URL" in f for f in findings), findings
+
+
+def test_rename_targets_a_page_a_redirect_or_a_mapped_url_serves_pass(
+    tmp_path: Path,
+) -> None:
+    vuh = _load()
+    root = plant(
+        tmp_path,
+        redirects={"/gone/": "/how-to/install/"},
+        yml={
+            "gone.md": "how-to/install.md",
+            "moved.md": "how-to/install.md",
+            "a.md": "how-to/install.md",
+            "b.md": "how-to/install.md",
+        },
+        renames=[
+            ("a/", "how-to/install/"),  # a served page
+            ("b/", "moved/"),  # a redirect entry's old page
+            ("c/", "gone/"),  # a mapped dead URL
+        ],
+        history=["c/"],
+    )
+    findings, _summary = vuh.run(root)
+    assert not [f for f in findings if "historical-urls.tsv:" in f], findings
 
 
 def test_planted_broken_site_stub_fails(tmp_path: Path) -> None:
