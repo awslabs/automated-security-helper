@@ -5,7 +5,7 @@
 
 Why this exists
 ---------------
-`.ash/.ash.yaml` and `.ash/.ash_alpha_plugins.yaml` once said, in comments, that
+`.ash.yaml` and `.ash/.ash_alpha_plugins.yaml` once said, in comments, that
 ASH's path matcher ignores a trailing ``**`` on a multi-segment pattern, and a
 neighbouring comment said ``/**`` is what makes ``tests/pytest-temp/**`` match
 anything. Both cannot be true. ``file_path_matches`` is the matcher the SARIF

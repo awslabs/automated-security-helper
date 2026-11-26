@@ -32,6 +32,8 @@ from typing import Any, Dict, List
 import pytest
 import yaml
 
+from automated_security_helper.utils.suppression_matcher import file_path_matches
+
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -41,12 +43,21 @@ SYMBOL = "_log_where_the_server_listens"
 FLAGGED_TEXT = '"0.0.0.0" if config.host is None'
 
 
+def _select_b104(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Every B104 entry whose path REACHES the mcp module, read by the real
+    matcher: string equality would let a glob or a bare directory (which
+    matches its whole subtree) hide a real ``0.0.0.0`` bind."""
+    return [
+        e
+        for e in entries
+        if e.get("rule_id") == "B104"
+        and file_path_matches(MCP_PATH, str(e.get("path") or ""))
+    ]
+
+
 def _b104_entries(config: str) -> List[Dict[str, Any]]:
     doc = yaml.safe_load((REPO_ROOT / config).read_text(encoding="utf-8")) or {}
-    entries = (doc.get("global_settings") or {}).get("suppressions") or []
-    return [
-        e for e in entries if e.get("rule_id") == "B104" and e.get("path") == MCP_PATH
-    ]
+    return _select_b104((doc.get("global_settings") or {}).get("suppressions") or [])
 
 
 def _symbol_span(source: str, name: str) -> "tuple[int, int]":
@@ -82,6 +93,33 @@ def test_the_two_configs_carry_the_same_pin():
     assert default.get("symbol") == alpha.get("symbol"), (
         "the default and alpha self-scan configs must pin the mcp B104 entry "
         "to the same symbol (kept in step)"
+    )
+
+
+def test_the_selector_sees_every_path_spelling_that_reaches_the_module():
+    """Control: each spelling that covers the mcp module is selected, so a
+    planted entry in any of them would break the exactly-one assertion."""
+    spellings = [
+        MCP_PATH,
+        "automated_security_helper/cli/mcp/**",
+        "automated_security_helper/cli/mcp/*.py",
+        "automated_security_helper/cli/mcp",
+    ]
+    planted = [{"rule_id": "B104", "path": spelling} for spelling in spellings]
+    assert _select_b104(planted) == planted
+    # And ones that do not reach it stay unselected: another rule, another
+    # subtree, a pathless entry, and a ./-prefixed path, which the product
+    # matcher itself reads as matching nothing, so it suppresses nothing.
+    assert (
+        _select_b104(
+            [
+                {"rule_id": "B105", "path": MCP_PATH},
+                {"rule_id": "B104", "path": "automated_security_helper/cli/report/**"},
+                {"rule_id": "B104"},
+                {"rule_id": "B104", "path": f"./{MCP_PATH}"},
+            ]
+        )
+        == []
     )
 
 

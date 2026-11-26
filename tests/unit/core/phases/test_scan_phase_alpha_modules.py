@@ -245,8 +245,14 @@ def test_a_loaded_module_without_the_name_gets_the_generic_message(tmp_path):
     FromTheModule.__module__ = f"{PKG}.ash_snyk_plugins.snyk_code_scanner"
     with pytest.raises(ScannerSelectionError) as raised:
         _scan(_context(tmp_path), [FromTheModule], ["snyk-code"])
-    assert "None of the requested scanners exist" in str(raised.value)
-    assert "not loaded" not in str(raised.value)
+    message = str(raised.value)
+    assert "None of the requested scanners exist" in message
+    # The live hint's markers (enablement.unloaded_opt_in_hint): the generic
+    # refusal must carry none of them. "not loaded" is kept against a return of
+    # the old wording.
+    assert "is provided by" not in message
+    assert "did not load" not in message
+    assert "not loaded" not in message
 
 
 def test_several_unloaded_scanners_name_every_module_once(tmp_path):
