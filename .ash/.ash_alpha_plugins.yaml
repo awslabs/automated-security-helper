@@ -545,15 +545,15 @@ global_settings:
         for the trade_secret keywords, pattern text and not a value.
     - path: .ash.yaml
       rule_id: API_KEY_OR_SECRET
-      line_start: 774
-      line_end: 774
+      line_start: 715
+      line_end: 715
       reason: >-
         False positive. A suppression reason that quotes a placeholder fixture
         literal; the text explains why another finding is a false positive.
     - path: .ash.yaml
       rule_id: API_KEY_OR_SECRET
-      line_start: 1021
-      line_end: 1021
+      line_start: 962
+      line_end: 962
       reason: >-
         False positive. A suppression reason that quotes a placeholder fixture
         literal; the text explains why another finding is a false positive.

@@ -111,6 +111,15 @@ OUTPUT_RESTRICTING_GRYPE_KEYS: Final[frozenset[str]] = frozenset(
 )
 
 # The per-result message grype's SARIF presenter writes for a package match.
+#: Where the register's mapped grype cells were observed. ASH runs grype on a
+#: directory (``dir:``); the committed capture is grype 0.122.1 over a syft SBOM,
+#: so locations, the line and column values, the fingerprint distribution and the
+#: rule help link are read from that mode and a ``dir:`` run is not yet captured.
+_SBOM_CAPTURE_NOTE = (
+    "observed in the committed grype 0.122.1 capture over a syft SBOM, not in a "
+    "dir: scan, the mode ASH wires; a dir: capture would settle any difference"
+)
+
 _GRYPE_PACKAGE_MESSAGE = re.compile(
     r"vulnerability in \S+ package: (?P<name>[^,\s]+), version (?P<version>\S+) "
     r"was found at: "
@@ -414,30 +423,36 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
             state=FacetState.MAPPED,
+            reason=_SBOM_CAPTURE_NOTE,
             native_field="SARIF result ruleId (the vulnerability id plus the "
             "package name)",
         ),
         severity=FacetDecl(
             state=FacetState.MAPPED,
+            reason=_SBOM_CAPTURE_NOTE,
             native_field='SARIF rule properties "security-severity" (CVSS), '
             'else the result "level"',
         ),
         file_path=FacetDecl(
             state=FacetState.MAPPED,
+            reason=_SBOM_CAPTURE_NOTE,
             native_field="SARIF locations[].physicalLocation.artifactLocation."
             "uri (the manifest or lockfile)",
         ),
         line_range=FacetDecl(
             state=FacetState.MAPPED,
+            reason=_SBOM_CAPTURE_NOTE,
             native_field="SARIF region.startLine (grype writes line 1 of the manifest)",
         ),
         column=FacetDecl(
             state=FacetState.MAPPED,
+            reason=_SBOM_CAPTURE_NOTE,
             native_field="SARIF region.startColumn / region.endColumn (always "
             "1 in the capture, as the finding is the manifest's line 1)",
         ),
         message=FacetDecl(
             state=FacetState.MAPPED,
+            reason=_SBOM_CAPTURE_NOTE,
             native_field="SARIF result message.text",
         ),
         resource_id=FacetDecl(
@@ -453,11 +468,13 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         ),
         package_name=FacetDecl(
             state=FacetState.MAPPED,
+            reason=_SBOM_CAPTURE_NOTE,
             native_field='SARIF message "package: <name>, version <version> '
             'was found at:" parsed by _GRYPE_PACKAGE_MESSAGE',
         ),
         package_version=FacetDecl(
             state=FacetState.MAPPED,
+            reason=_SBOM_CAPTURE_NOTE,
             native_field='SARIF message "package: <name>, version <version> '
             'was found at:" parsed by _GRYPE_PACKAGE_MESSAGE',
         ),
@@ -488,6 +505,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         ),
         fingerprints=FacetDecl(
             state=FacetState.MAPPED,
+            reason=_SBOM_CAPTURE_NOTE,
             native_field="SARIF result partialFingerprints."
             "primaryLocationLineHash (a hash of the manifest line, so findings "
             "at one manifest line share a value; 6 distinct values over 21 "
@@ -495,6 +513,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         ),
         fix_available=FacetDecl(
             state=FacetState.MAPPED,
+            reason=_SBOM_CAPTURE_NOTE,
             native_field='the SARIF rule help.text line "Fix Version: '
             "<versions>\" (grype's rendering of "
             "matches[].vulnerability.fix.versions); fix_available=True is "
@@ -518,7 +537,8 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             "none of its own",
             reason="grype writes the advisory dataSource as the rule helpUri; "
             "the native match urls (matches[].vulnerability.urls, "
-            "relatedVulnerabilities[].urls) are still never read",
+            "relatedVulnerabilities[].urls) are still never read; "
+            + _SBOM_CAPTURE_NOTE,
         ),
         tags=FacetDecl(
             state=FacetState.UNCONFIRMED,
@@ -530,6 +550,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
+            reason=_SBOM_CAPTURE_NOTE,
             native_field="SARIF result properties bag (package identity keys "
             "this adapter writes) passed through to the flat properties",
         ),
@@ -623,11 +644,11 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 ),
             ),
             identity=opsf.IdentityFacet(
-                fingerprint_class=opsf.FingerprintClass.STABLE_NATIVE,
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
                 note="read at tests/test_data/scanners/grype/captured/grype-0.122.1-from-syft-sbom.sarif: "
                 "every result carries partialFingerprints.primaryLocationLineHash, which grype writes "
                 "per manifest line (6 distinct values over 21 results), so findings at one line share "
-                "a value; it is not a per-finding hash",
+                "a value; it is not a per-finding hash, so identity is the position",
             ),
             extensibility=opsf.ExtensibilityFacet(
                 custom_rules=opsf.CustomRules.NONE,

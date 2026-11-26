@@ -999,14 +999,23 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                             "publishes cp314 wheels from 1.19.0, while "
                             "yara-python publishes none through 4.5.4"
                         ),
-                        # Both bounds are proved (>=3.10 is guarddog's own
-                        # floor, <3.14 is the wheel gap at the pinned
-                        # dependency versions), so this is a closed row. A
-                        # search of the VirusTotal/yara-python issues for a
-                        # cp314 report found none (a "wheel" search returned
-                        # issues, so the search itself works); with no issue
-                        # URL to cite, the row is not declared open-ended.
-                        open_ended=False,
+                        # The gap is genuinely unresolved upstream (yara-python
+                        # publishes no cp314 wheel through 4.5.4), so the row
+                        # is open-ended and re-read at a guarddog bump; with no
+                        # upstream issue to cite, the recheck_note carries what
+                        # was searched in the URL's place.
+                        open_ended=True,
+                        recheck_note=(
+                            "no upstream issue exists to cite: a search of the "
+                            "VirusTotal/yara-python issues for a cp314 report "
+                            "found none (a 'wheel' search returned issues, so "
+                            "the search itself works; read 2026-11-25); re-check "
+                            "pygit2 and yara-python cp314 wheels at the next "
+                            "guarddog version bump"
+                        ),
+                        # GUARDDOG_DEFAULT_VERSION_CONSTRAINT, as of this row's
+                        # writing.
+                        recorded_default_constraint="==3.2.0",
                     ),
                 ),
             ),

@@ -610,3 +610,20 @@ def test_a_mapped_scanner_keeps_its_resource_id(scanner_cls: type) -> None:
 
 def test_an_unknown_scanner_is_left_as_read() -> None:
     assert _flatten_with_bag_key("no-such-scanner").resource_id == _BAG_VALUE
+
+
+def test_a_state_the_drop_does_not_know_never_keeps_a_tool_bag_resource_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The drop is fail-closed: any declared state but MAPPED drops the value.
+
+    A state added to the vocabulary later is not named in the drop, and a
+    pass-through resource id would bind resource-scoped suppressions to a value
+    the tool, not ASH, wrote. ``None`` (an unknown scanner) stays left as read.
+    """
+    from automated_security_helper.utils import scanner_tool_types
+
+    monkeypatch.setattr(
+        scanner_tool_types, "scanner_resource_id_state", lambda _name: "a-future-state"
+    )
+    assert _flatten_with_bag_key("any-scanner").resource_id is None
