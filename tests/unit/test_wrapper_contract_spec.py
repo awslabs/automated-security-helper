@@ -140,6 +140,45 @@ def test_the_subcommands_whose_own_dash_o_is_forwarded():
     assert contract().dash_o_subcommands == ("get-genai-guide", "config")
 
 
+def test_the_commands_that_read_stdin():
+    """Commands, not the groups they sit in: `config` prompts in lint and wizard and
+    nowhere else, and `results` holds one terminal app (inspect findings) beside four
+    commands that read nothing. The findings view is listed once for each path it is
+    mounted at."""
+    assert contract().stdin_readers == (
+        ("config", "lint"),
+        ("config", "wizard"),
+        ("inspect", "findings"),
+        ("mcp",),
+        ("results", "inspect", "findings"),
+    )
+
+
+def test_a_stdin_reader_must_be_a_command_of_the_cli_and_not_a_group():
+    import typer.main
+
+    from automated_security_helper.cli.main import app
+    from automated_security_helper.interactions.wrapper_contract import _stdin_readers
+
+    root = typer.main.get_command(app)
+    declared = (("results", "inspect", "findings"), ("config", "lint"))
+    # Sorted, whatever order they were declared in.
+    assert _stdin_readers(root, declared) == (
+        ("config", "lint"),
+        ("results", "inspect", "findings"),
+    )
+    # A misspelled or removed command, at the end of a path and in the middle of one.
+    with pytest.raises(ValueError, match="no command `lnt`"):
+        _stdin_readers(root, (("config", "lnt"),))
+    with pytest.raises(ValueError, match="no command `inspekt`"):
+        _stdin_readers(root, (("results", "inspekt", "findings"),))
+    # A group is refused: its commands are named instead.
+    with pytest.raises(ValueError, match="which is a group"):
+        _stdin_readers(root, (("config",),))
+    with pytest.raises(ValueError, match="which is a group"):
+        _stdin_readers(root, (("results", "inspect"),))
+
+
 def test_runner_order_image_pattern_and_build_targets():
     spec = contract()
     assert spec.runner_order == ("finch", "docker", "nerdctl", "podman")

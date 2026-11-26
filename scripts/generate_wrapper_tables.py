@@ -10,8 +10,9 @@ Usage:
 
 The two host wrappers exist for hosts with no Python, so they carry written-out copies of
 the ``ash`` CLI's own surface: the subcommand names, the root options that take a value,
-which subcommands take the options a wrapper adds, the runner discovery order. This
-script computes those from the real typer app and container mode's constants
+which subcommands take the options a wrapper adds, which commands read stdin (``./ash``
+only), the runner discovery order. This script computes those from the real typer app
+and container mode's constants
 (``automated_security_helper/interactions/wrapper_contract.py``) and writes them between
 marker comments inside each wrapper, in that wrapper's own syntax::
 
@@ -164,6 +165,14 @@ def sh_takes_sandbox(contract) -> list[str]:
     return [f'ASH_TAKES_SANDBOX="{_sh_words(contract.sandbox_subcommands)}"']
 
 
+def sh_reads_stdin(contract) -> list[str]:
+    # One word per command, the words that name it joined with ":" (config:lint). The
+    # wrapper splits an entry back into words and compares them with the words after
+    # the subcommand, so a word of the caller's that holds a ":" cannot spell a command.
+    commands = (":".join(words) for words in contract.stdin_readers)
+    return [f'ASH_READS_STDIN="{_sh_words(commands)}"']
+
+
 def sh_exit_codes(contract) -> list[str]:
     return [
         f"WRAPPER_REFUSAL_EXIT={contract.refusal_exit}",
@@ -199,6 +208,7 @@ BLOCKS: dict[str, list[tuple[str, Renderer]]] = {
         ("sh-root-value-options", sh_root_value_options),
         ("sh-takes-quiet-and-color", sh_takes_quiet_and_color),
         ("sh-takes-sandbox", sh_takes_sandbox),
+        ("sh-reads-stdin", sh_reads_stdin),
         ("sh-exit-codes", sh_exit_codes),
         ("sh-runner-order", sh_runner_order),
         ("sh-ci-runner-markers", sh_ci_runner_markers),

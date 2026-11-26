@@ -1953,26 +1953,49 @@ else
       if [[ "${COLOR_OUTPUT}" = "true" ]] && [ -t 1 ]; then
         DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -t"
       fi
-      # The container's stdin is kept open (-i) only for a run that reads it. The
-      # subcommands that read stdin are ASH_READS_STDIN: mcp, whose default stdio
-      # transport is driven by the client over stdin; inspect, the Textual app, which
-      # reads keys, and results, whose inspect is that same app; and config, whose
-      # init and fix steps prompt for answers. A group is listed as a whole, so every
-      # command under results and config keeps stdin open. Any subcommand reads stdin
-      # when given `--cli-json-input -`, which takes its parameters as a JSON document
-      # from stdin. Without -i none of them got any input. No other run reads stdin,
-      # and -i on one makes the container consume the caller's input: `while read d;
-      # do ./ash --source-dir "$d"; done < dirs.txt` ended after one directory, a job
-      # script fed to bash on stdin lost the commands after ./ash, and `./ash scan &`
-      # from an interactive shell had the runner read the terminal and stopped on
-      # SIGTTIN. SUBCOMMAND is the first of ash's words that names a subcommand
-      # (detect_subcommand, above). The list must name the subcommands that read
-      # stdin; tests/unit/test_ash_bash_entrypoint_subcommand_args.py checks it
-      # against the CLI's own readers.
-      ASH_READS_STDIN="config inspect mcp results"
+      # The container's stdin is kept open (-i) only for a run that reads it. Those
+      # are the commands in ASH_READS_STDIN, each written as the words that name it
+      # joined with ":": mcp, whose default stdio transport is driven by the client
+      # over stdin; inspect findings and results inspect findings, the Textual app,
+      # which reads keys; and config lint and config wizard, which ask before they
+      # change a file. The list names commands, not the groups they sit in. The rest
+      # of config and of results reads nothing, and -i on a run that reads nothing
+      # makes the container consume the caller's input: `while read d; do ./ash
+      # --source-dir "$d"; done < dirs.txt` ended after one directory, a job script
+      # fed to bash on stdin lost the commands after ./ash, and `./ash scan &` from an
+      # interactive shell had the runner read the terminal and stopped on SIGTTIN.
+      # Any command reads stdin when given `--cli-json-input -`, which takes its
+      # parameters as a JSON document from stdin. Without -i none of them got any
+      # input. A run reads stdin when the words from SUBCOMMAND on (the first of ash's
+      # words that names a subcommand, detect_subcommand above) spell one of the listed
+      # commands: a group's own commands are named right after it, so each word of an
+      # entry is compared with the word in the same place. utils/ash_helpers.ps1 never
+      # passes -i, so it has no such list.
+      # tests/unit/test_ash_bash_entrypoint_subcommand_args.py reads each command's code
+      # and fails when a command reads stdin and is not listed, or is listed and does
+      # not.
+      # BEGIN generated: sh-reads-stdin (scripts/generate_wrapper_tables.py)
+      ASH_READS_STDIN="config:lint config:wizard inspect:findings mcp results:inspect:findings"
+      # END generated: sh-reads-stdin
+      # Run again rather than reused, as below: SUBCOMMAND_AT must index the words as
+      # they stand now.
+      detect_subcommand
       KEEP_STDIN="NO"
-      if [[ -n "${SUBCOMMAND}" && " ${ASH_READS_STDIN} " == *" ${SUBCOMMAND} "* ]]; then
-        KEEP_STDIN="YES"
+      if [[ -n "${SUBCOMMAND}" ]]; then
+        read -r -d '' -a STDIN_COMMANDS <<< "${ASH_READS_STDIN}"
+        for STDIN_COMMAND in "${STDIN_COMMANDS[@]}"; do
+          read -r -d '' -a STDIN_COMMAND_WORDS <<< "${STDIN_COMMAND//:/ }"
+          STDIN_NAMED="YES"
+          for ((STDIN_STEP = 0; STDIN_STEP < ${#STDIN_COMMAND_WORDS[@]}; STDIN_STEP++)); do
+            if [[ "${ASH_ARG_WORDS[SUBCOMMAND_AT + STDIN_STEP]:-}" != "${STDIN_COMMAND_WORDS[STDIN_STEP]}" ]]; then
+              STDIN_NAMED="NO"
+              break
+            fi
+          done
+          if [[ "${STDIN_NAMED}" = "YES" ]]; then
+            KEEP_STDIN="YES"
+          fi
+        done
       fi
       for ((STDIN_WORD_AT = 0; STDIN_WORD_AT < ${#ASH_ARG_WORDS[@]}; STDIN_WORD_AT++)); do
         case "${ASH_ARG_WORDS[STDIN_WORD_AT]}" in
