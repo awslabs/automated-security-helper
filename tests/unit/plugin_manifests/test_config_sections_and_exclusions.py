@@ -175,8 +175,8 @@ def test_the_exclusion_table_is_what_the_manifests_declare():
         ("trivy", "ignore_file", "trivy-ignore-file", ()),
     }
     # A number, not ``len(exclusion_options())``: the table is built one-to-one from
-    # that function, so comparing the two could not fail.
-    assert len(SCANNER_EXCLUSION_OPTIONS) == 9
+    # that function, so comparing the two could not fail. 8: no semgrep row on v4.
+    assert len(SCANNER_EXCLUSION_OPTIONS) == 8
 
 
 def test_a_manifest_listing_an_exclusion_option_twice_is_refused():

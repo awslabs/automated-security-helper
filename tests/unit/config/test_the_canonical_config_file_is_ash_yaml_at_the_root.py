@@ -153,7 +153,7 @@ class TestWarnings:
         assert "deprecated" in warnings[0]
         assert found.as_posix() in warnings[0]
         assert ".ash.yaml" in warnings[0]
-        assert "4.0" in warnings[0]
+        assert "4.1" in warnings[0]
 
     @pytest.mark.parametrize("legacy", LEGACY_LOCATIONS)
     def test_the_canonical_file_over_a_legacy_one_warns_once_naming_the_shadowed_file(
