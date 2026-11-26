@@ -38,6 +38,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.helpers import iter_repo_files
+
 pytestmark = pytest.mark.unit
 
 TESTS = Path(__file__).resolve().parents[2]
@@ -95,8 +97,14 @@ LEGACY_SUBJECT = {
 
 
 def _files_with_legacy_spelling(root: Path, skip: Path) -> set[str]:
+    """The ``.py`` files under ``root`` that name a legacy location.
+
+    Walked with ``iter_repo_files``, which prunes the tests' scratch tree as it
+    descends: ``root`` is tests/, where other xdist workers create and remove
+    tests/pytest-temp while this walks (tests/unit/test_repo_walkers_skip_scratch.py).
+    """
     found = set()
-    for path in sorted(root.rglob("*.py")):
+    for path in sorted(p for p in iter_repo_files(root) if p.suffix == ".py"):
         if path == skip or "test_data" in path.parts:
             continue
         if LEGACY_SPELLING.search(path.read_text(encoding="utf-8", errors="replace")):
