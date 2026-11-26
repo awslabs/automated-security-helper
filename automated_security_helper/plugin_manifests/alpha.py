@@ -146,6 +146,14 @@ MANIFESTS = (
         owned=(f"{_DOCS}/betterleaks-plugin.md", f"{_FIXTURES}/betterleaks"),
     ),
     _alpha(
+        "capa",
+        "ash_capa_plugins",
+        "capa_scanner",
+        "CapaScanner",
+        "CapaScannerConfigOptions",
+        owned=(f"{_DOCS}/capa-plugin.md", f"{_FIXTURES}/capa"),
+    ),
+    _alpha(
         "credsweeper",
         "ash_credsweeper_plugins",
         "credsweeper_scanner",

@@ -129,6 +129,7 @@ from automated_security_helper.core.enums import ScannerToolType
 SCANNER_TOOL_TYPES: Mapping[str, str] = {
     "actionlint": ScannerToolType.IAC.value,
     "bandit": ScannerToolType.SAST.value,
+    "capa": ScannerToolType.SAST.value,
     "cdk-nag": ScannerToolType.IAC.value,
     "cfn-guard": ScannerToolType.IAC.value,
     "cfn-lint": ScannerToolType.IAC.value,

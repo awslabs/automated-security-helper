@@ -780,6 +780,14 @@ RUN guarddog --version
 RUN ggshield --version
 
 #
+# capa (alpha scanner) is NOT in the image: every Linux build of its pinned v10.0.0
+# standalone release unpacks a libpython that needs GLIBC_2.38, and this image's
+# bookworm base has glibc 2.36 (measured: `capa --version` exits 255 with "version
+# `GLIBC_2.38' not found" in the base image). Its pin stays scanner-side
+# (ash_capa_plugins/capa_install.py), so ash_capa_plugins is not in the alpha list.
+#
+
+#
 # Polaris (alpha scanner). Installed by `ash dependencies install` above through
 # its module-local pinned installer (polaris_install.py: version, per-platform
 # assets, archive and executable digests). `polaris --version` is an unknown

@@ -188,6 +188,9 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
     "betterleaks": CorpusSpec(
         "betterleaks", sarif=("captured/*.sarif",), prep="betterleaks"
     ),
+    # The committed SARIF is what the scanner writes for the REAL captured capa
+    # 10.0.0 documents (captured/*.json); a regeneration test keeps it honest.
+    "capa": CorpusSpec("capa", sarif=("captured/*.sarif",)),
     "cdk-nag": CorpusSpec("cdk", prep="cdk-nag"),
     "cfn-guard": CorpusSpec(
         "cfn_lint_guard", sarif=("captured/cfn-guard-*.sarif",), prep="cfn-guard"
@@ -763,7 +766,7 @@ def test_the_gate_carries_no_waiver_but_the_register() -> None:
 def test_the_registry_and_the_corpus_table_agree() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
     names = {_name(cls) for cls in SCANNER_CLASSES}
-    assert len(SCANNER_CLASSES) == 30, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == 31, sorted(c.__name__ for c in SCANNER_CLASSES)
     assert names == set(CORPORA) == set(SCANNER_TOOL_TYPES), (
         f"registry {sorted(names)} / corpus table {sorted(CORPORA)}: a scanner "
         "needs a CORPORA row (a corpus, or None with the fixture to author)"

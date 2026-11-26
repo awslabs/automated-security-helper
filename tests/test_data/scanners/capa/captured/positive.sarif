@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "results": [
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "sample.elf"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "capa capability: terminate process (host-interaction/process/terminate); 1 match(es). Mapped to C0018."
+          },
+          "properties": {
+            "issue_severity": "LOW",
+            "match_addresses": [
+              33559584
+            ],
+            "match_count": 1,
+            "mbc_ids": [
+              "C0018"
+            ],
+            "namespace": "host-interaction/process/terminate",
+            "tags": [
+              "capability"
+            ]
+          },
+          "ruleId": "terminate process"
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "sample.elf"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "capa capability: write file on Linux (host-interaction/file-system/write); 1 match(es). Mapped to C0052."
+          },
+          "properties": {
+            "issue_severity": "LOW",
+            "match_addresses": [
+              33560132
+            ],
+            "match_count": 1,
+            "mbc_ids": [
+              "C0052"
+            ],
+            "namespace": "host-interaction/file-system/write",
+            "tags": [
+              "capability"
+            ]
+          },
+          "ruleId": "write file on Linux"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "informationUri": "https://github.com/mandiant/capa",
+          "name": "capa",
+          "version": "10.0.0"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

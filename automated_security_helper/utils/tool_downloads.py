@@ -1270,6 +1270,14 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         commit=_THIRD_PARTY_HASHES["betterleaks commit"],
         files=(LicenseFile("LICENSE"),),
     ),
+    # capa (alpha scanner) has NO entry: the table is what the image must carry, and
+    # the image cannot run capa v10.0.0 -- every Linux build of the standalone release
+    # unpacks a libpython that needs GLIBC_2.38, and the image's bookworm base has
+    # glibc 2.36 (measured: `capa --version` exits 255 with "version `GLIBC_2.38' not
+    # found" in the base image). The plugin pins and installs the release on user
+    # machines (ash_capa_plugins/capa_install.py); its register carries the license
+    # read (Apache-2.0, LICENSE.txt at the v10.0.0 tag's commit).
+    #
     # The release archive holds the executable and a README, no license file, so
     # both files come from the repository.
     "cfn-guard": ThirdPartyLicense(

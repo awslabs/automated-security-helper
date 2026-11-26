@@ -1,0 +1,360 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "results": [
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "sample.elf"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "capa capability: encode data using XOR (data-manipulation/encoding/xor); 1 match(es). Mapped to T1027, E1027.m02, C0026.002."
+          },
+          "properties": {
+            "attack_ids": [
+              "T1027"
+            ],
+            "issue_severity": "LOW",
+            "match_addresses": [
+              33575104
+            ],
+            "match_count": 1,
+            "mbc_ids": [
+              "E1027.m02",
+              "C0026.002"
+            ],
+            "namespace": "data-manipulation/encoding/xor",
+            "tags": [
+              "capability"
+            ]
+          },
+          "ruleId": "encode data using XOR"
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "sample.elf"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "capa capability: enumerate files on Linux (host-interaction/file-system/files/list); 1 match(es). Mapped to T1083, E1083."
+          },
+          "properties": {
+            "attack_ids": [
+              "T1083"
+            ],
+            "issue_severity": "LOW",
+            "match_addresses": [
+              33628720
+            ],
+            "match_count": 1,
+            "mbc_ids": [
+              "E1083"
+            ],
+            "namespace": "host-interaction/file-system/files/list",
+            "tags": [
+              "capability"
+            ]
+          },
+          "ruleId": "enumerate files on Linux"
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "sample.elf"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "capa capability: get current user on Linux (host-interaction/session); 1 match(es). Mapped to T1033."
+          },
+          "properties": {
+            "attack_ids": [
+              "T1033"
+            ],
+            "issue_severity": "LOW",
+            "match_addresses": [
+              33612528
+            ],
+            "match_count": 1,
+            "namespace": "host-interaction/session",
+            "tags": [
+              "capability"
+            ]
+          },
+          "ruleId": "get current user on Linux"
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "sample.elf"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "capa capability: get file attributes (host-interaction/file-system/meta); 1 match(es). Mapped to C0049."
+          },
+          "properties": {
+            "issue_severity": "LOW",
+            "match_addresses": [
+              33614541
+            ],
+            "match_count": 1,
+            "mbc_ids": [
+              "C0049"
+            ],
+            "namespace": "host-interaction/file-system/meta",
+            "tags": [
+              "capability"
+            ]
+          },
+          "ruleId": "get file attributes"
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "sample.elf"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "capa capability: get hostname (host-interaction/os/hostname); 1 match(es). Mapped to T1082, E1082."
+          },
+          "properties": {
+            "attack_ids": [
+              "T1082"
+            ],
+            "issue_severity": "LOW",
+            "match_addresses": [
+              33574112
+            ],
+            "match_count": 1,
+            "mbc_ids": [
+              "E1082"
+            ],
+            "namespace": "host-interaction/os/hostname",
+            "tags": [
+              "capability"
+            ]
+          },
+          "ruleId": "get hostname"
+        },
+        {
+          "level": "none",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "sample.elf"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "capa capability: get password database entry on Linux (host-interaction/session); 1 match(es)."
+          },
+          "properties": {
+            "issue_severity": "INFO",
+            "match_addresses": [
+              33612601
+            ],
+            "match_count": 1,
+            "namespace": "host-interaction/session",
+            "tags": [
+              "capability"
+            ]
+          },
+          "ruleId": "get password database entry on Linux"
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "sample.elf"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "capa capability: parse credit card information (collection/credit-card); 1 match(es). Mapped to C0019."
+          },
+          "properties": {
+            "issue_severity": "LOW",
+            "match_addresses": [
+              33582032
+            ],
+            "match_count": 1,
+            "mbc_ids": [
+              "C0019"
+            ],
+            "namespace": "collection/credit-card",
+            "tags": [
+              "capability"
+            ]
+          },
+          "ruleId": "parse credit card information"
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "sample.elf"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "capa capability: query environment variable (host-interaction/environment-variable); 3 match(es). Mapped to T1082, E1082."
+          },
+          "properties": {
+            "attack_ids": [
+              "T1082"
+            ],
+            "issue_severity": "LOW",
+            "match_addresses": [
+              33574112,
+              33593968,
+              33623776
+            ],
+            "match_count": 3,
+            "mbc_ids": [
+              "E1082"
+            ],
+            "namespace": "host-interaction/environment-variable",
+            "tags": [
+              "capability"
+            ]
+          },
+          "ruleId": "query environment variable"
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "sample.elf"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "capa capability: terminate process (host-interaction/process/terminate); 2 match(es). Mapped to C0018."
+          },
+          "properties": {
+            "issue_severity": "LOW",
+            "match_addresses": [
+              33591936,
+              33593760
+            ],
+            "match_count": 2,
+            "mbc_ids": [
+              "C0018"
+            ],
+            "namespace": "host-interaction/process/terminate",
+            "tags": [
+              "capability"
+            ]
+          },
+          "ruleId": "terminate process"
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "sample.elf"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "capa capability: write file on Linux (host-interaction/file-system/write); 1 match(es). Mapped to C0052."
+          },
+          "properties": {
+            "issue_severity": "LOW",
+            "match_addresses": [
+              33581499
+            ],
+            "match_count": 1,
+            "mbc_ids": [
+              "C0052"
+            ],
+            "namespace": "host-interaction/file-system/write",
+            "tags": [
+              "capability"
+            ]
+          },
+          "ruleId": "write file on Linux"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "informationUri": "https://github.com/mandiant/capa",
+          "name": "capa",
+          "version": "10.0.0"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

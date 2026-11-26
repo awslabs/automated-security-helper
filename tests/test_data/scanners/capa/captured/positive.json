@@ -1,0 +1,1222 @@
+{
+  "meta": {
+    "analysis": {
+      "arch": "amd64",
+      "base_address": {
+        "type": "absolute",
+        "value": 33554432
+      },
+      "extractor": "VivisectFeatureExtractor",
+      "feature_counts": {
+        "file": 402,
+        "functions": [
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33558528
+            },
+            "count": 18
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559072
+            },
+            "count": 8
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559088
+            },
+            "count": 9
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559104
+            },
+            "count": 9
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559120
+            },
+            "count": 8
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559136
+            },
+            "count": 9
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559152
+            },
+            "count": 9
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559168
+            },
+            "count": 9
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559184
+            },
+            "count": 9
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559200
+            },
+            "count": 9
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559216
+            },
+            "count": 8
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559232
+            },
+            "count": 8
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559248
+            },
+            "count": 9
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559264
+            },
+            "count": 8
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559280
+            },
+            "count": 9
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559296
+            },
+            "count": 8
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559312
+            },
+            "count": 9
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559328
+            },
+            "count": 9
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559344
+            },
+            "count": 9
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559360
+            },
+            "count": 8
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559376
+            },
+            "count": 8
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559392
+            },
+            "count": 9
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559408
+            },
+            "count": 9
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559424
+            },
+            "count": 9
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559440
+            },
+            "count": 9
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559456
+            },
+            "count": 8
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559472
+            },
+            "count": 9
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559488
+            },
+            "count": 9
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559504
+            },
+            "count": 8
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559520
+            },
+            "count": 8
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559536
+            },
+            "count": 9
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559552
+            },
+            "count": 8
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559584
+            },
+            "count": 157
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33560880
+            },
+            "count": 20
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33560928
+            },
+            "count": 13
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33561040
+            },
+            "count": 26
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33561104
+            },
+            "count": 23
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33561664
+            },
+            "count": 38
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33567248
+            },
+            "count": 29
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33567376
+            },
+            "count": 135
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33568848
+            },
+            "count": 14
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33568868
+            },
+            "count": 11
+          }
+        ]
+      },
+      "format": "elf",
+      "layout": {
+        "functions": [
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33558528
+            },
+            "matched_basic_blocks": [
+              {
+                "address": {
+                  "type": "absolute",
+                  "value": 33558550
+                }
+              }
+            ]
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33559584
+            },
+            "matched_basic_blocks": [
+              {
+                "address": {
+                  "type": "absolute",
+                  "value": 33559584
+                }
+              },
+              {
+                "address": {
+                  "type": "absolute",
+                  "value": 33559783
+                }
+              },
+              {
+                "address": {
+                  "type": "absolute",
+                  "value": 33559837
+                }
+              },
+              {
+                "address": {
+                  "type": "absolute",
+                  "value": 33560466
+                }
+              }
+            ]
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33561104
+            },
+            "matched_basic_blocks": [
+              {
+                "address": {
+                  "type": "absolute",
+                  "value": 33560976
+                }
+              }
+            ]
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33567376
+            },
+            "matched_basic_blocks": [
+              {
+                "address": {
+                  "type": "absolute",
+                  "value": 33567576
+                }
+              },
+              {
+                "address": {
+                  "type": "absolute",
+                  "value": 33567602
+                }
+              },
+              {
+                "address": {
+                  "type": "absolute",
+                  "value": 33567621
+                }
+              },
+              {
+                "address": {
+                  "type": "absolute",
+                  "value": 33567833
+                }
+              },
+              {
+                "address": {
+                  "type": "absolute",
+                  "value": 33567927
+                }
+              },
+              {
+                "address": {
+                  "type": "absolute",
+                  "value": 33568002
+                }
+              },
+              {
+                "address": {
+                  "type": "absolute",
+                  "value": 33568099
+                }
+              },
+              {
+                "address": {
+                  "type": "absolute",
+                  "value": 33568598
+                }
+              }
+            ]
+          },
+          {
+            "address": {
+              "type": "absolute",
+              "value": 33568868
+            },
+            "matched_basic_blocks": [
+              {
+                "address": {
+                  "type": "absolute",
+                  "value": 33568868
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "library_functions": [],
+      "os": "linux",
+      "rules": [
+        "/work/capa-rules-10.0.0"
+      ]
+    },
+    "argv": [
+      "-q",
+      "-j",
+      "-r",
+      "/work/capa-rules-10.0.0",
+      "--",
+      "clean.elf"
+    ],
+    "flavor": "static",
+    "sample": {
+      "md5": "3ac75c0fc8bc839f07b3ea24dda555f3",
+      "path": "/work/clean.elf",
+      "sha1": "573ca48f3d7dac2021c18bd2c3a92ea1d8059ada",
+      "sha256": "95202858b65afc961d4c0507e7c5e935a69181309965d973fe9c36272757b54f"
+    },
+    "timestamp": "2026-11-25T00:17:19.000328",
+    "version": "10.0.0"
+  },
+  "rules": {
+    "contain loop": {
+      "matches": [
+        [
+          {
+            "type": "absolute",
+            "value": 33559584
+          },
+          {
+            "captures": {},
+            "children": [
+              {
+                "captures": {},
+                "children": [],
+                "locations": [
+                  {
+                    "type": "absolute",
+                    "value": 33559584
+                  }
+                ],
+                "node": {
+                  "feature": {
+                    "characteristic": "loop",
+                    "type": "characteristic"
+                  },
+                  "type": "feature"
+                },
+                "success": true
+              },
+              {
+                "captures": {},
+                "children": [],
+                "locations": [],
+                "node": {
+                  "feature": {
+                    "characteristic": "tight loop",
+                    "type": "characteristic"
+                  },
+                  "type": "feature"
+                },
+                "success": false
+              },
+              {
+                "captures": {},
+                "children": [],
+                "locations": [],
+                "node": {
+                  "feature": {
+                    "characteristic": "recursive call",
+                    "type": "characteristic"
+                  },
+                  "type": "feature"
+                },
+                "success": false
+              }
+            ],
+            "locations": [],
+            "node": {
+              "statement": {
+                "type": "or"
+              },
+              "type": "statement"
+            },
+            "success": true
+          }
+        ],
+        [
+          {
+            "type": "absolute",
+            "value": 33567376
+          },
+          {
+            "captures": {},
+            "children": [
+              {
+                "captures": {},
+                "children": [],
+                "locations": [
+                  {
+                    "type": "absolute",
+                    "value": 33567376
+                  }
+                ],
+                "node": {
+                  "feature": {
+                    "characteristic": "loop",
+                    "type": "characteristic"
+                  },
+                  "type": "feature"
+                },
+                "success": true
+              },
+              {
+                "captures": {},
+                "children": [],
+                "locations": [],
+                "node": {
+                  "feature": {
+                    "characteristic": "tight loop",
+                    "type": "characteristic"
+                  },
+                  "type": "feature"
+                },
+                "success": false
+              },
+              {
+                "captures": {},
+                "children": [],
+                "locations": [],
+                "node": {
+                  "feature": {
+                    "characteristic": "recursive call",
+                    "type": "characteristic"
+                  },
+                  "type": "feature"
+                },
+                "success": false
+              }
+            ],
+            "locations": [],
+            "node": {
+              "statement": {
+                "type": "or"
+              },
+              "type": "statement"
+            },
+            "success": true
+          }
+        ]
+      ],
+      "meta": {
+        "attack": [],
+        "authors": [
+          "moritz.raabe@mandiant.com"
+        ],
+        "description": "",
+        "examples": [
+          "08AC667C65D36D6542917655571E61C8:0x406EAA"
+        ],
+        "is_subscope_rule": false,
+        "lib": true,
+        "maec": {},
+        "mbc": [],
+        "name": "contain loop",
+        "references": [],
+        "scopes": {
+          "static": "function"
+        }
+      },
+      "source": "rule:\n  meta:\n    name: contain loop\n    authors:\n      - moritz.raabe@mandiant.com\n    lib: true\n    scopes:\n      static: function\n      dynamic: unsupported  # requires characteristic features\n    examples:\n      - 08AC667C65D36D6542917655571E61C8:0x406EAA\n  features:\n    - or:\n      - characteristic: loop\n      - characteristic: tight loop\n      - characteristic: recursive call\n"
+    },
+    "terminate process": {
+      "matches": [
+        [
+          {
+            "type": "absolute",
+            "value": 33559584
+          },
+          {
+            "captures": {},
+            "children": [
+              {
+                "captures": {},
+                "children": [],
+                "locations": [],
+                "node": {
+                  "feature": {
+                    "api": "System.Diagnostics.Process::Kill",
+                    "type": "api"
+                  },
+                  "type": "feature"
+                },
+                "success": false
+              },
+              {
+                "captures": {},
+                "children": [],
+                "locations": [],
+                "node": {
+                  "feature": {
+                    "api": "System.Diagnostics.Process::WaitForExit",
+                    "type": "api"
+                  },
+                  "type": "feature"
+                },
+                "success": false
+              },
+              {
+                "captures": {},
+                "children": [],
+                "locations": [],
+                "node": {
+                  "feature": {
+                    "api": "System.Diagnostics.Process::WaitForExitAsync",
+                    "type": "api"
+                  },
+                  "type": "feature"
+                },
+                "success": false
+              },
+              {
+                "captures": {},
+                "children": [],
+                "locations": [],
+                "node": {
+                  "feature": {
+                    "api": "System.Environment::Exit",
+                    "type": "api"
+                  },
+                  "type": "feature"
+                },
+                "success": false
+              },
+              {
+                "captures": {},
+                "children": [],
+                "locations": [],
+                "node": {
+                  "feature": {
+                    "api": "System.Windows.Forms.Application::Exit",
+                    "type": "api"
+                  },
+                  "type": "feature"
+                },
+                "success": false
+              },
+              {
+                "captures": {},
+                "children": [],
+                "locations": [
+                  {
+                    "type": "absolute",
+                    "value": 33560691
+                  }
+                ],
+                "node": {
+                  "feature": {
+                    "api": "exit",
+                    "type": "api"
+                  },
+                  "type": "feature"
+                },
+                "success": true
+              },
+              {
+                "captures": {},
+                "children": [],
+                "locations": [],
+                "node": {
+                  "feature": {
+                    "api": "Exit",
+                    "type": "api"
+                  },
+                  "type": "feature"
+                },
+                "success": false
+              },
+              {
+                "captures": {},
+                "children": [],
+                "locations": [],
+                "node": {
+                  "feature": {
+                    "api": "RmShutdown",
+                    "type": "api"
+                  },
+                  "type": "feature"
+                },
+                "success": false
+              },
+              {
+                "captures": {},
+                "children": [
+                  {
+                    "captures": {},
+                    "children": [],
+                    "locations": [
+                      {
+                        "type": "no address"
+                      }
+                    ],
+                    "node": {
+                      "feature": {
+                        "os": "linux",
+                        "type": "os"
+                      },
+                      "type": "feature"
+                    },
+                    "success": true
+                  },
+                  {
+                    "captures": {},
+                    "children": [],
+                    "locations": [],
+                    "node": {
+                      "feature": {
+                        "api": "exit_group",
+                        "type": "api"
+                      },
+                      "type": "feature"
+                    },
+                    "success": false
+                  }
+                ],
+                "locations": [],
+                "node": {
+                  "statement": {
+                    "type": "and"
+                  },
+                  "type": "statement"
+                },
+                "success": false
+              },
+              {
+                "captures": {},
+                "children": [
+                  {
+                    "captures": {},
+                    "children": [
+                      {
+                        "captures": {},
+                        "children": [],
+                        "locations": [],
+                        "node": {
+                          "feature": {
+                            "match": "open process",
+                            "type": "match"
+                          },
+                          "type": "feature"
+                        },
+                        "success": false
+                      }
+                    ],
+                    "locations": [],
+                    "node": {
+                      "statement": {
+                        "type": "optional"
+                      },
+                      "type": "statement"
+                    },
+                    "success": true
+                  },
+                  {
+                    "captures": {},
+                    "children": [
+                      {
+                        "captures": {},
+                        "children": [],
+                        "locations": [],
+                        "node": {
+                          "feature": {
+                            "api": "TerminateProcess",
+                            "type": "api"
+                          },
+                          "type": "feature"
+                        },
+                        "success": false
+                      },
+                      {
+                        "captures": {},
+                        "children": [],
+                        "locations": [],
+                        "node": {
+                          "feature": {
+                            "api": "NtTerminateProcess",
+                            "type": "api"
+                          },
+                          "type": "feature"
+                        },
+                        "success": false
+                      },
+                      {
+                        "captures": {},
+                        "children": [],
+                        "locations": [],
+                        "node": {
+                          "feature": {
+                            "api": "ExitProcess",
+                            "type": "api"
+                          },
+                          "type": "feature"
+                        },
+                        "success": false
+                      },
+                      {
+                        "captures": {},
+                        "children": [],
+                        "locations": [],
+                        "node": {
+                          "feature": {
+                            "api": "ZwTerminateProcess",
+                            "type": "api"
+                          },
+                          "type": "feature"
+                        },
+                        "success": false
+                      }
+                    ],
+                    "locations": [],
+                    "node": {
+                      "statement": {
+                        "type": "or"
+                      },
+                      "type": "statement"
+                    },
+                    "success": false
+                  }
+                ],
+                "locations": [],
+                "node": {
+                  "statement": {
+                    "type": "and"
+                  },
+                  "type": "statement"
+                },
+                "success": false
+              }
+            ],
+            "locations": [],
+            "node": {
+              "statement": {
+                "type": "or"
+              },
+              "type": "statement"
+            },
+            "success": true
+          }
+        ]
+      ],
+      "meta": {
+        "attack": [],
+        "authors": [
+          "moritz.raabe@mandiant.com",
+          "mehunhoff@google.com",
+          "anushka.virgaonkar@mandiant.com"
+        ],
+        "description": "",
+        "examples": [
+          "C91887D861D9BD4A5872249B641BC9F9:0x401A77",
+          "9B7CCAA2AE6A5B96E3110EBCBC4311F6:0x10010307"
+        ],
+        "is_subscope_rule": false,
+        "lib": false,
+        "maec": {},
+        "mbc": [
+          {
+            "behavior": "Terminate Process",
+            "id": "C0018",
+            "method": "",
+            "objective": "Process",
+            "parts": [
+              "Process",
+              "Terminate Process"
+            ]
+          }
+        ],
+        "name": "terminate process",
+        "namespace": "host-interaction/process/terminate",
+        "references": [],
+        "scopes": {
+          "dynamic": "span of calls",
+          "static": "function"
+        }
+      },
+      "source": "rule:\n  meta:\n    name: terminate process\n    namespace: host-interaction/process/terminate\n    authors:\n      - moritz.raabe@mandiant.com\n      - mehunhoff@google.com\n      - anushka.virgaonkar@mandiant.com\n    scopes:\n      static: function\n      dynamic: span of calls\n    mbc:\n      - Process::Terminate Process [C0018]\n    examples:\n      - C91887D861D9BD4A5872249B641BC9F9:0x401A77\n      - 9B7CCAA2AE6A5B96E3110EBCBC4311F6:0x10010307\n  features:\n    - or:\n      - api: System.Diagnostics.Process::Kill\n      - api: System.Diagnostics.Process::WaitForExit\n      - api: System.Diagnostics.Process::WaitForExitAsync\n      - api: System.Environment::Exit\n      - api: System.Windows.Forms.Application::Exit\n      - api: exit\n      - api: Exit\n      - api: RstrtMgr.RmShutdown\n      - and:\n        - os: linux\n        - api: exit_group\n      - and:\n        - optional:\n          - match: open process\n        - or:\n          - api: kernel32.TerminateProcess\n          - api: ntdll.NtTerminateProcess\n          - api: kernel32.ExitProcess\n          - api: ZwTerminateProcess\n"
+    },
+    "write file on Linux": {
+      "matches": [
+        [
+          {
+            "type": "absolute",
+            "value": 33560132
+          },
+          {
+            "captures": {},
+            "children": [
+              {
+                "captures": {},
+                "children": [
+                  {
+                    "captures": {},
+                    "children": [],
+                    "locations": [
+                      {
+                        "type": "no address"
+                      }
+                    ],
+                    "node": {
+                      "feature": {
+                        "os": "linux",
+                        "type": "os"
+                      },
+                      "type": "feature"
+                    },
+                    "success": true
+                  },
+                  {
+                    "captures": {},
+                    "children": [],
+                    "locations": [],
+                    "node": {
+                      "feature": {
+                        "os": "android",
+                        "type": "os"
+                      },
+                      "type": "feature"
+                    },
+                    "success": false
+                  }
+                ],
+                "locations": [],
+                "node": {
+                  "statement": {
+                    "type": "or"
+                  },
+                  "type": "statement"
+                },
+                "success": true
+              },
+              {
+                "captures": {},
+                "children": [
+                  {
+                    "captures": {},
+                    "children": [],
+                    "locations": [],
+                    "node": {
+                      "feature": {
+                        "api": "fputc",
+                        "type": "api"
+                      },
+                      "type": "feature"
+                    },
+                    "success": false
+                  },
+                  {
+                    "captures": {},
+                    "children": [],
+                    "locations": [],
+                    "node": {
+                      "feature": {
+                        "api": "fputs",
+                        "type": "api"
+                      },
+                      "type": "feature"
+                    },
+                    "success": false
+                  },
+                  {
+                    "captures": {},
+                    "children": [],
+                    "locations": [],
+                    "node": {
+                      "feature": {
+                        "api": "putc",
+                        "type": "api"
+                      },
+                      "type": "feature"
+                    },
+                    "success": false
+                  },
+                  {
+                    "captures": {},
+                    "children": [],
+                    "locations": [],
+                    "node": {
+                      "feature": {
+                        "api": "write",
+                        "type": "api"
+                      },
+                      "type": "feature"
+                    },
+                    "success": false
+                  },
+                  {
+                    "captures": {},
+                    "children": [],
+                    "locations": [],
+                    "node": {
+                      "feature": {
+                        "api": "fputwc",
+                        "type": "api"
+                      },
+                      "type": "feature"
+                    },
+                    "success": false
+                  },
+                  {
+                    "captures": {},
+                    "children": [],
+                    "locations": [],
+                    "node": {
+                      "feature": {
+                        "api": "putwc",
+                        "type": "api"
+                      },
+                      "type": "feature"
+                    },
+                    "success": false
+                  },
+                  {
+                    "captures": {},
+                    "children": [],
+                    "locations": [],
+                    "node": {
+                      "feature": {
+                        "api": "fputws",
+                        "type": "api"
+                      },
+                      "type": "feature"
+                    },
+                    "success": false
+                  },
+                  {
+                    "captures": {},
+                    "children": [],
+                    "locations": [
+                      {
+                        "type": "absolute",
+                        "value": 33560132
+                      }
+                    ],
+                    "node": {
+                      "feature": {
+                        "api": "fwrite",
+                        "type": "api"
+                      },
+                      "type": "feature"
+                    },
+                    "success": true
+                  },
+                  {
+                    "captures": {},
+                    "children": [],
+                    "locations": [],
+                    "node": {
+                      "feature": {
+                        "api": "putwchar",
+                        "type": "api"
+                      },
+                      "type": "feature"
+                    },
+                    "success": false
+                  },
+                  {
+                    "captures": {},
+                    "children": [],
+                    "locations": [],
+                    "node": {
+                      "feature": {
+                        "api": "dprintf",
+                        "type": "api"
+                      },
+                      "type": "feature"
+                    },
+                    "success": false
+                  },
+                  {
+                    "captures": {},
+                    "children": [],
+                    "locations": [],
+                    "node": {
+                      "feature": {
+                        "api": "vdprintf",
+                        "type": "api"
+                      },
+                      "type": "feature"
+                    },
+                    "success": false
+                  },
+                  {
+                    "captures": {},
+                    "children": [],
+                    "locations": [],
+                    "node": {
+                      "feature": {
+                        "api": "fprintf",
+                        "type": "api"
+                      },
+                      "type": "feature"
+                    },
+                    "success": false
+                  },
+                  {
+                    "captures": {},
+                    "children": [],
+                    "locations": [],
+                    "node": {
+                      "feature": {
+                        "api": "vfprintf",
+                        "type": "api"
+                      },
+                      "type": "feature"
+                    },
+                    "success": false
+                  }
+                ],
+                "locations": [],
+                "node": {
+                  "statement": {
+                    "type": "or"
+                  },
+                  "type": "statement"
+                },
+                "success": true
+              }
+            ],
+            "locations": [],
+            "node": {
+              "statement": {
+                "type": "and"
+              },
+              "type": "statement"
+            },
+            "success": true
+          }
+        ]
+      ],
+      "meta": {
+        "attack": [],
+        "authors": [
+          "joakim@intezer.com",
+          "mehunhoff@google.com"
+        ],
+        "description": "",
+        "examples": [
+          "7351f8a40c5450557b24622417fc478d:0x401E14"
+        ],
+        "is_subscope_rule": false,
+        "lib": false,
+        "maec": {},
+        "mbc": [
+          {
+            "behavior": "Writes File",
+            "id": "C0052",
+            "method": "",
+            "objective": "File System",
+            "parts": [
+              "File System",
+              "Writes File"
+            ]
+          }
+        ],
+        "name": "write file on Linux",
+        "namespace": "host-interaction/file-system/write",
+        "references": [],
+        "scopes": {
+          "dynamic": "call",
+          "static": "instruction"
+        }
+      },
+      "source": "rule:\n  meta:\n    name: write file on Linux\n    namespace: host-interaction/file-system/write\n    authors:\n      - joakim@intezer.com\n      - mehunhoff@google.com\n    scopes:\n      static: instruction\n      dynamic: call\n    mbc:\n      - File System::Writes File [C0052]\n    examples:\n      - 7351f8a40c5450557b24622417fc478d:0x401E14\n  features:\n    - and:\n      - or:\n        - os: linux\n        - os: android\n      - or:\n        - api: fputc\n        - api: fputs\n        - api: putc\n        - api: write\n        - api: fputwc\n        - api: putwc\n        - api: fputws\n        - api: fwrite\n        - api: putwchar\n        - api: dprintf\n        - api: vdprintf\n        - api: fprintf\n        - api: vfprintf\n"
+    }
+  }
+}
