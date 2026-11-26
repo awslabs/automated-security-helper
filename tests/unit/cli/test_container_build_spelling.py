@@ -140,7 +140,8 @@ def test_a_root_option_the_leaf_takes_differently_names_the_leaf_in_the_refusal(
 
     result = _invoke("-f", "sarif", "container", "build", "--no-run")
 
-    # The refusal names the program the operator ran: `ashx` on the v4 line.
+    # The refusal names the canonical command, `ashx` on the v4 line (main.py's
+    # refusal text spells it), whichever console script the operator ran.
     text = _one_line(result.output)
     assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
     assert "'ashx container build' takes -f as --force" in text, text

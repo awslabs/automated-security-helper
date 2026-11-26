@@ -198,11 +198,15 @@ class TestOtherEntryPointsDoNotWarn:
         from typer.testing import CliRunner
 
         # `results report`, not the top-level `report`: the top-level spelling is
-        # itself deprecated (main grouped the results commands under `results`),
-        # and its help says so, which is not the notice this control is about.
+        # itself deprecated (the results commands moved under `results`). Both
+        # spellings' --config help names the deprecated config file names
+        # (ASH_CONFIG_SOURCES_DESCRIPTION), so, as for the root help above, the
+        # notices are what must be absent, not the word: the deprecated-alias
+        # notice and the moved-spelling DeprecationWarning.
         result = CliRunner().invoke(cli_main.app, ["results", "report", "--help"])
         assert result.exit_code == 0
-        assert "deprecated" not in result.output
+        assert "command is deprecated" not in result.output
+        assert "DeprecationWarning" not in result.output
         assert "deprecated" not in capsys.readouterr().err
 
     def test_the_warning_is_not_registered_as_an_app_callback(self):
