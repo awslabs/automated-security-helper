@@ -163,7 +163,12 @@ def _scans(records: list[list[str]]) -> list[list[str]]:
     return scans
 
 
+#: The step names the subject and the directory, so the scan prints no
+#: deprecation line for the subject-less form.
 _SCAN = [
+    "scan",
+    "fs",
+    ".",
     "--mode",
     "container",
     "--build-target",

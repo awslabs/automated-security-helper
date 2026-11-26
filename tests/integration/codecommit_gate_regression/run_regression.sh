@@ -74,7 +74,10 @@ build_repo() {
   chmod -R a+rX "$repo"
 }
 
-# Returns ASH's exit code on stdout. Mirrors CODECOMMIT_GATE_HANDLER's argv.
+# Returns ASH's exit code on stdout. Mirrors CODECOMMIT_GATE_HANDLER's argv,
+# including how it names the directory: `ash scan fs PATH` when the image's ASH
+# has the `fs` subject (3.9 and later, whose help names `scan fs`), and
+# `--source-dir PATH` when it does not.
 run_scan() {
   local repo="$1" out="$2" dest="$3" log="$4"
   mkdir -p "$out"
@@ -85,7 +88,10 @@ run_scan() {
   docker run --rm --entrypoint /bin/sh \
     -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
     -v "$repo:/work/src" -v "$out:/work/out" \
-    "$IMAGE" -c "cd /work/src && ash scan --source-dir /work/src --output-dir /work/out \
+    "$IMAGE" -c "cd /work/src && \
+if ash scan fs --help 2>/dev/null | grep 'scan fs' >/dev/null; then \
+directory='fs /work/src'; else directory='--source-dir /work/src'; fi && \
+ash scan \$directory --output-dir /work/out \
 --no-progress --simple --compact-report --changed-files-only --base-ref $dest \
 --min-severity medium; echo \"ASH_EXIT=\$?\"" > "$log" 2>&1 || true
   sed -n 's/^ASH_EXIT=\([0-9]\+\).*/\1/p' "$log" | tail -1

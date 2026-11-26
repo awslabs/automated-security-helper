@@ -73,13 +73,15 @@ function runMerge(baseConfig?: string): AshRecord[] {
   }
 }
 
-test('control: the merge build command runs ash merge', () => {
+test('control: the merge build command runs ash results merge', () => {
+  // The stand-in answers as this repository's ASH, which has `ash results merge`;
+  // ash-distributed-pipeline-subject.test.ts covers an older one.
   const [ash] = runMerge('project_name: operator-base-config\n');
   expect(ash).toBeDefined();
-  expect(ash.argv[0]).toBe('merge');
+  expect(ash.argv.slice(0, 2)).toEqual(['results', 'merge']);
 });
 
-test('with a base config, ash merge is pointed at it', () => {
+test('with a base config, the merge is pointed at it', () => {
   const [ash] = runMerge('project_name: operator-base-config\n');
   expect({ exists: ash.effective_config_exists, content: ash.effective_config_content }).toEqual({
     exists: true,
@@ -87,7 +89,7 @@ test('with a base config, ash merge is pointed at it', () => {
   });
 });
 
-test('with no base config, ash merge is pointed at `{}`, ASH\'s defaults', () => {
+test('with no base config, the merge is pointed at `{}`, ASH\'s defaults', () => {
   const [ash] = runMerge();
   expect({ exists: ash.effective_config_exists, content: ash.effective_config_content }).toEqual({
     exists: true,

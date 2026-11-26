@@ -59,6 +59,8 @@ from typing import Any, Callable, Dict, List
 
 import pytest
 
+from tests.unit.deploy.gate_probe_answers import answer
+
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
@@ -260,12 +262,11 @@ def test_run_scan_passes_the_redirected_environment(gate, monkeypatch, tmp_path)
     captured: List[Dict[str, Any]] = []
 
     def _fake_run(argv, cwd=None, env=None):
-        if list(argv) == ["ash", "scan", "--help"]:
-            # The gate's probe of the image's options, answered as an ASH that has
-            # --fail-on-incomplete-scanners; not the scan this test is about.
-            return SimpleNamespace(
-                returncode=0, stdout="--fail-on-incomplete-scanners", stderr=""
-            )
+        reply = answer(argv)
+        if reply is not None:
+            # The gate's probes of the image's options, answered as this tree's ASH;
+            # not the scan this test is about.
+            return reply
         captured.append({"argv": list(argv), "cwd": cwd, "env": env})
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 

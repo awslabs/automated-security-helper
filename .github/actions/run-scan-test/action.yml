@@ -522,9 +522,9 @@ runs:
         # Teed so the cache report below can count the build steps the layer cache
         # served. pipefail (bash's default here) keeps ash's exit status.
         if [ "${ASH_TEST_CONFIG_FILE}" = "alpha" ]; then
-          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
+          ash scan fs . --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
         else
-          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
+          ash scan fs . --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
         fi
 
     - name: "Cache report: image-layers"
@@ -621,9 +621,9 @@ runs:
         ash dependencies install
         ash config get
         if ("$env:ASH_TEST_CONFIG_FILE" -eq "alpha") {
-          ash --mode local --build-target ci --verbose --no-progress --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
+          ash scan fs . --mode local --build-target ci --verbose --no-progress --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
         } else {
-          ash --mode local --build-target ci --verbose --no-progress --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
+          ash scan fs . --mode local --build-target ci --verbose --no-progress --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
         }
 
     - name: Validate No Plugin Errors (Python Local Windows)
@@ -696,8 +696,7 @@ runs:
         & ash dependencies install --tool hadolint --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_hadolint_plugins]"
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         $Out = Join-Path $env:RUNNER_TEMP "hadolint-out"
-        & ash scan --mode local --no-progress --simple `
-          --source-dir tests/test_data/scanners/hadolint/positive `
+        & ash scan fs tests/test_data/scanners/hadolint/positive --mode local --no-progress --simple `
           --output-dir $Out `
           --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins `
           --scanners hadolint
@@ -725,9 +724,9 @@ runs:
         ash dependencies install
         ash config get
         if [ "${ASH_TEST_CONFIG_FILE}" = "alpha" ]; then
-          ash --mode local --build-target ci --verbose --no-progress --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
+          ash scan fs . --mode local --build-target ci --verbose --no-progress --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
         else
-          ash --mode local --build-target ci --verbose --no-progress --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
+          ash scan fs . --mode local --build-target ci --verbose --no-progress --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
         fi
 
     - name: Validate No Plugin Errors (Python Local Unix)
@@ -763,8 +762,7 @@ runs:
           --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_hadolint_plugins]"
         out="${RUNNER_TEMP}/hadolint-out"
         set +e
-        ash scan --mode local --no-progress --simple \
-          --source-dir tests/test_data/scanners/hadolint/positive \
+        ash scan fs tests/test_data/scanners/hadolint/positive --mode local --no-progress --simple \
           --output-dir "$out" \
           --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins \
           --scanners hadolint
@@ -812,9 +810,9 @@ runs:
         # before Invoke-ASH sets one, such as a parameter it cannot bind.
         try {
           if ("$env:ASH_TEST_CONFIG_FILE" -eq "alpha") {
-            Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner -Config ".ash/.ash_alpha_plugins.yaml" --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
+            Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner -Config ".ash/.ash_alpha_plugins.yaml" scan fs --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
           } else {
-            Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
+            Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner scan fs --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
           }
         } catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }
         # The scan's own exit code, as the built-in shell's appended line passed it on.
@@ -861,9 +859,9 @@ runs:
         echo "Testing ASH using Bash on ${ASH_TEST_OS} (${ASH_TEST_PLATFORM}) with config: ${ASH_TEST_CONFIG_FILE}"
         chmod +x ./ash
         if [ "${ASH_TEST_CONFIG_FILE}" = "alpha" ]; then
-          ./ash --build-target ci --verbose --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
+          ./ash scan fs . --build-target ci --verbose --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
         else
-          ./ash --build-target ci --verbose --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
+          ./ash scan fs . --build-target ci --verbose --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
         fi
 
     # The sh helper, sourced the way its header says and the sandbox suite drives it:
@@ -888,9 +886,9 @@ runs:
         chmod +x ./ash
         . ./utils/ash_helpers.sh
         if [ "${ASH_TEST_CONFIG_FILE}" = "alpha" ]; then
-          invoke-ash --build-target ci --verbose --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
+          invoke-ash scan fs . --build-target ci --verbose --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
         else
-          invoke-ash --build-target ci --verbose --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
+          invoke-ash scan fs . --build-target ci --verbose --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
         fi
 
     - name: Validate No Plugin Errors (Bash)

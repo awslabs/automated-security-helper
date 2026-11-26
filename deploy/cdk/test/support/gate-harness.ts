@@ -79,7 +79,10 @@ export const PULL_REQUEST_CONFIG = [
 export interface AshRecord {
   readonly argv: string[];
   readonly cwd: string;
+  /** The value of `--source-dir`: the directory, in the subject-less `ash scan`. */
   readonly source_dir: string | null;
+  /** The PATH right after `ash scan fs`: the directory, in ASH 3.9's form. */
+  readonly scan_path: string | null;
   readonly config_arg: string | null;
   readonly env_config: string | null;
   readonly effective_config: string | null;
@@ -118,10 +121,13 @@ export interface GateRunOptions {
   readonly repoFiles?: Record<string, string>;
   /** How `ash scan --help` answers; see `AshScanHelp`. Default `listed`. */
   readonly ashScanHelp?: AshScanHelp;
+  /** Which ASH the stand-in answers as; see `AshRelease`. Default `with-subject`. */
+  readonly ashRelease?: AshRelease;
 }
 
 /**
- * How the stand-in `ash` answers `ash scan --help`:
+ * How the stand-in `ash` answers the scan's help (`ash scan fs --help` and
+ * `ash scan --help`):
  * - `listed`: lists `--fail-on-incomplete-scanners`, as this repository's ASH does;
  * - `missing`: omits it, as every release up to v3.7.1 does;
  * - `coloured`: lists it styled the way rich prints it when colour is forced, each
@@ -129,6 +135,18 @@ export interface GateRunOptions {
  * - `fails`: exits non-zero.
  */
 export type AshScanHelp = 'listed' | 'missing' | 'coloured' | 'fails';
+
+/**
+ * Which ASH the stand-in `ash` answers as:
+ * - `with-subject`: ASH 3.9 and later, as this repository's is. A directory is
+ *   scanned with `ash scan fs PATH` and results are merged with `ash results merge`,
+ *   and only their help prints those command paths;
+ * - `without-subject`: ASH 3.8 and earlier. `ash scan fs --help` shows the
+ *   subject-less scan's help, since click reads `--help` before it refuses the extra
+ *   argument, and there is no `results` command, so `ash results merge --help` is a
+ *   usage error.
+ */
+export type AshRelease = 'with-subject' | 'without-subject';
 
 let cachedPython: string | undefined;
 
@@ -225,25 +243,29 @@ sys.exit(0)
 /**
  * A stand-in for `ash` that records what it was given, with its record path baked in.
  *
- * `ash scan --help` is answered rather than recorded: it is a probe of the options,
- * not a scan. See `AshScanHelp` for how it answers.
+ * The help probes (`ash scan fs --help`, `ash scan --help`, `ash results merge
+ * --help`) are answered rather than recorded: they ask what this ASH is, they are
+ * not scans. See `AshScanHelp` and `AshRelease` for how they answer.
  */
 export const fakeAshScript = (
   python: string,
   recordFile: string,
   exitCode: number,
   scanHelp: AshScanHelp = 'listed',
+  release: AshRelease = 'with-subject',
 ) => `#!${python}
 import json, os, sys
 
 argv = sys.argv[1:]
 CREDENTIAL_VARIABLES = ${JSON.stringify(CREDENTIAL_VARIABLES)}
+HELP = ${JSON.stringify(scanHelp)}
+RELEASE = ${JSON.stringify(release)}
 
-if argv[:2] == ["scan", "--help"]:
-    HELP = ${JSON.stringify(scanHelp)}
+
+def scan_help(usage):
     if HELP == "fails":
         sys.exit(1)
-    print("Usage: ash scan [OPTIONS]")
+    print(usage)
     for line in ("--source-dir PATH", "--output-dir PATH", "--config PATH", "--min-severity TEXT"):
         print("  " + line)
     if HELP == "listed":
@@ -251,6 +273,17 @@ if argv[:2] == ["scan", "--help"]:
     elif HELP == "coloured":
         print("\\x1b[1;36m-\\x1b[0m\\x1b[1;36m-fail\\x1b[0m\\x1b[1;36m-on-incomplete-scanners\\x1b[0m")
     sys.exit(0)
+
+
+if argv[:3] == ["scan", "fs", "--help"] or argv[:2] == ["scan", "--help"]:
+    # With the subject, the subject-less form shows the subject's help too.
+    scan_help("Usage: ash scan fs [OPTIONS] [PATH]" if RELEASE == "with-subject" else "Usage: ash scan [OPTIONS]")
+if argv[:3] == ["results", "merge", "--help"]:
+    if RELEASE == "with-subject":
+        print("Usage: ash results merge [OPTIONS]")
+        sys.exit(0)
+    print("Error: No such command 'results'.", file=sys.stderr)
+    sys.exit(2)
 
 
 def option(names):
@@ -279,6 +312,7 @@ record = {
     "argv": argv,
     "cwd": os.getcwd(),
     "source_dir": option(["--source-dir"]),
+    "scan_path": argv[2] if argv[:2] == ["scan", "fs"] and len(argv) > 2 and not argv[2].startswith("-") else None,
     "config_arg": config_arg,
     "env_config": env_config,
     "effective_config": effective,
@@ -370,7 +404,13 @@ export function runGateHandler(options: GateRunOptions): GateRun {
     fs.writeFileSync(path.join(bin, 'git'), FAKE_GIT(python, gitLog, repo), { mode: 0o755 });
     fs.writeFileSync(
       path.join(bin, 'ash'),
-      fakeAshScript(python, ashLog, options.ashExit ?? 0, options.ashScanHelp ?? 'listed'),
+      fakeAshScript(
+        python,
+        ashLog,
+        options.ashExit ?? 0,
+        options.ashScanHelp ?? 'listed',
+        options.ashRelease ?? 'with-subject',
+      ),
       { mode: 0o755 },
     );
     const handlerFile = path.join(dir, 'ash_gate_handler.py');

@@ -89,10 +89,19 @@ class Ash < Formula
   test do
     assert_match "automated-security-helper", shell_output("#{bin}/ash --version")
 
+    # ASH 3.9 and later scan a directory with `ash scan fs PATH`, and print a
+    # deprecation line for `ash scan --source-dir PATH`. The tag above names the
+    # release before that until the release commit moves it, and that release has no
+    # `fs` subject. So the installed ASH is asked which form it has: only an ASH with
+    # the subject prints its name in the help. The exit status is not read, which is
+    # why this is not shell_output.
+    fs_help = `#{bin}/ash scan fs --help 2>&1`
+    directory_word = fs_help.include?("scan fs") ? "fs" : "--source-dir"
+
     (testpath/"src/sample.py").write "print('hello')\n"
     # detect-secrets is a Python dependency of ASH, so this scan needs nothing
     # beyond what the formula installed; it fails if a dependency is missing.
-    system (bin/"ash").to_s, "scan", "--source-dir", (testpath/"src").to_s,
+    system (bin/"ash").to_s, "scan", directory_word.to_s, (testpath/"src").to_s,
            "--output-dir", (testpath/"out").to_s,
            "--simple", "--phases", "scan", "--phases", "report", "--scanners", "detect-secrets"
     assert_path_exists testpath/"out/ash_aggregated_results.json"
@@ -109,7 +118,7 @@ class Ash < Formula
           Type: AWS::S3::Bucket
     YAML
     # The exit status goes on a line of its own, after ash's last line whatever it ends with.
-    exited = shell_output("#{bin}/ash scan --source-dir #{testpath}/cfn --output-dir #{testpath}/out-cfn " \
+    exited = shell_output("#{bin}/ash scan #{directory_word} #{testpath}/cfn --output-dir #{testpath}/out-cfn " \
                           "--simple --phases scan --phases report --scanners cdk-nag; " \
                           "rc=$?; echo; echo \"ash exited $rc\"")
                  .lines.last.strip

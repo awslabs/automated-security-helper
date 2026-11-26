@@ -217,7 +217,10 @@ SCAN_ENV_DROPPED_VARIABLES = frozenset(
 #: options that take a value, --min-severity among them.
 GATE_OWNED_SCAN_OPTIONS = frozenset(
     {
-        # Passed by this gate, so a repeat here would resolve last and win.
+        # Passed by this gate, so a repeat here would resolve last and win. The gate
+        # names the directory itself: as the PATH argument of `ash scan fs` when the
+        # image's ASH has that subject, where a --source-dir naming another tree is a
+        # usage error, and as --source-dir when it does not.
         "--source-dir",
         "--output-dir",
         "--min-severity",
@@ -624,11 +627,28 @@ COMPLETENESS_FLAG = "--fail-on-incomplete-scanners"
 #: per execution environment, because the image cannot change under a warm one.
 _completeness_flag_found: bool | None = None
 
+#: Whether this image's ASH names a directory scan ``ash scan fs PATH``, once known.
+#: Settled by the same probe as _completeness_flag_found, and at the same time.
+_scan_has_subject: bool | None = None
+
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 
+#: What only the help of an ASH with the subject prints: its own command path.
+SUBJECT_COMMAND = "scan fs"
 
-def check_completeness_flag(env: dict[str, str]) -> None:
+
+def _help_text(argv: list[str], env: dict[str, str]) -> tuple[int, str]:
+    """``argv``'s exit status and its help, plain: colour off, a wide terminal, no ANSI."""
+    probe_env = dict(env, COLUMNS="200", NO_COLOR="1")
+    probe_env.pop("FORCE_COLOR", None)
+    probe = _run(argv, env=probe_env)
+    return probe.returncode, _ANSI_ESCAPE.sub("", probe.stdout or "")
+
+
+def check_completeness_flag(env: dict[str, str]) -> bool:
     """Refuse to scan with an ASH whose ``ash scan`` cannot fail an incomplete scan.
+
+    Returns whether that ASH names a directory scan ``ash scan fs PATH``.
 
     ``run_scan`` passes COMPLETENESS_FLAG, and the gate's fail-closed property rests
     on it: without it a run where no scanner completed exits 0, which is outcome
@@ -637,24 +657,33 @@ def check_completeness_flag(env: dict[str, str]) -> None:
     no effect there. Measured on v3.7.0: bandit and grype both MISSING, the flag
     passed, exit 0.
 
-    So ``ash scan --help`` is asked once whether the option exists. The probe runs
-    with colour off and a wide terminal, and ANSI codes are stripped before the
-    match, because rich styles each dash of an option name apart when colour is
-    forced and the plain name would then not appear. A probe that fails refuses too
-    and is asked again next time, rather than being read as either answer.
+    So the help of the scan this gate will run is asked once whether the option
+    exists. ASH 3.9 and later scan a directory with ``ash scan fs PATH`` and print a
+    deprecation line for the subject-less ``ash scan --source-dir PATH``, which goes in
+    ASH v4.0; ``ash_version`` can name an older release, which has no ``fs`` subject.
+    ``ash scan fs --help`` is asked first, and only an ASH with the subject prints
+    SUBJECT_COMMAND in it: an older ASH shows the subject-less scan's help there, as
+    click reads ``--help`` before it refuses the extra argument. Without the subject,
+    ``ash scan --help`` is asked, as it always was.
+
+    Each probe runs with colour off and a wide terminal, and ANSI codes are stripped
+    before the match, because rich styles each dash of an option name apart when
+    colour is forced and the plain name would then not appear. A probe that fails
+    refuses too and is asked again next time, rather than being read as either answer.
     """
-    global _completeness_flag_found
+    global _completeness_flag_found, _scan_has_subject
     if _completeness_flag_found is None:
-        probe_env = dict(env, COLUMNS="200", NO_COLOR="1")
-        probe_env.pop("FORCE_COLOR", None)
-        probe = _run(["ash", "scan", "--help"], env=probe_env)
-        if probe.returncode != 0:
-            raise RuntimeError(
-                f"'ash scan --help' exited {probe.returncode}, so this image's ASH could "
-                f"not be checked for {COMPLETENESS_FLAG}. Refusing to scan."
-            )
-        help_text = _ANSI_ESCAPE.sub("", probe.stdout or "")
+        status, help_text = _help_text(["ash", "scan", "fs", "--help"], env)
+        has_subject = status == 0 and SUBJECT_COMMAND in help_text
+        if not has_subject:
+            status, help_text = _help_text(["ash", "scan", "--help"], env)
+            if status != 0:
+                raise RuntimeError(
+                    f"'ash scan --help' exited {status}, so this image's ASH could "
+                    f"not be checked for {COMPLETENESS_FLAG}. Refusing to scan."
+                )
         _completeness_flag_found = COMPLETENESS_FLAG in help_text
+        _scan_has_subject = has_subject
     if not _completeness_flag_found:
         raise RuntimeError(
             f"The ASH in this image has no {COMPLETENESS_FLAG} option, so a scan whose "
@@ -662,6 +691,7 @@ def check_completeness_flag(env: dict[str, str]) -> None:
             f"the gate's base image from an ash_version whose `ash scan` accepts "
             f"{COMPLETENESS_FLAG}."
         )
+    return bool(_scan_has_subject)
 
 
 def scan_config(source_dir: pathlib.Path) -> pathlib.Path:
@@ -745,9 +775,10 @@ def run_scan(
     # mirror of it: most of what it refuses are options the gate never passes but which
     # narrow the scan, and the ordering below does nothing about those. For them the
     # refusal is the only defence, which is why it refuses rather than warns.
+    #
+    # The directory is not in this list: how it is named depends on the image's ASH,
+    # which the completeness probe below settles. See the argv.
     gate_owned = [
-        "--source-dir",
-        str(source_dir),
         "--output-dir",
         str(output_dir),
         # Always, so ASH never discovers a config inside the clone; see scan_config.
@@ -790,11 +821,6 @@ def run_scan(
     extra_tokens = extra.split() if extra else []
     _reject_gate_owned_options(extra_tokens)
 
-    # Extras first, the gate's own options last. The refusal above is the guard; this
-    # ordering is what still holds if the guard is ever incomplete, since a spelling it
-    # does not know about then resolves before the gate's value rather than after it.
-    argv = ["ash", "scan", *extra_tokens, *gate_owned]
-
     # env= is load-bearing, not hygiene: without it the child inherits Lambda's
     # PATH merged with the image's ENVs, which point every scanner's cache at the
     # read-only root filesystem. See _scan_env. It raises when an offline scan's
@@ -802,7 +828,29 @@ def run_scan(
     env = _scan_env()
     env["ASH_CONFIG"] = str(config_path)
     # After the refusals above, so a deployment they refuse never starts ASH at all.
-    check_completeness_flag(env)
+    has_subject = check_completeness_flag(env)
+
+    # Extras first, the gate's own options last. The refusal above is the guard; this
+    # ordering is what still holds if the guard is ever incomplete, since a spelling it
+    # does not know about then resolves before the gate's value rather than after it.
+    #
+    # The clone is named the way the image's ASH names a directory. With the subject
+    # it is the PATH argument, right after `fs` and ahead of the extras: a bare word
+    # among them is then a second PATH, which ASH refuses as an extra argument (outcome
+    # "error"), and can never become the directory scanned. Without it, it is
+    # --source-dir among the gate's own options, after the extras.
+    if has_subject:
+        argv = ["ash", "scan", "fs", str(source_dir), *extra_tokens, *gate_owned]
+    else:
+        argv = [
+            "ash",
+            "scan",
+            *extra_tokens,
+            "--source-dir",
+            str(source_dir),
+            *gate_owned,
+        ]
+
     result = _run(argv, env=env)
     log_tail = (result.stderr or result.stdout or "").strip()[-4000:]
     LOGGER.info("ash scan exited %d", result.returncode)

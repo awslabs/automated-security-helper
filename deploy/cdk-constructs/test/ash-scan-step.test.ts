@@ -117,8 +117,8 @@ describe('sharded scan', () => {
       .filter((a) => a.name.includes('Shard'))
       .flatMap((a) => a.outputs);
 
-    expect(command).toContain('ash merge');
-    expect(command.match(/--results/g)).toHaveLength(3);
+    expect(command).toMatch(/then ash results merge --results[\s\S]*else ash merge --results/);
+    expect(command.match(/--results/g)).toHaveLength(6); // per shard, in both spellings (subject-probe.test.ts)
 
     // Each --results points at the CodeBuild directory for one shard artifact,
     // which is how the merge sees every shard's results and not just its own.

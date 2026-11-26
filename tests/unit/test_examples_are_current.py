@@ -154,12 +154,17 @@ def test_cz_bump_rewrites_the_codebuild_examples_pin(monkeypatch):
 
 
 def test_the_codebuild_example_passes_only_options_the_cli_declares():
+    """Both spellings of each command are read: the example's RELEASE_TAG can name a
+    release older than 3.9, so it asks the installed ASH for `scan fs` and
+    `results report` and falls back to the subject-less scan and `ash report`."""
     root = _cli()
     invocations = _codebuild_invocations()
 
     assert {invocation.command_path(root) for invocation in invocations} == {
         "",
+        "scan fs",
         "report",
+        "results report",
     }, "the reader no longer sees the scan and report command lines"
     problems = [
         p for invocation in invocations for p in unknown_to_cli(invocation, root)
@@ -178,7 +183,12 @@ def _output_dir(invocation: Invocation) -> str:
 
 def test_the_codebuild_example_collects_what_the_scan_writes():
     document = _load(CODEBUILD)
-    output_dirs = {_output_dir(invocation) for invocation in _codebuild_invocations()}
+    # The `--help` probes ask which spelling the installed ASH has; they write nothing.
+    output_dirs = {
+        _output_dir(invocation)
+        for invocation in _codebuild_invocations()
+        if "--help" not in invocation.words
+    }
 
     assert len(output_dirs) == 1, output_dirs
     (output_dir,) = output_dirs
@@ -293,6 +303,18 @@ def test_the_github_example_sets_no_unused_env():
 
 def test_the_shell_reader_sees_the_codebuild_scan_line():
     """Positive control for the reader on the exact shape the buildspec uses."""
-    line = "ash --mode container --no-progress --output-dir .ash/ash_output"
-    (invocation,) = shell_invocations(line, "control")
-    assert invocation.words == tuple(shlex.split(line))[1:]
+    scan = "ash scan fs --mode container --no-progress --output-dir .ash/ash_output"
+    legacy = "ash --mode container --no-progress --output-dir .ash/ash_output"
+    block = (
+        'if ash scan fs --help 2>/dev/null | grep "scan fs" >/dev/null; then\n'
+        f"  {scan}\n"
+        "else\n"
+        f"  {legacy}\n"
+        "fi\n"
+    )
+    invocations = shell_invocations(block, "control")
+    assert [invocation.words for invocation in invocations] == [
+        ("scan", "fs", "--help", "2"),
+        tuple(shlex.split(scan))[1:],
+        tuple(shlex.split(legacy))[1:],
+    ]

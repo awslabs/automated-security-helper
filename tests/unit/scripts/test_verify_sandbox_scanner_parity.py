@@ -59,6 +59,32 @@ def _write(directory: Path, document: dict) -> Path:
     return directory
 
 
+def test_the_scan_names_its_fixture_as_the_fs_subjects_path(
+    parity, monkeypatch, tmp_path
+):
+    """ASH 3.9's spelling, `ash scan fs PATH`: the script runs this tree's ASH.
+
+    The child is not started: Popen is replaced with a recorder that exits 0.
+    """
+    started: list[list[str]] = []
+
+    class _Finished:
+        def __init__(self, command, **kwargs):
+            started.append(list(command))
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(parity.subprocess, "Popen", _Finished)
+    source = tmp_path / "repo"
+
+    parity.run_scan(["ash"], source, tmp_path / "out", "none", offline=False)
+
+    assert len(started) == 1, started
+    assert started[0][:4] == ["ash", "scan", "fs", str(source)], started[0]
+    assert "--source-dir" not in started[0], started[0]
+
+
 class TestCompare:
     def test_a_bucket_absent_from_scanner_results_is_compared(self, parity, tmp_path):
         """At the base only the names in scanner_results were walked, so the

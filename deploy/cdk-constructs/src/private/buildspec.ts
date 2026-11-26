@@ -11,10 +11,12 @@
  */
 
 import {
+  ashInvocation,
   DEFAULT_ASH_REF,
   DEFAULT_ASH_REPOSITORY,
   installCommands,
   InstallOptions,
+  resultsMergeCommand,
   scanCommands,
   shardScanCommands,
   shellArg,
@@ -79,6 +81,11 @@ function header(purpose: string[]): string[] {
     '  cd deploy/cdk-constructs && npm ci && npm run generate:buildspec',
     '',
     ...purpose,
+    '',
+    'Each ASH command first asks the installed ASH whether it has the ASH 3.9',
+    'spelling (`ash scan fs DIR`, `ash results merge`) and runs the older one',
+    '(`ash scan --source-dir DIR`, `ash merge`) when it does not, so an older',
+    'ASH_VERSION keeps working.',
   ];
 }
 
@@ -211,7 +218,9 @@ export function mergeBuildspec(): YamlMap {
  * Kept beside the merge renderer on purpose. It expands to exactly the argument
  * vector `mergeCommands` builds, one `--results` per shard directory, and it
  * refuses to run on an empty list rather than silently merging nothing, which
- * would report a clean verdict for a scan that never happened.
+ * would report a clean verdict for a scan that never happened. The merge itself
+ * is rendered by `resultsMergeCommand`, so it is `ash results merge` or
+ * `ash merge` by what the installed ASH has, as the construct's merge is.
  */
 export function mergeLoopCommands(): string[] {
   return [
@@ -219,8 +228,13 @@ export function mergeLoopCommands(): string[] {
       `echo "${SHARD_RESULTS_VAR} is empty; refusing to report a verdict for zero shards." >&2; ` +
       'exit 1; fi',
     `set --; for shard_dir in $${SHARD_RESULTS_VAR}; do set -- "$@" --results "$shard_dir"; done; ` +
-      `ash merge "$@" --output-dir ${shellArg(`$${OUTPUT_DIR_VAR}`)} ` +
-      `--min-severity ${shellArg(`$${MIN_SEVERITY_VAR}`)}`,
+      resultsMergeCommand(ashInvocation(STANDALONE_INSTALL), [
+        '"$@"',
+        '--output-dir',
+        shellArg(`$${OUTPUT_DIR_VAR}`),
+        '--min-severity',
+        shellArg(`$${MIN_SEVERITY_VAR}`),
+      ]),
   ];
 }
 
@@ -272,7 +286,7 @@ export function generatedBuildspecs(): GeneratedBuildspec[] {
           `Set ${SHARD_RESULTS_VAR} to a space-separated list of shard output`,
           'directories, one per shard.',
           '',
-          'This step is the verdict for the whole scan, so `ash merge` must exit',
+          'This step is the verdict for the whole scan, so the merge must exit',
           'non-zero when the merged findings breach the configured threshold.',
         ]),
         mergeBuildspec(),

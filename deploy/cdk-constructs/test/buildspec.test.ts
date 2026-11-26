@@ -230,16 +230,22 @@ describe('the env-driven merge loop matches the literal merge command', () => {
       { mode: ASHInstallMode.PIP, sourceRepository: DEFAULT_ASH_REPOSITORY },
     )[0];
 
+    // The same options after `ash results merge` and after `ash merge`, one for an
+    // ASH with the results group and one for an older ASH.
+    const options =
+      '--results "out/shard-0" --results "out/shard-1" ' +
+      '--results "out/shard-2" --output-dir ".ash/ash_output" --min-severity low';
     expect(literal).toBe(
-      'ash merge --results "out/shard-0" --results "out/shard-1" ' +
-        '--results "out/shard-2" --output-dir ".ash/ash_output" --min-severity low',
+      'if ash results merge --help 2>/dev/null | grep "results merge" >/dev/null; ' +
+        `then ash results merge ${options}; else ash merge ${options}; fi`,
     );
 
     const loop = mergeLoopCommands().join('\n');
+    const loopOptions =
+      '"$@" --output-dir "$ASH_OUTPUT_DIR" --min-severity "$ASH_MIN_SEVERITY"';
     expect(loop).toContain('--results "$shard_dir"');
-    expect(loop).toContain(
-      'ash merge "$@" --output-dir "$ASH_OUTPUT_DIR" --min-severity "$ASH_MIN_SEVERITY"',
-    );
+    expect(loop).toContain(`then ash results merge ${loopOptions}; `);
+    expect(loop).toContain(`else ash merge ${loopOptions}; fi`);
   });
 
   test('mergeCommands refuses an empty results list', () => {

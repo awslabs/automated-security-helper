@@ -107,8 +107,8 @@
  * `ContainerUri`. No `Command`, no `EntryPoint`, no `Args`. The MCP invocation
  * therefore cannot come from this template and must be inside the image — which
  * is what the `mcp` flavor in `ash-image-build.ts` builds. ASH's own image ends
- * with `CMD ["ash"]`, so pointing AgentCore straight at it would start a process
- * that prints help and exits.
+ * with `CMD ["ash", "scan", "fs"]`, so pointing AgentCore straight at it would start
+ * a scan of the working directory that exits when it finishes, never the MCP server.
  *
  * WHY THERE IS NO `--allowed-host` HERE
  * -------------------------------------

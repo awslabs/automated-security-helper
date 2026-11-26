@@ -11,9 +11,10 @@ scanner was MISSING or ERROR exits 1, outcome "error", rather than 0, outcome "p
 which is the one outcome that APPROVEs. ASH releases up to v3.7.1 have no such option,
 and their ``ash scan`` collects unknown options instead of refusing them, so the flag
 has no effect there: measured on v3.7.0, bandit and grype both MISSING exit 0 with the
-flag passed. The handler therefore asks ``ash scan --help`` once
-whether the option exists, and refuses to scan when it does not, which the handler
-reports as outcome "error" with a REVOKE.
+flag passed. The handler therefore asks the scan's help once (``ash scan fs --help``,
+then ``ash scan --help`` for an ASH without the ``fs`` subject) whether the option
+exists, and refuses to scan when it does not, which the handler reports as outcome
+"error" with a REVOKE.
 
 The gate is loaded by path, as test_codecommit_gate_fails_closed.py explains.
 """
@@ -76,7 +77,13 @@ def gate(monkeypatch, tmp_path) -> ModuleType:
 
 
 class _Ash:
-    """Stands in for every subprocess the gate starts; answers the help probe."""
+    """Stands in for every subprocess the gate starts; answers the help probes.
+
+    The gate asks ``ash scan fs --help`` first and, when that help does not name
+    ``scan fs``, ``ash scan --help``. These help texts are an ASH without the ``fs``
+    subject, which shows its subject-less scan's help for both, so both probes are
+    answered alike. test_codecommit_gate_scan_subject.py covers an ASH with the subject.
+    """
 
     def __init__(self, help_text: str, help_exit: int = 0) -> None:
         self.help_text = help_text
@@ -86,7 +93,7 @@ class _Ash:
 
     def __call__(self, argv, cwd=None, env=None):
         argv = list(argv)
-        if argv == ["ash", "scan", "--help"]:
+        if argv in (["ash", "scan", "--help"], ["ash", "scan", "fs", "--help"]):
             self.probes.append(dict(env or {}))
             return SimpleNamespace(
                 returncode=self.help_exit, stdout=self.help_text, stderr=""
@@ -131,17 +138,20 @@ def test_coloured_help_still_counts(gate, monkeypatch, tmp_path):
     gate.run_scan(tmp_path / "src", "low", True)
 
     assert len(ash.scans) == 1
-    assert ash.probes[0].get("NO_COLOR") == "1" and "FORCE_COLOR" not in ash.probes[0]
+    for probe in ash.probes:
+        assert probe.get("NO_COLOR") == "1" and "FORCE_COLOR" not in probe
 
 
-def test_the_probe_runs_once_per_execution_environment(gate, monkeypatch, tmp_path):
+def test_the_probes_run_once_per_execution_environment(gate, monkeypatch, tmp_path):
     ash = _Ash(HELP_WITH_FLAG)
     monkeypatch.setattr(gate, "_run", ash)
 
     gate.run_scan(tmp_path / "src", "low", True)
     gate.run_scan(tmp_path / "src", "low", True)
 
-    assert (len(ash.probes), len(ash.scans)) == (1, 2)
+    # `ash scan fs --help`, then `ash scan --help` for an ASH without the subject;
+    # nothing again for the second scan.
+    assert (len(ash.probes), len(ash.scans)) == (2, 2)
 
 
 class _AuthorCannotApprove(Exception):

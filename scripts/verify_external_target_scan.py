@@ -7,13 +7,12 @@ Run with: python scripts/verify_external_target_scan.py
 
 Why this exists
 ---------------
-ASH scans the directory named by ``--source-dir``. Scanning a directory that is not
-the process working directory *already happens* in CI:
-``.github/actions/validate-install/action.yml`` (lines 32, 52, 70),
-``.github/actions/validate-mcp/action.yml`` (line 48) and
-``.github/workflows/ash-upgrade-paths.yml`` (line 167) all pass ``--source-dir``.
-So the gap this job fills is not the flag. It is that nothing has ever asserted on
-what came back.
+ASH scans the directory it is given (``ash scan fs PATH``; ``--source-dir`` before
+3.9). Scanning a directory that is not the process working directory *already
+happens* in CI: ``.github/actions/validate-install/action.yml``,
+``.github/actions/validate-mcp/action.yml`` and
+``.github/workflows/ash-upgrade-paths.yml`` all name one. So the gap this job fills
+is not the argument. It is that nothing has ever asserted on what came back.
 
 Those existing jobs cannot catch the bugs below, for two compounding reasons:
 
@@ -66,8 +65,8 @@ maintainer reads to confirm the gate did real work is worse than no evidence.
 
 Why the fixture-scoping assertion matters
 -----------------------------------------
-Consider the inverse regression: ASH ignores ``--source-dir`` and scans the process
-working directory. Every other assertion still passes -- the repository yields
+Consider the inverse regression: ASH ignores the directory it is given and scans the
+process working directory. Every other assertion still passes -- the repository yields
 findings, ASH's own Python trips bandit, the anchors plausibly appear, the exit code
 is 0 or 2 -- while the gate has tested the exact opposite of its premise. So the
 gate also checks where each finding came from.
@@ -981,8 +980,8 @@ def check_findings_are_from_the_fixture(
 
     This is the property the job is named for. Without it the gate cannot tell a
     scan of the fixture from a scan of the repository, and the inverse regression --
-    ASH ignoring --source-dir and scanning the process working directory -- passes
-    every other check in this file.
+    ASH ignoring the directory it is given and scanning the process working
+    directory -- passes every other check in this file.
 
     Two independent tests per URI. Both are needed because the aggregated SARIF does
     not relativize URIs against source_dir when cwd != source_dir; see the Known
@@ -1055,7 +1054,7 @@ def check_findings_are_from_the_fixture(
     if inside_repository:
         violations.append(
             "finding(s) name files inside the repository, which means the scan read "
-            "the process working directory instead of --source-dir: "
+            "the process working directory instead of the target it was given: "
             f"{_sample(inside_repository)}"
         )
     if unlocatable:
@@ -1294,7 +1293,7 @@ def build_scan_command(source_dir: Path, output_dir: Path) -> List[str]:
         "-m",
         "automated_security_helper.cli.main",
         "scan",
-        "--source-dir",
+        "fs",
         str(source_dir),
         "--output-dir",
         str(output_dir),
@@ -1676,7 +1675,7 @@ def main(argv: Iterable[str] | None = None) -> int:
 
         print("ASH external-target scan gate")
         print(f"  repository root (subprocess cwd): {repo_root}")
-        print(f"  scan target (--source-dir):       {target_dir}")
+        print(f"  scan target (ash scan fs PATH):   {target_dir}")
         print(f"  scan output (--output-dir):       {output_dir}")
         print(f"  fixture files:                    {[p.name for p in written]}")
         print("  cwd != source_dir, which is the condition this gate exists for")

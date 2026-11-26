@@ -23,7 +23,6 @@
   ],
   "scan_flags": {
     "base": [
-      "--source-dir",
       "--output-dir",
       "--config",
       "--no-progress",

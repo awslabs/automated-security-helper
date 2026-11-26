@@ -551,11 +551,25 @@ export class AshDistributedPipelineStack extends Stack {
               // consumes. That is robust whether the flag is absent (usage error,
               // no results), a scanner crashed (no results), findings were found
               // (results present) or the shard was clean (results present).
+              //
+              // ASH 3.9 scans a directory as `ash scan fs PATH`; an AshVersion
+              // older than 3.9 has only `ash scan --source-dir PATH`, which 3.9
+              // still runs with a deprecation line and v4.0 removes. So the image's
+              // ASH is asked first: only one with the subject prints `scan fs` in
+              // that help. ASH_EXIT is the scan's status either way, since an `if`
+              // exits with its branch's last command.
               [
                 'set +e',
-                'ash scan --source-dir "$CODEBUILD_SRC_DIR" --output-dir ./ash-shard-output \\',
-                '  --shard-index "$ASH_SHARD_INDEX" --shard-count "$ASH_SHARD_COUNT" \\',
-                '  --no-fail-on-findings --no-progress --simple',
+                ...onEitherAsh(
+                  'ash scan fs --help 2>/dev/null | grep "scan fs" >/dev/null',
+                  'ash scan fs "$CODEBUILD_SRC_DIR"',
+                  'ash scan --source-dir "$CODEBUILD_SRC_DIR"',
+                  [
+                    '--output-dir ./ash-shard-output',
+                    '--shard-index "$ASH_SHARD_INDEX" --shard-count "$ASH_SHARD_COUNT"',
+                    '--no-fail-on-findings --no-progress --simple',
+                  ],
+                ),
                 'ASH_EXIT=$?',
                 'set -e',
                 '# ASH may have died before creating its output directory.',
@@ -613,7 +627,7 @@ export class AshDistributedPipelineStack extends Stack {
   ): codebuild.Project {
     const resultsFlags = Array.from(
       { length: shardCount },
-      (_, index) => `  --results ./shard-results/shard-${index} \\`,
+      (_, index) => `--results ./shard-results/shard-${index}`,
     );
 
     // Same reason as the shard projects: 39 against W76's ceiling of 25 when the
@@ -702,11 +716,17 @@ export class AshDistributedPipelineStack extends Stack {
               // --results is repeatable and accepts a file or a directory. One
               // flag per shard directory, so a shard that vanished between the
               // check above and here still fails rather than being skipped.
-              [
-                'ash merge \\',
-                ...resultsFlags,
-                '  --output-dir ./ash-merged-output',
-              ].join('\n'),
+              //
+              // `ash results merge` from ASH 3.9, `ash merge` before it (3.9 still
+              // runs that with a deprecation line, v4.0 removes it); the image's
+              // ASH is asked which it has, as the shards ask about `scan fs`. The
+              // `if` exits with the merge's status, so the verdict passes through.
+              onEitherAsh(
+                'ash results merge --help 2>/dev/null | grep "results merge" >/dev/null',
+                'ash results merge',
+                'ash merge',
+                [...resultsFlags, '--output-dir ./ash-merged-output'],
+              ).join('\n'),
             ],
           },
           post_build: {
@@ -737,6 +757,31 @@ export class AshDistributedPipelineStack extends Stack {
  * long as an execution id, with its hyphens in place.
  */
 export const EXECUTION_ID_SEGMENT = '????????-????-????-????-????????????';
+
+/**
+ * Shell lines that run `newCommand` when `probe` succeeds and `oldCommand` when it
+ * does not, each followed by the same `argumentLines`, one continuation line apiece.
+ *
+ * For a command ASH 3.9 respells (`ash scan fs PATH` for `ash scan --source-dir
+ * PATH`, `ash results merge` for `ash merge`): the shard and merge projects run in
+ * the image the pipeline builds from `AshVersion`, which can predate 3.9. Both
+ * branches are written out whole, so the deploy CLI contract test reads the options
+ * of each. The `if` exits with the status of the branch that ran.
+ */
+function onEitherAsh(
+  probe: string,
+  newCommand: string,
+  oldCommand: string,
+  argumentLines: string[],
+): string[] {
+  const branch = (command: string) => {
+    const lines = [command, ...argumentLines];
+    return lines.map(
+      (line, index) => `${index === 0 ? '  ' : '    '}${line}${index < lines.length - 1 ? ' \\' : ''}`,
+    );
+  };
+  return [`if ${probe}; then`, ...branch(newCommand), 'else', ...branch(oldCommand), 'fi'];
+}
 
 /**
  * Write the deployment-wide ASH config into the build, or `{}` when none was supplied.

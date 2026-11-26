@@ -259,7 +259,7 @@ function refCheckCommands(ref: string): string[] {
  * because the executable is named `ash` while the distribution is named
  * `automated-security-helper`, and `--from` is what states that difference.
  */
-function ashInvocation(install: InstallOptions): string {
+export function ashInvocation(install: InstallOptions): string {
   if (install.mode !== ASHInstallMode.UVX) {
     return 'ash';
   }
@@ -268,6 +268,54 @@ function ashInvocation(install: InstallOptions): string {
     install.version ?? DEFAULT_ASH_REF,
   );
   return `uvx --from ${requirement} ash`;
+}
+
+/**
+ * The shell test that is true when the installed ASH has the command `words`.
+ *
+ * ASH 3.9 names the scan's subject, `ash scan fs PATH`, and groups the commands
+ * that read saved results under `ash results`. The old spellings still work there
+ * but print a deprecation line, and they go in ASH v4.0. An ASH older than 3.9 has
+ * only the old ones, and the ref these commands install can be one: the default
+ * names the release this package came from until the release commit moves it, and
+ * a caller may pin any ref. So the command asks the ASH it is about to run.
+ *
+ * Only an ASH that has the command prints its name in the command's help, so the
+ * help is searched for it rather than the exit status read. An older ASH shows the
+ * subject-less scan's help for `ash scan fs --help`, since its help option is read
+ * before the extra argument is refused, and has no `results` command at all. The
+ * whole help is read (no `grep -q`), so ASH never writes into a closed pipe, which
+ * under pipefail would fail the test for an ASH that has the command.
+ */
+function hasCommand(ash: string, words: string[]): string {
+  const name = words.join(' ');
+  return `${ash} ${name} --help 2>/dev/null | grep "${name}" >/dev/null`;
+}
+
+/**
+ * One command line for each ASH: the new spelling when the installed ASH has it,
+ * the old one otherwise. The exit status of the `if` is that of the branch that
+ * ran, so the verdict is the scan's or the merge's own.
+ */
+function onEitherAsh(ash: string, probe: string[], current: string[], older: string[]): string {
+  return (
+    `if ${hasCommand(ash, probe)}; then ${[ash, ...current].join(' ')}; ` +
+    `else ${[ash, ...older].join(' ')}; fi`
+  );
+}
+
+/**
+ * A directory scan: `ash scan fs DIR` on an ASH that has the subject, and
+ * `ash scan --source-dir DIR` on one that does not, with the same options after.
+ */
+function directoryScanCommand(ash: string, sourceDirectory: string, options: string[]): string {
+  const directory = shellArg(sourceDirectory);
+  return onEitherAsh(
+    ash,
+    ['scan', 'fs'],
+    ['scan', 'fs', directory, ...options],
+    ['scan', '--source-dir', directory, ...options],
+  );
 }
 
 /**
@@ -282,19 +330,16 @@ export function scanCommands(
   options: CommonCommandOptions,
   install: InstallOptions,
 ): string[] {
-  const argv = [
-    ashInvocation(install),
-    'scan',
-    '--source-dir',
-    shellArg(options.sourceDirectory),
-    '--output-dir',
-    shellArg(options.outputDirectory),
-    '--min-severity',
-    options.severityThreshold,
-    '--fail-on-findings',
-    ...options.extraScanArguments,
+  return [
+    directoryScanCommand(ashInvocation(install), options.sourceDirectory, [
+      '--output-dir',
+      shellArg(options.outputDirectory),
+      '--min-severity',
+      options.severityThreshold,
+      '--fail-on-findings',
+      ...options.extraScanArguments,
+    ]),
   ];
-  return [argv.join(' ')];
 }
 
 /**
@@ -317,21 +362,18 @@ export function shardScanCommands(
   options: ShardCommandOptions,
   install: InstallOptions,
 ): string[] {
-  const argv = [
-    ashInvocation(install),
-    'scan',
-    '--source-dir',
-    shellArg(options.sourceDirectory),
-    '--output-dir',
-    shellArg(options.outputDirectory),
-    '--shard-index',
-    shellArg(options.shardIndex),
-    '--shard-count',
-    shellArg(options.shardCount),
-    '--no-fail-on-findings',
-    ...options.extraScanArguments,
+  return [
+    directoryScanCommand(ashInvocation(install), options.sourceDirectory, [
+      '--output-dir',
+      shellArg(options.outputDirectory),
+      '--shard-index',
+      shellArg(options.shardIndex),
+      '--shard-count',
+      shellArg(options.shardCount),
+      '--no-fail-on-findings',
+      ...options.extraScanArguments,
+    ]),
   ];
-  return [argv.join(' ')];
 }
 
 /**
@@ -339,9 +381,12 @@ export function shardScanCommands(
  * and one exit code.
  *
  * One `--results` per shard, each a directory. Passing a single parent directory
- * holding every shard is refused by `ash merge`, on the grounds that it would
- * make the merged set depend on whatever else happens to be in the tree,
- * including a previous merged report.
+ * holding every shard is refused by the merge, on the grounds that it would make
+ * the merged set depend on whatever else happens to be in the tree, including a
+ * previous merged report.
+ *
+ * The merge is `ash results merge` on an ASH that has the `results` group (3.9 and
+ * later) and `ash merge` on one that does not; see `hasCommand`.
  *
  * This command's exit code is the pipeline's verdict, which is also why
  * `--min-severity` is passed here and nowhere else: the severity floor has to
@@ -358,13 +403,27 @@ export function mergeCommands(
   if (resultsPaths.length === 0) {
     throw new Error('mergeCommands requires at least one results path.');
   }
-  const argv = [ashInvocation(install), 'merge'];
+  const options: string[] = [];
   for (const results of resultsPaths) {
-    argv.push('--results', shellArg(results));
+    options.push('--results', shellArg(results));
   }
-  argv.push('--output-dir', shellArg(outputDirectory));
-  argv.push('--min-severity', severityThreshold);
-  return [argv.join(' ')];
+  options.push('--output-dir', shellArg(outputDirectory));
+  options.push('--min-severity', severityThreshold);
+  return [resultsMergeCommand(ashInvocation(install), options)];
+}
+
+/**
+ * The merge with `options` after it: `ash results merge` on an ASH that has it,
+ * `ash merge` on one that does not.
+ *
+ * Exported for the buildspec generator, whose merge takes its `--results` from an
+ * environment variable at build time and so builds its options in the shell.
+ */
+export function resultsMergeCommand(ash: string, options: string[]): string {
+  return onEitherAsh(ash, ['results', 'merge'], ['results', 'merge', ...options], [
+    'merge',
+    ...options,
+  ]);
 }
 
 /**

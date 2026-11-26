@@ -43,10 +43,10 @@ any of three ways:
 <!-- doctest: illustrative reason="needs the example package installed" -->
 ```bash
 # On the command line
-ash --source-dir /path/to/code --ash-plugin-modules my_ash_plugins
+ash scan fs /path/to/code --ash-plugin-modules my_ash_plugins
 
 # With this directory's config, which also sets the plugins' options
-ash --source-dir /path/to/code --config examples/ash_plugins_example/.ash.yaml
+ash scan fs /path/to/code --config examples/ash_plugins_example/.ash.yaml
 ```
 
 or copy `.ash.yaml` into the root of the repository you scan, where ASH finds it.

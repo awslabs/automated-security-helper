@@ -15,8 +15,8 @@
  * `AgentRuntimeArtifact.ContainerConfiguration.ContainerUri`. There is no
  * `Command`, `EntryPoint` or `Args` property. So the MCP invocation CANNOT be
  * supplied by the template — it has to be baked into the image. ASH's own
- * Dockerfile ends with `ENTRYPOINT [] / CMD ["ash"]`, which would run `ash` with
- * no arguments and exit.
+ * Dockerfile ends with `ENTRYPOINT [] / CMD ["ash", "scan", "fs"]`, which would scan
+ * the working directory and exit.
  * https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-properties-bedrockagentcore-runtime-containerconfiguration.html
  *
  * That is why the entrypoint is a script rather than a fixed `CMD` line: the
@@ -777,18 +777,26 @@ exec "$@"
  * The scan passes `--fail-on-incomplete-scanners`, so a run in which a selected
  * scanner was MISSING or ERROR exits 1 ("errored") rather than 0 ("passed"), whatever
  * an operator's base config says about `fail_on_incomplete_scanners`. Releases up to
- * v3.7.1, including the default `AshVersion`, have no such option, and their
- * `ash scan` collects unknown options instead of refusing them, so there the flag
- * has no effect and a scan with every scanner MISSING exits 0. So
- * `_check_completeness_flag` asks `ash scan --help`
- * once per execution environment whether the option exists, and when it does not
- * the scan is refused through the same comment-and-REVOKE path as the offline
- * refusal below. The probe runs with colour off and a wide terminal, and ANSI codes
- * are stripped before the match, because rich styles each dash of an option name
- * separately when colour is forced.
+ * v3.7.1 have no such option, and their `ash scan` collects unknown options instead
+ * of refusing them, so there the flag has no effect and a scan with every scanner
+ * MISSING exits 0. So `_check_completeness_flag` asks the help of the scan the gate
+ * will run, once per execution environment, whether the option exists, and when it
+ * does not the scan is refused through the same comment-and-REVOKE path as the
+ * offline refusal below. Each probe runs with colour off and a wide terminal, and
+ * ANSI codes are stripped before the match, because rich styles each dash of an
+ * option name separately when colour is forced.
  *
- * WHAT THIS COSTS: with the default `AshVersion` (v3.7.0) the gate refuses every pull
- * request until it is deployed with an `AshVersion` whose `ash scan` has the option.
+ * The same probe settles how the directory is named. ASH 3.9 and later scan it as
+ * `ash scan fs PATH` and print a deprecation line for the subject-less
+ * `ash scan --source-dir PATH`, which goes in ASH v4.0; an `AshVersion` older than
+ * 3.9 has no `fs` subject. `ash scan fs --help` is asked first, and only an ASH with
+ * the subject prints `scan fs` in it (an older one shows the subject-less scan's
+ * help, since click reads `--help` before it refuses the extra argument); without
+ * it, `ash scan --help` is asked, and the scan takes `--source-dir`.
+ *
+ * WHAT THIS COSTS: with an `AshVersion` of v3.7.1 or older the gate refuses every
+ * pull request until it is deployed with an `AshVersion` whose `ash scan` has the
+ * option.
  *
  * THE SCAN RUNS WITHOUT THE FUNCTION ROLE'S CREDENTIALS
  * -----------------------------------------------------
@@ -983,27 +991,43 @@ def _verdict(exit_code):
 # ash-container-scripts.ts.
 COMMIT_ID = re.compile(r"[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?")
 
-# Whether this image's ash scan has the option, asked once per execution
-# environment; see ash-container-scripts.ts.
+# Whether this image's ash scan has the option, and whether its ASH names a
+# directory 'ash scan fs PATH'; both asked once per execution environment, see
+# ash-container-scripts.ts.
 COMPLETENESS_FLAG = "--fail-on-incomplete-scanners"
+# What only the help of an ASH with the subject prints: its own command path.
+SUBJECT_COMMAND = "scan fs"
 _completeness_flag_found = None
+_scan_has_subject = None
+
+
+def _help_text(argv, scan_env):
+    """argv's exit status and its help, plain: colour off, a wide terminal, no ANSI."""
+    env = dict(scan_env, COLUMNS="200", NO_COLOR="1")
+    env.pop("FORCE_COLOR", None)
+    probe = _run(argv, env=env)
+    return probe.returncode, re.sub(r"\\x1b\\[[0-9;]*m", "", probe.stdout or "")
 
 
 def _check_completeness_flag(scan_env):
-    global _completeness_flag_found
+    """Refuse an ASH that cannot fail an incomplete scan. Returns whether it has 'scan fs'."""
+    global _completeness_flag_found, _scan_has_subject
     if _completeness_flag_found is None:
-        env = dict(scan_env, COLUMNS="200", NO_COLOR="1")
-        env.pop("FORCE_COLOR", None)
-        probe = _run(["ash", "scan", "--help"], env=env)
-        if probe.returncode != 0:
-            raise RuntimeError("'ash scan --help' exited %d, so this image's ASH could not be "
-                               "checked for %s. Refusing to scan." % (probe.returncode, COMPLETENESS_FLAG))
-        _completeness_flag_found = COMPLETENESS_FLAG in re.sub(r"\\x1b\\[[0-9;]*m", "", probe.stdout or "")
+        status, help_text = _help_text(["ash", "scan", "fs", "--help"], scan_env)
+        has_subject = status == 0 and SUBJECT_COMMAND in help_text
+        if not has_subject:
+            status, help_text = _help_text(["ash", "scan", "--help"], scan_env)
+            if status != 0:
+                raise RuntimeError("'ash scan --help' exited %d, so this image's ASH could not be "
+                                   "checked for %s. Refusing to scan." % (status, COMPLETENESS_FLAG))
+        _completeness_flag_found = COMPLETENESS_FLAG in help_text
+        _scan_has_subject = has_subject
     if not _completeness_flag_found:
         raise RuntimeError(
             "The ASH in this image has no %s option, so a scan whose scanners never ran "
             "would be reported as passing. Refusing to scan. Deploy an AshVersion whose "
             "'ash scan' accepts %s." % (COMPLETENESS_FLAG, COMPLETENESS_FLAG))
+    return bool(_scan_has_subject)
 
 
 def _scan_config(workdir):
@@ -1052,7 +1076,7 @@ def handler(event, context):
     # standing approval rather than failing the invocation silently.
     try:
         scan_env = _scan_env(workdir)
-        _check_completeness_flag(scan_env)
+        has_subject = _check_completeness_flag(scan_env)
         config_path = _scan_config(workdir)
         scan_env["ASH_CONFIG"] = config_path
     except RuntimeError as exc:
@@ -1074,7 +1098,10 @@ def handler(event, context):
     if checkout.returncode != 0:
         raise RuntimeError("could not check out %s: %s" % (source_commit, checkout.stderr))
 
-    argv = ["ash", "scan", "--source-dir", source_dir, "--output-dir", output_dir,
+    # The clone is named the way this image's ASH names a directory: the PATH of
+    # 'ash scan fs' from ASH 3.9, --source-dir before it. See ash-container-scripts.ts.
+    directory = ["fs", source_dir] if has_subject else ["--source-dir", source_dir]
+    argv = ["ash", "scan", *directory, "--output-dir", output_dir,
             "--config", config_path, COMPLETENESS_FLAG,
             "--no-progress", "--simple", "--compact-report"]
     if os.environ.get("ASH_CHANGED_FILES_ONLY", "false") == "true":

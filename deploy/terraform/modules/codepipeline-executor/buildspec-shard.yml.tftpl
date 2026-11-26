@@ -58,6 +58,13 @@ phases:
       # With no base config ash-container-init sets no ASH_CONFIG, and ASH would
       # then read a config committed in the scanned repository. So this writes
       # `{}`, ASH's defaults, outside the checkout and points ASH_CONFIG at it.
+      #
+      # ASH 3.9 scans a directory as `ash scan fs PATH`. An ash_version older
+      # than 3.9 has only `ash scan --source-dir PATH`, which 3.9 still runs with
+      # a deprecation line and v4.0 removes, so the image's ASH is asked first:
+      # only one with the subject prints `scan fs` in that help. ASH_EXIT is the
+      # scan's status either way, since an `if` exits with its branch's last
+      # command.
       - |
         set -eu
         mkdir -p ash_output
@@ -67,12 +74,20 @@ phases:
           export ASH_CONFIG
         fi
         set +e
-        /usr/local/bin/ash-container-init ash scan \
-          --source-dir . \
-          --output-dir ash_output \
-          --shard-index "$SHARD_INDEX" \
-          --shard-count "$SHARD_COUNT" \
-          --no-fail-on-findings
+        if ash scan fs --help 2>/dev/null | grep "scan fs" >/dev/null; then
+          /usr/local/bin/ash-container-init ash scan fs . \
+            --output-dir ash_output \
+            --shard-index "$SHARD_INDEX" \
+            --shard-count "$SHARD_COUNT" \
+            --no-fail-on-findings
+        else
+          /usr/local/bin/ash-container-init ash scan \
+            --source-dir . \
+            --output-dir ash_output \
+            --shard-index "$SHARD_INDEX" \
+            --shard-count "$SHARD_COUNT" \
+            --no-fail-on-findings
+        fi
         ASH_EXIT=$?
         set -e
         echo "ash scan exited $ASH_EXIT"

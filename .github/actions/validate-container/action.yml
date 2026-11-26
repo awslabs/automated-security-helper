@@ -30,7 +30,7 @@ runs:
     # can scan with the result, which is the only reason the image is built. So podman
     # and finch were the two runtimes in the matrix whose image nobody ever ran, while
     # the five methods that do scan (pip, pipx, uvx, mcp, nix) all exercise
-    # `ash scan --source-dir /tmp/ash-selftest ... --phases scan --phases report`.
+    # `ash scan fs /tmp/ash-selftest ... --phases scan --phases report`.
     #
     # A runtime with a build leg and no scan leg is precisely that defect, so the
     # runtimes carrying one are named here rather than assumed. Adding a runtime to the
@@ -643,11 +643,10 @@ runs:
         mapfile -t alpha_args < <(python3 .github/scripts/alpha-scanner-legs.py args)
         test "${#alpha_args[@]}" -gt 0
         set +e
-        ash scan \
+        ash scan fs /tmp/ash-selftest \
           --mode container \
           --oci-runner "${RUNTIME}" \
           --build-target ci \
-          --source-dir /tmp/ash-selftest \
           --output-dir /tmp/ash-selftest/output \
           --simple \
           --fail-on-incomplete-scanners \
@@ -657,7 +656,7 @@ runs:
         rc=$?
         set -e
         if [ "$rc" -ne 0 ]; then
-          echo "::error::ash scan --mode container --oci-runner ${RUNTIME} exited $rc; this fixture and these flags exit 0 when the scan works."
+          echo "::error::ash scan fs --mode container --oci-runner ${RUNTIME} exited $rc; this fixture and these flags exit 0 when the scan works."
           case "$rc" in
             1) echo "::error::1 is ASH's 'error during execution', which --fail-on-incomplete-scanners also uses for a scan where a selected scanner reported ERROR or MISSING. Read the per-scanner table below." ;;
             2) echo "::error::2 means actionable findings on a fixture that is one print statement." ;;
@@ -864,11 +863,10 @@ runs:
           > /tmp/ash-zizmor-selftest/.github/workflows/selftest.yml
         cat /tmp/ash-zizmor-selftest/.github/workflows/selftest.yml
         set +e
-        ash scan \
+        ash scan fs /tmp/ash-zizmor-selftest \
           --mode container \
           --oci-runner "${RUNTIME}" \
           --build-target ci \
-          --source-dir /tmp/ash-zizmor-selftest \
           --output-dir /tmp/ash-zizmor-selftest/output \
           --scanners zizmor \
           --no-fail-on-findings \
@@ -877,7 +875,7 @@ runs:
         rc=$?
         set -e
         if [ "$rc" -ne 0 ]; then
-          echo "::error::ash scan --scanners zizmor exited $rc; with --no-fail-on-findings only an incomplete or broken scan exits non-zero."
+          echo "::error::ash scan fs --scanners zizmor exited $rc; with --no-fail-on-findings only an incomplete or broken scan exits non-zero."
           exit "$rc"
         fi
         python3 <<'PY'
@@ -923,11 +921,10 @@ runs:
         mkdir -p /tmp/ash-selftest-hadolint
         printf 'FROM ubuntu:latest\nRUN echo fixture\n' > /tmp/ash-selftest-hadolint/Dockerfile
         set +e
-        ash scan \
+        ash scan fs /tmp/ash-selftest-hadolint \
           --mode container \
           --oci-runner "${RUNTIME}" \
           --build-target ci \
-          --source-dir /tmp/ash-selftest-hadolint \
           --output-dir /tmp/ash-selftest-hadolint/output \
           --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins \
           --scanners hadolint \
@@ -982,11 +979,10 @@ runs:
         mkdir -p /tmp/ash-selftest-betterleaks
         printf 'token = "%s%s"\n' ghp_ x7Kq9ZmP2vLw4RtYb8NcD3sFh6JgA1eUoW5i > /tmp/ash-selftest-betterleaks/settings.py
         set +e
-        ash scan \
+        ash scan fs /tmp/ash-selftest-betterleaks \
           --mode container \
           --oci-runner "${RUNTIME}" \
           --build-target ci \
-          --source-dir /tmp/ash-selftest-betterleaks \
           --output-dir /tmp/ash-selftest-betterleaks/output \
           "${alpha_args[@]}" \
           --scanners betterleaks \
@@ -1034,11 +1030,10 @@ runs:
         mkdir -p /tmp/ash-cfn-selftest
         cp tests/test_data/scanners/cfn_lint_guard/repo/templates/compliant.yaml /tmp/ash-cfn-selftest/
         set +e
-        ash scan \
+        ash scan fs /tmp/ash-cfn-selftest \
           --mode container \
           --oci-runner "${RUNTIME}" \
           --build-target ci \
-          --source-dir /tmp/ash-cfn-selftest \
           --output-dir /tmp/ash-cfn-selftest/output \
           --scanners cfn-lint,cfn-guard \
           --simple \

@@ -912,4 +912,7 @@ HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
     CMD ["/bin/sh", "-c", "command -v ash || exit 1"]
 
 ENTRYPOINT [ ]
-CMD [ "ash" ]
+# `docker run <image>` with no command scans the working directory, as bare `ash` did,
+# with the subject named so the scan prints no deprecation line (bare `ash` is
+# deprecated and goes in ASH v4.0).
+CMD [ "ash", "scan", "fs" ]

@@ -46,6 +46,7 @@ from tests.unit.deploy.buildspec_extraction import (
     sole_command_containing,
     templates_with_joined_buildspec_marker,
 )
+from tests.unit.deploy.gate_probe_answers import answer, fs_arguments
 
 pytestmark = pytest.mark.unit
 
@@ -92,8 +93,9 @@ def test_the_scan_argv_forces_incomplete_scanners_to_fail(gate, monkeypatch, tmp
     # value is not asserted here -- this test is about argv -- but a stub that
     # refused the keyword would fail on the signature rather than on the property.
     def _fake_run(argv, cwd=None, env=None):
-        if list(argv) == ["ash", "scan", "--help"]:
-            return SimpleNamespace(returncode=0, stdout=SCAN_HELP, stderr="")
+        reply = answer(argv)
+        if reply is not None:
+            return reply
         captured.append(list(argv))
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -123,32 +125,34 @@ def _resolve_scan_params(argv: list[str]) -> dict[str, Any]:
     Imported inside the function because this module otherwise loads the gate by path and needs
     nothing from the package; the import exists to get the genuine option definitions rather
     than a restatement of them here that could drift from the CLI.
+
+    Either form of the scan resolves: ``ash scan fs PATH ...`` and the subject-less
+    ``ash scan --source-dir PATH ...`` both run as the ``fs`` subject (see fs_arguments).
     """
     import typer.main
 
     from automated_security_helper.cli.main import app
 
-    assert argv[:2] == ["ash", "scan"], f"unexpected argv prefix: {argv[:2]}"
     scan_command = typer.main.get_command(app).commands["scan"].commands["fs"]
-    return scan_command.make_context("scan", argv[2:], resilient_parsing=False).params
-
-
-#: What the gate's probe of ``ash scan --help`` is answered with: an ASH that has
-#: the completeness option. test_codecommit_gate_completeness_probe.py covers the
-#: other answers.
-SCAN_HELP = "  --fail-on-incomplete-scanners / --no-fail-on-incomplete-scanners\n"
+    return scan_command.make_context(
+        "fs", fs_arguments(argv), resilient_parsing=False
+    ).params
 
 
 def _capture_argv(gate, monkeypatch, tmp_path) -> list[list[str]]:
     """Point the gate's subprocess runner at a list, and return that list.
 
-    The help probe is answered and not recorded: it is not a scan.
+    The help probes are answered as this tree's ASH (it has the ``fs`` subject and the
+    completeness option) and not recorded: they are not scans.
+    test_codecommit_gate_completeness_probe.py and test_codecommit_gate_scan_subject.py
+    cover the other answers.
     """
     captured: list[list[str]] = []
 
     def _fake_run(argv, cwd=None, env=None):
-        if list(argv) == ["ash", "scan", "--help"]:
-            return SimpleNamespace(returncode=0, stdout=SCAN_HELP, stderr="")
+        reply = answer(argv)
+        if reply is not None:
+            return reply
         captured.append(list(argv))
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -577,16 +581,22 @@ def test_the_gates_own_options_are_resolved_last(gate, monkeypatch, tmp_path):
     first: it helps only for options the gate itself passes. An unrecognized spelling of
     ``--scanners`` would resolve to the operator's value whatever the ordering, because the
     gate passes no ``--scanners`` of its own for the ordering to favour.
+
+    The directory is the exception, and on purpose: with an ASH that has the ``fs``
+    subject it is the subject's PATH, right after ``fs`` and AHEAD of the extras, so a
+    bare word among them is a second PATH, which ASH refuses, and cannot become the tree
+    scanned. test_codecommit_gate_scan_subject.py holds the subject-less form, where it
+    is ``--source-dir`` among the gate's options after the extras.
     """
     captured = _capture_argv(gate, monkeypatch, tmp_path)
     monkeypatch.setenv("ASH_SCAN_EXTRA_ARGS", "--offline --output-formats html")
+    source = tmp_path / "src"
 
-    gate.run_scan(tmp_path / "src", "medium", False)
+    gate.run_scan(source, "medium", False)
 
     argv = captured[0]
     last_extra = max(argv.index("--offline"), argv.index("html"))
     for owned in (
-        "--source-dir",
         "--output-dir",
         "--min-severity",
         "--no-fail-on-findings",
@@ -596,9 +606,12 @@ def test_the_gates_own_options_are_resolved_last(gate, monkeypatch, tmp_path):
             f"{owned} is emitted before the operator's extra args, so a repeat of it in "
             f"ASH_SCAN_EXTRA_ARGS would resolve last and win. argv={argv}"
         )
+    assert argv[:4] == ["ash", "scan", "fs", str(source)], argv
+    assert "--source-dir" not in argv, argv
 
     # And the values ASH resolves are the gate's, with the operator's tokens interspersed.
     params = _resolve_scan_params(argv)
+    assert params["path"] == str(source)
     assert params["fail_on_incomplete_scanners"] is True
     assert params["fail_on_findings"] is False
     assert params["min_severity"] == "medium"
