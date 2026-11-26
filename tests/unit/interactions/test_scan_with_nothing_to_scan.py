@@ -14,7 +14,7 @@ When the scanners had nothing to scan it now says so, names them, names
 global_settings.ignore_paths when the config sets it, and gives the remedy.
 
 The tree is the one an operator meets: ``app.py`` and an in-tree
-``.ash/.ash.yaml`` whose ignore_paths is ``**``, scanned with detect-secrets, which
+``.ash.yaml`` whose ignore_paths is ``**``, scanned with detect-secrets, which
 ASH depends on. Each run is a child process with no cloud credentials, an endpoint
 that refuses connections and a home of its own.
 """
@@ -67,8 +67,8 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
 def _tree(root: Path) -> Path:
-    (root / ".ash").mkdir(parents=True)
-    (root / ".ash" / ".ash.yaml").write_text(IGNORE_EVERYTHING, encoding="utf-8")
+    root.mkdir(parents=True)
+    (root / ".ash.yaml").write_text(IGNORE_EVERYTHING, encoding="utf-8")
     (root / "app.py").write_text('print("hello")\n', encoding="utf-8")
     return root
 

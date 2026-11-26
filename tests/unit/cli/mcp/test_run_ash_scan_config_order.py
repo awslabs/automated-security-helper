@@ -103,10 +103,8 @@ def _scanned_project_names(target: Path, monkeypatch: pytest.MonkeyPatch) -> Lis
 
 def test_a_discovered_config_comes_before_ash_config(_env, monkeypatch) -> None:
     target = _env["scan_root"] / "repo"
-    (target / ".ash").mkdir(parents=True)
-    (target / ".ash" / ".ash.yaml").write_text(
-        "project_name: discovered\n", encoding="utf-8"
-    )
+    target.mkdir(parents=True)
+    (target / ".ash.yaml").write_text("project_name: discovered\n", encoding="utf-8")
 
     assert _scanned_project_names(target, monkeypatch) == ["discovered"]
 

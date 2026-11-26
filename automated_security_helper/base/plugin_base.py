@@ -32,6 +32,7 @@ from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.uv_tool_mixin import (
     UVToolMixin,
+    _tool_name,
     guarded_values,
     guarded_values_read,
 )
@@ -1128,6 +1129,20 @@ class PluginBase(UVToolMixin, BaseModel):
         default_factory=lambda: _CONFIG_FROM_CONTEXT.get()
     )
 
+    def _require_context(self) -> PluginContext:
+        """The plugin's context, or a ``ScannerError`` naming the plugin when it
+        was built without one.
+
+        The field is typed as always set for the methods that run under a phase,
+        which hands every plugin its context first; a plugin built on its own
+        can still reach one of those methods without it, and this is where that
+        stops with a named error rather than an ``AttributeError`` on ``None``.
+        """
+        context: PluginContext | None = self.context
+        if context is None:
+            raise ScannerError(f"No context provided for {self.__class__.__name__}!")
+        return context
+
     def __init__(self, **data: Any) -> None:
         # The caller's own declaration wins over the type inference: a dict
         # section is read as the context's, a typed object as caller-built,
@@ -1618,7 +1633,7 @@ class PluginBase(UVToolMixin, BaseModel):
                         stderr_text,
                         values,
                         plugin_inputs=plugin_inputs,
-                        tool_name=self._tool_command(),
+                        tool_name=_tool_name(self),
                         limit=None,
                     )
                 else:
@@ -2337,7 +2352,8 @@ class PluginBase(UVToolMixin, BaseModel):
         stderr_log_before = _log_identity(stderr_log)
         try:
             # Use provided cwd or fall back to context.source_dir
-            working_dir = Path(cwd if cwd is not None else self.context.source_dir)
+            source_dir = self._require_context().source_dir
+            working_dir = Path(cwd if cwd is not None else source_dir)
 
             # Offline, the tool's own update, version and telemetry checks are
             # turned off in the environment it gets (utils/offline_tool_env.py).
@@ -2371,7 +2387,7 @@ class PluginBase(UVToolMixin, BaseModel):
             # this process's) is not known to be the operator's alone. Such a
             # UV_PYTHON is dropped before the choice is read, so ASH's
             # interpreter is set in its place.
-            if _uv_interpreter_inside(env, working_dir, Path(self.context.source_dir)):
+            if _uv_interpreter_inside(env, working_dir, Path(source_dir)):
                 # Said once per plugin, as a warning: the operator or the scan's
                 # config set a variable that is not honored, and one line per
                 # tool run would repeat it for every run. The value is not shown.

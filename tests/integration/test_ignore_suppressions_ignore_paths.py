@@ -61,8 +61,7 @@ def _ignored_tree(root: Path) -> Path:
     (root / "clean.py").write_text(
         "def add(a, b):\n    return a + b\n", encoding="utf-8"
     )
-    (root / ".ash").mkdir()
-    (root / ".ash" / ".ash.yaml").write_text(
+    (root / ".ash.yaml").write_text(
         yaml.safe_dump(
             {
                 "project_name": "ignore-paths-e2e",

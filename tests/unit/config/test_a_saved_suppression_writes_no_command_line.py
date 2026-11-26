@@ -67,8 +67,7 @@ def _read(text: str) -> Dict[str, Any]:
 def _config_file(tmp_path: Path, rest: str | None) -> Path:
     """The config to save into: *rest* appended to a one-key head, or, for
     ``None`` (the new-file shape), a path with no file behind it."""
-    path = tmp_path / ".ash" / ".ash.yaml"
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path = tmp_path / ".ash.yaml"
     if rest is not None:
         path.write_text(f"project_name: {json.dumps('demo')}\n{rest}", "utf-8")
     return path

@@ -126,10 +126,10 @@ def _scanner(
     """
     config = get_default_config()
     # operator=True: built from no file in the scanned tree. Otherwise from the
-    # tree's .ash/.ash.yaml, judged against the defaults plus ``overrides``.
+    # tree's .ash.yaml, judged against the defaults plus ``overrides``.
     record_provenance(
         config,
-        in_tree=[] if operator else [repo / ".ash" / ".ash.yaml"],
+        in_tree=[] if operator else [repo / ".ash.yaml"],
         trusted=AshConfig(),
         config_overrides=list(overrides),
     )

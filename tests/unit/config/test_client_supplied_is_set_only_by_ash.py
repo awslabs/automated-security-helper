@@ -58,9 +58,9 @@ def _marks(config: Any) -> List[bool]:
 
 def test_a_repository_config_cannot_mark_its_own_entries(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
-    (repo / ".ash").mkdir(parents=True)
+    repo.mkdir(parents=True)
     (repo / ".git").mkdir()
-    (repo / ".ash" / ".ash.yaml").write_text(
+    (repo / ".ash.yaml").write_text(
         yaml.safe_dump(_marked_document()), encoding="utf-8"
     )
     assert _marks(resolve_config(source_dir=repo)) == [False] * 4

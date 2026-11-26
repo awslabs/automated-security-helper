@@ -414,6 +414,9 @@ def test_a_warning_before_logging_is_set_up_reaches_stderr_shown(tmp_path) -> No
     scan's namespace refusal instead (config/plugin_module_trust.py,
     confine_plugin_modules), which get_config answers as a structured
     plugin_module_refused result, with no warning to show.
+
+    Legacy location: this test's subject includes the deprecated .ash/.ash.yaml
+    path, because the hostile base file sits beside the config inside ``.ash/``.
     """
     from mcp.types import LATEST_PROTOCOL_VERSION
 

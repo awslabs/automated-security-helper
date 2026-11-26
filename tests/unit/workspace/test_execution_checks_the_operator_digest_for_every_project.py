@@ -99,7 +99,7 @@ def test_a_project_with_its_own_config_is_still_refused_on_a_changed_operator_fi
     """The first kind keeps its check: the operator's file is layered over the
     project's own config, and a rewrite is refused as before."""
     operator = _operator(tmp_path)
-    own = tmp_path / "workspace" / "api" / ".ash" / ".ash.yaml"
+    own = tmp_path / "workspace" / "api" / ".ash.yaml"
     own.parent.mkdir(parents=True, exist_ok=True)
     own.write_text(yaml.safe_dump({"project_name": "api"}), encoding="utf-8")
     project = _project(

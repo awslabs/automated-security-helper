@@ -228,8 +228,7 @@ def test_ash_scan_with_zizmor_applies_rule_path_and_line_suppressions(source):
         },
         "scanners": {"zizmor": {"enabled": True}},
     }
-    config_path = source / ".ash" / ".ash.yaml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path = source / ".ash.yaml"
     config_path.write_text(yaml.safe_dump(config))
     output_dir = source.parent / "out"
 

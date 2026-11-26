@@ -3,10 +3,10 @@
 
 """The ``own_environment`` fixture leaves an ``ash report`` run nothing of the runner's.
 
-``ash report`` finds its configuration from ``ASH_CONFIG`` and from a ``.ash``
+``ash report`` finds its configuration from ``ASH_CONFIG`` and from a ``.ash.yaml``
 file in the working directory or above, and its output directory from
 ``ASH_OUTPUT_DIR``. The report tests that invoke the command ask for the fixture,
-so a variable the runner set, or the checkout's own ``.ash/.ash.yaml``, is not
+so a variable the runner set, or the checkout's own ``.ash.yaml``, is not
 read by them.
 """
 

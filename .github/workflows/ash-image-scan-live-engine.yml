@@ -71,11 +71,20 @@ jobs:
         with:
           python-version: "3.12"
           install-ash: "false"
-      - name: Install ASH, syft and crane
+      - name: Install ASH and syft
         run: |
           set -euo pipefail
           pip install .
-          ash dependencies install --tool syft --tool crane
+          ash dependencies install --tool syft
+      # crane is not a scanner or reporter plugin, so `ash dependencies install` does
+      # not know it. The image build installs it with this script from the same pins
+      # (utils/tool_downloads.py), which verifies the archive and the executable digests.
+      - name: Install the pinned crane
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/crane-bin"
+          python3 automated_security_helper/assets/install-pinned-tool.py crane -b "$RUNNER_TEMP/crane-bin"
+          echo "$RUNNER_TEMP/crane-bin" >> "$GITHUB_PATH"
       - name: Start a local registry
         run: |
           set -euo pipefail

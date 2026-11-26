@@ -35,14 +35,13 @@ def project_with_dirs(tmp_path):
     (tmp_path / "tests" / "test_data" / "sample.json").write_text("{}")
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "guide.md").write_text("# Guide")
-    (tmp_path / ".ash").mkdir()
     return tmp_path
 
 
 @pytest.fixture
 def config_with_dir_ignore_path(project_with_dirs):
     """Config with ignore_path pointing to a directory without **."""
-    config_path = project_with_dirs / ".ash" / ".ash.yaml"
+    config_path = project_with_dirs / ".ash.yaml"
     config_data = {
         "project_name": "test-project",
         "global_settings": {
@@ -61,7 +60,7 @@ def config_with_dir_ignore_path(project_with_dirs):
 @pytest.fixture
 def config_with_trailing_slash_ignore_path(project_with_dirs):
     """Config with ignore_path pointing to a directory with trailing slash but no **."""
-    config_path = project_with_dirs / ".ash" / ".ash.yaml"
+    config_path = project_with_dirs / ".ash.yaml"
     config_data = {
         "project_name": "test-project",
         "global_settings": {
@@ -80,7 +79,7 @@ def config_with_trailing_slash_ignore_path(project_with_dirs):
 @pytest.fixture
 def config_with_valid_ignore_paths(project_with_dirs):
     """Config with properly formed ignore_paths using **."""
-    config_path = project_with_dirs / ".ash" / ".ash.yaml"
+    config_path = project_with_dirs / ".ash.yaml"
     config_data = {
         "project_name": "test-project",
         "global_settings": {
@@ -107,7 +106,7 @@ def config_with_valid_ignore_paths(project_with_dirs):
 @pytest.fixture
 def config_with_nonexistent_dir_path(project_with_dirs):
     """Config with ignore_path pointing to a non-existent directory (e.g., uninitialized venv)."""
-    config_path = project_with_dirs / ".ash" / ".ash.yaml"
+    config_path = project_with_dirs / ".ash.yaml"
     config_data = {
         "project_name": "test-project",
         "global_settings": {
@@ -130,7 +129,7 @@ def config_with_nonexistent_dir_path(project_with_dirs):
 @pytest.fixture
 def config_with_suppression_dir_path(project_with_dirs):
     """Config with suppression path pointing to a directory without **."""
-    config_path = project_with_dirs / ".ash" / ".ash.yaml"
+    config_path = project_with_dirs / ".ash.yaml"
     config_data = {
         "project_name": "test-project",
         "global_settings": {
@@ -166,7 +165,7 @@ class TestIgnorePathLinting:
     def test_warns_on_a_recursive_pattern_naming_a_directory(self, project_with_dirs):
         """A ``**`` pattern whose last component names an existing directory
         still matches no file in it, and draws the warning."""
-        config_path = project_with_dirs / ".ash" / ".ash.yaml"
+        config_path = project_with_dirs / ".ash.yaml"
         config_path.write_text(
             yaml.dump(
                 {
@@ -202,7 +201,7 @@ class TestIgnorePathLinting:
     def test_accepts_a_suppression_path_ending_in_a_slash(self, project_with_dirs):
         """A suppression path ending in '/' names the directory and matches the
         files below it (the bare-directory rule, issue #894): no warning."""
-        config_path = project_with_dirs / ".ash" / ".ash.yaml"
+        config_path = project_with_dirs / ".ash.yaml"
         config_path.write_text(
             yaml.dump(
                 {
@@ -306,7 +305,7 @@ class TestIgnorePathLinting:
 
     def test_multiple_issues_reported(self, project_with_dirs):
         """Several ``**`` patterns naming directories each produce a warning."""
-        config_path = project_with_dirs / ".ash" / ".ash.yaml"
+        config_path = project_with_dirs / ".ash.yaml"
         config_data = {
             "project_name": "test-project",
             "global_settings": {
@@ -327,7 +326,7 @@ class TestIgnorePathLinting:
 
     def test_path_prefix_in_issue(self, project_with_dirs):
         """The issue should include the correct config path prefix for identification."""
-        config_path = project_with_dirs / ".ash" / ".ash.yaml"
+        config_path = project_with_dirs / ".ash.yaml"
         config_path.write_text(
             yaml.dump(
                 {
@@ -402,9 +401,8 @@ class TestIgnorePathValidation:
         source_dir = tmp_path / "project"
         source_dir.mkdir()
         (source_dir / "vendor").mkdir()
-        (source_dir / ".ash").mkdir()
 
-        config_path = source_dir / ".ash" / ".ash.yaml"
+        config_path = source_dir / ".ash.yaml"
         config_data = {
             "project_name": "test-project",
             "global_settings": {
@@ -427,13 +425,20 @@ class TestIgnorePathValidation:
         assert len(path_errors) == 1, errors
 
 
-#: The advice for a suppression path "docs/" is whatever the suppression matcher
-#: makes of it: 'docs/**/*' while the matcher reads the trailing slash as written,
-#: as it does today (file_path_matches("docs/a.py", "docs/") is False), and none
-#: once it reads "docs/" as the directory's files. The expectation is taken from
-#: the matcher, so a matcher that changes turns this cell red until the advice
-#: changes with it.
-_FOLLOWS_THE_MATCHER = "follows-the-matcher"
+def test_the_matcher_reads_a_glob_free_directory_path_as_its_files():
+    """The premise of the "no advice" cells below, pinned where it is used: under
+    the bare-directory rule (issue #894) a glob-free suppression path, with or
+    without a trailing slash, matches the files below the directory, anchored at
+    the top. It is also what lets the scan drop its old warning that a
+    trailing-slash suppression matches nothing."""
+    from automated_security_helper.utils.suppression_matcher import file_path_matches
+
+    assert file_path_matches("docs/a.py", "docs/") is True
+    assert file_path_matches("docs/a.py", "docs") is True
+    assert file_path_matches("docs/sub/b.py", "docs/") is True
+    # Anchored: not a directory of that name deeper in the tree.
+    assert file_path_matches("pkg/docs/a.py", "docs/") is False
+    assert file_path_matches("pkg/docs/a.py", "docs") is False
 
 
 @pytest.mark.parametrize("checker", ["lint", "validate"])
@@ -445,7 +450,7 @@ _FOLLOWS_THE_MATCHER = "follows-the-matcher"
         ("ignore_paths", "docs", None),
         ("ignore_paths", "docs/", None),
         ("suppressions", "docs", None),
-        ("suppressions", "docs/", _FOLLOWS_THE_MATCHER),
+        ("suppressions", "docs/", None),
         # A "**" pattern's last component names a path exactly, so the files
         # inside the directory do not match, and the advice gives the spelling.
         ("ignore_paths", "**/docs", "'**/docs/'"),
@@ -461,16 +466,10 @@ def test_one_spelling_for_every_file_inside_a_directory(
     path, where ``**/docs/**`` would also match a path named exactly ``docs``.
     A glob-free path gets no advice: under the bare-directory rule (issue #894)
     it already matches the directory's files, with or without the slash."""
-    if advice == _FOLLOWS_THE_MATCHER:
-        from automated_security_helper.utils.suppression_matcher import (
-            file_path_matches,
-        )
-
-        advice = None if file_path_matches("docs/a.py", "docs/") else "'docs/**/*'"
     entry = {"path": path, "reason": "r"}
     if section == "suppressions":
         entry["rule_id"] = "R1"
-    config_path = project_with_dirs / ".ash" / ".ash.yaml"
+    config_path = project_with_dirs / ".ash.yaml"
     config_path.write_text(
         yaml.dump(
             {"project_name": "test-project", "global_settings": {section: [entry]}}
@@ -500,7 +499,7 @@ class TestEdgeCases:
 
     def test_path_with_glob_in_middle(self, project_with_dirs):
         """Paths like 'src/*/test.py' should not trigger the warning."""
-        config_path = project_with_dirs / ".ash" / ".ash.yaml"
+        config_path = project_with_dirs / ".ash.yaml"
         config_data = {
             "project_name": "test-project",
             "global_settings": {
@@ -519,7 +518,7 @@ class TestEdgeCases:
 
     def test_path_with_question_mark_glob(self, project_with_dirs):
         """Paths with ? glob should not trigger the warning."""
-        config_path = project_with_dirs / ".ash" / ".ash.yaml"
+        config_path = project_with_dirs / ".ash.yaml"
         config_data = {
             "project_name": "test-project",
             "global_settings": {
@@ -538,7 +537,7 @@ class TestEdgeCases:
 
     def test_exact_file_path_no_warning(self, project_with_dirs):
         """An exact file path should not trigger the warning even if it exists."""
-        config_path = project_with_dirs / ".ash" / ".ash.yaml"
+        config_path = project_with_dirs / ".ash.yaml"
         config_data = {
             "project_name": "test-project",
             "global_settings": {
@@ -557,7 +556,7 @@ class TestEdgeCases:
 
     def test_empty_ignore_paths_no_crash(self, project_with_dirs):
         """Empty ignore_paths list should not cause issues."""
-        config_path = project_with_dirs / ".ash" / ".ash.yaml"
+        config_path = project_with_dirs / ".ash.yaml"
         config_data = {
             "project_name": "test-project",
             "global_settings": {
@@ -574,7 +573,7 @@ class TestEdgeCases:
 
     def test_no_global_settings_no_crash(self, project_with_dirs):
         """Config without global_settings should not crash."""
-        config_path = project_with_dirs / ".ash" / ".ash.yaml"
+        config_path = project_with_dirs / ".ash.yaml"
         config_data = {
             "project_name": "test-project",
         }
@@ -588,7 +587,7 @@ class TestEdgeCases:
 
     def test_mixed_valid_and_invalid_paths(self, project_with_dirs):
         """Only a ** pattern naming a directory is flagged; the rest pass."""
-        config_path = project_with_dirs / ".ash" / ".ash.yaml"
+        config_path = project_with_dirs / ".ash.yaml"
         config_data = {
             "project_name": "test-project",
             "global_settings": {

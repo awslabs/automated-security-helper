@@ -34,7 +34,7 @@ outside the scanned tree that provides the same function; see ``_filter_by_file`
 
 Every case runs a real in-process scan through ``run_ash_scan`` with only
 detect-secrets selected, so the config tiers are decided exactly as for ``ash scan``
-(``--config`` outside the tree: operator; ``.ash/.ash.yaml`` found in the tree:
+(``--config`` outside the tree: operator; ``.ash.yaml`` found in the tree:
 repository; ``untrusted_config=True``: an MCP client's upload, as
 ``cli/mcp_tools.py`` passes it).
 
@@ -360,7 +360,7 @@ class TestOfflineScanSendsNoVerificationRequest:
         self, recorder, repo, tmp_path, elsewhere
     ):
         """Workspace mode: the project's own config is repository-written too."""
-        _write_ash_config(repo / ".ash" / ".ash.yaml", _settings())
+        _write_ash_config(repo / ".ash.yaml", _settings())
 
         results = _workspace_scan(
             tmp_path, tmp_path / "out", offline=True, project=repo.name
@@ -419,12 +419,12 @@ class TestOnlyTheOperatorEnablesVerification:
     def test_repository_ash_config_cannot_enable_verification(
         self, recorder, repo, tmp_path, elsewhere
     ):
-        _write_ash_config(repo / ".ash" / ".ash.yaml", _settings())
+        _write_ash_config(repo / ".ash.yaml", _settings())
 
         results = _scan(repo, tmp_path / "out", offline=False)
 
         assert _issuer_requests(recorder) == [], (
-            "a repository-local .ash/.ash.yaml enabled secret verification: "
+            "a repository-local .ash.yaml enabled secret verification: "
             f"{recorder.requests}"
         )
         _assert_key_still_reported(results)
@@ -433,9 +433,7 @@ class TestOnlyTheOperatorEnablesVerification:
     def test_repository_ash_config_naming_the_filter_by_file_path(
         self, recorder, repo, tmp_path, elsewhere
     ):
-        _write_ash_config(
-            repo / ".ash" / ".ash.yaml", _settings(_filter_by_file(tmp_path))
-        )
+        _write_ash_config(repo / ".ash.yaml", _settings(_filter_by_file(tmp_path)))
 
         results = _scan(repo, tmp_path / "out", offline=False)
 
@@ -460,8 +458,7 @@ class TestOnlyTheOperatorEnablesVerification:
                 }
             },
         }
-        (repo / ".ash").mkdir()
-        (repo / ".ash" / ".ash.yaml").write_text(json.dumps(document), encoding="utf-8")
+        (repo / ".ash.yaml").write_text(json.dumps(document), encoding="utf-8")
 
         results = _scan(repo, tmp_path / "out", offline=False)
 
@@ -485,7 +482,7 @@ class TestOnlyTheOperatorEnablesVerification:
     def test_workspace_project_config_cannot_enable_verification(
         self, recorder, repo, tmp_path, elsewhere
     ):
-        _write_ash_config(repo / ".ash" / ".ash.yaml", _settings())
+        _write_ash_config(repo / ".ash.yaml", _settings())
 
         results = _workspace_scan(
             tmp_path, tmp_path / "out", offline=False, project=repo.name

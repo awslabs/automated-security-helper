@@ -1338,7 +1338,7 @@ import my_plugins.scanner
 from my_plugins import MyScanner, scanner
 {FENCE}
 
-<!-- doctest: save-as=.ash/.ash.yaml -->
+<!-- doctest: save-as=.ash.yaml -->
 {FENCE}yaml
 project_name: saved
 {FENCE}
@@ -1571,7 +1571,7 @@ def test_a_saved_config_block_is_still_validated(tmp_path):
     page = _write(
         tmp_path,
         "docs/page.md",
-        f"<!-- doctest: save-as=.ash/.ash.yaml -->\n{FENCE}yaml\nproject_name: x\n"
+        f"<!-- doctest: save-as=.ash.yaml -->\n{FENCE}yaml\nproject_name: x\n"
         f"fail_on_findngs: true\n{FENCE}\n",
     )
     _assert_reports(

@@ -171,8 +171,7 @@ def test_a_selection_does_not_enable_a_disabled_scanner(
 def test_a_repository_config_cannot_set_it(tmp_path: Path, operator: Path) -> None:
     repo = tmp_path / "repo"
     mark_git_checkout(repo)
-    (repo / ".ash").mkdir()
-    (repo / ".ash" / ".ash.yaml").write_text(
+    (repo / ".ash.yaml").write_text(
         "default_scanners:\n  only: [checkov]\n", encoding="utf-8"
     )
 

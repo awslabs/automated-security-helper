@@ -84,7 +84,7 @@ def _repository(tmp_path: Path, config: str = "") -> Path:
     repository = tmp_path / "repo"
     mark_git_checkout(repository)
     if config:
-        _write(repository / ".ash" / ".ash.yaml", config)
+        _write(repository / ".ash.yaml", config)
     return repository
 
 

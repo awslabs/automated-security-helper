@@ -136,7 +136,7 @@ class TestOperatorOverlay:
         monkeypatch.delenv("ASH_MCP_WORKSPACE_ROOT", raising=False)
 
     def test_an_unknown_entry_key_in_the_overlay_warns_and_loads(self, tmp_path):
-        project = _write(tmp_path / "repo" / ".ash" / ".ash.yaml", {})
+        project = _write(tmp_path / "repo" / ".ash.yaml", {})
         operator = _write(tmp_path / "operator" / "ash.yaml", _config_data())
 
         config = resolve_config(
@@ -149,7 +149,7 @@ class TestOperatorOverlay:
         assert config.global_settings.suppressions[0].has_unknown_keys
 
     def test_fail_on_unknown_keys_in_the_overlay_still_refuses(self, tmp_path):
-        project = _write(tmp_path / "repo" / ".ash" / ".ash.yaml", {})
+        project = _write(tmp_path / "repo" / ".ash.yaml", {})
         operator = _write(
             tmp_path / "operator" / "ash.yaml", _config_data(fail_on_unknown_keys=True)
         )

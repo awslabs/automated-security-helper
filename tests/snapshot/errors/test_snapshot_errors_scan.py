@@ -181,7 +181,7 @@ class TestWorkspaceRefusals:
             json.dumps({"folders": [{"path": "service-a"}]}),
         )
         _write(
-            in_tmp / "service-a" / ".ash" / ".ash.yaml",
+            in_tmp / "service-a" / ".ash.yaml",
             "project_name: service-a\nfail_on_findings: sometimes\n",
         )
         assert run_cli([*SCAN, "--workspace", "team.code-workspace"]) == snapshot

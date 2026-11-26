@@ -57,7 +57,7 @@ def _context(repo: Path, trusted: AshConfig, *, operator: bool) -> PluginContext
     config = get_default_config()
     record_provenance(
         config,
-        in_tree=[] if operator else [repo / ".ash" / ".ash.yaml"],
+        in_tree=[] if operator else [repo / ".ash.yaml"],
         trusted=trusted,
     )
     return PluginContext(
@@ -102,7 +102,7 @@ class TestOperatorValue:
         config = get_default_config()
         record_provenance(
             config,
-            in_tree=[Path("/scanned/.ash/.ash.yaml")],
+            in_tree=[Path("/scanned/.ash.yaml")],
             trusted=_trusted(
                 {"cfn-guard": {"options": {"rule_sets": OPERATOR_RULE_SETS}}}
             ),
@@ -117,7 +117,7 @@ class TestOperatorValue:
         config = get_default_config()
         record_provenance(
             config,
-            in_tree=[Path("/scanned/.ash/.ash.yaml")],
+            in_tree=[Path("/scanned/.ash.yaml")],
             trusted=AshConfig(),
             config_overrides=["scanners.cfn-lint.options.ignore_checks=[W3005]"],
         )

@@ -237,12 +237,12 @@ def run(work):
     )
 
     source = work / "src"
-    (source / ".ash").mkdir(parents=True)
+    source.mkdir(parents=True)
     # A keyword detect-secrets reports, made here too.
     finding = f'password = "{secrets.token_hex(10)}"\n'
     for name in ("app.py", "suppressed.py"):
         (source / name).write_text(finding, encoding="utf-8")
-    config = source / ".ash" / ".ash.yaml"
+    config = source / ".ash.yaml"
     config.write_text(CONFIG, encoding="utf-8")
 
     def scan(output: Path, *more: str) -> subprocess.CompletedProcess:

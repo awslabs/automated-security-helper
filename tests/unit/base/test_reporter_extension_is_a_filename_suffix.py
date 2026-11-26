@@ -100,8 +100,8 @@ def test_the_same_refusal_is_logged_once(ash_log):
 
 def test_an_in_tree_config_cannot_move_a_report(tmp_path, ash_log):
     source = tmp_path / "repo"
-    (source / ".ash").mkdir(parents=True)
-    (source / ".ash" / ".ash.yaml").write_text(
+    source.mkdir(parents=True)
+    (source / ".ash.yaml").write_text(
         yaml.safe_dump(
             {
                 "project_name": "scanned",
@@ -245,8 +245,8 @@ def test_an_extension_of_dot_dot_x_in_a_config_file_writes_only_inside(
 ):
     """From a config file the value is replaced by the default, which stays inside."""
     source = tmp_path / "repo"
-    (source / ".ash").mkdir(parents=True)
-    (source / ".ash" / ".ash.yaml").write_text(
+    source.mkdir(parents=True)
+    (source / ".ash.yaml").write_text(
         yaml.safe_dump({"reporters": {"csv": {"extension": "../x"}}})
     )
     config = resolve_config(source_dir=source)

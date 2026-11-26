@@ -271,8 +271,7 @@ class TestOnlyTheOperatorChoosesThePluginModules:
     def test_a_config_file_in_the_working_directory_adds_no_module(self, tmp_path):
         """The merge's working directory is the scanned tree, not the operator's."""
         child = _Child(tmp_path)
-        (child.workdir / ".ash").mkdir()
-        _operator_config(child.workdir / ".ash" / ".ash.yaml", [MARKER_PACKAGE])
+        _operator_config(child.workdir / ".ash.yaml", [MARKER_PACKAGE])
 
         result = child.merge(child.shards([MARKER_PACKAGE]))
 

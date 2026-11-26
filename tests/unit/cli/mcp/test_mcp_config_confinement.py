@@ -20,6 +20,10 @@ Two rules are pinned here.
 
 Refusals use a stable ``error_type``, carry nothing from the refused file, and
 read the same whether or not the refused file exists.
+
+Legacy location: much of this module exercises the deprecated ``.ash/`` directory
+and the ``.ash/.ash.yaml`` path, because the chain rule above is defined in
+terms of the ``.ash/`` directory.
 """
 
 from __future__ import annotations

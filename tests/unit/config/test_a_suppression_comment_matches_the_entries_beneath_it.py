@@ -43,7 +43,11 @@ _TOP_LEVEL_KEY = re.compile(r"^ {2}[A-Za-z_]")
 _EXPIRY = re.compile(
     r"^\s+(?:-\s+)?expir(?:es|ation):\s*[\"']?(?P<date>\d{4}-\d{2}-\d{2})"
 )
-_ENTRY = re.compile(r"^(?P<indent>\s+)- [\"']?[A-Za-z_]+[\"']?:")
+# A list item opening a mapping: a dash, any run of spaces (YAML allows more
+# than one), then a first key of any spelling (quoted keys can open with a
+# digit) up to its colon. The indent group ends at the dash, so nesting depth
+# does not move with the spaces after it.
+_ENTRY = re.compile(r"^(?P<indent>\s+)-\s+[\"']?[^\s\"'#:]+[\"']?\s*:")
 _HEADER_DATE = re.compile(r"\(expires (?P<date>\d{4}-\d{2}-\d{2})\)")
 # A plural claim ("the entries carry no expiration", "they never expire") covers
 # every entry in the block; a singular one ("the private-key entry carries no
@@ -97,13 +101,15 @@ def _blocks(text: str) -> List[Block]:
         expiry = _EXPIRY.match(line)
         if entry:
             # Only items at the block's own list depth are entries; a deeper
-            # `- key:` line is a nested value inside the current entry.
+            # `- key:` line is a nested value inside the current entry, and
+            # a nested `- expires:` is such a value too, never the entry's
+            # own expiry, so no list item falls through to the stamp below.
             indent = len(entry.group("indent"))
             if current.entry_indent is None:
                 current.entry_indent = indent
             if indent == current.entry_indent:
                 current.entries.append(expiry.group("date") if expiry else None)
-                continue
+            continue
         if expiry and current.entries:
             current.entries[-1] = expiry.group("date")
     return blocks
@@ -233,6 +239,62 @@ def test_the_reader_takes_an_expiry_that_opens_its_entry() -> None:
         "      rule_id: A\n"
     )
     assert _problems_with_a_stated_expiry(_blocks(text)) == {}
+
+
+def test_an_entry_with_extra_spaces_after_the_dash_is_still_an_entry() -> None:
+    """YAML allows any run of spaces after the dash, so a permanent entry
+    written ``-   rule_id:`` must not be invisible to the reader: unseen, it
+    hides inside the dated block and never lapses."""
+    text = (
+        "  suppressions:\n"
+        "    # === Time-boxed: thing (expires 2026-12-27) ===\n"
+        "    - rule_id: A\n"
+        '      expires: "2026-12-27"\n'
+        "    -   rule_id: B\n"
+        "        path: x\n"
+    )
+    blocks = _blocks(text)
+    assert blocks[0].entries == ["2026-12-27", None]
+    assert list(_problems_with_a_stated_expiry(blocks)) == [
+        "Time-boxed: thing (expires 2026-12-27)"
+    ]
+
+
+def test_an_entry_whose_first_key_is_not_a_bare_word_is_still_an_entry() -> None:
+    """A first key outside ``[A-Za-z_]`` (a quoted key opening with a digit,
+    say) still opens an entry; read past, the permanent entry it opens hides
+    inside the dated block."""
+    text = (
+        "  suppressions:\n"
+        "    # === Time-boxed: thing (expires 2026-12-27) ===\n"
+        "    - rule_id: A\n"
+        '      expires: "2026-12-27"\n'
+        '    - "0_fixture": x\n'
+        "      path: y\n"
+    )
+    blocks = _blocks(text)
+    assert blocks[0].entries == ["2026-12-27", None]
+    assert list(_problems_with_a_stated_expiry(blocks)) == [
+        "Time-boxed: thing (expires 2026-12-27)"
+    ]
+
+
+def test_a_nested_expires_item_does_not_date_the_entry_above_it() -> None:
+    """A deeper ``- expires:`` line is a value inside the current entry, never
+    the entry's own expiry; stamping the entry above it would read a permanent
+    entry as dated."""
+    text = (
+        "  suppressions:\n"
+        "    # === Time-boxed: thing (expires 2026-12-27) ===\n"
+        "    - rule_id: A\n"
+        "      metadata:\n"
+        '        - expires: "2026-12-27"\n'
+    )
+    blocks = _blocks(text)
+    assert blocks[0].entries == [None]
+    assert list(_problems_with_a_stated_expiry(blocks)) == [
+        "Time-boxed: thing (expires 2026-12-27)"
+    ]
 
 
 def test_a_nested_list_item_is_not_read_as_a_new_entry() -> None:

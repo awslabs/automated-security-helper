@@ -69,8 +69,8 @@ _PLAIN = (
 
 
 def _repository_file(root: Path, body: str) -> Path:
-    named = root / ".ash" / ".ash.yaml"
-    named.parent.mkdir(parents=True)
+    named = root / ".ash.yaml"
+    root.mkdir(parents=True, exist_ok=True)
     named.write_text(body, encoding="utf-8")
     return named
 

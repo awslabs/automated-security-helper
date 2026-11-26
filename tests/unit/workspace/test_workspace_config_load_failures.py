@@ -75,9 +75,9 @@ class TestResolver:
     @pytest.mark.parametrize(
         ("relative", "content"),
         [
-            pytest.param(".ash/ash.yaml", BAD_YAML, id="yaml_syntax"),
+            pytest.param(".ash.yaml", BAD_YAML, id="yaml_syntax"),
             pytest.param(".ash.json", BAD_JSON, id="json_syntax"),
-            pytest.param(".ash/.ash.yaml", NON_UTF8, id="not_utf8"),
+            pytest.param(".ash.yaml", NON_UTF8, id="not_utf8"),
         ],
     )
     def test_project_config_that_cannot_be_parsed_is_refused(
@@ -100,7 +100,7 @@ class TestResolver:
 
     def test_control_schema_invalid_project_config_is_already_refused(self, tmp_path):
         workspace = _workspace(tmp_path, "api")
-        _write(tmp_path / "api" / ".ash" / "ash.yaml", "global_settings: 7\n")
+        _write(tmp_path / "api" / ".ash.yaml", "global_settings: 7\n")
 
         with pytest.raises(ASHConfigValidationError):
             resolve_workspace(workspace)
@@ -196,7 +196,7 @@ class TestExecutor:
     ):
         """The file the plan recorded no longer parses when the scan starts."""
         root = tmp_path / "ws"
-        config = _write(root / "api" / ".ash" / "ash.yaml", BAD_YAML)
+        config = _write(root / "api" / ".ash.yaml", BAD_YAML)
         plan = _plan(root, config_source=config.as_posix())
 
         outcome = _execute(root, plan)
@@ -253,7 +253,7 @@ class TestAshScanWorkspaceCommand:
     ):
         monkeypatch.chdir(tmp_path)
         _workspace(tmp_path, "api")
-        _write(tmp_path / "api" / ".ash" / ".ash.yaml", BAD_YAML)
+        _write(tmp_path / "api" / ".ash.yaml", BAD_YAML)
 
         result = _cli(tmp_path, "--dry-run")
 
@@ -267,11 +267,9 @@ class TestAshScanWorkspaceCommand:
         refuses it with exit 3; the dry run must not report the plan as fine."""
         monkeypatch.chdir(tmp_path)
         _workspace(tmp_path, "api", "web")
-        _write(tmp_path / "api" / ".ash" / ".ash.yaml", GOOD_YAML)
-        _write(tmp_path / "web" / ".ash" / ".ash.yaml", GOOD_YAML)
-        _write(
-            tmp_path / ".ash" / ".ash.yaml", "workspace:\n  max_parallel_projects: [\n"
-        )
+        _write(tmp_path / "api" / ".ash.yaml", GOOD_YAML)
+        _write(tmp_path / "web" / ".ash.yaml", GOOD_YAML)
+        _write(tmp_path / ".ash.yaml", "workspace:\n  max_parallel_projects: [\n")
 
         result = _cli(tmp_path, "--dry-run")
 
@@ -284,7 +282,7 @@ class TestAshScanWorkspaceCommand:
     ):
         monkeypatch.chdir(tmp_path)
         _workspace(tmp_path, "api")
-        _write(tmp_path / "api" / ".ash" / ".ash.yaml", GOOD_YAML)
+        _write(tmp_path / "api" / ".ash.yaml", GOOD_YAML)
 
         result = _cli(tmp_path, "--dry-run")
 

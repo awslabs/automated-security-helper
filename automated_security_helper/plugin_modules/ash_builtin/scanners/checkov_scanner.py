@@ -40,6 +40,7 @@ from automated_security_helper.base.options import (
 )
 from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.base.uv_tool_mixin import _tool_name
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
@@ -871,7 +872,8 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     #: The records read are the committed side report (tests/test_data/scanners/
     #: checkov/src.test.yaml.json, failed_checks[] keys check_id, file_path,
     #: file_line_range, check_name, resource, guideline, fixed_definition,
-    #: code_block), and the SARIF checkov 3.4.6 writes: the capture under
+    #: code_block), the committed checkov-3.4.6 SARIF capture, and the SARIF
+    #: checkov 3.4.6 writes: the capture under
     #: tests/test_data/scanners/checkov/resources/results_sarif.sarif holds
     #: only ruleId, URI and line range (its README says the messages, snippets
     #: and rules were left out), so the SARIF cells below are settled from
@@ -880,7 +882,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     #: and ``locations[0].physicalLocation`` with ``region.startLine``,
     #: ``region.endLine`` and ``region.snippet.text`` (the record's code_block
     #: joined), and no column, contextRegion, fingerprint or property bag.
-    #: resource_id is MAPPED:
+    #: A cell the capture settles carries its evidence (MAPPED, or n/a with
+    #: the reason read off the capture); a cell neither source settles is
+    #: UNCONFIRMED, never n/a. resource_id is MAPPED:
     #: :func:`attach_checkov_resources` copies each record's ``resource`` from
     #: the JSON report onto its SARIF result under ``ash_resource_id``, and only
     #: for the frameworks in :data:`_RESOURCE_FRAMEWORKS` (the per-framework
@@ -1099,10 +1103,16 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                             "https://github.com/bridgecrewio/checkov/issues/7777"
                         ),
                         # Unsolved upstream: re-read whenever the checkov
-                        # version constraint moves (the consistency gate holds
-                        # this row to covering the default constraint), and
-                        # drop the upper bound once a release passes array_hook.
+                        # version constraint moves. The re-check is the
+                        # recorded default constraint below -- the consistency
+                        # gate reds the moment _get_tool_version_constraint's
+                        # default no longer equals it (the bump that follows an
+                        # upstream fix), and the fix then drops the upper bound
+                        # and closes the row.
                         open_ended=True,
+                        # _get_tool_version_constraint's default, as of this
+                        # row's writing.
+                        recorded_default_constraint=">=3.2.0,<4.0.0",
                     ),
                 ),
             ),
@@ -1349,7 +1359,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             # call of the mixin does: without it a scanner offline by its
             # options probed PyPI online while its run and install were offline.
             resolved = get_uv_tool_command(
-                self._tool_command(),
+                _tool_name(self),
                 from_spec=self._uv_probe_from_spec(),
                 offline=self._is_offline_mode(),
             )
@@ -1389,7 +1399,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # scan went through uv, whose install had just failed. And a dependency
         # declared satisfied is recorded as such, as the branches above record it.
         resolved = get_uv_tool_command(
-            self._tool_command(),
+            _tool_name(self),
             from_spec=self._uv_probe_from_spec(),
             offline=self._is_offline_mode(),
         )
@@ -1419,7 +1429,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         executable = resolved[0]
         checked = verify_pre_installed_tool(
             executable,
-            self._tool_command(),
+            _tool_name(self),
             None,
             self._get_tool_version_constraint(),
             uv_executable=None,

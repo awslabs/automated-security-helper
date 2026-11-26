@@ -55,8 +55,7 @@ def test_the_load_hands_the_other_roots_to_the_plugin_module_step(
     mark_git_checkout(repo)
     other = tmp_path / "other"
     other.mkdir()
-    config_file = repo / ".ash" / ".ash.yaml"
-    config_file.parent.mkdir(parents=True)
+    config_file = repo / ".ash.yaml"
     config_file.write_text("project_name: in-tree\n", encoding="utf-8")
 
     resolve_config_module.resolve_config(
@@ -81,7 +80,7 @@ def test_the_recorded_config_entry_point_hands_the_other_roots_on(
         AshConfig(),
         [],
         repo,
-        [repo / ".ash" / ".ash.yaml"],
+        [repo / ".ash.yaml"],
         also_scanned=[str(other)],
     )
 
@@ -97,7 +96,7 @@ def test_with_no_other_roots_the_step_gets_an_empty_list(
     mark_git_checkout(repo)
 
     resolve_config_module.confine_to_trusted_base(
-        AshConfig(), AshConfig(), [], repo, [repo / ".ash" / ".ash.yaml"]
+        AshConfig(), AshConfig(), [], repo, [repo / ".ash.yaml"]
     )
 
     assert recorded[0]["also_scanned"] == []

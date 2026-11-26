@@ -298,8 +298,8 @@ def test_a_repository_config_s_refused_value_is_shown_nowhere(tmp_path, ash_log,
 
     document, field = _REFUSED_DOCUMENTS[case]
     tree = tmp_path / "tree"
-    (tree / ".ash").mkdir(parents=True)
-    (tree / ".ash" / ".ash.yaml").write_text(document, encoding="utf-8")
+    tree.mkdir(parents=True)
+    (tree / ".ash.yaml").write_text(document, encoding="utf-8")
 
     with pytest.raises(ASHConfigValidationError) as excinfo:
         resolve_config(source_dir=tree)

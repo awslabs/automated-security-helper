@@ -45,7 +45,7 @@ def _layout(tmp_path: Path) -> dict:
     """A scanned checkout, an output dir outside it, and a work product
     under the work dir derived from the checkout."""
     source = tmp_path / "repo"
-    (source / ".ash").mkdir(parents=True)
+    source.mkdir(parents=True)
     (source / "app.py").write_text("x = 1\n")
     output = tmp_path / "out"
     work = output / ASH_WORK_DIR_NAME
@@ -56,7 +56,7 @@ def _layout(tmp_path: Path) -> dict:
 
 
 def _repo_config(source: Path, body: str) -> None:
-    (source / ".ash" / ".ash.yaml").write_text(f"project_name: scanned\n{body}")
+    (source / ".ash.yaml").write_text(f"project_name: scanned\n{body}")
 
 
 def _scanner_settings(layout: dict, scanner_config) -> dict:
@@ -686,7 +686,7 @@ def _layout_with_output_above_source(tmp_path: Path) -> dict:
     ``--output-dir /ci/ws --source-dir /ci/ws/repo``."""
     output = tmp_path / "ws"
     source = output / "repo"
-    (source / ".ash").mkdir(parents=True)
+    source.mkdir(parents=True)
     (source / "app.py").write_text("x = 1\n")
     work = output / ASH_WORK_DIR_NAME
     product = work / "converted" / "bandit.yaml"

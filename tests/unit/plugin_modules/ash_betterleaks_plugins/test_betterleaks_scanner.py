@@ -123,7 +123,7 @@ def _scanner(
     config = get_default_config()
     record_provenance(
         config,
-        in_tree=[] if operator else [source / ".ash" / ".ash.yaml"],
+        in_tree=[] if operator else [source / ".ash.yaml"],
         trusted=AshConfig(),
     )
     output = output_dir or tmp_path / "out"

@@ -41,8 +41,7 @@ def _checkout(tmp_path: Path, body: str = "") -> Path:
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
     if body:
-        (checkout / ".ash").mkdir()
-        (checkout / ".ash" / ".ash.yaml").write_text(body, encoding="utf-8")
+        (checkout / ".ash.yaml").write_text(body, encoding="utf-8")
     return checkout
 
 
@@ -97,7 +96,7 @@ def _about_the_limit(messages: List[str]) -> List[str]:
 
 @pytest.mark.parametrize("key", ["detect-secrets", "detect_secrets"])
 def test_a_file_in_the_tree_does_not_set_the_limit(tmp_path, key):
-    """The repository's own .ash/.ash.yaml raises the limit: the scan keeps
+    """The repository's own .ash.yaml raises the limit: the scan keeps
     the operator's, 256 by default, and one warning names the option, the file
     and where the operator sets it. Each spelling of the section reaches the
     scanner, so each is ignored."""
@@ -197,7 +196,7 @@ def test_a_limit_only_the_operator_s_file_sets_binds_a_silent_tree(
 @pytest.mark.parametrize("repository", ["leaves-it-alone", "sets-another"])
 def test_an_operator_file_keeps_its_limit_over_a_repository_base(tmp_path, repository):
     """The operator's file outside the tree sets 1024 and extends the
-    repository's .ash/.ash.yaml. That file either sets another of the scanner's
+    repository's .ash.yaml. That file either sets another of the scanner's
     options or sets the limit too; the operator's file is merged over it either
     way. The limit is the operator's, and no warning charges the repository's
     file or tells the operator to do what their file already does."""
@@ -207,7 +206,7 @@ def test_an_operator_file_keeps_its_limit_over_a_repository_base(tmp_path, repos
     checkout = _checkout(tmp_path, body)
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n" + _setting(1024),
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n" + _setting(1024),
         encoding="utf-8",
     )
 
@@ -342,7 +341,7 @@ _LIMIT_PATH = "/scanners/detect-secrets/options/max_worker_output_mib"
 
 
 def _patching_its_base(tmp_path: Path, op: str, value: Any, head: str = "") -> Path:
-    """A checkout whose .ash/.ash.yaml extends .ash/base.yaml, which sets the
+    """A checkout whose .ash.yaml extends base.yaml, which sets the
     limit to 64, and patches the limit with one ``op``."""
     checkout = _checkout(
         tmp_path,
@@ -351,7 +350,7 @@ def _patching_its_base(tmp_path: Path, op: str, value: Any, head: str = "") -> P
         + f"patch:\n  - op: {op}\n    path: {_LIMIT_PATH}\n"
         + ("" if value is None else f"    value: {value}\n"),
     )
-    (checkout / ".ash" / "base.yaml").write_text(_setting(64), encoding="utf-8")
+    (checkout / "base.yaml").write_text(_setting(64), encoding="utf-8")
     return checkout
 
 
@@ -417,7 +416,7 @@ def test_a_repository_patch_tests_its_own_keys_beside_a_left_out_limit(tmp_path)
         "    value: false\n"
         f"  - op: replace\n    path: {_LIMIT_PATH}\n    value: 32\n",
     )
-    (checkout / ".ash" / "base.yaml").write_text(_setting(64), encoding="utf-8")
+    (checkout / "base.yaml").write_text(_setting(64), encoding="utf-8")
 
     config = resolve_config(source_dir=checkout)
 
@@ -436,7 +435,7 @@ def test_an_operator_patch_sets_the_limit_over_a_repository_base(tmp_path, op):
     checkout = _checkout(tmp_path, _setting(64))
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         f"patch:\n  - op: {op}\n    path: {_LIMIT_PATH}\n    value: 32\n",
         encoding="utf-8",
     )
@@ -496,7 +495,7 @@ def test_an_ash_config_file_in_the_tree_that_writes_a_refused_limit_still_loads(
     refuses. That file is the repository's, so the limit is left out as it is
     read and the file still loads, as one discovered does: with no config file
     to discover, the scan's configuration is that file's, at the default limit;
-    beside the repository's .ash/.ash.yaml, which the scan uses, it is read too
+    beside the repository's .ash.yaml, which the scan uses, it is read too
     and refuses nothing, as it is for a command that names the config file and
     does not fall back to the defaults (`ash config get`)."""
     from automated_security_helper.config.resolve_config import resolve_config
@@ -513,7 +512,7 @@ def test_an_ash_config_file_in_the_tree_that_writes_a_refused_limit_still_loads(
     with _warnings() as messages:
         if beside == "named-without-the-defaults":
             config = resolve_config(
-                config_path=checkout / ".ash" / ".ash.yaml",
+                config_path=checkout / ".ash.yaml",
                 source_dir=checkout,
                 fallback_to_default=False,
             )
@@ -714,8 +713,7 @@ def test_a_repository_reference_at_a_kept_limit_leaves_no_reference_behind(
     else:
         operator = tmp_path / "operator.yaml"
         operator.write_text(
-            f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
-            + _setting(512),
+            f"extends: {(checkout / '.ash.yaml').as_posix()}\n" + _setting(512),
             encoding="utf-8",
         )
         config = resolve_config(config_path=operator, source_dir=checkout)
@@ -764,7 +762,7 @@ def test_config_validate_reports_a_repository_limit_as_the_scan_treats_it(tmp_pa
     checkout = _checkout(tmp_path, "project_name: checkout\n" + _setting(4097))
 
     check = ConfigValidator.check_config_file(
-        checkout / ".ash" / ".ash.yaml", source_dir=checkout
+        checkout / ".ash.yaml", source_dir=checkout
     )
 
     assert not [e for e in check.errors if "max_worker_output_mib" in e], check.errors
@@ -828,7 +826,7 @@ def test_config_validate_warns_about_the_limit_as_the_scan_does(
     with _warnings() as messages:
         resolve_config(source_dir=checkout, config_overrides=overrides)
     check = ConfigValidator.check_config_file(
-        checkout / ".ash" / ".ash.yaml",
+        checkout / ".ash.yaml",
         source_dir=checkout,
         config_overrides=overrides,
     )
@@ -841,7 +839,7 @@ def test_config_validate_warns_about_the_limit_as_the_scan_does(
 def test_config_validate_reads_ash_config_s_file_in_the_tree_as_the_scan_does(
     tmp_path, monkeypatch
 ):
-    """`ash config validate` of the repository's .ash/.ash.yaml also loads the
+    """`ash config validate` of the repository's .ash.yaml also loads the
     file ASH_CONFIG names, as a scan starts from it. That file is in the tree
     and writes 4097: a scan leaves the limit out and refuses nothing, so the
     check reports no error for it either."""
@@ -854,7 +852,7 @@ def test_config_validate_reads_ash_config_s_file_in_the_tree_as_the_scan_does(
     monkeypatch.setenv("ASH_CONFIG", str(in_tree))
 
     check = ConfigValidator.check_config_file(
-        checkout / ".ash" / ".ash.yaml", source_dir=checkout
+        checkout / ".ash.yaml", source_dir=checkout
     )
 
     assert not [e for e in check.errors if "max_worker_output_mib" in e], check.errors
@@ -916,8 +914,7 @@ def test_get_config_marks_the_limit_only_where_a_checkout_s_file_writes_it(
 
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    (checkout / ".ash").mkdir()
-    (checkout / ".ash" / ".ash.yaml").write_text(
+    (checkout / ".ash.yaml").write_text(
         "project_name: checkout\n" + (_setting(writes) if writes else ""),
         encoding="utf-8",
     )
@@ -931,7 +928,7 @@ def test_get_config_marks_the_limit_only_where_a_checkout_s_file_writes_it(
     # names is shown, so the test's directory is set aside as the operator's.
     monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
 
-    result = mcp_get_config(config_path=str(checkout / ".ash" / ".ash.yaml"))
+    result = mcp_get_config(config_path=str(checkout / ".ash.yaml"))
 
     scanners = result["scanners"]
     [key] = [key for key in scanners if key in ("detect-secrets", "detect_secrets")]
@@ -1042,11 +1039,10 @@ def test_get_config_does_not_mark_what_the_operator_s_own_chain_file_keeps(
 
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    (checkout / ".ash").mkdir()
-    (checkout / ".ash" / ".ash.yaml").write_text(_setting(1024), encoding="utf-8")
+    (checkout / ".ash.yaml").write_text(_setting(1024), encoding="utf-8")
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         + (_setting(root_writes) if root_writes else ""),
         encoding="utf-8",
     )
@@ -1153,8 +1149,7 @@ def test_get_config_shows_an_environment_read_option_by_its_reference(
     if route == "named-file":
         checkout = tmp_path / "checkout"
         mark_git_checkout(checkout)
-        (checkout / ".ash").mkdir()
-        (checkout / ".ash" / ".ash.yaml").write_text(
+        (checkout / ".ash.yaml").write_text(
             "project_name: checkout\n" + body, encoding="utf-8"
         )
         elsewhere = tmp_path / "elsewhere"
@@ -1162,7 +1157,7 @@ def test_get_config_shows_an_environment_read_option_by_its_reference(
         monkeypatch.chdir(elsewhere)
         monkeypatch.delenv("ASH_CONFIG", raising=False)
         _operator_names_files_under(tmp_path, monkeypatch)
-        result = mcp_get_config(config_path=str(checkout / ".ash" / ".ash.yaml"))
+        result = mcp_get_config(config_path=str(checkout / ".ash.yaml"))
     else:
         checkout = _tree_with_ash_config_limit(tmp_path, monkeypatch, body)
         result = mcp_get_config(search_dir=str(checkout))
@@ -1189,6 +1184,8 @@ def test_get_config_shows_an_environment_read_option_by_its_reference(
         ("named-ash-config-file", "configs/ash.yaml"),
         ("named-in-the-searched-tree", "configs/ash.yaml"),
         ("no-file", ".ash/other.yaml"),
+        ("discovered", ".ash.yaml"),
+        # Legacy location: the deprecated .ash/.ash.yaml path.
         ("discovered", ".ash/.ash.yaml"),
         ("discovered", "ash.yaml"),
     ],
@@ -1198,6 +1195,7 @@ def test_get_config_never_answers_with_an_in_tree_file_s_read_scope(
 ):
     """A file inside the searched tree writes findings_scope as ${VAR}, and
     ASH_CONFIG names it (but for the second route, where only the call does).
+    The row naming .ash/.ash.yaml exercises the deprecated legacy location.
     By every route get_config takes for it, the answer holds no value the
     environment gave. Where it marks the scope ignored, the marker is the
     reference. Where the file is the one a scan of the tree finds, it is
@@ -1273,8 +1271,7 @@ def test_get_config_shows_a_literal_scope_as_written_beside_a_read_value(
     monkeypatch.setenv("ASH_TEST_MARKER_VAR", "same-text")
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    (checkout / ".ash").mkdir()
-    (checkout / ".ash" / ".ash.yaml").write_text(
+    (checkout / ".ash.yaml").write_text(
         "project_name: ${ASH_TEST_MARKER_VAR}\n"
         "reporters:\n  aws-security-hub:\n    options:\n"
         "      findings_scope: same-text\n",
@@ -1286,7 +1283,7 @@ def test_get_config_shows_a_literal_scope_as_written_beside_a_read_value(
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     _operator_names_files_under(tmp_path, monkeypatch)
 
-    result = mcp_get_config(config_path=str(checkout / ".ash" / ".ash.yaml"))
+    result = mcp_get_config(config_path=str(checkout / ".ash.yaml"))
 
     options = result["reporters"]["aws-security-hub"]["options"]
     assert "findings_scope" not in options, options
@@ -1308,13 +1305,12 @@ def test_get_config_shows_a_literal_written_over_a_read_value_as_the_literal(
     monkeypatch.setenv("ASH_TEST_MARKER_VAR", _SERVER_VALUE)
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    (checkout / ".ash").mkdir()
-    (checkout / ".ash" / "base.yaml").write_text(
+    (checkout / "base.yaml").write_text(
         "reporters:\n  aws-security-hub:\n    options:\n"
         "      findings_scope: ${ASH_TEST_MARKER_VAR}\n",
         encoding="utf-8",
     )
-    (checkout / ".ash" / ".ash.yaml").write_text(
+    (checkout / ".ash.yaml").write_text(
         "extends: base.yaml\n"
         "project_name: checkout\n"
         "reporters:\n  aws-security-hub:\n    options:\n"
@@ -1327,7 +1323,7 @@ def test_get_config_shows_a_literal_written_over_a_read_value_as_the_literal(
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     _operator_names_files_under(tmp_path, monkeypatch)
 
-    result = mcp_get_config(config_path=str(checkout / ".ash" / ".ash.yaml"))
+    result = mcp_get_config(config_path=str(checkout / ".ash.yaml"))
 
     assert _SERVER_VALUE not in json.dumps(result), result
     marker = result["reporters"]["aws-security-hub"]["options"]["findings_scope"]
@@ -1355,14 +1351,13 @@ def test_a_chain_file_swapped_for_a_link_after_the_resolve_still_answers(
     monkeypatch.setenv("ASH_TEST_MARKER_VAR", _SERVER_VALUE)
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    (checkout / ".ash").mkdir()
-    base = checkout / ".ash" / "base.yaml"
+    base = checkout / "base.yaml"
     base.write_text(
         "reporters:\n  aws-security-hub:\n    options:\n"
         "      findings_scope: ${ASH_TEST_MARKER_VAR}\n",
         encoding="utf-8",
     )
-    (checkout / ".ash" / ".ash.yaml").write_text(
+    (checkout / ".ash.yaml").write_text(
         "extends: base.yaml\nproject_name: checkout\n", encoding="utf-8"
     )
     outside = tmp_path / "outside.yaml"
@@ -1382,7 +1377,7 @@ def test_a_chain_file_swapped_for_a_link_after_the_resolve_still_answers(
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     _operator_names_files_under(tmp_path, monkeypatch)
 
-    result = mcp_get_config(config_path=str(checkout / ".ash" / ".ash.yaml"))
+    result = mcp_get_config(config_path=str(checkout / ".ash.yaml"))
 
     text = json.dumps(result)
     assert _SERVER_VALUE not in text, result
@@ -1407,8 +1402,7 @@ def test_get_config_shows_an_aliased_environment_value_by_its_reference(
     monkeypatch.setenv("ASH_TEST_MARKER_VAR", _SERVER_VALUE)
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    (checkout / ".ash").mkdir()
-    (checkout / ".ash" / ".ash.yaml").write_text(
+    (checkout / ".ash.yaml").write_text(
         "project_name: &scope ${ASH_TEST_MARKER_VAR}\n"
         "reporters:\n  aws-security-hub:\n    options:\n      aws_region: us-west-2\n"
         "      findings_scope: *scope\n",
@@ -1420,7 +1414,7 @@ def test_get_config_shows_an_aliased_environment_value_by_its_reference(
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     _operator_names_files_under(tmp_path, monkeypatch)
 
-    result = mcp_get_config(config_path=str(checkout / ".ash" / ".ash.yaml"))
+    result = mcp_get_config(config_path=str(checkout / ".ash.yaml"))
 
     assert _SERVER_VALUE not in json.dumps(result), result
     reporter = (result.get("reporters") or {}).get("aws-security-hub") or {}
@@ -1627,7 +1621,7 @@ def test_a_working_directory_deleted_inside_a_checkout_stays_confined(
 
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    cfg = checkout / ".ash" / ".ash.yaml"
+    cfg = checkout / ".ash.yaml"
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text(
         "project_name: checkout\n"
@@ -1681,14 +1675,14 @@ def test_get_config_answers_a_named_file_past_another_checkout_s_ash_config(
 
     operator_checkout = tmp_path / "operator-checkout"
     mark_git_checkout(operator_checkout)
-    env_cfg = operator_checkout / ".ash" / ".ash.yaml"
+    env_cfg = operator_checkout / ".ash.yaml"
     env_cfg.parent.mkdir(parents=True, exist_ok=True)
     env_cfg.write_text("project_name: env\n" + _setting(4097), encoding="utf-8")
     monkeypatch.setenv("ASH_CONFIG", str(env_cfg))
 
     named_checkout = tmp_path / "named-checkout"
     mark_git_checkout(named_checkout)
-    named = named_checkout / ".ash" / ".ash.yaml"
+    named = named_checkout / ".ash.yaml"
     named.parent.mkdir(parents=True, exist_ok=True)
     named.write_text("project_name: named\n", encoding="utf-8")
 
@@ -1720,13 +1714,13 @@ def test_the_no_tree_reads_share_the_pre_check_s_construction(tmp_path, monkeypa
 
     operator_checkout = tmp_path / "operator-checkout"
     mark_git_checkout(operator_checkout)
-    env_cfg = operator_checkout / ".ash" / ".ash.yaml"
+    env_cfg = operator_checkout / ".ash.yaml"
     env_cfg.parent.mkdir(parents=True, exist_ok=True)
     env_cfg.write_text("project_name: env\n" + _setting(4097), encoding="utf-8")
     monkeypatch.setenv("ASH_CONFIG", str(env_cfg))
     named_checkout = tmp_path / "named-checkout"
     mark_git_checkout(named_checkout)
-    named = named_checkout / ".ash" / ".ash.yaml"
+    named = named_checkout / ".ash.yaml"
     named.parent.mkdir(parents=True, exist_ok=True)
     named.write_text("project_name: named\n", encoding="utf-8")
     launched = tmp_path / "launched-here"
@@ -1794,13 +1788,13 @@ def _checkouts_either_side(tmp_path, monkeypatch, env_limit, named_text):
 
     operator_checkout = tmp_path / "operator-checkout"
     mark_git_checkout(operator_checkout)
-    env_cfg = operator_checkout / ".ash" / ".ash.yaml"
+    env_cfg = operator_checkout / ".ash.yaml"
     env_cfg.parent.mkdir(parents=True, exist_ok=True)
     env_cfg.write_text("project_name: env\n" + _setting(env_limit), encoding="utf-8")
     monkeypatch.setenv("ASH_CONFIG", str(env_cfg))
     named_checkout = tmp_path / "named-checkout"
     mark_git_checkout(named_checkout)
-    named = named_checkout / ".ash" / ".ash.yaml"
+    named = named_checkout / ".ash.yaml"
     named.parent.mkdir(parents=True, exist_ok=True)
     named.write_text(named_text, encoding="utf-8")
     return named_checkout, named
@@ -1933,7 +1927,7 @@ def _project_directory_holding_the_ash_config_file(tmp_path, monkeypatch, env_li
     """A project directory that is not a checkout, holding the config file a
     caller names and the file ASH_CONFIG names, which writes the limit."""
     project = tmp_path / "plain-project"
-    named = project / ".ash" / ".ash.yaml"
+    named = project / ".ash.yaml"
     named.parent.mkdir(parents=True, exist_ok=True)
     named.write_text("project_name: named\n", encoding="utf-8")
     env_cfg = project / "operator.yaml"
@@ -2045,7 +2039,7 @@ def _named_file_with_a_checkout_base(tmp_path):
 
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    base = checkout / ".ash" / ".ash.yaml"
+    base = checkout / ".ash.yaml"
     base.parent.mkdir(parents=True, exist_ok=True)
     base.write_text("project_name: base\n" + _setting(1024), encoding="utf-8")
     named = tmp_path / "operator.yaml"
@@ -2134,7 +2128,7 @@ def _checkout_file_writing_the_off_host_section(tmp_path, monkeypatch):
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     checkout = tmp_path / "named-checkout"
     mark_git_checkout(checkout)
-    named = checkout / ".ash" / ".ash.yaml"
+    named = checkout / ".ash.yaml"
     named.parent.mkdir(parents=True, exist_ok=True)
     named.write_text(
         "project_name: here\n"
@@ -2249,7 +2243,7 @@ def test_the_no_root_default_reads_ash_config_fail_closed(
 
     operator_checkout = tmp_path / "operator-checkout"
     mark_git_checkout(operator_checkout)
-    env_cfg = operator_checkout / ".ash" / ".ash.yaml"
+    env_cfg = operator_checkout / ".ash.yaml"
     env_cfg.parent.mkdir(parents=True, exist_ok=True)
     env_cfg.write_text("project_name: env\n" + _setting(2048), encoding="utf-8")
     monkeypatch.setenv("ASH_CONFIG", str(env_cfg))
@@ -2563,7 +2557,7 @@ def test_a_repository_case_variant_patch_cannot_set_the_limit(
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    repository = checkout / ".ash" / ".ash.yaml"
+    repository = checkout / ".ash.yaml"
     repository.parent.mkdir(parents=True, exist_ok=True)
     repository.write_text(
         "scanners:\n  detect-secrets:\n    options:\n"
@@ -2603,7 +2597,7 @@ def test_the_no_tree_warning_masks_a_key_the_chain_read_from_the_environment(
 
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    cfg = checkout / ".ash" / ".ash.yaml"
+    cfg = checkout / ".ash.yaml"
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text(
         "project_name: here\nreporters:\n"
@@ -2654,7 +2648,7 @@ def test_the_settle_warning_masks_a_key_the_chain_read_from_the_environment(
 
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    cfg = checkout / ".ash" / ".ash.yaml"
+    cfg = checkout / ".ash.yaml"
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text(
         "project_name: here\nreporters:\n"
@@ -2692,7 +2686,7 @@ def test_the_settle_warning_keeps_fixed_names_beside_an_env_read_value(
 
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    cfg = checkout / ".ash" / ".ash.yaml"
+    cfg = checkout / ".ash.yaml"
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text(
         "project_name: here\nreporters:\n"
@@ -2735,13 +2729,13 @@ def _merged_respelled_chain(tmp_path, monkeypatch, pair):
     base_key, env_key = _MERGED_SPELLINGS[pair]
     checkout = tmp_path / "env-checkout"
     mark_git_checkout(checkout)
-    base = checkout / ".ash" / "base.yaml"
+    base = checkout / "base.yaml"
     base.parent.mkdir(parents=True, exist_ok=True)
     base.write_text(
         f"reporters:\n  {base_key}:\n    options:\n      findings_scope: repo-scope\n",
         encoding="utf-8",
     )
-    cfg = checkout / ".ash" / ".ash.yaml"
+    cfg = checkout / ".ash.yaml"
     cfg.write_text(
         f"project_name: here\nextends: {base.as_posix()}\nreporters:\n"
         "  !ENV ${ASH_RK:aws-security-hub}:\n"
@@ -2827,7 +2821,7 @@ def test_the_fail_closed_warning_keeps_fixed_names_beside_an_env_read_value(
 
     checkout = tmp_path / "env-checkout"
     mark_git_checkout(checkout)
-    cfg = checkout / ".ash" / ".ash.yaml"
+    cfg = checkout / ".ash.yaml"
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text(
         "project_name: here\nreporters:\n"

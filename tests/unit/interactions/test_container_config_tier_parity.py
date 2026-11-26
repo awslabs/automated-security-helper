@@ -116,9 +116,9 @@ def _tree(w: Path) -> None:
     ws = w / "repo" / "ws"
     (ws / "bare").mkdir(parents=True)
     (ws / "bare" / "a.py").write_text("x = 1\n", encoding="utf-8")
-    (ws / "own" / ".ash").mkdir(parents=True)
+    (ws / "own").mkdir(parents=True)
     (ws / "own" / "b.py").write_text("y = 2\n", encoding="utf-8")
-    (ws / "own" / ".ash" / ".ash.yaml").write_text("project_name: own\n")
+    (ws / "own" / ".ash.yaml").write_text("project_name: own\n")
     (ws / "ash.code-workspace").write_text(
         json.dumps({"folders": [{"path": "bare"}, {"path": "own"}]}),
         encoding="utf-8",

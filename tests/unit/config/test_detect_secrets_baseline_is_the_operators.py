@@ -57,8 +57,7 @@ def layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
-    (repo / ".ash").mkdir()
-    (repo / ".ash" / ".ash.yaml").write_text(
+    (repo / ".ash.yaml").write_text(
         yaml.safe_dump(
             {
                 "project_name": "repo",

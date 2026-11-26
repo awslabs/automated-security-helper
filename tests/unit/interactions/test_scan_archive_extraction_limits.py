@@ -11,7 +11,7 @@ in-process, and inspects what the run wrote.
 
 The tree holds:
 
-- ``.ash/.ash.yaml``, the repository's own config, raising every extraction limit
+- ``.ash.yaml``, the repository's own config, raising every extraction limit
   above anything the archives below declare;
 - ``declared.zip``, whose one member declares 1 TiB and holds a few bytes;
 - ``nested.zip``, holding ``top_level.py`` and ``inner.zip``;
@@ -62,8 +62,8 @@ def holding_a_key(marker: str) -> str:
 
 def build(base: Path) -> Path:
     tree = base / "tree"
-    (tree / ".ash").mkdir(parents=True)
-    (tree / ".ash" / ".ash.yaml").write_text(REPOSITORY_CONFIG)
+    tree.mkdir(parents=True)
+    (tree / ".ash.yaml").write_text(REPOSITORY_CONFIG)
     (tree / "declared.zip").write_bytes(
         zip_bytes(
             {"declared_member.py": holding_a_key(DECLARED_MARKER)},

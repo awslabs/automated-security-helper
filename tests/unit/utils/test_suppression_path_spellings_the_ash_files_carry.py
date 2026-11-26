@@ -35,8 +35,10 @@ FILES = (".ash.yaml", ".ash/.ash_alpha_plugins.yaml")
         ("tests/pytest-temp/**", "tests/other/b.py", False),
         # A bare directory name matches the subtree below it, like the "/**"
         # spelling (tests/unit/utils/test_bare_directory_path_matching.py pins
-        # that behavior; this row only keeps the two suites agreeing).
+        # that behavior; this row only keeps the two suites agreeing). A
+        # sibling that only shares the leading characters stays unmatched.
         ("tests/pytest-temp", "tests/pytest-temp/b.py", True),
+        ("tests/pytest-temp", "tests/pytest-temp-other/b.py", False),
         ("docs/**", "docs/content/x.md", True),
         ("tests/**/__snapshots__/**", "tests/unit/__snapshots__/a.json", True),
         ("tests/**/__snapshots__/**/*", "tests/unit/__snapshots__/a.json", True),

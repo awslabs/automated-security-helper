@@ -298,7 +298,7 @@ def _tree(tmp_path: Path, name: str, modules: List[str] | None = None) -> Path:
     source.mkdir(parents=True, exist_ok=True)
     if modules is not None:
         _write(
-            source / ".ash" / ".ash.yaml",
+            source / ".ash.yaml",
             {"project_name": name, "ash_plugin_modules": modules},
         )
     return source
@@ -418,7 +418,7 @@ def test_a_module_the_operator_loaded_takes_no_part_in_a_later_scan(
         )
         first = _scan(
             source,
-            config_path=str(source / ".ash" / ".ash.yaml"),
+            config_path=str(source / ".ash.yaml"),
             trusted_config_path=str(trusted),
         )
 

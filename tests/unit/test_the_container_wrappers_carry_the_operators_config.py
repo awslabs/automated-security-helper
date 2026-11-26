@@ -736,7 +736,7 @@ def _layout(layout: str, tmp_path: Path) -> Tuple[Path, Path, Path]:
     elif layout == "discoverable-in-the-source":
         # The file a scan of this directory finds without being told, so the
         # variable's file is not the only candidate.
-        config = source / ".ash" / ".ash.yaml"
+        config = source / ".ash.yaml"
         config.write_text("project_name: p\n", encoding="utf-8")
     elif layout == "link-elsewhere-in-the-checkout-out-of-it":
         config = checkout / "ci" / "ash.yaml"
@@ -1198,8 +1198,8 @@ def test_ash_config_is_the_scans_config_even_when_the_source_holds_one(
     fake_runner, tmp_path
 ):
     source = tmp_path / "project"
-    (source / ".ash").mkdir(parents=True)
-    (source / ".ash" / ".ash.yaml").write_text("project_name: repo\n", encoding="utf-8")
+    source.mkdir(parents=True)
+    (source / ".ash.yaml").write_text("project_name: repo\n", encoding="utf-8")
     env_config = tmp_path / "base.yaml"
     env_config.write_text("project_name: base\n", encoding="utf-8")
 

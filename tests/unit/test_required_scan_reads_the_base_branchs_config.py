@@ -8,7 +8,7 @@ Why this file exists
 ``ash / SAST, SCA, and IaC Scan`` installs ASH from the pull request's base commit
 (tests/unit/test_required_scan_installs_ash_from_the_base_branch.py). The config it
 scanned with still came from the checkout: ``--source-dir .`` with no ``--config``,
-so ASH discovered the pull request's own ``.ash/.ash.yaml``. A pull request could
+so ASH discovered the pull request's own ``.ash.yaml``. A pull request could
 then add a suppression or an ignore path for its own finding and pass the check
 that gates it.
 
@@ -90,7 +90,7 @@ PR_NUMBER = 812
 HEAD_SHA = "2222222222222222222222222222222222222222"
 MERGE_SHA = "3333333333333333333333333333333333333333"
 
-CONFIG_PATH = ".ash/.ash.yaml"
+CONFIG_PATH = ".ash.yaml"
 BASE_CONFIG = "# the base commit's config\nproject_name: base\n"
 CHECKOUT_CONFIG = (
     "# the checkout's config\nproject_name: checkout\nglobal_settings:\n"
@@ -188,7 +188,7 @@ class Repository:
         _git("init", "-q", ".", cwd=workspace, home=home)
         _git("remote", "add", "origin", f"file://{origin}", cwd=workspace, home=home)
         checkout_config = workspace / CONFIG_PATH
-        checkout_config.parent.mkdir(parents=True)
+        checkout_config.parent.mkdir(parents=True, exist_ok=True)
         checkout_config.write_text(CHECKOUT_CONFIG, encoding="utf-8")
         for name, content in (checkout_files or {}).items():
             path = workspace / name
@@ -579,9 +579,9 @@ class TestTheConfigRefStepRefusesWhatItCannotReadExactly:
         [
             "/etc/hostname",
             "../outside.yaml",
-            ".ash/../.ash/.ash.yaml",
-            ".ash/./.ash.yaml",
-            ".ash//.ash.yaml",
+            "sub/../.ash.yaml",
+            "sub/./.ash.yaml",
+            "sub//.ash.yaml",
             ".ash/",
         ],
     )
@@ -772,7 +772,7 @@ class TestToolConfigFilesComeFromTheBaseCommit:
     """The base config's relative scanners.*.options.config_file are fetched too.
 
     bandit reads `config_file` relative to the working directory and grype relative
-    to the source directory, both the checkout, so with only `.ash/.ash.yaml` taken
+    to the source directory, both the checkout, so with only `.ash.yaml` taken
     from config-ref a pull request still set bandit's and grype's config for its own
     required check.
     """
@@ -949,7 +949,7 @@ class TestToolConfigFilesComeFromTheBaseCommit:
         "config_name,content",
         [
             pytest.param(
-                ".ash/.ash.json",
+                ".ash.json",
                 '{"project_name": "${ASH_PROBE_VALUE:dflt}", "scanners": '
                 '{"bandit": {"options": {"config_file": ".ash/bandit.yaml"}}}}\n',
                 id="json, where ASH resolves no reference",

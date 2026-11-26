@@ -130,10 +130,10 @@ UNUSED_REPORT = {
 @pytest.fixture
 def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     project = tmp_path / "demo-project"
-    (project / ".ash").mkdir(parents=True)
+    project.mkdir(parents=True)
     (project / "vendor").mkdir()
     (project / "src").mkdir()
-    (project / ".ash" / ".ash.yaml").write_text(EVERY_ISSUE, encoding="utf-8")
+    (project / ".ash.yaml").write_text(EVERY_ISSUE, encoding="utf-8")
     (project / "broken.yaml").write_text(BROKEN, encoding="utf-8")
     (project / "clean.yaml").write_text(CLEAN, encoding="utf-8")
     (project / "unused.yaml").write_text(WITH_UNUSED, encoding="utf-8")
@@ -176,7 +176,7 @@ def _issues(result) -> list[dict]:
 
 def test_fixtures_exercise_every_lint_category(project_dir, snapshot):
     results = {
-        "every-issue": ConfigLinter.lint(project_dir / ".ash" / ".ash.yaml"),
+        "every-issue": ConfigLinter.lint(project_dir / ".ash.yaml"),
         "broken": ConfigLinter.lint(project_dir / "broken.yaml"),
         "unused": ConfigLinter.lint(
             project_dir / "unused.yaml",
@@ -219,9 +219,7 @@ def test_config_lint(args, stdin, exit_code, project_dir, text_snapshot):
     run = run_cli(args, stdin=stdin)
 
     assert run.exit_code == exit_code, run.output
-    assert (project_dir / ".ash" / ".ash.yaml").read_text(
-        encoding="utf-8"
-    ) == EVERY_ISSUE
+    assert (project_dir / ".ash.yaml").read_text(encoding="utf-8") == EVERY_ISSUE
     assert text_snapshot("txt") == run.document
 
 
@@ -233,9 +231,9 @@ def test_config_lint_fix_rewrites_config(project_dir, text_snapshot):
     # ones the model refuses.
     assert run.exit_code == 3, run.output
     assert text_snapshot("txt")(name="stdout") == run.document
-    assert text_snapshot("yaml")(name="fixed") == (
-        project_dir / ".ash" / ".ash.yaml"
-    ).read_text(encoding="utf-8")
+    assert text_snapshot("yaml")(name="fixed") == (project_dir / ".ash.yaml").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_config_lint_fix_unused_comments_out(project_dir, text_snapshot):

@@ -129,7 +129,7 @@ def _context(root: Path, output: Path, *, operator: bool) -> PluginContext:
     config = AshConfig()
     record_provenance(
         config,
-        in_tree=[] if operator else [root / ".ash" / ".ash.yaml"],
+        in_tree=[] if operator else [root / ".ash.yaml"],
         trusted=AshConfig(),
     )
     return PluginContext(

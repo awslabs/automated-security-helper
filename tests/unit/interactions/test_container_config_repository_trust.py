@@ -135,8 +135,7 @@ class TestTheHostTellsTheContainer:
 
     def test_a_config_inside_the_source_directory_needs_no_mark(self, checkout):
         """Control: the scan inside reads it through /src, which is its own tree."""
-        (checkout["source"] / ".ash").mkdir()
-        config = checkout["source"] / ".ash" / "ash.yaml"
+        config = checkout["source"] / ".ash.yaml"
         config.write_text("project_name: p\n", encoding="utf-8")
 
         inner = _inner_args(
@@ -144,7 +143,7 @@ class TestTheHostTellsTheContainer:
         )
 
         assert FLAG not in inner
-        assert inner[inner.index("--config") + 1] == "/src/.ash/ash.yaml"
+        assert inner[inner.index("--config") + 1] == "/src/.ash.yaml"
 
     @pytest.mark.parametrize("layout", LINKS_IN_THE_SCANNED_CHECKOUT)
     def test_a_config_reached_through_a_link_in_the_scanned_checkout_is_marked(

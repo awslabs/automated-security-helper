@@ -184,7 +184,7 @@ def build_fixture(root: Path) -> Path:
     # suppression's reach is measurable on the findings while runner.py keeps
     # the finding the ceiling assertions are built on.
     _write(root / "lax" / "src" / LAX_SUPPRESSED_FILE, LAX_SOURCE)
-    _write(root / "lax" / ".ash" / "ash.yaml", _project_config("CRITICAL"))
+    _write(root / "lax" / ".ash.yaml", _project_config("CRITICAL"))
 
     _write(root / "strict" / "src" / "runner.py", STRICT_SOURCE)
     # The same second file as lax, at the same project-relative path. The policy
@@ -192,11 +192,11 @@ def build_fixture(root: Path) -> Path:
     # would match this file and lower strict's finding_count, which the findings
     # check reads. Without it a leak could only show on the plan, not on the scan.
     _write(root / "strict" / "src" / LAX_SUPPRESSED_FILE, STRICT_SOURCE)
-    _write(root / "strict" / ".ash" / "ash.yaml", _project_config("LOW"))
+    _write(root / "strict" / ".ash.yaml", _project_config("LOW"))
 
     _write(root / "iac" / "main.tf", IAC_SOURCE)
     _write(
-        root / "iac" / ".ash" / "ash.yaml",
+        root / "iac" / ".ash.yaml",
         _project_config("CRITICAL", keep="checkov"),
     )
 
@@ -834,7 +834,7 @@ def main(argv: list[str] | None = None) -> int:
         code_d, _, _ = run_ash(
             workspace,
             scratch / "out-d",
-            policy=scratch / "lax" / ".ash" / "ash.yaml",
+            policy=scratch / "lax" / ".ash.yaml",
             timeout=args.timeout,
         )
         check(

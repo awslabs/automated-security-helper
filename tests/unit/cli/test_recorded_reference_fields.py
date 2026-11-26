@@ -211,9 +211,9 @@ def _scan_record(threshold: str) -> AshAggregatedResults:
 
 def _container_source(tmp_path: Path) -> ScanOptions:
     source = tmp_path / "src"
-    (source / ".ash").mkdir(parents=True)
+    source.mkdir(parents=True)
     (source / "app.py").write_text("x = 1\n", encoding="utf-8")
-    (source / ".ash" / ".ash.yaml").write_text(
+    (source / ".ash.yaml").write_text(
         f"project_name: demo\nglobal_settings:\n  severity_threshold: {REFERENCE}\n",
         encoding="utf-8",
     )
@@ -388,7 +388,7 @@ def _repair_warnings(tmp_path: Path, monkeypatch, extra_field: bool) -> list[str
         update={"mode": module.RunMode.container, "build": False}
     )
     if extra_field:
-        (opts.source_dir / ".ash" / ".ash.yaml").write_text(
+        (opts.source_dir / ".ash.yaml").write_text(
             f"project_name: demo\nglobal_settings:\n  severity_threshold: {REFERENCE}\n"
             "  zz_option_a_later_schema_declares: true\n",
             encoding="utf-8",
@@ -537,7 +537,10 @@ def test_merge_does_not_take_the_value_from_a_config_file_it_finds(
 ):
     """A config file in the working directory is one a scan would find; merge
     reads the file ``--config`` or ASH_CONFIG names and no other, so this one
-    does not supply the field and the refusal holds."""
+    does not supply the field and the refusal holds.
+
+    Legacy location: the ``.ash/.ash.yaml`` case is kept beside the canonical
+    ``.ash.yaml`` case, since merge must ignore a config at either path."""
     found = tmp_path / location
     found.parent.mkdir(exist_ok=True)
     found.write_text(
@@ -589,7 +592,10 @@ def test_report_does_not_take_the_value_from_a_config_file_it_finds(
     """``ash report`` reads the file ``--config`` or ASH_CONFIG names and no
     other. A config file a scan would find in the working directory does not
     supply the field, and neither does one beside the results (the directory
-    ``resolve_config`` is told is also scanned), so the refusal holds."""
+    ``resolve_config`` is told is also scanned), so the refusal holds.
+
+    Legacy location: the ``.ash/.ash.yaml`` cases are kept beside the canonical
+    ``.ash.yaml`` cases, since report must ignore a config at either path."""
     root = tmp_path if where == "working directory" else shard
     found = root / location
     found.parent.mkdir(exist_ok=True)

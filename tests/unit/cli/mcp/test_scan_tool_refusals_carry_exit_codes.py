@@ -299,8 +299,7 @@ def test_both_scan_tools_put_an_unreadable_ash_config_in_one_category(
 
 
 def test_a_discovered_config_outside_the_roots(layout, no_scan_runs) -> None:
-    link = layout["scan"] / ".ash" / ".ash.yaml"
-    link.parent.mkdir()
+    link = layout["scan"] / ".ash.yaml"
     link.symlink_to(layout["outside"] / "ash.yaml")
     _assert_refused_with(_scan_directory(directory_path=str(layout["scan"])), CONFIG)
 

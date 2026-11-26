@@ -472,7 +472,7 @@ class TestTheBashEntrypoint:
     def test_a_repo_config_mode_resolves_off_through_resolve_config(
         self, tmp_path, command
     ):
-        """The scan's own config resolution, over a repository's .ash/.ash.yaml.
+        """The scan's own config resolution, over a repository's .ash.yaml.
 
         The scanned repository's config sets sandbox.mode; the scan's words from the
         wrapper go through the real CLI, and its overrides through resolve_config
@@ -489,8 +489,7 @@ class TestTheBashEntrypoint:
         )
         overrides = _scan_overrides(_inner_words(calls[1]), tmp_path)
         repository = tmp_path / "src"
-        (repository / ".ash").mkdir()
-        (repository / ".ash" / ".ash.yaml").write_text(
+        (repository / ".ash.yaml").write_text(
             'sandbox:\n  mode: "landlock"\n', encoding="utf-8"
         )
 
@@ -1542,7 +1541,9 @@ class TestThePowerShellEntrypoint:
     ):
         """The checkout reached through a link of the operator's own, with a link
         the checkout holds leading out of it: the name is judged by the link the
-        checkout holds, whichever way the checkout is spelled."""
+        checkout holds, whichever way the checkout is spelled.
+
+        Legacy location: this test's subject is the deprecated .ash/ash.yaml path."""
         if os.name == "nt":
             pytest.skip("creating a symbolic link needs a privilege on Windows")
         root = tmp_path / "set"

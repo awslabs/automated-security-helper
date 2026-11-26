@@ -75,12 +75,17 @@ def test_symbol_suppression_in_a_real_bandit_scan(tmp_path):
     source = tmp_path / "project"
     source.mkdir()
     (source / "app.py").write_text(FIXTURE, encoding="utf-8")
-    # A symbol suppression needs its file locked in .ash.lock; the scan
-    # refuses the config otherwise.
-    from automated_security_helper.utils.ash_lock import AshLock, LockScope
+    # A symbol suppression needs its (rule_id, symbol) scope recorded on its
+    # file's .ash.lock entry; the scan refuses the config otherwise. Both
+    # config entries below are bound, and the key is built with lock_key, the
+    # normalization `ash suppress add` and the scan's resolver share.
+    from automated_security_helper.utils.ash_lock import AshLock, LockScope, lock_key
 
+    key = lock_key("app.py")
+    assert key is not None
     lock = AshLock(source_dir=source)
-    lock.bind("app.py", LockScope("B602", "risky"))
+    lock.bind(key, LockScope("B602", "risky"))
+    lock.bind(key, LockScope("B602", "deleted_function"))
     lock.save()
     output = tmp_path / "out"
     config_path = tmp_path / "ash.yaml"
@@ -163,3 +168,49 @@ def test_symbol_suppression_in_a_real_bandit_scan(tmp_path):
     assert [u.get("symbol") for u in unused["unused_suppressions"]] == [
         "deleted_function"
     ], unused
+
+    # The guarantee the lock exists for: after an edit to the locked file the
+    # suppression stops applying and the finding inside `risky` comes back.
+    (source / "app.py").write_text(
+        FIXTURE + "# edited after review\n", encoding="utf-8"
+    )
+    second_output = tmp_path / "out-after-edit"
+    second = subprocess.run(
+        [
+            ash,
+            "scan",
+            "--mode",
+            "local",
+            "--source-dir",
+            str(source),
+            "--output-dir",
+            str(second_output),
+            "--config",
+            str(config_path),
+            "--scanners",
+            "bandit",
+            "--no-progress",
+            "--no-fail-on-findings",
+        ],
+        env=checkout_env(),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=600,
+    )
+    second_log = (
+        f"exit {second.returncode}\nSTDOUT:\n{second.stdout[-4000:]}"
+        f"\nSTDERR:\n{second.stderr[-4000:]}"
+    )
+    second_sarif_path = second_output / "reports" / "ash.sarif"
+    assert second_sarif_path.exists(), second_log
+    second_sarif = json.loads(second_sarif_path.read_text(encoding="utf-8"))
+    stale_b602 = {}
+    for run in second_sarif["runs"]:
+        for result in run.get("results", []):
+            if result.get("ruleId") != "B602":
+                continue
+            region = result["locations"][0]["physicalLocation"]["region"]
+            stale_b602[region["startLine"]] = bool(result.get("suppressions"))
+    assert stale_b602.get(inside) is False, (stale_b602, second_log)

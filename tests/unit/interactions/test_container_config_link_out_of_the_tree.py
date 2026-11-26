@@ -59,7 +59,6 @@ def layout(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
     (repo / ".git" / "HEAD").write_text("ref: refs/heads/scan\n", encoding="utf-8")
-    (repo / ".ash").mkdir()
     (repo / "src").mkdir()
     outside = tmp_path / "other" / "settings" / "config.json"
     outside.parent.mkdir(parents=True)
@@ -82,9 +81,9 @@ def _refused(result, commands) -> None:
 
 @pytest.mark.parametrize("source", [".", "src"], ids=["source-is-repo", "subdir"])
 def test_a_config_linked_out_of_the_tree_is_refused(source, layout, commands):
-    (layout["repo"] / ".ash" / ".ash.yaml").symlink_to(layout["outside"])
+    (layout["repo"] / ".ash.yaml").symlink_to(layout["outside"])
 
-    result = _run(source, ".ash/.ash.yaml")
+    result = _run(source, ".ash.yaml")
 
     _refused(result, commands)
     assert "link" in result.stderr
@@ -102,14 +101,14 @@ def test_a_directory_linked_out_of_the_tree_is_refused(layout, commands):
 
 def test_a_link_inside_the_tree_to_a_file_inside_it_still_runs(layout, commands):
     """Control: both ends are the repository's."""
-    (layout["repo"] / ".ash" / "real.yaml").write_text("project_name: p\n")
-    (layout["repo"] / ".ash" / ".ash.yaml").symlink_to("real.yaml")
+    (layout["repo"] / "real.yaml").write_text("project_name: p\n")
+    (layout["repo"] / ".ash.yaml").symlink_to("real.yaml")
 
-    result = _run(".", ".ash/.ash.yaml")
+    result = _run(".", ".ash.yaml")
 
     assert result.returncode == 0
     run = commands[0]
-    assert run[run.index("--config") + 1] == "/src/.ash/real.yaml"
+    assert run[run.index("--config") + 1] == "/src/real.yaml"
 
 
 def test_an_operator_link_outside_the_tree_still_runs(layout, commands, tmp_path):

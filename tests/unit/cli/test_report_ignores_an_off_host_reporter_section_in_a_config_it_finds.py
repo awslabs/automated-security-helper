@@ -3,7 +3,7 @@
 """``ash report`` and an off-host plugin reporter's section in a config file it finds itself.
 
 With no ``--config`` and no ``ASH_CONFIG``, ``ash report`` reads the config file it
-finds in the working directory: ``.ash/.ash.yaml``, the file a scan of that
+finds in the working directory: ``.ash.yaml``, the file a scan of that
 directory would also read. The file is in the tree, so ``resolve_config`` records
 the operator's view of the configuration (``record_operator_reporters``), and
 ``reporter_section`` builds a reporter that sends findings off the host from that
@@ -50,7 +50,7 @@ pytestmark = pytest.mark.integration
 def _report(tmp_path: Path, site: Path, overrides: List[str]) -> Dict:
     """``ash report --format quiet-offhost``, with no ``--config``.
 
-    The working directory holds ``.ash/.ash.yaml``, which enables the reporter and
+    The working directory holds ``.ash.yaml``, which enables the reporter and
     gives it an endpoint and a title. The directory is in no git checkout, so the
     working directory is what places the file in the tree.
     """
@@ -58,7 +58,7 @@ def _report(tmp_path: Path, site: Path, overrides: List[str]) -> Dict:
     output = repo / ".ash" / "ash_output"
     write_results(output)
     outside_every_checkout(repo)
-    found = repo / ".ash" / ".ash.yaml"
+    found = repo / ".ash.yaml"
     found.write_text(
         f"reporters:\n"
         f"  {REPORTER}:\n"

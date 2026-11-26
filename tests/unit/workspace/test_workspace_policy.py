@@ -609,11 +609,11 @@ def test_an_explicit_policy_file_is_used(tmp_path):
 def test_a_workspace_root_that_is_also_a_project_keeps_both_files_separate(tmp_path):
     """The collision case from the RFC, stated as behaviour.
 
-    .ash/ash.yaml at the workspace root belongs to the root project. Reading it
+    .ash.yaml at the workspace root belongs to the root project. Reading it
     as workspace policy would apply one project's threshold to its siblings.
     """
     _write(
-        tmp_path / ".ash" / "ash.yaml",
+        tmp_path / ".ash.yaml",
         "global_settings:\n  severity_threshold: CRITICAL\n",
     )
     _write(
@@ -628,7 +628,7 @@ def test_a_workspace_root_that_is_also_a_project_keeps_both_files_separate(tmp_p
 
 def test_pointing_the_policy_at_a_project_config_is_refused_naming_the_file(tmp_path):
     project_config = _write(
-        tmp_path / ".ash" / "ash.yaml",
+        tmp_path / ".ash.yaml",
         "global_settings:\n  severity_threshold: HIGH\n",
     )
     with pytest.raises(WorkspaceDefinitionError) as excinfo:
@@ -647,7 +647,7 @@ def test_pointing_the_policy_at_a_named_project_config_is_refused(tmp_path):
     has to be caught too.
     """
     project = tmp_path / "api"
-    project_config = _write(project / ".ash" / "ash.yaml", "global_settings: {}\n")
+    project_config = _write(project / ".ash.yaml", "global_settings: {}\n")
     with pytest.raises(WorkspaceDefinitionError) as excinfo:
         resolve_workspace_policy(
             tmp_path,

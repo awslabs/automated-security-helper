@@ -7,8 +7,8 @@ On a source directory ``proj`` holding one file and no ASH config, with ASH run
 from the parent or from ``proj``, every detect-secrets URI reads ``settings.py``,
 which the path sanitizer takes as relative to the source directory, so in a
 workspace the ``workspace_uri`` never doubles the directory. With two files in
-the scan set both runs read the same, and an ASH config in ``.ash/`` is a second
-file.
+the scan set both runs read the same, and an ASH config at the root (``.ash.yaml``) is a
+second file.
 
 detect-secrets' ``SecretsCollection.scan_files`` keys one file by the name it was
 handed, which is absolute, and two or more by the path relative to ``root``; the
@@ -76,7 +76,7 @@ SECRET = f"AWS_ACCESS_KEY_ID = '{PLANTED_KEY}'\n"
     [
         pytest.param({"settings.py": SECRET}, id="one-file"),
         pytest.param(
-            {"settings.py": SECRET, ".ash/.ash.yaml": "project_name: p\n"},
+            {"settings.py": SECRET, ".ash.yaml": "project_name: p\n"},
             id="with-an-ash-config",
         ),
     ],
