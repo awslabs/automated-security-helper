@@ -34,7 +34,7 @@ from typing import Optional
 import pytest
 
 from tests.utils.env_assertions import environ_value
-from tests.utils.helpers import checkout_env
+from tests.utils.helpers import WINDOWS_CHILD_START_NAMES, checkout_env
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HOME_VARIABLES = (
@@ -103,6 +103,15 @@ def _run_with_sentinel_home(
     value "user" turned the guard's "wrote under the real user's ~/.ash" into
     text the assertion missed. The values this function itself sets are paths of
     this run's own, which the asserted words never hold.
+
+    What Windows needs is ``WINDOWS_CHILD_START_NAMES``, the processor architecture
+    included. Python 3.11 reads ``platform.machine()`` there from
+    PROCESSOR_ARCHITEW6432 or PROCESSOR_ARCHITECTURE alone (3.12 asks WMI first), and
+    polars refuses to load when the machine is unnamed ("unknown feature flag:
+    'sse3'"). The builtin reporters import polars, and a tests/conftest.py fixture's
+    import of the MCP package reaches them, so on Windows 3.11 a child without those
+    names errored at setup and never made the write the guard refuses. The
+    variables' values (AMD64, ARM64, x86) are no word the asserted text holds.
     """
     sentinel = tmp_path / "sentinel"
     home = sentinel / "home"
@@ -112,7 +121,7 @@ def _run_with_sentinel_home(
     else:
         env = {
             name: os.environ[name]
-            for name in ("PATH", "SYSTEMROOT", "COMSPEC", "PATHEXT")
+            for name in ("PATH", *WINDOWS_CHILD_START_NAMES)
             if name in os.environ
         }
     env.update(
@@ -230,6 +239,41 @@ def test_a_test_that_writes_into_the_developers_ash_is_refused_and_fails(tmp_pat
     assert result.returncode == 1, output[-4000:]
     assert "wrote under the real user's ~/.ash" in output, output[-4000:]
     assert "refused by the test guard" in output, output[-4000:]
+
+
+@pytest.mark.unit
+def test_a_scrubbed_child_keeps_what_a_windows_python_needs_to_start(
+    tmp_path, monkeypatch
+):
+    """The scrubbed child's environment carries every name in WINDOWS_CHILD_START_NAMES.
+
+    The cell above runs the child from PATH alone plus those names, and on Windows
+    under Python 3.11 a child without the processor architecture could not import
+    polars, so it errored at setup before it made the write the guard refuses. That
+    needs a Windows runner to show; what a Linux run can show is that the names this
+    run has reach the child, which is the part the fix is. The child is not started:
+    the launch of a child pytest is replaced by one that keeps the environment it was
+    given, and any other process a fixture starts meanwhile runs as it would.
+    """
+    for name in WINDOWS_CHILD_START_NAMES:
+        monkeypatch.setenv(name, "stand-in")
+    given = []
+    run = subprocess.run
+
+    def keep_the_environment(argv, **kwargs):
+        if list(argv[:3]) != [sys.executable, "-m", "pytest"]:
+            return run(argv, **kwargs)
+        given.append(dict(kwargs["env"]))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", keep_the_environment)
+    _run_with_sentinel_home(tmp_path, PROBE, inherited=False)
+
+    assert len(given) == 1, len(given)
+    missing = [name for name in WINDOWS_CHILD_START_NAMES if name not in given[0]]
+    assert missing == [], missing
+    assert "PROCESSOR_ARCHITECTURE" in WINDOWS_CHILD_START_NAMES
+    assert "PROCESSOR_ARCHITEW6432" in WINDOWS_CHILD_START_NAMES
 
 
 @pytest.mark.integration
