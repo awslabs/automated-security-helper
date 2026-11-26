@@ -21,7 +21,11 @@ at once, and the test would agree with it.
 
 The floors at the bottom are the other half. They pin what the runner executes today,
 so a change that stops running examples, deliberately or not, has to lower a number
-here in the same commit and say why.
+here in the same commit and say why. The executed-block floor is read from the
+illustrative seed (docs/illustrative-seed/): it is what the runner executed at main,
+plus one for every seed line a converting commit has deleted, so nothing is edited
+here when a marked block starts to run, and a block deleted instead of converted
+shows up as a floor the runner no longer meets.
 
 WHAT THIS DOES NOT CHECK
 ------------------------
@@ -47,12 +51,22 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-#: The runnable pages and the blocks the runner executes on them, measured on this
-#: tree. Raise them when runnable blocks are added; lowering one is a decision to run
-#: fewer examples, made in the commit that does it.
+#: The runnable pages and the blocks the runner executes on them, measured at main
+#: (c15148192f4) when the illustrative seed was first written. Raise the page count when
+#: a page gains its first runnable block; lowering one is a decision to run fewer
+#: examples, made in the commit that does it.
 # Was 43: two pages had only network or repository-only blocks, now marked illustrative.
 RUNNABLE_PAGES_FLOOR = 41
-EXECUTED_BLOCKS_FLOOR = 151
+EXECUTED_BLOCKS_AT_MAIN = 151
+#: How many lines of the illustrative seed (docs/illustrative-seed/) sat on a page the
+#: runner runs at that commit. The seed also has a line for each .md.template copy of a
+#: page, 85 of its 599, which no runner runs: the rendered page does.
+SEED_LINES_ON_RUN_PAGES_AT_MAIN = 514
+#: Seed lines that left the seed by deleting their block (or turning it into something
+#: nothing runs) rather than by making it run. Each such commit raises this by the
+#: number of lines it removed and says in its message why the examples are not run.
+SEED_LINES_RETIRED_NOT_RUN = 0
+SEED_DIR = REPO_ROOT / "docs" / "illustrative-seed"
 #: The output samples the runner compares with their run block's output, measured the
 #: same way. A sample marker the runner stops honoring would otherwise pass silently,
 #: since an uncompared sample fails nothing. The floor in force is this or the count of
@@ -495,18 +509,93 @@ def test_every_output_marker_is_compared_or_reported(corpus, pages):
     )
 
 
+def seed_lines_on_run_pages(directory: Path = SEED_DIR) -> int:
+    """How many lines of the illustrative seed sit on a page the runner runs.
+
+    Read here, from the files, and not through scripts/docs_checks.py, so the floor that
+    follows does not move with a change to the seed's reader. A line is
+    ``<page path>`` TAB ``<reason>``, and the runner runs a ``.md`` page: a
+    ``.md.template`` is a source the rendered page is made from, and its blocks run on
+    the page.
+    """
+    if not directory.is_dir():
+        return 0
+    count = 0
+    for path in sorted(directory.iterdir()):
+        if path.suffix != ".tsv":
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            page = line.partition("\t")[0]
+            if page and not page.endswith(".md.template"):
+                count += 1
+    return count
+
+
+def executed_blocks_floor(seed_lines_on_run_pages_now: int) -> int:
+    """The blocks the runner must execute, given the seed as it is now.
+
+    The runner executed EXECUTED_BLOCKS_AT_MAIN when the seed held
+    SEED_LINES_ON_RUN_PAGES_AT_MAIN lines on pages it runs. A converting commit makes
+    a marked block run and deletes its line, so each line that is gone adds a block the
+    runner executes. The floor rises by one for each, with no number to edit in the
+    commit that converts. A line deleted with its block, not converted, is the one thing
+    the seed cannot tell, so that commit says so in SEED_LINES_RETIRED_NOT_RUN.
+    """
+    converted = SEED_LINES_ON_RUN_PAGES_AT_MAIN - seed_lines_on_run_pages_now
+    return EXECUTED_BLOCKS_AT_MAIN + converted - SEED_LINES_RETIRED_NOT_RUN
+
+
 @pytest.mark.integration
 def test_the_runner_runs_no_fewer_examples_than_it_did(runner_pages):
     executed = sum(len(runner.runnable_blocks(page)) for page in runner_pages)
+    floor = executed_blocks_floor(seed_lines_on_run_pages())
     assert len(runner_pages) >= RUNNABLE_PAGES_FLOOR, (
         f"{len(runner_pages)} pages have a runnable example, down from "
         f"{RUNNABLE_PAGES_FLOOR}. If that is deliberate, lower RUNNABLE_PAGES_FLOOR in "
         "the same commit and say which examples stopped running and why."
     )
-    assert executed >= EXECUTED_BLOCKS_FLOOR, (
-        f"the runner executes {executed} blocks, down from {EXECUTED_BLOCKS_FLOOR}. If "
-        "that is deliberate, lower EXECUTED_BLOCKS_FLOOR in the same commit and say "
-        "which examples stopped running and why."
+    assert executed >= floor, (
+        f"the runner executes {executed} blocks, down from {floor}: the {EXECUTED_BLOCKS_AT_MAIN} "
+        "it ran at main, and one more for each line the illustrative seed has lost "
+        f"({SEED_LINES_ON_RUN_PAGES_AT_MAIN} sat on pages it runs then, "
+        f"{seed_lines_on_run_pages()} do now). A marked block that is converted runs; "
+        "one that was deleted instead raises SEED_LINES_RETIRED_NOT_RUN in the same "
+        "commit, with the reason in its message."
+    )
+
+
+@pytest.mark.unit
+def test_every_seed_line_that_is_gone_raises_the_executed_floor_by_one():
+    full = SEED_LINES_ON_RUN_PAGES_AT_MAIN
+
+    assert executed_blocks_floor(full) == EXECUTED_BLOCKS_AT_MAIN
+    assert executed_blocks_floor(full - 1) == EXECUTED_BLOCKS_AT_MAIN + 1
+    assert executed_blocks_floor(0) == EXECUTED_BLOCKS_AT_MAIN + full
+
+
+@pytest.mark.unit
+def test_a_seed_line_that_sits_on_a_template_does_not_move_the_floor(tmp_path):
+    (tmp_path / "docs%2Fa.md.tsv").write_text(
+        "docs/a.md\tneeds Docker\ndocs/a.md\tneeds Docker\n", encoding="utf-8"
+    )
+    (tmp_path / "docs%2Fa.md.template.tsv").write_text(
+        "docs/a.md.template\tneeds Docker\n", encoding="utf-8"
+    )
+    (tmp_path / "notes.txt").write_text("docs/b.md\tx\n", encoding="utf-8")
+
+    assert seed_lines_on_run_pages(tmp_path) == 2
+    assert seed_lines_on_run_pages(tmp_path / "missing") == 0
+
+
+@pytest.mark.integration
+def test_the_seed_this_floor_reads_is_in_this_checkout_and_has_not_grown():
+    """A missing seed would read as every line converted, and the floor would fail on
+    the runner. This says why first, and that the count never exceeds main's."""
+    assert SEED_DIR.is_dir(), f"{SEED_DIR} is gone; the executed-block floor reads it"
+    now = seed_lines_on_run_pages()
+    assert 0 < now <= SEED_LINES_ON_RUN_PAGES_AT_MAIN, (
+        f"{now} seed lines sit on pages the runner runs; main had "
+        f"{SEED_LINES_ON_RUN_PAGES_AT_MAIN}, and the seed only shrinks"
     )
 
 
