@@ -25,6 +25,7 @@ from automated_security_helper.base.converter_plugin import (
     ConverterPluginConfigBase,
 )
 from automated_security_helper.base.options import ConverterOptionsBase
+from automated_security_helper.base.plugin_context import context_ash_config
 from automated_security_helper.models.core import ignore_paths_that_skip_scanning
 from automated_security_helper.plugins.decorators import ash_converter_plugin
 from automated_security_helper.utils.get_scan_set import (
@@ -101,7 +102,9 @@ class McpConfigConverter(ConverterPluginBase[McpConfigConverterConfig]):
         """Whether ``path`` is under an ignore path that keeps it out of conversion."""
         ignore_paths = ignore_paths_that_skip_scanning(
             active_ignore_paths(
-                self._require_ash_config().global_settings.ignore_paths
+                context_ash_config(
+                    self._require_context(), self.__class__.__name__
+                ).global_settings.ignore_paths
             ),
             ignore_suppressions=self._require_context().ignore_suppressions,
         )

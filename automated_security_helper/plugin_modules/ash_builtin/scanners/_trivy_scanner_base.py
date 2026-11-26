@@ -811,7 +811,7 @@ def _verified_message_lines(result: Any) -> Optional[List[str]]:
     the separator trivy writes, for the reason ``trivy_severity`` gives.
     """
     message: Optional[str] = result.message.root.text if result.message else None
-    lines: List[str] = [*(message or "").split("\n")]
+    lines = message.split("\n") if message else [""]
     uri = _decoded_single_uri(result)
     if uri is None or lines[0] != f"Artifact: {uri}":
         return None
@@ -2164,8 +2164,18 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         """
         if self.context is None:
             raise ScannerError(f"{self.__class__.__name__} has no plugin context")
-        config_name = self.config.name if self.config is not None else None
-        name = config_name if config_name is not None else "trivy"
+        config = self.config
+        if config is None:
+            name = "trivy"
+        elif config.name is None:
+            # The key below is where the operator's write of the option is looked
+            # up; without a name it would name no scanner's section at all.
+            raise ScannerError(
+                f"{self.__class__.__name__}'s configuration has no name, so where "
+                f"the operator set {option} cannot be looked up"
+            )
+        else:
+            name = config.name
         key = f"scanners.{name}.options.{option}"
         # A configuration the embedding caller built is the operator's own write,
         # as for syft, bandit, checkov and grype (operator_wrote_value): the

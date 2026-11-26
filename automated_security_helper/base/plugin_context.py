@@ -19,6 +19,7 @@ from typing import Annotated, Any, Dict, List, Optional, Set, TYPE_CHECKING
 from automated_security_helper.base.forward_refs import OnceOnlyResolver
 from automated_security_helper.core.asset import Asset
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.plugin_manager import AshPluginManager
 
 # Import AshConfig only for type checking to avoid circular imports
@@ -425,6 +426,21 @@ class PluginContext(BaseModel):
         # Last, so the output and work directories are both settled.
         _record_derived_roots_on_config(self)
         return self
+
+
+def context_ash_config(context: PluginContext, owner: str) -> "AshConfig":
+    """The context's ASH configuration, or a ``ScannerError`` naming ``owner``
+    when the context was built without one.
+
+    ``PluginContext.config`` defaults to None, and pydantic does not validate a
+    default, so a context built without a configuration keeps None rather than
+    the empty ``AshConfig`` its validator would build. A function rather than a
+    method so that a context double which sets only ``config`` still works.
+    """
+    ash_config = context.config
+    if ash_config is None:
+        raise ScannerError(f"{owner} has no ASH configuration")
+    return ash_config
 
 
 def _record_derived_roots_on_config(context: Any) -> None:

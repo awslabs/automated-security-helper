@@ -11,7 +11,6 @@ import re
 import threading
 from pathlib import Path
 from typing import (
-    TYPE_CHECKING,
     Annotated,
     Any,
     Callable,
@@ -83,9 +82,6 @@ from automated_security_helper.utils.subprocess_utils import (
     response_could_not_stop,
     signal_ending,
 )
-
-if TYPE_CHECKING:
-    from automated_security_helper.config.ash_config import AshConfig
 
 
 class PluginDependency(BaseModel):
@@ -1153,19 +1149,6 @@ class PluginBase(UVToolMixin, BaseModel):
         if work_dir is None:
             raise ScannerError(f"{self.__class__.__name__} has no work directory")
         return work_dir
-
-    def _require_ash_config(self) -> "AshConfig":
-        """The context's ASH configuration, or a ``ScannerError`` naming the
-        plugin when its context was built without one.
-
-        ``PluginContext.config`` defaults to None, and pydantic does not
-        validate a default, so a context built without a configuration keeps
-        None rather than the empty ``AshConfig`` its validator would build.
-        """
-        ash_config = self._require_context().config
-        if ash_config is None:
-            raise ScannerError(f"{self.__class__.__name__} has no ASH configuration")
-        return ash_config
 
     def _require_results_dir(self) -> Path:
         """The plugin's results directory, or a ``ScannerError`` naming the

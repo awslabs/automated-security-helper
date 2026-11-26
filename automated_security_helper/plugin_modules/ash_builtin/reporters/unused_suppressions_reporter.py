@@ -12,6 +12,7 @@ from pydantic import Field, PrivateAttr, ValidationInfo, field_validator
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.base.plugin_context import context_ash_config
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
@@ -273,7 +274,10 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             all_suppressions: List[AshSuppression] = []
         else:
             all_suppressions = (
-                self._require_ash_config().global_settings.suppressions or []
+                context_ash_config(
+                    self._require_context(), self.__class__.__name__
+                ).global_settings.suppressions
+                or []
             )
 
         # Under --ignore-suppressions nothing was matched, so the subtraction

@@ -25,6 +25,7 @@ from automated_security_helper.base.converter_plugin import (
     ConverterPluginBase,
     ConverterPluginConfigBase,
 )
+from automated_security_helper.base.plugin_context import context_ash_config
 from automated_security_helper.core.constants import is_offline_mode
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -164,7 +165,9 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
     def _ignore_paths_skipping_harvest(self) -> List[IgnorePathWithReason]:
         return ignore_paths_that_skip_scanning(
             active_ignore_paths(
-                self._require_ash_config().global_settings.ignore_paths
+                context_ash_config(
+                    self._require_context(), self.__class__.__name__
+                ).global_settings.ignore_paths
             ),
             ignore_suppressions=getattr(self.context, "ignore_suppressions", False),
         )

@@ -42,6 +42,7 @@ from automated_security_helper.base.options import (
     ConverterOptionsBase,
     tool_version_constraint,
 )
+from automated_security_helper.base.plugin_context import context_ash_config
 from automated_security_helper.base.uv_tool_mixin import (
     _tool_name,
     deferred_tool_version_probes,
@@ -957,7 +958,9 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         """
         return ignore_paths_that_skip_scanning(
             active_ignore_paths(
-                self._require_ash_config().global_settings.ignore_paths
+                context_ash_config(
+                    self._require_context(), self.__class__.__name__
+                ).global_settings.ignore_paths
             ),
             ignore_suppressions=self._require_context().ignore_suppressions,
         )
