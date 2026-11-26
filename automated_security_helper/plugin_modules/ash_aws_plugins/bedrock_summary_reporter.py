@@ -46,6 +46,7 @@ from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.flat_vulnerability import (
     BELOW_THRESHOLD_PROPERTY,
 )
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.error_text import error_text, text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -1289,10 +1290,11 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         configured profile and region, the ones validate_plugin_dependencies
         checked."""
         session_params: Dict[str, Any] = {}
-        if self.config.options.aws_profile:
-            session_params["profile_name"] = self.config.options.aws_profile
-        if self.config.options.aws_region:
-            session_params["region_name"] = self.config.options.aws_region
+        options = self._require_config().options
+        if options.aws_profile:
+            session_params["profile_name"] = options.aws_profile
+        if options.aws_region:
+            session_params["region_name"] = options.aws_region
         return boto3.Session(**session_params)
 
     def _control_plane(self) -> Any:
@@ -1301,7 +1303,9 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         if self._control_client is None:
             self._control_client = self._session().client(
                 "bedrock",
-                config=control_plane_client_config(self.config.options.max_retries),
+                config=control_plane_client_config(
+                    self._require_config().options.max_retries
+                ),
             )
         return self._control_client
 
@@ -1312,9 +1316,10 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
 
     def companion_file_names(self) -> Tuple[str, ...]:
         """The markdown files ``_write_markdown_files`` writes, with ``output_markdown`` on."""
-        config = self.config
-        if isinstance(config, dict):
-            config = BedrockSummaryReporterConfig.model_validate(config)
+        if isinstance(self.config, dict):
+            config = BedrockSummaryReporterConfig.model_validate(self.config)
+        else:
+            config = self._require_config()
         opts = config.options
         return tuple(getattr(opts, option) for option in opts.written_file_options())
 
@@ -1360,9 +1365,10 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
 
         # The region defaults to us-east-1, so it is unset only when a config sets
         # it to null.
-        if self.config.options.aws_region is None:
+        config = self._require_config()
+        if config.options.aws_region is None:
             report_missing_setting(
-                self.config.name, "aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")
+                config.name, "aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")
             )
             return self.dependencies_satisfied
 
@@ -1377,7 +1383,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 self._plugin_log(
                     "Invalid AWS credentials. Unable to get caller identity.",
                     level=logging.WARNING,
-                    target_type="source",
+                    target_type=TargetType.SOURCE,
                     append_to_stream="stderr",
                 )
                 return self.dependencies_satisfied
@@ -1385,7 +1391,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             # Check if Bedrock is available
             bedrock_client = session.client(
                 "bedrock",
-                config=control_plane_client_config(self.config.options.max_retries),
+                config=control_plane_client_config(config.options.max_retries),
             )
 
             # Check if we can list models. ListFoundationModels is unpaginated and
@@ -1416,7 +1422,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                         f"Error accessing Bedrock service: {detail}", values
                     ),
                     level=logging.WARNING,
-                    target_type="source",
+                    target_type=TargetType.SOURCE,
                     append_to_stream="stderr",
                 )
                 return self.dependencies_satisfied
@@ -1427,7 +1433,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             # again, possibly while it was already throttling, and logged a
             # failed profile listing a second time at WARNING, because the walk's
             # first call through a fresh wrapper raised the original error.
-            model_id = self.config.options.model_id
+            model_id = config.options.model_id
             label = self._model_label(model_id)
             bedrock_client = ListingsOnce(bedrock_client)
             check = validate_bedrock_model(
@@ -1447,7 +1453,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                         values,
                     ),
                     level=logging.WARNING,
-                    target_type="source",
+                    target_type=TargetType.SOURCE,
                     append_to_stream="stderr",
                 )
 
@@ -1456,7 +1462,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 # checking the first fallback alone disabled the reporter when
                 # only a later one was usable. The listing the configured
                 # model's check made serves every candidate (the wrapper above).
-                if self.config.options.enable_fallback_models:
+                if config.options.enable_fallback_models:
                     visited = {model_id}
                     fallback_model = get_fallback_model(model_id)
                     while fallback_model and fallback_model not in visited:
@@ -1481,7 +1487,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                                     values,
                                 ),
                                 level=logging.INFO,
-                                target_type="source",
+                                target_type=TargetType.SOURCE,
                                 append_to_stream="stderr",
                             )
                         elif check[0]:
@@ -1493,7 +1499,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                                     values,
                                 ),
                                 level=logging.INFO,
-                                target_type="source",
+                                target_type=TargetType.SOURCE,
                                 append_to_stream="stderr",
                             )
                             # We can proceed with the fallback model
@@ -1513,7 +1519,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                     values,
                 ),
                 level=logging.WARNING,
-                target_type="source",
+                target_type=TargetType.SOURCE,
                 append_to_stream="stderr",
             )
         except Exception as e:
@@ -1521,7 +1527,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 "Error when validating Bedrock access: "
                 f"{type(e).__name__}: {error_text(e, values)}",
                 level=logging.WARNING,
-                target_type="source",
+                target_type=TargetType.SOURCE,
                 append_to_stream="stderr",
             )
 
@@ -1558,7 +1564,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             # findings left the previous run's summary, executive and technical
             # files in place, and a configured output_file never existed for a
             # clean scan.
-            if self.config.options.output_markdown:
+            if self._require_config().options.output_markdown:
                 nothing = self._nothing_to_analyze()
                 # No model was called, so the companion files say so instead
                 # of claiming generated output.
@@ -1578,7 +1584,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             "bedrock-runtime", config=reporter_client_config()
         )
 
-        if self.config.options.add_section_headers:
+        if self._require_config().options.add_section_headers:
             ASH_LOGGER.info("Generating structured report with section headers")
             summary = self._run_structured_report(
                 bedrock_runtime, model, all_findings, secret_findings, indexed_findings
@@ -1600,7 +1606,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             + summary.removeprefix("# Security scan summary report\n\n")
             + f"\n\n{FOOTER_CREDIT}\n"
         )
-        if self.config.options.output_markdown:
+        if self._require_config().options.output_markdown:
             self._write_markdown_files(
                 bedrock_runtime, model, all_findings, secret_findings, summary
             )
@@ -1786,7 +1792,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         """
         excluded = {
             normalize_tool_type(name)
-            for name in self.config.options.exclude_scanner_types
+            for name in self._require_config().options.exclude_scanner_types
         }
         excluded.discard(None)
         return result_tool_types(finding_dict) & excluded
@@ -1802,7 +1808,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         """
         return SECRETS_TOOL_TYPE in {
             normalize_tool_type(name)
-            for name in self.config.options.exclude_scanner_types
+            for name in self._require_config().options.exclude_scanner_types
         }
 
     def _is_actionable(
@@ -1827,7 +1833,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         With no *threshold* only suppression is checked; ``_scanner_threshold``
         always resolves one.
         """
-        if not self.config.options.actionable_only:
+        if not self._require_config().options.actionable_only:
             return True
         if finding_dict.get("suppressions"):
             return False
@@ -1875,7 +1881,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         findings: List[Dict[str, Any]],
         secret_findings: List[Dict[str, Any]],
     ) -> str:
-        opts = self.config.options
+        opts = self._require_config().options
         builder = BedrockPromptBuilder()
         client = self._make_model_client(bedrock_runtime)
         prepared = builder.prepare_prompt(
@@ -1907,7 +1913,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         secret_findings: List[Dict[str, Any]],
         indexed_findings: List[Dict[str, Any]],
     ) -> str:
-        opts = self.config.options
+        opts = self._require_config().options
         builder = BedrockPromptBuilder()
         client = self._make_model_client(bedrock_runtime)
 
@@ -2212,7 +2218,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
 
             original = raw_by_index.get(index)
             with_code = (
-                self.config.options.include_code_snippets
+                self._require_config().options.include_code_snippets
                 and index not in secret_indexes
             )
             if with_code and original:
@@ -2245,7 +2251,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
     # ------------------------------------------------------------------
 
     def _build_toc(self, findings: List[Dict[str, Any]]) -> str:
-        opts = self.config.options
+        opts = self._require_config().options
         if not opts.add_table_of_contents:
             return ""
 
@@ -2291,7 +2297,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         as the config file wrote it when the file read it from the environment
         (config/environment_record.py), else the ID itself. A fallback model's
         ID is ASH's own."""
-        if model_id != self.config.options.model_id:
+        if model_id != self._require_config().options.model_id:
             return model_id
         from automated_security_helper.config.environment_record import (
             record_environment_references,
@@ -2308,7 +2314,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
     def _model_call_retries(self) -> int:
         """The retries of a model call: the ``max_retries`` option, or
         ``DEFAULT_MODEL_CALL_RETRIES`` when the operator set none."""
-        retries = self.config.options.max_retries
+        retries = self._require_config().options.max_retries
         return DEFAULT_MODEL_CALL_RETRIES if retries is None else retries
 
     def _model_id_to_call(self) -> str:
@@ -2318,14 +2324,14 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         configured id. Read with a default: a reporter built by
         ``model_construct`` (the retry-config tests) has not run ``__init__``,
         so the attribute may not exist."""
-        configured = self.config.options.model_id
+        configured = self._require_config().options.model_id
         listed = getattr(self, "_listed_spelling", None)
         if listed is not None and listed[0] == configured:
             return listed[1]
         return configured
 
     def _make_model_client(self, bedrock_runtime: Any) -> BedrockModelClient:
-        opts = self.config.options
+        opts = self._require_config().options
         return BedrockModelClient(
             bedrock_runtime=bedrock_runtime,
             model_id=self._model_id_to_call(),
@@ -2427,7 +2433,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         validation error, a throttle, a timeout) is called again with the next
         one, and one the control plane left unchecked is checked again.
         """
-        opts = self.config.options
+        opts = self._require_config().options
 
         def call(model: str) -> CallOutcome:
             return client.with_model(model).call(prompt, system_prompt)
@@ -2728,7 +2734,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         secret_findings: List[Dict[str, Any]],
         summary: str,
     ) -> None:
-        opts = self.config.options
+        opts = self._require_config().options
         included = set(opts.include_sections) - set(opts.exclude_sections)
         builder = BedrockPromptBuilder()
         client = self._make_model_client(bedrock_runtime)
@@ -2808,7 +2814,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         produced (a run that called no model; a section with nothing to send)
         a line that says so, per file, since one file may be generated while
         the other is not."""
-        opts = self.config.options
+        opts = self._require_config().options
         included = set(opts.include_sections) - set(opts.exclude_sections)
 
         # The configured file names can come from the environment (``${VAR}``),
@@ -2816,7 +2822,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         # reporter's redaction values. The files themselves keep their names.
         values = self._redaction_values()
 
-        reports_dir = Path(self.context.output_dir) / "reports"
+        reports_dir = Path(self._require_context().output_dir) / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
 
         self._write_companion(
@@ -2883,7 +2889,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
 
     def _get_cached_or_generate(self, key: str, generator_func):  # type: ignore[type-arg]
         """Get a cached result or generate and cache it."""
-        if not self.config.options.enable_caching:
+        if not self._require_config().options.enable_caching:
             return generator_func()
         if key in self._cache:
             ASH_LOGGER.debug(f"Using cached result for {key}")
@@ -2909,7 +2915,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         the prompts list them instead of the first instance's alone, and
         ``original_count`` so the builders count every instance.
         """
-        if not self.config.options.summarize_findings or not findings:
+        if not self._require_config().options.summarize_findings or not findings:
             return findings
 
         grouped: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
@@ -2961,7 +2967,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         findings: List[Dict[str, Any]],
     ) -> str:
         """Process findings in batches to optimize token usage."""
-        opts = self.config.options
+        opts = self._require_config().options
         builder = BedrockPromptBuilder()
         client = self._make_model_client(bedrock_runtime)
 
@@ -3058,7 +3064,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         built for this call, from the profile and region the options hold
         now, and a fallback its walk reaches answers this call only.
         """
-        opts = self.config.options
+        opts = self._require_config().options
         builder = BedrockPromptBuilder()
         client = self._make_model_client(bedrock_runtime)
 
@@ -3162,7 +3168,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
 
     def _prepare_prompt(self, user_message: str) -> str:
         """Prepare the prompt with custom context and industry information."""
-        opts = self.config.options
+        opts = self._require_config().options
         return BedrockPromptBuilder().prepare_prompt(
             user_message,
             custom_prompt=opts.custom_prompt,
@@ -3184,7 +3190,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         inference_config: Dict,
     ) -> str:
         """Try to call a specific model with error handling."""
-        opts = self.config.options
+        opts = self._require_config().options
         client = BedrockModelClient(
             bedrock_runtime=bedrock_runtime,
             model_id=model_id,
@@ -3250,7 +3256,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
 
         The builder's prompt goes to ``_call_bedrock`` unprepared, as in
         ``_generate_executive_summary``."""
-        opts = self.config.options
+        opts = self._require_config().options
         builder = BedrockPromptBuilder()
         return self._call_bedrock(
             bedrock_runtime,

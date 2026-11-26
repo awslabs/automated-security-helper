@@ -212,7 +212,9 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
         if self._settings_missing():
             return self.dependencies_satisfied
         try:
-            sts_client = boto3.client("sts", region_name=self.config.options.aws_region)
+            sts_client = boto3.client(
+                "sts", region_name=self._require_config().options.aws_region
+            )
             caller_id = sts_client.get_caller_identity()
             self.dependencies_satisfied = "Account" in caller_id
         except Exception as e:
@@ -237,9 +239,10 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
         the environment or a config file alike; ``not`` rather than ``is None``
         keeps an empty name out of CreateLogStream should one ever get through.
         """
+        config = self._require_config()
         return settings_missing(
-            self.config.name,
-            self.config.options,
+            config.name,
+            config.options,
             (
                 ("aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")),
                 ("log_group_name", ("ASH_CLOUDWATCH_LOG_GROUP_NAME",)),
@@ -301,9 +304,10 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
         # reporter's own retries still repeat a read timeout, a closed
         # connection and a 5xx answer, which can come after PutLogEvents was
         # accepted, so an event can be written up to max_retries + 1 times.
+        config = self._require_config()
         cwlogs_client = boto3.client(
             "logs",
-            region_name=self.config.options.aws_region,
+            region_name=config.options.aws_region,
             config=reporter_client_config(),
         )
 
@@ -328,8 +332,8 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
         try:
             resp = self._put_log_events_with_retry(
                 cwlogs_client,
-                logGroupName=self.config.options.log_group_name,
-                logStreamName=self.config.options.log_stream_name,
+                logGroupName=config.options.log_group_name,
+                logStreamName=config.options.log_stream_name,
                 logEvents=[log_event],
             )
             # PutLogEvents answers 200 and lists an event it would not keep
@@ -366,16 +370,18 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
     def _create_log_stream_with_retry(self, cwlogs_client):
         """Create log stream with retry logic."""
         try:
+            config = self._require_config()
+
             # Define the retry decorator for creating log stream
             @retry_with_backoff(
-                max_retries=self.config.options.max_retries,
-                base_delay=self.config.options.base_delay,
-                max_delay=self.config.options.max_delay,
+                max_retries=config.options.max_retries,
+                base_delay=config.options.base_delay,
+                max_delay=config.options.max_delay,
             )
             def create_log_stream():
                 return cwlogs_client.create_log_stream(
-                    logGroupName=self.config.options.log_group_name,
-                    logStreamName=self.config.options.log_stream_name,
+                    logGroupName=config.options.log_group_name,
+                    logStreamName=config.options.log_stream_name,
                 )
 
             # Call the decorated function
@@ -421,10 +427,12 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
         configuration. The method name and signature are unchanged.
         """
 
+        config = self._require_config()
+
         @retry_with_backoff(
-            max_retries=self.config.options.max_retries,
-            base_delay=self.config.options.base_delay,
-            max_delay=self.config.options.max_delay,
+            max_retries=config.options.max_retries,
+            base_delay=config.options.base_delay,
+            max_delay=config.options.max_delay,
         )
         def put_log_events():
             return cwlogs_client.put_log_events(**kwargs)

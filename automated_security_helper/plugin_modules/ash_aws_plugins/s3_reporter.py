@@ -221,9 +221,10 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
         return (self._local_copy_name(),)
 
     def _local_copy_name(self) -> str:
-        config = self.config
-        if isinstance(config, dict):
-            config = S3ReporterConfig.model_validate(config)
+        if isinstance(self.config, dict):
+            config = S3ReporterConfig.model_validate(self.config)
+        else:
+            config = self._require_config()
         file_extension = "json" if config.options.file_format == "json" else "yaml"
         return f"s3-report.{file_extension}"
 
@@ -233,9 +234,10 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
         if self._settings_missing():
             return self.dependencies_satisfied
         try:
+            config = self._require_config()
             session = boto3.Session(
-                profile_name=self.config.options.aws_profile,
-                region_name=self.config.options.aws_region,
+                profile_name=config.options.aws_profile,
+                region_name=config.options.aws_region,
             )
             sts_client = session.client("sts")
             caller_id = sts_client.get_caller_identity()
@@ -250,7 +252,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             # other failure leave the dependency unsatisfied here.
             s3_client = session.client("s3")
             try:
-                s3_client.head_bucket(Bucket=self.config.options.bucket_name or "")
+                s3_client.head_bucket(Bucket=config.options.bucket_name or "")
             except botocore.exceptions.ClientError as e:
                 status = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
                 code = e.response.get("Error", {}).get("Code")
@@ -287,9 +289,10 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
         the environment or a config file alike; ``not`` rather than ``is None``
         keeps an empty name out of PutObject should one ever get through.
         """
+        config = self._require_config()
         return settings_missing(
-            self.config.name,
-            self.config.options,
+            config.name,
+            config.options,
             (
                 ("aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")),
                 ("bucket_name", ("ASH_S3_BUCKET_NAME",)),
@@ -331,7 +334,8 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             or model.metadata.summary_stats.start
             or datetime.now(timezone.utc).isoformat(timespec="seconds")
         )
-        file_extension = "json" if self.config.options.file_format == "json" else "yaml"
+        config = self._require_config()
+        file_extension = "json" if config.options.file_format == "json" else "yaml"
         project = getattr(model.metadata, "workspace_project", None)
         project_segment = f"{project}/" if isinstance(project, str) and project else ""
         # The prefix is used as written, so the object name stays the one an
@@ -340,7 +344,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
         # meant ("scans/repo-"), so it is named once per run and left alone. The
         # warning does not quote it: a configured option can come from the
         # environment, and the warning goes to the console and ash.log.
-        key_prefix = self.config.options.key_prefix
+        key_prefix = config.options.key_prefix
         if key_prefix and not key_prefix.endswith("/"):
             _warn_once(
                 "reporters.s3.options.key_prefix",
@@ -366,7 +370,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
                 by_alias=True, exclude_none=True, mode="json"
             )
         output_dict = json.loads(json.dumps(output_dict, default=str))
-        if self.config.options.file_format == "json":
+        if config.options.file_format == "json":
             output_content = json.dumps(output_dict, indent=2)
         else:
             # utils/report_yaml.py: no line of it is a CI workflow command, whatever
@@ -375,8 +379,8 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
 
         # Create a session with the specified profile and region
         session = boto3.Session(
-            profile_name=self.config.options.aws_profile,
-            region_name=self.config.options.aws_region,
+            profile_name=config.options.aws_profile,
+            region_name=config.options.aws_region,
         )
         # The upload repeats a failure itself (retry_with_backoff), so the client
         # makes one attempt per call.
@@ -386,7 +390,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             # Upload the content to S3 with retry logic
             self._put_object_with_retry(
                 s3_client,
-                Bucket=self.config.options.bucket_name,
+                Bucket=config.options.bucket_name,
                 Key=s3_key,
                 Body=output_content,
                 ContentType=(
@@ -396,7 +400,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
                 ),
             )
 
-            s3_url = f"s3://{self.config.options.bucket_name}/{s3_key}"
+            s3_url = f"s3://{config.options.bucket_name}/{s3_key}"
             # Redacted: the bucket and key prefix are configured, a configured
             # option can come from the environment, and ash.log keeps this line.
             ASH_LOGGER.info(
@@ -427,7 +431,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
         # succeeded into None.
         local_copy = None
         try:
-            reports_dir = Path(self.context.output_dir) / "reports"
+            reports_dir = Path(self._require_context().output_dir) / "reports"
             reports_dir.mkdir(parents=True, exist_ok=True)
             local_copy = write_report_file(
                 reports_dir, self._local_copy_name(), output_content
@@ -445,9 +449,9 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
         return json.dumps(
             {
                 "url": s3_url,
-                "bucket": self.config.options.bucket_name,
+                "bucket": config.options.bucket_name,
                 "key": s3_key,
-                "file_format": self.config.options.file_format,
+                "file_format": config.options.file_format,
                 "local_copy": local_copy.as_posix() if local_copy else None,
             },
             indent=2,
@@ -472,10 +476,12 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
         test_project_attribution keeps working.
         """
 
+        config = self._require_config()
+
         @retry_with_backoff(
-            max_retries=self.config.options.max_retries,
-            base_delay=self.config.options.base_delay,
-            max_delay=self.config.options.max_delay,
+            max_retries=config.options.max_retries,
+            base_delay=config.options.base_delay,
+            max_delay=config.options.max_delay,
         )
         def put_object():
             return s3_client.put_object(**kwargs)
