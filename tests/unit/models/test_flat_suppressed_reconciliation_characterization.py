@@ -314,3 +314,61 @@ def test_the_hand_built_cases_reach_each_loop():
     _, second = _oracle("two-keys-fold-to-one-name")
     assert second["rows"]["Bandit"]["suppressed_finding_count"] == 2
     assert second["rows"]["Bandit"]["severity_suppressed"] == 2
+
+
+# --------------------------------------------------------------------------
+# One walk, made only when a loop needs a count.
+# --------------------------------------------------------------------------
+
+
+def _spy_on_the_readers(monkeypatch) -> Dict[str, int]:
+    calls = {"batch": 0, "per_name": 0}
+    batch = ScannerStatisticsCalculator.sarif_counts_by_scanner
+    per_name = ScannerStatisticsCalculator.extract_sarif_counts_for_scanner
+
+    def counting_batch(model):
+        calls["batch"] += 1
+        return batch(model)
+
+    def counting_per_name(model, name):
+        calls["per_name"] += 1
+        return per_name(model, name)
+
+    monkeypatch.setattr(
+        ScannerStatisticsCalculator,
+        "sarif_counts_by_scanner",
+        staticmethod(counting_batch),
+    )
+    monkeypatch.setattr(
+        ScannerStatisticsCalculator,
+        "extract_sarif_counts_for_scanner",
+        staticmethod(counting_per_name),
+    )
+    return calls
+
+
+def test_a_model_whose_loops_read_no_count_walks_nothing(monkeypatch):
+    calls = _spy_on_the_readers(monkeypatch)
+    model = _empty()
+    model.sarif = _sarif([_result(scanner="bandit"), _result(scanner="grype")])
+
+    model.to_flat_vulnerabilities()
+
+    assert calls == {"batch": 0, "per_name": 0}
+
+
+def test_every_row_the_loops_reconcile_shares_one_walk(monkeypatch):
+    calls = _spy_on_the_readers(monkeypatch)
+    model = _empty()
+    model.sarif = _sarif(
+        [_result(scanner="bandit"), _result(scanner="grype"), _result(tags=["shape"])]
+    )
+    for name in ("Bandit", "grype", "stale"):
+        model.scanner_results[name] = ScannerTargetStatusInfo(
+            suppressed_finding_count=1,
+            severity_counts=ScannerSeverityCount(suppressed=1),
+        )
+
+    model.to_flat_vulnerabilities()
+
+    assert calls == {"batch": 1, "per_name": 0}
