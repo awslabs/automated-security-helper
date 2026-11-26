@@ -78,6 +78,17 @@
   baseline or a suppression keyed by that id needs refreshing. A suppression written
   against the config file's path and lines is not affected. A result that has a line in
   the generated script with no sidecar row is unchanged.
+- **trivy and trivy-repo secret findings match a baseline only by exact identity and get
+  `secret/` correlation ids, like other secret findings.** trivy marks a secret finding
+  with the `secret` tag on its rule and nothing on the result. The secret masking and the
+  Bedrock summary reporter read that tag; the flattened findings, which the baseline gate
+  and the correlation ids are built from, now read it too. A baseline matches a secret
+  finding only by an exact identity with a fingerprint on both sides, and trivy's results
+  carry no fingerprint, so an existing baseline no longer covers a trivy or trivy-repo
+  secret finding: it is reported again, and recording the baseline again does not change
+  that. A finding of another scanner whose rule is tagged `secret`, `secrets`, CWE-798
+  or CWE-321 is classified the same way, as the Bedrock summary reporter already
+  classified it.
 
 ### Maintenance
 

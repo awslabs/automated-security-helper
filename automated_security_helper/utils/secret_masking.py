@@ -11,9 +11,11 @@ from typing import (
     Any,
     Callable,
     Dict,
+    FrozenSet,
     Iterable,
     List,
     Literal,
+    NamedTuple,
     Optional,
     Set,
     Tuple,
@@ -893,6 +895,37 @@ def secret_rule_ids(sarif_report: Any) -> Set[str]:
     """
     return _rule_ids_tagged(sarif_report, _is_secret_tag) | _rule_ids_described(
         sarif_report
+    )
+
+
+class SecretRuleIds(NamedTuple):
+    """The ids of the rules a report's rule metadata marks, in the sets the two
+    secret predicates take: ``secret`` and ``described_only`` are what
+    ``is_secret_finding`` takes, as the masking passes them (``_index_secrets``),
+    and ``detection`` is what ``is_secret_detection`` takes, as the Bedrock
+    summary reporter passes it. The default holds none, and a predicate given
+    none reads the result alone."""
+
+    secret: FrozenSet[str] = frozenset()
+    described_only: FrozenSet[str] = frozenset()
+    detection: FrozenSet[str] = frozenset()
+
+
+def report_secret_rule_ids(sarif_report: Any) -> SecretRuleIds:
+    """The :class:`SecretRuleIds` of *sarif_report*, read from the rules of every
+    run's tool components, for a caller that classifies the report's results one
+    at a time.
+
+    A scanner can mark a secret finding on its rule alone: trivy tags its secret
+    rules ``secret`` and writes no mark on the result, so a result classified
+    without its report's rules is not a secret to either predicate.
+    """
+    tagged = _rule_ids_tagged(sarif_report, _is_secret_tag)
+    described = _rule_ids_described(sarif_report)
+    return SecretRuleIds(
+        secret=frozenset(tagged | described),
+        described_only=frozenset(described - tagged),
+        detection=frozenset(secret_detection_rule_ids(sarif_report)),
     )
 
 
