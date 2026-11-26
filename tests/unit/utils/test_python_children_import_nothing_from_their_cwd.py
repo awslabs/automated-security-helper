@@ -190,21 +190,28 @@ def test_the_detect_secrets_worker_imports_nothing_from_the_tree_or_its_results(
 @pytest.mark.unit
 def test_a_relative_bin_path_is_warned_about_and_not_searched(tmp_path, monkeypatch):
     """A relative ASH_BIN_PATH is not used: tool lookup warns once per value and
-    searches ``~/.ash/bin`` instead (``_bin_path``). ``current_bin_path`` is the
-    installer's reader, absolutized at the caller's working directory, where
-    the caller named it."""
+    searches ``~/.ash/bin`` instead (``_bin_path``), and so does ``current_bin_path``,
+    the installer's reader. It used to make the value absolute against the working
+    directory and install into it."""
     from automated_security_helper.core.constants import home_bin_path
     from automated_security_helper.utils import subprocess_utils
 
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    # What Path.home() reads on Windows.
+    monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ASH_BIN_PATH", "rel/bin")
-    assert current_bin_path() == tmp_path / "rel" / "bin"
+    # A fresh record of what was warned about, so the warning is this test's own.
+    monkeypatch.setattr(subprocess_utils, "_warned_relative_bin_paths", set())
+    assert home_bin_path() == home / ".ash" / "bin"
+    assert current_bin_path() == home_bin_path()
     # The warning is keyed by the path as the OS spells it (Path turns "rel/bin"
     # into "rel\\bin" on Windows).
     spelled = str(Path("rel/bin"))
-    subprocess_utils._warned_relative_bin_paths.discard(spelled)
-    assert subprocess_utils._bin_path() == home_bin_path()
     assert spelled in subprocess_utils._warned_relative_bin_paths
+    assert subprocess_utils._bin_path() == home_bin_path()
     assert subprocess_utils.path_independent_dirs()[0] == home_bin_path()
 
 
