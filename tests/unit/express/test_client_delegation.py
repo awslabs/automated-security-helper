@@ -34,6 +34,17 @@ class TestClassification:
             [],
             ["--source-dir", "x", "--mode", "precommit"],
             ["--express"],
+            # The value of a root option that takes one is not a subcommand's name,
+            # whatever it spells: a mode, an output directory, a scanner list or a
+            # config file named for a command is still a scan.
+            ["--mode", "container"],
+            ["--output-dir", "results"],
+            ["--express", "--mode", "container"],
+            ["--scanners", "report"],
+            ["-c", "config"],
+            ["--quiet", "scan", "--scanners", "report"],
+            # The last letter of a cluster of short options takes the next word.
+            ["-qf", "report"],
         ],
     )
     def test_scan_shapes_are_delegable(self, argv):
@@ -50,15 +61,24 @@ class TestClassification:
             # subcommand's name, so only the group's own entry in the list keeps
             # it from reaching the daemon as a scan.
             ["results"],
+            ["results", "report"],
             ["container", "build"],
             ["--help"],
             ["scan", "--help"],
             ["--version"],
             ["scan", "--no-express"],
-            # A token that merely looks like a subcommand classifies the whole
-            # invocation as not-a-scan: the cold run parses the truth, so the
-            # mistake costs warmth, never correctness.
-            ["--scanners", "report"],
+            # A value is passed over and the command after it is not.
+            ["--output-dir", "results", "results", "report"],
+            ["--mode", "container", "container", "build"],
+            # A value attached to its option, or to a cluster of short options, is
+            # in the same word, so the word after it is a command.
+            ["--mode=container", "report"],
+            ["-fsarif", "report"],
+            # An option this client does not list hides nothing. A token that merely
+            # looks like a subcommand classifies the whole invocation as not-a-scan:
+            # the cold run parses the truth, so the mistake costs warmth, never
+            # correctness.
+            ["--not-an-option", "report"],
         ],
     )
     def test_everything_else_runs_cold(self, argv):
@@ -74,6 +94,32 @@ class TestClassification:
 
         registered = set(typer_main.get_command(app).commands.keys())
         assert registered - {"scan"} == set(client.NON_SCAN_SUBCOMMANDS)
+
+    def test_the_value_options_match_the_registered_cli(self):
+        """The root options the classifier passes a value over are pinned to the real
+        Typer app: an option that takes a value and is missing here lets its value be
+        read as a subcommand's name (a scan runs cold), and one that takes none and is
+        listed hides the subcommand after it (a command is handed to the daemon)."""
+        import typer.main as typer_main
+
+        from automated_security_helper.cli.main import app
+
+        options = [
+            param
+            for param in typer_main.get_command(app).params
+            if param.param_type_name == "option"
+        ]
+        takes_a_value = {
+            spelling
+            for param in options
+            if not param.is_flag and not param.count
+            for spelling in param.opts
+        }
+        # The control: the options the cases above name are among them.
+        assert {"--mode", "--output-dir", "--scanners", "-c", "-f"} <= takes_a_value
+        assert takes_a_value == set(client.ROOT_VALUE_OPTIONS)
+        # One word is skipped, so no option takes more than one value.
+        assert all(param.nargs == 1 for param in options)
 
     def test_no_express_beats_express_wherever_both_appear(self):
         assert not client.wants_express(["--express", "--no-express"])
@@ -259,6 +305,31 @@ class TestExpressFlagChoreography:
         code = client.delegated_exit_code(["scan", "--express"], environ={})
         assert code == 2
         assert recorder.calls == ["connect", "autostart", "await", "run"]
+
+    def test_a_value_that_names_a_command_still_asks_for_the_daemon(
+        self, monkeypatch, tmp_path
+    ):
+        """`ash --express --mode container` is a scan whose --mode value spells a
+        command. Read as a command it ran cold, and the daemon --express asked for
+        was never started, with no word said about it."""
+        recorder = _Recorder(monkeypatch, tmp_path, outcomes=[("exit", 0)])
+        code = client.delegated_exit_code(
+            ["--express", "--mode", "container"], environ={}
+        )
+        assert code == 0
+        assert recorder.calls == ["connect", "autostart", "await", "run"]
+
+    def test_a_results_command_runs_cold_even_under_express(
+        self, monkeypatch, tmp_path
+    ):
+        """The control for the case above: a command that is not a scan never
+        reaches the daemon, --express or not."""
+        recorder = _Recorder(monkeypatch, tmp_path, outcomes=[])
+        assert (
+            client.delegated_exit_code(["--express", "results", "report"], environ={})
+            is None
+        )
+        assert recorder.calls == []
 
     def test_a_stale_daemon_is_restarted_once_under_express(
         self, monkeypatch, tmp_path
