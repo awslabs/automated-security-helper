@@ -24,6 +24,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    TypeVar,
 )
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 
@@ -31,6 +32,9 @@ from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.plugins.events import AshEventType
 from automated_security_helper.utils.import_caches import invalidate_import_caches
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+
+#: A plugin type key: the singular spelling, or the PluginKind member for it.
+_KindKey = TypeVar("_KindKey", bound=str)
 
 
 def callback_display_name(callback: Any, *, strict: bool = False) -> str:
@@ -912,9 +916,9 @@ class AshPluginManager(BaseModel):
 
     def plugins_loaded_by(
         self,
-        plugins: Mapping[str, Sequence[type]],
+        plugins: Mapping[_KindKey, Sequence[type]],
         module_names: Iterable[str],
-    ) -> Dict[str, List[type]]:
+    ) -> Dict[_KindKey, List[type]]:
         """``plugins`` without the classes only another scan's untrusted imports brought in.
 
         A class is left out when every registration that brings it into

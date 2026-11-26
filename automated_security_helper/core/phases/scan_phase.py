@@ -1206,7 +1206,11 @@ class ScanPhase(EnginePhase):
 
                 metadata = getattr(aggregated_results, "metadata", None)
                 recorded = getattr(metadata, "scan_source", None)
-                if isinstance(recorded, str) and recorded.startswith("image:"):
+                if (
+                    metadata is not None
+                    and isinstance(recorded, str)
+                    and recorded.startswith("image:")
+                ):
                     metadata.scan_source = image_scan_source(resolved)
         source_files = (
             []

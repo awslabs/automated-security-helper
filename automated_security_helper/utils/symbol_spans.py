@@ -307,7 +307,7 @@ def _load_language(grammar: SymbolGrammar) -> Any:
             # The grammar's loader hands back the language pointer; py-tree-sitter
             # marks the int overload of Language() deprecated in favor of a
             # capsule, which the loaders here do not return.
-            language = tree_sitter.Language(getattr(module, grammar.loader)())  # ty: ignore[deprecated]
+            language = tree_sitter.Language(getattr(module, grammar.loader)())
         except (ImportError, AttributeError, TypeError, ValueError) as exc:
             raise SymbolsUnavailableError(f"{type(exc).__name__}: {exc}") from exc
         _language_cache[key] = language

@@ -834,7 +834,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             return override(self, *args, **kw)
 
         setattr(validate_with_forced_record, _FORCED_RECORD_PREFIX_MARK, True)
-        cls.validate_plugin_dependencies = validate_with_forced_record  # type: ignore[method-assign]
+        # Replaced on the class being created, as the mark above is set: the
+        # wrapper is the subclass's own method from here on.
+        setattr(cls, "validate_plugin_dependencies", validate_with_forced_record)
 
     def _forced_binary_precluded_reason(self) -> Optional[str]:
         """Why a recorded ``--binary-path`` force cannot satisfy this scanner, or None.
