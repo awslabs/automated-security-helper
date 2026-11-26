@@ -16,7 +16,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Tuple
 
-from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.vocab import TargetType
 
 if TYPE_CHECKING:
@@ -25,15 +24,18 @@ if TYPE_CHECKING:
 
 def context_work_dir(context: "PluginContext") -> Path:
     """The context's work directory, the converted tree's root, or a
-    ``ScannerError`` when the context has none.
+    ``ValueError`` when the context has none.
 
     A validated context always has one (``PluginContext._derive_work_dir``
     derives it from the output directory); a context built with
-    ``model_construct`` and no work directory does not.
+    ``model_construct`` and no work directory does not. A ``ValueError``, not
+    ``ScannerError``: that lives in ``core``, and an import of ``core`` here
+    would be one more edge against the layer order
+    (``tests/unit/test_layer_dag_boundaries.py``).
     """
     work_dir = context.work_dir
     if work_dir is None:
-        raise ScannerError("The scan's context has no work directory")
+        raise ValueError("The scan's context has no work directory")
     return Path(work_dir)
 
 

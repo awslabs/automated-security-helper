@@ -59,7 +59,6 @@ from automated_security_helper.utils.suppression_matcher import (
     ignore_path_matches,
 )
 from automated_security_helper.core.cancellation import ScanCancelled
-from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.vocab import FailureKind
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -387,12 +386,13 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         """This converter's own options: the nbconvert version and install timeout.
 
         Raises:
-            ScannerError: When the converter has no configuration, or runs on the
-                generic converter configuration, which declares neither option.
+            ScannerError: When the converter has no configuration.
+            TypeError: When it runs on the generic converter configuration, which
+                declares neither option.
         """
         config = self._require_config()
         if not isinstance(config, JupyterConverterConfig):
-            raise ScannerError(
+            raise TypeError(
                 f"{self.__class__.__name__} runs on the generic converter "
                 "configuration, which has no nbconvert version or install "
                 "timeout options"

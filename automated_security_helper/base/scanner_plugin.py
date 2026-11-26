@@ -78,7 +78,9 @@ from typing import (
 from abc import abstractmethod
 
 if TYPE_CHECKING:
-    from automated_security_helper.core.asset import ImageLocator
+    # Re-exported for the scanners that override the image hooks below: the
+    # hooks' signatures name it, and a plugin imports the contract, not core.
+    from automated_security_helper.core.asset import ImageLocator as ImageLocator
     from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
 # Pattern for valid CLI flag keys: one or two leading dashes followed by

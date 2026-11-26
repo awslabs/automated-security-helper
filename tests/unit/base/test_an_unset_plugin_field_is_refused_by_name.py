@@ -107,9 +107,7 @@ def test_a_converter_whose_context_has_no_configuration_is_refused(tmp_path):
     context = _context(tmp_path, with_config=False)
     assert context.config is None
     converter = McpConfigConverter(context=context, config=McpConfigConverterConfig())
-    with pytest.raises(
-        ScannerError, match="McpConfigConverter has no ASH configuration"
-    ):
+    with pytest.raises(ValueError, match="McpConfigConverter has no ASH configuration"):
         converter._skipped(str(context.source_dir / ".mcp.json"))
 
 
@@ -156,9 +154,7 @@ def test_the_jupyter_converter_refuses_options_the_generic_configuration_lacks(
     # Construction reads a generic configuration into the converter's own model,
     # so the generic one is put in afterwards, as the field admits.
     converter.config = ConverterPluginConfigBase(name="jupyter")
-    with pytest.raises(
-        ScannerError, match="runs on the generic converter configuration"
-    ):
+    with pytest.raises(TypeError, match="runs on the generic converter configuration"):
         converter._get_tool_version_constraint()
 
 
@@ -193,7 +189,7 @@ def test_trivy_refuses_an_operator_path_lookup_for_a_configuration_without_a_nam
 def test_scan_targets_refuses_a_context_without_a_work_directory(tmp_path):
     from automated_security_helper.utils.scan_targets import scan_targets
 
-    with pytest.raises(ScannerError, match="The scan's context has no work directory"):
+    with pytest.raises(ValueError, match="The scan's context has no work directory"):
         scan_targets(SimpleNamespace(source_dir=tmp_path, work_dir=None))
 
 

@@ -229,7 +229,7 @@ from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
 if TYPE_CHECKING:
-    from automated_security_helper.core.asset import ImageLocator
+    from automated_security_helper.base.scanner_plugin import ImageLocator
 
 # UNBOUNDED_TRIVY_TIMEOUT and trivy_timeout live in the shared base since trivy-repo
 # passes the same bound; both names stay importable from this module.
