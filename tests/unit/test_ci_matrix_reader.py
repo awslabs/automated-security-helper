@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import itertools
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -826,3 +828,218 @@ class TestTheRealWorkflows:
         for leg in others:
             running = [s.get("uses") for s in _validator_steps(job) if ci.step_runs(s, leg)]
             assert len(running) == 1, (leg, running)
+
+
+# ---------------------------------------------------------------------------
+# The old expanders, as the four modules carried them at c15148192f4, held against the
+# reader before the modules are re-pointed.
+# ---------------------------------------------------------------------------
+
+_OLD_OVERLAY = re.compile(
+    r"^\$\{\{ github\.event_name == 'pull_request' && '([^']*)' \|\| '' \}\}$"
+)
+_OLD_FINCH_LABEL_OVERRIDE = re.compile(
+    r"\(matrix\.(?P<axis>[\w-]+) == '(?P<value>[^']+)' && "
+    r"matrix\.os == '(?P<os>[^']+)'\) && '(?P<label>[^']+)' \|\| matrix\.os"
+)
+
+
+def _old_resolve(value, event):
+    if isinstance(value, str):
+        match = _OLD_OVERLAY.match(value)
+        if match:
+            return match.group(1) if event == "pull_request" else None
+    return value
+
+
+def _old_cells(job, event="push"):
+    """test_unified_ci_job_counts.py _cells."""
+    matrix = (job.get("strategy") or {}).get("matrix")
+    if not matrix:
+        return [{}]
+    assert isinstance(matrix, dict), f"a matrix this test cannot expand: {matrix!r}"
+    axes = {k: v for k, v in matrix.items() if k not in ("include", "exclude")}
+    for name, values in axes.items():
+        assert isinstance(values, list), f"axis {name} is not a list: {values!r}"
+    cells = (
+        [dict(zip(axes, combo)) for combo in itertools.product(*axes.values())]
+        if axes
+        else []
+    )
+    for excluded in matrix.get("exclude") or []:
+        resolved = {k: _old_resolve(v, event) for k, v in excluded.items()}
+        if any(v is None for v in resolved.values()):
+            continue
+        cells = [
+            c for c in cells if not all(c.get(k) == v for k, v in resolved.items())
+        ]
+    added = []
+    for included in matrix.get("include") or []:
+        matching = [
+            cell
+            for cell in cells
+            if all(cell[k] == v for k, v in included.items() if k in axes)
+        ]
+        for cell in matching:
+            cell.update(included)
+        if not matching:
+            added.append(dict(included))
+    return cells + added
+
+
+def _old_effective_matrix(job):
+    """test_ci_matrix_agreement.py and test_oci_runner_ci_coverage.py _effective_matrix."""
+    matrix = (job.get("strategy") or {}).get("matrix") or {}
+    axes = {k: v for k, v in matrix.items() if k not in ("include", "exclude")}
+    cells = []
+    if axes:
+        cells = [dict(zip(axes, combo)) for combo in itertools.product(*axes.values())]
+        for excluded in matrix.get("exclude") or []:
+            cells = [
+                cell
+                for cell in cells
+                if not all(cell.get(k) == v for k, v in excluded.items())
+            ]
+    cells.extend(matrix.get("include") or [])
+    return cells
+
+
+def _old_install_matrix(workflow):
+    """tests/unit/docs/test_page_claims.py _install_matrix."""
+    rows = []
+    for job in workflow["jobs"].values():
+        matrix = (job.get("strategy") or {}).get("matrix")
+        if not isinstance(matrix, dict) or "method" not in matrix:
+            continue
+        assert "include" not in matrix, "expand matrix include entries here first"
+        keys = [k for k in matrix if k != "exclude"]
+        combos = [
+            dict(zip(keys, v)) for v in itertools.product(*(matrix[k] for k in keys))
+        ]
+        excluded = matrix.get("exclude") or []
+        rows += [
+            c
+            for c in combos
+            if not any(all(c.get(k) == v for k, v in e.items()) for e in excluded)
+        ]
+    return rows
+
+
+def _old_runner_images(job):
+    """test_unified_ci_job_counts.py _runner_images."""
+    runs_on = str(job["runs-on"])
+    if "matrix.os" in runs_on:
+        override = _OLD_FINCH_LABEL_OVERRIDE.search(runs_on)
+        images = set()
+        for cell in _old_cells(job):
+            image = cell["os"]
+            if (
+                override
+                and cell.get(override["axis"]) == override["value"]
+                and image == override["os"]
+            ):
+                image = override["label"]
+            images.add(image)
+        return images
+    return {runs_on}
+
+
+MATRIX_WORKFLOWS = (
+    "ash-unified-ci.yml",
+    "ash-install-methods.yml",
+    "ash-docs-ci-runners.yml",
+)
+
+
+def _both(name):
+    """The workflow as the old modules read it (yaml.safe_load) and as the reader does."""
+    path = WORKFLOWS / name
+    return yaml.safe_load(path.read_text(encoding="utf-8")), ci.load_workflow(path)
+
+
+def _matrix_of(job):
+    return (job.get("strategy") or {}).get("matrix") or {}
+
+
+class TestDifferentialAgainstTheOldExpanders:
+    @pytest.mark.parametrize("name", MATRIX_WORKFLOWS)
+    def test_the_cells_equal_the_old_expansion_on_every_event(self, name):
+        old, new = _both(name)
+        wrong = []
+        for event in ci.EVENTS:
+            total = 0
+            for job_id, job in new["jobs"].items():
+                got = ci.cells(job, event)
+                total += len(got)
+                if got != _old_cells(old["jobs"][job_id], event):
+                    wrong.append((event, job_id))
+            matrix_jobs = [j for j in new["jobs"].values() if _matrix_of(j)]
+            print(
+                f"DIFFERENTIAL {name} {event}: jobs={len(new['jobs'])} "
+                f"matrix_jobs={len(matrix_jobs)} cells={total}"
+            )
+        assert not wrong, wrong
+
+    @pytest.mark.parametrize(
+        "path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda path: path.name
+    )
+    def test_every_workflows_cells_equal_the_old_expansion(self, path):
+        old = yaml.safe_load(path.read_text(encoding="utf-8"))
+        new = ci.load_workflow(path)
+        for event in ci.EVENTS:
+            for job_id, job in new["jobs"].items():
+                assert ci.cells(job, event) == _old_cells(old["jobs"][job_id], event), (
+                    path.name,
+                    job_id,
+                    event,
+                )
+
+    @pytest.mark.parametrize("name", MATRIX_WORKFLOWS)
+    def test_the_effective_matrix_is_the_axis_cells_and_every_include(self, name):
+        old, new = _both(name)
+        compared = 0
+        for job_id, job in new["jobs"].items():
+            matrix = _matrix_of(job)
+            adapted = ci.axis_cells(matrix, "workflow_dispatch") + list(
+                matrix.get("include") or []
+            )
+            assert adapted == _old_effective_matrix(old["jobs"][job_id]), job_id
+            compared += len(adapted)
+        print(f"DIFFERENTIAL {name} effective matrix: cells={compared}")
+
+    def test_the_install_rows_equal_the_old_install_matrix(self):
+        old, new = _both("ash-install-methods.yml")
+        rows = []
+        for job in new["jobs"].values():
+            matrix = _matrix_of(job)
+            if isinstance(matrix, dict) and "method" in matrix:
+                rows += ci.cells(job, "workflow_dispatch")
+        assert rows == _old_install_matrix(old)
+        assert len(rows) >= 50, len(rows)
+        print(f"DIFFERENTIAL ash-install-methods.yml install rows: {len(rows)}")
+
+    def test_the_runner_images_equal_the_old_ones(self):
+        old, new = _both("ash-unified-ci.yml")
+        compared = 0
+        for job_id, old_job in old["jobs"].items():
+            if "runs-on" not in old_job:
+                continue
+            job = new["jobs"][job_id]
+            images = {ci.runs_on(job, leg, new) for leg in ci.cells(job)}
+            assert images == _old_runner_images(old_job), job_id
+            compared += 1
+        assert compared >= 20, compared
+        print(f"DIFFERENTIAL ash-unified-ci.yml runner images: {compared} jobs")
+
+    def test_the_comparison_can_fail(self):
+        """Controls: the old and new expansions differ when they should, so equality
+        above is a finding and not a property of the comparison."""
+        job = _job({"os": ["a", "b"]})
+        assert _old_cells(job) == ci.cells(job)
+        assert _old_cells(job) != ci.cells(job)[:1]
+        merging = _job({"os": ["a"], "include": [{"os": "a", "extra": 1}]})
+        # The two old rules for an include differ, which is why the adapter keeps its own.
+        assert _old_cells(merging) == [{"os": "a", "extra": 1}]
+        assert _old_effective_matrix(merging) == [{"os": "a"}, {"os": "a", "extra": 1}]
+        overlaid = _job({"os": ["a", "b"], "exclude": [{"os": _overlay("a")}]})
+        assert _old_cells(overlaid, "pull_request") != _old_effective_matrix(overlaid)
