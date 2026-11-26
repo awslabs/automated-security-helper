@@ -10,7 +10,7 @@ metadata:
   name: ashscans.ash.awslabs.github.io
   annotations:
     ash.awslabs.github.io/generated-by: python -m ash_operator.generate_manifests
-    ash.awslabs.github.io/ash-config-schema-sha256: 915c50abb461e0db
+    ash.awslabs.github.io/ash-config-schema-sha256: 9cdcbf122207173c
 spec:
   group: ash.awslabs.github.io
   scope: Namespaced
@@ -591,7 +591,8 @@ spec:
                               (the primary finding''s id, on every non-primary member) and `duplicate_sources`
                               (on the primary: the other members'' scanner, rule, id and severity). Rows
                               and counts are unchanged. Off by default because the columns change the
-                              CSV header. CLI: `--annotate-duplicates` on `ash scan` and `ash report`.'
+                              CSV header. CLI: `--annotate-duplicates` on `ashx scan` and `ashx results
+                              report`.'
                           fold:
                             x-kubernetes-preserve-unknown-fields: true
                             description: 'When true, the human-readable reports (HTML, Markdown, text,
@@ -604,7 +605,7 @@ spec:
                               overlaps both. IaC resource clusters are annotated only. Finding ids, SARIF,
                               per-scanner metrics, suppressions, baselines, the CSV, flat-JSON and JUnit
                               reports and the exit code are unchanged. Off by default because it changes
-                              row counts. CLI: `--fold-duplicates` on `ash scan` and `ash report`.'
+                              row counts. CLI: `--fold-duplicates` on `ashx scan` and `ashx results report`.'
                         type: object
                       history:
                         description: Run history recording (a compact record of each completed scan).

@@ -87,8 +87,10 @@ KNOWN_VIOLATIONS: Dict[Tuple[str, str], int] = {
     ("base", "models"): 10,
     ("base", "plugins"): 5,
     # 96 -> 97: one more utils import landed with the vocabulary/facets waves this
-    # census re-measured at; the edge itself is long-known debt.
-    ("base", "utils"): 97,
+    # census re-measured at; the edge itself is long-known debt. 97 -> 96: 4.0 removed
+    # the community tier aliases, and with them the utils.log import of
+    # base/plugin_manifest.py's alias warning.
+    ("base", "utils"): 96,
     ("config", "core"): 42,
     ("config", "plugins"): 5,
     ("express", "cli"): 1,
