@@ -98,6 +98,20 @@ class TestNothingDeclaredNothingFound:
         plain = tmp_path / "not-a-socket"
         plain.write_text("", encoding="utf-8")
         assert _both({"DOCKER_HOST": f"unix://{plain}"}) == (ContainerEngine.NONE, None)
+        assert _both({"CONTAINER_HOST": f"unix://{plain}"}) == (
+            ContainerEngine.NONE,
+            None,
+        )
+
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="a bare path is read as a socket path only when it starts with '/', "
+        "which a Windows drive path does not",
+    )
+    def test_a_bare_path_to_a_regular_file_is_not_a_socket(self, defaults, tmp_path):
+        plain = tmp_path / "not-a-socket"
+        plain.write_text("", encoding="utf-8")
+        assert _both({"DOCKER_HOST": str(plain)}) == (ContainerEngine.NONE, None)
         assert _both({"CONTAINER_HOST": str(plain)}) == (ContainerEngine.NONE, None)
 
 
