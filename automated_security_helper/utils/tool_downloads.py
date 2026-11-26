@@ -1143,6 +1143,8 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "pygit2 commit": "d88fa3dcbab21a7eb33ff354222c4ec8e5ff6ece",  # pragma: allowlist secret
     "pygit2/AUTHORS.md": "4ecad3164600b3c7a216cdd636288d1434afd6307737cfeba8fc1372dc04ba20",  # pragma: allowlist secret
     "pygit2/COPYING": "3f2a642de5f24ed216404873b875e9d1c5dd112a4e0ae27a42f7303583f69683",  # pragma: allowlist secret
+    "scorecard commit": "d7552fb3cdc05e9f6426177d3328887304fce554",  # pragma: allowlist secret
+    "scorecard/LICENSE": "61324beb8841ff62645c758ff5b121164592ec163056dda34d76a0526a0b3b5e",  # pragma: allowlist secret
     "semgrep commit": "a5844e7c2d9d04548f86048f525d467a00742656",  # pragma: allowlist secret
     "semgrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "semgrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
@@ -1589,6 +1591,24 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             ),
         ),
         version_probe=("polaris", "version"),
+    ),
+    # The alpha Scorecard scanner's tool. Pinned and installed by its own module
+    # (``ash_scorecard_plugins/scorecard_install.py``), not by install-pinned-tool,
+    # so its license is staged from the repository at the pinned commit on the
+    # --licenses-only line; every release archive's LICENSE is byte-identical to
+    # that file (compared on 2026-11-26). ``scorecard --version`` is an unknown
+    # flag, so the version check runs ``scorecard version`` (prints
+    # "GitVersion:    v5.7.0").
+    "scorecard": ThirdPartyLicense(
+        tool="scorecard",
+        version="v5.7.0",
+        license="Apache-2.0",
+        repository="https://github.com/ossf/scorecard",
+        commit=_THIRD_PARTY_HASHES["scorecard commit"],
+        files=(
+            _from_source("scorecard", "https://github.com/ossf/scorecard", "LICENSE"),
+        ),
+        version_probe=("scorecard", "version"),
     ),
     # The wheel's dist-info holds no license file, only METADATA's
     # `License-Expression: LGPL-2.1-or-later`, so both files come from the

@@ -1,0 +1,102 @@
+{
+  "checks": [
+    {
+      "details": null,
+      "documentation": {
+        "short": "Determines if the project has generated executable (binary) artifacts in the source repository.",
+        "url": "https://github.com/ossf/scorecard/blob/d7552fb3cdc05e9f6426177d3328887304fce554/docs/checks.md#binary-artifacts"
+      },
+      "name": "Binary-Artifacts",
+      "reason": "no binaries found in the repo",
+      "score": 10
+    },
+    {
+      "details": null,
+      "documentation": {
+        "short": "Determines if the project's GitHub Action workflows avoid dangerous patterns.",
+        "url": "https://github.com/ossf/scorecard/blob/d7552fb3cdc05e9f6426177d3328887304fce554/docs/checks.md#dangerous-workflow"
+      },
+      "name": "Dangerous-Workflow",
+      "reason": "no dangerous workflow patterns detected",
+      "score": 10
+    },
+    {
+      "details": [
+        "Warn: no dependency update tool configurations found"
+      ],
+      "documentation": {
+        "short": "Determines if the project uses a dependency update tool.",
+        "url": "https://github.com/ossf/scorecard/blob/d7552fb3cdc05e9f6426177d3328887304fce554/docs/checks.md#dependency-update-tool"
+      },
+      "name": "Dependency-Update-Tool",
+      "reason": "no update tool detected",
+      "score": 0
+    },
+    {
+      "details": [
+        "Warn: project does not have a license file"
+      ],
+      "documentation": {
+        "short": "Determines if the project has defined a license.",
+        "url": "https://github.com/ossf/scorecard/blob/d7552fb3cdc05e9f6426177d3328887304fce554/docs/checks.md#license"
+      },
+      "name": "License",
+      "reason": "license file not detected",
+      "score": 0
+    },
+    {
+      "details": [
+        "Warn: GitHub-owned GitHubAction not pinned by hash: .github/workflows/ci.yml:13",
+        "Warn: pipCommand not pinned by hash: .github/workflows/ci.yml:15",
+        "Info:   1 out of   2 GitHub-owned GitHubAction dependencies pinned",
+        "Info:   0 out of   1 pipCommand dependencies pinned"
+      ],
+      "documentation": {
+        "short": "Determines if the project has declared and pinned the dependencies of its build process.",
+        "url": "https://github.com/ossf/scorecard/blob/d7552fb3cdc05e9f6426177d3328887304fce554/docs/checks.md#pinned-dependencies"
+      },
+      "name": "Pinned-Dependencies",
+      "reason": "dependency not pinned by hash detected -- score normalized to 3",
+      "score": 3
+    },
+    {
+      "details": [
+        "Info: security policy file detected: SECURITY.md:1",
+        "Info: Found linked content: SECURITY.md:1",
+        "Warn: One or no descriptive hints of disclosure, vulnerability, and/or timelines in security policy",
+        "Info: Found text in security policy: SECURITY.md:1"
+      ],
+      "documentation": {
+        "short": "Determines if the project has published a security policy.",
+        "url": "https://github.com/ossf/scorecard/blob/d7552fb3cdc05e9f6426177d3328887304fce554/docs/checks.md#security-policy"
+      },
+      "name": "Security-Policy",
+      "reason": "security policy file detected",
+      "score": 9
+    },
+    {
+      "details": [
+        "Warn: jobLevel 'security-events' permission set to 'write': .github/workflows/ci.yml:10",
+        "Info: topLevel 'contents' permission set to 'read': .github/workflows/ci.yml:5"
+      ],
+      "documentation": {
+        "short": "Determines if the project's workflows follow the principle of least privilege.",
+        "url": "https://github.com/ossf/scorecard/blob/d7552fb3cdc05e9f6426177d3328887304fce554/docs/checks.md#token-permissions"
+      },
+      "name": "Token-Permissions",
+      "reason": "GitHub workflow tokens follow principle of least privilege",
+      "score": 10
+    }
+  ],
+  "date": "2026-11-26T17:14:12Z",
+  "metadata": null,
+  "repo": {
+    "commit": "unknown",
+    "name": "file://in/pos"
+  },
+  "score": 6.9,
+  "scorecard": {
+    "commit": "d7552fb3cdc05e9f6426177d3328887304fce554",
+    "version": "v5.7.0"
+  }
+}

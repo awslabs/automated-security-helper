@@ -232,6 +232,10 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
     # The committed SARIF is the converter's output for a REAL captured Polaris
     # v10.2.6 run (captured/positive.json); a regeneration test keeps it honest.
     "polaris": CorpusSpec("polaris", sarif=("captured/*.sarif",)),
+    # The committed SARIF is the converter's output for a REAL captured Scorecard
+    # v5.7.0 run (captured/positive.json, its file-based checks run locally, since a
+    # --repo run needs a GitHub token); a regeneration test keeps it honest.
+    "scorecard": CorpusSpec("scorecard", sarif=("captured/*.sarif",)),
     "secretlint": CorpusSpec("secretlint", sarif=("captured/*.sarif",)),
     "semgrep": CorpusSpec("semgrep", sarif=("captured/*.sarif",)),
     # No corpus until a licensed `snyk code test --sarif` run is committed under
@@ -763,7 +767,7 @@ def test_the_gate_carries_no_waiver_but_the_register() -> None:
 def test_the_registry_and_the_corpus_table_agree() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
     names = {_name(cls) for cls in SCANNER_CLASSES}
-    assert len(SCANNER_CLASSES) == 30, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == 32, sorted(c.__name__ for c in SCANNER_CLASSES)
     assert names == set(CORPORA) == set(SCANNER_TOOL_TYPES), (
         f"registry {sorted(names)} / corpus table {sorted(CORPORA)}: a scanner "
         "needs a CORPORA row (a corpus, or None with the fixture to author)"

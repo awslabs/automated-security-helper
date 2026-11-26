@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "properties": {
+        "scorecard_aggregate_score": 6.9
+      },
+      "results": [
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "github.com/example-org/example-repo"
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Dependency-Update-Tool scored 0/10: no update tool detected This scores the origin repository as hosted on GitHub, not the files that were scanned. Details: Warn: no dependency update tool configurations found"
+          },
+          "partialFingerprints": {
+            "scorecard/v1": "47c6f0e703e56188e529c26ca56e6bb7"
+          },
+          "properties": {
+            "issue_severity": "HIGH",
+            "scorecard_repo": "github.com/example-org/example-repo",
+            "scorecard_score": 0
+          },
+          "ruleId": "Dependency-Update-Tool"
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "github.com/example-org/example-repo"
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "License scored 0/10: license file not detected This scores the origin repository as hosted on GitHub, not the files that were scanned. Details: Warn: project does not have a license file"
+          },
+          "partialFingerprints": {
+            "scorecard/v1": "b775e94679919920d9b958c80fa6501a"
+          },
+          "properties": {
+            "issue_severity": "HIGH",
+            "scorecard_repo": "github.com/example-org/example-repo",
+            "scorecard_score": 0
+          },
+          "ruleId": "License"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "github.com/example-org/example-repo"
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Pinned-Dependencies scored 3/10: dependency not pinned by hash detected -- score normalized to 3 This scores the origin repository as hosted on GitHub, not the files that were scanned. Details: Warn: GitHub-owned GitHubAction not pinned by hash: .github/workflows/ci.yml:13; Warn: pipCommand not pinned by hash: .github/workflows/ci.yml:15; Info:   1 out of   2 GitHub-owned GitHubAction dependencies pinned; Info:   0 out of   1 pipCommand dependencies pinned"
+          },
+          "partialFingerprints": {
+            "scorecard/v1": "75b6de4c31c3a360fe94b81a057fbe66"
+          },
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "scorecard_repo": "github.com/example-org/example-repo",
+            "scorecard_score": 3
+          },
+          "ruleId": "Pinned-Dependencies"
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "github.com/example-org/example-repo"
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Security-Policy scored 9/10: security policy file detected This scores the origin repository as hosted on GitHub, not the files that were scanned. Details: Info: security policy file detected: SECURITY.md:1; Info: Found linked content: SECURITY.md:1; Warn: One or no descriptive hints of disclosure, vulnerability, and/or timelines in security policy; Info: Found text in security policy: SECURITY.md:1"
+          },
+          "partialFingerprints": {
+            "scorecard/v1": "388df80634ba1e9152131b8a1ac16ffa"
+          },
+          "properties": {
+            "issue_severity": "LOW",
+            "scorecard_repo": "github.com/example-org/example-repo",
+            "scorecard_score": 9
+          },
+          "ruleId": "Security-Policy"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "informationUri": "https://github.com/ossf/scorecard",
+          "name": "OpenSSF Scorecard",
+          "rules": [
+            {
+              "helpUri": "https://github.com/ossf/scorecard/blob/d7552fb3cdc05e9f6426177d3328887304fce554/docs/checks.md#dependency-update-tool",
+              "id": "Dependency-Update-Tool",
+              "properties": {
+                "tags": [
+                  "scorecard",
+                  "supply-chain"
+                ]
+              },
+              "shortDescription": {
+                "text": "Determines if the project uses a dependency update tool."
+              }
+            },
+            {
+              "helpUri": "https://github.com/ossf/scorecard/blob/d7552fb3cdc05e9f6426177d3328887304fce554/docs/checks.md#license",
+              "id": "License",
+              "properties": {
+                "tags": [
+                  "scorecard",
+                  "supply-chain"
+                ]
+              },
+              "shortDescription": {
+                "text": "Determines if the project has defined a license."
+              }
+            },
+            {
+              "helpUri": "https://github.com/ossf/scorecard/blob/d7552fb3cdc05e9f6426177d3328887304fce554/docs/checks.md#pinned-dependencies",
+              "id": "Pinned-Dependencies",
+              "properties": {
+                "tags": [
+                  "scorecard",
+                  "supply-chain"
+                ]
+              },
+              "shortDescription": {
+                "text": "Determines if the project has declared and pinned the dependencies of its build process."
+              }
+            },
+            {
+              "helpUri": "https://github.com/ossf/scorecard/blob/d7552fb3cdc05e9f6426177d3328887304fce554/docs/checks.md#security-policy",
+              "id": "Security-Policy",
+              "properties": {
+                "tags": [
+                  "scorecard",
+                  "supply-chain"
+                ]
+              },
+              "shortDescription": {
+                "text": "Determines if the project has published a security policy."
+              }
+            }
+          ],
+          "version": "v5.7.0"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

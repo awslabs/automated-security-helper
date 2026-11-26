@@ -1,0 +1,95 @@
+{
+  "checks": [
+    {
+      "details": [
+        "Warn: branch protection not enabled for branch 'main'"
+      ],
+      "documentation": {
+        "short": "Determines if the default and release branches are protected with GitHub's branch protection settings.",
+        "url": "https://github.com/ossf/scorecard/blob/main/docs/checks.md#branch-protection"
+      },
+      "name": "Branch-Protection",
+      "reason": "branch protection not enabled on development/release branches",
+      "score": 0
+    },
+    {
+      "details": null,
+      "documentation": {
+        "short": "Determines if the project requires human code review before pull requests (aka merge requests) are merged.",
+        "url": "https://github.com/ossf/scorecard/blob/main/docs/checks.md#code-review"
+      },
+      "name": "Code-Review",
+      "reason": "Found 3/10 approved changesets -- score normalized to 3",
+      "score": 3
+    },
+    {
+      "details": [
+        "Warn: 5 commits out of 10 are checked with a SAST tool"
+      ],
+      "documentation": {
+        "short": "Determines if the project uses static code analysis.",
+        "url": "https://github.com/ossf/scorecard/blob/main/docs/checks.md#sast"
+      },
+      "name": "SAST",
+      "reason": "SAST tool is not run on all commits -- score normalized to 5",
+      "score": 5
+    },
+    {
+      "details": [
+        "Warn: GitHub-owned GitHubAction not pinned by hash: .github/workflows/ci.yml:12"
+      ],
+      "documentation": {
+        "short": "Determines if the project has declared and pinned the dependencies of its build process.",
+        "url": "https://github.com/ossf/scorecard/blob/main/docs/checks.md#pinned-dependencies"
+      },
+      "name": "Pinned-Dependencies",
+      "reason": "dependency not pinned by hash detected -- score normalized to 6",
+      "score": 6
+    },
+    {
+      "details": [
+        "Warn: no topLevel permission defined: .github/workflows/ci.yml:1"
+      ],
+      "documentation": {
+        "short": "Determines if the project's workflows follow the principle of least privilege.",
+        "url": "https://github.com/ossf/scorecard/blob/main/docs/checks.md#token-permissions"
+      },
+      "name": "Token-Permissions",
+      "reason": "detected GitHub workflow tokens with excessive permissions",
+      "score": 9
+    },
+    {
+      "details": [
+        "Info: project has a license file: LICENSE:0"
+      ],
+      "documentation": {
+        "short": "Determines if the project has defined a license.",
+        "url": "https://github.com/ossf/scorecard/blob/main/docs/checks.md#license"
+      },
+      "name": "License",
+      "reason": "license file detected",
+      "score": 10
+    },
+    {
+      "details": null,
+      "documentation": {
+        "short": "Determines if the project uses fuzzing.",
+        "url": "https://github.com/ossf/scorecard/blob/main/docs/checks.md#fuzzing"
+      },
+      "name": "Fuzzing",
+      "reason": "internal error: could not determine",
+      "score": -1
+    }
+  ],
+  "date": "2026-11-19T00:00:00Z",
+  "metadata": [],
+  "repo": {
+    "commit": "0000000000000000000000000000000000000000",
+    "name": "github.com/example-org/example-repo"
+  },
+  "score": 5.4,
+  "scorecard": {
+    "commit": "1111111111111111111111111111111111111111",
+    "version": "v5.7.0"
+  }
+}

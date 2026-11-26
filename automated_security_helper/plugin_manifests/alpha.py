@@ -226,6 +226,14 @@ MANIFESTS = (
         owned=(f"{_DOCS}/polaris-plugin.md", f"{_FIXTURES}/polaris"),
     ),
     _alpha(
+        "scorecard",
+        "ash_scorecard_plugins",
+        "scorecard_scanner",
+        "ScorecardScanner",
+        "ScorecardScannerConfigOptions",
+        owned=(f"{_DOCS}/scorecard-plugin.md", f"{_FIXTURES}/scorecard"),
+    ),
+    _alpha(
         "secretlint",
         "ash_secretlint_plugins",
         "secretlint_scanner",
