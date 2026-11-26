@@ -220,6 +220,11 @@ from automated_security_helper.schemas.sarif_schema_model import SarifReport
 # UNBOUNDED_TRIVY_TIMEOUT and trivy_timeout live in the shared base since trivy-repo
 # passes the same bound; both names stay importable from this module.
 
+#: trivy's own subcommand for a container-image scan. The word is trivy's CLI
+#: grammar, not ASH's TargetType label, which happens to share the spelling;
+#: named once so the vocab drift gate can tell the two apart.
+_TRIVY_IMAGE_SUBCOMMAND = "image"
+
 
 class TrivyScannerConfigOptions(ScannerOptionsBase):
     scanners: Annotated[
@@ -766,7 +771,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         try:
             # For this resolution only, exactly as the extra-args swaps are
             # scoped: the next fs target must not inherit the image subcommand.
-            self.subcommands = ["image"]
+            self.subcommands = [_TRIVY_IMAGE_SUBCOMMAND]
             final_args = self._resolve_arguments(
                 target=target_token, results_file=results_file
             )
@@ -803,7 +808,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         skipped for an image scan: joining image packages to the host's
         lockfiles would attribute a copy the image does not hold.
         """
-        if len(final_args) > 1 and final_args[1] == "image":
+        if len(final_args) > 1 and final_args[1] == _TRIVY_IMAGE_SUBCOMMAND:
             self._attach_image_layers(sarif_report, final_args)
         if not self._image_scan_in_progress:
             # The package-identity join reads the source tree's lockfiles,

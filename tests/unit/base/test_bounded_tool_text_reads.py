@@ -112,6 +112,12 @@ _ALLOWED_SIZED_READS = {
     ): "one byte to check database readability and bounded+1 metadata JSON; "
     "only the parsed timestamp leaves the reader",
     (
+        "utils/image_digest_resolver.py",
+        "inspect_digest",
+    ): "the engine's inspect answer over its unix socket at "
+    "_MAX_INSPECT_BYTES + 1, refused over the cap and parsed as JSON for one "
+    "digest field; structured engine output, no text shown",
+    (
         "utils/sdist_harvest.py",
         "harvest_lockfiles_from_sdist",
     ): "an embedded lockfile member of a hash-verified sdist, read at "

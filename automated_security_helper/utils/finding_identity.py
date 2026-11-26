@@ -216,8 +216,14 @@ FINGERPRINT_KINDS = ("fingerprints", "partialFingerprints")
 #: relative to the converted root in (``utils/scan_output_dirs``).
 CONVERTED_PATH_PROPERTY = "converted_path"
 
-#: The ``tree`` of a finding inside a container image.
-IMAGE_TREE = "image"
+#: The ``tree`` of a finding inside a container image: TargetType.IMAGE's wire
+#: spelling, which is also the identity component naming WHICH image
+#: (IMAGE_COMPONENT) -- one deliberate word, spelled through the enum so the
+#: vocab drift gate holds them together.
+IMAGE_TREE = TargetType.IMAGE.value
+#: The identity-key component carrying the image's digest (or the submitted
+#: locator) beside ``"tree": IMAGE_TREE``.
+IMAGE_COMPONENT = TargetType.IMAGE.value
 
 #: SARIF result properties carrying an image finding's attribution, written by
 #: the scanner executor on every image-scan result (``utils/image_attribution``)
@@ -445,7 +451,7 @@ def finding_identity(
     }
     if image is not None:
         base["tree"] = IMAGE_TREE
-        base["image"] = image
+        base[IMAGE_COMPONENT] = image
     elif converted:
         base["tree"] = TargetType.CONVERTED.value
     return FindingIdentity(
@@ -805,7 +811,7 @@ def secret_correlation_key(
     if identity.base.get("tree") is not None:
         key["tree"] = identity.base["tree"]
         if identity.base["tree"] == IMAGE_TREE:
-            key["image"] = identity.base.get("image")
+            key[IMAGE_COMPONENT] = identity.base.get(IMAGE_COMPONENT)
     return key
 
 

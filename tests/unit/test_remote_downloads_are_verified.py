@@ -182,6 +182,19 @@ _ALLOWED: dict[tuple[str, str], str] = {
         "The apt signing key for the Finch repository; the same trust-anchor shape as "
         "the NodeSource key in the Dockerfile. CI-only runner setup."
     ),
+    (
+        ".github/workflows/ash-image-scan-live-engine.yml",
+        "http://127.0.0.1:5000/v2/ash-live-engine/manifests/ci",
+    ): (
+        "The Docker-Content-Digest header of the job's OWN local registry "
+        "container (started two steps up from an image pinned by digest), read "
+        "as the EXPECTED VALUE the scan's recorded scope is then compared "
+        "against. It is a digest, not code: nothing fetched here is run or "
+        "installed, the shape is checked (sha256: and 64 hex) before use, and "
+        "the registry's answer is the trust anchor the test exists to measure "
+        "ASH against -- verifying it against anything else would be verifying "
+        "the oracle with the system under test."
+    ),
 }
 
 
