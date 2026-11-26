@@ -15,7 +15,7 @@ import logging
 import platform
 import sys
 from pathlib import Path
-from typing import Annotated, ClassVar, Dict, List, Literal
+from typing import Annotated, ClassVar, Dict, List, Literal, Tuple
 
 from pydantic import Field, PrivateAttr, model_validator
 
@@ -58,6 +58,25 @@ from automated_security_helper.utils.subprocess_utils import (
     spawn_run,
 )
 from automated_security_helper.utils.process_env import snapshot_environ
+
+#: The platform/arch keys of ``OpengrepScannerConfigOptions.sha256``: one per
+#: release asset ``OpengrepScanner.setup_custom_install_commands`` builds an
+#: install command for.
+_OpengrepPlatform = Literal[
+    "linux/amd64",
+    "linux/arm64",
+    "darwin/amd64",
+    "darwin/arm64",
+    "windows/amd64",
+]
+#: Every ``_OpengrepPlatform``, in the order the install commands are built.
+_OPENGREP_PLATFORMS: Tuple[_OpengrepPlatform, ...] = (
+    "linux/amd64",
+    "linux/arm64",
+    "darwin/amd64",
+    "darwin/arm64",
+    "windows/amd64",
+)
 
 
 class OpengrepScannerConfigOptions(ScannerOptionsBase):
@@ -122,13 +141,7 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
     # rather than installed unverified.
     sha256: Annotated[
         Dict[
-            Literal[
-                "linux/amd64",
-                "linux/arm64",
-                "darwin/amd64",
-                "darwin/arm64",
-                "windows/amd64",
-            ],
+            _OpengrepPlatform,
             Annotated[str, Field(pattern=r"^[0-9a-fA-F]{64}$")],
         ],
         Field(
@@ -520,17 +533,12 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         digests = self.config.options.sha256
         # TODO: detect manylinux vs musllinux. Only matters for a 1.x version: from
         # 2.0.0 the Linux build is one static executable (get_opengrep_url).
-        for target_platform, arch in (
-            ("linux", "amd64"),
-            ("linux", "arm64"),
-            ("darwin", "amd64"),
-            ("darwin", "arm64"),
-            ("windows", "amd64"),
-        ):
+        for platform_key in _OPENGREP_PLATFORMS:
+            target_platform, arch = platform_key.split("/")
             url = get_opengrep_url(
                 target_platform, arch, version=version, linux_type="manylinux"
             )
-            digest = digests.get(f"{target_platform}/{arch}")
+            digest = digests.get(platform_key)
             if url.endswith(".zip"):
                 # From 2.0.0 the Windows asset is a zip of opengrep.exe and its DLLs.
                 # The URL download installs the file it fetches as the executable, so
