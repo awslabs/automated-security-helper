@@ -187,6 +187,20 @@ class IngestRecord:
         """Whether the read changed nothing."""
         return not self._counts
 
+    def checkpoint(self) -> dict[str, Any]:
+        """The record as it is now, for :meth:`rollback`."""
+        return copy.deepcopy(self.__dict__)
+
+    def rollback(self, checkpoint: dict[str, Any]) -> None:
+        """Forget what was noted since *checkpoint*, which this record gave.
+
+        For a reader that makes one document per input and goes on when one is
+        refused: the repairs made on a document that was then left unread
+        changed nothing the report keeps, so they are not counted.
+        """
+        self.__dict__.clear()
+        self.__dict__.update(copy.deepcopy(checkpoint))
+
     @contextlib.contextmanager
     def scoped(self, label: str) -> Iterator[None]:
         """Prefix the pointers noted inside the block with *label*.

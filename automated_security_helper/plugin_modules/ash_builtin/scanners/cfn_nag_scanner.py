@@ -45,6 +45,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
+from automated_security_helper.schemas.scanner_output_ingest import (
+    ingest_sarif,
+    read_json_text_tolerant,
+)
 from automated_security_helper.utils.cfn_template_model import (
     CloudFormationTemplateModelError,
     cloudformation_candidate_files,
@@ -1058,6 +1062,9 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         self.exit_code = None
         self._nothing_scanned_reason = None
         self.clear_unevaluated_targets()
+        # What reading this target's SARIF repairs, started again for each target
+        # for the same reason.
+        self._start_ingest_record()
 
         tool_component = ToolComponent(
             name="cfn_nag",
@@ -1428,6 +1435,8 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     )
                 finally:
                     _remove_staged_cfn_nag_input(staged_input)
+                # A template that is not read keeps none of its repairs (below).
+                checkpoint = self._ingest_record.checkpoint()
                 try:
                     stdout = proc_resp.get("stdout", "")
                     if not stdout or not stdout.strip():
@@ -1450,7 +1459,18 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                             f"its SARIF document for {cfn_file}; they are not part "
                             "of the report and were left out of the parse."
                         )
-                    file_sarif = SarifReport.model_validate_json(json_data=sarif_text)
+                    # Read as the base class reads a tool's SARIF: the smallest
+                    # out-of-spec part is dropped or rewritten and the template's
+                    # other findings are kept. The pointers name the template by
+                    # its ordinal. A lone-surrogate escape anywhere in the text was
+                    # refused whole by the parse that read it as JSON; it is kept.
+                    with self._ingest_record.scoped(
+                        f"template {self.targets_attempted}"
+                    ):
+                        file_sarif = ingest_sarif(
+                            read_json_text_tolerant(sarif_text, self._ingest_record),
+                            self._ingest_record,
+                        )
                     parsed_sarif += 1
                     _restore_cfn_nag_uris(
                         file_sarif, staged_input, cfn_file, self.context.source_dir
@@ -1494,6 +1514,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                         ASH_LOGGER.error(
                             f"CFN Nag did not evaluate {cfn_file}: {reason}"
                         )
+                        self._ingest_record.rollback(checkpoint)
                         self.targets_failed += 1
                         self.errors.append(f"{cfn_file}: {reason}")
                         self.record_unevaluated_target(cfn_file)
@@ -1528,6 +1549,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                         f"Failed to parse CFN Nag results as SARIF: {str(e)}"
                     )
                     self.errors.append(f"{cfn_file}: {type(e).__name__}: {e}")
+                    self._ingest_record.rollback(checkpoint)
                     if not failed_counted:
                         self.targets_failed += 1
                         self.record_unevaluated_target(cfn_file)
@@ -1550,6 +1572,10 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 target=target,
                 target_type=target_type,
             )
+            self._say_what_the_ingest_repaired(target_type)
+            notifications = self._ingest_record.notifications(
+                self._ingest_source_name()
+            )
 
             sarif_invocation: Invocation = Invocation(
                 commandLine="ash-CFN Nag-scanner",
@@ -1568,6 +1594,13 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 ),
                 properties=PropertyBag(
                     tool=sarif_tool,
+                ),
+                # What was repaired in the templates' SARIF, said in the report
+                # as a warning, which fails no run.
+                **(
+                    {"toolExecutionNotifications": notifications}
+                    if notifications
+                    else {}
                 ),
             )
             if sarif_report.runs:

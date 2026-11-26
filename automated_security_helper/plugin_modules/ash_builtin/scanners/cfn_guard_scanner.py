@@ -67,7 +67,6 @@ with the same results.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -120,6 +119,11 @@ from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
     Tool,
     ToolComponent,
+)
+from automated_security_helper.schemas.scanner_output_ingest import (
+    IngestRecord,
+    ingest_sarif,
+    read_json_text_tolerant,
 )
 from automated_security_helper.utils.cfn_template_discovery import (
     cloudformation_templates_nothing_to_scan_reason,
@@ -1152,6 +1156,9 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         self.targets_failed = 0
         self.exit_code = None
         self._reset_errors()
+        # What reading this target's templates repairs, started again for each
+        # target for the same reason.
+        self._start_ingest_record()
 
         report = self._empty_report()
         # The unevaluated targets are cleared as cfn-nag clears them, for a
@@ -1254,7 +1261,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             # only the last template's text.
             stderr_sections: List[str] = []
             timed_out = False
-            for template in discovery.templates:
+            for template_number, template in enumerate(discovery.templates, start=1):
                 self.targets_attempted += 1
                 shown = display_path(template, source_dir)
                 if timed_out:
@@ -1318,10 +1325,19 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     stderr_text = response.get("stderr") or ""
                     if str(stderr_text).strip():
                         stderr_sections.append(f"--- {shown}\n{stderr_text}")
-                failure, template_report = self._parse_response(
-                    response, values=guarded_values(self)
-                )
+                # The pointers of what is repaired in this template's SARIF name
+                # the template by its ordinal, never by its path.
+                checkpoint = self._ingest_record.checkpoint()
+                with self._ingest_record.scoped(f"template {template_number}"):
+                    failure, template_report = self._parse_response(
+                        response,
+                        values=guarded_values(self),
+                        record=self._ingest_record,
+                    )
                 if failure is not None or template_report is None:
+                    # A template that is not read keeps none of its repairs: they
+                    # changed nothing the report holds.
+                    self._ingest_record.rollback(checkpoint)
                     failure = failure or "cfn-guard output could not be read"
                     self.targets_failed += 1
                     # Recorded as a target the tool never evaluated; the ERROR
@@ -1347,6 +1363,10 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
 
             report.runs[0].results = merged
             self._post_scan(target=target, target_type=target_type)
+            self._say_what_the_ingest_repaired(target_type)
+            notifications = self._ingest_record.notifications(
+                self._ingest_source_name()
+            )
             report.runs[0].invocations = [
                 Invocation(
                     commandLine="cfn-guard",
@@ -1362,6 +1382,13 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     exitCodeDescription="\n".join(self.errors),
                     workingDirectory=ArtifactLocation(
                         uri=get_shortest_name(input=target)
+                    ),
+                    # What was repaired in the templates' SARIF, said in the
+                    # report as a warning, which fails no run.
+                    **(
+                        {"toolExecutionNotifications": notifications}
+                        if notifications
+                        else {}
                     ),
                 )
             ]
@@ -1404,6 +1431,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         response: object,
         *,
         values: Optional[Iterable[str]],
+        record: Optional[IngestRecord] = None,
     ) -> Tuple[Optional[str], Optional[SarifReport]]:
         """(failure reason or None, parsed report or None) for one invocation.
 
@@ -1413,7 +1441,14 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         place of the stderr rather than the text unredacted. Required, with no
         default: a default of "redact nothing" let a caller that forgot it print
         the stderr unredacted, the gap the parameter closes.
+
+        ``record`` takes what reading the template's SARIF repaired (see
+        ``schemas.scanner_output_ingest``): the smallest out-of-spec part is
+        dropped or rewritten and the template's other findings are kept. Without
+        one the repairs are made and not kept.
         """
+        if record is None:
+            record = IngestRecord()
         if not isinstance(response, dict):
             return "cfn-guard did not run", None
         failure = _run_failure(response)
@@ -1430,7 +1465,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         if not stdout.strip():
             return f"cfn-guard exited {code} without writing SARIF", None
         try:
-            parsed = SarifReport.model_validate(json.loads(stdout))
+            parsed = ingest_sarif(read_json_text_tolerant(stdout, record), record)
         except Exception as exc:
             return f"cfn-guard output was not valid SARIF ({exc})", None
         if not parsed.runs:
