@@ -635,6 +635,68 @@ def test_assign_clusters_matches_the_oracle(specs):
     ]
 
 
+@st.composite
+def package_specs(draw):
+    """Package rows only, few keys, so repeated scanners and versions are common."""
+    specs = []
+    for position in range(draw(st.integers(2, 12))):
+        specs.append(
+            pkg(
+                f"id{position}",
+                draw(st.sampled_from(["grype", "trivy", "osv", ""])),
+                cve_id=draw(st.sampled_from(["CVE-1", "CVE-2", "CVE-3"])),
+                package_version=draw(st.sampled_from([None, "1", "2"])),
+                package_path="p/left-pad",
+                workspace_project=draw(st.sampled_from([None, "p1"])),
+            )
+        )
+    return specs
+
+
+@st.composite
+def wide_location_specs(draw):
+    """Location rows with wide multi-CWE ranges, so the split guard has work."""
+    specs = []
+    for position in range(draw(st.integers(2, 10))):
+        start = draw(st.integers(0, 12))
+        cwes = draw(
+            st.lists(st.sampled_from(CWES[:3]), min_size=1, max_size=3, unique=True)
+        )
+        specs.append(
+            loc(
+                f"id{position}",
+                draw(st.sampled_from(["s1", "s2", "s3"])),
+                line=start,
+                end=start + draw(st.integers(0, 12)),
+                cwe=", ".join(cwes),
+                path=draw(st.sampled_from(["a.py", "b.py"])),
+                rule_id=draw(st.sampled_from(["R1", "R2"])),
+            )
+        )
+    return specs
+
+
+@DIFFERENTIAL
+@given(package_specs())
+def test_package_copies_match_the_oracle(specs):
+    rows = [make(spec) for spec in specs]
+    assert [cluster_view(c) for c in module.cluster_findings(rows)] == [
+        cluster_view(c) for c in reference.cluster_findings(rows)
+    ]
+    assert [cluster_view(c) for c in module.clusters_by_project(rows)] == [
+        cluster_view(c) for c in reference.clusters_by_project(rows)
+    ]
+
+
+@DIFFERENTIAL
+@given(wide_location_specs())
+def test_the_split_guard_matches_the_oracle(specs):
+    rows = [make(spec) for spec in specs]
+    assert [cluster_view(c) for c in module.cluster_findings(rows)] == [
+        cluster_view(c) for c in reference.cluster_findings(rows)
+    ]
+
+
 @DIFFERENTIAL
 @given(finding_specs(with_projects=False))
 def test_the_components_match_the_oracle(specs):
