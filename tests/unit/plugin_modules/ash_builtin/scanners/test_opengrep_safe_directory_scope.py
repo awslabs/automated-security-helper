@@ -161,6 +161,59 @@ def test_a_parent_whose_git_entry_belongs_to_the_scan_targets_owner_is_named(
         assert _named(env) == [os.path.realpath(sub), os.path.realpath(repo)], name
 
 
+def test_a_parent_git_entry_owned_by_the_effective_uid_is_named_for_a_foreign_target(
+    test_plugin_context, monkeypatch, only_staged_checkouts
+):
+    """git trusts a top whose ``.git`` the effective uid owns, so the walk names it.
+
+    The scanned directory belongs to another user (a container mount, a build
+    directory a different uid created) while the checkout's ``.git`` belongs to
+    the user running ASH. Before the widened acceptance the walk compared the
+    ``.git`` owner with the target's owner only, dropped the top, and git then
+    refused the checkout.
+    """
+    repo, sub = _checkout(only_staged_checkouts)
+    _owned_by_someone_else(monkeypatch, os.path.realpath(sub))
+    scanner = _scanner(test_plugin_context)
+
+    envs = _both_spawn_paths(scanner, _policy(only_staged_checkouts, sub), sub)
+
+    for name, env in envs.items():
+        assert _named(env) == [os.path.realpath(sub), os.path.realpath(repo)], name
+
+
+def test_the_walk_logs_the_git_entry_it_refuses_to_trust(
+    test_plugin_context, monkeypatch, only_staged_checkouts
+):
+    """The early stop names the ``.git`` it refused, so a missing top is diagnosable."""
+    import logging
+
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    messages = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            messages.append(record.getMessage())
+
+    handler = _Capture(level=logging.DEBUG)
+    previous_level = ASH_LOGGER.level
+    ASH_LOGGER.addHandler(handler)
+    ASH_LOGGER.setLevel(logging.DEBUG)
+    try:
+        repo, sub = _checkout(only_staged_checkouts)
+        _owned_by_someone_else(monkeypatch, repo / ".git")
+        scanner = _scanner(test_plugin_context)
+        _both_spawn_paths(scanner, _policy(only_staged_checkouts, sub), sub)
+    finally:
+        ASH_LOGGER.removeHandler(handler)
+        ASH_LOGGER.setLevel(previous_level)
+
+    refusals = [m for m in messages if "safe_directories_for: not naming" in m]
+    assert refusals, messages
+    assert any(".git" in m for m in refusals)
+
+
 def test_a_filesystem_root_parent_is_refused_on_both_spawn_paths(
     test_plugin_context, monkeypatch, only_staged_checkouts
 ):
