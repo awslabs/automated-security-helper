@@ -437,20 +437,27 @@ def bandit_would_skip(
     # The builder is the one declared on this entry's own option (``scanner`` and
     # ``option``, which the exclusion carries), so two scanners that share the
     # kind with different builders are each matched by their own. A caller that
-    # names no option gets the first bandit-kind builder in manifest order.
+    # names a scanner and an option requires that option's own bandit builder:
+    # another tool's globs carry another tool's exclude semantics, and matching
+    # with them would decide which findings are hidden. Only a caller that names
+    # no option gets the first bandit-kind builder in manifest order.
     #
     # ``next`` with no default would let a manifest set that declares no bandit
     # builder end this call as a bare ``StopIteration``: PEP 479 turns that into
     # a ``RuntimeError`` inside a generator, and a ``map`` callback or a custom
     # ``__next__`` ends its iteration silently, which drops findings with no
     # error. A missing declaration is a configuration fault, named as one.
-    own = (
-        _declared_option(scanner, option)
-        if scanner is not None and option is not None
-        else None
-    )
+    option_named = scanner is not None and option is not None
+    own = _declared_option(scanner, option) if option_named else None
     if own is not None and own.kind == "bandit" and own.glob_builder is not None:
         builder_ref: Optional[str] = own.glob_builder
+    elif option_named:
+        raise ScannerError(
+            f"the exclusion option 'scanners.{scanner}.options.{option}' does not "
+            "declare a glob_builder of kind 'bandit' in its manifest, so a "
+            "client-supplied bandit exclusion for it cannot be matched. Declare "
+            "one on the option (ExclusionOption.glob_builder)."
+        )
     else:
         builder_ref = next(
             (
