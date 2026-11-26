@@ -61,7 +61,7 @@
   before). Every location that worked before still loads: `.ash/.ash.yaml`, `.ash.yml`,
   `ash.yaml` and the other names of the old list, each also under `.ash/`, and the
   `ashrc` names. A scan that reads one of them prints one warning that names the file
-  as deprecated and gives the path to move it to, and ASH 4.0 stops reading them. When
+  as deprecated and gives the path to move it to, and ASH 4.1 stops reading them. When
   `.ash.yaml` and an older file both exist, `.ash.yaml` is read and the warning names the
   file it shadowed; for a project that has `.ash.yml` beside `.ash.yaml`, this reverses
   which of the two is read. `--config` and `ASH_CONFIG` are unchanged and print no
@@ -131,7 +131,7 @@
   and the Dockerfile build argument `ASH_COMMUNITY_PLUGIN_MODULES`, now
   `ASH_ALPHA_PLUGIN_MODULES` (a value given for the old name wins). The docs checks
   refuse the old `Community plugins` / `Community scanners` column headings and name
-  the new one. ASH 3.9.0 stops accepting the old spellings.
+  the new one. ASH 4.1.0 stops accepting the old spellings.
 
 ### Fixes
 
@@ -164,7 +164,7 @@
   removes the entry of a locked file that is gone. Line-range suppressions are
   unchanged. This repository's own symbol suppressions are locked in the same change.
   The lock is the root dotfile `.ash.lock`; a lock still at `.ash/ash.lock` is read
-  with a deprecation warning (deprecated in v3.9, removed in v4.0) that advises
+  with a deprecation warning (deprecated in v3.9, removed in v4.1) that advises
   `git mv`. See
   [Lock a symbol suppression to its file](docs/content/how-to/suppress-findings.md#lock).
 - **ASFF findings of one secret carry one `ash/correlationId`.** ASH does not

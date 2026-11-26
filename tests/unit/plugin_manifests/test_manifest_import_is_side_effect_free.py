@@ -62,6 +62,8 @@ def test_the_probe_sees_a_plugin_load() -> None:
 
 
 def test_importing_every_manifest_loads_no_plugin_module() -> None:
+    # 22 manifests on v4: the semgrep scanner plugin was removed, and its name
+    # dispatches to opengrep, which the last line holds.
     loaded = _run(
         "from automated_security_helper.plugin_manifests import ("
         "scanner_manifests, opt_in_scanner_modules, dispatch_target)\n"
