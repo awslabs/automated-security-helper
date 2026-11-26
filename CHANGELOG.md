@@ -168,6 +168,47 @@
 
 ### Fixes
 
+- **`ash report` honors every `--config-overrides` spelling of the deduplication
+  settings.** An override that sets `global_settings.deduplication.annotate` or
+  `fold` through an object value at the section or at `global_settings`, with a
+  hyphen for an underscore, or in the append form `key+=value` now replaces the value
+  recorded in the results, as the dotted form already did. Before, the recorded value
+  stayed in force, with exit 0 and no message. The command also no longer resolves the
+  configuration a second time to learn which fields the config file wrote, so a
+  configuration that loads only because an override relaxed it keeps its own
+  `annotate` and `fold`, and each configuration warning is printed once.
+
+- **A retired scanner name no longer outranks the current one across config files.**
+  Where one file is layered over another (an `extends` chain, or an operator's
+  workspace overlay over a project's file), the later file now wins whichever spelling
+  each file uses for a scanner's section. Before, a base file's section under a retired
+  name overrode the extending file's section under the current name. Inside one file, a
+  section under the retired name still overlays the current one. No shipped scanner
+  name is retired today, so no current configuration reads differently.
+
+- **A session's patched profile that reads a value from the environment is no longer
+  refused for that value.** When the registered profile sets an option a client may
+  not set from an environment reference and `select_profile`'s patch changes only keys
+  the profile permits, the patched copy is accepted when it is bound and when it is
+  scanned: the filled-in value counts as the profile's own where the copy holds, at
+  exactly that place, the one reference text the profile wrote there. A value the copy
+  wrote itself, the reference at another place, and a place the profile's files read
+  twice (a base and the file that extends it) are still refused. Each value the copy
+  repeats from the profile is also judged on its own now, validated as a config file is
+  with only that value placed, so another spelling of a field, a key the model drops,
+  or reference text in a typed field elsewhere in the copy no longer decides whether it
+  counts as repeated, and an error while reading it leaves it a change instead of
+  escaping the check.
+
+- **The warning for a dropped trusted config chain names who decides
+  `honor_ignore_files` correctly.** A deciding file that an `extends` entry reached
+  with a value read from the environment is shown as `<value>`, as other warnings show
+  such a file, and it is named as the chain names it. When `--config-overrides` sets the
+  key (`--no-honor-ignore-files` is such an override), the warning says the override
+  decides the value instead of naming a file that may have written the other value. In
+  a long-running process such as the MCP server, saying one ending of the warning for a
+  file no longer keeps a later resolution from saying another.
+
 - **On Windows, `--no-color` now turns color off in the scan's progress output.** The
   scan (and a workspace scan) forced Rich's "windows" color system on every Windows run,
   so the flag was ignored there and output redirected into a pipe or a file carried
