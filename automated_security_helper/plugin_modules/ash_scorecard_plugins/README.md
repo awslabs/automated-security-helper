@@ -20,7 +20,10 @@ It refuses to run, and the scan reports why, when:
 
 - ASH is offline;
 - none of `GITHUB_AUTH_TOKEN`, `GITHUB_TOKEN`, `GH_AUTH_TOKEN` or `GH_TOKEN` is set (Scorecard has no token flag);
-- no `github.com` repository can be determined: set `scanners.scorecard.options.repo` (`owner/name`), or have an `origin` remote in the source directory's `.git/config`. Other hosts are not supported.
+- no `github.com` repository can be determined: set `scanners.scorecard.options.repo` (`owner/name`), or have an `origin` remote in the source directory's `.git/config`. Other hosts are not supported;
+- the source directory's `.git/config` is not a regular file inside the source directory: a symbolic link at `.git` or `config`, a FIFO or device, a file with a second hard link, or a file larger than 1 MiB is refused, not read, and the message names the reason.
+
+An MCP client cannot configure the scanner: its whole section, `/scanners/scorecard/**`, is denied to a client whatever a profile's `denied_paths` says.
 
 ## Installing
 

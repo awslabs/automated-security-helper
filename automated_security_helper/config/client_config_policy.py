@@ -501,6 +501,14 @@ SHIPPED_DEFAULT_DENIED_PATHS = (
     SHIPPED_DEFAULT_DENIED_PATHS[-1]
     | {"/global_settings/history", "/global_settings/history/**"},
 )
+#: The default after the scorecard scanner's whole section joined it (also in
+#: ``ALWAYS_DENIED_PATHS``): it calls the GitHub API with the token in ASH's
+#: environment and scores the repository its ``repo`` option names, so a client may
+#: neither turn it on nor choose that repository.
+SHIPPED_DEFAULT_DENIED_PATHS = (
+    *SHIPPED_DEFAULT_DENIED_PATHS,
+    SHIPPED_DEFAULT_DENIED_PATHS[-1] | {"/scanners/scorecard/**"},
+)
 
 
 class _OptionDefaults(Mapping[Tuple[str, str], Any]):
@@ -530,18 +538,18 @@ class _OptionDefaults(Mapping[Tuple[str, str], Any]):
 
 
 #: Defaults of the denied options of scanners that come from a plugin package
-#: (betterleaks, ferret-scan, guarddog, hadolint, snyk-code, trivy-repo). The trusted config
-#: carries a built-in scanner's defaults, so a delivered value equal to one is
-#: accepted as no change; it need not carry a plugin's section at all, so
-#: without this a delivered file that wrote such a default would be refused.
-#: Used only where the trusted config has no value of its own. snyk-code's and
-#: trivy-repo's whole sections are denied (``ALWAYS_DENIED_PATHS``), so every
-#: one of their options is listed. For ferret-scan, guarddog and hadolint the
-#: denied options are listed: those named in the default ``denied_paths`` and
-#: the ones the ``/scanners/*/options/offline`` and ``tool_version`` globs reach
-#: (hadolint has no ``tool_version`` option). A list default is compared with
-#: ``==``, so a delivered list holding the same items in another order is not
-#: the default.
+#: (betterleaks, ferret-scan, guarddog, hadolint, scorecard, snyk-code, trivy-repo).
+#: The trusted config carries a built-in scanner's defaults, so a delivered value
+#: equal to one is accepted as no change; it need not carry a plugin's section at
+#: all, so without this a delivered file that wrote such a default would be
+#: refused. Used only where the trusted config has no value of its own.
+#: scorecard's, snyk-code's and trivy-repo's whole sections are denied
+#: (``ALWAYS_DENIED_PATHS``), so every one of their options is listed. For
+#: ferret-scan, guarddog and hadolint the denied options are listed: those named
+#: in the default ``denied_paths`` and the ones the ``/scanners/*/options/offline``
+#: and ``tool_version`` globs reach (hadolint has no ``tool_version`` option).
+#: A list default is compared with ``==``, so a delivered list holding the same
+#: items in another order is not the default.
 #: ``test_the_plugin_option_defaults_are_the_plugins`` derives the list from the
 #: default ``denied_paths`` and checks each value against the plugin's model.
 #: Declared by each such scanner's manifest (``denied_option_defaults``), where the

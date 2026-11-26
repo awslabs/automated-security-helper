@@ -27,6 +27,9 @@ Like the `snyk-code` scanner, it fails closed and says why:
 - ASH is offline (its offline strategy is skip-offline).
 - None of `GITHUB_AUTH_TOKEN`, `GITHUB_TOKEN`, `GH_AUTH_TOKEN` or `GH_TOKEN` is set. Scorecard has no token flag; these are the variables its documentation names.
 - No `github.com` repository can be determined. ASH uses the `repo` option, else the `origin` remote in `<source>/.git/config`. Any other host is refused.
+- `<source>/.git/config` is not read. ASH reads it in its own process, so it reads it only when it is a regular file inside the source directory: a symbolic link at `.git` or at `config`, a FIFO or device, a file with a second hard link, and a file larger than 1 MiB are refused, and the message names the reason. Set the `repo` option instead.
+
+An MCP client cannot configure the scanner at all: its whole section, `/scanners/scorecard/**`, is denied to a client whatever a profile's `denied_paths` says, as for every scanner that can send data off the host. Otherwise a client could turn it on and set `repo` to any repository the GitHub token in ASH's environment can read, and get that repository's findings back.
 
 ## Installing Scorecard
 

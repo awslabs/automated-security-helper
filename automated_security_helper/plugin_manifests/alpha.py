@@ -41,14 +41,15 @@ _EXCLUSIONS = {
 
 
 #: The default of each option a client-delivered config may not set, per scanner;
-#: see ``ScannerManifest.denied_option_defaults``. snyk-code's and trivy-repo's
-#: whole sections are denied, so every one of their options is listed; for the
-#: others the denied options are the ones named in the default ``denied_paths`` and
-#: the ones its ``/scanners/*/options/offline`` and ``tool_version`` globs reach
-#: (hadolint has no ``tool_version`` option). A list default is compared with
-#: ``==``, so a delivered list holding the same items in another order is not the
-#: default. ``test_the_plugin_option_defaults_are_the_plugins`` derives the rows from
-#: the default ``denied_paths`` and checks each value against the plugin's model.
+#: see ``ScannerManifest.denied_option_defaults``. scorecard's, snyk-code's and
+#: trivy-repo's whole sections are denied, so every one of their options is listed;
+#: for the others the denied options are the ones named in the default
+#: ``denied_paths`` and the ones its ``/scanners/*/options/offline`` and
+#: ``tool_version`` globs reach (hadolint has no ``tool_version`` option). A list
+#: default is compared with ``==``, so a delivered list holding the same items in
+#: another order is not the default.
+#: ``test_the_plugin_option_defaults_are_the_plugins`` derives the rows from the
+#: default ``denied_paths`` and checks each value against the plugin's model.
 _DENIED_OPTION_DEFAULTS: dict[str, dict[str, Any]] = {
     "betterleaks": {
         "config_file": None,
@@ -84,6 +85,12 @@ _DENIED_OPTION_DEFAULTS: dict[str, dict[str, Any]] = {
         "verify": False,
     },
     "hadolint": {"config_file": None, "offline": False},
+    "scorecard": {
+        "offline": False,
+        "repo": None,
+        "scan_timeout": 1800,
+        "severity_threshold": None,
+    },
     "snyk-code": {
         "honor_tree_exclusions": False,
         "offline": False,

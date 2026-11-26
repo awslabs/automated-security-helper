@@ -683,6 +683,7 @@
                   "/scanners/detect-secrets/**",
                   "/scanners/npm-audit/**",
                   "/scanners/opengrep/**",
+                  "/scanners/scorecard/**",
                   "/scanners/semgrep/**",
                   "/scanners/snyk-code/**",
                   "/scanners/trivy-repo/**",
@@ -1395,6 +1396,7 @@
                 "/scanners/detect-secrets/**",
                 "/scanners/npm-audit/**",
                 "/scanners/opengrep/**",
+                "/scanners/scorecard/**",
                 "/scanners/semgrep/**",
                 "/scanners/snyk-code/**",
                 "/scanners/trivy-repo/**",
@@ -1724,6 +1726,7 @@
               "/scanners/detect-secrets/**",
               "/scanners/npm-audit/**",
               "/scanners/opengrep/**",
+              "/scanners/scorecard/**",
               "/scanners/semgrep/**",
               "/scanners/snyk-code/**",
               "/scanners/trivy-repo/**",
@@ -6696,6 +6699,7 @@
             "/scanners/detect-secrets/**",
             "/scanners/npm-audit/**",
             "/scanners/opengrep/**",
+            "/scanners/scorecard/**",
             "/scanners/semgrep/**",
             "/scanners/snyk-code/**",
             "/scanners/trivy-repo/**",
@@ -6706,7 +6710,7 @@
             "/converters/archive/options/max_total_bytes",
             "/converters/archive/options/max_compression_ratio"
           ],
-          "description": "JSON-Pointer glob patterns that are never allowed (denied wins over allowed). Each entry starts with '/'. The defaults block the fields that decide whether a scan fails, what it runs and reports, where findings are sent, the scanner sandbox, the run history's recording and retention, and this policy. A list equal to a default ASH has shipped counts as the current default list. Any other list is added to the current defaults, unless replace_default_denied_paths is true. When it is added, a list that holds some default entries and leaves others out still gets them, and a warning names the ones it leaves out. Whatever the list, and with replace_default_denied_paths too, the entries ASH always denies (the scanner sandbox, ash_plugin_modules, the detect-secrets verification, plugin and baseline settings, the archive converter's extraction limits, and the sections of the plugins that send data off the host: the s3, aws-security-hub, cloudwatch-logs and bedrock-summary-reporter reporters and the detect-secrets, npm-audit, opengrep, semgrep, snyk-code, trivy, trivy-repo and zizmor scanners) are added to it.",
+          "description": "JSON-Pointer glob patterns that are never allowed (denied wins over allowed). Each entry starts with '/'. The defaults block the fields that decide whether a scan fails, what it runs and reports, where findings are sent, the scanner sandbox, the run history's recording and retention, and this policy. A list equal to a default ASH has shipped counts as the current default list. Any other list is added to the current defaults, unless replace_default_denied_paths is true. When it is added, a list that holds some default entries and leaves others out still gets them, and a warning names the ones it leaves out. Whatever the list, and with replace_default_denied_paths too, the entries ASH always denies (the scanner sandbox, ash_plugin_modules, the detect-secrets verification, plugin and baseline settings, the archive converter's extraction limits, and the sections of the plugins that send data off the host: the s3, aws-security-hub, cloudwatch-logs and bedrock-summary-reporter reporters and the detect-secrets, npm-audit, opengrep, scorecard, semgrep, snyk-code, trivy, trivy-repo and zizmor scanners) are added to it.",
           "items": {
             "type": "string"
           },

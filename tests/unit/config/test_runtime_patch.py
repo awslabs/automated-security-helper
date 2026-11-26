@@ -376,9 +376,9 @@ class TestDefaults:
 
         Plugin-provided reporters (`bedrock-summary-reporter`, `cloudwatch-logs`,
         `aws-security-hub`, `s3`) and scanners (`ferret-scan`, `guarddog`,
-        `hadolint`, `snyk-code`, `trivy-repo`) are NOT present on a default
-        `AshConfig`; we materialize them here via model_validate so the schema
-        check covers extras that real plugins add, from their own models.
+        `hadolint`, `scorecard`, `snyk-code`, `trivy-repo`) are NOT present on a
+        default `AshConfig`; we materialize them here via model_validate so the
+        schema check covers extras that real plugins add, from their own models.
         """
         from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
             FerretScannerConfig,
@@ -391,6 +391,9 @@ class TestDefaults:
         )
         from automated_security_helper.plugin_modules.ash_hadolint_plugins.hadolint_scanner import (
             HadolintScannerConfig,
+        )
+        from automated_security_helper.plugin_modules.ash_scorecard_plugins.scorecard_scanner import (
+            ScorecardScannerConfig,
         )
         from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
             TrivyRepoScannerConfig,
@@ -430,6 +433,7 @@ class TestDefaults:
                     "ferret-scan": FerretScannerConfig().model_dump(by_alias=True),
                     "guarddog": GuardDogScannerConfig().model_dump(by_alias=True),
                     "hadolint": HadolintScannerConfig().model_dump(by_alias=True),
+                    "scorecard": ScorecardScannerConfig().model_dump(by_alias=True),
                     "trivy-repo": TrivyRepoScannerConfig().model_dump(by_alias=True),
                     "snyk-code": SnykCodeScannerConfig().model_dump(by_alias=True),
                 },

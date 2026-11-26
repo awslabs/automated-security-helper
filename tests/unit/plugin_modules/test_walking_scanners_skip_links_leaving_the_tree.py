@@ -33,6 +33,12 @@ the kinds below, so a new one cannot be added without deciding which:
   copy: nothing a link leads to reaches what snyk reads. The refusal is checked
   here for every kind of link, and the copy alone in the cells at the end, with the
   refusal set aside.
+- scorecard reads no file of its target: Scorecard scores the repository as GitHub
+  hosts it, and its command names the repository and no path. The one file of the
+  tree read at all, ``.git/config`` (for the origin remote), is read in ASH's
+  process through ``open_in_scanned_tree``, so a link there is refused: the scan is
+  not run, and the refusal names the link. Its own cases (FIFO, hard link, size)
+  are in ash_scorecard_plugins/test_scorecard_scanner_behavior.py.
 """
 
 from __future__ import annotations
@@ -72,6 +78,12 @@ FOLLOWS_NO_LINK = "follows no link and is given no exclusion"
 #: It is not run on a target that holds such a link, and otherwise on a copy of the
 #: scan set that holds no link.
 REFUSES_THE_TARGET = "refuses a target holding the link"
+#: Its tool reads no file of the target, and its command names none; the one file
+#: ASH reads from the tree for it (scorecard's ``.git/config``) is opened under the
+#: scanned-tree rule, which refuses a link.
+READS_NO_FILE_OF_THE_TARGET = (
+    "its tool reads no file of the target; ASH reads one under the scanned-tree rule"
+)
 
 #: How each registered scanner is kept off a link that leaves its target, which
 #: test_each_scanners_link_handling_holds checks for each of them.
@@ -106,6 +118,9 @@ LINK_HANDLING = {
     # Likewise `betterleaks dir`, whose --follow-symlinks defaults to false.
     "betterleaks": FOLLOWS_NO_LINK,
     "snyk-code": REFUSES_THE_TARGET,
+    # `scorecard --repo` scores the hosted repository; .git/config is read through
+    # open_in_scanned_tree (scorecard_scanner.py _git_config_text).
+    "scorecard": READS_NO_FILE_OF_THE_TARGET,
 }
 
 _SCANNERS = "automated_security_helper.plugin_modules"
@@ -197,6 +212,11 @@ SCANNER_CLASSES = {
         "ash_betterleaks_plugins.betterleaks_scanner",
         "BetterleaksScanner",
         "Betterleaks",
+    ),
+    "scorecard": (
+        "ash_scorecard_plugins.scorecard_scanner",
+        "ScorecardScanner",
+        "Scorecard",
     ),
 }
 #: Where the scanners that take their inputs from utils/cfn_template_discovery.py
@@ -314,6 +334,11 @@ def _what_snyk_reads(scanner, target: Path) -> dict:
 
 def _snyk_refusal(scanner, target: Path) -> str:
     """What snyk-code says when it refuses ``target``; snyk is not started."""
+    return _refusal_before_the_tool(scanner, target)
+
+
+def _refusal_before_the_tool(scanner, target: Path) -> str:
+    """What ``scanner`` says when it refuses ``target``; its tool is not started."""
     scanner.dependencies_satisfied = True
     with (
         patch.object(scanner, "_pre_scan", return_value=True),
@@ -446,6 +471,31 @@ def test_each_scanners_link_handling_holds(tmp_path, monkeypatch, name):
         refusal = _snyk_refusal(scanner, source)
         assert "'link_out.py'" in refusal, refusal
         assert "link leaves the scanned tree" in refusal, refusal
+        return
+
+    if handling == READS_NO_FILE_OF_THE_TARGET:
+        monkeypatch.setenv("GITHUB_AUTH_TOKEN", "placeholder-token")
+        git = source / ".git"
+        git.mkdir()
+        (git / "config").write_text(
+            '[remote "origin"]\n\turl = https://github.com/o/r\n', encoding="utf-8"
+        )
+        # The tool is given the repository and no path of the tree.
+        argv = _recorded_argv(scanner, source)
+        assert "--repo=github.com/o/r" in argv, argv
+        assert [str(arg) for arg in argv if "link_out" in str(arg)] == [], argv
+        # The one file read from the tree, made a link leaving it: refused, and the
+        # tool is not started, rather than the outside file's origin scored.
+        outside = tmp_path / "outside" / "gitconfig"
+        outside.write_text(
+            '[remote "origin"]\n\turl = https://github.com/outside/leak\n',
+            encoding="utf-8",
+        )
+        (git / "config").unlink()
+        (git / "config").symlink_to(outside)
+        refusal = _refusal_before_the_tool(scanner, source)
+        assert ".git/config was not read: it is a symbolic link" in refusal, refusal
+        assert "outside/leak" not in refusal, refusal
         return
 
     if name in _OWN_SCAN:

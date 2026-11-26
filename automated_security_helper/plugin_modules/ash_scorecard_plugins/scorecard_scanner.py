@@ -42,6 +42,14 @@ Like ``snyk-code``, Scorecard needs a network and a credential, so the scanner:
   ``[remote "origin"]`` in ``<source>/.git/config``. Other hosts are refused:
   this plugin is GitHub only.
 
+``.git/config`` is the one file of the scanned tree read in ASH's own process, at
+the gate as well as at the scan, so it is read under the scanned-tree rule
+(``utils/scanned_tree.open_in_scanned_tree``): a link at any component (``.git``
+or ``config``), anything but a regular file (a FIFO cannot block the open), and a
+file with a second hard link are refused before anything is read, and so is a
+file larger than ``MAX_GIT_CONFIG_BYTES``. The refusal names the reason and asks
+for the ``repo`` option; the file is never followed to somewhere else.
+
 Severity
 --------
 Scorecard rates each check 0 to 10 (10 best) or -1 when it could not decide.
@@ -131,10 +139,19 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.utils.scanned_tree import (
+    TreeInputRefused,
+    open_in_scanned_tree,
+)
 from automated_security_helper.utils.subprocess_utils import find_executable
 
 #: The variables Scorecard reads a GitHub token from (README, "Authentication").
 TOKEN_ENV_NAMES = ("GITHUB_AUTH_TOKEN", "GITHUB_TOKEN", "GH_AUTH_TOKEN", "GH_TOKEN")
+
+#: The most of ``<source>/.git/config`` read to find the ``origin`` remote. A
+#: repository's own config is a few kilobytes at most; a larger file is refused, so
+#: a file the scanned tree controls cannot make ASH's process read without bound.
+MAX_GIT_CONFIG_BYTES = 1024 * 1024
 
 #: Variables removed from Scorecard's environment because they redirect it to
 #: another host or enable behavior ASH has not measured (``GH_HOST`` points it at a
@@ -199,18 +216,63 @@ def normalize_repo(value: str) -> Optional[str]:
     return None
 
 
-def origin_url_from_git_config(source_dir: Path) -> Optional[str]:
-    """The ``url`` of ``[remote "origin"]`` in ``<source_dir>/.git/config``, or None.
+def _git_config_text(source_dir: Path) -> str:
+    """The text of ``<source_dir>/.git/config``, read under the scanned-tree rule.
+
+    Opened with ``open_in_scanned_tree``, so a link at any component below the
+    source directory (``.git`` or ``config``), anything but a regular file (a FIFO,
+    a device) and a file with a second hard link are refused before a byte is read,
+    and a FIFO cannot block the open. At most ``MAX_GIT_CONFIG_BYTES`` are read, and
+    a larger file is refused.
+
+    Raises:
+        TreeInputRefused: why the file was not read.
+        OSError: the file could not be opened: it does not exist, ``.git`` is a
+            file (a worktree or submodule), or permission was denied.
+    """
+    root = Path(source_dir)
+    with open_in_scanned_tree(root / ".git" / "config", root) as handle:
+        data = handle.read(MAX_GIT_CONFIG_BYTES + 1)
+    if len(data) > MAX_GIT_CONFIG_BYTES:
+        raise TreeInputRefused(
+            ".git/config", f"it is larger than {MAX_GIT_CONFIG_BYTES} bytes"
+        )
+    return data.decode("utf-8", errors="replace")
+
+
+def origin_url_or_refusal(source_dir: Path) -> Tuple[Optional[str], Optional[str]]:
+    """The ``origin`` url of ``<source_dir>/.git/config``, or why it was not read.
+
+    ``(url, None)``; ``(None, None)`` when the file is missing, cannot be opened or
+    names no ``origin`` url; ``(None, reason)`` when the scanned-tree rule refused
+    the file, the reason a short phrase (``it is a symbolic link``) that holds
+    nothing read from it.
 
     Read as text and parsed by hand: no ``git`` process is started in a tree whose
     configuration the scanned repository controls. A ``.git`` that is a file (a
     worktree or submodule) is not followed; set the ``repo`` option there.
     """
-    config = Path(source_dir) / ".git" / "config"
     try:
-        text = config.read_text(encoding="utf-8", errors="replace")
+        text = _git_config_text(source_dir)
+    except TreeInputRefused as refused:
+        return None, refused.reason
     except OSError:
-        return None
+        return None, None
+    return _origin_url_in(text), None
+
+
+def origin_url_from_git_config(source_dir: Path) -> Optional[str]:
+    """The ``url`` of ``[remote "origin"]`` in ``<source_dir>/.git/config``, or None.
+
+    None too when the file is refused under the scanned-tree rule; see
+    ``origin_url_or_refusal``, which says why.
+    """
+    url, _ = origin_url_or_refusal(source_dir)
+    return url
+
+
+def _origin_url_in(text: str) -> Optional[str]:
+    """The ``url`` of the ``[remote "origin"]`` section of a git config's text."""
     in_origin = False
     for raw in text.splitlines():
         line = raw.strip()
@@ -541,7 +603,12 @@ class ScorecardScanner(ScannerPluginBase[ScorecardScannerConfig]):
                     "github.com is supported"
                 )
             return repo, None
-        url = origin_url_from_git_config(Path(self._ctx.source_dir))
+        url, refused = origin_url_or_refusal(Path(self._ctx.source_dir))
+        if refused is not None:
+            return None, (
+                f"the source directory's .git/config was not read: {refused}; set "
+                "scanners.scorecard.options.repo to owner/name"
+            )
         if not url:
             return None, (
                 "no `origin` remote was found in the source directory's .git/config; "
@@ -823,6 +890,7 @@ def convert_scorecard_result(document: Dict[str, Any], *, repo: str) -> SarifRep
 
 
 __all__ = [
+    "MAX_GIT_CONFIG_BYTES",
     "SCORE_BANDS",
     "ScorecardScanner",
     "ScorecardScannerConfig",
@@ -830,5 +898,6 @@ __all__ = [
     "convert_scorecard_result",
     "normalize_repo",
     "origin_url_from_git_config",
+    "origin_url_or_refusal",
     "severity_for_score",
 ]

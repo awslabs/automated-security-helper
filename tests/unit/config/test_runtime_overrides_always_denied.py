@@ -70,6 +70,7 @@ FLOOR = [
     "/scanners/detect-secrets/**",
     "/scanners/npm-audit/**",
     "/scanners/opengrep/**",
+    "/scanners/scorecard/**",
     "/scanners/semgrep/**",
     "/scanners/snyk-code/**",
     "/scanners/trivy-repo/**",

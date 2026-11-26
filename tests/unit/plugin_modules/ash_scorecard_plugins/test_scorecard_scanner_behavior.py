@@ -13,6 +13,9 @@ from __future__ import annotations
 
 import copy
 import json
+import os
+import sys
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -216,6 +219,136 @@ class TestRepoResolution:
 
     def test_no_git_config_is_none(self, tmp_path):
         assert origin_url_from_git_config(tmp_path) is None
+
+
+# ---------------------------------------------------------------------------
+# .git/config is read in ASH's own process, under the scanned-tree rule
+# ---------------------------------------------------------------------------
+
+#: The bound the reader applies, written out so a run of these cases against a
+#: reader without one fails on the read, not on a missing name.
+_BOUND = 1024 * 1024
+
+_ORIGIN = '[remote "origin"]\n\turl = https://github.com/o/r\n'
+
+_LINKS = pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
+
+
+def _outside_config(tmp_path: Path) -> Path:
+    """A git config outside the scanned tree, whose origin is a GitHub repository."""
+    config = tmp_path / "outside" / ".git" / "config"
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        '[remote "origin"]\n\turl = https://github.com/outside/leak\n',
+        encoding="utf-8",
+    )
+    return config
+
+
+def _source_with_git_dir(tmp_path: Path) -> Path:
+    src = tmp_path / "src"
+    (src / ".git").mkdir(parents=True)
+    return src
+
+
+class TestGitConfigIsReadUnderTheTreeRule:
+    """No link at any component, a regular file only, one hard link, a bounded read.
+
+    Each refusal reads as no origin remote, and the gate says why. The scanner
+    reads this file at the gate as well as at the scan, so a FIFO here would hang
+    the scan before Scorecard is started, and a link to a device would read until
+    memory ran out.
+    """
+
+    def test_the_bound_is_the_one_written_here(self):
+        assert ss.MAX_GIT_CONFIG_BYTES == _BOUND
+
+    @_LINKS
+    def test_a_config_that_is_a_link_leaving_the_tree_is_not_followed(self, tmp_path):
+        src = _source_with_git_dir(tmp_path)
+        (src / ".git" / "config").symlink_to(_outside_config(tmp_path))
+        assert origin_url_from_git_config(src) is None
+        assert ss.origin_url_or_refusal(src) == (None, "it is a symbolic link")
+
+    @_LINKS
+    def test_a_git_directory_that_is_a_link_is_not_followed(self, tmp_path):
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / ".git").symlink_to(
+            _outside_config(tmp_path).parent, target_is_directory=True
+        )
+        assert origin_url_from_git_config(src) is None
+        assert ss.origin_url_or_refusal(src) == (
+            None,
+            "its parent directory '.git' is a symbolic link",
+        )
+
+    @_LINKS
+    @pytest.mark.skipif(not Path(os.devnull).exists(), reason="no null device")
+    def test_a_config_linked_to_a_device_is_refused_without_reading_it(self, tmp_path):
+        """The null device, not /dev/zero: the refusal comes before any read either
+        way, and a reader that followed the link to /dev/zero would read until the
+        test process ran out of memory."""
+        src = _source_with_git_dir(tmp_path)
+        (src / ".git" / "config").symlink_to(os.devnull)
+        assert ss.origin_url_or_refusal(src) == (None, "it is a symbolic link")
+
+    @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs here")
+    def test_a_config_that_is_a_fifo_is_refused_without_blocking(self, tmp_path):
+        src = _source_with_git_dir(tmp_path)
+        fifo = src / ".git" / "config"
+        os.mkfifo(fifo)
+        result: List[Any] = []
+        reader = threading.Thread(
+            target=lambda: result.append(origin_url_from_git_config(src)),
+            daemon=True,
+        )
+        reader.start()
+        reader.join(timeout=10)
+        blocked = reader.is_alive()
+        if blocked:
+            # Release the reader that is waiting for a writer, so the thread ends.
+            os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+            reader.join(timeout=10)
+        assert not blocked, "reading .git/config blocked on the FIFO"
+        assert result == [None]
+        assert ss.origin_url_or_refusal(src) == (None, "it is not a regular file")
+
+    def test_a_config_larger_than_the_bound_is_refused(self, tmp_path):
+        src = _source_with_git_dir(tmp_path)
+        text = _ORIGIN.encode("utf-8")
+        (src / ".git" / "config").write_bytes(text + b"#" * (_BOUND + 1 - len(text)))
+        assert origin_url_from_git_config(src) is None
+        assert ss.origin_url_or_refusal(src) == (
+            None,
+            f"it is larger than {_BOUND} bytes",
+        )
+
+    def test_control_a_config_at_the_bound_is_read(self, tmp_path):
+        src = _source_with_git_dir(tmp_path)
+        text = _ORIGIN.encode("utf-8")
+        (src / ".git" / "config").write_bytes(text + b"#" * (_BOUND - len(text)))
+        assert origin_url_from_git_config(src) == "https://github.com/o/r"
+
+    @pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links")
+    def test_a_hard_linked_config_is_refused(self, tmp_path):
+        src = _source_with_git_dir(tmp_path)
+        try:
+            os.link(_outside_config(tmp_path), src / ".git" / "config")
+        except OSError as exc:  # pragma: no cover - filesystem without hard links
+            pytest.skip(f"cannot create a hard link here: {exc}")
+        assert origin_url_from_git_config(src) is None
+        assert ss.origin_url_or_refusal(src) == (
+            None,
+            "it has more than one hard link",
+        )
+
+    def test_control_a_regular_config_reports_no_refusal(self, tmp_path):
+        src = _source_with_git_dir(tmp_path)
+        (src / ".git" / "config").write_text(_ORIGIN, encoding="utf-8")
+        assert ss.origin_url_or_refusal(src) == ("https://github.com/o/r", None)
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +556,25 @@ class TestOptInGate:
         (src / "a.py").write_text("x = 1\n")
         with pytest.raises(ScannerError, match="github.com"):
             _run(_scanner(src, tmp_path), FakeScorecard(), monkeypatch)
+
+    @_LINKS
+    def test_a_linked_git_config_fails_closed_naming_why(
+        self, tmp_path, token, on_path, monkeypatch
+    ):
+        """The outside origin is not scored, and the refusal says what to set."""
+        src = _source_with_git_dir(tmp_path)
+        (src / ".git" / "config").symlink_to(_outside_config(tmp_path))
+        scanner = _scanner(src, tmp_path)
+        fake = FakeScorecard()
+        with pytest.raises(ScannerError) as refused:
+            _run(scanner, fake, monkeypatch)
+        assert fake.calls == []
+        message = str(refused.value)
+        assert ".git/config was not read: it is a symbolic link" in message
+        assert "scanners.scorecard.options.repo" in message
+        assert "outside/leak" not in message
+        assert scanner.validate_plugin_dependencies() is False
+        assert "it is a symbolic link" in scanner.dependency_unavailable_reason
 
     def test_offline_fails_closed(self, tree, tmp_path, token, on_path, monkeypatch):
         monkeypatch.setattr(ScorecardScanner, "_is_offline_mode", lambda self: True)

@@ -94,6 +94,13 @@ OFF_HOST: Dict[Plugin, str] = {
         "ASH's environment, to the GitHub API, when `online_audits` is set "
         "(zizmor_scanner.py `_online`)"
     ),
+    ("scanners", "scorecard"): (
+        "requests to the GitHub API, with the GitHub token in ASH's environment, "
+        "for the settings of the repository its `repo` option (else the origin "
+        "remote) names; the findings and their `--show-details` details come back "
+        "into the results (scorecard_scanner.py `sandbox_requirements`, "
+        "`_build_arguments`)"
+    ),
     ("scanners", "detect-secrets"): (
         "each candidate secret, to the service that issued it, when the "
         "verification filter is configured (detect_secrets_scanner.py:245-268)"
