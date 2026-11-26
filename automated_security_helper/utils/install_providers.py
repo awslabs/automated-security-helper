@@ -434,7 +434,7 @@ class InstallProvider:
     description: str = ""
     implemented: bool = True
 
-    def capabilities(self) -> frozenset:
+    def capabilities(self) -> frozenset[Capability]:
         return frozenset()
 
     def build(
@@ -466,7 +466,7 @@ class UvProvider(InstallProvider):
     name = "uv"
     description = "uv tool environments, uv pip installs, uv venv"
 
-    def capabilities(self) -> frozenset:
+    def capabilities(self) -> frozenset[Capability]:
         return frozenset(
             {
                 Capability.PYTHON_TOOL_INSTALLS,
@@ -476,7 +476,13 @@ class UvProvider(InstallProvider):
             }
         )
 
-    def build(self, request, env, row, context):
+    def build(
+        self,
+        request: InstallRequest,
+        env: EnvOptions,
+        row: Optional[EcosystemPackage],
+        context: RouteContext,
+    ) -> "List[List[str]] | Refusal":
         from automated_security_helper.utils.uv_tool_runner import UV_NO_CONFIG
 
         venv = env.virtualenv_path
@@ -525,7 +531,9 @@ class UvProvider(InstallProvider):
             f"the declared install is a {request.kind.value}, not a Python package",
         )
 
-    def venv_create_command(self, path, runtime_request):
+    def venv_create_command(
+        self, path: Path, runtime_request: Optional[str]
+    ) -> "List[str] | Refusal":
         command = ["uv", "venv"]
         if runtime_request:
             command += ["--python", runtime_request]
@@ -537,12 +545,18 @@ class PipxProvider(InstallProvider):
     name = "pipx"
     description = "pipx per-tool environments"
 
-    def capabilities(self) -> frozenset:
+    def capabilities(self) -> frozenset[Capability]:
         return frozenset(
             {Capability.PYTHON_TOOL_INSTALLS, Capability.INTERPRETER_REQUESTS}
         )
 
-    def build(self, request, env, row, context):
+    def build(
+        self,
+        request: InstallRequest,
+        env: EnvOptions,
+        row: Optional[EcosystemPackage],
+        context: RouteContext,
+    ) -> "List[List[str]] | Refusal":
         if request.native_provider == self.name and request.kind in (
             CommandKind.NATIVE_PACKAGE,
             CommandKind.OPAQUE,
@@ -595,7 +609,7 @@ class PipProvider(InstallProvider):
     name = "pip"
     description = "pip into one interpreter's environment, python -m venv"
 
-    def capabilities(self) -> frozenset:
+    def capabilities(self) -> frozenset[Capability]:
         return frozenset(
             {
                 Capability.PYTHON_TOOL_INSTALLS,
@@ -604,7 +618,13 @@ class PipProvider(InstallProvider):
             }
         )
 
-    def build(self, request, env, row, context):
+    def build(
+        self,
+        request: InstallRequest,
+        env: EnvOptions,
+        row: Optional[EcosystemPackage],
+        context: RouteContext,
+    ) -> "List[List[str]] | Refusal":
         venv = env.virtualenv_path
         python = str(venv_python(venv)) if venv else None
         if request.kind == CommandKind.PYTHON_ENV:
@@ -646,7 +666,9 @@ class PipProvider(InstallProvider):
             f"the declared install is a {request.kind.value}, not a Python package",
         )
 
-    def venv_create_command(self, path, runtime_request):
+    def venv_create_command(
+        self, path: Path, runtime_request: Optional[str]
+    ) -> "List[str] | Refusal":
         if runtime_request:
             return Refusal(
                 self.name,
@@ -661,10 +683,16 @@ class ReleaseDownloadProvider(InstallProvider):
     name = "release-download"
     description = "ASH's pinned, digest-verified release downloads"
 
-    def capabilities(self) -> frozenset:
+    def capabilities(self) -> frozenset[Capability]:
         return frozenset({Capability.RELEASE_DOWNLOADS, Capability.BINARY_PINNING})
 
-    def build(self, request, env, row, context):
+    def build(
+        self,
+        request: InstallRequest,
+        env: EnvOptions,
+        row: Optional[EcosystemPackage],
+        context: RouteContext,
+    ) -> "List[List[str]] | Refusal":
         if request.kind == CommandKind.RELEASE_DOWNLOAD:
             return self._identity(request)
         tool = request.tool
@@ -705,10 +733,16 @@ class NixProvider(InstallProvider):
     name = "nix"
     description = "the repository flake's pinned toolchain (`ash --mode nix`)"
 
-    def capabilities(self) -> frozenset:
+    def capabilities(self) -> frozenset[Capability]:
         return frozenset({Capability.BINARY_PINNING, Capability.NATIVE_PACKAGES})
 
-    def build(self, request, env, row, context):
+    def build(
+        self,
+        request: InstallRequest,
+        env: EnvOptions,
+        row: Optional[EcosystemPackage],
+        context: RouteContext,
+    ) -> "List[List[str]] | Refusal":
         if row is None:
             return Refusal(
                 self.name,
@@ -799,13 +833,19 @@ class PackageManagerProvider(InstallProvider):
         self.privileged = privileged
         self.description = description
 
-    def capabilities(self) -> frozenset:
+    def capabilities(self) -> frozenset[Capability]:
         caps = {Capability.NATIVE_PACKAGES}
         if not self.privileged:
             caps.add(Capability.PRIVILEGED_INSTALLS)
         return frozenset(caps)
 
-    def build(self, request, env, row, context):
+    def build(
+        self,
+        request: InstallRequest,
+        env: EnvOptions,
+        row: Optional[EcosystemPackage],
+        context: RouteContext,
+    ) -> "List[List[str]] | Refusal":
         if (
             request.kind in (CommandKind.NATIVE_PACKAGE, CommandKind.OPAQUE)
             and request.native_provider == self.name
@@ -846,7 +886,13 @@ class StubProvider(InstallProvider):
         self.name = name
         self.description = description
 
-    def build(self, request, env, row, context):
+    def build(
+        self,
+        request: InstallRequest,
+        env: EnvOptions,
+        row: Optional[EcosystemPackage],
+        context: RouteContext,
+    ) -> "List[List[str]] | Refusal":
         if request.native_provider == self.name:
             return self._identity(request)
         return Refusal(
@@ -861,10 +907,16 @@ class CustomProvider(InstallProvider):
     name = "custom"
     description = "a plugin's own shell or download command, run as declared"
 
-    def capabilities(self) -> frozenset:
+    def capabilities(self) -> frozenset[Capability]:
         return frozenset({Capability.CUSTOM_COMMANDS})
 
-    def build(self, request, env, row, context):
+    def build(
+        self,
+        request: InstallRequest,
+        env: EnvOptions,
+        row: Optional[EcosystemPackage],
+        context: RouteContext,
+    ) -> "List[List[str]] | Refusal":
         if request.native_provider == self.name:
             return self._identity(request)
         return Refusal(

@@ -120,6 +120,7 @@ class _Parser:
             raise self.fail("unexpected end of document")
         start = self.i
         ch = self.text[self.i]
+        value: Any
         if ch == "{":
             value = self.parse_object(pointer, depth)
         elif ch == "[":

@@ -11,7 +11,7 @@ import json
 import threading
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Dict, List, Literal, Sequence
+from typing import Any, Dict, List, Literal, Sequence
 
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactContent,
@@ -132,7 +132,9 @@ def _build_nag_pack(
     """
     import cdk_nag
 
-    pack_type = getattr(cdk_nag, pack_name, None)
+    # The pack class is looked up by name, so its static type is unknown; Any is
+    # also what lets the class statement below subclass it.
+    pack_type: Any = getattr(cdk_nag, pack_name, None)
     if pack_type is None:
         raise ValueError(f"Unknown cdk-nag pack: {pack_name}")
     if validate_outcomes is None:

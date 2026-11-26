@@ -64,7 +64,7 @@ _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
 #: ``Runner(argv, timeout)`` returns ``(exit_code, stdout)``; tests pass a fake
 #: so no suite run reads a registry.
-Runner = Callable[[list, float], "tuple[int, str]"]
+Runner = Callable[[list[str], float], "tuple[int, str]"]
 
 #: ``Inspector(ref)`` returns ``(digest or None, why it answered nothing)``;
 #: tests pass a fake so no suite run asks an engine.
@@ -80,7 +80,7 @@ def _pinned_by_digest(ref: str) -> bool:
     return _DIGEST.fullmatch(ref.rsplit("@", 1)[-1]) is not None
 
 
-def _spawn(argv: list, timeout: float) -> "tuple[int, str]":
+def _spawn(argv: list[str], timeout: float) -> "tuple[int, str]":
     from automated_security_helper.utils.subprocess_utils import spawn_run
 
     completed = spawn_run(
@@ -200,7 +200,7 @@ def resolve_image_locator(
         return image
 
     ref = image.ref
-    reasons = []
+    reasons: list[str] = []
 
     def fall_back() -> ImageLocator:
         ASH_LOGGER.warning(
