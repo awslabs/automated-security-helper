@@ -65,16 +65,15 @@ class ImageLocator(_Frozen):
     """
 
     #: ``registry/repo[:tag][@sha256:digest]``. Digest-pinned refs preferred;
-    #: a tag-only ref is handed to the tools as written (ASH resolves
-    #: nothing itself).
+    #: a tag-only ref is accepted and resolved at scan start where an engine
+    #: is present.
     ref: Optional[str] = None
     #: An OCI image-layout directory (the ``oci-layout`` marker file's parent).
     oci_layout: Optional[Path] = None
     #: A saved-image tarball (``docker save`` / an OCI archive).
     oci_archive: Optional[Path] = None
-    #: A digest the SUBMITTER already resolved for the ref (an infrastructure
-    #: caller that knows one); carried into identity and attribution, never
-    #: required, and never filled by ASH itself.
+    #: Filled at scan start when an engine can resolve the submitted ref to a
+    #: digest; carried into identity and attribution, never required.
     resolved_digest: Optional[str] = None
 
     @model_validator(mode="after")
@@ -100,7 +99,9 @@ class ImageLocator(_Frozen):
         if self.oci_layout is not None:
             return self.oci_layout.as_posix()
         # The validator leaves exactly one shape set, so this is the archive.
-        return self.oci_archive.as_posix()  # type: ignore[union-attr]
+        if self.oci_archive is None:
+            raise ValueError("an ImageLocator names exactly one of its three shapes")
+        return self.oci_archive.as_posix()
 
 
 class Asset(_Frozen):

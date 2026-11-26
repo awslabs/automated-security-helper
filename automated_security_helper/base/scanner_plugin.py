@@ -22,6 +22,7 @@ from automated_security_helper.base.uv_tool_mixin import (
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -66,7 +67,6 @@ from typing import (
     Generic,
     Iterable,
     List,
-    Literal,
     Optional,
     Sequence,
     Set,
@@ -412,7 +412,18 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     Plugin implementations
     """
 
-    config: T | ScannerPluginConfigBase | None = None
+    if TYPE_CHECKING:
+        # Every concrete scanner fills its config in ``model_post_init`` when
+        # none was given, so the methods read it as the plugin's own config
+        # type; the runtime field below still accepts None until then.
+        # The ``= None`` keeps both optional in the constructor the checker
+        # sees; this branch is never evaluated.
+        config: T = None  # ty: ignore[invalid-assignment]
+        # The scanner's own results directory, set by ``_pre_scan`` before the
+        # scan runs.
+        results_dir: Path = None  # ty: ignore[invalid-assignment]
+    else:
+        config: T | ScannerPluginConfigBase | None = None
     dependencies_satisfied: bool = False
 
     #: Human-readable target coverage ("Terraform", "Python"), for the docs graphics.
@@ -506,6 +517,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     #: class's: cfn-nag and cdk-nag set it when they passed over a candidate they could
     #: not parse, and reset it at the top of each scan(). Read before the class value.
     _nothing_scanned_reason: Optional[str] = PrivateAttr(default=None)
+    #: The ignore paths of the image scan this scanner is running, set by
+    #: ``scan_image`` (and by a scanner that overrides it) and read by the
+    #: image argv resolution (``_image_exclude_globs``). Empty for any other scan.
+    _image_ignore_paths: List[Any] = PrivateAttr(default_factory=list)
     #: What this scanner scans, as fnmatch globs over source-relative POSIX paths
     #: and base names, read only under ``--mode precommit --staged`` and only by
     #: scanners that run through the template ``scan()``. With a staged scope in
@@ -667,6 +682,16 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             cls, ScannerPluginConfigBase, value, handler, info
         )
 
+    def tool_type_tag(self) -> str:
+        """The ``tool_type::<TYPE>`` tag a scanner puts on its results.
+
+        Written from the member's value: ``f"{member}"`` is the value on Python
+        3.10 and 3.11 and ``ClassName.MEMBER`` on 3.12, and the tag is a wire
+        spelling that readers (``utils/scanner_tool_types``) normalize from.
+        """
+        tool_type = self.tool_type or ScannerToolType.UNKNOWN
+        return f"tool_type::{getattr(tool_type, 'value', tool_type)}"
+
     def model_post_init(self, context):
         if self.config is None:
             raise ScannerError(
@@ -797,7 +822,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """
         if self.dependency_unavailable_reason:
             return False
-        found = find_executable(self.command)
+        found = find_executable(self._tool_command())
         if found is None and self.command:
             # A copy inside the scanned tree was refused: say so in the MISSING row,
             # with the path and how to allow it, rather than "not installed".
@@ -958,7 +983,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 handle.write(content)
 
     def _staged_scope_paths(
-        self, target: str | Path, target_type: str
+        self, target: str | Path, target_type: TargetType
     ) -> Optional[List[Path]]:
         """The staged files this scanner would scan under ``target``, or None.
 
@@ -975,7 +1000,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         directory scan's and every suppression and ignore path resolves as in a
         whole-repository run.
         """
-        if target_type != "source":
+        if target_type != TargetType.SOURCE:
             return None
         if self.staged_scope_patterns is None and self.staged_target_style is None:
             return None
@@ -1300,7 +1325,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def _pre_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         config: Optional[ScannerPluginConfigBase] = None,
         *args,
         **kwargs,
@@ -1312,7 +1337,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             options: Optional scanner-specific options
         """
         self.start_time = datetime.now(timezone.utc)
-        self.results_dir.mkdir(parents=True, exist_ok=True)
+        if self.results_dir is not None:
+            self.results_dir.mkdir(parents=True, exist_ok=True)
 
         # The config swap FIRST, before the dependency check reads anything the
         # config decides (tool_version builds the requirement). It used to sit
@@ -1443,7 +1469,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def _post_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
     ) -> None:
         """Perform pre-scan setup.
 
@@ -1706,7 +1732,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         sarif_report: SarifReport,
         final_args: List[str],
         target: "Path",
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Return additional Invocation kwargs (e.g. ``properties``).
 
         Default returns an empty dict. Override to attach scanner-specific
@@ -1819,7 +1845,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             exitCode=self.exit_code,
             exitCodeDescription="\n".join(self.errors) if self.errors else "",
             workingDirectory=working_dir,
-            **extras,
+            # A scanner's extras name Invocation fields by key (properties,
+            # toolExecutionNotifications, ...); a dict unpack is checked against
+            # every typed field at once, which no value type satisfies.
+            **extras,  # ty: ignore[invalid-argument-type]
         )
         ash_record._tool_said_unsuccessful = tool_said_unsuccessful
         sarif_report.runs[0].invocations = [
@@ -1944,7 +1973,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def _execute_scan(
         self,
         target: "Path",
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], "Path", Optional[dict]]:
         """Run the scanner tool and return (final_args, results_file, subprocess_env).
@@ -2241,7 +2270,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def scan(
         self,
         target: "Path",
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: "T | ScannerPluginConfigBase | None" = None,
         *args,
@@ -2599,11 +2628,36 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             )
         return None
 
+    def _image_exclude_globs(self) -> List[str]:
+        """The in-image exclude globs this scan's ignore paths translate to.
+
+        What a tool is handed so it leaves those paths unread
+        (``utils/image_ignore_paths``); the report filter still applies every
+        ignore path after the scan, so this is only the work the tool is saved.
+        One INFO line names how many entries only the filter applies.
+        """
+        from automated_security_helper.utils.image_ignore_paths import (
+            image_exclude_globs,
+        )
+
+        excludes = image_exclude_globs(self._image_ignore_paths)
+        if excludes.left_to_the_filter:
+            self._plugin_log(
+                f"{len(excludes.left_to_the_filter)} ignore path(s) cannot be "
+                f"given to {self.command or 'the tool'} as an exclude (a relative "
+                "path, a glob ending in '/', or more than the tool is handed) and "
+                "are applied to its findings after the scan.",
+                level=logging.INFO,
+                target_type=TargetType.IMAGE,
+            )
+        return excludes.globs
+
     def scan_image(
         self,
         image: "ImageLocator",
         config: "T | ScannerPluginConfigBase | None" = None,
         *args,
+        global_ignore_paths: "List[IgnorePathWithReason] | None" = None,
         **kwargs,
     ) -> Any | SarifReport:
         """Image template: preamble → _execute_image_scan → the scan() tail.
@@ -2618,7 +2672,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         the context's source directory, which an image scan uses as its
         working anchor, never as its subject.
         """
-        image_target_type = "image"
+        image_target_type = TargetType.IMAGE
         anchor = Path(getattr(self.context, "source_dir", None) or Path.cwd())
 
         # Per target, exactly as scan() resets them, and for the same reasons.
@@ -2630,6 +2684,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self._staged_scan_files = None
         self._staged_all_filtered = False
         self._nothing_scanned_reason = None
+        self._image_ignore_paths = list(global_ignore_paths or [])
 
         # One engine reading for the whole target: the skip decision and the
         # argv build must agree on it, and two detections could not (a socket
@@ -2833,7 +2888,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                     text,
                     read.values,
                     plugin_inputs=self._uv_run_inputs_for_records(),
-                    tool_name=self.command,
+                    tool_name=self._tool_command(),
                     limit=None,
                 )
             except Exception:  # noqa: BLE001 -- the error being reported outranks it
@@ -3101,7 +3156,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                             raw,
                             values,
                             plugin_inputs=inputs,
-                            tool_name=self.command,
+                            tool_name=self._tool_command(),
                             limit=None,
                         )
                 else:
@@ -3290,7 +3345,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def safe_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: T | ScannerPluginConfigBase | None = None,
         *args,
@@ -3316,12 +3371,14 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if global_ignore_paths is None:
             global_ignore_paths = []
         try:
+            # Passed by keyword: a scan override reads them by name, and an
+            # extra positional would collide with ``target``.
             return self.scan(
                 target=target,
                 target_type=target_type,
                 global_ignore_paths=global_ignore_paths,
                 config=config,
-                *args,
+                *args,  # ty: ignore[parameter-already-assigned]
                 **kwargs,
             )
         except Exception as e:

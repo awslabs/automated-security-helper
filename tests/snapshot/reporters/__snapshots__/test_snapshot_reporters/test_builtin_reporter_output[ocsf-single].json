@@ -363,6 +363,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
+      "correlation_uid": "secret/febaf0e11ce2f3b0e97c5eee80659e09f319bf333ab709c47cdc3f58e96474cb",
       "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
@@ -377,6 +378,9 @@
     "status_id": 3,
     "time": 1768478442000,
     "type_uid": 200201,
+    "unmapped": {
+      "ash/correlationId": "secret/febaf0e11ce2f3b0e97c5eee80659e09f319bf333ab709c47cdc3f58e96474cb"
+    },
     "vulnerabilities": [
       {
         "affected_code": [

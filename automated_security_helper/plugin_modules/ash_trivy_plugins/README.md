@@ -43,7 +43,7 @@ trivy --version
 
 ### Basic Configuration
 
-Add to your ASH config file (`.ashrc.yaml` in a new project):
+Add to your ASH config file (`.ash.yaml` in the project root):
 
 ```yaml
 scanners:
@@ -253,7 +253,7 @@ repos:
 ## Documentation
 
 For comprehensive documentation and advanced configuration options, see:
-- [ASH Community Plugins Documentation](../../../docs/content/docs/plugins/community/trivy-plugin.md)
+- [ASH Alpha Plugins Documentation](../../../docs/content/docs/plugins/alpha/trivy-plugin.md)
 - [Trivy Official Documentation](https://aquasecurity.github.io/trivy/)
 
 ## Support

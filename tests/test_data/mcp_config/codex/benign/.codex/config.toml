@@ -1,0 +1,11 @@
+model = "gpt-5"
+
+[mcp_servers.files]
+command = "/usr/local/bin/mcp-files"
+args = ["--root", "/srv/data"]
+
+[mcp_servers.files.env]
+LOG_LEVEL = "info"
+
+[mcp_servers.docs]
+url = "https://mcp.example.com/docs"

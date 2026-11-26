@@ -158,7 +158,7 @@ describe('cfn-guard suppressions sit only on the approved resources', () => {
  *
  * The app writes exactly two, both on AshCodeCommitGate resources that exist only when
  * VPC placement is on: W12 on the conditional ENI policy, and W5 on the 443-only
- * security group. Per-resource so that no file-level entry in `.ash/.ash.yaml` had to
+ * security group. Per-resource so that no file-level entry in `.ash.yaml` had to
  * be widened to cover them.
  * Pinned the same way as the cfn-guard set above.
  */

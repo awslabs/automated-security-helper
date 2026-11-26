@@ -161,7 +161,7 @@ def by_key(report) -> dict:
 def suppress_root(name: str, ghsa: str, lockdir: str) -> AshSuppression:
     return AshSuppression(
         rule_id=ghsa,
-        path=f"node_modules/{name}/package.json",
+        path=f"{lockdir}/package-lock.json",
         package_name=name,
         package_path=f"{lockdir}/node_modules/{name}",
         reason="root",
@@ -198,7 +198,7 @@ class TestScannerRecordsRoots:
             {
                 "rule_id": BRACES,
                 "package_path": "deploy/cdk/node_modules/braces",
-                "uri": "node_modules/braces/package.json",
+                "uri": "deploy/cdk/package-lock.json",
             }
         ]
         jest = results[("npm-audit-transitive-jest", "deploy/cdk/node_modules/jest")]

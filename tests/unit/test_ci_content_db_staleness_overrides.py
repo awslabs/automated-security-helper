@@ -43,7 +43,7 @@ pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REPO_CONFIGS = sorted((REPO_ROOT / ".ash").glob(".ash*.yaml"))
-COMMUNITY_CONFIG = REPO_ROOT / ".ash" / ".ash_community_plugins.yaml"
+ALPHA_CONFIG = REPO_ROOT / ".ash" / ".ash_alpha_plugins.yaml"
 #: The databases this repository's configs may relax, and why each one may. Empty while no
 #: relaxation is in force: a database is added here in the same change as its config entry,
 #: with the upstream state that justifies it, and removed with the entry.
@@ -80,7 +80,7 @@ def expired_relaxations(paths: List[Path], now: Optional[datetime] = None) -> Li
 
 
 def test_the_repo_configs_are_found() -> None:
-    assert COMMUNITY_CONFIG in REPO_CONFIGS, REPO_CONFIGS
+    assert ALPHA_CONFIG in REPO_CONFIGS, REPO_CONFIGS
 
 
 def test_no_repo_config_keeps_an_expired_relaxation() -> None:

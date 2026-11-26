@@ -12,10 +12,10 @@ exit code 2 if any check raised and so did not run (an ERROR line names it).
 
 The checks run in a few forked worker processes, grouped so that each expensive
 shared cache (the env-var read sweep, the MCP contract, the config models, the
-package syntax trees) is built exactly once; the report is printed in the
-registry's order either way, so the output matches a sequential run's.
-``--serial``, or a platform whose multiprocessing has no fork start method, runs
-the checks one at a time in this process instead.
+package syntax trees) is built in one worker where it can be; the report is
+printed in the registry's order either way, so the output matches a sequential
+run's. ``--serial``, a platform other than Linux, or a process that already has
+more than one thread runs the checks one at a time in this process instead.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from __future__ import annotations
 import ast
 import re
 import sys
+import threading
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -606,7 +607,7 @@ def check_reporters() -> list[str]:
 
 def scanner_names() -> dict[str, str]:
     """Every scanner ASH ships, by config name: the fields of ScannerConfigSegment
-    (the built-in scanners) and the scanner config classes of the community plugin
+    (the built-in scanners) and the scanner config classes of the alpha plugin
     modules in the package, which are configured under the same ``scanners`` key."""
     from automated_security_helper.config.ash_config import ScannerConfigSegment
 
@@ -683,10 +684,7 @@ def check_plugin_data() -> list[str]:
     are compared with the same registry. Every link the partial gives into the
     scanner and reporter references must name a heading that exists there.
     """
-    from automated_security_helper.config.ash_config import (
-        ConverterConfigSegment,
-        ScannerConfigSegment,
-    )
+    from automated_security_helper.config.ash_config import ScannerConfigSegment
 
     failures: list[str] = []
     where = "docs/overrides/partials/generated/plugin-data.html"
@@ -707,7 +705,15 @@ def check_plugin_data() -> list[str]:
                 f"missing {sorted(expected - listed)}, extra {sorted(listed - expected)}"
             )
 
-    converters = set(_segment_names(ConverterConfigSegment))
+    # The converters come from the plugin registry, not the config segment: a
+    # converter whose section the config model does not declare (the sdist lock
+    # harvester) is still a converter, and a name with an underscore ("mcp_config")
+    # is that name, not a dashed spelling of its field.
+    # scripts/ is not on sys.path where this module is loaded by path.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _plugin_reference import discover
+
+    converters = {plugin.name for plugin in discover("converter")}
     block = _partial_block(text, "converters")
     listed = (
         set(re.findall(r'"name": "([^"]+)"', block)) if block is not None else set()
@@ -1741,7 +1747,11 @@ def _use_trees(docs_root: Path) -> None:
 # package syntax trees 6.0s, and everything else ~9s together. Checks that build the
 # same cache therefore run in ONE worker, in registry order, so no cache is built
 # twice; checks in different groups run concurrently, and the wall is the slowest
-# group. Threads would not do: the work is pure CPU under the GIL, and two threads
+# group.
+# The grouping is not a partition of the caches: check_doc_report_files sits in the
+# package-ast group but also calls load_config_models, so the config models are
+# built in two workers; wall time is unaffected because the env group dominates.
+# Threads would not do: the work is pure CPU under the GIL, and two threads
 # racing the same lru_cache build the 60s cache twice.
 
 #: Check function -> the cache group it runs in. A check absent here is cheap and
@@ -1778,26 +1788,53 @@ def _execute_check(check_fn) -> tuple[str, object]:
     parent reports as the check not running -- fail-closed, never a silent pass.
     """
     try:
-        failures = check_fn()
+        # The conversion is inside the try: a check that returns None, or a finding
+        # whose __str__ raises, is a check that did not run (exit 2), not a
+        # traceback (exit 1, "docs drifted") or a dead worker blaming its group.
+        return "ok", [str(f) for f in check_fn()]
     except Exception as e:  # noqa: BLE001 -- reported as a check that did not run
         return "error", f"{type(e).__name__}: {e}"
-    return "ok", [str(f) for f in failures]
 
 
 def _fork_context():
-    """The fork multiprocessing context, or None where fork does not exist.
+    """The fork multiprocessing context, or None where forking is not safe.
 
     fork, never spawn: the workers must inherit this module's state as it stands
     (the check functions, _VERBOSE, a --docs-root rebase, a test's monkeypatches)
     rather than re-import a script that spawn cannot locate by module name, and
-    fork passes the check functions to the child without pickling them. Where only
-    spawn exists (Windows), the gate runs serially, as it always did.
+    fork passes the check functions to the child without pickling them.
+
+    Fork is used only on Linux, and only while this process has one thread. On
+    macOS system libraries start threads, which is why CPython moved its default
+    there to spawn; and a fork taken while another thread holds a lock (a stream
+    buffer, an import lock) leaves that lock held forever in the child. A caller
+    that is not safe to fork from (a pytest-xdist worker has execnet's receiver
+    thread) and every other platform gets the serial run, as the gate always did.
     """
     import multiprocessing
 
+    if not sys.platform.startswith("linux") or threading.active_count() > 1:
+        return None
     if "fork" not in multiprocessing.get_all_start_methods():
         return None
     return multiprocessing.get_context("fork")
+
+
+#: Seconds a worker may take to exit after it has closed its pipe (it has sent every
+#: result by then, so this is interpreter teardown) before it is terminated and its
+#: unreported checks are errors; and the grace between terminate and kill.
+_WORKER_EXIT_TIMEOUT_S = 60.0
+_WORKER_KILL_GRACE_S = 5.0
+
+
+def _stop_worker(process) -> None:
+    """End a worker that is still running: terminate, then kill, and reap it."""
+    if process.is_alive():
+        process.terminate()
+        process.join(_WORKER_KILL_GRACE_S)
+    if process.is_alive():
+        process.kill()
+        process.join()
 
 
 def _run_group(checks, indices, sender) -> None:
@@ -1843,47 +1880,68 @@ def _iter_parallel(checks):
     sys.stderr.flush()
 
     workers: dict[object, tuple[object, list[int], set[int]]] = {}
-    for group, indices in groups.items():
-        receiver, sender = context.Pipe(duplex=False)
-        process = context.Process(
-            target=_run_group,
-            args=(checks, indices, sender),
-            name=f"docs-freshness-{group}",
-        )
-        process.start()
-        sender.close()
-        workers[receiver] = (process, indices, set())
+    started: list[object] = []
+    try:
+        for group, indices in groups.items():
+            receiver, sender = context.Pipe(duplex=False)
+            process = context.Process(
+                target=_run_group,
+                args=(checks, indices, sender),
+                name=f"docs-freshness-{group}",
+            )
+            process.start()
+            started.append(process)
+            sender.close()
+            workers[receiver] = (process, indices, set())
 
-    results: dict[int, tuple[str, str, object]] = {}
-    emit = 0
-    while emit < len(checks):
-        while emit < len(checks) and emit in results:
-            captured, status, payload = results.pop(emit)
-            yield checks[emit][0], captured, status, payload
-            emit += 1
-        if emit >= len(checks):
-            break
-        for receiver in connection_wait(list(workers)):
-            process, indices, reported = workers[receiver]
-            try:
-                index, captured, status, payload = receiver.recv()
-            except (EOFError, OSError):
-                receiver.close()
-                del workers[receiver]
-                process.join()
-                for index in indices:
-                    if index not in reported:
-                        results[index] = (
-                            "",
-                            "error",
-                            (
-                                "the worker process running this check exited with "
-                                f"code {process.exitcode} before reporting a result"
-                            ),
+        results: dict[int, tuple[str, str, object]] = {}
+        emit = 0
+        while emit < len(checks):
+            while emit < len(checks) and emit in results:
+                captured, status, payload = results.pop(emit)
+                yield checks[emit][0], captured, status, payload
+                emit += 1
+            if emit >= len(checks):
+                break
+            for receiver in connection_wait(list(workers)):
+                process, indices, reported = workers[receiver]
+                try:
+                    index, captured, status, payload = receiver.recv()
+                except (EOFError, OSError):
+                    receiver.close()
+                    del workers[receiver]
+                    process.join(_WORKER_EXIT_TIMEOUT_S)
+                    if process.is_alive():
+                        _stop_worker(process)
+                        how = (
+                            "did not exit within "
+                            f"{_WORKER_EXIT_TIMEOUT_S:g}s of closing its pipe "
+                            "and was terminated"
                         )
-                continue
-            reported.add(index)
-            results[index] = (captured, status, payload)
+                    else:
+                        how = f"exited with code {process.exitcode}"
+                    for index in indices:
+                        if index not in reported:
+                            results[index] = (
+                                "",
+                                "error",
+                                (
+                                    "the worker process running this check "
+                                    f"{how} before reporting a result"
+                                ),
+                            )
+                    continue
+                reported.add(index)
+                results[index] = (captured, status, payload)
+    finally:
+        # Reached on a normal finish, on an exception out of this loop, and when the
+        # consumer drops the generator (run_gate raising while it prints, a closed
+        # pipe under `| head`): no worker outlives the run, so the interpreter's
+        # exit never waits on a half-finished sweep.
+        for receiver in workers:
+            receiver.close()
+        for process in started:
+            _stop_worker(process)
 
 
 def _iter_serial(checks):
@@ -1967,7 +2025,6 @@ def run_gate(checks, serial: bool = False) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
-    import gc
 
     parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     parser.add_argument(
@@ -2054,30 +2111,38 @@ def main(argv: list[str] | None = None) -> int:
         ("Journey pages match their journey files", check_doc_journeys),
     ]
 
-    # The gate deliberately holds big caches for its whole run (the env-var read
-    # sweep, the config models, the MCP contract, the package syntax trees), and
-    # the cyclic collector re-walks all of it on every generation-2 pass that the
-    # later allocation-heavy checks trigger. Measured on a quiet 192-CPU host:
-    # the same 26 checks took 94.6s with the collector on and 66.9s with it off,
-    # before any other change here. Nothing in a process this short-lived needs
-    # cycles reclaimed; the workers inherit the setting through fork.
-    #
-    # The restore for in-process callers (the tests) freezes first. Everything
-    # allocated while the collector was off sits uncollected in the young
-    # generation, and a plain enable() pays that whole debt at the next pass --
-    # measured as ~27s at interpreter shutdown, which un-did the win. freeze()
-    # moves what the gate left behind (its caches, which live for the process
-    # anyway) into the permanent generation, so collection resumes for new
-    # allocations only.
-    was_enabled = gc.isenabled()
+    return run_gate(checks, serial=args.serial)
+
+
+def _run_as_script() -> int:
+    """main() for the command line, with the cyclic collector off.
+
+    The gate deliberately holds big caches for its whole run (the env-var read
+    sweep, the config models, the MCP contract, the package syntax trees), and
+    the cyclic collector re-walks all of it on every generation-2 pass that the
+    later allocation-heavy checks trigger. Measured on a quiet 192-CPU host:
+    the same 26 checks took 94.6s with the collector on and 66.9s with it off,
+    before any other change here. Nothing in a process this short-lived needs
+    cycles reclaimed; the workers inherit the setting through fork.
+
+    This lives here, not in main(), because both calls are process-wide: an
+    in-process caller (the tests call main() many times in one pytest worker)
+    would be left with a frozen heap or a changed collector. Nothing is restored,
+    since the process exits. freeze() is for that exit: everything allocated
+    while the collector was off sits in the young generation, and the
+    interpreter's shutdown collection would walk all of it (measured as ~27s).
+    freeze() moves every object tracked at that point, the gate's caches and any
+    garbage not yet collected, into the permanent generation, which collections
+    never visit.
+    """
+    import gc
+
     gc.disable()
     try:
-        return run_gate(checks, serial=args.serial)
+        return main()
     finally:
-        if was_enabled:
-            gc.freeze()
-            gc.enable()
+        gc.freeze()
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_run_as_script())

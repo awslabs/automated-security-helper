@@ -202,7 +202,7 @@
     },
     "ArchiveConverterConfigOptions": {
       "additionalProperties": false,
-      "description": "Limits on what extracting one archive may write.\n\nEach is an inclusive maximum, checked against what the archive declares, for\nevery member, before anything is written. An archive over any of them is not\nextracted at all. The defaults are far above an ordinary source archive. Set\ninside the scanned tree (``.ash/.ash.yaml``), by a config an MCP client\nsupplied, or by a workspace project's own config, a value can only lower a\nlimit; raise one with ``--config-overrides`` or a config file outside the tree.",
+      "description": "Limits on what extracting one archive may write.\n\nEach is an inclusive maximum, checked against what the archive declares, for\nevery member, before anything is written. An archive over any of them is not\nextracted at all. The defaults are far above an ordinary source archive. Set\ninside the scanned tree (``.ash.yaml``), by a config an MCP client\nsupplied, or by a workspace project's own config, a value can only lower a\nlimit; raise one with ``--config-overrides`` or a config file outside the tree.",
       "properties": {
         "max_compression_ratio": {
           "anyOf": [
@@ -560,6 +560,7 @@
               "annotate": false,
               "fold": false
             },
+            "exclusions": [],
             "history": {
               "enabled": false,
               "keep_runs": 50
@@ -588,6 +589,7 @@
                   "/scanners/detect-secrets/options/baseline_file",
                   "/global_settings/ignore_paths",
                   "/global_settings/suppressions",
+                  "/global_settings/exclusions",
                   "/global_settings/mcp",
                   "/global_settings/mcp/**",
                   "/scanners/opengrep/options/exclude_rule",
@@ -628,6 +630,7 @@
                   "/scanners/ferret-scan/options/config_file",
                   "/scanners/grype/options/config_file",
                   "/scanners/syft/options/config_file",
+                  "/scanners/syft/options/sdist_harvest/**",
                   "/scanners/trivy-repo/options/secret_config_file",
                   "/scanners/trivy-repo/options/config_file",
                   "/scanners/trivy-repo/options/module_dir",
@@ -1216,6 +1219,15 @@
           },
           "description": "Cross-scanner duplicate annotation in the flat reports (opt-in; off by default)."
         },
+        "exclusions": {
+          "default": [],
+          "description": "Global list of rule+path exclusions. Each entry names a rule ID (glob allowed), a path (matched like a suppression's), an optional scanner and a required reason, and DROPS the matching results from SARIF instead of keeping them marked suppressed: for finding classes that are always benign in a known place, such as bandit B101 under tests/.",
+          "items": {
+            "$ref": "#/$defs/AshExclusion"
+          },
+          "title": "Exclusions",
+          "type": "array"
+        },
         "history": {
           "$ref": "#/$defs/AshHistoryConfig",
           "default": {
@@ -1258,6 +1270,7 @@
                 "/scanners/detect-secrets/options/baseline_file",
                 "/global_settings/ignore_paths",
                 "/global_settings/suppressions",
+                "/global_settings/exclusions",
                 "/global_settings/mcp",
                 "/global_settings/mcp/**",
                 "/scanners/opengrep/options/exclude_rule",
@@ -1298,6 +1311,7 @@
                 "/scanners/ferret-scan/options/config_file",
                 "/scanners/grype/options/config_file",
                 "/scanners/syft/options/config_file",
+                "/scanners/syft/options/sdist_harvest/**",
                 "/scanners/trivy-repo/options/secret_config_file",
                 "/scanners/trivy-repo/options/config_file",
                 "/scanners/trivy-repo/options/module_dir",
@@ -1433,6 +1447,88 @@
       "title": "AshDeduplicationConfig",
       "type": "object"
     },
+    "AshExclusion": {
+      "additionalProperties": false,
+      "description": "A rule+path exclusion: a known-benign finding class DROPPED from results.\n\nUnlike a suppression, which keeps the result in SARIF marked ``suppressed``\n(``kind: inSource``), an exclusion removes it, so a class that is always\nbenign in a known place (bandit B101 under ``tests/``, say) does not pile up\nas suppressed noise in SARIF consumers and dashboards (issue #894). And\nunlike an ignore path, it drops only the named rule in the named path, so\nother rules there are still reported.\n\n``rule_id`` and ``path`` are both required, with ``reason``; ``scanner``\noptionally bounds the exclusion to one scanner's results. The path is read\nexactly as a suppression's (``suppression_matcher.file_path_matches``), the\nrule id as a suppression's rule id (exact, case-insensitive, or a glob), and\n``expires`` as every entry's. Applied by\n``sarif_utils.apply_suppressions_to_sarif`` after the ignore-path check and\nbefore the config suppressions; an entry a client-delivered config supplied\n(``client_supplied``) marks the result as a client suppression instead of\ndropping it, so the results show what the client chose to hide. A runtime\noverride of ``/global_settings/exclusions`` is denied\n(``RuntimeOverridesConfig.denied_paths``).",
+      "properties": {
+        "client_supplied": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": false,
+          "description": "Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored.",
+          "title": "Client Supplied"
+        },
+        "expiration": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Deprecated alias of 'expires', accepted when a config is read and removed in ASH v4; the entry is written and stored as 'expires'.",
+          "title": "Expiration"
+        },
+        "expires": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expiration' is accepted as a deprecated alias when a config is read; the alias is removed in ASH v4.",
+          "title": "Expires"
+        },
+        "path": {
+          "description": "Path or pattern to exclude",
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Reason for exclusion",
+          "title": "Reason",
+          "type": "string"
+        },
+        "rule_id": {
+          "description": "Rule ID whose findings the exclusion drops. Compared like a suppression's rule_id: the finding's exact id (case-insensitive), or a glob such as 'B1*'.",
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "scanner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Only drop this scanner's findings, by its registered name (case-insensitive), e.g. 'bandit'. Omit it to drop the rule from any scanner.",
+          "title": "Scanner"
+        }
+      },
+      "required": [
+        "path",
+        "reason",
+        "rule_id"
+      ],
+      "title": "AshExclusion",
+      "type": "object"
+    },
     "AshHistoryConfig": {
       "additionalProperties": false,
       "description": "Run history: a compact record of each completed scan, for ``ash trend``.",
@@ -1501,6 +1597,7 @@
               "/scanners/detect-secrets/options/baseline_file",
               "/global_settings/ignore_paths",
               "/global_settings/suppressions",
+              "/global_settings/exclusions",
               "/global_settings/mcp",
               "/global_settings/mcp/**",
               "/scanners/opengrep/options/exclude_rule",
@@ -1541,6 +1638,7 @@
               "/scanners/ferret-scan/options/config_file",
               "/scanners/grype/options/config_file",
               "/scanners/syft/options/config_file",
+              "/scanners/syft/options/sdist_harvest/**",
               "/scanners/trivy-repo/options/secret_config_file",
               "/scanners/trivy-repo/options/config_file",
               "/scanners/trivy-repo/options/module_dir",
@@ -1932,7 +2030,12 @@
         "confidence_level": {
           "anyOf": [
             {
-              "pattern": "^(all|low|medium|high)$",
+              "enum": [
+                "all",
+                "low",
+                "medium",
+                "high"
+              ],
               "type": "string"
             },
             {
@@ -6195,6 +6298,7 @@
             "/scanners/detect-secrets/options/baseline_file",
             "/global_settings/ignore_paths",
             "/global_settings/suppressions",
+            "/global_settings/exclusions",
             "/global_settings/mcp",
             "/global_settings/mcp/**",
             "/scanners/opengrep/options/exclude_rule",
@@ -6235,6 +6339,7 @@
             "/scanners/ferret-scan/options/config_file",
             "/scanners/grype/options/config_file",
             "/scanners/syft/options/config_file",
+            "/scanners/syft/options/sdist_harvest/**",
             "/scanners/trivy-repo/options/secret_config_file",
             "/scanners/trivy-repo/options/config_file",
             "/scanners/trivy-repo/options/module_dir",
@@ -6488,27 +6593,9 @@
           "type": "array"
         },
         "mode": {
-          "anyOf": [
-            {
-              "enum": [
-                "off",
-                "auto",
-                "bwrap",
-                "firejail",
-                "landlock",
-                "sandbox-exec"
-              ],
-              "type": "string"
-            },
-            {
-              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
-              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
-              "type": "string"
-            }
-          ],
+          "$ref": "#/$defs/SandboxMode",
           "default": "off",
-          "description": "How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. A mode that --sandbox, ASH_CONFIG or the operator's config file sets is a floor: a config file inside a git checkout or the scanned directory cannot turn it off or switch backends. Not applied in container mode, where the container is the boundary; ASH logs a warning when it is set there.",
-          "title": "Mode"
+          "description": "How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. A mode that --sandbox, ASH_CONFIG or the operator's config file sets is a floor: a config file inside a git checkout or the scanned directory cannot turn it off or switch backends. Not applied in container mode, where the container is the boundary; ASH logs a warning when it is set there."
         },
         "network_scanners": {
           "anyOf": [
@@ -6538,6 +6625,30 @@
       },
       "title": "SandboxConfig",
       "type": "object"
+    },
+    "SandboxMode": {
+      "anyOf": [
+        {
+          "description": "How scanner subprocesses are confined. See docs/content/docs/scanner-sandbox.md.",
+          "enum": [
+            "off",
+            "auto",
+            "bwrap",
+            "firejail",
+            "landlock",
+            "sandbox-exec"
+          ],
+          "title": "SandboxMode",
+          "type": "string"
+        },
+        {
+          "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+          "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+          "type": "string"
+        }
+      ],
+      "description": "How scanner subprocesses are confined. See docs/content/docs/scanner-sandbox.md.",
+      "title": "SandboxMode"
     },
     "ScannerConfigSegment": {
       "additionalProperties": {

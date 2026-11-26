@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": "actionlint",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "actionlint-1.7.12-default",
+      "live_input": false,
+      "note": null,
+      "observable": true,
+      "pin_stamp": {
+        "tool": "actionlint",
+        "version": "1.7.12"
+      },
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "actionlint-1.7.12-default.json",
+          "sha256": "fe5f467f5eeb5bc06f6c385a1b8ae18b958d9b149d8d35c50efc161b15e0dd6e"
+        }
+      ],
+      "retention": "current",
+      "scanner": "actionlint",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "actionlint",
+        "version": "1.7.12"
+      }
+    },
+    {
+      "adapter_prep": "actionlint",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "actionlint-1.7.12-clean",
+      "live_input": false,
+      "note": null,
+      "observable": true,
+      "pin_stamp": {
+        "tool": "actionlint",
+        "version": "1.7.12"
+      },
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "actionlint-1.7.12-clean.json",
+          "sha256": "3f6f85fc4b8c963261bfe06bc9e757aa39f883ea9e58dc3b453c128b1a0fed51"
+        }
+      ],
+      "retention": "current",
+      "scanner": "actionlint",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "actionlint",
+        "version": "1.7.12"
+      }
+    },
+    {
+      "adapter_prep": "actionlint",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "actionlint-1.7.12-shellcheck",
+      "live_input": false,
+      "note": "recorded with the shellcheck integration on",
+      "observable": true,
+      "pin_stamp": {
+        "tool": "actionlint",
+        "version": "1.7.12"
+      },
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "actionlint-1.7.12-shellcheck.json",
+          "sha256": "e8575ab21b01a257081a32c32590a5d74b08d58bcf1e799bc699d81600ecb5f2"
+        }
+      ],
+      "retention": "current",
+      "scanner": "actionlint",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "actionlint",
+        "version": "1.7.12"
+      }
+    }
+  ],
+  "unrecorded": []
+}

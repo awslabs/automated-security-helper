@@ -73,6 +73,10 @@ def _tar_with(tmp_path, names, file_name="image.tar") -> Path:
     return path
 
 
+def _archive(tmp_path) -> Path:
+    return _tar_with(tmp_path, ["manifest.json"])
+
+
 def _docker_archive(tmp_path) -> Path:
     """What ``podman save`` (and docker save before 25) writes: no index.json."""
     return _tar_with(tmp_path, ["manifest.json"], "docker-image.tar")
@@ -81,6 +85,7 @@ def _docker_archive(tmp_path) -> Path:
 def _oci_archive(tmp_path) -> Path:
     """A tar holding an OCI layout, as newer ``docker save`` writes."""
     return _tar_with(tmp_path, ["oci-layout", "index.json"], "oci-image.tar")
+
 
 
 def _layout(tmp_path) -> Path:
@@ -187,23 +192,32 @@ class TestArchiveScheme:
 
     def test_a_manifest_only_tar_is_docker_archive(self, tmp_path):
         # podman save's default, and docker save before 25: stereoscope's
-        # oci-archive provider cannot read these, its docker-archive one can.
+        # oci-archive provider cannot read these, its docker-archive one can
+        # (measured on syft 1.57.2 and grype 0.122.1: a docker-save tarball
+        # given as oci-archive: is refused).
         assert archive_scheme(_docker_archive(tmp_path)) == "docker-archive"
 
-    def test_a_repositories_tar_is_docker_archive(self, tmp_path):
-        tar = _tar_with(tmp_path, ["repositories"], "legacy.tar")
+    def test_a_save_that_holds_both_listings_is_docker_archive(self, tmp_path):
+        # A recent `docker save` writes manifest.json and an OCI index;
+        # docker-archive: reads that.
+        tar = _tar_with(tmp_path, ["index.json", "oci-layout", "manifest.json"], "both.tar")
         assert archive_scheme(tar) == "docker-archive"
 
-    def test_a_markerless_tar_is_left_to_the_tool(self, tmp_path):
-        # Neither marker: the tool owns the verdict on image bytes, so the
-        # label defaults rather than refusing here.
-        tar = _tar_with(tmp_path, ["something-else.json"], "odd.tar")
-        assert archive_scheme(tar) == "oci-archive"
+    def test_a_dot_slash_member_name_is_read(self, tmp_path):
+        tar = _tar_with(tmp_path, ["./manifest.json"], "dot.tar")
+        assert archive_scheme(tar) == "docker-archive"
 
-    def test_an_unreadable_file_is_left_to_the_tool(self, tmp_path):
+    def test_a_markerless_tar_is_the_documented_shape(self, tmp_path):
+        # Neither marker: named docker-archive, the documented shape, so the
+        # tool reports what is wrong with the bytes itself.
+        tar = _tar_with(tmp_path, ["something-else.json"], "odd.tar")
+        assert archive_scheme(tar) == "docker-archive"
+
+    def test_an_archive_that_cannot_be_walked_is_the_documented_shape(self, tmp_path):
         not_tar = tmp_path / "not-a.tar"
         not_tar.write_bytes(b"PK\x03\x04 definitely a zip")
-        assert archive_scheme(not_tar) == "oci-archive"
+        assert archive_scheme(not_tar) == "docker-archive"
+        assert archive_scheme(tmp_path / "absent.tar") == "docker-archive"
 
 
 class TestStereoscopeTargets:

@@ -373,8 +373,8 @@ def test_a_profile_that_denies_suppressions_still_refuses_them(_server) -> None:
 
 
 def test_ashs_own_repository_config_delivered_as_a_tree_scans(_server) -> None:
-    own = Path(__file__).resolve().parents[4] / ".ash" / ".ash.yaml"
-    source = _upload({".ash/.ash.yaml": own.read_text(encoding="utf-8")})
+    own = Path(__file__).resolve().parents[4] / ".ash.yaml"
+    source = _upload({".ash.yaml": own.read_text(encoding="utf-8")})
     config = _scan_resolution(source, None)
     if sys.platform == "win32":
         # Platform contract: opengrep and semgrep are "Off by default on Windows"

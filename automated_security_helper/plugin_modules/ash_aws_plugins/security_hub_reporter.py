@@ -30,6 +30,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
+from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     MAX_RETRIES,
     MAX_RETRY_DELAY_SECONDS,
@@ -111,7 +112,7 @@ MAX_GET_FINDINGS_RESULTS = 100
 
 # The scanner statuses that mean the scanner looked at everything it was given.
 # ERROR, MISSING and SKIPPED scanners did not, so their findings are never archived.
-_COMPLETED_STATUSES = {"PASSED", "FAILED"}
+_COMPLETED_STATUSES = {ScannerStatus.PASSED.value, ScannerStatus.FAILED.value}
 
 # The API's own 500 is InternalException, which the shared list does not carry.
 # LimitExceededException, the API's 429, is already in it.
@@ -1551,7 +1552,7 @@ def _archive_record(stored: dict[str, Any], timestamp: str) -> dict[str, Any] | 
         "Description",
     )
     if not resources or not all(
-        isinstance(record[key], str) and record[key].strip() for key in required
+        isinstance(value := record[key], str) and value.strip() for key in required
     ):
         return None
     return record

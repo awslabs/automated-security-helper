@@ -11,7 +11,7 @@ ash scan --sandbox auto            # best sandbox this machine has
 ash scan --sandbox bwrap --offline # bubblewrap, no scanner gets a network
 ```
 
-or in your ASH config file (`.ashrc.yaml` in a new project):
+or in your ASH config file (`.ash.yaml` at the project root):
 
 ```yaml
 sandbox:
@@ -346,10 +346,10 @@ it needs.
 | gitleaks | no | none | single binary |
 | zizmor | no; `online_audits` gets neither a network nor a GitHub token yet | uv cache | uv-managed binary |
 
-### Community and third-party plugin scanners
+### Alpha and third-party plugin scanners
 
-The sandbox applies to every scanner, whatever module it comes from. A scanner from a
-community module (snyk-code, ferret-scan, trivy-repo) or your own plugin package gets
+The sandbox applies to every scanner, whatever module it comes from. A scanner from an
+alpha module (snyk-code, ferret-scan, trivy-repo) or your own plugin package gets
 its policy from its `sandbox_requirements` class attribute. A scanner that declares
 none gets the strictest default: no network, the source tree read-only, its own
 results directory as the only writable place, a private empty `$HOME` and `/tmp`, and
@@ -383,6 +383,11 @@ class MyScanner(ScannerPluginBase[MyScannerConfig]):
         env_names=("MYTOOL_TOKEN",),
         # Set under sandbox-exec only, after the allowlist.
         sandbox_exec_env=(("MYTOOL_PACKAGE_CACHE", "disabled"),),
+        # Under sandbox-exec, these variables point at a private, empty
+        # directory per spawn. For a tool whose cache location follows a
+        # variable it offers no other way to move (Go's os.UserCacheDir reads
+        # HOME alone on macOS).
+        sandbox_exec_cache_env=("HOME",),
         # The tool unpacks itself where this variable says and runs what it
         # unpacked; sandbox-exec points it at a private directory per spawn.
         unpack_dir_env="XDG_CACHE_HOME",
@@ -405,7 +410,7 @@ class MyScanner(ScannerPluginBase[MyScannerConfig]):
     )
 ```
 
-The community scanners declare theirs:
+The alpha scanners declare theirs:
 
 - snyk-code asks for a network, its `SNYK_` variables and `SNYK_TOKEN`, and read
   access to its token file.
@@ -514,7 +519,7 @@ An in-tree `network_scanners` list still takes network away: a scanner it doesn'
 name gets none, so a repository can keep its own scan offline with
 `network_scanners: []`.
 
-When any file the config was built from can't grant (the discovered `.ash/.ash.yaml`,
+When any file the config was built from can't grant (the discovered `.ash.yaml`,
 a `--config` path, an `extends` base, or the file `ASH_CONFIG` names), the five
 settings are taken from the files that can: in workspace mode the operator's
 default config (under the MCP server, the session's bound profile), else
@@ -528,11 +533,11 @@ warning that names the files that can't grant and the settings it dropped. A `ne
 it doesn't name gets none, so a repository can keep its own scan offline with
 `network_scanners: []`.
 
-For a config in `/home/me/src/app/.ash/.ash.yaml` that grants grype a network and a
+For a config in `/home/me/src/app/.ash.yaml` that grants grype a network and a
 read path, the warning reads:
 
 ```text
-WARNING  Ignoring sandbox.network_scanners, sandbox.extra_read_paths from /home/me/src/app/.ash/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. A network_scanners list there still removes network from scanners it does not name, and a sandbox mode there still applies when nothing else turns the sandbox on. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
+WARNING  Ignoring sandbox.network_scanners, sandbox.extra_read_paths from /home/me/src/app/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. A network_scanners list there still removes network from scanners it does not name, and a sandbox mode there still applies when nothing else turns the sandbox on. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
 ```
 
 This applies to a trusted config kept in a checkout of its own as well, such as an

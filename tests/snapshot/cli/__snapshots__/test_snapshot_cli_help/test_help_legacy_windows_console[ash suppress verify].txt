@@ -1,0 +1,17 @@
+
+ Usage: ash suppress verify [OPTIONS]
+
+ Check the lock against the tree. Exits 1 when anything is out of date.
+
+ Lists every locked file whose bytes changed or that is gone, and every
+ symbol suppression in the named configs whose file has no lock entry. Exit
+ code 0 means a scan applies every symbol suppression.
+
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
+│ --config      -c      <str>  A YAML config file whose symbol suppressions must each have a lock │
+│                              entry. Repeat it for several. Defaults to the config a scan of the │
+│                              source directory uses.                                             │
+│ --source-dir          <str>  The directory the scan covers, which holds .ash.lock. Defaults to  │
+│                              the current directory.                                             │
+│ --help                       Show this message and exit.                                        │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘

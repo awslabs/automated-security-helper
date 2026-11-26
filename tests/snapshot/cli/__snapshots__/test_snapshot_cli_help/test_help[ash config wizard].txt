@@ -5,14 +5,15 @@
 
  Reads the existing config (the one a scan of --source-dir, or the current
  directory, would use, or --config), walks through scanner, reporter,
- offline-mode, and community-plugin settings interactively, then writes the
- result back. With no config yet, it creates .ashrc.yaml there.
+ offline-mode, and alpha-plugin settings interactively, then writes the
+ result back. With no config yet, it creates .ash.yaml, the canonical
+ config file, there.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --config      -c                <str>  Path to read/write the configuration file. By default,    │
 │                                        the config a scan of --source-dir would use (the current  │
 │                                        directory when --source-dir is not given), or a new       │
-│                                        .ashrc.yaml in that directory when there is none.         │
+│                                        .ash.yaml in that directory when there is none.           │
 │                                        [env var: ASH_CONFIG]                                     │
 │ --source-dir                    <str>  The directory a scan would scan, as `ash scan             │
 │                                        --source-dir`: the config is discovered there unless      │

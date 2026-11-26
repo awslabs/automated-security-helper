@@ -10,3 +10,19 @@ rules:
       owasp: "A07:2021 - Identification and Authentication Failures"
       references:
         - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  - id: sudo-in-shell-script
+    # A whole word `sudo`, bare or quoted, in a shell script outside a comment. The
+    # MCP config converter writes every stdio server as `exec '<command>' '<arg>'...`,
+    # so a server started through sudo reads here as `exec 'sudo' ...`.
+    pattern-regex: (?m)^(?![ \t]*#)(?:[^\n]*[ \t;&|(`'"/])?sudo(?:['"]|[ \t]|$)
+    paths:
+      include:
+        - "*.sh"
+    message: "sudo in a shell script runs the rest of the command line with elevated privileges"
+    languages: [none]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-250: Execution with Unnecessary Privileges"
+      references:
+        - https://cwe.mitre.org/data/definitions/250.html

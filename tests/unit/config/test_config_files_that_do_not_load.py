@@ -403,8 +403,7 @@ class TestDiscoveryLocations:
 
 
 def _two_sources(root: Path) -> Path:
-    (root / ".ash").mkdir()
-    used = root / ".ash" / ".ash.yaml"
+    used = root / ".ash.yaml"
     used.write_text("project_name: used\n", encoding="utf-8")
     (root / ".ashrc.toml").write_text('project_name = "ignored"\n', encoding="utf-8")
     return used
@@ -447,7 +446,10 @@ class TestIgnoredSourcesAreResolutionWarnings:
         )
 
         assert config.project_name == "used"
-        assert [".ashrc.toml" in w for w in config._resolution_warnings] == [True]
+        # The file sits at a legacy location, so a deprecation warning comes with
+        # the ignored-source one; the ignored source is the one this test is about.
+        ignored = [w for w in config._resolution_warnings if w.startswith("Ignoring")]
+        assert [".ashrc.toml" in w for w in ignored] == [True]
 
     def test_the_warning_survives_config_overrides(self, tmp_path):
         """An override rebuilds the config object; the warning is added after it."""

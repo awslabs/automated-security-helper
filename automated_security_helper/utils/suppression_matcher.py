@@ -11,7 +11,7 @@ import weakref
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, TypeVar
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, TypeVar
 
 from automated_security_helper.models.core import (
     PACKAGE_SUPPRESSION_FIELDS,
@@ -21,10 +21,7 @@ from automated_security_helper.models.core import (
     expiration_has_passed,
 )
 from automated_security_helper.utils.path_matching import (
-    _match_form,
     _path_pattern_matches,
-    _pattern_components,
-    directory_spelling,
     ignore_path_pattern,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
@@ -382,10 +379,16 @@ def file_path_matches(
     nothing.
 
     A pattern containing ``**`` goes to ``_recursive_glob_match``, which matches
-    whole path components. Any other goes to ``fnmatchcase``, whose ``*`` is not
-    stopped by a separator: ``fnmatch.translate("*")`` is ``(?s:.*)``, so
+    whole path components. Any other glob goes to ``fnmatchcase``, whose ``*`` is
+    not stopped by a separator: ``fnmatch.translate("*")`` is ``(?s:.*)``, so
     ``src/*.py`` also matches ``src/sub/deep/a.py`` and a suppression written that
     way covers subdirectories too.
+
+    A pattern with no glob character names a path, and (the bare-directory
+    rule, issue #894) also the directory of that name: ``tests`` and ``tests/``
+    both match every finding below ``tests/``, anchored at the start of the
+    path, so a bare-directory suppression or ignore path no longer silently
+    matches nothing.
     """
     return _path_pattern_matches(finding_file_path, suppression_file_path)
 
@@ -400,86 +403,6 @@ def ignore_path_matches(file_path: Optional[str], ignore_path: str) -> bool:
     exclusions the tree-walking scanners are given, and snyk-code's refusal.
     """
     return file_path_matches(file_path, ignore_path_pattern(ignore_path))
-
-
-def warn_unmatched_directory_suppressions(
-    suppressions: Iterable[AshSuppression],
-    used_ids: Iterable[str],
-    recorded: Optional[Dict[int, Dict[str, Any]]] = None,
-    config: Any = None,
-) -> None:
-    """Warn once for each suppression whose path ends in ``/`` and matched nothing.
-
-    An ignore path ending in ``/`` names a directory; a suppression's path does
-    not, and matches only that literal path, which no file has. A suppression
-    written ``build/`` therefore suppresses nothing, and the findings it was
-    written for are reported. The warning names the glob that suppresses the
-    directory's findings, ``build/**/*``: as a suppression path that covers every
-    file below the directory and not a file named ``build``, which ``build/**``
-    would also cover. Called after the scan's last suppression pass, with the ids
-    of the suppressions that pass used.
-
-    A path whose last component is ``**`` (``build/**/``) is not literal: the
-    matcher reads the trailing slash after ``**`` as part of it
-    (``path_matching._pattern_components``), so it is ``build/**``, which matches
-    files, and the warning does not apply to it.
-
-    ``recorded`` is ``recorded_suppressions(config)``. The warning then quotes a
-    path the config file read from the environment by its reference, as every
-    other message about a suppression does, and never by its value. A caller
-    that holds the config passes it as ``config`` instead and the record is
-    built here, from the same list it is keyed by: the scan's caller passed
-    neither, so a path read from the environment was printed by its value in
-    this one warning. The record is keyed by ``id()``, so ``suppressions`` are
-    the config's own instances (``config.global_settings.suppressions``), not
-    copies; with ``config`` given that is what the record is built from.
-    """
-    if recorded is None and config is not None:
-        recorded = recorded_suppressions(config)
-    used = set(used_ids)
-    for suppression in suppressions:
-        path = getattr(suppression, "path", None) or ""
-        if not path.endswith(("/", "\\")) or suppression.id in used:
-            continue
-        directory = path.rstrip("/\\")
-        if not directory:
-            continue
-        # As the matcher reads it: one slash after a trailing ``**`` is part of
-        # it (``build/**/`` is ``build/**``), a second is a component of its own
-        # that no path has (``build/**//`` matches nothing and is warned about).
-        if _pattern_components(_match_form(path))[-1] == "**":
-            continue
-        written = (recorded or {}).get(id(suppression), {}).get("path")
-        if (
-            isinstance(written, str)
-            and written != path
-            and not written.endswith(("/", "\\"))
-        ):
-            # The slash comes from the value the config read from the
-            # environment, not from what the file wrote (``${DIR}``, say). The
-            # written form cannot be shown with the slash, and advice that
-            # spelled ``${DIR}/**/*`` would resolve to ``dir//**/*``, which
-            # matches nothing: so no spelling is advised.
-            ASH_LOGGER.warning(
-                f"The suppression with path '{written}' matched no finding: the "
-                "path it reads ends in '/', and a suppression path ending in '/' "
-                "matches only that literal path, not the files in the directory. "
-                "To suppress the findings below the directory, make the path "
-                "name it without the trailing '/' and append '/**/*'."
-            )
-            continue
-        if isinstance(written, str) and written.rstrip("/\\"):
-            path = written
-            directory = written.rstrip("/\\")
-        # A plain message: the log sinks show it, values included, once. Escaping
-        # the values for Rich here showed them a second time.
-        ASH_LOGGER.warning(
-            f"The suppression with path '{path}' matched no finding: "
-            "a suppression path ending in '/' matches only that literal path, not "
-            "the files in the directory, as an ignore path's does. To suppress the "
-            "findings below it, write "
-            f"'{directory_spelling(directory, ignore_path=False)}'."
-        )
 
 
 def _line_range_matches(

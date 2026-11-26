@@ -73,10 +73,11 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, cast
 
 from automated_security_helper.core.asset import ImageLocator
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 from automated_security_helper.cli.mcp.session_identity import (
     UNIDENTIFIED_SESSION_ID,
 )
-from automated_security_helper.cli.mcp.session_paths import (
+from automated_security_helper.config.session_paths import (
     hidden_deleting_name,
     mark_session_workspace,
     session_directory,
@@ -197,9 +198,6 @@ CLONE_MAX_WORKERS = 8
 #: (an ``rmtree``) can hold a worker for seconds, so the size bounds how many
 #: of those one tenant's calls can queue another's chunk behind.
 DELIVERY_MAX_WORKERS = 8
-
-#: ``error_type`` the MCP tools return for :class:`SourceDeliveryBusyError`.
-SOURCE_DELIVERY_BUSY = "source_delivery_busy"
 
 
 @contextlib.contextmanager
@@ -416,7 +414,8 @@ def ensure_session_workspace(
     through :func:`ensure_session_image_scan_dir`, the directory an image
     scan is anchored in (an image asset has no target directory of its own).
     The directory the server already owns for the session is also why
-    ``ASH_MCP_ALLOWED_ROOTS`` is not implicated by a bare ref.
+    ``ASH_MCP_ALLOWED_ROOTS`` is not implicated by a bare ref -- the
+    sandbox already permits a session its own workspace.
     """
 
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
@@ -463,25 +462,11 @@ def _drop_session_image_locator(session_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def resolve_workspace_root() -> Path:
-    """Resolve the configured MCP workspace root.
-
-    Resolution order:
-
-    1. ``$ASH_MCP_WORKSPACE_ROOT``
-    2. ``$XDG_CACHE_HOME/ash-mcp/``
-    3. ``~/.cache/ash-mcp/``
-    """
-
-    env_root = os.environ.get("ASH_MCP_WORKSPACE_ROOT")
-    if env_root:
-        return Path(env_root).expanduser()
-
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    if xdg:
-        return Path(xdg).expanduser() / "ash-mcp"
-
-    return Path.home() / ".cache" / "ash-mcp"
+#: The workspace root resolution lives in ``config.mcp_sandbox`` (the config
+#: trust layer judges paths against it); it is re-exported here.
+from automated_security_helper.config.mcp_sandbox import (  # noqa: E402
+    resolve_workspace_root as resolve_workspace_root,
+)
 
 
 class InvalidSessionIdError(ValueError):
@@ -499,7 +484,7 @@ def _session_workspace(workspace_root: Path, session_id: str) -> Path:
 
     The session id is validated against an explicit allowlist and the joined path
     is confirmed to stay inside ``workspace_root``; see
-    ``cli/mcp/session_paths.py`` for both. That keeps the session sandbox flat, so
+    ``config/session_paths.py`` for both. That keeps the session sandbox flat, so
     one session's directory is a sibling of another's and never a parent of it.
 
     The return value is the unresolved join, unchanged from before, so a caller
@@ -522,10 +507,6 @@ def _session_workspace(workspace_root: Path, session_id: str) -> Path:
         raise InvalidSessionIdError(str(e)) from e
 
 
-#: ``error_type`` every delivery tool returns for :class:`SessionWorkspaceError`.
-SESSION_WORKSPACE_UNAVAILABLE = "session_workspace_unavailable"
-
-
 class SessionWorkspaceError(OSError):
     """The session's workspace could not be prepared for, or hold, the new source.
 
@@ -534,7 +515,7 @@ class SessionWorkspaceError(OSError):
     a failed delivery could not fully delete is not one of these: it stays in its
     staging directory, logged, and the delivery reports the failure that ended it.
     An OSError, so a caller that catches OSError catches it. The MCP tools report it as
-    SESSION_WORKSPACE_UNAVAILABLE, an ``error_type`` a client can branch on, not
+    McpErrorType.SESSION_WORKSPACE_UNAVAILABLE, an ``error_type`` a client can branch on, not
     the exception's class name and not the errno's.
     """
 
@@ -997,7 +978,7 @@ def _created_session_dir(root: Path, session_id: str) -> Path:
             ``session_workspace_unavailable``.
     """
 
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         DEFAULT_SESSION_ID,
     )
 
@@ -1156,17 +1137,13 @@ class CloneRefusedError(RuntimeError):
     subclass's ``error_type``, so a new refusal type needs no other change.
     """
 
-    error_type = "clone_refused"
-
-
-#: ``error_type`` the MCP tool returns for :class:`GitTimeoutError`.
-CLONE_TIMED_OUT = "clone_timed_out"
+    error_type = McpErrorType.CLONE_REFUSED.value
 
 
 class GitTimeoutError(CloneRefusedError):
     """A git command of a delivery ran past ``GIT_TIMEOUT_SECONDS`` and was stopped."""
 
-    error_type = CLONE_TIMED_OUT
+    error_type = McpErrorType.CLONE_TIMED_OUT.value
 
 
 #: Bytes a clone may grow the session's source directory to, the same limit the
@@ -1178,24 +1155,17 @@ MAX_CLONE_BYTES = _MAX_EXTRACTED_BYTES
 #: Seconds between looks at the size of the tree a git command is writing.
 GIT_POLL_SECONDS = 0.5
 
-#: ``error_type`` the MCP tool returns for :class:`CloneTooLargeError`.
-CLONE_TOO_LARGE = "clone_too_large"
-
 
 class CloneTooLargeError(CloneRefusedError):
     """A clone passed ``MAX_CLONE_BYTES`` or ``_MAX_FILES`` entries."""
 
-    error_type = CLONE_TOO_LARGE
-
-
-#: ``error_type`` the MCP tool returns for :class:`CloneTreeUnreadableError`.
-CLONE_TREE_UNREADABLE = "clone_tree_unreadable"
+    error_type = McpErrorType.CLONE_TOO_LARGE.value
 
 
 class CloneTreeUnreadableError(CloneRefusedError):
     """The tree a git command wrote could not be read once the command had exited."""
 
-    error_type = CLONE_TREE_UNREADABLE
+    error_type = McpErrorType.CLONE_TREE_UNREADABLE.value
 
 
 def _walk_failed(error: OSError) -> None:
@@ -1494,15 +1464,6 @@ def _refuse_remote_helper_prefix(url: str) -> None:
             f"transport: git would run that helper rather than connect to a host"
         )
 
-
-#: ``error_type`` values set_source_git returns, besides the scan-target refusal
-#: of a local clone source (scan_target_not_permitted) and invalid_session_id.
-#: A client branches on these, so they are stable; the message is for a person.
-CLONE_URL_NOT_PERMITTED = "clone_url_not_permitted"
-CLONE_REF_NOT_PERMITTED = "clone_ref_not_permitted"
-INVALID_CLONE_DEPTH = "invalid_clone_depth"
-GIT_CLONE_FAILED = "git_clone_failed"
-GIT_CHECKOUT_FAILED = "git_checkout_failed"
 
 #: The most commits of history ``set_source_git`` fetches: a limit on how much history
 #: a delivery fetches. It is not a limit on disk or time (a depth of 1000 is the whole
@@ -1929,6 +1890,115 @@ def set_source_git(
     )
 
 
+class CloneRequestRefused(ValueError):
+    """A remote-git source request refused before anything was cloned.
+
+    ``error_type`` is the name the MCP tool answers with for the same refusal, so
+    the CLI and the MCP server agree on which rule refused a request.
+    """
+
+    def __init__(self, message: str, error_type: str) -> None:
+        super().__init__(message)
+        self.error_type = error_type
+
+
+def validated_remote_clone_request(
+    url: str,
+    ref: Optional[str] = None,
+    depth: object = 1,
+    ssh_key_id: Optional[str] = None,
+) -> Tuple[str, Optional[str], int, Tuple[str, str, int]]:
+    """The rules every remote-git source request obeys, whichever surface took it.
+
+    The MCP ``set_source_git`` tool and ``ash scan --source-git`` both run this,
+    in this order, so a request one refuses for these reasons the other refuses
+    with the same ``error_type``: an option-like, command-executing or
+    control-character URL; an option-like ref; a depth that is not a whole number
+    from 1 to ``MAX_CLONE_DEPTH``; a local path or ``file://`` URL; a URL whose
+    host or scheme git cannot be said to reach unambiguously (only https and ssh,
+    and the scp-like ``host:path`` form); and any ssh key id. What this does NOT
+    decide is which hosts may be cloned from: the MCP tool acts for a remote
+    client, so its operator's ``ASH_MCP_GIT_ALLOWED_HOSTS`` list applies there
+    (``clone_endpoint_allowed``), while on the command line the person typing the
+    URL is the operator.
+
+    Returns:
+        ``(url, ref, depth, (scheme, host, port))``, each checked.
+
+    Raises:
+        CloneRequestRefused: the first rule the request breaks.
+    """
+    try:
+        url = _validate_clone_url(url)
+    except ValueError as error:
+        raise CloneRequestRefused(
+            str(error), McpErrorType.CLONE_URL_NOT_PERMITTED.value
+        ) from error
+    if ref:
+        try:
+            ref = _reject_option_like(ref, "ref")
+        except ValueError as error:
+            raise CloneRequestRefused(
+                str(error), McpErrorType.CLONE_REF_NOT_PERMITTED.value
+            ) from error
+    try:
+        depth = _validated_clone_depth(depth)
+    except ValueError as error:
+        raise CloneRequestRefused(
+            str(error), McpErrorType.INVALID_CLONE_DEPTH.value
+        ) from error
+    if local_clone_path(url) is not None:
+        raise CloneRequestRefused(
+            "a clone source must be a remote https or ssh url; a local path or "
+            "file:// url would read this machine's own filesystem",
+            McpErrorType.LOCAL_CLONE_SOURCE_REFUSED.value,
+        )
+    try:
+        endpoint = remote_clone_endpoint(url)
+    except ValueError as error:
+        raise CloneRequestRefused(
+            str(error), McpErrorType.CLONE_URL_NOT_PERMITTED.value
+        ) from error
+    try:
+        _refuse_ssh_key_id(ssh_key_id)
+    except ValueError as error:
+        raise CloneRequestRefused(
+            str(error), McpErrorType.SSH_KEY_NOT_REGISTERED.value
+        ) from error
+    return url, ref or None, depth, endpoint
+
+
+def clone_remote_source(
+    url: str,
+    ref: Optional[str] = None,
+    *,
+    depth: int = 1,
+    destination: Path,
+) -> Path:
+    """Clone a remote repository for the command line, under *destination*.
+
+    The same request rules as the MCP tool (:func:`validated_remote_clone_request`)
+    and the same git: the allowlisted environment (:func:`_git_environment`), no
+    system or global configuration, no credentials or helpers of the caller's,
+    redirects not followed, a bounded time. The clone goes to
+    ``<destination>/source`` and ``HOME`` for git is ``<destination>/home``; the
+    caller owns *destination* and removes it.
+
+    Raises:
+        CloneRequestRefused: the request broke a rule; nothing was run.
+        RuntimeError: git is not on PATH.
+        GitCommandError, GitTimeoutError: git ran and failed or ran too long.
+    """
+    url, ref, depth, _endpoint = validated_remote_clone_request(url, ref, depth)
+    git = _git_executable()
+    home = Path(destination) / "home"
+    target = Path(destination) / "source"
+    _ensure_dir(home)
+    _ensure_dir(target)
+    _clone(url, ref, git=git, depth=depth, target=target, env=_git_environment(home))
+    return target
+
+
 @_while_no_scan_runs(removes_workspace=False)
 def _clone_into_session(
     url: str,
@@ -2197,7 +2267,11 @@ def _clone(
         program=program,
     )
     result = _run_git_step(
-        cmd, env=env, what="git clone", error_type=GIT_CLONE_FAILED, grows_in=target
+        cmd,
+        env=env,
+        what="git clone",
+        error_type=McpErrorType.GIT_CLONE_FAILED.value,
+        grows_in=target,
     )
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip()
@@ -2212,7 +2286,9 @@ def _clone(
             # own after git's text (or the whole detail when git printed none).
             detail = _with_the_redirect_hint(detail)
         message = f"git clone failed (exit {result.returncode}): {detail}"
-        raise GitCommandError(message, GIT_CLONE_FAILED, disk_full=disk_full)
+        raise GitCommandError(
+            message, McpErrorType.GIT_CLONE_FAILED.value, disk_full=disk_full
+        )
     if not ref:
         # A clone of a repository whose HEAD names a branch that does not exist
         # (an empty repository, or one whose default branch was deleted) exits 0
@@ -2232,13 +2308,13 @@ def _clone(
             ),
             env=env,
             what="git rev-parse HEAD",
-            error_type=GIT_CLONE_FAILED,
+            error_type=McpErrorType.GIT_CLONE_FAILED.value,
         )
         if head.returncode != 0:
             raise GitCommandError(
                 "git clone produced no commit: the repository's default branch "
                 "has no commits or does not exist. Name a ref to deliver.",
-                GIT_CLONE_FAILED,
+                McpErrorType.GIT_CLONE_FAILED.value,
             )
         return
 
@@ -2265,7 +2341,7 @@ def _clone(
         ),
         env=env,
         what=f"git fetch {ref!r}",
-        error_type=GIT_CLONE_FAILED,
+        error_type=McpErrorType.GIT_CLONE_FAILED.value,
         grows_in=target,
     )
     if fetch.returncode != 0:
@@ -2273,7 +2349,7 @@ def _clone(
         if _is_disk_full(fetch_detail):
             raise GitCommandError(
                 f"git fetch {ref!r} failed (exit {fetch.returncode}): {fetch_detail}",
-                GIT_CLONE_FAILED,
+                McpErrorType.GIT_CLONE_FAILED.value,
                 disk_full=True,
             )
     revision = "FETCH_HEAD" if fetch.returncode == 0 else ref
@@ -2289,14 +2365,16 @@ def _clone(
         ),
         env=env,
         what=f"git checkout {ref!r}",
-        error_type=GIT_CHECKOUT_FAILED,
+        error_type=McpErrorType.GIT_CHECKOUT_FAILED.value,
         grows_in=target,
     )
     if checkout.returncode != 0:
         detail = checkout.stderr.strip() or checkout.stdout.strip()
         message = f"git checkout {ref!r} failed (exit {checkout.returncode}): {detail}"
         raise GitCommandError(
-            message, GIT_CHECKOUT_FAILED, disk_full=_is_disk_full(detail)
+            message,
+            McpErrorType.GIT_CHECKOUT_FAILED.value,
+            disk_full=_is_disk_full(detail),
         )
 
 
@@ -3012,6 +3090,7 @@ def remove_session_workspace(
     gone = True if doomed is None else _remove_tree(doomed)
     # Ends the source record AND the image binding (its docstring's contract).
     _drop_session_source_dir(session_id)
+    _drop_session_image_locator(session_id)
     return gone
 
 
@@ -3123,9 +3202,8 @@ def set_source_image(
     Under the session's change lock, as every delivery is: the scan subject
     must not flip while a scan of the session reads it. Returns the stored
     locator. Digest-pinned refs are preferred (the attribution then agrees
-    across machines); a tag-only ref is accepted and handed to the scanner
-    tools as written -- ASH itself resolves nothing, and a digest the scan's
-    own output names is read back into the attribution.
+    across machines); a tag-only ref is accepted and resolved at scan start
+    where an engine is present.
 
     Raises:
         ValueError: for a value that can never be a reference

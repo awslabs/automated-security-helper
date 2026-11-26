@@ -12,12 +12,14 @@ properties are the subject itself:
 - ``imageDigest``: the image's sha256 MANIFEST digest wherever one is named:
   the tool's own run output first (``repoDigests`` ahead of the config-blob
   ``imageID``, so every source yields the same value for one image), else the
-  locator's ``resolved_digest``, else the digest a pinned reference
-  (``repo@sha256:...``) states. The executor never asks an engine itself;
-- ``layerDigest``: left to the scanner. None of the wired scanners' SARIF
-  output carries per-result layer digests today, so a result has one only when
-  a tool (or a post-process of its plugin) wrote it; the property name is the
-  contract so that one that does flows through to the flat columns.
+  locator's ``resolved_digest`` (the digest-resolver ladder fills it at scan
+  start), else the digest a pinned reference (``repo@sha256:...``) states. The
+  executor never asks an engine itself;
+- ``layerDigest``: written by the scanner, not here. trivy's SARIF carries no
+  layer, so its image scan joins its JSON report (``utils/image_layer_digests``)
+  onto the results; grype and syft name none, so their results have none. The
+  property name is the contract: any tool or plugin post-process that writes it
+  flows through to the flat columns.
 
 The identity keys on the digest when there is one, else the submitted ref
 (``finding_identity``'s ``image`` argument), so two scans of one pinned image
@@ -47,6 +49,23 @@ def _digest_text(value: Any) -> Optional[str]:
         return None
     tail = value.rsplit("@", 1)[-1]
     return tail if _DIGEST.fullmatch(tail) else None
+
+
+def image_scan_source(image: ImageLocator) -> str:
+    """The ``scan_source`` an image scan records: ``image:<digest>`` or ``image:<ref>``.
+
+    The scope a reporter that archives resolved findings compares (aws-security-hub
+    reads "not reported" as "fixed" within one scope only). It names the image by
+    its digest when the scan knows one (the locator's ``resolved_digest``, or the
+    digest a pinned reference states), so two tags of one image are one scope and
+    a tag that moves to another image is a new one: the findings of the image it
+    left are not archived as fixed by a scan of the image it now names. With no
+    digest it names the submitted reference or payload path, as before. The
+    ``image:`` prefix keeps it from reading as a directory of the same name, and
+    no repository scope (a directory or ``.``) can equal it.
+    """
+    digest = _digest_text(image.resolved_digest) or _digest_text(image.ref)
+    return f"image:{digest}" if digest is not None else f"image:{image.shown()}"
 
 
 def image_digest_of_run(run: Any) -> Optional[str]:

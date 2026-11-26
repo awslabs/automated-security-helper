@@ -94,8 +94,27 @@ def test_the_guideline_is_read_for_every_framework() -> None:
     assert list(checkov_resources(reports).values()) == [[None]]
 
 
+@pytest.mark.parametrize("guideline", [URL, "http://docs.example/policy"])
+def test_an_http_or_https_url_is_copied(guideline) -> None:
+    """The positive control for the refusals below, on the same builders."""
+    sarif = _sarif(_result("CKV_X_1", "a.tf", 1, 2))
+    reports = [_report("terraform", _record("CKV_X_1", "/a.tf", (1, 2), guideline))]
+    assert attach_checkov_guidelines(sarif, checkov_guidelines(reports)) == 1
+    assert _related(sarif["runs"][0]["results"][0]) == [guideline]
+
+
 @pytest.mark.parametrize(
-    "guideline", [None, "", "javascript:alert(1)", "/etc/passwd", "ftp://x/y", 5]
+    "guideline",
+    [
+        None,
+        "",
+        "javascript:alert(1)",
+        "/etc/passwd",
+        "ftp://x/y",
+        5,
+        " https://x/y",
+        "HTTPS://X/Y",
+    ],
 )
 def test_only_an_http_url_is_copied(guideline) -> None:
     sarif = _sarif(_result("CKV_X_1", "a.tf", 1, 2))

@@ -27,10 +27,11 @@ pretty_print = True
 # `coverage combine` folds the source paths each leg recorded into the first entry, which is
 # the checkout the unit-coverage job combines in. A leg records absolute paths of its own
 # runner (/home/runner/work/<repo>/<repo>/ on Linux, /Users/runner/work/... on macOS,
-# D:\a\<repo>\<repo>\ on Windows), so without these aliases the combine would count one file
-# once per operating system and the total would be a mean of three partial figures.
+# D:\a\<repo>\<repo>\ on Windows). The macOS and Windows paths do not exist on the runner
+# that combines, so a path that matches no alias makes `coverage report` fail with "No
+# source for code" for that file. Slash in an alias matches either separator, so the
+# second alias folds the Windows layout as well.
 [paths]
 source =
     automated_security_helper/
     */automated_security_helper/
-    *\automated_security_helper\

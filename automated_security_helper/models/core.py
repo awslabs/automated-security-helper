@@ -32,6 +32,7 @@ from pydantic import (
 )
 from datetime import datetime, date
 
+from automated_security_helper.models.frame_model import RankEncoded
 from automated_security_helper.utils.path_matching import (
     _path_pattern_matches,
     ignore_path_pattern,
@@ -1032,11 +1033,20 @@ class AshSuppression(IgnorePathWithReason):
     rule_id: Annotated[str | None, Field(None, description="Rule ID to suppress")] = (
         None
     )
+    # The line numbers are unbounded Python ints; a frame column is 64-bit. The
+    # markers record how the suppression frames carry them (utils/
+    # suppression_frame.py): as dense ranks over one build's collection, which
+    # the overlap expression compares by order alone. Pydantic ignores the
+    # markers, so validation and the JSON schema are unchanged.
     line_start: Annotated[
-        int | None, Field(None, description="(Optional) Starting line number")
+        int | None,
+        Field(None, description="(Optional) Starting line number"),
+        RankEncoded("lines"),
     ] = None
     line_end: Annotated[
-        int | None, Field(None, description="(Optional) Ending line number")
+        int | None,
+        Field(None, description="(Optional) Ending line number"),
+        RankEncoded("lines"),
     ] = None
     package_name: Annotated[
         str | None,
@@ -1334,3 +1344,75 @@ class AshSuppression(IgnorePathWithReason):
     def _line_range_matches(self, finding: "FlatVulnerability") -> bool:
         """Return True if ``finding``'s line range overlaps with this suppression."""
         return suppression_frame.line_range_overlaps(finding, [self])[0]
+
+
+class AshExclusion(IgnorePathWithReason):
+    """A rule+path exclusion: a known-benign finding class DROPPED from results.
+
+    Unlike a suppression, which keeps the result in SARIF marked ``suppressed``
+    (``kind: inSource``), an exclusion removes it, so a class that is always
+    benign in a known place (bandit B101 under ``tests/``, say) does not pile up
+    as suppressed noise in SARIF consumers and dashboards (issue #894). And
+    unlike an ignore path, it drops only the named rule in the named path, so
+    other rules there are still reported.
+
+    ``rule_id`` and ``path`` are both required, with ``reason``; ``scanner``
+    optionally bounds the exclusion to one scanner's results. The path is read
+    exactly as a suppression's (``suppression_matcher.file_path_matches``), the
+    rule id as a suppression's rule id (exact, case-insensitive, or a glob), and
+    ``expires`` as every entry's. Applied by
+    ``sarif_utils.apply_suppressions_to_sarif`` after the ignore-path check and
+    before the config suppressions; an entry a client-delivered config supplied
+    (``client_supplied``) marks the result as a client suppression instead of
+    dropping it, so the results show what the client chose to hide. A runtime
+    override of ``/global_settings/exclusions`` is denied
+    (``RuntimeOverridesConfig.denied_paths``).
+    """
+
+    ENTRY_KIND: ClassVar[str] = "an exclusion"
+
+    rule_id: Annotated[
+        str,
+        Field(
+            ...,
+            description=(
+                "Rule ID whose findings the exclusion drops. Compared like a "
+                "suppression's rule_id: the finding's exact id "
+                "(case-insensitive), or a glob such as 'B1*'."
+            ),
+        ),
+    ]
+    scanner: Annotated[
+        str | None,
+        Field(
+            None,
+            description=(
+                "(Optional) Only drop this scanner's findings, by its registered "
+                "name (case-insensitive), e.g. 'bandit'. Omit it to drop the "
+                "rule from any scanner."
+            ),
+        ),
+    ] = None
+
+    @field_validator("rule_id")
+    @classmethod
+    def validate_rule_id_not_blank(cls, v, info: ValidationInfo):
+        """Reject a blank ``rule_id``.
+
+        An exclusion drops findings outright, so one whose rule id was left
+        blank by mistake must not silently widen or silently match nothing.
+        Under the TOLERATE_STORED_CONFIG context (utils/unknown_keys.py) a blank
+        id a results file recorded is kept and noted rather than refused, and
+        the exclusion pass never applies such an entry.
+        """
+        if v is not None and not v.strip():
+            notes = tolerated_notes(info)
+            if notes is not None:
+                notes.append(BLANK_RULE_ID_NOTE)
+                return v
+            raise ValueError(
+                "rule_id must name a rule (a glob is allowed): an exclusion "
+                "drops findings, so a blank rule id is refused rather than read "
+                "as 'every rule'"
+            )
+        return v

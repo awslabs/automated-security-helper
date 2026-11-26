@@ -17,7 +17,7 @@ from automated_security_helper.utils.terminal_text import shown_not_obeyed
 
 
 def analyze_sarif_file(
-    file_path: str, scanner_name: str = None
+    file_path: str, scanner_name: Optional[str] = None
 ) -> Tuple[Dict[str, Dict[str, Set[str]]], str]:
     """
     Analyze a SARIF file and extract field paths.

@@ -217,3 +217,31 @@ def test_an_image_result_inside_the_anchor_is_not_rebased(tmp_path):
         .physicalLocation.root.artifactLocation.uri
     )
     assert uri == shadowed
+
+
+def test_an_image_task_hands_the_scanner_the_global_ignore_paths(tmp_path):
+    """The ignore paths reach scan_image, which turns them into tool excludes."""
+    from automated_security_helper.models.core import IgnorePathWithReason
+
+    seen = {}
+
+    class Recording(ImageShapeScanner):
+        def scan_image(
+            self, image, config=None, *args, global_ignore_paths=None, **kwargs
+        ):
+            seen["paths"] = global_ignore_paths
+            return super().scan_image(image, config)
+
+    context = _context(tmp_path, image=True)
+    scanner = Recording(config=_Config(), context=context)
+    executor = ScannerExecutor(
+        plugin_context=context, progress_display=MagicMock(), scanner_tasks=[]
+    )
+    ignored = [IgnorePathWithReason(path="/usr/share/doc/", reason="docs")]
+    executor._global_ignore_paths = ignored
+    executor._execute_scanner(
+        "image-shape-tool",
+        scanner,
+        [{"path": Path(context.source_dir), "type": "image"}],
+    )
+    assert seen["paths"] == ignored

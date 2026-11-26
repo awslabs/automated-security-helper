@@ -1,11 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What the builtin ``trivy`` scanner and the community ``trivy-repo`` scanner share.
+"""What the builtin ``trivy`` scanner and the alpha ``trivy-repo`` scanner share.
 
 Why this module exists
 ----------------------
-trivy reached ASH first as the community plugin ``trivy-repo``
+trivy reached ASH first as the alpha plugin ``trivy-repo``
 (``plugin_modules/ash_trivy_plugins``), which users enable through
 ``ash_plugin_modules``. The builtin ``trivy`` scanner runs the same binary, so the
 logic that turns options into trivy flags, installs the pinned binary, and ties a
@@ -56,6 +56,11 @@ from typing import (
 import yaml
 from pydantic import Field, PrivateAttr, model_validator
 
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -63,7 +68,9 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.core.enums import OfflineStrategy
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolExtraArg
+from automated_security_helper.models.vocab import Severity
 from automated_security_helper.schemas.sarif_schema_model import (
+    Level,
     PropertyBag,
     SarifReport,
 )
@@ -106,6 +113,126 @@ from automated_security_helper.utils.package_identity import (
 )
 
 C = TypeVar("C", bound=ScannerPluginConfigBase)
+
+#: The facets register cells both trivy scanners share, because both read trivy's
+#: SARIF through this base (base/scanner_facets.py). Each class still declares its
+#: own ``facets`` attribute from this value (the registry totality test reads the
+#: class's own dict), overriding only the cells it classifies differently. The
+#: cells describe trivy's vulnerability results and, for resource_id, the
+#: terraform misconfiguration results; no committed capture holds a secret or a
+#: license result, so those result classes are not classified here.
+#: Native fields are quoted from the committed trivy SARIF
+#: (tests/test_data/scanners/trivy/trivy-0.69.3.vuln.sarif) and from the M0
+#: misconfig capture (tests/test_data/scanners/trivy/captured/
+#: trivy-0.76.2-misconfig-terraform.{json,sarif}, M0-FINDINGS.md (a)).
+TRIVY_SARIF_FACETS = ScannerFacets(
+    rule_id=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF result ruleId",
+    ),
+    severity=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field='result message line "Severity: <level>", checked '
+        "against the result level and the rule tags (issue_severity)",
+    ),
+    file_path=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF locations[].physicalLocation.artifactLocation.uri",
+    ),
+    line_range=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF region.startLine / region.endLine",
+    ),
+    column=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF region.startColumn",
+    ),
+    message=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF result message.text",
+    ),
+    resource_id=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="Results[].Misconfigurations[].CauseMetadata.Resource "
+        "(trivy's JSON report, absent from its SARIF), copied onto the "
+        "SARIF result under ash_resource_id by attach_trivy_resources "
+        "for result type terraform only: cloudformation carries a "
+        "file:line locator (t.yaml:3-4) and kubernetes and dockerfile "
+        "carry none (trivy 0.76.2, M0-FINDINGS.md (a))",
+        example="aws_s3_bucket.m0_fixture_bucket",
+    ),
+    resource_type=FacetDecl(
+        state=FacetState.NA,
+        reason="trivy's CauseMetadata names Provider and Service (AWS, "
+        "s3) and no resource type; the type is only the prefix of the "
+        "dropped address, which would be a derivation",
+    ),
+    package_name=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field='result message line 1 "Package: <name>" (_package_from_message)',
+    ),
+    package_version=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field='result message line 2 "Installed Version: <version>" '
+        "(_package_from_message)",
+    ),
+    package_path=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="npm lockfile entry at the SARIF region.startLine of "
+        "the result's location (one result per installed copy)",
+    ),
+    taxonomy_cve=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF result ruleId (the CVE id)",
+    ),
+    taxonomy_cwe=FacetDecl(
+        state=FacetState.UNCONFIRMED,
+        reason="UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are "
+        "vulnerability, security, <severity>); the JSON format's CweIDs "
+        "has no committed vulnerability fixture, and a `trivy fs --format "
+        "json` run over a lockfile settles it",
+    ),
+    fingerprints=FacetDecl(
+        state=FacetState.NA,
+        reason="trivy's SARIF results carry no fingerprints (result keys "
+        "are level, locations, message, ruleId, ruleIndex)",
+    ),
+    fix_available=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field='message line "Fixed Version: <version>", written as '
+        "fix_available=True when non-empty by "
+        "TrivyScannerBase._fixed_version_from_message (an empty value "
+        "writes nothing)",
+    ),
+    remediation_text=FacetDecl(
+        state=FacetState.UNCONFIRMED,
+        reason="UNCONFIRMED: not classified by the survey; the flat "
+        "model has no remediation column, and the rule help text carries "
+        "the fixed version already declared under fix_available",
+    ),
+    snippet=FacetDecl(
+        state=FacetState.NA,
+        reason="trivy's SARIF results carry no code snippet",
+    ),
+    references=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF rule helpUri, read into the flat references "
+        "by FlatVulnerability.from_sarif_result when the result carries "
+        "no relatedLocations",
+    ),
+    tags=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF rule properties.tags, read into the flat tags "
+        "by FlatVulnerability.from_sarif_result when the result carries "
+        "none (the severity word among them still feeds issue_severity)",
+    ),
+    extras=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="result properties bag (issue_severity and the "
+        "package identity keys this adapter writes) passed through to "
+        "the flat properties",
+    ),
+)
 
 #: Flags every trivy scan gets, online or offline. ``trivy --offline-scan``: trivy scans
 #: never contact package registries; the database refresh is a separate step
@@ -211,21 +338,26 @@ def _split_list_string(value: str) -> List[str]:
 
 #: trivy's severities that ASH reports as the same name. trivy's fifth, UNKNOWN,
 #: is left to ASH's generic SARIF mapping.
-TRIVY_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
+TRIVY_SEVERITIES = (
+    Severity.CRITICAL.value,
+    Severity.HIGH.value,
+    Severity.MEDIUM.value,
+    Severity.LOW.value,
+)
 
 #: The SARIF level trivy gives a result of each severity (``toSarifErrorLevel``).
 _SARIF_LEVEL = {
-    "CRITICAL": "error",
-    "HIGH": "error",
-    "MEDIUM": "warning",
-    "LOW": "note",
+    Severity.CRITICAL.value: Level.error.value,
+    Severity.HIGH.value: Level.error.value,
+    Severity.MEDIUM.value: Level.warning.value,
+    Severity.LOW.value: Level.note.value,
 }
 
 #: ``_SARIF_LEVEL`` with trivy's fifth severity: ``toSarifErrorLevel`` gives
 #: UNKNOWN the ``note`` level, LOW's. Read against a message's ``Severity:`` lines
 #: (``trivy_severity``), so a line trivy wrote for an UNKNOWN rating still reads as
 #: trivy's own, and the result is left to ASH's generic mapping as before.
-_MESSAGE_LEVEL = {**_SARIF_LEVEL, "UNKNOWN": "note"}
+_MESSAGE_LEVEL = {**_SARIF_LEVEL, "UNKNOWN": Level.note.value}
 
 #: trivy's severities from the highest down, UNKNOWN last. Between two
 #: ``Severity:`` lines of one level, ``trivy_severity`` reads the higher.
@@ -438,6 +570,16 @@ def skip_dirs_value(path: str) -> str:
     return _csv_field(escaped)
 
 
+def skip_files_glob_value(glob: str) -> str:
+    """*glob* as one ``--skip-files`` value, its glob characters left to trivy.
+
+    The CSV quoting of :func:`_csv_field` only: unlike :func:`skip_dirs_value`,
+    which escapes glob characters to name one directory literally, an image
+    exclude glob (``/opt/dir/**``) is meant to be read as a glob.
+    """
+    return _csv_field(glob)
+
+
 def _csv_field(value: str) -> str:
     """``value`` as one field of the CSV trivy reads a list flag as.
 
@@ -637,8 +779,68 @@ def _same_package(entry: Any, name: str | None, version: str | None) -> bool:
 
 
 #: What identifies a misconfiguration in both of trivy's reports: the check id, the
-#: file as the report spells it, and the cause's line range.
-_MisconfigKey = Tuple[str, str, int, int]
+#: file as the report spells it, the cause's line range, and the finding's message
+#: (None when a report gives none). The message separates findings of one check on
+#: one range that differ in what they say.
+_MisconfigKey = Tuple[str, str, int, int, Optional[str]]
+
+
+def _decoded_single_uri(result: Any) -> Optional[str]:
+    """The decoded artifact URI of a result with exactly one location, else None."""
+    locations = result.locations or []
+    physical = locations[0].physicalLocation if len(locations) == 1 else None
+    root = physical.root if physical is not None else None
+    artifact = getattr(root, "artifactLocation", None)
+    uri = getattr(artifact, "uri", None)
+    return unquote(uri) if isinstance(uri, str) else None
+
+
+def _verified_message_lines(result: Any) -> Optional[List[str]]:
+    """The lines of a misconfiguration result's message, when they can be trusted.
+
+    trivy's SARIF writer opens a misconfiguration message with
+    ``Artifact: <path>``, and the path is the repository's: a file name can hold
+    a line break, so a name such as ``a.tf\\nType: terraform\\n...`` makes the
+    lines after the first the repository's own text. The later lines are read
+    only when the first line names exactly the result's own location (decoded),
+    which a name carrying a line break cannot satisfy. Split on ``\\n`` alone,
+    the separator trivy writes, for the reason ``trivy_severity`` gives.
+    """
+    message = result.message.root.text if result.message else None
+    lines = (message or "").split("\n")
+    uri = _decoded_single_uri(result)
+    if uri is None or lines[0] != f"Artifact: {uri}":
+        return None
+    return lines
+
+
+def _sarif_misconfig_message(result: Any) -> Optional[str]:
+    """The ``Message:`` of a misconfiguration result, or None.
+
+    The text from the ``Message:`` line (third in trivy's template, after the
+    artifact, type and check lines) up to the final ``Link:`` line, read only from
+    a message whose artifact line is verified (:func:`_verified_message_lines`).
+    The same text is the JSON record's ``Message``.
+    """
+    lines = _verified_message_lines(result)
+    if lines is None:
+        return None
+    for index in range(2, len(lines)):
+        if lines[index].startswith("Message: "):
+            end = max(
+                (
+                    position
+                    for position in range(index, len(lines))
+                    if lines[position].startswith("Link: ")
+                ),
+                default=len(lines),
+            )
+            text = "\n".join(
+                [lines[index][len("Message: ") :], *lines[index + 1 : end]]
+            )
+            return text.strip() or None
+    return None
+
 
 #: The trivy result types whose ``CauseMetadata.Resource`` is an infrastructure
 #: address. A type is listed only after its records were read (trivy 0.76.2, the
@@ -689,7 +891,9 @@ def trivy_misconfig_resources(
             if type(start) is not int or type(end) is not int:
                 continue
             resource = cause.get("Resource")
-            found.setdefault((rule, target, start, end), []).append(
+            message = record.get("Message")
+            message = message.strip() if isinstance(message, str) else None
+            found.setdefault((rule, target, start, end, message or None), []).append(
                 resource if named and isinstance(resource, str) and resource else None
             )
     return found
@@ -703,12 +907,18 @@ def attach_trivy_resources(
     trivy's SARIF names the check, the file and the line range of a
     misconfiguration and not the resource: two buckets in one file, or one
     resource block and the next, give results that differ in nothing a
-    suppression can match. The JSON report names it. Both list a key's records in
-    the same order, so the n-th result with a key takes the n-th resource
-    recorded for it. When the two reports disagree on how many records a key has,
-    none of that key's results is given a resource: a wrong one would bind a
-    suppression to a finding it was not written for, and a missing one only fails
-    closed. Returns how many results were set.
+    suppression can match. The JSON report names it. The two reports come from
+    two separate trivy runs, so nothing says that they list records that share a
+    key in the same order. The key therefore includes the finding's message, which
+    separates findings that say different things, and a key still shared by more
+    than one result is given a resource only when every record under it names the
+    same one (as for cfn-lint's): a module used twice, or the instances of a
+    ``count`` or ``for_each``, are ties no order can settle, and a wrong resource
+    would bind a suppression to a finding it was not written for where a missing
+    one only fails closed. When the two reports disagree on how many records a
+    key has, none of that key's results is given a resource. The assignments are
+    worked out first and written together, so a failure part way leaves the report
+    as it was. Returns how many results were set.
     """
     by_key: dict[_MisconfigKey, List[Any]] = {}
     for run in sarif_report.runs or []:
@@ -716,31 +926,32 @@ def attach_trivy_resources(
             locations = result.locations or []
             physical = locations[0].physicalLocation if len(locations) == 1 else None
             root = physical.root if physical is not None else None
-            artifact = getattr(root, "artifactLocation", None)
             region = getattr(root, "region", None)
-            uri = getattr(artifact, "uri", None)
+            uri = _decoded_single_uri(result)
             start = getattr(region, "startLine", None)
             end = getattr(region, "endLine", None)
-            if not (result.ruleId and isinstance(uri, str)):
+            if not (result.ruleId and uri is not None):
                 continue
             if type(start) is not int or type(end) is not int:
                 continue
-            key = (result.ruleId, unquote(uri), start, end)
+            key = (result.ruleId, uri, start, end, _sarif_misconfig_message(result))
             if key in resources:
                 by_key.setdefault(key, []).append(result)
-    attached = 0
+    assignments: List[Tuple[Any, str]] = []
     for key, results in by_key.items():
         named = resources[key]
         if len(named) != len(results):
             continue
+        if len(results) > 1 and (len(set(named)) != 1 or None in named):
+            continue
         for result, resource in zip(results, named):
-            if resource is None:
-                continue
-            if result.properties is None:
-                result.properties = PropertyBag()
-            setattr(result.properties, ASH_RESOURCE_ID_KEY, resource)  # noqa: B010
-            attached += 1
-    return attached
+            if resource is not None:
+                assignments.append((result, resource))
+    for result, resource in assignments:
+        if result.properties is None:
+            result.properties = PropertyBag()
+        setattr(result.properties, ASH_RESOURCE_ID_KEY, resource)  # noqa: B010
+    return len(assignments)
 
 
 def _misconfig_report_command(
@@ -863,6 +1074,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     # trivy (_trivy_config_file) is kept for the same reason: a trivy.yaml can name
     # the cache (``cache.dir``).
     _scan_config_file: Optional[str] = PrivateAttr(default=None)
+
+    # Where the image scan's second, JSON pass writes its report (trivy's SARIF
+    # names no layer, its JSON does; see utils/image_layer_digests).
+    _image_layers_json: Optional[Path] = PrivateAttr(default=None)
 
     def _environment_values(self) -> Tuple[str, ...]:
         """The configuration's environment values, plus the two input-file variables
@@ -2406,33 +2621,101 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
 
         trivy's SARIF writer opens a misconfiguration message with ``Artifact:``
         and ``Type:`` lines (a vulnerability's opens with ``Package:``). Read by
-        position, as ``_package_from_message`` reads its lines.
+        position, as ``_package_from_message`` reads its lines, and only from a
+        message whose ``Artifact:`` line names the result's own location
+        (:func:`_verified_message_lines`): a file name with a line break writes
+        lines of its own into the message.
         """
-        message = result.message.root.text if result.message else None
-        lines = (message or "").split("\n")
-        if len(lines) < 2 or not lines[0].startswith("Artifact: "):
+        lines = _verified_message_lines(result)
+        if lines is None or len(lines) < 2:
             return None
         if not lines[1].startswith("Type: "):
             return None
         return lines[1][len("Type: ") :].strip() or None
+
+    def _scanners_as_ran(self, final_args: List[str]) -> List[str]:
+        """The trivy scanners the command ``final_args`` turned on.
+
+        A ``--scanners`` token in the command decides, as it does for trivy, and
+        every occurrence counts (trivy accumulates them). The option, the
+        environment and the config file are read only when the command has none.
+        The command is what ran: ASH can take ``misconfig`` out of the token it
+        passes (offline, when trivy's own list cannot be read) while the option
+        still names it, and reading the option then would run a scanner the first
+        run left out.
+        """
+        named: List[str] = []
+        found = False
+        for index, token in enumerate(final_args):
+            name, equals, value = token.partition("=")
+            if name != "--scanners":
+                continue
+            if not equals:
+                if index + 1 >= len(final_args):
+                    continue
+                value = final_args[index + 1]
+            found = True
+            named.extend(part.strip() for part in value.split(",") if part.strip())
+        if found:
+            return self._canonical_scanners(named)
+        return self._effective_scanners(final_args)
+
+    def _warn_side_report_skipped(self, reason: str) -> None:
+        """Say once per scanner that the resource report was not obtained.
+
+        A scan that passes with this reason behind it carries no resource ids, so
+        a suppression scoped to a resource never matches and nothing else in the
+        run says why. ``reason`` names the exit code or the kind of failure, never
+        the text of an error: the tool's own text can carry the run's values.
+        """
+        warning = f"trivy's resource report was skipped: {reason}"
+        if warning in self._warned_inputs:
+            return
+        self._warned_inputs.add(warning)
+        self._plugin_log(
+            f"{warning}. Misconfiguration results carry no resource id for this "
+            "scan, so a suppression scoped to a resource does not match them.",
+            level=logging.WARNING,
+        )
 
     def _attach_misconfig_resources(
         self, sarif_report: SarifReport, final_args: List[str]
     ) -> SarifReport:
         """Name the resource of each misconfiguration result, from a second report.
 
+        The enrichment is guarded as a whole: whatever it raises other than a
+        cancellation (which is not an ``Exception`` and propagates) returns the
+        report as it came, so a failure of the second run cannot lose the report
+        already read, whichever caller's catch-all it would have reached.
+        """
+        try:
+            return self._attach_misconfig_resources_unguarded(sarif_report, final_args)
+        except Exception as error:  # noqa: BLE001 -- best-effort enrichment
+            self._warn_side_report_skipped(f"{type(error).__name__}")
+            return sarif_report
+
+    def _attach_misconfig_resources_unguarded(
+        self, sarif_report: SarifReport, final_args: List[str]
+    ) -> SarifReport:
+        """The body of :meth:`_attach_misconfig_resources`.
+
         trivy's SARIF carries no resource; its JSON format does
         (``CauseMetadata.Resource``). One more run of the same command with the
         format turned to JSON and only the misconfig scanner on
         (:func:`_misconfig_report_command`) gives the resources, matched to the
-        results by :func:`attach_trivy_resources`. It runs only when the scan has
-        the misconfig scanner on, and leaves no trace on the scan's record
+        results by :func:`attach_trivy_resources`. It runs only when the command
+        had the misconfig scanner on, and never offline: trivy's Terraform checks
+        fetch the source of every module a ``.tf`` file names, which offline mode
+        exists to prevent, and a command from which ASH took those checks out must
+        not get them back by a second run. It leaves no trace on the scan's record
         (``_run_unrecorded``): a run that fails or times out attaches nothing and
         the scan reports as it would have, because a missing resource only fails
         closed. ``final_args`` is the command as it ran, so the second run reads
         the same cache, config and skip lists the first did, with no update.
         """
-        if "misconfig" not in self._effective_scanners(final_args):
+        if self._offline():
+            return sarif_report
+        if "misconfig" not in self._scanners_as_ran(final_args):
             return sarif_report
         # Only a misconfiguration of a type that names its resource is worth the
         # second run: trivy's SARIF message gives the type on its second line
@@ -2469,10 +2752,16 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                     f"trivy's misconfiguration report was not written "
                     f"(exit {response.get('returncode')}); no resource is named."
                 )
+                self._warn_side_report_skipped(
+                    f"the second run exited {response.get('returncode')}"
+                    if response.get("returncode") != 0
+                    else "the second run wrote no report"
+                )
                 return sarif_report
             document = json.loads(json_file.read_text(encoding="utf-8"))
         except (OSError, ValueError) as error:
             ASH_LOGGER.debug(f"trivy's misconfiguration report was not read: {error}")
+            self._warn_side_report_skipped("the report could not be read")
             return sarif_report
         finally:
             json_file.unlink(missing_ok=True)

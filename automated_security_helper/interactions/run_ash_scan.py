@@ -26,12 +26,13 @@ from typing import (
     Set,
     Tuple,
     Union,
-    cast,
 )
 
 import typer
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from rich.text import Text
+
+from automated_security_helper.models.vocab import Severity
 
 # `print` shadows the builtin on purpose: this is rich's documented import
 # idiom, so every print() below renders markup and respects the console. The
@@ -71,6 +72,8 @@ from automated_security_helper.core.scanner_selection import (
     selection_marker,
 )
 from automated_security_helper.core.enums import (
+    DEFAULT_EXECUTION_PHASES,
+    AshExitCode,
     AshLogLevel,
     BuildTarget,
     ExecutionPhase,
@@ -80,6 +83,7 @@ from automated_security_helper.core.enums import (
     RunMode,
     SandboxMode,
     ScannerStatus,
+    phase_values,
 )
 from automated_security_helper.core.committed_output import (
     COMMITTED_OUTPUT_REFUSED_EXIT_CODE,
@@ -101,7 +105,6 @@ from automated_security_helper.core.exceptions import (
     WorkspaceDefinitionError,
     WorkspacePathNotUtf8Error,
 )
-from automated_security_helper.core.progress import ExecutionPhaseType
 from automated_security_helper.core.sharding import shown_shard_text
 from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
@@ -135,7 +138,10 @@ from automated_security_helper.interactions.run_ash_nix import (
     run_ash_nix,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.models.workspace import WorkspaceExitCode
+from automated_security_helper.models.workspace import (
+    ProjectRunStatus,
+    WorkspaceExitCode,
+)
 from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.content_db_staleness import ContentDbAgeRecord
 from automated_security_helper.utils import scan_completeness as _scan_completeness
@@ -265,7 +271,7 @@ class ScanOptions(BaseModel):
     config_overrides: Optional[List[str]] = Field(default_factory=list)
     # A check every `extends` base of the config must also pass, applied by every
     # config read below. The MCP server passes the calling session's allowed
-    # config roots (cli/mcp/sandbox.config_base_gate); None keeps the CLI rule.
+    # config roots (config.mcp_sandbox.config_base_gate); None keeps the CLI rule.
     config_base_gate: Optional[Callable[[Path], bool]] = Field(
         default=None, exclude=True
     )
@@ -277,7 +283,7 @@ class ScanOptions(BaseModel):
     # config_overrides came from an MCP client (a workspace tool's), so a tool
     # config path they name is not the operator's (config/path_trust.py).
     client_overrides: bool = False
-    # The scan was started by a remote MCP client (cli/mcp/sandbox.caller_is_remote),
+    # The scan was started by a remote MCP client (config.mcp_sandbox.caller_is_remote),
     # so every config file the operator did not set aside resolves no !ENV; see
     # "Environment variables" in config/config_sources.py. Applied by every config
     # read below, and carried to each project in workspace mode.
@@ -347,7 +353,9 @@ class ScanOptions(BaseModel):
     # scanners that were supposed to look actually ran.
     fail_on_incomplete_scanners: Optional[bool] = None
     ignore_suppressions: bool = False
-    min_severity: str = "low"
+    # Plain text, as every explicit value is after _known_min_severity: a default
+    # skips that validator, and a member here would print as "MinSeverity.LOW".
+    min_severity: str = MinSeverity.LOW.value
     baseline: Optional[str] = None
     baseline_data: Optional[Any] = Field(default=None, exclude=True)
     changed_files_only: bool = False
@@ -447,7 +455,13 @@ class ScanOptions(BaseModel):
 # Keyed by exactly the MinSeverity values, which are what the CLI offers and what
 # ScanOptions accepts, so the lookup in _compute_exit_code never meets a value it does
 # not rank. tests/unit/cli/test_min_severity_is_validated.py holds the two together.
-_SEVERITY_RANK = {"critical": 3, "high": 3, "medium": 2, "low": 1, "none": 0}
+_SEVERITY_RANK = {
+    MinSeverity.CRITICAL: 3,
+    MinSeverity.HIGH: 3,
+    MinSeverity.MEDIUM: 2,
+    MinSeverity.LOW: 1,
+    MinSeverity.NONE: 0,
+}
 
 # The scanners `--mode precommit` always adds to the selection now live in
 # core/constants.py (see the comment there for why: the scan command's help text
@@ -850,9 +864,7 @@ def print_incompleteness_message(
                 + "[/yellow]"
             )
         no_kind_rows = [
-            row
-            for row in incomplete_converter_rows
-            if not (getattr(row, "kinds", ()) or ())
+            row for row in incomplete_converter_rows if not getattr(row, "kinds", None)
         ]
         if no_kind_rows:
             # A hand-built (name, reason) pair carries no record kinds, so the
@@ -968,7 +980,7 @@ def _resolve_fail_on_incomplete_scanners(
 
 
 class ScanIncompleteExit(SystemExit):
-    """``sys.exit(1)`` for a scan that finished with partial coverage.
+    """``sys.exit(AshExitCode.SCAN_ERRORS)`` for a scan that finished with partial coverage.
 
     A ``SystemExit`` with code 1, so the CLI's exit code and every caller that
     catches ``SystemExit`` see what they saw before. It adds the structured reason.
@@ -985,13 +997,13 @@ class ScanIncompleteExit(SystemExit):
     def __init__(
         self, incompleteness: ScanIncompleteness, results: AshAggregatedResults
     ):
-        super().__init__(1)
+        super().__init__(AshExitCode.SCAN_ERRORS.value)
         self.incompleteness = incompleteness
         self.results = results
 
 
 class ReportPathRefusedExit(SystemExit):
-    """``sys.exit(1)`` for a run whose reports were refused, with the reason.
+    """``sys.exit(AshExitCode.SCAN_ERRORS)`` for a run whose reports were refused, with the reason.
 
     Raised when a report path is a link, when a file name a reporter would write is
     not a file in the reports directory, and in container and nix mode when the
@@ -1003,7 +1015,7 @@ class ReportPathRefusedExit(SystemExit):
     """
 
     def __init__(self, reason: str):
-        super().__init__(1)
+        super().__init__(AshExitCode.SCAN_ERRORS.value)
         self.reason = reason
 
 
@@ -1081,7 +1093,7 @@ def _read_back_inner_results(
         # run set, a device that fails the read) is the same exit, worded, not a
         # traceback.
         logger.error(f"Could not read results file {output_file}: {error_text(e)}")
-    sys.exit(1)
+    sys.exit(AshExitCode.SCAN_ERRORS)
 
 
 def _refuse_an_inner_run_that_was_refused(opts: ScanOptions, run_id: str) -> None:
@@ -1140,7 +1152,7 @@ def _refuse_an_inner_run_that_did_not_complete(
     results: AshAggregatedResults,
     opts: ScanOptions,
     run_id: str,
-    mode: str,
+    mode: RunMode,
     output_file: Path,
     logger,
 ) -> None:
@@ -1167,7 +1179,7 @@ def _refuse_an_inner_run_that_did_not_complete(
     # In container mode the inner ASH is the image's, which can be older than this
     # one. In nix mode it is started with this ASH's own interpreter
     # (run_ash_nix._this_ash), so the message names that instead.
-    if mode == "container":
+    if mode is RunMode.container:
         older = (
             " An ASH older than this one does not write that record: "
             f"{_image_rebuild_hint()}"
@@ -1177,11 +1189,11 @@ def _refuse_an_inner_run_that_did_not_complete(
             f" The inner run was started with this ASH's interpreter, {sys.executable}."
         )
     logger.error(
-        f"The {mode} run did not complete, so its results are not read back: "
+        f"The {mode.value} run did not complete, so its results are not read back: "
         f"{output_file} {found}. The run's own output above says what stopped it."
         f"{older}"
     )
-    sys.exit(1)
+    sys.exit(AshExitCode.SCAN_ERRORS)
 
 
 def _refuse_links_left_in_reports(opts: ScanOptions) -> None:
@@ -3104,7 +3116,7 @@ def _refuse_a_source_dir_that_is_not_utf8(opts: ScanOptions) -> None:
             style="bold red",
         )
     )
-    sys.exit(1)
+    sys.exit(AshExitCode.SCAN_ERRORS)
 
 
 def _is_utf8_text(text: str) -> bool:
@@ -3166,7 +3178,7 @@ def _refuse_a_container_mount_that_is_not_utf8(opts: ScanOptions) -> None:
                 style="bold red",
             )
         )
-        sys.exit(3)
+        sys.exit(AshExitCode.INVALID_CONFIG)
 
 
 def _refuse_a_container_mount_the_runner_cannot_carry(opts: ScanOptions) -> None:
@@ -3185,7 +3197,7 @@ def _refuse_a_container_mount_the_runner_cannot_carry(opts: ScanOptions) -> None
         _require_mountable_directories(opts.source_dir, opts.output_dir)
     except ContainerInputError as error:
         print(Text(str(error), style="bold red"))
-        sys.exit(3)
+        sys.exit(AshExitCode.INVALID_CONFIG)
 
 
 # ---------------------------------------------------------------------------
@@ -3208,11 +3220,11 @@ def _scan_config_path(opts: ScanOptions, log_selection: bool = False) -> Optiona
 #: ASH writes below it, is reached through a link: 3, as for container mode's other
 #: unusable inputs, and the same whichever check refuses it (container mode's own
 #: rule, the general check, or the log file's open).
-OUTPUT_DIR_REFUSED_EXIT_CODE = 3
+OUTPUT_DIR_REFUSED_EXIT_CODE = AshExitCode.INVALID_CONFIG.value
 
 
 class OutputDirRefusedExit(SystemExit):
-    """``sys.exit(3)`` for an output directory ASH will not use, with the reason.
+    """``sys.exit(AshExitCode.INVALID_CONFIG)`` for an output directory ASH will not use, with the reason.
 
     A ``SystemExit`` with OUTPUT_DIR_REFUSED_EXIT_CODE. ``found`` names the link and
     ``reason`` adds the command-line remedy; an in-process caller (the MCP scan
@@ -3870,7 +3882,7 @@ def _sandbox_mode_without_the_config(opts: ScanOptions) -> List[str]:
             except Exception:
                 owned = None
             if owned is not None:
-                floor.sandbox.mode = owned
+                floor.sandbox.mode = SandboxMode(owned)
     selected = _sandbox_overrides(opts.config_overrides)
     if selected:
         try:
@@ -3878,7 +3890,7 @@ def _sandbox_mode_without_the_config(opts: ScanOptions) -> List[str]:
         except Exception:
             # An override that does not apply fails the scan in the container instead.
             return []
-    return [floor.sandbox.mode]
+    return [SandboxMode(floor.sandbox.mode).value]
 
 
 def _config_as_the_scan_resolves_it(opts: ScanOptions):
@@ -4190,7 +4202,7 @@ def _refuse_container_inputs(
         # It can name a path inside the scanned tree: the whole raw message is
         # shown once, on one line.
         echo(shown_on_one_line(refusal), err=True)
-        sys.exit(3)
+        sys.exit(AshExitCode.INVALID_CONFIG)
 
 
 def _workspace_policy_for_the_container(opts: ScanOptions) -> Optional[str]:
@@ -4572,7 +4584,7 @@ def _run_container_mode(
     if not opts.run:
         if hasattr(container_result, "returncode") and container_result.returncode != 0:
             sys.exit(container_result.returncode)
-        sys.exit(0)
+        sys.exit(AshExitCode.SUCCESS)
 
     # A status that is not a verdict did not come from a results file, so there is no
     # verdict for the host to re-derive and nothing below should try.
@@ -4670,11 +4682,11 @@ def _run_container_mode(
             "Rebuild the image from this ASH (run without --no-build, or rebuild the "
             "image ASH_IMAGE_NAME names)."
         )
-        sys.exit(3)
+        sys.exit(AshExitCode.INVALID_CONFIG)
     results = _read_back_inner_results(output_file, logger)
     if results is not None:
         _refuse_an_inner_run_that_did_not_complete(
-            results, opts, outer_run_id, "container", output_file, logger
+            results, opts, outer_run_id, RunMode.container, output_file, logger
         )
         _drop_restore_marker_after_a_completed_run(opts, logger)
         _take_own_values_for_record(results, opts, image_may_differ=image_may_differ)
@@ -4686,7 +4698,7 @@ def _run_container_mode(
             f"Results file not found at {output_file}. The container exited with "
             f"code {container_returncode}."
         )
-        sys.exit(1)
+        sys.exit(AshExitCode.SCAN_ERRORS)
 
 
 # ---------------------------------------------------------------------------
@@ -4861,7 +4873,7 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
             if opts.fail_on_incomplete_scanners
             else "--no-fail-on-incomplete-scanners"
         )
-    if opts.min_severity.lower() != "low":
+    if opts.min_severity.lower() != MinSeverity.LOW.value:
         argv.extend(["--min-severity", opts.min_severity])
     if opts.changed_files_only:
         argv.extend(["--changed-files-only", "--base-ref", opts.base_ref])
@@ -4955,7 +4967,7 @@ def _run_nix_mode(
         # stderr via echo, shown not obeyed: the message names a URL and flags,
         # not Rich markup.
         echo(str(e), err=True)
-        sys.exit(1)
+        sys.exit(AshExitCode.SCAN_ERRORS)
 
     if nix_result.returncode != 0:
         # Reported rather than fatal. A scan that finds something exits non-zero by design,
@@ -5008,7 +5020,7 @@ def _run_nix_mode(
     results = _read_back_inner_results(output_file, logger)
     if results is not None:
         _refuse_an_inner_run_that_did_not_complete(
-            results, opts, outer_run_id, "nix", output_file, logger
+            results, opts, outer_run_id, RunMode.nix, output_file, logger
         )
         _drop_restore_marker_after_a_completed_run(opts, logger)
         _take_own_values_for_record(results, opts, image_may_differ=image_may_differ)
@@ -5025,7 +5037,7 @@ def _run_nix_mode(
             f"Results file not found at {output_file}. The Nix shell exited with "
             f"code {shell_code}."
         )
-        sys.exit(1)
+        sys.exit(AshExitCode.SCAN_ERRORS)
 
 
 # ---------------------------------------------------------------------------
@@ -5430,7 +5442,10 @@ def _scan_source_for(opts: "ScanOptions", find_root: Any, environ: Any) -> str |
     of resolved findings, which compares the scope of the stored findings with
     this scan's) read an empty image scan as a clean scan of whatever repository
     the scan was started in. The ``image:`` prefix keeps an image reference from
-    reading as a directory called the same thing.
+    reading as a directory called the same thing, and a digest, where the scan
+    knows one, names the image rather than the tag
+    (``utils/image_attribution.image_scan_source``; the scan phase refines the
+    record once a tag's digest is resolved).
     """
     from automated_security_helper.utils.scan_source import recorded_scan_source
 
@@ -5440,7 +5455,11 @@ def _scan_source_for(opts: "ScanOptions", find_root: Any, environ: Any) -> str |
         and asset.kind == AssetKind.CONTAINER_IMAGE
         and asset.image is not None
     ):
-        return f"image:{asset.image.shown()}"
+        from automated_security_helper.utils.image_attribution import (
+            image_scan_source,
+        )
+
+        return image_scan_source(asset.image)
     return recorded_scan_source(opts.source_dir, find_root, environ)
 
 
@@ -5559,17 +5578,22 @@ def _run_local_mode(
             scan_source = _scan_source_for(
                 opts, git_repository_root, snapshot_environ()
             )
-            for warning in check_baseline_scope(
-                opts.baseline_data,
-                project_name=model.metadata.project_name,
-                scan_source=scan_source,
+            baseline = opts.baseline_data
+            for warning in (
+                check_baseline_scope(
+                    baseline,
+                    project_name=model.metadata.project_name,
+                    scan_source=scan_source,
+                )
+                if baseline is not None
+                else ()
             ):
                 logger.warning(warning)
             if staged_files == []:
                 echo(
                     "--staged: nothing is staged inside the scanned directory, so there is nothing to scan. Exiting clean."
                 )
-                sys.exit(0)
+                sys.exit(AshExitCode.SUCCESS)
 
         orchestrator = ASHScanOrchestrator.create(
             source_dir=opts.source_dir,
@@ -5712,20 +5736,18 @@ def _run_local_mode(
         )
 
         _phases = opts.phases or []
-        phases_to_run = []
-        if ExecutionPhase.CONVERT in _phases:
-            phases_to_run.append("convert")
-        if ExecutionPhase.SCAN in _phases:
-            phases_to_run.append("scan")
-        if ExecutionPhase.REPORT in _phases:
-            phases_to_run.append("report")
-        if ExecutionPhase.INSPECT in _phases or opts.inspect:
-            phases_to_run.append("inspect")
+        # In ExecutionPhase's member order, which is execution order; --inspect
+        # adds the inspect phase beside --phases inspect.
+        phases_to_run = [
+            phase
+            for phase in ExecutionPhase
+            if phase in _phases or (phase is ExecutionPhase.INSPECT and opts.inspect)
+        ]
         if not phases_to_run:
-            phases_to_run = ["convert", "scan", "report"]
+            phases_to_run = list(DEFAULT_EXECUTION_PHASES)
 
         if not opts.quiet and not opts.simple:
-            logger.debug(f"Running phases: {phases_to_run}")
+            logger.debug(f"Running phases: {phase_values(phases_to_run)}")
 
         # With keep_previous_results the caller settles the previous results, after
         # this function's last cancellation check below and after its own. Without
@@ -5733,9 +5755,7 @@ def _run_local_mode(
         settle: Dict[str, bool] = (
             {"settle_on_success": False} if opts.keep_previous_results else {}
         )
-        results = orchestrator.execute_scan(
-            phases=cast(List[ExecutionPhaseType], phases_to_run), **settle
-        )
+        results = orchestrator.execute_scan(phases=phases_to_run, **settle)
 
         if opts.simple and not opts.quiet:
             echo("\nASH scan completed.")
@@ -5778,7 +5798,7 @@ def _run_local_mode(
             raise
         # The shared printer escapes the text, which names fields and a path.
         _print_invalid_config(e)
-        sys.exit(3)
+        sys.exit(AshExitCode.INVALID_CONFIG)
     except BaselineRefused as e:
         refuse_baseline(e)
     except ASHConfigValidationError as e:
@@ -5798,7 +5818,7 @@ def _run_local_mode(
         # exit 3; not a fault, so no traceback. The message names the file and
         # quotes nothing from it.
         print(f"[bold red]ERROR (3) {escape_markup(str(e))}[/bold red]")
-        sys.exit(3)
+        sys.exit(AshExitCode.INVALID_CONFIG)
     except ReportPathRefused as e:
         # A report path was refused: by the report phase before any reporter wrote
         # (a link at the reports directory or at a report file, a report file name
@@ -5997,18 +6017,14 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
 
     workspace_config = _resolve_workspace_execution_config(opts)
 
-    phases: List[str] = []
-    for phase, name in (
-        (ExecutionPhase.CONVERT, "convert"),
-        (ExecutionPhase.SCAN, "scan"),
-        (ExecutionPhase.REPORT, "report"),
-    ):
-        if phase in (opts.phases or []):
-            phases.append(name)
-    if ExecutionPhase.INSPECT in (opts.phases or []) or opts.inspect:
-        phases.append("inspect")
+    phases: List[ExecutionPhase] = [
+        phase
+        for phase in ExecutionPhase
+        if phase in (opts.phases or [])
+        or (phase is ExecutionPhase.INSPECT and opts.inspect)
+    ]
     if not phases:
-        phases = ["convert", "scan", "report"]
+        phases = list(DEFAULT_EXECUTION_PHASES)
 
     return ProjectScanSettings(
         output_dir=opts.output_dir,
@@ -6028,7 +6044,7 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
         config_overrides=tuple(opts.config_overrides or []),
         client_overrides=opts.client_overrides,
         ash_plugin_modules=tuple(opts.ash_plugin_modules or []),
-        strategy=getattr(opts.strategy, "value", str(opts.strategy)),
+        strategy=opts.strategy,
         offline=opts.offline,
         python_based_plugins_only=opts.python_based_plugins_only,
         ignore_suppressions=opts.ignore_suppressions,
@@ -6255,13 +6271,13 @@ def _print_workspace_summary(
     print("")
 
     for entry in result.payload.projects:
-        if entry.status.value == "skipped":
+        if entry.status is ProjectRunStatus.SKIPPED:
             reason = entry.skip_reason.value if entry.skip_reason else "unspecified"
             _print_text(
                 "  ", ("skipped", "yellow"), f"  {entry.display_label} ({reason})"
             )
             continue
-        if entry.status.value == "failed":
+        if entry.status is ProjectRunStatus.FAILED:
             _print_text(
                 "  ",
                 ("failed", "bold red"),
@@ -6508,7 +6524,7 @@ def _compute_exit_code(
         #
         # Reachable without any sharding and without any operator error beyond a
         # single word. Measured on this tree with the repository's own
-        # .ash/.ash.yaml, which sets `semgrep: enabled: true`:
+        # .ash.yaml, which sets `semgrep: enabled: true`:
         # `ash scan --scanners semgrep` on Windows resolves semgrep against the
         # registered names, so ScannerSelectionError does not fire; semgrep then
         # declares the platform unsupported and is recorded SKIPPED; the other nine
@@ -6835,7 +6851,7 @@ def _gating_actionable_count(
     from automated_security_helper.base.reporter_plugin import confined_report_path
 
     # Indexed, not .get() with a default: ScanOptions only holds a ranked value.
-    min_sev_rank = _SEVERITY_RANK[opts.min_severity.lower()]
+    min_sev_rank = _SEVERITY_RANK[MinSeverity(opts.min_severity.lower())]
     # One threshold lookup for this read, shared by the count over the written
     # report and the --min-severity filter over the model: one resolver call per
     # scanner, and one actionability rule (_result_fails_its_scanner_threshold).
@@ -6851,13 +6867,15 @@ def _gating_actionable_count(
             counts = ScannerStatisticsCalculator.dict_result_counts(
                 results, metric.scanner_name
             )
-            for severity in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
-                count = getattr(counts, severity.lower())
+            for severity in Severity:
+                count = getattr(counts, severity.bucket)
                 if count and severity_fails_threshold(
-                    severity, threshold_for(metric.scanner_name)
+                    severity.value, threshold_for(metric.scanner_name)
                 ):
                     non_sarif_actionable += count
-                    rank = _SEVERITY_RANK.get(severity.lower(), _SEVERITY_RANK["low"])
+                    rank = _SEVERITY_RANK.get(
+                        severity.bucket, _SEVERITY_RANK[MinSeverity.LOW]
+                    )
                     if rank >= min_sev_rank:
                         non_sarif_qualifying = True
     # Set when the count below is taken from the written report: whether that
@@ -7283,6 +7301,10 @@ def _image_asset_or_refusal(
         if refusal is not None:
             _printed_refusal(ASH_EXIT_USAGE_ERROR, refusal, one_line=True)
         return Asset.for_image(ImageLocator(oci_archive=Path(image_archive).absolute()))
+    if image_layout is None:
+        # Unreachable: exactly one of the three was given and the other two
+        # are handled above.
+        return None
     refusal = image_layout_refusal(image_layout)
     if refusal is not None:
         _printed_refusal(ASH_EXIT_USAGE_ERROR, refusal, one_line=True)
@@ -7318,7 +7340,7 @@ def run_ash_scan(
     fail_on_findings: bool | None = None,
     fail_on_incomplete_scanners: bool | None = None,
     ignore_suppressions: bool = False,
-    min_severity: str = "low",
+    min_severity: str = MinSeverity.LOW.value,
     changed_files_only: bool = False,
     base_ref: str = "origin/main",
     staged: bool = False,

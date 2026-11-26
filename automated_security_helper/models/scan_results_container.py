@@ -10,6 +10,7 @@ from typing import Annotated, Any, Dict, Iterable, Literal, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.models.vocab import TargetType
 
 # InputNotScanned is defined beside ReportMetadata, which records the scan-level ones;
 # imported here, where each scanner's own are recorded, under the name it always had.
@@ -17,6 +18,7 @@ from automated_security_helper.models.asharp_model import (
     InputNotScanned,
     ScannerSeverityCount,
 )
+from automated_security_helper.models.vocab import Severity, SeverityThresholdText
 from automated_security_helper.utils.get_shortest_name import home_as_tilde
 
 __all__ = ["InputNotScanned", "ScanResultsContainer"]
@@ -50,7 +52,9 @@ class ScanResultsContainer(BaseModel):
         ),
     ] = None
     target: Path | None = None
-    target_type: str | None = None
+    # ``image`` is the third wire spelling an image scan stamps; it is not a tree
+    # a scanner is pointed at, so it is not a TargetType member.
+    target_type: TargetType | Literal["image"] | None = None
     # The tool's own exit code, or None for a scanner whose tool never ran: a
     # MISSING row, or one whose scan started no tool. The executor assigns it
     # only for a tool that did start, so a default of 0 would make every row
@@ -63,9 +67,7 @@ class ScanResultsContainer(BaseModel):
     metadata: Dict[str, Any] = {}
     raw_results: Any | None = None
     severity_counts: ScannerSeverityCount = Field(default_factory=ScannerSeverityCount)
-    scanner_severity_threshold: (
-        Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None
-    ) = None
+    scanner_severity_threshold: SeverityThresholdText | None = None
     status: ScannerStatus = ScannerStatus.PASSED
     dependencies_satisfied: bool = True
     excluded: bool = False
@@ -519,15 +521,10 @@ class ScanResultsContainer(BaseModel):
         )
 
         counts = self.severity_counts
-        counts_by_severity = (
-            ("CRITICAL", counts.critical),
-            ("HIGH", counts.high),
-            ("MEDIUM", counts.medium),
-            ("LOW", counts.low),
-            ("INFO", counts.info),
-        )
-
-        for severity, count in counts_by_severity:
-            if count > 0 and severity_fails_threshold(severity, threshold):
+        # Most severe first, the member order of the ladder; the count fields are
+        # the lowercase buckets the same members derive.
+        for severity in Severity:
+            count = getattr(counts, severity.bucket)
+            if count > 0 and severity_fails_threshold(severity.value, threshold):
                 return ScannerStatus.FAILED
         return ScannerStatus.PASSED

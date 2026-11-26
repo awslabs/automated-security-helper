@@ -71,10 +71,10 @@ class TestExclusivityIsRefusedBeforeAnyWork:
 
 class TestScopesAnImageScanCannotObeyAreRefused:
     """Each with its own reason: the git-history scopes (an image has none),
-    saved results (nothing would be scanned) and a baseline (unsupported for an
-    image scan). The rules live in run_ash_scan's shared gate; the CLI loop
-    exists for the wording, naming the flag as typed or the variable that set
-    it."""
+    saved results (nothing would be scanned) and a baseline (scoped to a
+    scanned directory, keyed on digests no other image shares). The rules live
+    in run_ash_scan's shared gate; the CLI loop exists for the wording, naming
+    the flag as typed or the variable that set it."""
 
     @pytest.mark.parametrize(
         "image_options",

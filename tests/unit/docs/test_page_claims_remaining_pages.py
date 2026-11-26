@@ -599,3 +599,17 @@ def test_the_zizmor_severity_table_is_the_mapping_the_scanner_applies():
         assert map_zizmor_severity(severity, "Medium", None) == confident, severity
         assert map_zizmor_severity(severity, "Low", None) == low_confidence, severity
         assert "CRITICAL" not in (confident, low_confidence)
+
+
+def test_both_deduplication_switches_are_off_by_default_and_independent():
+    assert_on_page(
+        "how-to/deduplicate-findings.md",
+        "Both are off by default, and they are independent: `fold` does not need "
+        "`annotate`.",
+    )
+    from automated_security_helper.config.ash_config import AshDeduplicationConfig
+
+    default = AshDeduplicationConfig()
+    assert (default.annotate, default.fold) == (False, False)
+    assert AshDeduplicationConfig(fold=True).annotate is False
+    assert AshDeduplicationConfig(annotate=True).fold is False

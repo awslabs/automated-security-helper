@@ -140,7 +140,7 @@ not demote it enough. Mitigations (pick one or combine):
 - Ship `validators.secrets.disabled_types: [API_KEY_OR_SECRET]` in bundled
   `ferret-config.yaml` (disables just the generic type, keeps real secret detection).
 - Scope `SECRETS` off generated-schema paths via `exclude_patterns`.
-- Add suppressions (`.ash/.ash.yaml` **and** `.ash/.ash_community_plugins.yaml`).
+- Add suppressions (`.ash.yaml` **and** `.ash/.ash_community_plugins.yaml`).
 
 ### 5.3 High — `--limit 200` silently truncates findings (P1)
 The plugin never passes `--limit`, so ferret-scan caps output at 200 findings by
@@ -223,7 +223,7 @@ GenAI block-list entry is needed. `extract_text` maps to `--preprocess-only`/`-p
    `EXPECTED_MIN_TESTS` / `TEST-COUNT` in sync.
 9. Run `uv run python scripts/validate_ferret_plugin.py` and the ferret unit suite
    before pushing (mirrors CI `--ignore-suppressions` scan).
-10. Per `DEVELOPMENT.md`, mirror any new suppressions into **both** `.ash/.ash.yaml`
+10. Per `DEVELOPMENT.md`, mirror any new suppressions into **both** `.ash.yaml`
     and `.ash/.ash_community_plugins.yaml`.
 
 ---
@@ -235,7 +235,7 @@ GenAI block-list entry is needed. `extract_text` maps to `--preprocess-only`/`-p
 | Version bump | `ferret_scanner.py`, `README.md`, `docs/.../ferret-scan-plugin.md` |
 | New option | `ferret_scanner.py`, `README.md`, `docs/.../ferret-scan-plugin.md`, `test_ferret_scanner.py` |
 | Bundled config | `ferret-config.yaml` |
-| FP mitigation | `ferret-config.yaml`, `.ash/.ash.yaml`, `.ash/.ash_community_plugins.yaml`, `scripts/validate_ferret_plugin.py` |
+| FP mitigation | `ferret-config.yaml`, `.ash.yaml`, `.ash/.ash_community_plugins.yaml`, `scripts/validate_ferret_plugin.py` |
 | Docs | `README.md`, `DEVELOPMENT.md`, community `index.md` |
 
 ---
@@ -357,7 +357,7 @@ is still achievable, but only via a different mechanism.
    `suppress_generic_secret: bool = True`). Fully within the plugin's control, default-on,
    documentable as DD-1, and keeps every *named* secret pattern (AWS keys, GitHub tokens,
    etc.) active. Downside: post-processing filter rather than a tool-native disable.
-2. **ASH suppression** (`rule_id: API_KEY_OR_SECRET` in `.ash/.ash.yaml` +
+2. **ASH suppression** (`rule_id: API_KEY_OR_SECRET` in `.ash.yaml` +
    `.ash_community_plugins.yaml`): fixes ASH's *own* CI self-scan (the red-PR symptom) but
    does not change behaviour for downstream plugin users.
 3. **Drop `SECRETS` from default checks:** rejected — loses all secret detection.

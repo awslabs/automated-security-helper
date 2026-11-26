@@ -72,9 +72,9 @@ from automated_security_helper.config.untrusted_source import (
 )
 from automated_security_helper.utils.content_databases import (
     STALENESS_CONFIG_FIELD,
-    STALENESS_FAIL,
     STALENESS_OFFLINE_IMAGE_CONFIG_FIELD,
     STALENESS_OVERRIDES_CONFIG_FIELD,
+    StalenessPolicy,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -128,7 +128,7 @@ def confine_content_db_staleness(
 
     ignored: List[str] = []
     policy = config.content_db_staleness
-    if policy != trusted_config.content_db_staleness and policy != STALENESS_FAIL:
+    if policy != trusted_config.content_db_staleness and policy != StalenessPolicy.FAIL:
         ignored.append(STALENESS_CONFIG_FIELD)
         config.content_db_staleness = trusted_config.content_db_staleness
 
@@ -145,14 +145,14 @@ def confine_content_db_staleness(
     operator_fail_databases = {
         entry.database
         for entry in trusted_config.content_db_staleness_overrides
-        if entry.policy == STALENESS_FAIL and not entry.is_expired()
+        if entry.policy == StalenessPolicy.FAIL and not entry.is_expired()
     }
     kept = []
     dropped: List[str] = []
     for entry in config.content_db_staleness_overrides:
         if entry.database in operator_fail_databases and entry.is_expired():
             dropped.append(entry.database)
-        elif entry.policy == STALENESS_FAIL or _dump(entry) in trusted_entries:
+        elif entry.policy == StalenessPolicy.FAIL or _dump(entry) in trusted_entries:
             kept.append(entry)
         else:
             dropped.append(entry.database)
@@ -172,7 +172,7 @@ def confine_content_db_staleness(
     carried = [
         entry
         for entry in trusted_config.content_db_staleness_overrides
-        if entry.policy == STALENESS_FAIL and entry.database not in kept_databases
+        if entry.policy == StalenessPolicy.FAIL and entry.database not in kept_databases
     ]
     if dropped or carried:
         config.content_db_staleness_overrides = [*kept, *carried]
@@ -195,6 +195,6 @@ def confine_content_db_staleness(
             f"Ignoring {'; '.join(ignored)} from {files}: relaxing the stale content "
             "database check is the operator's choice, and "
             f"{source.reason}. The operator's policy, or the default "
-            f"({STALENESS_FAIL}), applies instead. {source.remedy} Or pass "
+            f"({StalenessPolicy.FAIL.value}), applies instead. {source.remedy} Or pass "
             "--allow-stale-content-db."
         )

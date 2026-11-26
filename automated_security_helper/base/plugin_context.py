@@ -152,10 +152,14 @@ class PluginContext(BaseModel):
     output_dir: Annotated[
         Path, Field(description="Primary output directory for all ASH results")
     ]
+    # work_dir and config declare a non-optional type and default to None, which
+    # pydantic tolerates because defaults are not validated (see the note above
+    # on validate_assignment). The ignores below name that known gap; making the
+    # annotations honest is the wider change that note describes.
     work_dir: Annotated[
         Path, Field(description="Working directory for temporary files")
-    ] = None
-    config: Annotated["AshConfig", Field(description="ASH configuration")] = None
+    ] = None  # ty: ignore[invalid-assignment]
+    config: Annotated["AshConfig", Field(description="ASH configuration")] = None  # ty: ignore[invalid-assignment]
     ignore_suppressions: Annotated[
         bool, Field(description="Ignore all suppression rules")
     ] = False

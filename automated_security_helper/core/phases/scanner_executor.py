@@ -17,7 +17,6 @@ from typing import (
     Iterable,
     Iterator,
     List,
-    Literal,
     Optional,
     Tuple,
     cast,
@@ -48,6 +47,7 @@ from automated_security_helper.models.scan_results_container import (
 )
 from automated_security_helper.utils.scan_output_dirs import (
     drop_results_in_ash_output_dirs,
+    map_back_converted_results,
     mark_converted_results,
 )
 from automated_security_helper.core.cancellation import (
@@ -95,6 +95,10 @@ from automated_security_helper.utils.sarif_utils import (
     sanitize_sarif_paths,
 )
 from automated_security_helper.utils.tool_config_dir import tool_config_scope
+from automated_security_helper.models.vocab import (
+    SEVERITY_COUNT_FIELDS,
+    SeverityThresholdText,
+)
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_THRESHOLDS,
     resolve_missing_levels,
@@ -238,7 +242,7 @@ def _exit_is_the_shutdowns(error: BaseException) -> bool:
 
 
 #: The fields of ScannerSeverityCount a returned dict's ``severity_counts`` can set.
-_SEVERITY_COUNT_FIELDS = ("suppressed", "critical", "high", "medium", "low", "info")
+_SEVERITY_COUNT_FIELDS = SEVERITY_COUNT_FIELDS
 
 #: The levels a target report can record it was graded against
 #: (``ScanResultsContainer.scanner_severity_threshold``). An unrecognised
@@ -1628,6 +1632,7 @@ class ScannerExecutor:
                                             raw_results = scanner_plugin.scan_image(
                                                 image=image_locator,
                                                 config=scanner_config,
+                                                global_ignore_paths=self._global_ignore_paths,
                                             )
                                         else:
                                             raw_results = scanner_plugin.scan(
@@ -2148,6 +2153,14 @@ class ScannerExecutor:
                                 # So a converted file's finding keeps its id
                                 # wherever the output directory is.
                                 mark_converted_results(raw_results, self.plugin_context)
+                                # A generated file with a span sidecar (the MCP
+                                # config converter's) has its findings moved to
+                                # the original file and span before suppressions
+                                # are applied, so a suppression written against
+                                # the original matches.
+                                map_back_converted_results(
+                                    raw_results, self.plugin_context
+                                )
                             if not self.plugin_context.ignore_suppressions:
                                 raw_results = apply_suppressions_to_sarif(
                                     sarif_report=raw_results,
@@ -2479,8 +2492,7 @@ class ScannerExecutor:
                         # differently from the scan, silently.
                         if threshold in _GRADED_LEVELS:
                             container.scanner_severity_threshold = cast(
-                                Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"],
-                                str(threshold),
+                                SeverityThresholdText, str(threshold)
                             )
                         container.status = container.determine_status(threshold)
                         # A clean result from a database the policy rejects is not a
@@ -2666,10 +2678,13 @@ class ScannerExecutor:
                     # ``"metadata": null`` (or a list); read as a mapping it raised
                     # here, after the row was graded, and the raise discarded the
                     # scanner's other targets' containers with this one.
-                    if isinstance(raw_results, dict) and isinstance(
-                        raw_results.get("metadata"), dict
-                    ):
-                        for key, value in raw_results["metadata"].items():
+                    raw_metadata = (
+                        raw_results.get("metadata")
+                        if isinstance(raw_results, dict)
+                        else None
+                    )
+                    if isinstance(raw_metadata, dict):
+                        for key, value in raw_metadata.items():
                             container.add_metadata(key, value)
 
                     results.append(container)
@@ -3113,17 +3128,24 @@ class ScannerExecutor:
                 # scanner's thread. A pool thread does not inherit context, and
                 # one copy per task, because a context cannot be entered by two
                 # threads at once.
-                future = executor.submit(
-                    contextvars.copy_context().run,
-                    self._start_and_run,
-                    scanner_name,
-                    scanner_plugin,
-                    scan_targets,
+                # Context.run is generic over its callable's return, which ty
+                # does not solve through submit; the future's value is what
+                # _start_and_run returns.
+                future: Future[Tuple[List[ScanResultsContainer], bool]] = (  # ty: ignore[invalid-assignment]
+                    executor.submit(
+                        contextvars.copy_context().run,
+                        self._start_and_run,
+                        scanner_name,
+                        scanner_plugin,
+                        scan_targets,
+                    )
                 )
-                future.scanner_name = scanner_name  # type: ignore[attr-defined]
-                future.scanner_task_key = task_key  # type: ignore[attr-defined]
+                # The handler below reads these three back off the future;
+                # Future has no slot for them, so they ride as plain attributes.
+                future.scanner_name = scanner_name  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+                future.scanner_task_key = task_key  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
                 # For the handler below, which redacts with its values.
-                future.scanner_plugin = scanner_plugin  # type: ignore[attr-defined]
+                future.scanner_plugin = scanner_plugin  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
                 futures.append(future)
 
             # A cancel ends the run, but a scanner that had finished by then stays
@@ -3195,8 +3217,8 @@ class ScannerExecutor:
 
             completed_count = 0
             for future in _futures_to_record():
-                scanner_name = future.scanner_name  # type: ignore[attr-defined]
-                task_key = future.scanner_task_key  # type: ignore[attr-defined]
+                scanner_name = future.scanner_name  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+                task_key = future.scanner_task_key  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
                 task_id = scanner_tasks_map.get(task_key)
 
                 try:

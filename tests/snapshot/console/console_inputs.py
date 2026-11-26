@@ -234,17 +234,17 @@ def stale_records() -> list[ContentDbAgeRecord]:
     return [
         content_db_record(
             "semgrep-offline-rules",
-            policy=cdb.STALENESS_FAIL,
+            policy=cdb.StalenessPolicy.FAIL,
             age=cdb.get("semgrep-offline-rules").max_age + timedelta(days=3, hours=4),
         ),
         content_db_record(
             "opengrep-offline-rules",
-            policy=cdb.STALENESS_WARN,
+            policy=cdb.StalenessPolicy.WARN,
             age=cdb.get("opengrep-offline-rules").max_age + timedelta(hours=7),
         ),
         content_db_record(
             "grype-db",
-            policy=cdb.STALENESS_FAIL,
+            policy=cdb.StalenessPolicy.FAIL,
             age=None,
             error="ValueError: grype executable not found",
         ),

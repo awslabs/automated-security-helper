@@ -19,7 +19,7 @@ converters:
   archive: {}
 global_settings:
   ignore_paths:
-  - path: vendor
+  - path: '**/vendor'
     reason: third party code
   suppressions:
   - path: src/app.py

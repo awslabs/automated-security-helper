@@ -23,15 +23,13 @@ import zipfile
 from pathlib import Path
 from typing import Dict
 
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 import pytest
 import typer
 from starlette.testclient import TestClient
 from types import SimpleNamespace
 
 from automated_security_helper.cli.mcp import build_streamable_http_app, mcp_command
-from automated_security_helper.cli.mcp.session_identity import (
-    SESSION_IDENTITY_REQUIRED,
-)
 from automated_security_helper.core.constants import (
     ASH_EXIT_CODES,
     ASH_EXIT_USAGE_ERROR,
@@ -171,7 +169,9 @@ class TestDeclaredUpstreamSessions:
 
         result = _deliver(declared, headers)
 
-        assert result.get("error_type") == SESSION_IDENTITY_REQUIRED, result
+        assert (
+            result.get("error_type") == McpErrorType.SESSION_IDENTITY_REQUIRED.value
+        ), result
 
 
 @pytest.mark.parametrize(
@@ -197,7 +197,9 @@ def test_session_tools_refuse_a_stateless_caller_without_the_declaration(
         result = http.call_tool(tool, arguments, headers)
 
     assert result.get("success") is False, result
-    assert result.get("error_type") == SESSION_IDENTITY_REQUIRED, result
+    assert result.get("error_type") == McpErrorType.SESSION_IDENTITY_REQUIRED.value, (
+        result
+    )
     assert "--trust-upstream-session-id" in result.get("error", ""), result
 
 
@@ -228,7 +230,9 @@ def test_a_stateless_caller_without_the_declaration_starts_no_scan(
         result = http.call_tool("run_ash_scan", {"source_dir": str(granted)}, headers)
 
     assert result.get("success") is False, result
-    assert result.get("error_type") == SESSION_IDENTITY_REQUIRED, result
+    assert result.get("error_type") == McpErrorType.SESSION_IDENTITY_REQUIRED.value, (
+        result
+    )
     assert "--trust-upstream-session-id" in result.get("error", ""), result
     assert registry.get_scan_by_directory(str(granted)) is None
     assert not (granted / ".ash").exists(), "the refused scan wrote into the target"
@@ -249,7 +253,9 @@ def test_the_scan_tool_reports_an_exit_code_for_the_session_identity_refusal() -
         _issued, headers = http.open_session()
         result = http.call_tool("run_ash_scan", {}, headers)
 
-    assert result.get("error_type") == SESSION_IDENTITY_REQUIRED, result
+    assert result.get("error_type") == McpErrorType.SESSION_IDENTITY_REQUIRED.value, (
+        result
+    )
     assert result.get("exit_code") == ASH_EXIT_USAGE_ERROR, result
     assert result.get("exit_code_meaning") == ASH_EXIT_CODES[ASH_EXIT_USAGE_ERROR], (
         result
@@ -271,7 +277,9 @@ def test_the_scan_backend_refuses_a_caller_with_no_session(tmp_path) -> None:
     )
 
     assert result.get("success") is False, result
-    assert result.get("error_type") == SESSION_IDENTITY_REQUIRED, result
+    assert result.get("error_type") == McpErrorType.SESSION_IDENTITY_REQUIRED.value, (
+        result
+    )
     assert not (tmp_path / ".ash").exists()
 
 
@@ -393,7 +401,9 @@ def test_a_stateful_server_gives_an_issued_id_no_identity_on_the_newer_protocol(
     assert response.status_code == 200, response.text[:300]
     result = tool_payload(response.json())
     assert result.get("success") is False, result
-    assert result.get("error_type") == SESSION_IDENTITY_REQUIRED, result
+    assert result.get("error_type") == McpErrorType.SESSION_IDENTITY_REQUIRED.value, (
+        result
+    )
     # The refusal names the cause, a protocol version that is not a handshake
     # version, so a caller on this server has something it can change.
     assert "Mcp-Protocol-Version" in result.get("error", ""), result
@@ -444,7 +454,9 @@ def test_a_stateful_refusal_advises_initialize_not_an_operator_mode_change() -> 
     assert response.status_code == 200, response.text[:300]
     result = tool_payload(response.json())
     assert result.get("success") is False, result
-    assert result.get("error_type") == SESSION_IDENTITY_REQUIRED, result
+    assert result.get("error_type") == McpErrorType.SESSION_IDENTITY_REQUIRED.value, (
+        result
+    )
     assert "initialize" in result.get("error", ""), result
     assert "--stateless-http" not in result.get("error", ""), result
     assert "newer protocol version" not in result.get("error", ""), result
@@ -512,7 +524,9 @@ def test_a_refusal_the_protocol_version_did_not_cause_does_not_name_it() -> None
         _issued, headers = http.open_session()
         result = http.call_tool("clear_source", {}, headers)
 
-    assert result.get("error_type") == SESSION_IDENTITY_REQUIRED, result
+    assert result.get("error_type") == McpErrorType.SESSION_IDENTITY_REQUIRED.value, (
+        result
+    )
     assert "newer protocol version" not in result.get("error", ""), result
     assert "Mcp-Protocol-Version" not in result.get("error", ""), result
     assert "--trust-upstream-session-id" in result.get("error", ""), result

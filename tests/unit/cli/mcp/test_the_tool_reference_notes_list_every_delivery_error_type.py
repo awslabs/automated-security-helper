@@ -39,8 +39,8 @@ from pathlib import Path
 import pytest
 
 from automated_security_helper.cli import mcp_tools
-from automated_security_helper.cli.mcp import sessions
 from automated_security_helper.cli.mcp import source_delivery as sd
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 
 pytestmark = pytest.mark.unit
 
@@ -57,13 +57,25 @@ WRAPPERS = {
 }
 
 
-def _constant(name: str) -> str:
-    """The string a constant of ``source_delivery`` or ``sessions`` is named for."""
-    for module in (sd, sessions):
-        value = getattr(module, name, None)
-        if isinstance(value, str):
-            return value
-    raise AssertionError(f"{name} is not a string constant of the delivery modules")
+def _member_value(node: ast.expr) -> str:
+    """The string a ``McpErrorType.NAME.value`` expression spells."""
+    if (
+        isinstance(node, ast.Attribute)
+        and node.attr == "value"
+        and isinstance(node.value, ast.Attribute)
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "McpErrorType"
+    ):
+        return McpErrorType[node.value.attr].value
+    raise AssertionError(f"not a McpErrorType member's value: {ast.dump(node)}")
+
+
+def _is_member_value(node: ast.expr) -> bool:
+    try:
+        _member_value(node)
+    except AssertionError:
+        return False
+    return True
 
 
 def _git_failure_types() -> set[str]:
@@ -78,14 +90,13 @@ def _git_failure_types() -> set[str]:
         if (
             node.func.id == "GitCommandError"
             and len(node.args) >= 2
-            and isinstance(node.args[1], ast.Name)
-            and node.args[1].id.isupper()
+            and _is_member_value(node.args[1])
         ):
-            found.add(_constant(node.args[1].id))
+            found.add(_member_value(node.args[1]))
         elif node.func.id == "_run_git_step":
             for keyword in node.keywords:
-                if keyword.arg == "error_type" and isinstance(keyword.value, ast.Name):
-                    found.add(_constant(keyword.value.id))
+                if keyword.arg == "error_type" and _is_member_value(keyword.value):
+                    found.add(_member_value(keyword.value))
     return found
 
 
@@ -93,8 +104,8 @@ def _values(node: ast.expr) -> set[str]:
     """The ``error_type`` strings an expression in a wrapper can be."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return {node.value}
-    if isinstance(node, ast.Name) and node.id.isupper():
-        return {_constant(node.id)}
+    if _is_member_value(node):
+        return {_member_value(node)}
     if isinstance(node, ast.Attribute) and node.attr == "error_type":
         return _git_failure_types()
     # The parameter of the ``refused`` helper itself: its callers are read instead.
@@ -166,12 +177,12 @@ def test_the_reader_finds_a_literal_a_constant_and_a_git_failure_type():
     returned = _error_types_returned_by(WRAPPERS["set_source_git"])
 
     assert "local_clone_source_refused" in returned
-    assert sd.CLONE_TIMED_OUT in returned
-    assert sd.GIT_CHECKOUT_FAILED in returned
-    assert sd.SOURCE_DELIVERY_BUSY in _error_types_returned_by(
+    assert McpErrorType.CLONE_TIMED_OUT.value in returned
+    assert McpErrorType.GIT_CHECKOUT_FAILED.value in returned
+    assert McpErrorType.SOURCE_DELIVERY_BUSY.value in _error_types_returned_by(
         WRAPPERS["set_source_zip_finalize"]
     )
-    assert sessions.SESSION_WORKSPACE_BUSY in _error_types_returned_by(
+    assert McpErrorType.SESSION_WORKSPACE_BUSY.value in _error_types_returned_by(
         WRAPPERS["set_source_zip_chunk"]
     )
 
@@ -217,6 +228,6 @@ def test_the_finalize_note_says_what_each_kind_of_failure_returns(tool_notes):
     text = _text(tool_notes, "set_source_zip_finalize")
 
     assert "with no `error_type`" in text
-    assert _names(text, sd.SOURCE_DELIVERY_BUSY)
+    assert _names(text, McpErrorType.SOURCE_DELIVERY_BUSY.value)
     assert _names(text, "BadZipFile")
     assert _names(text, "OSError")

@@ -140,7 +140,7 @@ def test_a_repository_trivy_yaml_does_not_move_the_check(repo, monkeypatch):
     record = staleness.measure(
         cdb.get("trivy-db"),
         scanner.content_database_probe_context(),
-        cdb.STALENESS_FAIL,
+        cdb.StalenessPolicy.FAIL,
     )
     _assert_fresh(record, fresh)
 
@@ -166,6 +166,6 @@ def test_a_repository_grype_config_does_not_move_the_check(repo, name):
     record = staleness.measure(
         cdb.get("grype-db"),
         scanner.content_database_probe_context(),
-        cdb.STALENESS_FAIL,
+        cdb.StalenessPolicy.FAIL,
     )
     _assert_fresh(record, fresh)

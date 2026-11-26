@@ -317,6 +317,15 @@ env:
   # to the tools it names, and cdk-nag is a Python dependency rather than a
   # downloaded binary.
   #
+  # The `[symbols]` extra is tree-sitter and its grammars, which resolve
+  # suppressions scoped by `symbol` (a qualified definition name instead of a
+  # line pin). Resolution fails closed: without the extra every symbol-scoped
+  # entry matches nothing and its findings come back as residuals, so a config
+  # that uses `symbol` -- this repository's own .ash.yaml does -- needs the
+  # extra in the environment that runs the scan. The wheels cover the GitHub
+  # hosted runners; the extra exists (rather than core deps) for platforms,
+  # musllinux aarch64, that no wheel covers.
+  #
   # Extras on a PEP 508 direct reference, rather than a second install step: the
   # extra's contents are read from pyproject.toml at the pinned ref, so there is no
   # second list to drift, and the name is not resolved from an index, so this adds
@@ -325,7 +334,7 @@ env:
   # The ` @ ` makes this one requirement string containing spaces, so every use
   # below quotes it. Unquoted, the shell would split it into three words and pass
   # `@` to uvx as the command to run.
-  ASH_UVX_SOURCE: automated-security-helper[cdk] @ git+https://github.com/${{ inputs.ash-repo }}@${{ inputs.ash-version }}
+  ASH_UVX_SOURCE: automated-security-helper[cdk,symbols] @ git+https://github.com/${{ inputs.ash-repo }}@${{ inputs.ash-version }}
   # Where cfn-nag's Gemfile comes from: the same repo and ref the scan itself is
   # installed from, so the gem version can never disagree with the ASH that
   # invokes it, and the scanned checkout never picks it.
@@ -747,7 +756,7 @@ jobs:
             echo "version-url=${version_url}"
             echo "repo=${repo}"
           } >> "${GITHUB_OUTPUT}"
-          echo "ASH_UVX_SOURCE=automated-security-helper[cdk] @ git+https://github.com/${repo}@${version_url}" >> "${GITHUB_ENV}"
+          echo "ASH_UVX_SOURCE=automated-security-helper[cdk,symbols] @ git+https://github.com/${repo}@${version_url}" >> "${GITHUB_ENV}"
 
       # THE ASH REF IS RESOLVED TO ONE COMMIT, ONCE, BEFORE ANYTHING INSTALLS ASH
       #
@@ -829,7 +838,7 @@ jobs:
             fi
           fi
           {
-            echo "ASH_UVX_SOURCE=automated-security-helper[cdk] @ git+https://github.com/${ASH_REPO}@${COMMIT}"
+            echo "ASH_UVX_SOURCE=automated-security-helper[cdk,symbols] @ git+https://github.com/${ASH_REPO}@${COMMIT}"
             echo "ASH_ASSETS_URL=https://raw.githubusercontent.com/${ASH_REPO}/${COMMIT}/automated_security_helper/assets"
           } >> "$GITHUB_ENV"
           echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
@@ -1078,7 +1087,7 @@ jobs:
             exit 1
           fi
           if [ -z "${CONFIG_PATH}" ]; then
-            echo "::error::config-ref is set but config is empty. Name the config file to read from $(one_line "${CONFIG_REF}"), for example 'config: .ash/.ash.yaml'."
+            echo "::error::config-ref is set but config is empty. Name the config file to read from $(one_line "${CONFIG_REF}"), for example 'config: .ash.yaml'."
             exit 1
           fi
           RELATIVE="${CONFIG_PATH#./}"
@@ -1142,7 +1151,7 @@ jobs:
 
       - name: Install uv
         id: setup-uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           # Named here, because with no `version` setup-uv installs the uv that the
           # checkout's pyproject.toml or uv.toml asks for (`required-version`), and
@@ -1952,7 +1961,7 @@ jobs:
       # and make are still on the image; libyaml-dev is the one to check first.
       - name: Set up Ruby for cfn-nag
         if: inputs.install-cfn-nag
-        uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
+        uses: ruby/setup-ruby@20eb24b0d509e2b9ed9b6d42ddfeb992915e0564 # v1.341.0
         with:
           ruby-version: "3.3"
           # Neither from the checkout. The action's default `bundler: Gemfile.lock`

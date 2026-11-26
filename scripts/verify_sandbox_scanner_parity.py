@@ -23,9 +23,9 @@ grype, an npm lockfile for npm-audit, the actionlint and zizmor fixture workflow
 the cfn-lint/cfn-guard insecure template, and the gitleaks fixture's fabricated
 tokens (materialized under ``secrets/``, where its ``.gitleaks.toml`` is not the
 root config), so each builtin scanner has something to find. For the hadolint and
-GuardDog community scanners it adds GuardDog's fixture packages under
+GuardDog alpha scanners it adds GuardDog's fixture packages under
 ``packages/``; hadolint reads the snapshot fixture's Dockerfile.
-``--ash-plugin-modules`` loads community modules in both runs, and
+``--ash-plugin-modules`` loads alpha modules in both runs, and
 ``--config-override`` passes ``--config-overrides`` to both, for a scanner that is
 off by default. Both runs use --offline as well, unless --online is passed, in which
 case the pair is run online too, so the network-allowed scanners are exercised with
@@ -450,7 +450,7 @@ def main() -> int:
     parser.add_argument(
         "--ash-plugin-modules",
         default="",
-        help="comma-separated community plugin modules to load in both runs",
+        help="comma-separated alpha plugin modules to load in both runs",
     )
     parser.add_argument(
         "--config-override",

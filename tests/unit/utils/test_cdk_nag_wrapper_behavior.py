@@ -159,6 +159,24 @@ def _one_violation_report(**violation_kwargs):
     return _report(_plugin_report(violations=[_violation(**violation_kwargs)]))
 
 
+class _ValidationReport:
+    """What a pack's ``validate()`` returns: the fields the wrapper's recorder reads.
+
+    Shaped like ``aws_cdk.PolicyValidationPluginReportBeta1`` -- ``success`` and
+    ``violations`` -- because that is the object the real ``NagPack.validate`` returns
+    and :func:`~automated_security_helper.utils.cdk_nag_wrapper._record_validate_outcome`
+    reads. CDK then OMITS the report entry of a plugin whose return was success with
+    zero violations (aws-cdk-lib 2.258.0, aws/aws-cdk#38009), which is why this return
+    value, not the report file, is the evidence a compliant template was evaluated.
+    """
+
+    def __init__(self, success=True, violations=()):
+        self.success = success
+        # None is kept as None: the real report class allows a null violations
+        # list, and the recorder reads that as zero.
+        self.violations = None if violations is None else list(violations)
+
+
 class _Recorder:
     """Collects the objects the wrapper built, so tests can assert on them."""
 
@@ -175,6 +193,14 @@ class _Recorder:
         # case. See test_findings_survive_the_synth_raise_that_violations_cause.
         self.synth_raises = None
         self.synth_count = 0
+        # None (the default) means synth never calls the plugins' validate(), and a
+        # validate() call from anywhere is the wrapper reaching in where only CDK
+        # may -- the original tripwire. A dict opts in: synth calls each registered
+        # plugin's validate(), which answers with the dict's value for the pack's
+        # reported name (a _ValidationReport, or an exception instance to raise),
+        # the way CDK drives plugins during synthesis.
+        self.validate_results = None
+        self.validate_calls = []
 
 
 @pytest.fixture
@@ -213,10 +239,29 @@ def cdk_doubles(monkeypatch):
             recorder.pack_instances.append(self)
 
         def validate(self, context):
-            """v3 packs are plugins, so they validate. Present so ``hasattr`` agrees."""
-            raise AssertionError(
-                "validate() is CDK's to call during synth, not the wrapper's"
-            )
+            """v3 packs are plugins, so they validate. CDK's synth is the only caller.
+
+            With ``recorder.validate_results`` unset, any call is the wrapper
+            reaching in where only CDK may -- the original tripwire, kept. A test
+            that opts in (see ``App.synth``) supplies the per-pack result here,
+            keyed by the pack's reported name; an exception instance is raised
+            instead, mirroring a pack whose validate() throws under CDK.
+            """
+            if recorder.validate_results is None:
+                raise AssertionError(
+                    "validate() is CDK's to call during synth, not the wrapper's"
+                )
+            pack_name = getattr(self, "name", type(self).__name__)
+            recorder.validate_calls.append(pack_name)
+            outcome = recorder.validate_results.get(pack_name)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            if outcome is None:
+                raise AssertionError(
+                    f"no validate result configured for pack {pack_name!r}; "
+                    "validate_results opts every registered pack in"
+                )
+            return outcome
 
     # Each real cdk-nag 3.x pack exposes the name it writes its ``pluginReports[]``
     # entry under as ``name`` (the ``IPolicyValidationPlugin`` property), which is also
@@ -313,6 +358,16 @@ def cdk_doubles(monkeypatch):
 
         def synth(self):
             recorder.synth_count += 1
+            if recorder.validate_results is not None:
+                # Real CDK invokes every registered plugin during synthesis and
+                # catches one that throws (recording a failed entry for it in the
+                # report it writes); the report text the test supplies below is
+                # what CDK then writes, so the two are configured independently.
+                for plugin in self.plugins:
+                    try:
+                        plugin.validate(object())
+                    except Exception:
+                        pass
             if recorder.report_text is not None:
                 Path(self.outdir).joinpath("validation-report.json").write_text(
                     recorder.report_text, encoding="utf-8"
@@ -2464,9 +2519,9 @@ def jsii_node_during_the_call(monkeypatch):
     seen: list = []
     build = cdk_nag_wrapper._build_nag_pack
 
-    def recording_build(pack_name):
+    def recording_build(pack_name, validate_outcomes=None):
         seen.append(os.environ.get("JSII_NODE"))
-        return build(pack_name)
+        return build(pack_name, validate_outcomes)
 
     monkeypatch.setattr(cdk_nag_wrapper, "_build_nag_pack", recording_build)
     return seen
@@ -3840,3 +3895,192 @@ def test_a_bare_jsii_node_found_on_path_does_not_ask_the_working_directory(
 
     assert asked == []
     assert jsii_node_during_the_call == [str(resolved)]
+
+
+# ---------------------------------------------------------------------------
+# A compliant template under aws-cdk-lib >= 2.258.0 (issue #887)
+# ---------------------------------------------------------------------------
+# Since aws/aws-cdk#38009 (first released in 2.258.0), ``buildPluginReports``
+# skips every plugin that succeeded with zero violations and nothing
+# suppressed::
+#
+#     if (rep.success && rep.violations.length === 0 && !suppressed) continue;
+#
+# so a template that every requested pack evaluated WITHOUT violations writes
+# ``{"pluginReports": []}`` -- byte-identical, in the report, to a synth where
+# no pack ran at all. The wrapper records what each pack's ``validate()``
+# returned at its own boundary, and that record is what tells the two apart.
+# The doubles below opt in to synth driving ``validate()``
+# (``recorder.validate_results``), which is what real CDK does during
+# synthesis.
+
+EMPTY_PLUGIN_REPORTS = json.dumps(
+    {"version": "55.0.0", "title": "Validation Report", "pluginReports": []}
+)
+
+
+def test_a_clean_template_whose_pack_completed_is_evaluated_not_failed(
+    cdk_doubles, template_file, outdir
+):
+    """The issue-887 shape: pack ran clean, CDK omitted its entry, report is empty.
+
+    The pack DID evaluate the template -- its validate() returned success with no
+    violations -- so the response must be a clean evaluation (``failure=None`` and
+    the compliant ``{pack: []}`` results shape), not "No pack evaluated this
+    template" / "requested pack(s) with no entry".
+    """
+    cdk_doubles.validate_results = {"AwsSolutions": _ValidationReport(success=True)}
+    cdk_doubles.report_text = EMPTY_PLUGIN_REPORTS
+
+    response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert response is not None
+    assert cdk_doubles.validate_calls == ["AwsSolutions"]
+    assert response.failure is None, (
+        "the pack's own validate() completed with zero violations, so this is an "
+        f"evaluated, compliant template; got failure={response.failure!r}"
+    )
+    assert response.results == {"AwsSolutions": []}, (
+        "a compliant evaluation is the {pack: []} shape, so the scanner counts the "
+        f"template as evaluated; got {response.results!r}"
+    )
+
+
+def test_a_clean_pack_beside_a_violating_pack_is_not_reported_missing(
+    cdk_doubles, template_file, outdir
+):
+    """Two requested packs, one violating (entry written), one clean (entry omitted).
+
+    aws-cdk-lib >= 2.258.0 writes the violating pack's entry and skips the clean
+    one's, so before the completion record the clean pack read as 'requested
+    pack(s) with no entry in the report' and the whole template as not fully
+    evaluated. Both packs completed; the violating pack's findings must survive
+    beside the clean pack's empty evaluation.
+    """
+    cdk_doubles.validate_results = {
+        "AwsSolutions": _ValidationReport(success=False, violations=[object()]),
+        "HIPAA.Security": _ValidationReport(success=True),
+    }
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(
+        template_file,
+        outdir,
+        nag_packs=["AwsSolutionsChecks", "HIPAASecurityChecks"],
+    )
+
+    assert response.failure is None, (
+        "both requested packs evaluated the template (one found a violation, the "
+        f"other found nothing); got failure={response.failure!r}"
+    )
+    assert len(response.results["AwsSolutions"]) == 1
+    assert response.results["HIPAA.Security"] == []
+
+
+def test_an_empty_report_with_no_completion_record_is_still_a_failure(
+    cdk_doubles, template_file, outdir
+):
+    """Fail-closed control: no entry AND no record of validate() running = failure.
+
+    This is the pre-2.258.0 meaning of an empty report (no pack ran), and it is
+    also what a synth that never reached validation produces. Without the pack's
+    own completion evidence, nothing says any rule was evaluated.
+    """
+    cdk_doubles.report_text = EMPTY_PLUGIN_REPORTS
+
+    response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert response.failure is not None
+    assert "contains no plugin reports" in response.failure
+    assert response.results == {}
+
+
+@pytest.mark.parametrize(
+    "label, outcome",
+    [
+        # CDK records a plugin that throws as a failed entry; if the entry is
+        # nonetheless absent, the raise must not read as a clean evaluation.
+        ("validate raised", RuntimeError("pack blew up")),
+        # A non-success return with no entry: the report half of it is the failed
+        # arm; the record half must not stand in for an evaluation either.
+        ("validate returned failure", None),
+    ],
+)
+def test_a_pack_that_did_not_complete_cleanly_does_not_stand_in(
+    cdk_doubles, template_file, outdir, label, outcome
+):
+    cdk_doubles.validate_results = {
+        "AwsSolutions": (
+            outcome if outcome is not None else _ValidationReport(success=False)
+        )
+    }
+    cdk_doubles.report_text = EMPTY_PLUGIN_REPORTS
+
+    response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert response.failure is not None, (
+        f"{label}: the pack did not complete a clean evaluation, so the empty "
+        "report must stay a failure"
+    )
+    assert response.results == {}
+
+
+def test_a_recorded_success_whose_violations_the_report_lost_does_not_stand_in(
+    cdk_doubles, template_file, outdir
+):
+    """Success WITH violations and no entry is an inconsistent pair, not a clean scan.
+
+    CDK omits an entry only for a plugin with zero violations, so a recorded
+    violation count above zero beside an absent entry means findings were LOST on
+    the way to the report. Standing the pack in as ``{pack: []}`` would grade the
+    template compliant on rules that found something.
+    """
+    cdk_doubles.validate_results = {
+        "AwsSolutions": _ValidationReport(success=True, violations=[object()])
+    }
+    cdk_doubles.report_text = EMPTY_PLUGIN_REPORTS
+
+    response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert response.failure is not None
+    assert "No pack evaluated" in response.failure
+    assert response.results == {}
+
+
+def test_an_unreadable_validate_return_is_no_clean_evidence():
+    """``_record_validate_outcome`` must not mint evidence off a report it cannot read."""
+
+    class _RaisingReport:
+        @property
+        def success(self):
+            raise RuntimeError("jsii proxy gone")
+
+        violations = []
+
+    class _UnsizedViolations:
+        success = True
+        violations = 7  # no len()
+
+    class _NonBoolSuccess:
+        success = "true"
+        violations = []
+
+    for report in (_RaisingReport(), _UnsizedViolations(), _NonBoolSuccess()):
+        entry = {"returned": False, "success": None, "violations": None, "raised": None}
+        cdk_nag_wrapper._record_validate_outcome(entry, report)
+        assert entry["returned"] is True
+        assert entry["success"] is None, (
+            f"{type(report).__name__}: an unreadable return must leave the pack "
+            "unproven, so it cannot stand in as a clean evaluation"
+        )
+
+    entry = {"returned": False, "success": None, "violations": None, "raised": None}
+    cdk_nag_wrapper._record_validate_outcome(
+        entry, _ValidationReport(success=True, violations=None)
+    )
+    assert entry == {
+        "returned": True,
+        "success": True,
+        "violations": 0,
+        "raised": None,
+    }, "null violations reads as zero, matching the report file's own null entry"

@@ -121,10 +121,18 @@ runs:
         else result=miss; fi
         echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
 
+    # With the `[symbols]` extra: the jobs this action installs ASH for self-scan
+    # the repository with .ash.yaml and .ash/.ash_alpha_plugins.yaml,
+    # whose suppressions are scoped by `symbol` and resolved by tree-sitter from
+    # that extra. Resolution fails closed, so an install without the extra makes
+    # every symbol-scoped entry match nothing and the scan legs go red on the
+    # findings those entries cover. The "Check the symbols extra is importable"
+    # step below is the guard that keeps this clause load-bearing: an install that
+    # lacks the extra fails there, by name, instead of as residual findings later.
     - name: Install ASH package (Unix)
       if: inputs.install-ash == 'true' && runner.os != 'Windows'
       shell: bash
-      run: pip install .
+      run: pip install ".[symbols]"
 
     # No GITHUB_PATH write. This step used to append "$env:APPDATA\Python\Scripts",
     # on the theory that `pip install .` puts ash.exe in the user scheme. Measured on
@@ -140,7 +148,7 @@ runs:
     - name: Install ASH package (Windows)
       if: inputs.install-ash == 'true' && runner.os == 'Windows'
       shell: pwsh
-      run: pip install .
+      run: pip install ".[symbols]"
 
     # The contract callers rely on: after this action, `ash` on PATH is the ASH that
     # was just installed. Checked here so a runner image that installs console
@@ -155,6 +163,21 @@ runs:
       run: |
         python (Join-Path $env:GITHUB_ACTION_PATH 'locate_entry_point.py')
         exit $LASTEXITCODE
+
+    # The repository's suppression configs scope entries by `symbol`, which
+    # resolves only with the `symbols` extra (tree-sitter and its grammars).
+    # Without it every such entry matches nothing, so a revert of the install
+    # lines above to a bare `pip install .` would show up only as residual
+    # findings in a later scan step. Failing here names the cause.
+    - name: Check the symbols extra is importable
+      if: inputs.install-ash == 'true'
+      shell: pwsh
+      run: |
+        python -c "import sys; from automated_security_helper.utils.symbol_spans import symbols_extra_available as ok; sys.exit(0 if ok() else 1)"
+        if ($LASTEXITCODE -ne 0) {
+          Write-Host "::error::The ASH install lacks the [symbols] extra, so every symbol-scoped suppression would match nothing. Install ASH with pip install '.[symbols]'."
+          exit 1
+        }
 
     - name: Save pip's download cache (main only)
       if: >-

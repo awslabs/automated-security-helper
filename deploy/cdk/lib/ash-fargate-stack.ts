@@ -419,7 +419,7 @@ export class AshFargateStack extends Stack {
      * which renders as one rule with `IpProtocol: -1` to `0.0.0.0/0` -- cfn-nag's
      * CFN_NAG_W40 and CFN_NAG_W5 respectively. Pinning one port clears W40 and also
      * CFN_NAG_W29, which passes only when FromPort equals ToPort. W5 survives and its
-     * reason is recorded in .ash/.ash.yaml.
+     * reason is recorded in .ash.yaml.
      *
      * WHY 0.0.0.0/0 STAYS
      * -------------------

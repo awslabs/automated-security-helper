@@ -31,13 +31,16 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
+from automated_security_helper.core.enums import ThresholdSource
 from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
 )
 from automated_security_helper.models.flat_vulnerability import (
+    BELOW_THRESHOLD_PROPERTY,
     extract_workspace_project,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters._junitxml_frame import (
+    CaseOutcome,
     cases_frame,
     suite_members,
 )
@@ -59,6 +62,7 @@ from automated_security_helper.utils.sarif_utils import (
     result_rule_id,
     suppressions_in_effect,
 )
+from automated_security_helper.models.vocab import SeverityThreshold
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
     SEVERITY_THRESHOLDS,
@@ -97,7 +101,7 @@ SKIPPED_PROJECT_CLASSNAME = "ash.workspace"
 
 
 #: The ``type`` of the skip a non-gating policy-origin finding is reported with.
-POLICY_NOT_GATING_SKIP_TYPE = "policy-not-gating"
+POLICY_NOT_GATING_SKIP_TYPE = CaseOutcome.POLICY_NOT_GATING.value
 
 
 def _normalized_threshold(value: object) -> str | None:
@@ -165,7 +169,7 @@ def _configured_severity_threshold(model: "AshAggregatedResults") -> str:
             threshold,
             ", ".join(SEVERITY_THRESHOLDS),
         )
-        return "ALL"
+        return SeverityThreshold.ALL.value
     return normalized
 
 
@@ -192,7 +196,9 @@ def _scanner_threshold(
             model, scanner_name
         )
         cache[scanner_name] = (
-            _normalized_threshold(threshold) if source == "config" else None
+            _normalized_threshold(threshold)
+            if source == ThresholdSource.CONFIG
+            else None
         )
     return cache[scanner_name]
 
@@ -416,7 +422,7 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                 if "scanner_name" in extra:
                     actual_scanner = extra["scanner_name"]
                 elif props is not None and getattr(props, "tags", None):
-                    for tag in props.tags:
+                    for tag in props.tags or ():
                         if tag.startswith("tool_name::"):
                             actual_scanner = tag.split("::")[1]
                             break
@@ -534,7 +540,7 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                         # below threshold. A value that states neither true nor
                         # false decides nothing, and the gate runs.
                         below_threshold = _as_flag(
-                            getattr(props, "below_threshold", None)
+                            getattr(props, BELOW_THRESHOLD_PROPERTY, None)
                         )
                         if below_threshold is not None:
                             is_actionable = not below_threshold
@@ -714,18 +720,21 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
             for i in members:
                 test_case = TestCase(name=names[i], classname=classnames[i])
                 outcome = outcomes[i]
-                if outcome == "suppression":
+                if outcome == CaseOutcome.SUPPRESSION:
                     test_case.result = [
-                        Skipped(message=skip_messages[i], type_="suppression")
+                        Skipped(
+                            message=skip_messages[i],
+                            type_=CaseOutcome.SUPPRESSION.value,
+                        )
                     ]
-                elif outcome == "not-evaluated":
+                elif outcome == CaseOutcome.NOT_EVALUATED:
                     test_case.result = [
                         Skipped(
                             message="Rule was not evaluated for this target",
-                            type_="not-evaluated",
+                            type_=CaseOutcome.NOT_EVALUATED.value,
                         )
                     ]
-                elif outcome == "policy-not-gating":
+                elif outcome == CaseOutcome.POLICY_NOT_GATING:
                     test_case.result = [
                         Skipped(
                             message=(
@@ -735,14 +744,14 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                             type_=POLICY_NOT_GATING_SKIP_TYPE,
                         )
                     ]
-                elif outcome == "threshold":
+                elif outcome == CaseOutcome.THRESHOLD:
                     test_case.result = [
                         Skipped(
                             message="Finding is below configured severity threshold",
-                            type_="threshold",
+                            type_=CaseOutcome.THRESHOLD.value,
                         )
                     ]
-                elif outcome == "error":
+                elif outcome == CaseOutcome.ERROR:
                     test_case.result = [
                         Error(message=error_messages[i], type_=error_types[i])
                     ]

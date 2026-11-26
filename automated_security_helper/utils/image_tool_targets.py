@@ -7,8 +7,9 @@ grype and syft share stereoscope's scheme vocabulary for naming an image on
 the command line; this module is the one place ASH spells it, so the two
 scanners cannot drift on what a locator becomes:
 
-- a direct payload needs no engine: ``oci-archive:<tar>`` or
-  ``docker-archive:<tar>`` by what the tar holds, ``oci-dir:<layout>``;
+- a direct payload needs no engine: ``docker-archive:<tar>`` for a ``docker
+  save`` tarball (``oci-archive:<tar>`` for an OCI-layout tarball, see
+  :func:`archive_scheme`) / ``oci-dir:<layout>``;
 - a reference prefers the engine's content store, so one pull serves every
   scanner: ``docker:<ref>`` / ``podman:<ref>``;
 - with no engine, the tool's own registry client: ``registry:<ref>``.
@@ -19,7 +20,6 @@ trivy speaks its own grammar (the ``image`` subcommand, ``--input`` for a tar,
 
 from __future__ import annotations
 
-import tarfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -32,32 +32,34 @@ if TYPE_CHECKING:
     from automated_security_helper.core.asset import ImageLocator
 
 
-def archive_scheme(tar_path: str | Path) -> str:
-    """``"oci-archive"`` or ``"docker-archive"``: what the saved tar holds.
+def archive_scheme(archive: Path) -> str:
+    """The stereoscope scheme that reads the saved image at *archive*.
 
-    stereoscope's oci-archive provider needs an OCI layout inside the tar
-    (``index.json``); ``podman save`` writes docker-archive by default and
-    ``docker save`` before Docker 25 has no ``index.json``, so labelling every
-    tar ``oci-archive:`` failed those valid archives. The first marker met
-    decides: ``index.json`` or ``oci-layout`` says OCI, ``manifest.json`` or
-    ``repositories`` says docker-archive (an OCI layout has no top-level
-    ``manifest.json``; Docker 25's dual-format tar carries both markers and
-    both providers read it, so either answer serves). Member data is never
-    read -- tarfile seeks header to header -- and a tar with neither marker,
-    or one that cannot be read at all, is labelled ``oci-archive`` so the
-    tool, which owns the verdict on image bytes, names the failure itself.
+    A ``docker save`` tarball (what ``--image-archive`` takes) holds a
+    ``manifest.json`` and is read by ``docker-archive:``; an OCI image-layout
+    tarball (``skopeo copy ... oci-archive:``) holds ``oci-layout`` and
+    ``index.json`` and is read by ``oci-archive:``. The two are not
+    interchangeable: measured on syft 1.57.2 and grype 0.122.1, a docker-save
+    tarball given as ``oci-archive:`` is refused ("no source providers were able
+    to resolve the input"). Only member names are read (a tar header walk, no
+    layer is unpacked). A recent ``docker save`` writes both manifest.json and an
+    OCI index; ``docker-archive:`` reads that. An archive that holds neither, or
+    cannot be walked, is named ``docker-archive:``, the documented shape, so the
+    tool reports what is wrong with it.
     """
+    import tarfile
+
     try:
-        with tarfile.open(tar_path) as tar:
-            for member in tar:
+        with tarfile.open(archive, "r:") as saved:
+            names = set()
+            for member in saved:
                 name = member.name.lstrip("./")
-                if name in ("index.json", "oci-layout"):
-                    return "oci-archive"
-                if name in ("manifest.json", "repositories"):
+                if name == "manifest.json":
                     return "docker-archive"
-    except (OSError, tarfile.TarError, ValueError):
-        pass
-    return "oci-archive"
+                names.add(name)
+    except (tarfile.TarError, OSError):
+        return "docker-archive"
+    return "oci-archive" if names & {"oci-layout", "index.json"} else "docker-archive"
 
 
 def stereoscope_target(
@@ -73,8 +75,8 @@ def stereoscope_target(
     if image.oci_archive is not None:
         # Absolute and in posix form, as the dir: scans spell their targets:
         # the tool may run from a working directory that is not the caller's.
-        tar = Path(image.oci_archive).absolute().as_posix()
-        return f"{archive_scheme(image.oci_archive)}:{tar}"
+        archive = Path(image.oci_archive).absolute()
+        return f"{archive_scheme(archive)}:{archive.as_posix()}"
     if image.oci_layout is not None:
         return f"oci-dir:{Path(image.oci_layout).absolute().as_posix()}"
     if engine is None:

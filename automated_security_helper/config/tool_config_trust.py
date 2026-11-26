@@ -100,13 +100,13 @@ from typing import (
     FrozenSet,
     Iterable,
     List,
-    Literal,
     NamedTuple,
     Optional,
     Sequence,
     Tuple,
 )
 
+from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.config.untrusted_source import (
     IN_TREE_OR_DELIVERED,
     UntrustedSource,
@@ -202,9 +202,8 @@ OPERATOR_ONLY_PLUGIN_OPTIONS: Tuple[str, ...] = ("tool_version",)
 
 #: The config sections ``confine_tool_versions`` walks, each with the plugin type
 #: ``AshConfig.get_plugin_config`` reads it by.
-_PLUGIN_SEGMENTS: Tuple[Tuple[str, Literal["scanner", "converter"]], ...] = (
-    ("scanners", "scanner"),
-    ("converters", "converter"),
+_PLUGIN_SEGMENTS: Tuple[Tuple[str, PluginKind], ...] = tuple(
+    (kind.section, kind) for kind in (PluginKind.SCANNER, PluginKind.CONVERTER)
 )
 
 _MISSING = object()
@@ -702,7 +701,7 @@ def confine_scanner_config_files(
     ignored: List[str] = []
     extra = getattr(config.scanners, "__pydantic_extra__", None)
     for scanner, option_defaults in _confined_options().items():
-        trusted_section = trusted_config.get_plugin_config("scanner", scanner)
+        trusted_section = trusted_config.get_plugin_config(PluginKind.SCANNER, scanner)
         trusted_options = _options_mapping(trusted_section)
         # A plugin scanner's section the config leaves out, or holds with no
         # options mapping, is given the trusted base's confined values whole:
@@ -1044,7 +1043,9 @@ def _confine_settings_files(
         _scanner_sections,
     )
 
-    trusted_section = trusted_config.get_plugin_config("scanner", "detect-secrets")
+    trusted_section = trusted_config.get_plugin_config(
+        PluginKind.SCANNER, "detect-secrets"
+    )
     trusted_settings = _options_mapping(trusted_section).get("scan_settings") or {}
     ignored: List[str] = []
     for key, section in _scanner_sections(config, "detect-secrets"):

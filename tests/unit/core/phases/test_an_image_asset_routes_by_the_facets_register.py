@@ -293,9 +293,17 @@ class TestAConstructorFailureIsRoutedLikeAnyOtherRow:
         scanner_cls.side_effect = RuntimeError("constructor broke")
         return scanner_cls
 
-    def test_a_filesystem_only_scanner_that_cannot_be_built_is_skipped(
+    def test_a_filesystem_only_scanner_that_cannot_be_built_is_an_error_with_the_reason(
         self, scan_phase
     ):
+        # The same row, and the same gate visibility, as on a filesystem scan
+        # and as a module that fails to import (below): a scanner ASH could not
+        # bring up is a loss on any scan kind. The text says it would not have
+        # read the image, so nobody goes looking for lost image coverage.
+        from automated_security_helper.utils.scan_completeness import (
+            incomplete_scanners,
+        )
+
         scan_phase.plugins = [self._failing()]
         scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
 
@@ -304,8 +312,76 @@ class TestAConstructorFailureIsRoutedLikeAnyOtherRow:
         )
 
         row = result.scanner_results["bandit"]
-        assert row.status == ScannerStatus.SKIPPED
-        assert "container_image" in (row.skipped_reason or "")
+        assert row.status == ScannerStatus.ERROR
+        assert ("bandit", "ERROR") in incomplete_scanners(result)
+
+    def test_the_reason_names_the_constructor_error_and_that_no_image_coverage_was_lost(
+        self, scan_phase
+    ):
+        import logging
+
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        class _Lines(logging.Handler):
+            def __init__(self):
+                super().__init__(level=1)
+                self.lines = []
+
+            def emit(self, record):
+                self.lines.append(record.getMessage())
+
+        handler = _Lines()
+        ASH_LOGGER.addHandler(handler)
+        try:
+            scan_phase.plugins = [self._failing()]
+            scan_phase.plugin_context.asset = Asset.for_image(
+                ImageLocator(ref=IMAGE_REF)
+            )
+            scan_phase._execute_phase(
+                aggregated_results=AshAggregatedResults(), parallel=False
+            )
+        finally:
+            ASH_LOGGER.removeHandler(handler)
+        text = "\n".join(handler.lines)
+        assert "could not be constructed" in text
+        assert "constructor broke" in text
+        assert "does not scan container images" in text
+
+    def test_a_scanner_the_operator_excluded_is_still_skipped_when_it_cannot_be_built(
+        self, scan_phase
+    ):
+        # Selection comes before diagnosis, on an image scan as on any other.
+        scan_phase.plugins = [self._failing()]
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+
+        result = scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(),
+            parallel=False,
+            excluded_scanners=["bandit"],
+        )
+
+        assert result.scanner_results["bandit"].status == ScannerStatus.SKIPPED
+
+    def test_a_module_that_fails_to_import_is_an_error_row_on_an_image_scan_too(
+        self, scan_phase
+    ):
+        from automated_security_helper.plugins.loader import PluginLoadFailure
+        from automated_security_helper.utils.scan_completeness import (
+            incomplete_scanners,
+        )
+
+        failed = "automated_security_helper.plugin_modules.ash_x_plugins.scanners"
+        scan_phase.plugin_context.plugin_load_record = {
+            failed: PluginLoadFailure(recorded="ImportError: no module named 'x'")
+        }
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+
+        result = scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        assert result.scanner_results[failed].status == ScannerStatus.ERROR
+        assert (failed, "ERROR") in incomplete_scanners(result)
 
     def test_an_image_capable_scanner_that_cannot_be_built_is_an_error(
         self, scan_phase, monkeypatch
@@ -386,3 +462,98 @@ class TestTheNoRunWarningIsWrittenOnce:
             if "was not scanned" in record.getMessage()
         ]
         assert len(lines) == 1
+
+
+class TestATagIsResolvedOnceBeforeAnyScannerRuns:
+    """The scan phase asks the resolver once, and the scan carries its answer."""
+
+    DIGEST = "sha256:" + "ab" * 32
+
+    def _patched(self, monkeypatch, answer):
+        calls = []
+
+        def resolver(image, *, offline, **_):
+            calls.append((image, offline))
+            return answer(image)
+
+        monkeypatch.setattr(
+            "automated_security_helper.utils.image_digest_resolver.resolve_image_locator",
+            resolver,
+        )
+        return calls
+
+    def test_the_resolved_digest_is_on_the_asset_the_scanners_are_given(
+        self, scan_phase, monkeypatch
+    ):
+        calls = self._patched(
+            monkeypatch,
+            lambda image: image.model_copy(update={"resolved_digest": self.DIGEST}),
+        )
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+
+        scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        assert len(calls) == 1
+        assert calls[0][0].ref == IMAGE_REF
+        image = scan_phase.plugin_context.asset.image
+        assert (image.ref, image.resolved_digest) == (IMAGE_REF, self.DIGEST)
+
+    def test_the_recorded_scan_source_then_names_the_digest_not_the_tag(
+        self, scan_phase, monkeypatch
+    ):
+        self._patched(
+            monkeypatch,
+            lambda image: image.model_copy(update={"resolved_digest": self.DIGEST}),
+        )
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+        results = AshAggregatedResults()
+        results.metadata.scan_source = f"image:{IMAGE_REF}"
+
+        scan_phase._execute_phase(aggregated_results=results, parallel=False)
+
+        assert results.metadata.scan_source == f"image:{self.DIGEST}"
+
+    def test_a_scan_source_that_is_not_an_image_is_left_alone(
+        self, scan_phase, monkeypatch
+    ):
+        self._patched(
+            monkeypatch,
+            lambda image: image.model_copy(update={"resolved_digest": self.DIGEST}),
+        )
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+        results = AshAggregatedResults()
+        results.metadata.scan_source = "some/dir"
+
+        scan_phase._execute_phase(aggregated_results=results, parallel=False)
+
+        assert results.metadata.scan_source == "some/dir"
+
+    def test_an_unresolved_locator_leaves_the_asset_as_submitted(
+        self, scan_phase, monkeypatch
+    ):
+        self._patched(monkeypatch, lambda image: image)
+        asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+        scan_phase.plugin_context.asset = asset
+
+        scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        assert scan_phase.plugin_context.asset is asset
+
+    @pytest.mark.parametrize("subject", ["none", "filesystem"])
+    def test_a_filesystem_scan_never_asks(self, scan_phase, monkeypatch, subject):
+        calls = self._patched(monkeypatch, lambda image: image)
+        scan_phase.plugin_context.asset = (
+            None
+            if subject == "none"
+            else Asset.for_filesystem(scan_phase.plugin_context.source_dir)
+        )
+
+        scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        assert calls == []

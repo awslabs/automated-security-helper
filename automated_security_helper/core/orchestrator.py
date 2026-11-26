@@ -13,7 +13,6 @@ from typing import (
     Dict,
     Iterator,
     List,
-    Literal,
     Optional,
     Sequence,
     Set,
@@ -42,13 +41,15 @@ from automated_security_helper.config.resolve_config import (
     LoggedResolutionWarning,
     resolve_config,
 )
-from automated_security_helper.core.enums import ExecutionStrategy
+from automated_security_helper.core.enums import (
+    DEFAULT_EXECUTION_PHASES,
+    ExecutionPhase,
+    ExecutionStrategy,
+    phase_values,
+)
 from automated_security_helper.core.scanner_selection import (
     SelectionLayers,
     SelectionOrigin,
-)
-from automated_security_helper.core.progress import (
-    ExecutionPhaseType,
 )
 from automated_security_helper.core.constants import (
     ASH_WORK_DIR_NAME,
@@ -60,6 +61,9 @@ from automated_security_helper.core.execution_engine import (
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.models.core import ignore_paths_that_skip_scanning
+from automated_security_helper.utils.ash_lock import (
+    refuse_unlocked_symbol_suppressions,
+)
 from automated_security_helper.config.client_config_policy import ClientConfigRules
 from automated_security_helper.core.committed_output import (
     LOG_FILE_NAMES,
@@ -79,6 +83,7 @@ from automated_security_helper.models.asharp_model import (
 from automated_security_helper.models.asharp_model import InputNotScanned
 from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.core.enums import ExportFormat
+from automated_security_helper.models.vocab import SeverityThresholdText
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_scan_set import (
     honors_ignore_files,
@@ -148,7 +153,7 @@ def resolve_scan_config(
     without them reads ``sandbox.mode`` from a file the scanned repository or an
     MCP client wrote, which the scan itself does not honor.
     """
-    return resolve_config(
+    config = resolve_config(
         config_path=config_path,
         source_dir=source_dir,
         config_overrides=list(config_overrides or []),
@@ -159,6 +164,14 @@ def resolve_scan_config(
         client_config_policy=client_config_policy,
         remote_client=remote_client,
     )
+    # A symbol-scoped suppression is bound to its file's content hash in
+    # .ash.lock; one whose file has no entry is refused here, as any other
+    # invalid configuration is (utils/ash_lock.py).
+    global_settings = getattr(config, "global_settings", None)
+    refuse_unlocked_symbol_suppressions(
+        getattr(global_settings, "suppressions", None) or [], source_dir
+    )
+    return config
 
 
 def _refuse_a_named_config_that_is_not_a_file(
@@ -977,7 +990,9 @@ class ASHScanOrchestrator(BaseModel):
                     active_ignore_paths(config.global_settings.ignore_paths),
                     ignore_suppressions=self.ignore_suppressions,
                 ),
-                color_system=self.color_system,  # type: ignore[arg-type]
+                # The field is a free string for the CLI; the engine takes rich's
+                # literal names and rich rejects any other.
+                color_system=self.color_system,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
                 verbose=self.verbose,
                 debug=self.debug,
                 python_based_plugins_only=self.python_based_plugins_only,
@@ -1282,9 +1297,7 @@ class ASHScanOrchestrator(BaseModel):
             # The configured threshold is a ladder value, and stricter_of ranks
             # every value that is not one after CRITICAL, so it is replaced only
             # by a stricter ladder value: the cast names that and checks nothing.
-            settings.severity_threshold = cast(
-                Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"], effective
-            )
+            settings.severity_threshold = cast(SeverityThresholdText, effective)
         elif requested != configured and announce:
             ASH_LOGGER.info(
                 f"Severity threshold {requested} requested, looser than "
@@ -1370,11 +1383,13 @@ class ASHScanOrchestrator(BaseModel):
                 }
             )
 
-    def _writes_results_file(self, phases: Sequence[str]) -> bool:
+    def _writes_results_file(self, phases: Sequence[ExecutionPhase]) -> bool:
         """Whether this run owns the results file: a scan ran (not a report over
         existing results) and there is an output directory to write into."""
         return bool(
-            "scan" in phases and self.existing_results_path is None and self.output_dir
+            ExecutionPhase.SCAN in phases
+            and self.existing_results_path is None
+            and self.output_dir
         )
 
     def _remove_results_file_written_before_a_cancel(self) -> None:
@@ -1391,7 +1406,7 @@ class ASHScanOrchestrator(BaseModel):
                 f"the file could not be removed: {error_text(e)}"
             )
 
-    def _write_results_after_failure(self, phases: Sequence[str]) -> None:
+    def _write_results_after_failure(self, phases: Sequence[ExecutionPhase]) -> None:
         """Write the results the engine holds when a phase AFTER the scan raised.
 
         The scan phase used to write ash_aggregated_results.json at its own
@@ -1551,17 +1566,24 @@ class ASHScanOrchestrator(BaseModel):
                 dangling one.
         """
         self._refuse_linked_output_dir()
-        refuse_a_linked_reports_dir(self.output_dir.joinpath("reports"))
+        # initialize() resolves the output directory (the source directory's
+        # ``.ash/ash_output`` by default) before this runs.
+        if self.output_dir is None:
+            raise ASHValidationError(
+                "The output directory is not set; initialize() sets it first."
+            )
+        output_dir: Path = self.output_dir
+        refuse_a_linked_reports_dir(output_dir.joinpath("reports"))
         try:
             # Create output directory if it doesn't exist
             ASH_LOGGER.debug(
-                f"Creating output directory if it does not exist: {self.output_dir}"
+                f"Creating output directory if it does not exist: {output_dir}"
             )
-            self.output_dir.mkdir(parents=True, exist_ok=True)
+            output_dir.mkdir(parents=True, exist_ok=True)
             # Inside the scanned tree, a .gitignore keeps ASH's output from a tool
             # that reads the tree and honors one, such as snyk code test, which
             # uploads what it reads. Before any scanner starts.
-            ignore_output_dir_in_git(self.source_dir, self.output_dir)
+            ignore_output_dir_in_git(self.source_dir, output_dir)
 
             # If we're using existing results, only ensure the reports directory
             # exists. A plain mkdir: a link there was refused at the top of this
@@ -1572,12 +1594,12 @@ class ASHScanOrchestrator(BaseModel):
             # falling through to the branch that clears the working directories
             # and then reporting a scan that never ran.
             if self.existing_results_path is not None:
-                self.output_dir.joinpath("reports").mkdir(parents=True, exist_ok=True)
+                output_dir.joinpath("reports").mkdir(parents=True, exist_ok=True)
             else:
                 # Otherwise, set up all working directories. initialize has made
                 # sure git tracks nothing in them (_refuse_committed_results_paths).
                 for working_dir in OUTPUT_WORKING_DIRS:
-                    path_working_dir = self.output_dir.joinpath(working_dir)
+                    path_working_dir = output_dir.joinpath(working_dir)
                     if path_working_dir.exists() and self.existing_results_path is None:
                         ASH_LOGGER.verbose(
                             f"Cleaning up working directory from previous run: {path_working_dir.as_posix()}"
@@ -1619,7 +1641,7 @@ class ASHScanOrchestrator(BaseModel):
 
     def execute_scan(
         self,
-        phases: List[ExecutionPhaseType] | None = None,
+        phases: List[ExecutionPhase] | None = None,
         settle_on_success: bool = True,
     ) -> AshAggregatedResults:
         """Execute the security scan and return results.
@@ -1642,8 +1664,8 @@ class ASHScanOrchestrator(BaseModel):
         settle, when it is False (_write_results_file).
 
         Args:
-            phases (List[ExecutionPhaseType], optional): The phases to execute.
-                Defaults to ["convert", "scan", "report"].
+            phases (List[ExecutionPhase], optional): The phases to execute.
+                Defaults to DEFAULT_EXECUTION_PHASES: convert, scan and report.
             settle_on_success: False leaves the previous results set aside when
                 the phases finish, for a caller that still has work to do before
                 the scan counts as having results; it then calls
@@ -1667,7 +1689,7 @@ class ASHScanOrchestrator(BaseModel):
         # that reached it unresolved read as no scan, so the default call
         # (every phase) wrote no results file.
         if phases is None:
-            phases = ["convert", "scan", "report"]
+            phases = list(DEFAULT_EXECUTION_PHASES)
         try:
             # The run id the plugin context recorded its directories under
             # (_build_engine), in this thread and in the scanner pool's copies
@@ -1708,7 +1730,7 @@ class ASHScanOrchestrator(BaseModel):
         return results
 
     def _write_results_file(
-        self, phases: Sequence[str] | None, results: AshAggregatedResults
+        self, phases: Sequence[ExecutionPhase] | None, results: AshAggregatedResults
     ) -> None:
         """Write ash_aggregated_results.json once, after every phase has run.
 
@@ -1808,7 +1830,7 @@ class ASHScanOrchestrator(BaseModel):
             )
 
     def _execute_scan(
-        self, phases: List[ExecutionPhaseType] | None = None
+        self, phases: List[ExecutionPhase] | None = None
     ) -> AshAggregatedResults:
         """execute_scan without the handling of the previous results.
 
@@ -1820,12 +1842,12 @@ class ASHScanOrchestrator(BaseModel):
         """
         values = config_environment_values(self.config)
         if phases is None:
-            phases = ["convert", "scan", "report"]
+            phases = list(DEFAULT_EXECUTION_PHASES)
         ASH_LOGGER.verbose(f"Source directory: {self.source_dir}")
         ASH_LOGGER.verbose(f"Output directory: {self.output_dir}")
         ASH_LOGGER.verbose(f"Work directory: {self.work_dir}")
         ASH_LOGGER.verbose(f"Configuration path: {self.config_path}")
-        ASH_LOGGER.verbose(f"Executing phases: {phases}")
+        ASH_LOGGER.verbose(f"Executing phases: {phase_values(phases)}")
 
         try:
             # If existing results path is provided, load the model from it. By
@@ -1833,7 +1855,7 @@ class ASHScanOrchestrator(BaseModel):
             # results that could not be loaded, where a scan would otherwise
             # start and the phases would find no model.
             if self.existing_results_path is not None:
-                if "inspect" in phases:
+                if ExecutionPhase.INSPECT in phases:
                     # The inspect phase writes analysis/, which initialize did not
                     # check for a report over existing results.
                     refuse_committed_entries(
@@ -1879,8 +1901,10 @@ class ASHScanOrchestrator(BaseModel):
                     phases = [
                         phase
                         for phase in [
-                            "report",
-                            "inspect" if "inspect" in phases else None,
+                            ExecutionPhase.REPORT,
+                            ExecutionPhase.INSPECT
+                            if ExecutionPhase.INSPECT in phases
+                            else None,
                         ]
                         if phase is not None
                     ]
@@ -1919,7 +1943,7 @@ class ASHScanOrchestrator(BaseModel):
                     "The scan's subject is a container image; no source files "
                     "are identified and the scan-set walk is skipped."
                 )
-            elif "convert" in phases or "scan" in phases:
+            elif ExecutionPhase.CONVERT in phases or ExecutionPhase.SCAN in phases:
                 # Before the walk: a scan with no engine walked the whole tree and
                 # wrote its scan set before the check below said it had nothing to
                 # run the phases with.
