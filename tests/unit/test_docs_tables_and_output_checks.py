@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -1822,6 +1823,56 @@ def test_the_page_module_runs_without_the_callers_credentials(tmp_path, monkeypa
         dc.check_config_blocks([page], tmp_path),
         "scanners.acme-scan.options: Value error, Unknown key 'selct'",
     )
+
+
+#: What a Windows Python needs from a parent that builds its environment; the same
+#: names as WINDOWS_CHILD_START_NAMES in tests/utils/helpers.py.
+_WINDOWS_START_NAMES = (
+    "SYSTEMROOT",
+    "COMSPEC",
+    "PATHEXT",
+    "PROCESSOR_ARCHITECTURE",
+    "PROCESSOR_ARCHITEW6432",
+)
+
+
+@pytest.mark.unit
+def test_the_page_module_child_keeps_the_names_a_windows_python_needs(
+    tmp_path, monkeypatch
+):
+    """The child that imports the page's module is given a built environment. On
+    a Windows Python 3.11 ``platform.machine()`` reads PROCESSOR_ARCHITECTURE, and
+    without it polars' import-time CPU check raised "unknown feature flag: 'sse3'"
+    in the child, so every block that loads a page module failed to validate on
+    that leg. No child starts here (its run is replaced), so a name the host does
+    not set gets a stand-in value on every platform; a name the host sets keeps
+    its own value, which this process may still need."""
+    expected = {
+        name: os.environ.get(name, f"stand-in-{name.lower()}")
+        for name in _WINDOWS_START_NAMES
+    }
+    for name, value in expected.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("AWS_PROFILE", "docs-check-test")
+    given = []
+    real_run = subprocess.run
+
+    def run(argv, *args, **kwargs):
+        if list(argv[:3]) != [sys.executable, "-I", "-c"]:
+            return real_run(argv, *args, **kwargs)
+        given.append(dict(kwargs["env"]))
+        return subprocess.CompletedProcess(
+            argv, 0, stdout=f"{dc._CHILD_RESULT}[]\n", stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", run)
+    page = _write(tmp_path, "docs/page.md", PAGE_PLUGIN + _typo_config())
+
+    assert dc.check_config_blocks([page], tmp_path) == []
+    assert len(given) == 1, given
+    carried = {name: given[0].get(name) for name in _WINDOWS_START_NAMES}
+    assert carried == expected
+    assert "AWS_PROFILE" not in given[0]
 
 
 @pytest.mark.unit
