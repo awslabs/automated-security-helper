@@ -54,6 +54,7 @@ from automated_security_helper.cli.mcp_tools import (
     _loaded_scanner_classes,
     mcp_list_scanners,
 )
+from automated_security_helper.plugin_manifests import scanner_manifests
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.enablement import modules_needing_naming
 from automated_security_helper.plugins.loader import (
@@ -191,36 +192,34 @@ class TestLoadedScannerClasses:
         """Guards the subtlety that makes this work.
 
         ``ASH_SCANNERS`` is declared in each package's ``__init__``, so the
-        loaders return the six vendored scanners only when handed the package
-        path. Pointing at ``ash_ferret_plugins.ferret_scanner`` imports the
-        scanner but reports nothing, and the resulting list would be silently
-        short again. Measured both ways: leaf paths yield 0, package paths yield 6.
+        loaders return the alpha scanners only when handed the package path.
+        Pointing at ``ash_ferret_plugins.ferret_scanner`` imports the scanner but
+        reports nothing, and the resulting list would be silently short again.
+        Measured both ways: leaf paths yield 0, package paths yield one scanner
+        per package. Each package's leaf is read from its manifest, so an alpha
+        scanner added later is covered here without editing a list.
         """
-        leaf_paths = [
-            f"{package}.{leaf}"
-            for package, leaf in zip(
-                modules_needing_naming(),
-                (
-                    "betterleaks_scanner",
-                    "ferret_scanner",
-                    "guarddog_scanner",
-                    "hadolint_scanner",
-                    "snyk_code_scanner",
-                    "trivy_repo_scanner",
-                ),
-                strict=True,
-            )
-        ]
+        packages = list(modules_needing_naming())
+        leaf_of = {
+            m.plugin_module: m.entry_points.scanner.partition(":")[0]
+            for m in scanner_manifests()
+            if m.plugin_module in packages
+        }
+        leaf_paths = [leaf_of[package] for package in packages]
+        assert all(
+            leaf.startswith(f"{package}.")
+            for package, leaf in zip(packages, leaf_paths, strict=True)
+        ), leaf_paths
 
         via_leaves = load_additional_plugin_modules(leaf_paths)
-        via_packages = load_additional_plugin_modules(list(modules_needing_naming()))
+        via_packages = load_additional_plugin_modules(packages)
 
         assert via_leaves["scanners"] == [], (
             "leaf module paths now report scanners; if ASH_SCANNERS moved into "
             "the leaf modules this guard is stale, but check the package paths "
             "still work before deleting it"
         )
-        assert len(via_packages["scanners"]) == 6
+        assert len(via_packages["scanners"]) == len(packages)
 
 
 def test_this_child_imported_the_checkout_under_test():

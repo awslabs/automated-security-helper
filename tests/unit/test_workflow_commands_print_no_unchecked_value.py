@@ -164,6 +164,9 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
     (_SCAN_TEST, _COMPOSITE, "Validate alpha hadolint (Python Local Windows)"): {
         "AshPath": RUNNER
     },
+    (_SCAN_TEST, _COMPOSITE, "Validate alpha kyverno (Python Local Windows)"): {
+        "AshPath": RUNNER
+    },
     (
         ".github/actions/run-unit-tests/action.yml",
         _COMPOSITE,

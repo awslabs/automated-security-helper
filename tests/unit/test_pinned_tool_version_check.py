@@ -717,6 +717,10 @@ _TABLES_A_BUMP_LEAVES = {
     "_ASSET_TABLES": "maps the tool to its asset table, which its own step names",
     "_RELEASE_BASE_URLS": "the project's release download prefix, for every version",
     "_BARE_EXECUTABLE_TOOLS": "whether the release asset is the executable itself",
+    "TOOL_VERSIONS": (
+        "derived from the ToolPin declarations, which the ToolPin step names; "
+        "it holds no row to edit"
+    ),
 }
 
 #: Dockerfile ``ARG <NAME>_VERSION`` lines that pin a version this script does not
