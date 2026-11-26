@@ -28,9 +28,10 @@ a tool, which reports that itself.
 - ``Image layout has no oci-layout marker file: <path>``, when the directory
   is missing the ``oci-layout`` file the OCI image-layout spec requires
 
-The tar sniff reads the 8 bytes at offset 257, where both POSIX ustar and GNU
-tar place their magic. A tar shorter than one header block cannot hold an
-image and is refused as not a tar archive.
+The tar sniff reads the 2-byte gzip head at offset 0 and the 5-byte ``ustar``
+prefix at offset 257, where both POSIX ustar and GNU tar place their magic. A
+tar shorter than one header block cannot hold an image and is refused as not a
+tar archive.
 """
 
 from __future__ import annotations
@@ -88,7 +89,8 @@ class _Refused(Exception):
 def image_archive_refusal(archive: PathLike) -> Optional[str]:
     """Why *archive* cannot be scanned as a saved-image tarball, or None.
 
-    Stat-level plus one 8-byte read: the file must exist, be a regular file,
+    Stat-level plus two sized reads (the 2-byte gzip head, the 5-byte
+    ``ustar`` prefix at offset 257): the file must exist, be a regular file,
     be readable, and carry tar magic where every ``docker save`` / OCI archive
     carries it. Nothing inside the tar is read here.
     """

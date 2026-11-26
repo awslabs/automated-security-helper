@@ -112,6 +112,12 @@ _ALLOWED_SIZED_READS = {
     ): "one byte to check database readability and bounded+1 metadata JSON; "
     "only the parsed timestamp leaves the reader",
     (
+        "utils/image_digest_resolver.py",
+        "payload_digest",
+    ): "a payload's own index.json or manifest.json (a layout file and a tar "
+    "member) at _MAX_PAYLOAD_RECORD_BYTES + 1, refused over the cap and "
+    "parsed as JSON for one digest; structured records, no text shown",
+    (
         "utils/sdist_harvest.py",
         "harvest_lockfiles_from_sdist",
     ): "an embedded lockfile member of a hash-verified sdist, read at "
@@ -189,8 +195,9 @@ _ALLOWED_SIZED_READS = {
     (
         "utils/image_payload_refusals.py",
         "image_archive_refusal",
-    ): "the 2-byte gzip head and the 8-byte tar magic of the operator's own saved "
-    "image, compared with fixed byte strings; bytes compared, not shown",
+    ): "the 2-byte gzip head and the 5-byte ustar prefix at offset 257 of the "
+    "operator's own saved image, compared with fixed byte strings; bytes "
+    "compared, not shown",
     (
         "cli/scan.py",
         "_marker_head",
@@ -207,11 +214,6 @@ _ALLOWED_SIZED_READS = {
         "pyvenv_cfg_version",
     ): "a 64 KiB head of the environment's own pyvenv.cfg; parsed as key=value "
     "lines, and only a version matching the number shape leaves the reader",
-    (
-        "utils/oci_layout_archive.py",
-        "_write_layer",
-    ): "a 4-byte magic sniff of a layer blob before it is streamed into the "
-    "re-packed archive; bytes compared and copied, not shown",
     (
         "utils/scan_output_dirs.py",
         "_read_span_rows",

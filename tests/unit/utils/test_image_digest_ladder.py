@@ -231,7 +231,10 @@ class TestTheLadderOrder:
     def test_an_option_shaped_ref_is_never_handed_to_a_rung(self):
         engine = _engine((MANIFEST, ""))
         registry = _registry()
-        locator = ImageLocator(ref="--insecure")
+        # No surface builds this locator any more (the reference grammar
+        # refuses a leading '-'); model_construct skips that check so the
+        # resolver's own guard is what this row measures.
+        locator = ImageLocator.model_construct(ref="--insecure")
         resolve_image_locator(
             locator,
             offline=False,
