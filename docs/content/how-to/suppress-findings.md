@@ -134,6 +134,7 @@ The whole file is hashed, not the definition, so reformatting a definition and e
 
 Create the suppression and its lock entry together with `ash suppress add`:
 
+<!-- doctest: illustrative reason="names src/deploy.py and its Deployer.run_hook method, which the docs runner's sample project does not have" -->
 ```bash
 ash suppress add B602 --symbol Deployer.run_hook --file src/deploy.py \
   --reason "run_hook only runs commands from the deploy manifest"
@@ -143,6 +144,7 @@ This writes the suppression to the config a scan of the current directory uses (
 
 After you change a locked file, read the change, confirm the suppressions still hold, and record the review:
 
+<!-- doctest: illustrative reason="re-hashes src/deploy.py, a locked file the docs runner's sample project does not have" -->
 ```bash
 ash suppress refresh src/deploy.py   # or --all, after reviewing every change
 ```

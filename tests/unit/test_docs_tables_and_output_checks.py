@@ -1235,6 +1235,42 @@ def test_report_file_check_can_fail(tmp_path, file_code, case, text, expected):
     _assert_reports(dc.check_report_files([page], tmp_path, file_code), expected, 1)
 
 
+#: The move the legacy lock's deprecation warning advises, as the suppression guide
+#: spells it, and the same sentence with the old file misspelled.
+LEGACY_LOCK_MOVES = [
+    (
+        "the legacy lock ASH still reads",
+        "Move it with `git mv .ash/ash.lock .ash.lock`.\n",
+        [],
+    ),
+    (
+        "the legacy lock misspelled",
+        "Move it with `git mv .ash/ash.lok .ash.lock`.\n",
+        [
+            (
+                "docs/page.md:1: [files] `git mv .ash/ash.lok .ash.lock` "
+                "names ash.lok, which no reporter ASH registers writes and no "
+                "file-name constant in ASH names; did you mean ash.lock?"
+            )
+        ],
+    ),
+]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "case,text,expected", LEGACY_LOCK_MOVES, ids=[c[0] for c in LEGACY_LOCK_MOVES]
+)
+def test_the_legacy_lock_is_a_file_ash_reads(tmp_path, case, text, expected):
+    """ASH still reads .ash/ash.lock when .ash.lock does not exist, and the package
+    names that file with a file-name constant (LEGACY_LOCK_FILE_NAME in
+    utils/ash_lock.py). Checked against the real code tree: the sentence that tells a
+    reader to move the file passes, and the same sentence with the old file
+    misspelled is still reported."""
+    page = _write(tmp_path, "docs/page.md", text)
+    assert _messages(dc.check_report_files([page], tmp_path, REPO_ROOT)) == expected
+
+
 @pytest.mark.integration
 def test_renaming_a_reporters_extension_fails_the_pages_that_name_it(
     tmp_path, file_code

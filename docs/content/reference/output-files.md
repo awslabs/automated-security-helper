@@ -316,8 +316,11 @@ results, not as an access control. See
 SARIF 2.1.0 run, written two ways. The member writes every field of every result,
 defaults included, so its results show `"ruleIndex": -1`, and `"rule": null` unless the
 scanner gave one. `reports/ash.sarif` leaves out the fields ASH did not set, `ruleIndex`
-among them, and the empty ones, and adds each result's `rule` reference (below). After a
-scan of the sample project:
+among them, and the empty ones, and adds each result's `rule` reference (below). It also
+writes a result's cross-scanner correlation id, where the result has one, into the
+result's `properties` as `ash/correlationId`
+([Correlate one observation across scanners](../how-to/export-reports.md#correlation)),
+which the member does not hold. After a scan of the sample project:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash

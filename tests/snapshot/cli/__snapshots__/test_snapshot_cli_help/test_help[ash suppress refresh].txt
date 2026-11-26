@@ -5,13 +5,18 @@
 
  Run it after reading what changed in a file and confirming its suppressions
  still hold. It prints each file whose hash changed. A locked file that no
- longer exists is reported and left as it was; exit code 1 then.
+ longer exists is reported and left as it was (exit code 1), unless
+ --drop-missing removes its dead entry.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   paths      <str>  Locked files to re-hash. Every locked file when none is named.               │
+│   paths      <str>  Locked files to re-hash. Pass --all for every locked file.                   │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --source-dir        <str>  The directory the scan covers, which holds .ash.lock. Defaults to the │
-│                            current directory.                                                    │
-│ --help                     Show this message and exit.                                           │
+│ --all                        Re-hash every locked file. A refresh re-approves each changed file  │
+│                              it touches, so the whole-lock run is asked for explicitly.          │
+│ --drop-missing               Remove the entry of a named file that no longer exists, instead of  │
+│                              leaving it and exiting 1.                                           │
+│ --source-dir          <str>  The directory the scan covers, which holds .ash.lock. Defaults to   │
+│                              the current directory.                                              │
+│ --help                       Show this message and exit.                                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
