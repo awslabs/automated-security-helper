@@ -11,7 +11,7 @@ dependencies = [
  "requests>=2.34,<3.0.0",
  "attrs>=26.1,<27.0.0",
  "jsonschema>=4.26,<5.0.0",
- "importlib-metadata>=9.0.1,<10.0.0",
+ "importlib-metadata>=10.2.0,<11.0.0",
  "cattrs>=26.2.1,<27.0.0",
  "docker>=7.2,<8.0.0",
  "GitPython>=3.1.62,<4.0.0",  # floor is advisory-driven: GHSA-59cr-6r3x-644w affects <= 3.1.61
@@ -217,7 +217,7 @@ dev = [
  # writes, and a snapshot no test asserts any more fails the session as unused. It
  # also merges its report across pytest-xdist workers, which this suite runs under.
  # Its only runtime dependency is pytest.
- "syrupy>=6.1.1,<7.0.0",
+ "syrupy>=7.0.2,<8.0.0",
 ]
 
 [build-system]
@@ -365,7 +365,7 @@ version_files = [
     "ash-agent-plugins/agentic-coding/transpiler/_base/mcp.json:automated-security-helper@",
     "ash-agent-plugins/agentic-coding/transpiler/_base/commands/scan.md:automated-security-helper@",
     "ash-agent-plugins/agentic-coding/transpiler/_base/references/troubleshooting.md:automated-security-helper@",
-    "docs/content/docs/plugins/community/trivy-plugin.md:automated-security-helper.git@",
+    "docs/content/docs/plugins/alpha/trivy-plugin.md:automated-security-helper.git@",
     "docs/content/index.md:ash_version:",
     "docs/content/index.md:automated-security-helper.git@",
     "docs/content/index.md:--branch v",
@@ -853,8 +853,8 @@ disable_error_code = [
 module = [
     "automated_security_helper.base.reporter_plugin",
     "automated_security_helper.cli.inspect.compare_result_fields",
-    "automated_security_helper.cli.mcp.profile_registry",
     "automated_security_helper.config.config_linter",
+    "automated_security_helper.config.session_profiles",
     "automated_security_helper.core.phases.scan_result_processor",
     "automated_security_helper.core.resource_management.exceptions",
     "automated_security_helper.interactions.run_ash_nix",
@@ -1704,12 +1704,14 @@ include = [ "automated_security_helper", "automated_security_helper/assets", "au
 # reports as a stale allowlist entry rather than as a packaging asymmetry.
 "automated_security_helper/assets/tool_downloads.py" = "automated_security_helper/assets/tool_downloads.py"
 "automated_security_helper/assets/exceptions.py" = "automated_security_helper/assets/exceptions.py"
+"automated_security_helper/assets/plugin_provisioning.py" = "automated_security_helper/assets/plugin_provisioning.py"
 
 [tool.hatch.build.targets.wheel.force-include]
 "automated_security_helper/assets/Dockerfile" = "automated_security_helper/assets/Dockerfile"
 "automated_security_helper/assets/ASH_INSTALLED_REVISION" = "automated_security_helper/assets/ASH_INSTALLED_REVISION"
 "automated_security_helper/assets/tool_downloads.py" = "automated_security_helper/assets/tool_downloads.py"
 "automated_security_helper/assets/exceptions.py" = "automated_security_helper/assets/exceptions.py"
+"automated_security_helper/assets/plugin_provisioning.py" = "automated_security_helper/assets/plugin_provisioning.py"
 
 [tool.hatch.build.targets.sdist.hooks.custom]
 path = "hatch_build.py"

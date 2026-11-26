@@ -237,6 +237,20 @@ for name, row in sorted(results["scanner_results"].items()):
 detect-secrets FAILED 1
 ```
 
+## The `ash results` command group {#results-group}
+
+The commands that work on results a scan already wrote, and run no scan themselves, live
+under one noun: `ash results report`, `ash results diff`, `ash results trend`,
+`ash results merge` and `ash results inspect`. Each takes the same options and behaves the
+same as the top-level command it replaces.
+
+The old top-level spellings (`ash report`, `ash diff`, `ash trend`, `ash merge` and
+`ash inspect`) still work in 3.9. Each prints one `DeprecationWarning` line on standard
+error that names its replacement, and all five are removed in 4.0. They no longer appear in
+`ash --help`. Standard output, exit codes and options are unchanged, so a script that reads
+them keeps working while you move it to the new spelling. The sections below use the
+top-level spelling; add `results` after `ash` to use the new one.
+
 ## Print a report in the terminal with `ash report`
 
 `ash report` renders a report of the last scan and prints it to standard output. It reads
@@ -335,7 +349,7 @@ The Severity column uses the same severity as the summary table (see
 
 `x` asks for a reason and an optional expiration date, then adds a suppression for that
 rule, file, and line to a config file: the one `--config` or `ASH_CONFIG` names, else the
-config file a scan of the current directory would use, else `.ashrc.yaml` in the current
+config file a scan of the current directory would use, else `.ash.yaml` in the current
 directory. It writes YAML, or JSON to a `.json` file. It refuses a TOML file, and a file
 that `extends` another and has no suppressions list of its own, because writing one there
 would replace the base file's list. If the file already has the same suppression, `x`

@@ -53,6 +53,7 @@ import time
 import zipfile
 from pathlib import Path
 
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 import pytest
 
 from automated_security_helper.cli.mcp import source_delivery as sd
@@ -151,7 +152,9 @@ def test_a_previous_tree_that_cannot_be_renamed_ends_the_delivery_and_stays(
     )
 
     assert result["success"] is False, result
-    assert result["error_type"] == sd.SESSION_WORKSPACE_UNAVAILABLE, result
+    assert result["error_type"] == McpErrorType.SESSION_WORKSPACE_UNAVAILABLE.value, (
+        result
+    )
     # The previous tree is whole, the record names it, and the new tree is not in it.
     assert (first / "old.txt").read_text() == "old\n"
     assert not (first / "new.txt").exists()
@@ -212,7 +215,9 @@ def test_a_plain_oserror_from_the_swap_is_a_stable_error_type(
     )
 
     assert result["success"] is False, result
-    assert result["error_type"] == sd.SESSION_WORKSPACE_UNAVAILABLE, result
+    assert result["error_type"] == McpErrorType.SESSION_WORKSPACE_UNAVAILABLE.value, (
+        result
+    )
     assert _scratch_beside_source(workspace / SESSION) == []
 
 
@@ -234,7 +239,9 @@ def test_a_staged_tree_that_cannot_be_moved_into_place_puts_the_previous_tree_ba
     )
 
     assert result["success"] is False, result
-    assert result["error_type"] == sd.SESSION_WORKSPACE_UNAVAILABLE, result
+    assert result["error_type"] == McpErrorType.SESSION_WORKSPACE_UNAVAILABLE.value, (
+        result
+    )
     assert (first / "old.txt").read_text() == "old\n"
     assert sd.get_session_source_dir(SESSION) == first
     assert _scratch_beside_source(first.parent) == []

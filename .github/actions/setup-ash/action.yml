@@ -122,7 +122,7 @@ runs:
         echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
 
     # With the `[symbols]` extra: the jobs this action installs ASH for self-scan
-    # the repository with .ash/.ash.yaml and .ash/.ash_community_plugins.yaml,
+    # the repository with .ash.yaml and .ash/.ash_alpha_plugins.yaml,
     # whose suppressions are scoped by `symbol` and resolved by tree-sitter from
     # that extra. Resolution fails closed, so an install without the extra makes
     # every symbol-scoped entry match nothing and the scan legs go red on the

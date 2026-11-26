@@ -1,4 +1,4 @@
-$ ash report --format flat-json --log-level ERROR
+$ ash results report --format flat-json --log-level ERROR
 [exit 0]
 {
   "metadata": {
@@ -335,7 +335,8 @@ $ ash report --format flat-json --log-level ERROR
       "line_end": 1,
       "is_suppressed": false,
       "properties": "{\"tags\": [], \"scanner_name\": \"semgrep\", \"issue_severity\": \"INFO\"}",
-      "raw_data": "{\"ruleId\":\"generic.secrets.gitleaks\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Example key in docs\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"README.md\",\"index\":-1},\"region\":{\"startLine\":1,\"endLine\":1,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"semgrep\",\"issue_severity\":\"INFO\"}}"
+      "raw_data": "{\"ruleId\":\"generic.secrets.gitleaks\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Example key in docs\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"README.md\",\"index\":-1},\"region\":{\"startLine\":1,\"endLine\":1,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"semgrep\",\"issue_severity\":\"INFO\"}}",
+      "correlation_id": "secret/6a02ac4612b8b531b7f32f65af467ba48a7064f553419e13ff9dff90bc08990d"
     },
     {
       "id": "semgrep-python.lang.best-practice.open-e8ccdc5f7c4d",

@@ -72,8 +72,8 @@ def test_every_block_has_its_markers_in_its_file(generator):
         (
             "utils/ash_helpers.ps1",
             "ps1-option-subcommands",
-            "= 'scan build-image'\n",
-            "= 'scan'\n",
+            "'--ignore-suppressions'  = 'scan merge'\n",
+            "'--ignore-suppressions'  = 'scan'\n",
         ),
         (
             "utils/ash_helpers.ps1",
@@ -92,6 +92,42 @@ def test_every_block_has_its_markers_in_its_file(generator):
             "sh-root-value-options",
             "--workspace-config -c",
             "--workspace-config -c -x",
+        ),
+        (
+            "ash",
+            "sh-runner-order",
+            'ASH_RUNNER_ORDER="finch docker nerdctl podman"',
+            'ASH_RUNNER_ORDER="docker finch nerdctl podman"',
+        ),
+        (
+            "ash",
+            "sh-ci-runner-markers",
+            'ASH_CI_RUNNER_MARKERS="GITHUB_ACTIONS TF_BUILD TEAMCITY_VERSION"',
+            'ASH_CI_RUNNER_MARKERS="GITHUB_ACTIONS TF_BUILD"',
+        ),
+        (
+            "ash",
+            "sh-exit-codes",
+            "USAGE_ERROR_EXIT=5",
+            "USAGE_ERROR_EXIT=4",
+        ),
+        (
+            "utils/ash_helpers.ps1",
+            "ps1-ci-runner-markers",
+            "TEAMCITY_VERSION = $env:TEAMCITY_VERSION",
+            "TEAMCITY_VERSION = $env:TF_BUILD",
+        ),
+        (
+            "utils/ash_helpers.ps1",
+            "ps1-exit-codes",
+            "$refusalExitCode = 3",
+            "$refusalExitCode = 2",
+        ),
+        (
+            "utils/ash_helpers.ps1",
+            "ps1-image-reference-pattern",
+            "'\\A[A-Za-z0-9._:/@-]+\\z'",
+            "'\\A[A-Za-z0-9._:/@]+\\z'",
         ),
     ],
 )
@@ -134,6 +170,56 @@ def test_regenerating_a_perturbed_copy_restores_the_committed_text(generator, tm
     assert written == ["ash"]
     assert path.read_text(encoding="utf-8") == text
     assert not generator.check(root)
+
+
+def _prose_list(words, conjunction):
+    return ", ".join(words[:-1]) + f" {conjunction} " + words[-1]
+
+
+def test_the_refusal_texts_that_name_a_list_name_the_contracts_list(generator):
+    """A refusal sentence is hand-written, but the list in it is the generated one.
+
+    The runner order and the CI markers are generated into each wrapper's control
+    flow; the sentences that name them in a refusal must say the same words in the same
+    order, or a runner added to the CLI would run while its refusal still omitted it.
+    """
+    contract = generator._contract()
+    runners = _prose_list(list(contract.runner_order), "or")
+    markers = _prose_list(list(contract.ci_runner_markers), "and")
+    ash = (REPO_ROOT / "ash").read_text(encoding="utf-8")
+    ps1 = (REPO_ROOT / "utils" / "ash_helpers.ps1").read_text(encoding="utf-8")
+
+    assert ash.count(runners) == 2, runners
+    assert ash.count(markers) == 1, markers
+    assert ps1.count(markers) == 1, markers
+    # The control: a list in another order is in neither wrapper.
+    assert _prose_list(list(reversed(contract.runner_order)), "or") not in ash
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n"])
+def test_regenerating_keeps_each_files_own_line_endings(generator, tmp_path, ending):
+    root = _copy_of_the_wrappers(tmp_path, generator)
+    path = root / "ash"
+    text = path.read_text(encoding="utf-8")
+    stale = text.replace(' suppress express"', ' suppress"').replace("\n", ending)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(stale)
+    assert generator.check(root)
+
+    written = generator.write(root)
+
+    assert written == ["ash"]
+    after = path.read_bytes().decode("utf-8")
+    assert after == text.replace("\n", ending)
+    if ending == "\r\n":
+        # The control: no bare LF slipped in beside the CRLFs.
+        assert after.replace("\r\n", "").count("\n") == 0
+    assert not generator.check(root)
+
+
+def test_a_wrapper_that_has_the_right_blocks_is_not_rewritten(generator, tmp_path):
+    root = _copy_of_the_wrappers(tmp_path, generator)
+    assert generator.write(root) == []
 
 
 def test_a_missing_marker_is_an_error_not_a_pass(generator, tmp_path):

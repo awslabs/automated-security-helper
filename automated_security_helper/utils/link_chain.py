@@ -5,7 +5,7 @@
 Resolving a path on Windows opens what it names: a UNC spelling, or a link whose
 target is one, makes the OS connect to the host the path names before any gate
 has judged it. Two callers refused such paths unresolved and each carried its own
-copy of the reading: the MCP sandbox gates (``cli/mcp/sandbox.py``, every
+copy of the reading: the MCP sandbox gates (``config/mcp_sandbox.py``, every
 client-named scan target and config input) and the config loader
 (``config/config_sources.py``, a config source or ``.ash`` directory under an
 operator grant). The copies drifted in two ways: one read only the last component

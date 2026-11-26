@@ -365,9 +365,11 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
     """
     from automated_security_helper.utils.subprocess_utils import tree_scope_key
 
-    mode_value = SandboxMode(mode).value
-    if mode_value == SandboxMode.off.value:
+    requested = SandboxMode(mode)
+    if requested is SandboxMode.off:
         raise ValueError("resolve_backend called for sandbox mode 'off'")
+    # The spelling keys the caches and names the mode in text.
+    mode_value = requested.value
     cache_key = (mode_value, tree_scope_key())
     with _probe_lock:
         now = time.monotonic()
@@ -391,7 +393,7 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
         if cached is None:
             transient = False
             try:
-                if mode_value == SandboxMode.auto.value:
+                if requested is SandboxMode.auto:
                     cached, transient = _resolve_auto()
                 else:
                     cached = _probe_backend(mode_value)
@@ -495,7 +497,7 @@ def scanner_sandbox_scope(
 
     settings = _sandbox_settings(context)
     mode = SandboxMode(settings.mode if settings is not None else SandboxMode.off)
-    if mode == SandboxMode.off:
+    if mode is SandboxMode.off:
         return None
 
     # The sandbox gives each scanner the home directory as HOME and grants
@@ -782,7 +784,7 @@ def sandbox_refusal_grades_missing(refusal: SandboxUnavailable) -> bool:
     """
     return (
         isinstance(refusal, SandboxBackendUnavailable)
-        and refusal.mode == SandboxMode.auto.value
+        and refusal.mode == SandboxMode.auto
     )
 
 
@@ -921,7 +923,7 @@ def _sandboxed_probe_scope(
     import tempfile
 
     settings = _sandbox_settings(context)
-    if settings is None or SandboxMode(settings.mode) == SandboxMode.off:
+    if settings is None or SandboxMode(settings.mode) is SandboxMode.off:
         yield None
         return
     probe_dir = Path(tempfile.mkdtemp(prefix="ash-sandbox-probe-"))
@@ -951,7 +953,7 @@ def _sandboxed_probe_scope(
 def sandbox_requested(context: Any) -> bool:
     """Whether the run's ``sandbox.mode`` is anything but ``off``."""
     settings = _sandbox_settings(context)
-    return settings is not None and SandboxMode(settings.mode) != SandboxMode.off
+    return settings is not None and SandboxMode(settings.mode) is not SandboxMode.off
 
 
 @contextmanager

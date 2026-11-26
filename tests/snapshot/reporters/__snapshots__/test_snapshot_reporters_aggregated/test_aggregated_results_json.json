@@ -53,6 +53,7 @@
           "package_name": null,
           "package_version": null,
           "package_path": null,
+          "image": null,
           "symbol": null,
           "scope": null,
           "resource_id": null
@@ -68,6 +69,7 @@
           "package_name": null,
           "package_version": null,
           "package_path": null,
+          "image": null,
           "symbol": null,
           "scope": null,
           "resource_id": null
@@ -139,6 +141,7 @@
             "/scanners/ferret-scan/options/config_file",
             "/scanners/grype/options/config_file",
             "/scanners/syft/options/config_file",
+            "/scanners/syft/options/sdist_harvest/**",
             "/scanners/trivy-repo/options/secret_config_file",
             "/scanners/trivy-repo/options/config_file",
             "/scanners/trivy-repo/options/module_dir",
@@ -257,6 +260,11 @@
           "tool_version": ">=7.16.0,<8.0.0",
           "install_timeout": 300
         }
+      },
+      "mcp_config": {
+        "name": "mcp_config",
+        "enabled": true,
+        "options": {}
       }
     },
     "scanners": {
@@ -406,6 +414,22 @@
           "config_file": null
         }
       },
+      "mcp-config": {
+        "name": "mcp-config",
+        "enabled": true,
+        "options": {
+          "severity_threshold": null,
+          "scan_timeout": 1800,
+          "offline": false,
+          "forbid_privilege_escalation": true,
+          "forbid_unpinned_runners": true,
+          "forbid_auto_approval": true,
+          "require_local": false,
+          "remote_url_prefixes": [],
+          "allowed_command_prefixes": [],
+          "flag_env_secrets": true
+        }
+      },
       "npm-audit": {
         "name": "npm-audit",
         "enabled": true,
@@ -465,7 +489,20 @@
           "exclude": [],
           "additional_outputs": [
             "syft-table"
-          ]
+          ],
+          "sdist_harvest": {
+            "enabled": true,
+            "ecosystems": [
+              "cargo",
+              "gomod",
+              "npm"
+            ],
+            "max_sdist_mb": 100,
+            "cache_dir": null,
+            "lockfiles": [
+              "uv.lock"
+            ]
+          }
         }
       },
       "trivy": {

@@ -1740,7 +1740,7 @@ def run_cdk_nag_against_cfn_template(
     """
     if nag_packs is None:
         nag_packs = ["AwsSolutionsChecks"]
-    results: Dict[str, List[dict]] = {}
+    results: Dict[str, List[Result]] = {}
 
     # JSII (used by cdk_nag) reads these env vars at Python module import
     # time, so we can't pass them via env= to a subprocess — we have to

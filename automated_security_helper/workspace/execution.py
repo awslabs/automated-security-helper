@@ -345,6 +345,13 @@ from automated_security_helper.core.cancellation import (
     raise_if_cancelled,
 )
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
+from automated_security_helper.core.enums import (
+    DEFAULT_EXECUTION_PHASES,
+    ExecutionPhase,
+    ExecutionStrategy,
+    ScannerStatus,
+    ThresholdSource,
+)
 from automated_security_helper.core.previous_results import holds_restored_results
 from automated_security_helper.core.scanner_selection import (
     SelectionLayers,
@@ -366,6 +373,7 @@ from automated_security_helper.models.workspace import (
     WorkspaceExitCode,
     WorkspaceProjectResult,
     WorkspaceResults,
+    WorkspaceRunStatus,
     workspace_exit_code,
 )
 from automated_security_helper.utils.get_scan_set import (
@@ -458,9 +466,6 @@ _STOP_GRACE_MARGIN_SECONDS = 1.0
 #: less than it named whenever other projects were finishing.
 _ABANDONED_STOP_GRACE_SECONDS = SANDBOX_STOP_GRACE_SECONDS + _STOP_GRACE_MARGIN_SECONDS
 
-#: The phase name that selects report generation, as ``run_ash_scan`` spells it.
-_REPORT_PHASE = "report"
-
 #: The subtree each project's own output lands in.
 PROJECTS_DIR_NAME = "projects"
 
@@ -483,7 +488,7 @@ class ProjectScanSettings:
     """
 
     output_dir: Path
-    phases: Tuple[str, ...] = ("convert", "scan", "report")
+    phases: Tuple[ExecutionPhase, ...] = DEFAULT_EXECUTION_PHASES
     enabled_scanners: Tuple[str, ...] = ()
     excluded_scanners: Tuple[str, ...] = ()
     #: Who gave the two selections above: "mcp" from the MCP workspace tool, whose
@@ -498,7 +503,7 @@ class ProjectScanSettings:
     #: ``resolve_config(client_overrides=)``.
     client_overrides: bool = False
     ash_plugin_modules: Tuple[str, ...] = ()
-    strategy: str = "parallel"
+    strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL
     offline: bool = False
     python_based_plugins_only: bool = False
     ignore_suppressions: bool = False
@@ -549,7 +554,7 @@ class ProjectScanSettings:
     #: operator did not set aside resolves no ``!ENV`` (``resolve_config``). The
     #: same value the plan was resolved with.
     remote_client: bool = False
-    #: The MCP session's gate (``cli/mcp/sandbox.config_base_gate``), or None.
+    #: The MCP session's gate (``config.mcp_sandbox.config_base_gate``), or None.
     #: Each project's config file and its bases must resolve to a file it
     #: permits, as for the plan (``resolver.resolve_workspace``'s
     #: ``permit_base``), so a link changed after the plan is refused too.
@@ -973,8 +978,8 @@ def refuse_unresolvable_scanner_selection(
     :func:`prewarm_plugin_registry` has loaded the one plugin-module set every
     project shares, with the builders every selection refusal shares --
     ``core.scanner_selection.selection_after_exclusions`` for the cancelled
-    selection, ``community_scanner_refusal`` for the one that names a community
-    scanner whose module this run did not load, and
+    selection, ``plugins.enablement.unloaded_opt_in_refusal`` for the one that
+    names a shipped scanner whose module this run did not load, and
     ``refuse_selection_matching_no_scanner`` for the one that matches nothing --
     so the answer is the one each project's scan phase would reach, in the same
     words, named for the selection's origin. That this
@@ -1008,10 +1013,10 @@ def refuse_unresolvable_scanner_selection(
         split_plugin_names,
     )
     from automated_security_helper.core.scanner_selection import (
-        community_scanner_refusal,
         refuse_selection_matching_no_scanner,
     )
     from automated_security_helper.plugins import ash_plugin_manager
+    from automated_security_helper.plugins.enablement import unloaded_opt_in_refusal
     from automated_security_helper.plugins.loader import plugins_of
 
     settings = settled_scanner_selection(plan, settings)
@@ -1038,12 +1043,12 @@ def refuse_unresolvable_scanner_selection(
         if declared is None:
             return
         declared_names.append(declared)
-    # A selection that resolves to nothing and names a community scanner ASH
-    # ships whose module this run did not load is refused naming the module to
-    # add (and any misspelled name beside it), in the one text the engine and
-    # the scan phase raise; read as spelling advice alone, it sent the operator
-    # to fix a name that was right.
-    refusal = community_scanner_refusal(remaining, declared_names, scanner_classes)
+    # A selection that resolves to nothing and names a scanner ASH ships whose
+    # module this run did not load is refused naming the module to add (and
+    # any misspelled name beside it), in the one text the engine and the scan
+    # phase raise; read as spelling advice alone, it sent the operator to fix
+    # a name that was right.
+    refusal = unloaded_opt_in_refusal(remaining, declared_names, scanner_classes)
     if refusal:
         raise ScannerSelectionError(refusal)
     refuse_selection_matching_no_scanner(
@@ -1259,7 +1264,7 @@ def _scanner_threshold_resolver(
                     )
                 )
             except Exception as error:  # noqa: BLE001 -- an unreadable config grades as the project does
-                value, source, from_env = None, "unavailable", False
+                value, source, from_env = None, ThresholdSource.UNAVAILABLE, False
                 ASH_LOGGER.debug(
                     f"Project '{project.key}': the threshold of scanner "
                     f"'{scanner_name}' could not be read from the recorded "
@@ -1267,7 +1272,7 @@ def _scanner_threshold_resolver(
                     f"at the project's threshold",
                     extra=NO_MARKUP,
                 )
-            if source == "config" and isinstance(value, str) and value:
+            if source == ThresholdSource.CONFIG and isinstance(value, str) and value:
                 own = value.upper()
                 if project.severity_ceiling:
                     own = stricter_of(own, project.severity_ceiling)
@@ -1378,7 +1383,7 @@ def _scan_one_project(
             do not exist. The claim and the abandon are taken under one lock, so
             a project is either committed or abandoned, never both.
     """
-    from automated_security_helper.core.enums import ExecutionStrategy, ExportFormat
+    from automated_security_helper.core.enums import ExportFormat
 
     started = time.monotonic()
     project_output = _project_output_dir(settings, project)
@@ -1447,7 +1452,7 @@ def _scan_one_project(
             debug=settings.debug,
             strategy=(
                 ExecutionStrategy.PARALLEL
-                if settings.strategy == ExecutionStrategy.PARALLEL.value
+                if settings.strategy == ExecutionStrategy.PARALLEL
                 else ExecutionStrategy.SEQUENTIAL
             ),
             no_cleanup=not settings.cleanup,
@@ -1528,7 +1533,7 @@ def _scan_one_project(
         # the caller's) takes the claim and leaves the output in place.
         ASH_LOGGER.info(f"Project '{project.key}' stopped: it was cancelled")
         if handed and abandoned is not None and not _claim_commit(abandoned):
-            _discard_project_output(project_output)
+            _discard_project_output(project_output, _report_id_of(results))
         elif handed:
             # A cancel read at the scan's own results-file write ends it with the
             # previous results still set aside, for the caller to settle (the
@@ -1564,7 +1569,7 @@ def _scan_one_project(
         # landing after this verdict could overwrite the exit-3 refusal with a
         # timeout verdict; claimed, neither happens.
         if handed and abandoned is not None and not _claim_commit(abandoned):
-            _discard_project_output(project_output)
+            _discard_project_output(project_output, _report_id_of(results))
         refused = _failed_outcome(
             project,
             settings,
@@ -1586,7 +1591,7 @@ def _scan_one_project(
             # while these files stayed. The claim takes the decision once: a
             # worker that raised owns its FAILED outcome, and the poll can no
             # longer abandon it.
-            _discard_project_output(project_output)
+            _discard_project_output(project_output, _report_id_of(results))
         failed = _failed_outcome(
             project,
             settings,
@@ -1799,7 +1804,7 @@ def _reduce_project_scan(
         # projects/<key>/ash_aggregated_results.json and the project's reports
         # itself before this check ran, so they already hold the findings the
         # verdict says do not exist. Removed, as the message above says.
-        _discard_project_output(project_output)
+        _discard_project_output(project_output, _report_id_of(results))
         late = _failed_outcome(
             project,
             settings,
@@ -2610,7 +2615,7 @@ def _scanner_exit_codes(results: Any) -> Dict[str, Optional[int]]:
         was_set = "exit_code" in getattr(info, "model_fields_set", ())
         if was_set and isinstance(recorded, int) and not isinstance(recorded, bool):
             codes[str(name)] = recorded
-        elif statuses.get(str(name)) == "SKIPPED":
+        elif statuses.get(str(name)) == ScannerStatus.SKIPPED.value:
             codes[str(name)] = None
         else:
             codes[str(name)] = SCANNER_EXIT_CODE_UNRECORDED
@@ -2711,11 +2716,11 @@ def _scanner_reasons(results: Any, values: Iterable[str] = ()) -> Dict[str, str]
     for name, info in (getattr(results, "scanner_results", None) or {}).items():
         status = getattr(info, "status", None)
         value = str(getattr(status, "value", status))
-        if value == "SKIPPED":
+        if value == ScannerStatus.SKIPPED.value:
             reason = getattr(info, "skipped_reason", None)
-        elif value == "MISSING":
+        elif value == ScannerStatus.MISSING.value:
             reason = getattr(info, "missing_reason", None)
-        elif value == "ERROR":
+        elif value == ScannerStatus.ERROR.value:
             reason = recorded_error(results, str(name), values)
         else:
             continue
@@ -2822,8 +2827,73 @@ def _close_never_started(future: Any, gate: Any, key: str) -> bool:
 _SCAN_OUTPUT_NAMES = frozenset({RESULTS_FILENAME, "reports"})
 
 
-def _discard_project_output(project_output: Path) -> None:
+def _report_id_of(results: Any) -> Optional[str]:
+    """The ``report_id`` a scan's returned results carry; None for anything else."""
+    metadata = getattr(results, "metadata", None)
+    if metadata is None and isinstance(results, dict):
+        metadata = results.get("metadata")
+    if isinstance(metadata, dict):
+        report_id = metadata.get("report_id")
+    else:
+        report_id = getattr(metadata, "report_id", None)
+    return report_id if isinstance(report_id, str) and report_id else None
+
+
+def _discard_run_record_of(project_output: Path, report_id: Optional[str]) -> None:
+    """Remove the history record of the abandoned run, by that run's own id.
+
+    The record (``utils/scan_history``) says its run completed, so leaving it
+    made the abandoned run a point in ``ash trend`` beside a FAILED verdict.
+    *report_id* is the abandoned run's own, known to the caller from the
+    results its scan returned; None when the scan never returned, and then no
+    record is removed. It is never taken from the results file alone: a scan
+    that failed or was cancelled inside its phases has the PREVIOUS run's
+    results file put back (core/orchestrator), so the id the file holds then
+    is an earlier completed run's, and its record is not this abandon's to
+    remove. The record goes only when the results file being removed names the
+    same id. A results file that is missing, a link, or unreadable names
+    nothing, and nothing here raises: the abandon's own outcome is what the
+    caller records.
+    """
+    if not report_id:
+        return
+    import os
+    import stat as stat_module
+
+    from automated_security_helper.utils.scan_history import discard_run_record
+    from automated_security_helper.utils.scanned_tree import _is_link_stat
+
+    results_file = project_output / RESULTS_FILENAME
+    try:
+        info = os.lstat(results_file)
+    except OSError:
+        return
+    if _is_link_stat(info) or not stat_module.S_ISREG(info.st_mode):
+        return
+    try:
+        data = json.loads(results_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return
+    metadata = data.get("metadata") if isinstance(data, dict) else None
+    file_id = metadata.get("report_id") if isinstance(metadata, dict) else None
+    if file_id != report_id:
+        return
+    try:
+        discard_run_record(project_output, report_id)
+    except Exception as error:  # noqa: BLE001 - the abandon must finish
+        ASH_LOGGER.warning(
+            f"Could not remove the abandoned project's run record under "
+            f"{project_output}: {error_text(error)}",
+            extra=NO_MARKUP,
+        )
+
+
+def _discard_project_output(
+    project_output: Path, report_id: Optional[str] = None
+) -> None:
     """Remove what a scan wrote under ``projects/<key>/`` before it was abandoned.
+
+    *report_id* is the abandoned run's own (``_discard_run_record_of``).
 
     The scan phase writes ``projects/<key>/ash_aggregated_results.json`` on its
     own (``AshAggregatedResults.save_model``), and its report phase writes the
@@ -2852,6 +2922,9 @@ def _discard_project_output(project_output: Path) -> None:
 
     from automated_security_helper.utils.scanned_tree import _is_link_stat
 
+    # Before the removals: the results file this loop is about to remove is
+    # checked against the run's own id first.
+    _discard_run_record_of(project_output, report_id)
     try:
         entries = list(project_output.iterdir())
     except FileNotFoundError:
@@ -3014,7 +3087,7 @@ def execute_workspace(
     settings = settled_scanner_selection(plan, settings)
     refuse_unresolvable_scanner_selection(plan, settings)
 
-    reports_requested = _REPORT_PHASE in settings.phases
+    reports_requested = ExecutionPhase.REPORT in settings.phases
     if reports_requested:
         # Before the scan, for two reasons. The operator learns immediately
         # rather than after paying for the whole workspace; and once
@@ -3618,7 +3691,7 @@ def refused_results(plan: WorkspacePlan, detail: str) -> WorkspaceResults:
     return WorkspaceResults(
         workspace_file=plan.workspace_file,
         workspace_root=plan.workspace_root,
-        status="refused",
+        status=WorkspaceRunStatus.REFUSED,
         exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
         projects=[],
         unconvertible_finding_paths=0,

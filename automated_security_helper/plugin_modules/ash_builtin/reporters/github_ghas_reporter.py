@@ -87,11 +87,13 @@ from automated_security_helper.utils.frame_ops import stable_top
 from automated_security_helper.utils.frame_text import unwire, wire, wire_cell
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.finding_identity import CORRELATION_ID_PROPERTY
 from automated_security_helper.utils.sarif_utils import (
     DEFAULT_RESULT_KIND,
     result_kind,
     result_rule_id,
     result_scanner_name,
+    shared_correlation_ids,
     suppressions_in_effect,
 )
 from automated_security_helper.utils.severity_ladder import (
@@ -380,6 +382,30 @@ def _project_path_is_placeable(project_path: str) -> bool:
     return True
 
 
+def _correlation_by_result(
+    model: "AshAggregatedResults", runs: List[Any]
+) -> Dict[int, str]:
+    """``id(result)`` to its cross-scanner correlation id, for carrying results.
+
+    The ids come from the flattened findings by the same positional pairing
+    every shared id uses (``utils/sarif_utils.shared_correlation_ids``), over
+    every result of *runs* in run order, which is the order the flattening
+    walked. Keyed by object identity because the slim results are built per
+    run, not over the flat list. Guarded like the shared-id read: a model whose
+    flattening fails gives {} and every result is emitted without the property.
+    """
+    results = [result for run in runs for result in (run.results or [])]
+    if not results:
+        return {}
+    try:
+        ids = shared_correlation_ids(model, results)
+    except Exception:  # noqa: BLE001 -- a missing annotation, never a lost report
+        return {}
+    return {
+        id(result): value for result, value in zip(results, ids) if value is not None
+    }
+
+
 def _result_workspace_uri(result: Any) -> Optional[str]:
     """``properties.workspace_uri`` as the aggregator wrote it on *result*, or None."""
     props = getattr(result, "properties", None)
@@ -563,6 +589,12 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             #    result reached GitHub with no rule and no security-severity.
             #    Each run's results are located against its own project path,
             #    so a multi-run document reads against the workspace root.
+            # The cross-scanner correlation id of each result, keyed by the
+            # result object: the slim copy strips verbose fields, so without
+            # this keep-list entry the id written at flatten time would
+            # silently disappear from the upload.
+            correlation = _correlation_by_result(model, runs)
+
             graded: List[Tuple[str, Dict[str, Any]]] = []
             for index, run in enumerate(runs):
                 graded.extend(
@@ -573,6 +605,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                         project_path=project_paths.get(index),
                         project_root=self._project_root(run),
                         qualified=qualified,
+                        correlation=correlation,
                     )
                 )
             slim_results = [slim for _, slim in graded]
@@ -1197,6 +1230,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         project_path: Optional[str] = None,
         project_root: Optional[str] = None,
         qualified: Optional[Dict[Tuple[str, str], str]] = None,
+        correlation: Optional[Dict[int, str]] = None,
     ) -> List[Tuple[str, Dict[str, Any]]]:
         """Build a minimal list of result objects, each paired with the severity
         the gate grades its source result at (:func:`result_severity`).
@@ -1206,6 +1240,9 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         *project_root* the project's absolute path when the run is anchored to
         it; see :meth:`_build_slim_locations`. *qualified* maps (scanner
         identity, rule id) to the id a colliding rule was declared under.
+        *correlation* maps ``id(result)`` to the result's cross-scanner
+        correlation id (:func:`_correlation_by_result`); a result it names
+        keeps the id in the slim copy's property bag.
         """
         slim_results: List[Tuple[str, Dict[str, Any]]] = []
 
@@ -1277,6 +1314,15 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                 prints = _string_map(getattr(result, key, None))
                 if prints:
                     result_dict[key] = prints
+
+            # The cross-scanner correlation id, on the slim copy's keep list:
+            # the one property this reporter carries over, so a consumer of the
+            # upload can group two scanners' findings of one observation
+            # (utils/finding_identity, "Correlation ids"). Absent for a result
+            # with none, as every other surface omits it.
+            correlation_id = (correlation or {}).get(id(result))
+            if correlation_id:
+                result_dict["properties"] = {CORRELATION_ID_PROPERTY: correlation_id}
 
             slim_results.append((result_severity(result), result_dict))
 

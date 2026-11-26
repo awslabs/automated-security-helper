@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Betterleaks: a secret scanner by gitleaks' author, as a community scanner plugin.
+"""Betterleaks: a secret scanner by gitleaks' author, as an alpha scanner plugin.
 
 What it runs
 ------------
@@ -12,7 +12,7 @@ author is shifting focus to it), takes the same flags for everything this plugin
 uses, and runs the same kind of rules (regular expressions with keyword prefilters)
 plus entropy, token-efficiency and expression filters.
 
-Betterleaks is a community plugin: it is loaded only when
+Betterleaks is an alpha plugin: it is loaded only when
 ``ash_betterleaks_plugins`` is listed in ``ash_plugin_modules`` (or passed with
 ``--ash-plugin-modules``), so a scan that does not list the module is unchanged by its
 existence. It runs beside the builtin gitleaks scanner, not instead of it, so a secret
@@ -118,8 +118,10 @@ Betterleaks' rules are compiled into the binary and ``dir`` makes no network cal
 
 Sandbox
 -------
-The strict default: no network, and no variables or paths beyond the baseline. The
-config environment variables and an operator ``config_file`` outside the tree are not
+The strict default: no network, and no variables or paths beyond the baseline, plus
+one declaration for sandbox-exec: ``HOME`` is a private empty directory for the spawn,
+because the regular-expression engine creates its compilation cache under it on macOS
+and crashes when it cannot. The config environment variables and an operator ``config_file`` outside the tree are not
 passed into a sandbox yet; grants derived from the environment or options wait for the
 sandbox's grant gates.
 """
@@ -162,6 +164,7 @@ from automated_security_helper.config.tool_config_trust import empty_tool_direct
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     Kind,
@@ -182,7 +185,10 @@ from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.sandbox.scope import active_scope
-from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.subprocess_utils import (
+    OutputPreference,
+    find_executable,
+)
 
 #: The text Betterleaks writes in place of a secret under ``--redact``.
 REDACTED = "REDACTED"
@@ -391,7 +397,8 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
             "email, date, commitMessage)",
             reason="dir mode emits empty-string git metadata, which "
             "_post_process_sarif drops because an empty fingerprint is "
-            "identical across every result; git-mode values pass through",
+            "identical across every result; ASH runs only the dir subcommand, "
+            "so no git metadata is ever kept",
         ),
         fix_available=FacetDecl(
             state=FacetState.NA,
@@ -404,7 +411,7 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
         snippet=FacetDecl(
             state=FacetState.MAPPED,
             native_field="region.snippet.text, forced to REDACTED by "
-            "_post_process_sarif",
+            "--redact=100 and again by _post_process_sarif",
         ),
         references=FacetDecl(
             state=FacetState.NA,
@@ -451,7 +458,7 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
                 tool_type=ScannerToolType.SECRETS,
                 selection="`betterleaks dir` over the target; contents, not history (module header)",
                 covers_note=(
-                    "the community scanners declare no covers display string; no scanner "
+                    "the alpha scanners declare no covers display string; no scanner "
                     "claims git-history secrets (UNCLAIMED_TARGET_KINDS)"
                 ),
             ),
@@ -463,6 +470,7 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=opsf.PLATFORMS_ALL,
                 note="asset table lists all six platform/arch pairs",
@@ -503,7 +511,6 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
                 semantics="ASH passes --exit-code=2 because the tool's default 1 means both leaks and some errors",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.COMMUNITY_OPTIN,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=(
                     "ash_betterleaks_plugins in ash_plugin_modules",
@@ -523,8 +530,16 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
     )
 
     success_exit_codes: ClassVar[Set[int]] = {0, LEAKS_EXIT_CODE}
-    # The strict default; see "Sandbox" in the module docstring.
-    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
+    # The strict default, plus one macOS declaration; see "Sandbox" in the module
+    # docstring. The regular-expression engine (go-re2 over wazero) keeps a
+    # compilation cache under os.UserCacheDir(), which on macOS is
+    # $HOME/Library/Caches and cannot be moved with XDG_CACHE_HOME. sandbox-exec
+    # denies that directory, and the engine then dereferences a nil module instead
+    # of running without a cache. HOME is a private empty directory for the spawn,
+    # so the cache can be created and is thrown away with it.
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+        sandbox_exec_cache_env=("HOME",),
+    )
 
     # With honor_tree_ignore_files on, Betterleaks' stderr can quote the scanned
     # tree's ignore file (see _mask_quoted_ignore_entries), and the scanner
@@ -778,7 +793,7 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Resolve the argv and results path for one Betterleaks run.
@@ -824,14 +839,26 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
             )
         return super()._read_results_file(results_file)
 
-    def _run_subprocess(  # type: ignore[override]
+    def _run_subprocess(
         self,
         command: List[str],
         results_dir: str | Path | None = None,
-        **kwargs: Any,
-    ) -> Dict[str, str]:
+        stdout_preference: OutputPreference = "write",
+        stderr_preference: OutputPreference = "write",
+        cwd: Path | str | None = None,
+        env: Dict[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> Dict[str, Any]:
         """Run Betterleaks, then mask what its log quotes from an ignore file."""
-        response = super()._run_subprocess(command, results_dir=results_dir, **kwargs)
+        response = super()._run_subprocess(
+            command,
+            results_dir=results_dir,
+            stdout_preference=stdout_preference,
+            stderr_preference=stderr_preference,
+            cwd=cwd,
+            env=env,
+            timeout=timeout,
+        )
         if results_dir is not None:
             _mask_quoted_ignore_entries(
                 Path(results_dir) / f"{self.__class__.__name__}.stderr.log"
@@ -877,7 +904,9 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
                 result.properties = PropertyBag(tags=tags)
             else:
                 result.properties.tags = tags
-            setattr(result.properties, "issue_severity", "CRITICAL")  # noqa: B010
+            setattr(  # noqa: B010
+                result.properties, "issue_severity", Severity.CRITICAL.value
+            )
 
             for location in result.locations or []:
                 physical = location.physicalLocation

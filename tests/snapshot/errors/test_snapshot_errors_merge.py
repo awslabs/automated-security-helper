@@ -84,7 +84,9 @@ def _write_shards(root: Path, *shards: AshAggregatedResults) -> list[str]:
 
 
 def _merge(run_cli, results_args: Sequence[str], *extra: str):
-    return run_cli(["merge", *results_args, "--output-dir", "merged", *extra])
+    return run_cli(
+        ["results", "merge", *results_args, "--output-dir", "merged", *extra]
+    )
 
 
 # Two shards that split bandit and semgrep cleanly; every case below perturbs this.
@@ -124,7 +126,7 @@ class TestResultsPathRefusals:
         assert _merge(run_cli, ["--results", "shard0.json"]) == snapshot
 
     def test_no_results_option(self, run_cli, snapshot):
-        assert run_cli(["merge", "--output-dir", "merged"]) == snapshot
+        assert run_cli(["results", "merge", "--output-dir", "merged"]) == snapshot
 
     def test_invalid_output_format(self, run_cli, snapshot, in_tmp):
         args = _write_shards(in_tmp, _a(), _b())

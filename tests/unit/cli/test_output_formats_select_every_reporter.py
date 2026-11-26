@@ -118,7 +118,7 @@ SHIPPED_REPORTER_NAMES = _shipped_reporter_names()
 def _decorated_reporter_class_names() -> Dict[str, Path]:
     """Every class under ``plugin_modules`` decorated ``@ash_reporter_plugin``.
 
-    Found by parsing rather than importing, so the community plugin modules (which
+    Found by parsing rather than importing, so the alpha plugin modules (which
     register scanners process-wide when imported) are not loaded by this test.
     """
     found: Dict[str, Path] = {}

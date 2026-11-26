@@ -200,7 +200,7 @@ class ReportingConfiguration(RecordModel):
         description="Specifies whether the report may be produced during the scan.",
     )
     # Plain string, not Level.warning: see the deviation note in the module header.
-    level: Optional[Level] = Field(
+    level: Optional[Level] = Field(  # ty: ignore[invalid-assignment]  # plain-str default on purpose, see the module header
         "warning", description="Specifies the failure level for the report."
     )
     rank: Optional[float] = Field(
@@ -1762,7 +1762,7 @@ class ThreadFlowLocation(RecordModel):
         None,
         description="The Coordinated Universal Time (UTC) date and time at which this location was executed.",
     )
-    importance: Optional[Importance] = Field(
+    importance: Optional[Importance] = Field(  # ty: ignore[invalid-assignment]  # plain-str default on purpose, see the module header
         "important",
         description='Specifies the importance of this location in understanding the code flow in which it occurs. The order from most to least important is "essential", "important", "unimportant". Default: "important".',
     )
@@ -1816,7 +1816,7 @@ class Notification(RecordModel):
     message: Message = Field(
         ..., description="A message that describes the condition that was encountered."
     )
-    level: Optional[Level] = Field(
+    level: Optional[Level] = Field(  # ty: ignore[invalid-assignment]  # plain-str default on purpose, see the module header
         "warning",
         description="A value specifying the severity level of the notification.",
     )
@@ -2030,13 +2030,13 @@ class Result(RecordModel):
     # module header. These two are the reachable case -- every third-party SARIF
     # ASH ingests arrives through model_validate, so any result that omits the
     # key lands on the default.
-    kind: Optional[Kind] = Field(
+    kind: Optional[Kind] = Field(  # ty: ignore[invalid-assignment]  # plain-str default on purpose, see the module header
         "fail", description="A value that categorizes results by evaluation state."
     )
     # MISSING_SARIF_LEVEL ("warning"), SARIF 2.1.0's default (3.27.10) and the
     # one every grader reads a missing level as. It was "error", so a result
     # that stated no level was CRITICAL in memory and LOW at the gate.
-    level: Optional[Level] = Field(
+    level: Optional[Level] = Field(  # ty: ignore[invalid-assignment]  # plain-str default on purpose, see the module header
         MISSING_SARIF_LEVEL,
         description="A value specifying the severity level of the result.",
     )
@@ -2812,7 +2812,7 @@ class SarifReport(RecordModel):
         self,
         scanner_name: str,
         scanner_version: str | None = None,
-        invocation_details: dict = None,
+        invocation_details: dict | None = None,
     ) -> "SarifReport":
         """
         Attach scanner details to the SARIF report.
@@ -3159,7 +3159,7 @@ def _detach_run_scoped_references(
             base_id = incoming_bases[base_id].uriBaseId
         return True
 
-    def expand(uri: Optional[str], base_id: str) -> tuple:
+    def expand(uri: Optional[str], base_id: Optional[str]) -> tuple:
         """*uri* prefixed by the incoming run's definition of *base_id*."""
         text = uri or ""
         seen: set = set()

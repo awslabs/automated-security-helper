@@ -16,7 +16,7 @@
           "symbol": "version_output"
         }
       ],
-      "sha256": "41a86b424e48a7ebd672bc00607efecdd50ebdfb03fe8af3647196c66261e81a"
+      "sha256": "df54c8f38f22b4fc7ddb70b71e40a6034753a1dc6e91d7f11c1ec21e4530ee36"
     },
     "automated_security_helper/cli/dependencies.py": {
       "created": "2026-11-25T17:03:21Z",
@@ -26,7 +26,7 @@
           "symbol": "_run_declared_install_command"
         }
       ],
-      "sha256": "4304c6481848ec465eca9e8e65ffa38f07d0db56aaf9f164e3db19515756af90"
+      "sha256": "5cbb9bbd42377748d45c6d76e0d8cf284100e2e7ed45f9e0bfabb8083f12802a"
     },
     "automated_security_helper/cli/mcp/__init__.py": {
       "created": "2026-11-25T17:03:33Z",
@@ -36,7 +36,7 @@
           "symbol": "_log_where_the_server_listens"
         }
       ],
-      "sha256": "aa3e3a371dc248f498901f043e733509713849459c0c33bb95ea983986861009"
+      "sha256": "66710ab8eeec9b1851a66620e0bd7529ae0474a780a5cef45f77346e0ad6f73c"
     },
     "automated_security_helper/cli/mcp/source_delivery.py": {
       "created": "2026-11-25T17:02:52Z",
@@ -46,7 +46,7 @@
           "symbol": "_validate_zip_member"
         }
       ],
-      "sha256": "f2ae6642d8c22a7d9502a99c0b0e0c2c3742c1f086fc6529b9d6b3610b2d4a51"
+      "sha256": "b0b5c6e44e6a661b1d1d8f61abd39faa07b374ff68be48ea1e6e19cad1dfbd4e"
     },
     "automated_security_helper/interactions/run_ash_container.py": {
       "created": "2026-11-25T17:02:59Z",
@@ -56,7 +56,7 @@
           "symbol": "_write_env_file"
         }
       ],
-      "sha256": "0c8cf8e7ba52a9409875c34dc91ff419ab019d9ca9737db23c42271a094b870a"
+      "sha256": "6ce5751245caf8eaff0d5e10ef425cde3e2ef7177fb9850597a2981a89bbe6e4"
     },
     "automated_security_helper/interactions/run_ash_nix.py": {
       "created": "2026-11-25T17:03:24Z",
@@ -66,7 +66,7 @@
           "symbol": "shown_flake_ref"
         }
       ],
-      "sha256": "b9fbbf74a2f2a04e512d3897016229c01ba113edbcdc46865d0aa623800f5198"
+      "sha256": "60acdaf18deb0a27bad439a016e1d23fecb5704c98354a92ee3b6185ae719ec9"
     },
     "automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py": {
       "created": "2026-11-25T17:03:12Z",
@@ -76,21 +76,7 @@
           "symbol": "NpmAuditScanner._probe_npm_version"
         }
       ],
-      "sha256": "a10c3e78bb1dbcc51631fdcdef05022d646c1b661fee28ffd2a9581ae90c1f5e"
-    },
-    "automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py": {
-      "created": "2026-11-25T17:03:42Z",
-      "scopes": [
-        {
-          "rule_id": "B603",
-          "symbol": "FerretScanScanner._get_installed_version"
-        },
-        {
-          "rule_id": "B607",
-          "symbol": "FerretScanScanner._get_installed_version"
-        }
-      ],
-      "sha256": "52ba825f3fe7cf49f4217bda910821fe9ed1326213664cace65bef12997ce9d6"
+      "sha256": "c335468d4ea9691659a9bc6db95dbb047f361f3f6c390a9280a6e8f905a89a78"
     },
     "automated_security_helper/utils/content_db_refresh.py": {
       "created": "2026-11-25T17:03:23Z",
@@ -156,7 +142,7 @@
           "symbol": "python_package_install_command"
         }
       ],
-      "sha256": "3462432df315c7efe90494af2c87007d16708a1f2b03842ec4734c54d8713f97"
+      "sha256": "60b5652df7eadb240141fcd97924d6ac1c45ca83c260027762924c0262cffd0d"
     },
     "automated_security_helper/utils/secret_masking.py": {
       "created": "2026-11-25T17:03:26Z",
@@ -171,16 +157,6 @@
         }
       ],
       "sha256": "6585f8d5439168a9f1c6d8535979c75cbce83dbf8c142290d9c5843bc9a071e9"
-    },
-    "scripts/generate_test_docx.py": {
-      "created": "2026-11-25T17:03:45Z",
-      "scopes": [
-        {
-          "rule_id": "SECRET-HEX-HIGH-ENTROPY-STRING",
-          "symbol": "main"
-        }
-      ],
-      "sha256": "b3dde42e39948ee977cb381a905025ecd4cb394959c621c8269d4cafb6380468"
     },
     "tests/integration/scanners/test_trivy_real_binary.py": {
       "created": "2026-11-25T17:02:48Z",
@@ -204,7 +180,7 @@
           "symbol": "TestSurvives.test_panel_width_on_a_masked_line"
         }
       ],
-      "sha256": "81c19081d1da1d5de961a90ba1c3e9d3a446b8edb775f51f67ec409c66e1c0ee"
+      "sha256": "b898d9f6c3ae71b6ab1b618bbbbc0a6d5a8ac182736f6db61426e4d008d398d9"
     },
     "tests/unit/test_artifact_contents_gate.py": {
       "created": "2026-11-25T17:03:04Z",
@@ -218,7 +194,7 @@
           "symbol": "TestPlantedPayload.test_link_whose_target_escapes_the_artifact_is_rejected"
         }
       ],
-      "sha256": "6ce5f5e167551af2e6536ca8efecedefab6c3e3d87d273fd8722b50b375f1a4e"
+      "sha256": "25accaee4851d1a27f198df4b86a770f2ba6e4f4a348389ed66587c2d47ece01"
     },
     "tests/unit/test_defense_in_depth.py": {
       "created": "2026-11-25T17:03:07Z",
@@ -238,7 +214,7 @@
           "symbol": "TestOnlyAllowlistedHttpsUrlsAreFetched.test_a_url_outside_the_allowlist_is_refused_unopened"
         }
       ],
-      "sha256": "98e65c62a55bde547e40428532832e4be8fdc687e03bebbb58d0189ea13395dd"
+      "sha256": "489753523d3df6299649fb8b016fc41ff909bbc4f171eaee4a5fba415ef6f9c0"
     },
     "tests/unit/utils/test_opengrep_pinned_download.py": {
       "created": "2026-11-25T17:03:10Z",

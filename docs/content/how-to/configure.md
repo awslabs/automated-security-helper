@@ -10,7 +10,7 @@ Run this in the root of the repository you scan:
 ash config init
 ```
 
-`ash config init` writes `.ashrc.yaml` in the current directory, with `project_name` set to the directory's name and every other setting at its default value, and `.ash/.gitignore`, which keeps ASH's output directory `.ash/ash_output` out of git. It exits 1 if the file already exists; pass `--force` to overwrite it. It also exits 1 when the directory already has another config source, such as `.ash/.ash.yaml` or a `[tool.ash]` table, because ASH never merges sources, and `--force` does not change that. With `--config`, or `ASH_CONFIG` set, it writes to that path instead, and a path that ends in `.json` gets a JSON file. It then does not look for another config source, so a file it writes next to an existing `.ash/.ash.yaml` is one a scan does not read. `project_name` is then the name of the directory that holds the file, and `.ash/.gitignore` is written only when the file is in `.ash/` or has one of the names ASH looks for.
+`ash config init` writes `.ash.yaml` in the current directory, with `project_name` set to the directory's name and every other setting at its default value, and `.ash/.gitignore`, which keeps ASH's output directory `.ash/ash_output` out of git. It exits 1 if the file already exists; pass `--force` to overwrite it. It also exits 1 when the directory already has another config source, such as a legacy `.ash/.ash.yaml` or a `[tool.ash]` table, because ASH never merges sources, and `--force` does not change that. With `--config`, or `ASH_CONFIG` set, it writes to that path instead, and a path that ends in `.json` gets a JSON file. It then does not look for another config source, so a file it writes next to an existing `.ash.yaml` is one a scan does not read. `project_name` is then the name of the directory that holds the file, and `.ash/.gitignore` is written only when the file is in `.ash/` or has one of the names ASH looks for.
 
 You can delete every key you don't change. A key you keep holds its value when a later ASH release changes the default, and a key you delete follows the new default. A short file also has less to review:
 
@@ -26,21 +26,40 @@ scanners:
 
 `project_name` names the project in the reports. Without it, ASH uses the `ASH_PROJECT_NAME` environment variable, else `ash-scan`.
 
-A config file inside the repository you scan, including the `.ashrc.yaml` that ASH finds on its own, is a repository config: whoever can commit to the repository controls it, so ASH ignores the few settings in it that grant sandbox access, load ASH's plugins that send data off the host, turn on the reporters that send findings off the host, choose where findings are sent, relax the stale content database check, choose which release of a scanner's tool runs, let trivy send usage data to its vendor, or point the scanners listed in [Options only the operator can set](choose-scanners.md#operator-only) at their tool files. Command-line flags, and a config file outside every git checkout and the scanned directory that you name with `--config`, are operator sources and may set everything. A config in a separate ops or dotfiles checkout is held to the same limits as a repository config; [Configuration trust model](../concepts/trust-model.md) has the details.
+A config file inside the repository you scan, including the `.ash.yaml` that ASH finds on its own, is a repository config: whoever can commit to the repository controls it, so ASH ignores the few settings in it that grant sandbox access, load ASH's plugins that send data off the host, turn on the reporters that send findings off the host, choose where findings are sent, relax the stale content database check, choose which release of a scanner's tool runs, let trivy send usage data to its vendor, or point the scanners listed in [Options only the operator can set](choose-scanners.md#operator-only) at their tool files. Command-line flags, and a config file outside every git checkout and the scanned directory that you name with `--config`, are operator sources and may set everything. A config in a separate ops or dotfiles checkout is held to the same limits as a repository config; [Configuration trust model](../concepts/trust-model.md) has the details.
 
 ## Where ASH looks for its config {#discovery}
 
 `ash scan` looks in its source directory (`--source-dir`, by default the current directory), and so do `ash config get`, `ash config validate`, `ash config lint`, `ash config validate-plugin-dependencies`, `ash config update`, and `ash config wizard`, which take `--source-dir` too. `ash config init` writes in the current directory. ASH uses the first source it finds, in this order:
 
-1. `.ash.yml`, `.ash.yaml`, `.ash.json`, `ash.yml`, `ash.yaml`, `ash.json`. ASH tries each name in the directory and then in its `.ash/` subdirectory before it moves to the next name, so `.ash/.ash.yml` wins over `.ash.yaml`.
-2. `.ashrc.toml`, `.ashrc.yaml`, `.ashrc.yml`, `.ashrc.json`, `ashrc.toml`, `ashrc.yaml`, `ashrc.yml`, and `ashrc.json`, in the directory only.
-3. The `[tool.ash]` table of `pyproject.toml`.
+1. `.ash.yaml` at the root of the directory. This is the canonical location, and the one `ash config init` and `ash config wizard` write.
+2. The other names in the first group, which are deprecated locations: `.ash.yml`, `.ash.json`, `ash.yml`, `ash.yaml`, and `ash.json`, each tried in the directory and then in its `.ash/` subdirectory (`.ash/.ash.yaml` and `.ash/ash.yaml` included), before ASH moves to the next name.
+3. The `ashrc` names, which are deprecated: `.ashrc.toml`, `.ashrc.yaml`, `.ashrc.yml`, `.ashrc.json`, `ashrc.toml`, `ashrc.yaml`, `ashrc.yml`, and `ashrc.json`, in the directory only.
+4. The `[tool.ash]` table of `pyproject.toml`. It is a supported source and not deprecated, but it ranks after the file names.
 
-ASH never merges sources and does not look in parent directories. Every other source it finds is ignored, with a warning that names it. The [configuration reference](../reference/configuration.md#where-ash-finds-its-configuration) lists all 21 locations in order.
+ASH never merges sources and does not look in parent directories. Every other source it finds is ignored, with a warning that names it. The [configuration reference](../reference/configuration.md#where-ash-finds-its-configuration) lists all the locations in order.
 
-When a file from the first group is used while an `ashrc` file or a `[tool.ash]` table also exists, the warning adds that the first group's names are deprecated in favor of the other two. The file from the first group is still the one ASH uses. `ash config init` writes `.ashrc.yaml`, and these pages use that name.
+A config file at any location other than `.ash.yaml` at the root still loads, and ASH prints one warning that names the file, says the location is deprecated, and names `.ash.yaml` as the path to move it to. Support for those locations is removed in ASH 4.0; the warning starts in 3.9. When both `.ash.yaml` and a legacy file exist, `.ash.yaml` is used and one warning names the legacy file it shadows. `--config`, `-c`, and the `ASH_CONFIG` variable name a file directly and produce no warning.
 
-The commands that edit a config file (`ash config update`, `ash config wizard`, and `ash inspect findings`) write YAML, and JSON into a file whose name ends in `.json`. They refuse TOML files, and `update` and `wizard` also refuse a file that uses `extends` or `patch` or reads values from the environment, because a rewrite would store what the references resolve to. With no config file, `wizard` and `inspect findings` create `.ashrc.yaml`. `ash config update --set` takes the same `key.path=value` form as [`--config-overrides`](#overrides), including JSON values and `+=`. `update` and `wizard` exit 3 and leave the file unchanged when a scan refuses it, and `update` also when a `--set` leaves a config a scan would refuse. Neither checks the options of plugins loaded from `ash_plugin_modules`, so a scan can still refuse a file they wrote. They write every setting, defaults included, keep top-level keys ASH does not know (a JSON `$schema`, for example), and keep no comment other than the schema line.
+### Move an existing config to `.ash.yaml` {#move-config}
+
+Move the file with `git mv` so its history follows it. For a config in the `.ash/` directory:
+
+<!-- doctest: illustrative reason="runs in a repository that already has a config at the old location" -->
+```bash
+git mv .ash/.ash.yaml .ash.yaml
+```
+
+For a config under another legacy name, such as `.ashrc.yaml`, use that name as the source:
+
+<!-- doctest: illustrative reason="runs in a repository that already has a config at the old location" -->
+```bash
+git mv .ashrc.yaml .ash.yaml
+```
+
+The deprecation warning names the file ASH loaded and the `.ash.yaml` path to move it to. Run `ash config validate` afterward to confirm that ASH reads the new location.
+
+The commands that edit a config file (`ash config update`, `ash config wizard`, and `ash inspect findings`) write YAML, and JSON into a file whose name ends in `.json`. They refuse TOML files, and `update` and `wizard` also refuse a file that uses `extends` or `patch` or reads values from the environment, because a rewrite would store what the references resolve to. With no config file, `wizard` and `inspect findings` create `.ash.yaml`. `ash config update --set` takes the same `key.path=value` form as [`--config-overrides`](#overrides), including JSON values and `+=`. `update` and `wizard` exit 3 and leave the file unchanged when a scan refuses it, and `update` also when a `--set` leaves a config a scan would refuse. Neither checks the options of plugins loaded from `ash_plugin_modules`, so a scan can still refuse a file they wrote. They write every setting, defaults included, keep top-level keys ASH does not know (a JSON `$schema`, for example), and keep no comment other than the schema line.
 
 In `pyproject.toml`, the same settings go under `[tool.ash]`:
 
@@ -209,7 +228,7 @@ The first line `ash config init` writes points editors that use the YAML languag
 # yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
 ```
 
-The editor then completes keys and checks values as you type. ASH itself treats the line as a comment. The URL follows the `main` branch, not the ASH version you have installed, so the schema can list keys your version does not have. The schema flags an unknown key only where ASH itself refuses one (the unknown-key rows of the table in [Which mistakes ASH catches](#typos) that end in exit 3, plus `build` and `mcp-resource-management`), and it does not include the community plugins' sections.
+The editor then completes keys and checks values as you type. ASH itself treats the line as a comment. The URL follows the `main` branch, not the ASH version you have installed, so the schema can list keys your version does not have. The schema flags an unknown key only where ASH itself refuses one (the unknown-key rows of the table in [Which mistakes ASH catches](#typos) that end in exit 3, plus `build` and `mcp-resource-management`), and it does not include the alpha plugins' sections.
 
 ## Check a config {#check}
 

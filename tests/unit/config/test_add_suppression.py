@@ -444,7 +444,7 @@ class TestTheListEndsAtItsSiblingKey:
         with simulated_host(monkeypatch, host):
             run = run_cli(["config", "init"])
         assert run.exit_code == 0, run.document
-        config_path = project / ".ashrc.yaml"
+        config_path = project / ".ash.yaml"
         before = config_path.read_bytes()
         before_settings = _global_settings(config_path)
 

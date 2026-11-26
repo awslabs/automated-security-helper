@@ -36,6 +36,10 @@ ash_config:
       options:
         install_timeout: 300
         tool_version: '>=7.16.0,<8.0.0'
+    mcp_config:
+      enabled: true
+      name: mcp_config
+      options: {}
   default_scanners:
     add: []
     only: []
@@ -116,6 +120,7 @@ ash_config:
         - /scanners/ferret-scan/options/config_file
         - /scanners/grype/options/config_file
         - /scanners/syft/options/config_file
+        - /scanners/syft/options/sdist_harvest/**
         - /scanners/trivy-repo/options/secret_config_file
         - /scanners/trivy-repo/options/config_file
         - /scanners/trivy-repo/options/module_dir
@@ -450,6 +455,20 @@ ash_config:
         offline: false
         scan_timeout: 1800
         severity_threshold: null
+    mcp-config:
+      enabled: true
+      name: mcp-config
+      options:
+        allowed_command_prefixes: []
+        flag_env_secrets: true
+        forbid_auto_approval: true
+        forbid_privilege_escalation: true
+        forbid_unpinned_runners: true
+        offline: false
+        remote_url_prefixes: []
+        require_local: false
+        scan_timeout: 1800
+        severity_threshold: null
     npm-audit:
       enabled: true
       name: npm-audit
@@ -500,6 +519,16 @@ ash_config:
         exclude: []
         offline: false
         scan_timeout: 1800
+        sdist_harvest:
+          cache_dir: null
+          ecosystems:
+          - cargo
+          - gomod
+          - npm
+          enabled: true
+          lockfiles:
+          - uv.lock
+          max_sdist_mb: 100
         severity_threshold: null
     trivy:
       enabled: true

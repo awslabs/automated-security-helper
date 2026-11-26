@@ -17,7 +17,7 @@ The sweep is pure construction and static reads: scanner instances are built
 with a mock context (no tool is run, no network is touched) and the fixtures
 are parsed, never scanned.
 
-Planted controls guard the enumerations: a count of 22, the exact set of
+Planted controls guard the enumerations: a count of 23, the exact set of
 scanner names against ``SCANNER_TOOL_TYPES``, and a classifier control for
 the output-format reader, because a sweep over a silently shrunken or
 mis-parsed universe would pass vacuously.
@@ -25,15 +25,12 @@ mis-parsed universe would pass vacuously.
 
 from __future__ import annotations
 
-import importlib
 import json
-import pkgutil
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from automated_security_helper import plugin_modules
 from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.scanner_facets import (
@@ -43,10 +40,10 @@ from automated_security_helper.base.scanner_facets import (
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
-from automated_security_helper.plugin_modules import ash_builtin
 from automated_security_helper.utils import content_databases as cdb
 from automated_security_helper.utils import tool_downloads
 from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
+from tests.utils.scanner_enumeration import load_scanner_universe
 
 pytestmark = pytest.mark.unit
 
@@ -54,29 +51,9 @@ pytestmark = pytest.mark.unit
 # tests do.
 AshConfig.model_rebuild()
 
-_REMAINING_LOAD_ERRORS = ash_builtin.retry_failed_plugin_groups()
+SCANNER_CLASSES, _REMAINING_LOAD_ERRORS = load_scanner_universe()
 
 _FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "test_data" / "scanners"
-
-
-def _registered_scanner_classes() -> list[type]:
-    classes: list[type] = []
-    seen: set[type] = set()
-    modules = sorted(
-        pkgutil.iter_modules(plugin_modules.__path__), key=lambda m: m.name
-    )
-    for info in modules:
-        if not info.ispkg:
-            continue
-        package = importlib.import_module(f"{plugin_modules.__name__}.{info.name}")
-        for cls in getattr(package, "ASH_SCANNERS", []):
-            if cls not in seen:
-                seen.add(cls)
-                classes.append(cls)
-    return classes
-
-
-SCANNER_CLASSES = _registered_scanner_classes()
 
 
 def _ops(cls: type) -> opsf.ScannerOperationalFacets:
@@ -108,9 +85,9 @@ def _instances(_context) -> dict[type, ScannerPluginBase]:
 # ---------------------------------------------------------------------------
 
 
-def test_the_universe_is_the_twenty_two_shipped_scanners() -> None:
+def test_the_universe_is_the_twenty_three_shipped_scanners() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
-    assert len(SCANNER_CLASSES) == 22, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == 23, sorted(c.__name__ for c in SCANNER_CLASSES)
     names = [_ops(cls).scanner_name for cls in SCANNER_CLASSES]
     assert len(set(names)) == len(names), f"duplicate scanner_name in {names}"
     assert set(names) == set(SCANNER_TOOL_TYPES), (
@@ -427,13 +404,15 @@ def test_platforms_are_derived_from_the_download_table(cls) -> None:
 
 def test_every_pinned_binary_is_claimed_by_a_scanner() -> None:
     """A pin in TOOL_VERSIONS with no register row is a scanner binary the
-    register cannot see (uv is the installer, not a scanner)."""
+    register cannot see (uv is the installer, not a scanner; crane is the registry
+    client the scan phase asks for an image tag's digest, utils/image_digest_resolver.py,
+    and the grype and trivy rows declare the registry read it makes)."""
     claimed = {
         _ops(c).runtime.tool_versions_key
         for c in SCANNER_CLASSES
         if _ops(c).runtime.tool_versions_key
     }
-    unclaimed = set(tool_downloads.TOOL_VERSIONS) - claimed - {"uv"}
+    unclaimed = set(tool_downloads.TOOL_VERSIONS) - claimed - {"uv", "crane"}
     assert not unclaimed, f"pinned tools no scanner row names: {sorted(unclaimed)}"
 
 
@@ -493,18 +472,118 @@ _SOURCE_FOR_RUNTIME = {
 
 
 @pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
-def test_provenance_and_tier_agree_with_the_runtime_and_the_package(cls) -> None:
+def test_provenance_agrees_with_the_runtime(cls) -> None:
+    """The tier is the manifest's (tests/unit/plugin_manifests binds it to the
+    package); the provenance source must still fit the runtime kind."""
     facets = _ops(cls)
     assert facets.provenance.source in _SOURCE_FOR_RUNTIME[facets.runtime.kind], (
         f"{facets.scanner_name}: a {facets.runtime.kind.value} runtime cannot "
         f"have provenance {facets.provenance.source.value}"
     )
-    builtin = ".plugin_modules.ash_builtin." in f".{cls.__module__}."
-    expected = opsf.Tier.BUILTIN_DEFAULT if builtin else opsf.Tier.COMMUNITY_OPTIN
-    assert facets.provenance.tier is expected, (
-        f"{cls.__module__} implies {expected.value}, the register says "
-        f"{facets.provenance.tier.value}"
+
+
+# ---------------------------------------------------------------------------
+# F2. Runtime compatibility rows
+# ---------------------------------------------------------------------------
+
+_RUNTIME_FOR_COMPAT = {
+    opsf.RuntimeName.PYTHON: {
+        opsf.RuntimeKind.UV_PYTHON,
+        opsf.RuntimeKind.PYPI_PACKAGE,
+    },
+}
+
+
+def test_the_compat_sweep_is_not_vacuous() -> None:
+    """The two scanners whose per-scanner constants became rows carry them."""
+    with_rows = {
+        _ops(cls).scanner_name
+        for cls in SCANNER_CLASSES
+        if _ops(cls).runtime_compat.rows
+    }
+    assert {"checkov", "guarddog"} <= with_rows, with_rows
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_a_compat_row_fits_the_scanners_runtime(cls) -> None:
+    facets = _ops(cls)
+    for row in facets.runtime_compat.rows:
+        assert facets.runtime.kind in _RUNTIME_FOR_COMPAT[row.runtime], (
+            f"{facets.scanner_name}: a {row.runtime.value} compatibility row on "
+            f"a {facets.runtime.kind.value} runtime constrains an interpreter "
+            "ASH does not choose"
+        )
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_the_derived_interpreter_request_equals_the_rows(cls, _instances) -> None:
+    """The register row is the source and the installer derives from it, so
+    there is no per-scanner constant left to mirror."""
+    instance = _instances[cls]
+    facets = _ops(cls)
+    expected = facets.runtime_compat.pin_request(
+        opsf.RuntimeName.PYTHON, instance._get_tool_version_constraint()
     )
+    assert instance._get_tool_python_request() == expected, facets.scanner_name
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_no_scanner_overrides_the_interpreter_request(cls) -> None:
+    assert "_get_tool_python_request" not in vars(cls), (
+        f"{cls.__name__} overrides _get_tool_python_request; declare a "
+        "runtime_compat row instead"
+    )
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_an_open_ended_row_still_covers_the_default_tool_constraint(
+    cls, _instances
+) -> None:
+    """The re-check at a tool bump. An open-ended row records an UNSOLVED
+    upstream issue; when the scanner's default version constraint moves out of
+    the row's tool range this goes red, which is the prompt to read the row's
+    upstream issue and close or re-bound the row."""
+    instance = _instances[cls]
+    constraint = instance._get_tool_version_constraint()
+    for row in _ops(cls).runtime_compat.rows:
+        if row.open_ended:
+            assert row.applies_to(constraint), (
+                f"{_ops(cls).scanner_name}: the default tool constraint "
+                f"{constraint!r} is outside the open-ended row's tool range "
+                f"{row.tool_versions!r}; has {row.upstream_issue} been fixed?"
+            )
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_at_most_one_polyfill_row_applies_and_its_shim_ships(cls, _instances) -> None:
+    """Python imports one ``sitecustomize``, so a second applicable polyfill
+    row would silently lose to the first."""
+    from automated_security_helper.utils.runtime_compat_env import (
+        polyfill_directory,
+    )
+
+    facets = _ops(cls)
+    constraint = _instances[cls]._get_tool_version_constraint()
+    applicable = facets.runtime_compat.polyfills(constraint)
+    assert len(applicable) <= 1, facets.scanner_name
+    for row in facets.runtime_compat.rows:
+        if row.polyfill:
+            assert (polyfill_directory(row.polyfill) / "sitecustomize.py").is_file()
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_a_polyfill_row_is_never_the_default_where_a_pin_serves(cls) -> None:
+    """Prefer PIN: a scanner that carries a PIN row for a tool range does not
+    also carry a POLYFILL row for the same upstream issue."""
+    rows = _ops(cls).runtime_compat.rows
+    pinned = {r.upstream_issue for r in rows if r.resolution.value == "pin"}
+    for row in rows:
+        if row.resolution.value == "polyfill" and row.upstream_issue:
+            assert row.upstream_issue not in pinned, (
+                f"{_ops(cls).scanner_name}: {row.upstream_issue} is resolved by "
+                "both a PIN and a POLYFILL row; the PIN is the preferred "
+                "resolution, so the polyfill row has no reason to exist"
+            )
 
 
 @pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
@@ -527,3 +606,35 @@ def test_prerequisites_agree_with_the_scanners_own_selection(cls, _instances) ->
             f"{facets.scanner_name} needs a token but its sandbox declaration "
             "passes neither an env name nor a token file"
         )
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_a_container_image_claim_and_the_image_dispatch_travel_together(cls) -> None:
+    """The C5 iff-rule: claims CONTAINER_IMAGE ⇔ overrides the image dispatch.
+
+    The register row is the one place capability lives, and the dispatch
+    (``_execute_image_scan`` for a template scanner, a whole ``scan_image``
+    override for a bespoke one such as syft) is the wiring the claim promises.
+    A claim without the wiring would hand a scanner an image it cannot scan,
+    which the base hook reports as ASH's own drift; wiring without the claim
+    would be dead code the routing never reaches. Read from the class's own
+    ``vars()``, as every register reading is, so an inherited override never
+    answers for a subclass.
+    """
+    claims = opsf.TargetKind.CONTAINER_IMAGE in _ops(cls).targets.kinds
+    wires = "_execute_image_scan" in vars(cls) or "scan_image" in vars(cls)
+    assert claims == wires, (
+        f"{_ops(cls).scanner_name}: claims container_image={claims} but "
+        f"overrides the image dispatch={wires}; the register row and the "
+        "wiring must travel together"
+    )
+
+
+def test_the_wired_image_scanners_are_grype_syft_and_trivy() -> None:
+    """The first wave by name, so an accidental claim is a red row, not a drift."""
+    wired = sorted(
+        _ops(cls).scanner_name
+        for cls in SCANNER_CLASSES
+        if opsf.TargetKind.CONTAINER_IMAGE in _ops(cls).targets.kinds
+    )
+    assert wired == ["grype", "syft", "trivy"]

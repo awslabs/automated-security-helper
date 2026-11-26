@@ -25,15 +25,13 @@ import pytest
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.utils.inner_run_outcome import (
-    REPORTS_WRITTEN_CHECKPOINT,
-)
+from automated_security_helper.utils.inner_run_outcome import InnerRunRecordType
 
 pytestmark = pytest.mark.unit
 
 KEPT = {"type": "scanner_check", "metadata": {"note": "not a run record"}}
 RECORD = {
-    "type": REPORTS_WRITTEN_CHECKPOINT,
+    "type": InnerRunRecordType.REPORTS_WRITTEN.value,
     "metadata": {"formats": {"ash.sarif": "sarif"}},
 }
 
@@ -61,7 +59,7 @@ def test_a_reports_written_record_is_not_carried_into_the_engine(tmp_path):
 
     types = [item.get("type") for item in model.validation_checkpoints]
     # Red at the base: the earlier run's record was on the model.
-    assert REPORTS_WRITTEN_CHECKPOINT not in types
+    assert InnerRunRecordType.REPORTS_WRITTEN.value not in types
 
 
 def test_the_other_checkpoints_are_kept(tmp_path):

@@ -140,6 +140,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -385,31 +386,34 @@ def _is_a_uv_route(command: Optional[List[str]]) -> bool:
     return executable in _UV_EXECUTABLE_NAMES and command[1:3] == ["tool", "run"]
 
 
+# zizmor's own severity words on the left; the ASH side is a ``Severity`` member's
+# wire value. The tables stay text-keyed because zizmor's JSON and the finding's
+# ``severity`` field are text.
 _BASE_SEVERITY: Dict[str, str] = {
-    "high": "HIGH",
-    "medium": "MEDIUM",
-    "low": "LOW",
-    "informational": "INFO",
+    "high": Severity.HIGH.value,
+    "medium": Severity.MEDIUM.value,
+    "low": Severity.LOW.value,
+    "informational": Severity.INFO.value,
 }
+# One band down the ladder, the least severe band staying where it is: derived
+# from the member order, so the ladder is not spelled a second time here.
+_LADDER: Tuple[Severity, ...] = tuple(Severity)
 _ONE_BAND_LOWER: Dict[str, str] = {
-    "CRITICAL": "HIGH",
-    "HIGH": "MEDIUM",
-    "MEDIUM": "LOW",
-    "LOW": "INFO",
-    "INFO": "INFO",
+    member.value: _LADDER[min(position + 1, len(_LADDER) - 1)].value
+    for position, member in enumerate(_LADDER)
 }
 _LEVEL_TO_SEVERITY: Dict[str, str] = {
-    "error": "HIGH",
-    "warning": "MEDIUM",
-    "note": "LOW",
-    "none": "INFO",
+    Level.error.value: Severity.HIGH.value,
+    Level.warning.value: Severity.MEDIUM.value,
+    Level.note.value: Severity.LOW.value,
+    Level.none.value: Severity.INFO.value,
 }
 _SEVERITY_TO_LEVEL: Dict[str, Level] = {
-    "CRITICAL": Level.error,
-    "HIGH": Level.error,
-    "MEDIUM": Level.warning,
-    "LOW": Level.note,
-    "INFO": Level.none,
+    Severity.CRITICAL.value: Level.error,
+    Severity.HIGH.value: Level.error,
+    Severity.MEDIUM.value: Level.warning,
+    Severity.LOW.value: Level.note,
+    Severity.INFO.value: Level.none,
 }
 
 _CONSTRAINT_CLAUSE = re.compile(
@@ -503,7 +507,9 @@ def map_zizmor_severity(
     """
     base = _BASE_SEVERITY.get(str(zizmor_severity or "").strip().lower())
     if base is None:
-        return _LEVEL_TO_SEVERITY.get(str(sarif_level or "").strip().lower(), "MEDIUM")
+        return _LEVEL_TO_SEVERITY.get(
+            str(sarif_level or "").strip().lower(), Severity.MEDIUM.value
+        )
     if str(zizmor_confidence or "").strip().lower() == "low":
         return _ONE_BAND_LOWER[base]
     return base
@@ -752,13 +758,17 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     #: locations carry ``properties.symbolic.route`` (``jobs/greet/steps/0``)
     #: and ``key.Local.verbatim_path``, a position inside one file's document
     #: and not a name with a lifecycle independent of the file. The route stays
-    #: verbatim in the property bag for anyone who later disagrees.
+    #: in the property bag for anyone who later disagrees; the
+    #: ``verbatim_path`` beside it is rewritten relative to the target by
+    #: ``_relative_logical_path``, so it does not keep an absolute checkout path.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(state=FacetState.MAPPED, native_field="results[].ruleId"),
         severity=FacetDecl(
             state=FacetState.MAPPED,
             native_field='results[].properties."zizmor/severity" and '
-            '"zizmor/confidence" (ASH rewrites them to a severity band)',
+            '"zizmor/confidence" (ASH rewrites them to a severity band, '
+            "written to properties.issue_severity, and rewrites results[].level "
+            "to agree with it; map_zizmor_severity)",
         ),
         file_path=FacetDecl(
             state=FacetState.MAPPED,
@@ -840,7 +850,8 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             state=FacetState.MAPPED,
             native_field='results[].properties ("zizmor/severity", '
             '"zizmor/confidence", "zizmor/persona"), plus the symbolic '
-            "route in logicalLocations",
+            "route in logicalLocations, and the ASH-written issue_severity "
+            "(no native property of that name)",
         ),
     )
 
@@ -894,6 +905,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 python_only=True,
                 use_uv_tool=True,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="a PyPI package run through uv; platform support is the package's and was not read here",
@@ -927,7 +939,6 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 semantics="exit 3 is the no-inputs code: success with nothing to scan",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=("options.online_audits (off by default)",),
                 upstream_license=(
@@ -1259,7 +1270,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     def _collect_inputs(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
         report: bool = True,
     ) -> List[Path]:
@@ -1277,7 +1288,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         """
         target_abs = Path(target).absolute()
         target_real = Path(target).resolve()
-        if target_type == "converted":
+        if target_type == TargetType.CONVERTED:
             candidates = [p for p in target_abs.rglob("*") if p.is_file()]
         else:
             # In a workspace scan the workspace's output directory holds every
@@ -1449,7 +1460,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: Any = None,
         *args: Any,
@@ -1658,7 +1669,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Build zizmor's argv; SARIF arrives on stdout, written to the stdout log."""

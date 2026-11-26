@@ -152,7 +152,7 @@ def _environment_reads(package: Path) -> tuple:
 #: stale. Line numbers are left out so the pin survives unrelated edits.
 _KNOWN_DYNAMIC_READS = sorted(
     [
-        "cli/mcp/scan_target.py [get] :: var",
+        "config/mcp_sandbox.py [get] :: var",
         "config/ash_config.py [get] :: reference.var_name",
         "config/ash_config.py [get] :: name",
         "config/config_sources.py [get] :: name",

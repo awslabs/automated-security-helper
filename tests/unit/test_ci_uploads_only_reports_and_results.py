@@ -178,7 +178,7 @@ def test_the_scan_finds_the_uploads_it_is_about():
         ".github/workflows/run-ash-security-scan.yml",
         ".github/actions/run-scan-test/action.yml",
         "docs/content/docs/advanced-usage.md.template",
-        "docs/content/docs/plugins/community/trivy-plugin.md",
+        "docs/content/docs/plugins/alpha/trivy-plugin.md",
         # The CI how-to pages replaced the tutorials; between them they hold a
         # GitHub Actions, a GitLab CI, a Jenkins and a CircleCI upload, and the
         # sharded scan's per-shard upload.

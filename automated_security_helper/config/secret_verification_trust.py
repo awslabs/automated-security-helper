@@ -33,7 +33,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, FrozenSet, Iterable, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, FrozenSet, Iterable, List, Optional, Sequence
 
 from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
 from automated_security_helper.core.exceptions import (
@@ -44,9 +44,10 @@ from automated_security_helper.utils.log import ASH_LOGGER
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
-    from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
-        DetectSecretsScanSettings,
-    )
+
+    # The detect-secrets scan settings model lives in the scanner's plugin, which
+    # this layer does not import; the settings are read by attribute here.
+    DetectSecretsScanSettings = Any
 
 #: The function detect-secrets' verification filter is, whatever path names it.
 VERIFICATION_FILTER_FUNCTION = "is_ignored_due_to_verification_policies"

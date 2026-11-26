@@ -8,7 +8,7 @@ Why this exists
 ---------------
 GuardDog stops a rule after 1, 3 or 5 hits per package root unless
 ``scanners.guarddog.options.max_hits`` says otherwise. With the default, the
-repository's own self-scan (``.ash/.ash_community_plugins.yaml``) stopped
+repository's own self-scan (``.ash/.ash_alpha_plugins.yaml``) stopped
 threat-filesystem-read at its 5th hit, so matches past it were never reported or
 reviewed. The self-scan sets ``max_hits: 0`` so every hit is visible, and each hit
 it reports that is a test or fixture doing what the rule describes is suppressed
@@ -34,9 +34,12 @@ What this checks
 * Every line pin names a line, and every symbol entry a definition span, that holds
   at least one of the markers for its rule id. A rule id with no row in
   ``_RULE_LINE_MARKERS`` fails, so the first entry for a new rule adds its row.
-* Both configs carry the same GuardDog suppressions, as their comments say: the
-  self-scan reads only the community config, and ``.ash/.ash.yaml`` keeps the
-  same entries for a scan that lists the GuardDog module there.
+* The two configs agree on their GuardDog suppressions: every entry in the alpha
+  config is also in ``.ash.yaml``, and every entry only ``.ash.yaml``
+  holds sits under a path the alpha config excludes from GuardDog, where an entry
+  could never match. The self-scan reads only the alpha config; ``.ash.yaml``
+  keeps the full set for a scan that lists the GuardDog module there without the
+  exclusion.
 
 The symbol spans come from tree-sitter, the optional ``symbols`` extra. Without it
 the span checks skip, unless ``ASH_REQUIRE_SYMBOLS_EXTRA`` is set, as CI sets it,
@@ -50,11 +53,13 @@ from typing import Any, Dict, List, Tuple
 import pytest
 import yaml
 
+from automated_security_helper.utils.suppression_matcher import file_path_matches
+
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SELF_SCAN = REPO_ROOT / ".ash" / ".ash_community_plugins.yaml"
-DEFAULT = REPO_ROOT / ".ash" / ".ash.yaml"
+SELF_SCAN = REPO_ROOT / ".ash" / ".ash_alpha_plugins.yaml"
+DEFAULT = REPO_ROOT / ".ash.yaml"
 GLOB_CHARACTERS = set("*?[")
 
 
@@ -255,8 +260,40 @@ def test_the_dotfile_markers_match_the_name_only_as_source_text_quotes_it() -> N
         assert any(marker in pinned for marker in markers), pinned
 
 
-def test_both_configs_carry_the_same_guarddog_suppressions() -> None:
-    self_scan = sorted(_key(e) for e in _guarddog_pins(SELF_SCAN))
-    default = sorted(_key(e) for e in _guarddog_pins(DEFAULT))
-    assert self_scan == default
+def _excluded_globs() -> List[str]:
+    options = ((_load(SELF_SCAN).get("scanners") or {}).get("guarddog") or {}).get(
+        "options"
+    ) or {}
+    return [str(item["path"]) for item in options.get("excluded_paths") or []]
+
+
+def test_the_two_configs_agree_on_their_guarddog_suppressions() -> None:
+    self_scan = [_key(e) for e in _guarddog_pins(SELF_SCAN)]
+    default = [_key(e) for e in _guarddog_pins(DEFAULT)]
     assert len(set(self_scan)) == len(self_scan), "a GuardDog pin is listed twice"
+    assert len(set(default)) == len(default), "a GuardDog pin is listed twice"
+    assert set(self_scan) <= set(default), (
+        "the alpha config has a GuardDog pin that .ash.yaml lacks: "
+        f"{sorted(set(self_scan) - set(default), key=str)}"
+    )
+    excluded = _excluded_globs()
+    assert excluded, "the alpha config excludes no path from GuardDog"
+    only_default = set(default) - set(self_scan)
+    uncovered = [
+        key
+        for key in sorted(only_default, key=str)
+        if not any(file_path_matches(key[1], glob) for glob in excluded)
+    ]
+    assert uncovered == [], (
+        "these pins are only in .ash.yaml and sit under no excluded path of the "
+        f"alpha config, so the self-scan would report them unpinned: {uncovered}"
+    )
+
+
+def test_a_pin_under_an_excluded_path_is_read_as_one_that_could_never_match() -> None:
+    excluded = _excluded_globs()
+    assert any(file_path_matches("tests/unit/test_a.py", glob) for glob in excluded)
+    assert not any(
+        file_path_matches("automated_security_helper/utils/a.py", glob)
+        for glob in excluded
+    )

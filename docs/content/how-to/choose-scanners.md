@@ -1,6 +1,6 @@
 # Choose scanners
 
-ASH runs every enabled scanner it has, and all 16 built-in scanners are enabled by default (on Windows, semgrep and opengrep are off by default). This page shows how to see which scanners a scan will run, turn some off, add community scanners, and set a scanner's options. The [scanner reference](../reference/scanners.md) lists each scanner with its tool and options.
+ASH runs every enabled scanner it has, and all 17 built-in scanners are enabled by default (on Windows, semgrep and opengrep are off by default). This page shows how to see which scanners a scan will run, turn some off, add alpha scanners, and set a scanner's options. The [scanner reference](../reference/scanners.md) lists each scanner with its tool and options.
 
 ## See which scanners will run
 
@@ -60,9 +60,11 @@ A scanner that is turned off, not selected, or excluded is recorded SKIPPED and 
 
 `--python-only` keeps the scanners that need nothing but Python: bandit, cfn-lint, checkov, detect-secrets, semgrep, and zizmor. ASH applies it before it checks the scanners' tools, so every other scanner is recorded SKIPPED whether or not its tool is installed, and does not affect the exit code. When the run selects no Python-only scanner, as with `--python-only --scanners grype`, no scanner runs and the scan exits 1.
 
-## Add community scanners {#community}
+<a id="alpha"></a>
 
-Community scanners ship with ASH in plugin modules that load only when you name them. Add the module to `ash_plugin_modules`:
+## Add alpha scanners {#alpha}
+
+Alpha scanners are opt-in scanners that ship with ASH in plugin modules that load only when you name them. ASH does not yet promote them as supported. Add the module to `ash_plugin_modules`:
 
 ```yaml
 ash_plugin_modules:
@@ -72,7 +74,7 @@ scanners:
     enabled: true
 ```
 
-You can also load a module for one run with `--ash-plugin-modules` or the `ASH_PLUGIN_MODULES` environment variable. The modules and their scanners are listed in [Community plugins](../docs/plugins/community/index.md). Two modules send data off the host, `ash_snyk_plugins` (the scanned source) and `ash_aws_plugins` (findings), and ASH loads them only from an operator source: `--ash-plugin-modules`, `ASH_PLUGIN_MODULES`, `--config-overrides`, or a config file outside every git checkout and the scanned directory ([Configuration trust model](../concepts/trust-model.md#how-the-tier-is-decided)). From any other config file they are ignored with a warning.
+You can also load a module for one run with `--ash-plugin-modules` or the `ASH_PLUGIN_MODULES` environment variable. The modules and their scanners are listed in [Alpha plugins](../docs/plugins/alpha/index.md). Two modules send data off the host, `ash_snyk_plugins` (the scanned source) and `ash_aws_plugins` (findings), and ASH loads them only from an operator source: `--ash-plugin-modules`, `ASH_PLUGIN_MODULES`, `--config-overrides`, or a config file outside every git checkout and the scanned directory ([Configuration trust model](../concepts/trust-model.md#how-the-tier-is-decided)). From any other config file they are ignored with a warning.
 
 ## Set a scanner's options
 
@@ -123,7 +125,7 @@ Some default scanners cover the same ground, and ASH does not deduplicate their 
 | grype and trivy | Report known vulnerabilities in dependencies |
 | detect-secrets and gitleaks | Find secrets in the source |
 
-The community scanner trivy-repo runs trivy as well. To keep one of each pair, turn the other off:
+The alpha scanner trivy-repo runs trivy as well. To keep one of each pair, turn the other off:
 
 ```yaml
 scanners:
@@ -158,11 +160,11 @@ Some scanner options name a file, a rule directory, or a program for the scanner
 | trivy | `config_file`, `ignore_file`, `secret_config_file` | no |
 | zizmor | `config_file` | yes |
 | zizmor | `online_audits` | not a path |
-| ferret-scan (community) | `config_file` | no |
-| ferret-scan (community) | `profile`, `use_default_config` | not a path |
-| snyk-code (community) | `honor_tree_exclusions` | not a path |
-| trivy-repo (community) | `config_file`, `ignore_file`, `secret_config_file`, `module_dir` | no |
-| trivy-repo (community) | `disable_telemetry` set to `false` | not a path |
+| ferret-scan (alpha) | `config_file` | no |
+| ferret-scan (alpha) | `profile`, `use_default_config` | not a path |
+| snyk-code (alpha) | `honor_tree_exclusions` | not a path |
+| trivy-repo (alpha) | `config_file`, `ignore_file`, `secret_config_file`, `module_dir` | no |
+| trivy-repo (alpha) | `disable_telemetry` set to `false` | not a path |
 
 `tool_version`, in the section of every scanner and converter, is operator-only too: it chooses which release of the tool ASH installs and accepts.
 

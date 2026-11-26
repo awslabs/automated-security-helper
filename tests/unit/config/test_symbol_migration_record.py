@@ -5,7 +5,7 @@
 
 Why this exists
 ---------------
-.ash/.ash.yaml and .ash/.ash_community_plugins.yaml were migrated from
+.ash/.ash.yaml and .ash/.ash_alpha_plugins.yaml were migrated from
 line-pinned suppressions to symbol- and resource-scoped ones, recorded in
 tests/test_data/suppression_symbol_migration.yaml. A wrong symbol pick is the
 quiet failure of such a migration: an entry naming a NEIGHBORING definition
@@ -58,7 +58,7 @@ pytestmark = pytest.mark.unit
 
 REPO = Path(__file__).resolve().parents[3]
 RECORD = REPO / "tests" / "test_data" / "suppression_symbol_migration.yaml"
-CONFIGS = (".ash/.ash.yaml", ".ash/.ash_community_plugins.yaml")
+CONFIGS = (".ash.yaml", ".ash/.ash_alpha_plugins.yaml")
 
 
 def _require_symbols_extra() -> None:
@@ -137,8 +137,11 @@ def test_every_symbol_scoped_entry_in_our_configs_resolves():
             )
             checked += 1
     # 59 line pins converted; two same-definition pairs merged into one entry
-    # each per config, so the configs carry 55 symbol-scoped entries.
-    assert checked >= 55, f"only {checked} symbol entries; the migration wrote 55"
+    # each per config, so the migration wrote 55 symbol-scoped entries. Eleven of
+    # them were in the alpha config's test-file and ferret entries, which main
+    # then removed from that config (a scan of it excludes tests, and the ferret
+    # bandit and detect-secrets entries could not match), leaving 44.
+    assert checked >= 44, f"only {checked} symbol entries; the configs carry 44"
 
 
 def test_the_record_and_the_configs_agree_entry_for_entry():
@@ -284,10 +287,6 @@ _WIDE_SPAN_ALLOWANCES = {
         "automated_security_helper/utils/package_manager_child.py",
         "_pnpm_workspace_copy",
     ): "prose naming .npmrc; the smallest named definition holding it",
-    (
-        "scripts/generate_test_docx.py",
-        "main",
-    ): "synthetic card numbers built in the generator's main; a script, not shipped code",
 }
 
 

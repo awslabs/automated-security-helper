@@ -6510,7 +6510,7 @@ def resolve_config_path(
     """Walk a dotted config path from the top of an ASH config, as ASH reads it.
 
     Under scanners, reporters and converters a segment is a plugin name, which must be
-    one this ASH ships (community plugins included, when their module imports). A
+    one this ASH ships (alpha plugins included, when their module imports). A
     placeholder there (``*``, ``<name>``) stands for any plugin: the rest of the path
     must hold for the plugin base or for at least one plugin. A placeholder elsewhere
     ends the check. A list of sections is entered directly
@@ -6787,7 +6787,7 @@ def options_section(
     segment = next((n for n, seg in models.segments.items() if seg is model), None)
     if segment is not None:
         # The section's keys are plugin names: the ones it declares, and every plugin
-        # ASH ships for it, community modules included, which it accepts as extras.
+        # ASH ships for it, alpha modules included, which it accepts as extras.
         for name, config_cls in models.plugin_configs.get(segment, {}).items():
             spec = keys.get(name)
             if spec is None:
@@ -8512,9 +8512,9 @@ def check_report_files(
 #
 # Tables that list scanners in plain text (reference/coverage.md's "By stack" and
 # "By scanner") were checked by nothing, so an invented gitleakz passed. A column
-# headed Scanner, Scanners, Built-in scanners or Community plugins lists scanners:
-# each item of its cells must be one name, of a scanner ASH ships, built in or from a
-# community module as the header says. An item of several words ("the CloudFormation
+# headed Scanner, Scanners, Built-in scanners or Alpha plugins lists scanners:
+# each item of its cells must be one name, of a scanner ASH ships, built in or from an
+# alpha module as the header says. An item of several words ("the CloudFormation
 # scanners") is reported: nothing can check it, and "trufflehog scanner" would hide an
 # invented name. A note in parentheses is dropped first. Whether such a table lists
 # every scanner is the options marker's complete: of=scanners complete.
@@ -8524,19 +8524,28 @@ SCANNER_COLUMN_HEADERS = {
     "scanner": None,
     "scanners": None,
     "built-in scanners": "built-in",
-    "community plugins": "community",
-    "community scanners": "community",
+    "alpha plugins": "alpha",
+    "alpha scanners": "alpha",
+    # The tier was called community before it was called alpha; the old headings are
+    # accepted as aliases for this release.
+    "community plugins": "alpha",
+    "community scanners": "alpha",
+}
+#: The old column headings that still work, and the heading to use instead.
+_DEPRECATED_SCANNER_HEADERS = {
+    "community plugins": "alpha plugins",
+    "community scanners": "alpha scanners",
 }
 _SCANNER_ITEM = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*")
 
 
 def shipped_scanners(models: ConfigModels) -> dict[str, str]:
-    """Every scanner ASH ships, by config name: "built-in" or "community"."""
+    """Every scanner ASH ships, by config name: "built-in" or "alpha"."""
     builtin_package = f"{ASH_MODULE}.plugin_modules.ash_builtin."
     found = {
         name: "built-in"
         if config_cls.__module__.startswith(builtin_package)
-        else "community"
+        else "alpha"
         for name, config_cls in models.plugin_configs.get("scanners", {}).items()
     }
     for name in _field_keys(models.segments["scanners"]):
@@ -8580,6 +8589,13 @@ def check_scanner_names(
                 for index, cell in enumerate(headers)
                 if cell in SCANNER_COLUMN_HEADERS
             ]
+            for heading in headers:
+                if heading in _DEPRECATED_SCANNER_HEADERS:
+                    from automated_security_helper.base.plugin_manifest import (
+                        warn_community_alias,
+                    )
+
+                    warn_community_alias(heading, _DEPRECATED_SCANNER_HEADERS[heading])
             column_count += len(columns)
             for number, cells in table.rows:
                 for index, header, kind in columns:
@@ -8620,13 +8636,13 @@ def _scanner_item_problem(
         close = difflib.get_close_matches(item, sorted(shipped), n=1)
         hint = f"; did you mean '{close[0]}'?" if close else ""
         return f"'{item}' in the {header} column is not a scanner ASH ships{hint}"
-    if kind == "built-in" and actual == "community":
+    if kind == "built-in" and actual == "alpha":
         return (
-            f"'{item}' in the {header} column is a community plugin, not a built-in "
+            f"'{item}' in the {header} column is an alpha plugin, not a built-in "
             "scanner"
         )
-    if kind == "community" and actual == "built-in":
-        return f"'{item}' in the {header} column is a built-in scanner, not a community plugin"
+    if kind == "alpha" and actual == "built-in":
+        return f"'{item}' in the {header} column is a built-in scanner, not an alpha plugin"
     return None
 
 

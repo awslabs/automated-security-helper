@@ -53,7 +53,7 @@ Decisions, and why
    without it, so an enabled integration is never skipped quietly either.
 
    Both options name the program actionlint pipes each ``run:`` script to, and
-   ASH's config usually comes from the scanned repository (``.ash/.ash.yaml``), so
+   ASH's config usually comes from the scanned repository (``.ash.yaml``), so
    ``shellcheck: sh`` there would execute the repository's scripts. From a config
    inside a git checkout or the scanned directory, each option accepts only its own
    name (``shellcheck``, ``pyflakes``), looked up on PATH and ASH's bin directory.
@@ -205,6 +205,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -217,7 +218,7 @@ from automated_security_helper.models.core import (
     ignore_paths_that_skip_scanning,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
-from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.schemas.sarif_schema_model import Level, SarifReport
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
@@ -300,33 +301,33 @@ INJECTABLE_DEPRECATED_COMMANDS = ('"set-env"', '"add-path"')
 #: ``expression`` and ``deprecated-commands`` are LOW here and raised per finding by
 #: :func:`severity_for`.
 KIND_SEVERITY: Dict[str, str] = {
-    "action": "LOW",
-    "credentials": "HIGH",
-    "deprecated-commands": "LOW",
-    "env-var": "LOW",
-    "events": "LOW",
-    "expression": "LOW",
-    "glob": "LOW",
-    "id": "LOW",
-    "if-cond": "MEDIUM",
-    "job-needs": "LOW",
-    "matrix": "LOW",
-    "permissions": "MEDIUM",
-    "pyflakes": "LOW",
-    "runner-label": "LOW",
-    "shell-name": "LOW",
-    "shellcheck": "LOW",
-    "syntax-check": "LOW",
-    "workflow-call": "LOW",
+    "action": Severity.LOW.value,
+    "credentials": Severity.HIGH.value,
+    "deprecated-commands": Severity.LOW.value,
+    "env-var": Severity.LOW.value,
+    "events": Severity.LOW.value,
+    "expression": Severity.LOW.value,
+    "glob": Severity.LOW.value,
+    "id": Severity.LOW.value,
+    "if-cond": Severity.MEDIUM.value,
+    "job-needs": Severity.LOW.value,
+    "matrix": Severity.LOW.value,
+    "permissions": Severity.MEDIUM.value,
+    "pyflakes": Severity.LOW.value,
+    "runner-label": Severity.LOW.value,
+    "shell-name": Severity.LOW.value,
+    "shellcheck": Severity.LOW.value,
+    "syntax-check": Severity.LOW.value,
+    "workflow-call": Severity.LOW.value,
 }
 
 #: Severity for a kind KIND_SEVERITY does not list.
-UNKNOWN_KIND_SEVERITY = "LOW"
+UNKNOWN_KIND_SEVERITY = Severity.LOW.value
 
 _SEVERITY_TO_LEVEL: Dict[str, str] = {
-    "HIGH": "error",
-    "MEDIUM": "warning",
-    "LOW": "note",
+    Severity.HIGH.value: Level.error.value,
+    Severity.MEDIUM.value: Level.warning.value,
+    Severity.LOW.value: Level.note.value,
 }
 
 #: Tags on a ``credentials`` result and its rule. The finding reports a password
@@ -359,11 +360,11 @@ _KNOWN_IGNORED_DIRS = frozenset(item.strip("/") for item in KNOWN_IGNORE_PATHS)
 def severity_for(kind: str, message: str) -> str:
     """The ASH severity for one actionlint finding."""
     if kind == "expression" and _UNTRUSTED_INPUT_MESSAGE.match(message):
-        return "HIGH"
+        return Severity.HIGH.value
     if kind == "deprecated-commands" and any(
         command in message for command in INJECTABLE_DEPRECATED_COMMANDS
     ):
-        return "MEDIUM"
+        return Severity.MEDIUM.value
     return KIND_SEVERITY.get(kind, UNKNOWN_KIND_SEVERITY)
 
 
@@ -1070,7 +1071,7 @@ def build_sarif(
         if (
             not untrusted_shape_drift_logged
             and kind == "expression"
-            and severity != "HIGH"
+            and severity != Severity.HIGH.value
             and UNTRUSTED_INPUT_MARKER in message
         ):
             untrusted_shape_drift_logged = True
@@ -1275,8 +1276,11 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         rule_id=FacetDecl(state=FacetState.MAPPED, native_field="errors[].kind"),
         severity=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="errors[].kind (ASH severity table; a message matching "
-            "the untrusted-input pattern raises it to HIGH)",
+            native_field="errors[].kind and errors[].message (ASH severity "
+            "table, severity_for; an expression finding whose message matches "
+            "the untrusted-input pattern is raised to HIGH, and a "
+            "deprecated-commands finding whose message names set-env or "
+            "add-path is raised to MEDIUM)",
         ),
         file_path=FacetDecl(state=FacetState.MAPPED, native_field="errors[].filepath"),
         line_range=FacetDecl(state=FacetState.MAPPED, native_field="errors[].line"),
@@ -1397,6 +1401,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=opsf.PLATFORMS_ALL,
                 note="asset table lists all six platform/arch pairs",
@@ -1430,7 +1435,6 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 semantics="the base default {0, 1}; an exit code that disagrees with the findings is raised, not read as clean",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=(),
                 upstream_license=(
@@ -1595,6 +1599,16 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             "that integration."
         )
 
+    def _forced_binary_precluded_reason(self) -> Optional[str]:
+        """With a configured integration missing, a forced actionlint must not pass.
+
+        The integrations (shellcheck, pyflakes) are separate executables the
+        scan hands to actionlint; a ``--binary-path`` record names actionlint's
+        own binary and says nothing about them, so the same check
+        ``validate_plugin_dependencies`` makes runs first here.
+        """
+        return self._missing_integrations(self._integration_executables())
+
     def validate_plugin_dependencies(self) -> bool:
         self.dependency_unavailable_reason = self._missing_integrations(
             self._integration_executables()
@@ -1665,7 +1679,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     def _workflow_files(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
         report: bool = True,
         left_out: Optional[List[Dict[str, str]]] = None,
@@ -1688,7 +1702,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
 
         target_abs = Path(target).absolute()
         target_real = Path(target).resolve()
-        if target_type == "converted":
+        if target_type == TargetType.CONVERTED:
             candidates = [str(p) for p in target_abs.rglob("*") if p.is_file()]
         else:
             # In a workspace scan the workspace's output directory holds every
@@ -1974,7 +1988,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Abstract stub: ActionlintScanner overrides scan() directly."""
@@ -2011,7 +2025,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: ActionlintScannerConfig | ScannerPluginConfigBase | None = None,
         *args: Any,
@@ -2204,7 +2218,9 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 if effective_timeout is None
                 else time.monotonic() + effective_timeout
             )
-            uri_base = Path(target).absolute() if target_type == "converted" else None
+            uri_base = (
+                Path(target).absolute() if target_type == TargetType.CONVERTED else None
+            )
             # The workflows go on the command line in batches that fit the
             # platform's limit (workflow_batches); each run is judged by its own
             # exit code and parsed on its own, then the findings are joined.

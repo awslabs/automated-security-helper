@@ -216,7 +216,7 @@ print(hello())
 | `<!-- doctest: save-as=my_plugins/greeting.py -->` | saves the block and does not run it |
 | `<!-- doctest: run save-as=tools/check.py -->` | saves the block, then runs it; a Python block runs from the saved file, so `__file__` is that path |
 | `<!-- doctest: config kind=github-actions save-as=.github/workflows/ash.yml -->` | saves the block, which is still validated as its kind |
-| `<!-- doctest: save-as=.ash/.ash.yaml -->` on a YAML block | saves the block, which is still validated as a complete ASH config |
+| `<!-- doctest: save-as=.ash.yaml -->` on a YAML block | saves the block, which is still validated as a complete ASH config |
 
 The path is relative to the root of the page's fixture project, whatever directory
 earlier blocks changed to. An absolute path, a path containing `..`, and a path that
@@ -335,7 +335,7 @@ scanner need no row.
 |-------|--------------|
 | `scanners.bandit`, `reporters.sarif`, `converters.archive` | that plugin's options (the same as adding `.options`) |
 | `scanners.*` | the keys every scanner entry has (`name`, `enabled`, `options`) |
-| `scanners`, `reporters`, `converters` | the plugins of that section, by name, built-in and community ones; a column headed Enabled by default or On by default is compared with each plugin's `enabled` default |
+| `scanners`, `reporters`, `converters` | the plugins of that section, by name, built-in and alpha ones; a column headed Enabled by default or On by default is compared with each plugin's `enabled` default |
 | `config` | the top-level keys of an ASH config |
 | `global_settings`, `sandbox`, `global_settings.suppressions`, ... | the keys under that config path; a path through a list means one item of it |
 | `workspace-policy`, `workspace-policy.workspace`, ... | keys of the workspace policy file |
@@ -395,7 +395,7 @@ family as `ASH_MCP_*`; at least one variable ASH reads must start with the prefi
 An inline code span that is a dotted config path starting with a top-level config key
 (`scanners.bandit.options.severity_threshold`, `global_settings.suppressions`,
 `sandbox.mode`, also with a value after it, as in `scanners.bandit.enabled=false`) must
-resolve in ASH's config models, community plugins included when this ASH has them. Use
+resolve in ASH's config models, alpha plugins included when this ASH has them. Use
 `*` or `<name>` for a plugin name that is not fixed: `scanners.<name>.enabled`.
 
 Two more kinds of name are accepted. A build argument, declared with `ARG` in the
@@ -431,8 +431,8 @@ directory or a page that names the package. A placeholder, as in
 `reports/ash.<extension>`, is not checked.
 
 In a table, every item of a column headed Scanner, Scanners, Built-in scanners,
-Community plugins, or Community scanners must be one scanner ASH ships, built in or a
-community plugin as the header says. A note in parentheses after a name is ignored. Any other item of several
+Alpha plugins, or Alpha scanners must be one scanner ASH ships, built in or an
+alpha plugin as the header says. A note in parentheses after a name is ignored. Any other item of several
 words is an error, because nothing can check it: write
 `semgrep, opengrep (as far as their rules cover the language)`, and put longer notes in
 another column.
@@ -449,7 +449,7 @@ another column.
 - Every page is reachable from a `.nav.yml`, or matches a pattern in `not_in_nav` in
   `mkdocs.yml` with a comment saying why. A `.nav.yml` entry may be a page, a
   directory (which then uses its own `.nav.yml`, or lists everything in it), or a glob
-  such as `docs/plugins/community/*.md`. The check runs awesome-nav's own resolver, so
+  such as `docs/plugins/alpha/*.md`. The check runs awesome-nav's own resolver, so
   a glob means what it means in the build, including that it only picks up pages no
   other entry already took. A glob that matches nothing is an error. A glob with
   options is written `- glob: "<pattern>"` with at least one option beside it; on its
@@ -931,7 +931,7 @@ to resolve in: save the block inside one with `save-as=<package>/<module>.py`.
 | Message contains | Fix |
 |------------------|-----|
 | is not a scanner ASH ships | fix the name; the message suggests the nearest one |
-| is a community plugin, not a built-in scanner (or the reverse) | move the name to the column for its kind |
+| is an alpha plugin, not a built-in scanner (or the reverse) | move the name to the column for its kind |
 | is not one scanner name | list scanner names in the column, with any note in parentheses |
 
 ### `code-links`

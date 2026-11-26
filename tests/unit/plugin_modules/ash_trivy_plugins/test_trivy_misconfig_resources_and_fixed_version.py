@@ -38,6 +38,7 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
     TrivyRepoScanner,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.utils.subprocess_utils import TIMEOUT_RETURNCODE
 
 pytestmark = pytest.mark.unit
 
@@ -550,6 +551,112 @@ def test_a_failed_second_run_is_warned_about_once_with_its_exit_code(scanner) ->
     ]
     assert len(warnings) == 1
     assert "32" in warnings[0].args[1]
+
+
+def _warnings(log) -> list:
+    return [
+        call
+        for call in log.call_args_list
+        if call.kwargs.get("level") == logging.WARNING
+    ]
+
+
+@pytest.mark.parametrize(
+    "response, said",
+    [
+        (
+            {
+                "returncode": None,
+                "timed_out": True,
+                "could_not_stop": True,
+                "could_not_stop_pid": 4242,
+            },
+            "could not be stopped",
+        ),
+        (
+            {"returncode": TIMEOUT_RETURNCODE, "timed_out": True},
+            "the second run timed out",
+        ),
+        ({"returncode": None, "cancelled": True}, "the second run was cancelled"),
+    ],
+    ids=["could-not-stop", "timed-out", "cancelled"],
+)
+def test_a_second_run_that_did_not_finish_says_so_not_its_exit_code(
+    scanner, response, said
+) -> None:
+    """A run stopped at its timeout, cancelled, or left running has no exit code
+    worth naming: the reason is read from the response's flags."""
+
+    def fake(self, command, **kwargs):
+        return dict(response)
+
+    with patch.object(TrivyRepoScanner, "_plugin_log", autospec=True) as log:
+        _run_side(scanner, FINAL_ARGS, fake)
+    (warning,) = _warnings(log)
+    assert said in warning.args[1]
+    assert "exited None" not in warning.args[1]
+
+
+def _changed_rule_ids() -> str:
+    """The captured JSON report with every record's check id changed: it still
+    names the resource, and no key of it is a key of the captured SARIF."""
+    document = json.loads((CAPTURED / f"{STEM}.json").read_text(encoding="utf-8"))
+    for result in document["Results"]:
+        for record in result.get("Misconfigurations") or []:
+            record["ID"] = "NOT-A-RULE"
+    return json.dumps(document)
+
+
+def test_a_report_that_names_resources_none_of_which_match_is_warned_about(
+    scanner,
+) -> None:
+    def fake(self, command, **kwargs):
+        Path(command[command.index("--output") + 1]).write_text(_changed_rule_ids())
+        return {"returncode": 0}
+
+    with patch.object(TrivyRepoScanner, "_plugin_log", autospec=True) as log:
+        report, _ = _run_side(scanner, FINAL_ARGS, fake)
+    assert all("ash_resource_id" not in _bag(r) for r in report.runs[0].results)
+    (warning,) = _warnings(log)
+    assert "none matched a result" in warning.args[1]
+
+
+def test_a_report_whose_resources_matched_is_not_warned_about(scanner) -> None:
+    """Control for the test above: the same run over the unchanged report attaches
+    and says nothing."""
+
+    def fake(self, command, **kwargs):
+        target = Path(command[command.index("--output") + 1])
+        target.write_text((CAPTURED / f"{STEM}.json").read_text(encoding="utf-8"))
+        return {"returncode": 0}
+
+    with patch.object(TrivyRepoScanner, "_plugin_log", autospec=True) as log:
+        report, _ = _run_side(scanner, FINAL_ARGS, fake)
+    assert any("ash_resource_id" in _bag(r) for r in report.runs[0].results)
+    assert _warnings(log) == []
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        AssertionError("an invariant"),
+        TypeError("a defect"),
+        AttributeError("a defect"),
+        NameError("a defect"),
+    ],
+    ids=["assertion", "type", "attribute", "name"],
+)
+def test_a_defect_in_the_enrichment_is_not_swallowed_as_a_skipped_report(
+    scanner, defect
+) -> None:
+    """The guard keeps a failed second run from costing the scan its report; a
+    programming error is not a failed run and surfaces."""
+
+    def fake(self, command, **kwargs):
+        raise defect
+
+    with pytest.raises(type(defect)):
+        _run_side(scanner, FINAL_ARGS, fake)
 
 
 # --------------------------------------------------------------------------

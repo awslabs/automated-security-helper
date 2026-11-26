@@ -321,7 +321,7 @@ env:
   # suppressions scoped by `symbol` (a qualified definition name instead of a
   # line pin). Resolution fails closed: without the extra every symbol-scoped
   # entry matches nothing and its findings come back as residuals, so a config
-  # that uses `symbol` -- this repository's own .ash/.ash.yaml does -- needs the
+  # that uses `symbol` -- this repository's own .ash.yaml does -- needs the
   # extra in the environment that runs the scan. The wheels cover the GitHub
   # hosted runners; the extra exists (rather than core deps) for platforms,
   # musllinux aarch64, that no wheel covers.
@@ -913,7 +913,7 @@ jobs:
           # is its value, so a `--mode` there (`--output-dir --mode`) is not the
           # mode. A bare word, or anything after `--`, is Run ASH's to refuse.
           read -r -a args <<< "${ASH_ARGS}"
-          ASH_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --baseline --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
+          ASH_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --baseline --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --image --image-archive --image-layout --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
           mode="${ASH_MODE}"
           value_of=""
           for word in ${args[@]+"${args[@]}"}; do
@@ -1087,7 +1087,7 @@ jobs:
             exit 1
           fi
           if [ -z "${CONFIG_PATH}" ]; then
-            echo "::error::config-ref is set but config is empty. Name the config file to read from $(one_line "${CONFIG_REF}"), for example 'config: .ash/.ash.yaml'."
+            echo "::error::config-ref is set but config is empty. Name the config file to read from $(one_line "${CONFIG_REF}"), for example 'config: .ash.yaml'."
             exit 1
           fi
           RELATIVE="${CONFIG_PATH#./}"
@@ -1151,7 +1151,7 @@ jobs:
 
       - name: Install uv
         id: setup-uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           # Named here, because with no `version` setup-uv installs the uv that the
           # checkout's pyproject.toml or uv.toml asks for (`required-version`), and
@@ -1961,7 +1961,7 @@ jobs:
       # and make are still on the image; libyaml-dev is the one to check first.
       - name: Set up Ruby for cfn-nag
         if: inputs.install-cfn-nag
-        uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
+        uses: ruby/setup-ruby@20eb24b0d509e2b9ed9b6d42ddfeb992915e0564 # v1.341.0
         with:
           ruby-version: "3.3"
           # Neither from the checkout. The action's default `bundler: Gemfile.lock`
@@ -2216,7 +2216,7 @@ jobs:
           # reads every word as bare. ASH_VALUE_OPTIONS is the ash group's options
           # that take a value; tests/unit/test_reusable_workflow_ash_args.py holds
           # it to the CLI's. The refusals name the word by position, not by value.
-          ASH_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --baseline --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
+          ASH_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --baseline --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --image --image-archive --image-layout --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
           takes_value=""
           position=0
           for word in "${ASH_ARGS_LIST[@]}"; do

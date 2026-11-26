@@ -23,6 +23,7 @@ import pytest
 import automated_security_helper.base.engine_phase as engine_phase_module
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.core.enums import ExecutionPhase
 
 pytestmark = pytest.mark.unit
 
@@ -31,8 +32,8 @@ SECRET = "tok-secretvalue-from-the-environment"  # pragma: allowlist secret
 
 class _Phase(EnginePhase):
     @property
-    def phase_name(self) -> str:
-        return "report"
+    def phase_name(self) -> ExecutionPhase:
+        return ExecutionPhase.REPORT
 
     def _execute_phase(self, aggregated_results, **kwargs):
         return aggregated_results

@@ -260,7 +260,12 @@ def _primary(rows: Sequence[FlatVulnerability], members: Iterable[int]) -> int:
 
 
 def _cluster_id(finding_class: str, rows: Sequence[FlatVulnerability]) -> str:
-    material = "\x1f".join([finding_class, *sorted(r.id or "" for r in rows)])
+    # The members' project is part of the id: clusters never span projects, and
+    # identity-derived finding ids already embed theirs, but a plugin-supplied
+    # id on an identity-less finding can repeat across two projects of one
+    # workspace, and two different clusters must never share an id.
+    project = next((r.workspace_project for r in rows), None) or ""
+    material = "\x1f".join([finding_class, project, *sorted(r.id or "" for r in rows)])
     return "dup-" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
 
 
@@ -453,6 +458,7 @@ def fold_positions(
     rows: Sequence[FlatVulnerability],
     clusters: Sequence[FindingCluster],
     shown: Sequence[int],
+    prefer: Iterable[int] = (),
 ) -> List[Tuple[int, Tuple[int, ...]]]:
     """The rows of a view, one per foldable cluster, each with what it stands for.
 
@@ -461,15 +467,22 @@ def fold_positions(
     position that stays in the view and the positions folded under it, ascending;
     a row in no foldable cluster stays alone. The order of *shown* is kept.
 
-    Two rules keep a fold honest. Only the members that are in the view fold, so
-    a cluster half hidden by a filter folds what is left of it, and its
+    Three rules keep a fold honest. Only the members that are in the view fold,
+    so a cluster half hidden by a filter folds what is left of it, and its
     representative is the cluster's primary when that is in the view, else the
-    best of the rest by the primary's own ranking. And suppressed and live
-    members never fold together: a suppressed duplicate is not hidden under a live
-    row, and a live row is not hidden under a suppressed one. Clusters that do not
-    fold (``foldable`` False, the IaC class) leave every row in place.
+    best of the rest by the primary's own ranking. Suppressed and live members
+    never fold together: a suppressed duplicate is not hidden under a live row,
+    and a live row is not hidden under a suppressed one. And *prefer*, when
+    given, names the positions a representative is chosen among while any of
+    them is present: the report emitter passes its actionable rows, because the
+    gate is per scanner, so a cluster can hold an actionable row and a
+    higher-severity row another scanner's threshold leaves below it, and the
+    severity ranking alone then hid the actionable finding under a card the
+    default view does not show. Clusters that do not fold (``foldable`` False,
+    the IaC class) leave every row in place.
     """
     in_view = set(shown)
+    preferred = set(prefer)
     stands_for: Dict[int, Tuple[int, ...]] = {}
     folded_away: set[int] = set()
     for cluster in clusters:
@@ -483,10 +496,11 @@ def fold_positions(
             ]
             if len(present) < 2:
                 continue
+            candidates = [m for m in present if m in preferred] or present
             representative = (
                 cluster.primary
-                if cluster.primary in present
-                else _primary(rows, present)
+                if cluster.primary in candidates
+                else _primary(rows, candidates)
             )
             others = tuple(m for m in present if m != representative)
             stands_for[representative] = others

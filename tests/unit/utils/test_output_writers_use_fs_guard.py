@@ -424,6 +424,13 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         _PROJECT_ASH_DIR,
     ),
+    (f"{_ASH}/core/plugin_conformance.py", "_materialized", "shutil.copytree"): (
+        1,
+        (
+            "a fixture template copied into the conformance run's own scratch "
+            "directory, which is empty and outside every output directory"
+        ),
+    ),
     (f"{_ASH}/config/ash_config.py", "AshConfig.save", "open"): (1, _CONFIG),
     (f"{_ASH}/config/ash_config.py", "AshConfig.save", "write_text"): (1, _CONFIG),
     (f"{_ASH}/config/ash_config.py", "_staged_beside", "os.open"): (
@@ -490,7 +497,7 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         "the MCP upload workspace, where a client's source is assembled",
     ),
-    (f"{_ASH}/cli/mcp/session_paths.py", "mark_session_workspace", "touch"): (
+    (f"{_ASH}/config/session_paths.py", "mark_session_workspace", "touch"): (
         1,
         _MCP_SESSIONS,
     ),
@@ -518,7 +525,7 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
     ): (1, _MCP_SESSIONS),
     (f"{_ASH}/cli/mcp/sessions.py", "_a_scan_holds", "open"): (1, _MCP_SESSIONS),
     (
-        f"{_ASH}/cli/mcp/profile_registry.py",
+        f"{_ASH}/config/session_profiles.py",
         "_replace_staged",
         "os.replace",
     ): (1, _MCP_PROFILE_COPY),
@@ -539,6 +546,14 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         "_set_aside_for_removal",
         "os.rename",
     ): (1, _MCP_SESSION_WORKSPACE),
+    # The image-archive finalize moves the assembled upload into the session's
+    # own image directory, after the sha and the same-file check, under the
+    # upload lock: the move of a file the session workspace already holds.
+    (
+        f"{_ASH}/cli/mcp/source_delivery.py",
+        "set_source_image_archive_finalize",
+        "os.replace",
+    ): (1, "the MCP upload workspace, where a client's image archive is assembled"),
     (f"{_ASH}/cli/mcp_tools.py", "mcp_validate_config", "write_text"): (
         1,
         "a TemporaryDirectory of its own",
@@ -797,6 +812,12 @@ NOT_WRITES: Dict[Site, Tuple[int, str]] = {
     (f"{_ASH}/cli/mcp/source_delivery.py", "_finalize_zip_upload", "Path.open"): (
         1,
         "nothing: it reads a member of the uploaded zip",
+    ),
+    # `tarfile.open(archive, "r:")` reads a saved image's member names to pick the
+    # stereoscope scheme; the detector cannot read the mode of a tarfile.open().
+    (f"{_ASH}/utils/image_tool_targets.py", "archive_scheme", "Path.open"): (
+        1,
+        "nothing: it reads the member names of the saved image",
     ),
     (f"{_ASH}/cli/mcp_server.py", "_keep_stdout_off_the_wire", "os.open"): (
         1,

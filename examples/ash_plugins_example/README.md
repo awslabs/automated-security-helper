@@ -46,12 +46,13 @@ any of three ways:
 ash --source-dir /path/to/code --ash-plugin-modules my_ash_plugins
 
 # With this directory's config, which also sets the plugins' options
-ash --source-dir /path/to/code --config examples/ash_plugins_example/.ash/.ash.yaml
+ash --source-dir /path/to/code --config examples/ash_plugins_example/.ash.yaml
 ```
 
-or copy `.ash/.ash.yaml` into the repository you scan, where ASH finds it.
+or copy `.ash.yaml` into the root of the repository you scan, where ASH finds it.
+The example's config file is `.ash.yaml` at the example's root.
 
-A config file inside the scanned tree, such as a copied `.ash/.ash.yaml`, can name only
+A config file inside the scanned tree, such as a copied `.ash.yaml`, can name only
 modules installed outside that tree. The scanned tree is the scanned directory, or the
 outermost git checkout that contains it. An `ash_plugin_modules` entry from such a file
 that resolves inside the tree is not imported, and ASH logs "Ignoring

@@ -7,7 +7,7 @@
 This plugin ships with ASH and is loaded only when its module is listed. An `ash scan` that does not list it is unchanged.
 
 ```yaml
-# .ash/.ash.yaml
+# .ash.yaml
 ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_betterleaks_plugins
 ```
@@ -57,4 +57,4 @@ scanners:
 
 ## Documentation
 
-How it differs from gitleaks, suppressions, ignore files, offline use and every option: [the Betterleaks plugin page](https://awslabs.github.io/automated-security-helper/docs/plugins/community/betterleaks-plugin/).
+How it differs from gitleaks, suppressions, ignore files, offline use and every option: [the Betterleaks plugin page](https://awslabs.github.io/automated-security-helper/docs/plugins/alpha/betterleaks-plugin/).

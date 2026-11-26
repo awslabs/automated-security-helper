@@ -12,7 +12,7 @@ is loud, and the mechanism tests pin what a marker does.
 
 from __future__ import annotations
 
-from typing import Annotated, Callable, Dict, Optional, Tuple
+from typing import Annotated, Any, Callable, Dict, Optional, Tuple
 
 import polars as pl
 import pytest
@@ -32,6 +32,7 @@ from automated_security_helper.models.frame_model import (
     OverflowNullable,
     Position,
     RankEncoded,
+    Ranked,
     RawText,
     WireText,
     assert_accounted,
@@ -41,7 +42,27 @@ from automated_security_helper.models.frame_model import (
     to_frame,
     unaccounted,
 )
+from automated_security_helper.models.core import AshSuppression
+from automated_security_helper.plugin_modules.ash_builtin.reporters._report_frames import (
+    GRADED_SCHEMA,
+    graded_frame,
+)
+from automated_security_helper.plugin_modules.ash_builtin.reporters.asff_formatter import (
+    _derived_frame,
+    _derived_schema,
+)
+from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_sast_reporter import (
+    _projection,
+    _projection_schema,
+)
+from automated_security_helper.utils.finding_diff import SIDE_SPEC, _side
+from automated_security_helper.utils.finding_identity import identity_frame_spec
 from automated_security_helper.utils.frame_text import unwire, wire
+from automated_security_helper.utils.suppression_frame import (
+    _chunk_frame,
+    _span_frame,
+    line_span_spec,
+)
 from tests.unit.models.test_flat_frame import SCHEMA as FLAT_HAND_SCHEMA
 from tests.unit.models.test_flat_frame import row
 
@@ -51,7 +72,100 @@ pytestmark = pytest.mark.unit
 # the frame the layer ships, called with no rows.
 FRAME_SPECS: Dict[str, Tuple[FrameSpec, Callable[[], pl.DataFrame]]] = {
     "flat_frame": (FLAT_SPEC, lambda: flat_frame([])),
+    "suppression_line_span": (line_span_spec(), lambda: _span_frame([], [])),
+    "finding_diff_side": (SIDE_SPEC, lambda: _side([])),
 }
+
+# Models whose frames are derived from a whole run's keys, so no per-row column
+# can be projected straight off the model and there is no schema to pin -- but
+# every name the model holds still needs a decided frame fate.
+ACCOUNTED_SPECS: Dict[str, FrameSpec] = {
+    "finding_identity": identity_frame_spec(),
+}
+
+ALL_SPECS: Dict[str, FrameSpec] = {
+    **{name: spec for name, (spec, _build) in FRAME_SPECS.items()},
+    **ACCOUNTED_SPECS,
+}
+
+# Population-B frames: the rows are gradings, drafts or prepared values computed
+# on the host, so there is no model to derive a spec from (design section 7).
+# The registry pins each one's declared schema dict against the frame its
+# builder constructs, so the schema has one record beyond the builder itself.
+HAND_SCHEMAS: Dict[
+    str, Tuple[Callable[[], Dict[str, Any]], Callable[[], pl.DataFrame]]
+] = {
+    "graded_frame": (
+        lambda: dict(GRADED_SCHEMA),
+        lambda: graded_frame([], [], []),
+    ),
+    "graded_frame_actionable": (
+        lambda: dict(GRADED_SCHEMA),
+        lambda: graded_frame([], [], [], []),
+    ),
+    "asff_derived_input": (_derived_schema, lambda: _derived_frame([])),
+    "gitlab_sast_projection": (_projection_schema, lambda: _projection([])),
+}
+
+
+@pytest.mark.parametrize("name", sorted(HAND_SCHEMAS))
+def test_a_hand_schema_frame_builds_exactly_its_declared_schema(name):
+    declared, build = HAND_SCHEMAS[name]
+    assert list(dict(build().schema).items()) == list(declared().items())
+
+
+def test_the_graded_readers_read_declared_columns_over_a_real_row():
+    """The schema-equality case above cannot fail for a builder that passes the
+    whole declared dict as ``schema=``; what can drift is a reader naming a
+    column the schema no longer declares. One real row through each reader."""
+    from automated_security_helper.plugin_modules.ash_builtin.reporters._report_frames import (
+        active_level_counts,
+        flag_total,
+    )
+
+    # The three flag totals are pairwise distinct (0, 2, 1), so a reader that
+    # cross-reads one flag column for another cannot pass by coincidence.
+    frame = graded_frame(["high", "low"], [False, False], [True, True], [True, False])
+    assert active_level_counts(frame) == [("high", 1), ("low", 1)]
+    assert flag_total(frame, "is_suppressed") == 0
+    assert flag_total(frame, "left_out") == 2
+    assert flag_total(frame, "actionable") == 1
+    suppressed = graded_frame(["high"], [True], [False])
+    assert active_level_counts(suppressed) == []
+    assert flag_total(suppressed, "is_suppressed") == 1
+
+
+def test_the_asff_derived_reader_reads_declared_columns_over_real_rows():
+    """``_derived`` is the one consumer of the ASFF derived frame; its four
+    output cells prove each ``pl.col`` it selects is a declared column holding
+    what the schema says."""
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.asff_formatter import (
+        _derived,
+    )
+
+    active = row(0, severity="critical")
+    archived = row(1)
+    archived.__dict__["is_suppressed"] = True
+    derived = _derived(
+        [
+            {"severity": "critical", "flat": active, "is_cve": True},
+            {"severity": "not-on-the-table", "flat": archived, "is_cve": False},
+        ]
+    )
+    assert derived == [
+        {
+            "label": "CRITICAL",
+            "type": "Software and Configuration Checks/Vulnerabilities/CVE",
+            "record_state": "ACTIVE",
+            "suppressed_text": "false",
+        },
+        {
+            "label": "INFORMATIONAL",
+            "type": "Software and Configuration Checks/Vulnerabilities",
+            "record_state": "ARCHIVED",
+            "suppressed_text": "true",
+        },
+    ]
 
 
 @pytest.mark.parametrize("name", sorted(FRAME_SPECS))
@@ -62,15 +176,52 @@ def test_the_derived_schema_is_the_schema_the_builder_constructs(name):
     assert list(derived.items()) == list(built.items())
 
 
-@pytest.mark.parametrize("name", sorted(FRAME_SPECS))
+@pytest.mark.parametrize("name", sorted(ALL_SPECS))
 def test_every_name_the_model_holds_has_a_decided_frame_fate(name):
-    spec, _build = FRAME_SPECS[name]
+    spec = ALL_SPECS[name]
     assert unaccounted(spec) == []
     assert_accounted(spec)
 
 
 def test_the_flat_frame_schema_is_the_documented_one_in_the_documented_order():
     assert list(frame_schema(FLAT_SPEC).items()) == list(FLAT_HAND_SCHEMA.items())
+
+
+def test_the_suppression_line_columns_carry_the_rank_policy_from_the_model():
+    info = {column.name: column for column in frame_columns(line_span_spec())}
+    assert set(info) == {"line_start", "line_end"}
+    for column in info.values():
+        assert column.rank_group == "lines"
+        assert column.dtype == "Int64"
+        assert column.nullable is True  # both fields are Optional on the model
+
+
+def test_the_chunk_frame_line_columns_are_the_derived_span_columns():
+    frame = _chunk_frame(row(0), [])
+    built = dict(frame.schema)
+    # the predicate booleans are results of host predicates, not model fields,
+    # so they stay hand-declared; static_ok is their conjunction with the lines
+    assert list(built) == [
+        "live",
+        "rule",
+        "base",
+        "rest",
+        "engine",
+        "line_start",
+        "line_end",
+        "static_ok",
+    ]
+    derived = frame_schema(line_span_spec())
+    assert {name: built[name] for name in derived} == derived
+
+
+def test_the_suppression_markers_leave_validation_and_the_json_schema_alone():
+    schema = AshSuppression.model_json_schema()
+    assert "RankEncoded" not in str(schema)
+    assert schema["properties"]["line_start"]["anyOf"] == [
+        {"type": "integer"},
+        {"type": "null"},
+    ]
 
 
 class _PlantedField(FlatVulnerability):
@@ -129,6 +280,16 @@ def test_the_flat_spec_declares_what_the_model_cannot_show():
     )
 
 
+def test_the_emitters_severity_order_is_the_models_vocabulary():
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+        _SEVERITY_ORDER,
+    )
+
+    vocabulary = column_vocabularies(FLAT_SPEC)["severity"]
+    assert list(_SEVERITY_ORDER) == list(vocabulary)
+    assert list(_SEVERITY_ORDER.values()) == list(range(len(vocabulary)))
+
+
 def test_a_non_nullable_flag_is_never_null_for_a_finding_holding_none():
     # FlatVulnerability does not validate assignment, so an instance built around
     # validation (model_construct, __dict__) can hold None in a required bool; the
@@ -156,18 +317,18 @@ def test_every_string_column_of_the_flat_frame_is_wired():
     # would opt a column out without any sign at the use site
     assert not any(column.raw for column in frame_columns(FLAT_SPEC))
     finding = row(0)
-    finding.__dict__["severity"] = "SÄVERE\udcff"
-    assert unwire(flat_frame([finding])["severity"][0]) == "SÄVERE\udcff"
+    finding.__dict__["scanner"] = "SÄVERE\udcff"
+    assert unwire(flat_frame([finding])["scanner"][0]) == "SÄVERE\udcff"
 
 
-def test_severity_records_its_vocabulary_and_stays_a_string():
-    assert column_vocabularies(FLAT_SPEC) == {
-        "severity": ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
-    }
-    assert frame_schema(FLAT_SPEC)["severity"] == pl.String
+def test_severity_is_a_polars_enum_of_its_vocabulary():
+    ladder = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
+    assert column_vocabularies(FLAT_SPEC) == {"severity": ladder}
+    assert frame_schema(FLAT_SPEC)["severity"] == pl.Enum(list(ladder))
     off_ladder = row(0)
     off_ladder.__dict__["severity"] = "WEIRD"  # built around the model's validation
-    assert flat_frame([off_ladder])["severity"].to_list() == ["WEIRD"]
+    with pytest.raises(FrameSpecError, match="severity"):
+        flat_frame([off_ladder])
 
 
 def test_the_markers_leave_validation_and_the_json_schema_alone():
@@ -245,7 +406,7 @@ def test_a_toy_spec_derives_columns_dtypes_and_order():
         ("over", pl.Boolean),
         ("lo", pl.Int64),
         ("hi", pl.Int64),
-        ("level", pl.String),
+        ("level", pl.Enum(["A", "B"])),
         ("n_chars", pl.Int64),
     ]
     assert unaccounted(TOY_SPEC) == []
@@ -298,6 +459,30 @@ def test_optional_fields_derive_nullable_and_required_ones_do_not():
     assert not info["name"].nullable and not info["flag"].nullable
 
 
+def test_a_ranked_entry_projects_a_field_under_the_sites_rank_policy():
+    # _Toy.first/.second carry OverflowNullable, the flat-frame-shaped policy; a
+    # Ranked entry overrides it for a frame that only ever compares order.
+    spec = FrameSpec(_Toy, (Ranked("first", "g"), Ranked("second", "g")))
+    info = {c.name: c for c in frame_columns(spec)}
+    assert info["first"].rank_group == "g"
+    assert info["first"].overflow_flag is None
+    # no flag column is appended, and the dtype is a rank's Int64
+    assert list(frame_schema(spec)) == ["first", "second"]
+    frame = to_frame(
+        [_toy(first=2**70, second=5), _toy(first=None, second=2**70)], spec
+    )
+    assert frame["first"].to_list() == [1, None]  # a null value is a null rank
+    assert frame["second"].to_list() == [0, 1]
+
+
+def test_the_side_spec_line_columns_carry_the_diff_sides_rank_policy():
+    info = {c.name: c for c in frame_columns(SIDE_SPEC)}
+    for name in ("line_start", "line_end"):
+        assert info[name].rank_group == "lines"
+        assert info[name].overflow_flag is None
+        assert info[name].nullable is True
+
+
 class _Unbounded(BaseModel):
     count: int = 0
 
@@ -315,6 +500,10 @@ class _Unbounded(BaseModel):
             _Toy, ("name", Computed("c", "String", str, reads=("no_such_attr",)))
         ),
         lambda: FrameSpec(_Toy, ("first", Computed("over", "Boolean", bool))),
+        lambda: FrameSpec(_Toy, (Ranked("name"),)),  # a str field has no rank
+        lambda: FrameSpec(_Toy, (Ranked("nope"),)),  # not a model field
+        lambda: FrameSpec(_Toy, (Ranked("skipped"),)),  # marked NotInFrame
+        lambda: FrameSpec(_Toy, ("first", Ranked("first"))),  # declared twice
         lambda: FrameSpec(_Toy, (3,)),  # type: ignore[arg-type]
     ],
 )

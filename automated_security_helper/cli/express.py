@@ -18,6 +18,7 @@ from typing import Annotated, Optional
 
 import typer
 
+from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.utils.console import echo
 from automated_security_helper.utils.process_env import set_environ, snapshot_environ
 
@@ -118,7 +119,7 @@ def start_daemon(
             "socket, before starting one.",
             err=True,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     if status is not None and status.get("ok"):
         # "Already running" counts only for a daemon a scan would actually
         # use: one whose protocol and installed-package fingerprint match
@@ -140,7 +141,7 @@ def start_daemon(
                 "end it now.",
                 err=True,
             )
-            raise typer.Exit(1)
+            raise typer.Exit(AshExitCode.SCAN_ERRORS)
         echo("replacing a stale express daemon")
         client.stop_daemon(path)
         # stop_daemon returns quietly when nothing answered and when the old
@@ -158,7 +159,7 @@ def start_daemon(
                 "and run 'ash express stop' again.",
                 err=True,
             )
-            raise typer.Exit(1)
+            raise typer.Exit(AshExitCode.SCAN_ERRORS)
     if idle_seconds is not None:
         # The spawned daemon and the foreground serve both read the
         # environment's idle setting; the option is written there so one
@@ -181,7 +182,7 @@ def start_daemon(
             f"the express daemon did not come up; its log is {runtime.log_path()}",
             err=True,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     sock.close()
     # The socket answering proves some daemon serves, not that it is the one
     # just launched (a concurrent start's winner, or a daemon the stop missed,
@@ -199,7 +200,7 @@ def start_daemon(
             f"{runtime.RETIRED_FOR_THREADS_TEXT}. Its log is {runtime.log_path()}",
             err=True,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     if (
         not isinstance(running, dict)
         or not running.get("ok")
@@ -213,7 +214,7 @@ def start_daemon(
             f"log is {runtime.log_path()}",
             err=True,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     echo(f"express daemon started at {path} (log: {runtime.log_path()})")
 
 
@@ -241,7 +242,7 @@ def stop_daemon() -> None:
                 "socket file.",
                 err=True,
             )
-            raise typer.Exit(1)
+            raise typer.Exit(AshExitCode.SCAN_ERRORS)
         echo("no express daemon is running")
         return
     if not answer.get("ok"):
@@ -252,7 +253,7 @@ def stop_daemon() -> None:
             f"{answer.get('reason', 'no reason given')}",
             err=True,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     # Wait on the daemon's own pid where it gave one; the daemon unlinks its
     # socket itself (and only its own; see the client's stop_daemon). The
     # success claim is verified, not assumed: a daemon still alive at the
@@ -283,7 +284,7 @@ def stop_daemon() -> None:
             "finishing a scan. Check 'ash express status'.",
             err=True,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     echo("express daemon stopped")
 
 
@@ -327,12 +328,12 @@ def daemon_status(
                     "it, or remove the socket file.",
                     err=True,
                 )
-            raise typer.Exit(1)
+            raise typer.Exit(AshExitCode.SCAN_ERRORS)
         if as_json:
             echo(json.dumps({"running": False, "socket": os.fspath(path)}))
         else:
             echo(f"express daemon: not running (socket would be {path})")
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     if not status.get("ok"):
         # Answered, but not as a daemon's status: that is its own state, not
         # "not running" -- a scan would consult this socket and be refused.
@@ -353,7 +354,7 @@ def daemon_status(
                 "answer as a daemon; run 'ash express stop' to clear it.",
                 err=True,
             )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     if as_json:
         status["running"] = True
         echo(json.dumps(status, sort_keys=True))

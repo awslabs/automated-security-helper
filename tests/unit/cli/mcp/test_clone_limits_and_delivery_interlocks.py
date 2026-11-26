@@ -29,6 +29,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterator, List
 
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 import pytest
 
 from automated_security_helper.cli.mcp import sessions
@@ -226,7 +227,9 @@ def test_an_unreadable_tree_is_not_reported_as_too_large(
         sd._refuse_oversized(tree)
 
     assert not isinstance(unreadable.value, sd.CloneTooLargeError)
-    assert sd.CLONE_TREE_UNREADABLE != sd.CLONE_TOO_LARGE
+    assert (
+        McpErrorType.CLONE_TREE_UNREADABLE.value != McpErrorType.CLONE_TOO_LARGE.value
+    )
 
 
 @pytest.mark.integration
@@ -260,9 +263,9 @@ def test_an_unreadable_tree_is_reported_by_its_own_error_type(
 @pytest.mark.parametrize(
     ("refusal", "error_type"),
     [
-        (sd.GitTimeoutError, sd.CLONE_TIMED_OUT),
-        (sd.CloneTooLargeError, sd.CLONE_TOO_LARGE),
-        (sd.CloneTreeUnreadableError, sd.CLONE_TREE_UNREADABLE),
+        (sd.GitTimeoutError, McpErrorType.CLONE_TIMED_OUT.value),
+        (sd.CloneTooLargeError, McpErrorType.CLONE_TOO_LARGE.value),
+        (sd.CloneTreeUnreadableError, McpErrorType.CLONE_TREE_UNREADABLE.value),
     ],
 )
 @pytest.mark.unit
@@ -740,7 +743,7 @@ def test_a_chunk_refused_by_a_change_gets_the_one_type_and_retry_rule(
         session.end_change()
 
     assert result["success"] is False, result
-    assert sessions.SESSION_WORKSPACE_BUSY == "session_workspace_busy"
+    assert McpErrorType.SESSION_WORKSPACE_BUSY.value == "session_workspace_busy"
     assert result["error_type"] == "session_workspace_busy"
     assert "again as it is" in str(refused.value)
     assert "out-of-order" in str(refused.value)

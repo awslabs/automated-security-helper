@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 import json
 import re
 from typing import Dict, List, Any, TYPE_CHECKING
@@ -12,7 +13,9 @@ from automated_security_helper.models.flat_vulnerability import (
     FlatVulnerability,
     _extract_snippet_from_message,
 )
+from automated_security_helper.models.vocab import Disposition
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.core.unified_metrics import get_unified_scanner_metrics
 from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
@@ -79,20 +82,25 @@ def coverage_shortfall_text(attempted: int | None, failed: int | None) -> str:
 
 
 def deduplicated_summary_text(summary: Dict[str, Any]) -> str | None:
-    """The line that gives the fold's counts, or None when the fold is off.
+    """The line that gives the fold's counts, or None when it has none to give.
 
-    One sentence for the HTML, Markdown and text reports. It follows the
-    per-scanner figures and says they are unchanged: the fold's counts sit
-    beside them, never in their place.
+    One sentence for the HTML, Markdown, text and Bedrock summary reports. It
+    follows the per-scanner figures and says they are unchanged: the fold's
+    counts sit beside them, never in their place. None when the fold is off,
+    and when it is on but folded nothing: "(0 duplicate rows folded)" told the
+    reader nothing the per-scanner counts did not. The folded count is of live
+    (unsuppressed) rows, which the sentence says, since the cards also fold
+    suppressed duplicates under a suppressed representative.
     """
     folded = summary.get("deduplicated")
-    if not folded:
+    if not folded or not folded["folded_rows"]:
         return None
     rows = folded["folded_rows"]
     noun = "row" if rows == 1 else "rows"
     return (
         f"Deduplicated: {folded['actionable']} actionable, {folded['active']} active "
-        f"({rows} duplicate {noun} folded into the finding that stands for it). "
+        f"({rows} live duplicate {noun} folded into the finding that stands for it; "
+        "suppressed duplicates fold apart). "
         "The per-scanner counts are unchanged."
     )
 
@@ -124,15 +132,57 @@ _SCAN_TIME_FORMATS = (
 #: A trailing ``+HH:MM`` or ``-HH:MM`` UTC offset.
 _UTC_OFFSET = re.compile(r"([+-])(\d{2}):(\d{2})$")
 
-#: The place of each severity in a findings list, most severe first. A severity
-#: this table does not name sorts after all of them.
-_SEVERITY_ORDER = SEVERITY_DISPLAY_ORDER
+#: The place of each severity in a findings list, most severe first: the
+#: ladder's display order, whose source (``vocab.Severity`` member order) is the
+#: same one the EnumColumn marker on ``FlatVulnerability.severity`` records, so
+#: it is not a local ladder copy -- and this module no longer keys into the
+#: frame marker at import time, where a marker move would have KeyError'd every
+#: builtin reporter through ``reporters/__init__``. A severity the ladder does
+#: not name sorts after all of them.
+_SEVERITY_ORDER = dict(SEVERITY_DISPLAY_ORDER)
 
 #: The keys of the summary's two disposition counts that are not severities. The
 #: emitter writes them and the text, markdown and HTML reporters read them back:
-#: spelled once here, so a rename reaches every consumer.
-SUMMARY_BELOW_THRESHOLD = "below_threshold"
-SUMMARY_POLICY_NOT_GATING = "policy_not_gating"
+#: derived from the ``Disposition`` members, so a rename reaches every consumer.
+SUMMARY_ACTIONABLE = Disposition.ACTIONABLE.summary_key
+SUMMARY_SUPPRESSED = Disposition.SUPPRESSED.summary_key
+SUMMARY_BELOW_THRESHOLD = Disposition.BELOW_THRESHOLD.summary_key
+SUMMARY_POLICY_NOT_GATING = Disposition.POLICY_NOT_GATING.summary_key
+
+
+class OutcomeTone(str, Enum):
+    """How serious the scan outcome reads, and how each report draws it.
+
+    The value is the summary's ``tone`` text and the report stylesheet's
+    ``outcome--<tone>`` class. Each member also answers its HTML masthead
+    symbol and its Markdown alert type, read from one table keyed by the member
+    (a module-level check refuses a member the table has no row for), so a
+    report looks both up on the member and a new tone cannot reach a table that
+    lacks a row for it.
+    """
+
+    DANGER = "danger"
+    WARNING = "warning"
+    SUCCESS = "success"
+
+    @property
+    def symbol(self) -> str:
+        return _TONE_PRESENTATION[self][0]
+
+    @property
+    def alert(self) -> str:
+        return _TONE_PRESENTATION[self][1]
+
+
+_TONE_PRESENTATION: Dict[OutcomeTone, tuple[str, str]] = {
+    OutcomeTone.DANGER: ("!", "CAUTION"),
+    OutcomeTone.WARNING: ("!", "WARNING"),
+    OutcomeTone.SUCCESS: ("\u2713", "TIP"),
+}
+if set(_TONE_PRESENTATION) != set(OutcomeTone):
+    raise RuntimeError("an OutcomeTone has no presentation row")
+
+
 _UNLISTED_SEVERITY_PLACE = len(_SEVERITY_ORDER)
 
 
@@ -243,6 +293,10 @@ class ReportContentEmitter:
             if self.fold
             else {}
         )
+        # The positions a fold prefers as a cluster's representative (the
+        # actionable rows), filled on first fold: grading needs the threshold
+        # tables read below.
+        self._fold_prefer: set[int] | None = None
         # Each project's recorded gate, read once: is_finding_actionable runs
         # several times per finding (summary, hotspots, cards, detailed
         # findings), and the project list is scanned here instead of there.
@@ -284,12 +338,31 @@ class ReportContentEmitter:
         that stands for others, keyed by ``id(row)``. With the fold off the rows
         come back as they are and there are no notes. Only the rows in *vulns*
         fold, so a view that is already filtered (the actionable findings) folds
-        what it holds; the note names those rows only.
+        what it holds; the note names those rows only. The representative of a
+        cluster with an actionable member in the view is actionable, so a
+        finding the gate fails the scan for is never hidden under a
+        below-threshold or not-gating card. *vulns* are this emitter's own
+        rows; a copied or foreign row is refused by name rather than raising a
+        bare KeyError.
         """
         if not self.fold:
             return list(vulns), {}
-        shown = [self._positions[id(vuln)] for vuln in vulns]
-        kept = fold_positions(self.flat_vulns, self._clusters, shown)
+        try:
+            shown = [self._positions[id(vuln)] for vuln in vulns]
+        except KeyError:
+            raise ValueError(
+                "fold_findings folds this emitter's own rows; a copied or "
+                "foreign row has no position in the model's finding list"
+            ) from None
+        if self._fold_prefer is None:
+            self._fold_prefer = {
+                position
+                for position, vuln in enumerate(self.flat_vulns)
+                if self.is_finding_actionable(vuln)
+            }
+        kept = fold_positions(
+            self.flat_vulns, self._clusters, shown, prefer=self._fold_prefer
+        )
         notes = {}
         for position, others in kept:
             note = provenance_note(provenance_entries(self.flat_vulns, others))
@@ -306,24 +379,34 @@ class ReportContentEmitter:
         actionable = [v for v in self.flat_vulns if self.is_finding_actionable(v)]
         return len(self.fold_findings(actionable)[0])
 
+    def policy_not_gating_count(self) -> int:
+        """How many rows the not-gating list draws from, folded like the list.
+
+        The "of M" of that section's "Showing N of M": the summary's own
+        not-gating figure counts every row unfolded, so against the folded list
+        it read as a truncation, and the note then sent the reader to an HTML
+        report that folds the same way.
+        """
+        left_out = [v for v in self.flat_vulns if self.is_policy_not_gating(v)]
+        return len(self.fold_findings(left_out)[0])
+
     def _deduplicated_counts(self) -> Dict[str, Any]:
         """The fold's counts, for the line beside the per-scanner counts.
 
         Active (unsuppressed) rows and actionable rows, each counting a cluster
-        once at its representative's severity, with how many rows were folded
-        away and into how many clusters. Counted over the finding rows, so they
-        sit beside the scanner figures and never replace them.
+        once, with how many live rows were folded away (the cards also fold
+        suppressed duplicates, which this count leaves out and the summary line
+        says so). Counted over the finding rows, so they sit beside the scanner
+        figures and never replace them. No per-severity breakdown: no reporter
+        rendered the one this used to carry, and a dict nothing reads is a
+        schema to keep for nobody.
         """
         live = [v for v in self.flat_vulns if not v.is_suppressed]
         active_rows, _ = self.fold_findings(live)
         actionable_rows, _ = self.fold_findings(
             [v for v in live if self.is_finding_actionable(v)]
         )
-        counts = dict.fromkeys(("critical", "high", "medium", "low", "info"), 0)
-        for vuln in active_rows:
-            _count_severity(counts, vuln.severity)
         return {
-            "counts": counts,
             "active": len(active_rows),
             "actionable": len(actionable_rows),
             "folded_rows": len(live) - len(active_rows),
@@ -372,8 +455,8 @@ class ReportContentEmitter:
             # scanner had run and been fast. A machine-readable export keeps
             # the recorded number.
             did_not_run = self._human_presentation and metrics.status in (
-                "SKIPPED",
-                "MISSING",
+                ScannerStatus.SKIPPED,
+                ScannerStatus.MISSING,
             )
             unrecorded = (
                 self._human_presentation
@@ -448,9 +531,9 @@ class ReportContentEmitter:
         groups: Dict[tuple[str, str], Dict[str, Any]] = {}
         for result in self.get_scanner_results():
             status = result["status"]
-            if status == "SKIPPED":
+            if status == ScannerStatus.SKIPPED:
                 reason = result["skipped_reason"] or result["missing_reason"]
-            elif status == "MISSING":
+            elif status == ScannerStatus.MISSING:
                 reason = result["missing_reason"] or result["skipped_reason"]
             else:
                 continue
@@ -507,8 +590,11 @@ class ReportContentEmitter:
         }
 
         def ran(result: Dict[str, Any]) -> bool:
-            return result["status"] in ("PASSED", "FAILED") or (
-                result["status"] == "ERROR"
+            return result["status"] in (
+                ScannerStatus.PASSED,
+                ScannerStatus.FAILED,
+            ) or (
+                result["status"] == ScannerStatus.ERROR
                 and (
                     result["scanner_name"] in ran_against_stale
                     or result["scanner_name"] in partial_scanners
@@ -524,7 +610,9 @@ class ReportContentEmitter:
         # A FAILED row is a scanner the resolver graded as carrying findings at
         # or above its threshold; the "Review required" title reads it below so
         # a run whose rows fail reads as such even when the counts disagree.
-        rows_failed = any(result["status"] == "FAILED" for result in results)
+        rows_failed = any(
+            result["status"] == ScannerStatus.FAILED for result in results
+        )
         if is_workspace_scan(self.model):
             # The scanner rows grade each finding by the scanner resolver's
             # answer, which with the merged file's missing ash_config is ASH's
@@ -567,11 +655,11 @@ class ReportContentEmitter:
                 # A workspace scan counted every finding above, these included.
                 actionable += flag_total(extras, "actionable")
         completed = sum(ran(result) for result in results)
-        skipped = sum(result["status"] == "SKIPPED" for result in results)
+        skipped = sum(result["status"] == ScannerStatus.SKIPPED for result in results)
         unavailable = [
             result["scanner_name"]
             for result in results
-            if result["status"] != "SKIPPED" and not ran(result)
+            if result["status"] != ScannerStatus.SKIPPED and not ran(result)
         ]
         stale = stale_content_databases(self.model)
         # A project skipped as no-changes was examined: nothing under it changed,
@@ -618,10 +706,12 @@ class ReportContentEmitter:
         # lesser of the two. The gate is read as the title reads it (the
         # recount, and the rows' FAILED status only outside a workspace), so a
         # project gated above ASH's default does not turn its gap into a danger.
-        gap_tone = "danger" if actionable or rows_failed else "warning"
+        gap_tone = (
+            OutcomeTone.DANGER if actionable or rows_failed else OutcomeTone.WARNING
+        )
 
         if not completed:
-            title, tone = "No scanners completed", "warning"
+            title, tone = "No scanners completed", OutcomeTone.WARNING
             description = "Scanner coverage is unavailable."
             next_step = (
                 "Check scanner results and dependencies, then run the scan again."
@@ -642,11 +732,11 @@ class ReportContentEmitter:
             description = f"{actionable} actionable {finding_label}. Content database freshness needs review."
             next_step = "Review the database notices, refresh the affected scanners, and scan again."
         elif actionable or rows_failed:
-            title, tone = "Review required", "danger"
+            title, tone = "Review required", OutcomeTone.DANGER
             description = f"{actionable} {finding_label} at or above the configured scanner thresholds."
             next_step = "Review findings by severity, then inspect the source."
         else:
-            title, tone = "No actionable findings", "success"
+            title, tone = "No actionable findings", OutcomeTone.SUCCESS
             if policy_not_gating:
                 # A finding the workspace policy added, in a project whose
                 # policy_scanners_gate is off, can sit above the threshold and
@@ -668,14 +758,14 @@ class ReportContentEmitter:
 
         summary = {
             "title": title,
-            "tone": tone,
+            "tone": tone.value,
             "description": description,
             "next_step": next_step,
-            "actionable": actionable,
+            SUMMARY_ACTIONABLE: actionable,
             "active": active,
             SUMMARY_BELOW_THRESHOLD: max(0, active - actionable - policy_not_gating),
             SUMMARY_POLICY_NOT_GATING: policy_not_gating,
-            "suppressed": suppressed,
+            SUMMARY_SUPPRESSED: suppressed,
             "counts": counts,
             "completed": completed,
             "scanners": len(results),
@@ -795,6 +885,21 @@ class ReportContentEmitter:
             vuln.workspace_project in self._policy_not_gating
             and self._is_policy_origin_finding(vuln)
         )
+
+    def disposition(self, vuln: FlatVulnerability) -> Disposition:
+        """What the report does with *vuln*: the one answer the cards show.
+
+        In the order the gates are asked: suppressed first, then left out of
+        the project's outcome by where it came from, then actionable, and
+        what remains is below the threshold.
+        """
+        if vuln.is_suppressed:
+            return Disposition.SUPPRESSED
+        if self.is_policy_not_gating(vuln):
+            return Disposition.POLICY_NOT_GATING
+        if self.is_finding_actionable(vuln):
+            return Disposition.ACTIONABLE
+        return Disposition.BELOW_THRESHOLD
 
     def _threshold_for(self, project: str | None, scanner_name: str) -> str:
         """The gate a finding of *scanner_name* in *project* is graded by.

@@ -8,7 +8,7 @@ A scan runs up to three phases, always in this order: convert, scan, and report.
 
 ```mermaid
 flowchart LR
-    src[Source directory] --> convert[Convert phase<br/>archive, jupyter]
+    src[Source directory] --> convert[Convert phase<br/>archive, jupyter, mcp_config, sdist-lock-harvester]
     convert --> conv[converted/ target]
     src --> scan
     conv --> scan[Scan phase<br/>scanners in parallel]
@@ -37,7 +37,7 @@ Where the scan runs is a separate choice, the run mode. `local` (the default) ru
 
 ## How scanners are selected
 
-ASH ships 16 built-in scanners, all enabled by default except semgrep and opengrep on Windows. For each scanner it knows about, ASH asks these questions in order and records the first answer that stops the scanner:
+ASH ships 17 built-in scanners, all enabled by default except semgrep and opengrep on Windows. For each scanner it knows about, ASH asks these questions in order and records the first answer that stops the scanner:
 
 1. Is it enabled? `scanners.<name>.enabled: false` in the config turns a scanner off. `--scanners` cannot turn it back on; `ash scan --config-overrides scanners.<name>.enabled=true` can.
 2. Was it selected? `--scanners` is an allowlist and `--exclude-scanners` removes names from it. A scanner that is not selected is recorded SKIPPED.
@@ -47,7 +47,7 @@ ASH ships 16 built-in scanners, all enabled by default except semgrep and opengr
 
 ASH asks the first four before it looks for the scanner's tool, so a scanner they leave out is SKIPPED whether or not its tool is installed.
 
-Scanners outside the built-in set, such as the [community scanners](../docs/plugins/community/index.md), are considered only when their plugin module is loaded; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do). The [scanner reference](../reference/scanners.md) lists every scanner, its tool, and its defaults; [Choose scanners](../how-to/choose-scanners.md) covers turning them on and off.
+Scanners outside the built-in set, such as the [alpha scanners](../docs/plugins/alpha/index.md), are considered only when their plugin module is loaded; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do). The [scanner reference](../reference/scanners.md) lists every scanner, its tool, and its defaults; [Choose scanners](../how-to/choose-scanners.md) covers turning them on and off.
 
 ## How scanners run
 
@@ -82,6 +82,8 @@ ASH does not deduplicate findings, within a scan or across shards. When two scan
 
 This has three consequences. Finding counts are counts of scanner results, not of distinct problems. A suppression that names a `rule_id` matches the rule IDs of whichever scanner uses that ID, so the same problem reported by another scanner under another ID stays unsuppressed; a suppression without `rule_id` covers every rule in its path. And the gate counts every unsuppressed duplicate. If two scanners overlap more than you want, turn one of them off; see [Choose scanners](../how-to/choose-scanners.md). [Suppressions, ignore paths, and scanner exclusions](suppressions.md) explains how suppressions match.
 
+For secret detections, the ASFF findings of the `asff` and `aws-security-hub` reporters say which of them are about one secret: they share an `ash/correlationId`, derived from where the secret is and not from who reported it. The findings stay separate. See [AWS reporters](../plugins/aws.md#aws-security-hub).
+
 Sharding splits a scan by scanner, not by file, so `ash merge` of the shards does not count any finding twice. See [Scale to large repositories](../how-to/scale-large-repos.md).
 
 ## Where the exit code comes from
@@ -90,4 +92,4 @@ ASH decides the exit code after the report phase, from the scanner rows and the 
 
 ## Plugins
 
-Scanners, reporters, and converters are all plugins, and so are event subscribers, which run code on scan events such as a phase starting or a scanner finishing. The built-in plugins live in one package that every scan loads. Other plugin packages, including the community scanners and the AWS reporters that ship with ASH, load in `ash scan` only when a plugin module list names them: `ash_plugin_modules` in the config, `--config-overrides`, `--ash-plugin-modules`, `ASH_PLUGIN_MODULES`, or the Python API's `ash_plugin_modules` argument. For the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do). A plugin module is imported into ASH's own process and runs with ASH's access, outside the scanner sandbox; only the subprocesses a scanner starts through ASH are sandboxed. Which config files may name which modules is part of the [trust model](trust-model.md). [Plugins](../plugins/index.md) explains the plugin model and how to write one.
+Scanners, reporters, and converters are all plugins, and so are event subscribers, which run code on scan events such as a phase starting or a scanner finishing. The built-in plugins live in one package that every scan loads. Other plugin packages, including the alpha scanners and the AWS reporters that ship with ASH, load in `ash scan` only when a plugin module list names them: `ash_plugin_modules` in the config, `--config-overrides`, `--ash-plugin-modules`, `ASH_PLUGIN_MODULES`, or the Python API's `ash_plugin_modules` argument. For the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do). A plugin module is imported into ASH's own process and runs with ASH's access, outside the scanner sandbox; only the subprocesses a scanner starts through ASH are sandboxed. Which config files may name which modules is part of the [trust model](trust-model.md). [Plugins](../plugins/index.md) explains the plugin model and how to write one.

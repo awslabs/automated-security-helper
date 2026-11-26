@@ -496,6 +496,25 @@ ALLOWLIST: tuple[Entry, ...] = (
         ),
     ),
     Entry(
+        file=".github/workflows/ash-image-scan-live-engine.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=live-engine-image-scan "
+            "path=${{ runner.temp }}/scan-engine"
+            "|${{ runner.temp }}/scan-registry"
+            "|${{ runner.temp }}/scan-engine.log"
+            "|${{ runner.temp }}/scan-registry.log"
+        ),
+        reason=(
+            "Debugging evidence from a failed run of the live-engine image scan "
+            "check (`if: failure()`, 7-day retention): the scan output and logs of "
+            "scanning a busybox-based fixture image built from this repository's "
+            "own public Dockerfile. Findings and logs about a public fixture, not a "
+            "wheel, image, binary or bundle this project distributes."
+        ),
+    ),
+    Entry(
         file=".github/workflows/ash-docs-ci-runners.yml",
         kind=KIND_UPLOAD,
         action=_UPLOAD,
@@ -520,6 +539,36 @@ ALLOWLIST: tuple[Entry, ...] = (
             "stays in the runner's temp directory, outside the uploaded one. "
             "Hidden files and secret-shaped names are left out, and the job holds "
             "no secret."
+        ),
+    ),
+    Entry(
+        file=".github/workflows/ash-scan-benchmark.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=scan-benchmark-${{ github.run_id }}"
+            "-attempt-${{ github.run_attempt }} "
+            "path=${{ runner.temp }}/out/benchmark.json"
+        ),
+        reason=(
+            "The scan-time benchmark job's record, kept 30 days: the wall times "
+            "of ASH's own scans of a generated fixture repository, per build and "
+            "scenario, with the exit codes and load averages of the runs. Timing "
+            "figures about public code, not a wheel, image, binary or bundle this "
+            "project distributes, and the job holds a read-only token and no "
+            "secret."
+        ),
+    ),
+    Entry(
+        file=".github/workflows/ash-scan-benchmark.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=("name=scan-benchmark-trend path=${{ runner.temp }}/out/trend.jsonl"),
+        reason=(
+            "The nightly run's trend file, kept 90 days: one JSON line per night "
+            "with the head build's min, median, mean and max scan times per "
+            "scenario, appended to the previous night's file. Timing figures "
+            "only, nothing this project distributes."
         ),
     ),
     Entry(
@@ -1438,7 +1487,7 @@ def self_test() -> int:
       - name: Build the image and export every layer
         env:
           ASH_GHA_BUILD_CACHE_EXPORT: max
-        run: ash build-image --no-run
+        run: ash container build --no-run
 """
     )
     credentials_export = dict(baseline)

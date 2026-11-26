@@ -20,7 +20,7 @@ never fail. The distinction is DECLARED, and the registry totality test
 every registered scanner without a declaration of its own.
 
 Why production code and not a tests-side table: ``ScannerPluginBase`` is a
-public plugin API with out-of-tree community members, which a tests-side table
+public plugin API with out-of-tree members, which a tests-side table
 could never enumerate; and the declaration has runtime consumers (generated
 per-scanner docs rows; reporters that can say "this scanner cannot carry
 resource ids" instead of implying absence is a gap).
@@ -39,6 +39,16 @@ Declaration rules, fail closed:
   instead, and the run that would settle it) -- the honest unconfirmed state is
   representable, never a guess, and never stretched into N/A, which the corpus
   gate reads as "a populated column is contamination".
+- A value the ADAPTER writes where the tool wrote none (a constant line 1 or
+  level, a path built from a package name) is classified by what a real read
+  shows, not by who wrote it: MAPPED, with the cell opening "(no native <x>)"
+  and naming the synthesis, when a committed capture or a tested adapter path
+  shows the value on every result; UNCONFIRMED only when no read shows what
+  the adapter writes. Where one adapter converts several native shapes (npm,
+  yarn, pnpm), the cell states each path's source, or says which path lacks
+  the value, rather than quoting the strongest path alone. An N/A cell whose
+  reason says UNCONFIRMED is the documented form for "the tool might carry it
+  and no read says"; the generated docs mark such a cell.
 - ``resource_id`` values obey the resource value test: a value is a resource
   id only when it names an infrastructure/deployable resource (a terraform
   address, a CloudFormation logical id, a k8s object). Secret hashes, file

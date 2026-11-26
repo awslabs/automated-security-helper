@@ -13,8 +13,8 @@ from automated_security_helper.utils.scan_results_file import parse_full_scan_re
 pytestmark = pytest.mark.unit
 
 
-def finding(rule, *, severity="HIGH", line=10, path="src/app.py"):
-    return {
+def finding(rule, *, severity="HIGH", line=10, path="src/app.py", suppressed=False):
+    result = {
         "ruleId": rule,
         "message": {"text": "Snippet that must not appear in the trend"},
         "properties": {"issue_severity": severity},
@@ -27,6 +27,9 @@ def finding(rule, *, severity="HIGH", line=10, path="src/app.py"):
             }
         ],
     }
+    if suppressed:
+        result["suppressions"] = [{"kind": "inSource"}]
+    return result
 
 
 def results(*findings, second=1, expected=("bandit",), project="project", **metadata):
@@ -58,7 +61,7 @@ def write(tmp_path, filename, payload):
 def trend(tmp_path, *payloads, json_output=True, extra=()):
     files = [write(tmp_path, f"run{i}.json", p) for i, p in enumerate(payloads)]
     options = ["--format", "json"] if json_output else []
-    return CliRunner().invoke(app, ["trend", *files, *options, *extra])
+    return CliRunner().invoke(app, ["results", "trend", *files, *options, *extra])
 
 
 def three_runs():
@@ -80,7 +83,7 @@ def test_trend_json_counts_each_boundary(tmp_path):
     assert response.stderr == ""
     assert "Snippet that must not appear" not in response.stdout
     payload = json.loads(response.stdout)
-    assert payload["trend_version"] == 1
+    assert payload["trend_version"] == 2
     assert [run["findings"] for run in payload["runs"]] == [2, 2, 3]
     run1 = {
         (r["severity"], r["status"]): r["count"]
@@ -106,12 +109,53 @@ def test_files_are_put_in_chronological_order_by_report_id(tmp_path):
     assert [run["findings"] for run in payload["runs"]] == [2, 2, 3]
 
 
+def test_mixed_prefix_ids_order_by_their_stamp_not_their_prefix(tmp_path):
+    runs = three_runs()
+    # A raw-string sort puts the oldest run last on its prefix alone.
+    runs[0]["metadata"]["report_id"] = "ZSH-20260101000001-0123456789ab"
+    response = trend(tmp_path, runs[2], runs[0], runs[1])
+    assert response.exit_code == 0, response.output
+    payload = json.loads(response.stdout)
+    assert [run["findings"] for run in payload["runs"]] == [2, 2, 3]
+    assert payload["ordered_by"] == "report_id"
+
+
+def test_a_file_without_a_timestamped_id_keeps_the_given_order_and_says_so(tmp_path):
+    runs = three_runs()
+    runs[0]["metadata"]["report_id"] = "hand-edited"
+    response = trend(tmp_path, runs[2], runs[0], runs[1])
+    assert response.exit_code == 0, response.output
+    payload = json.loads(response.stdout)
+    assert payload["ordered_by"] == "given"
+    assert [run["findings"] for run in payload["runs"]] == [3, 2, 2]
+    text = trend(tmp_path, runs[2], runs[0], runs[1], json_output=False)
+    assert "in the order given" in text.stdout
+    assert "(oldest first)" not in text.stdout
+
+
+def test_severity_and_suppression_changes_render_as_diff_words(tmp_path):
+    before = results(finding("B101"), finding("B102", line=20), second=1)
+    after = results(
+        finding("B101", severity="LOW"),
+        finding("B102", line=20, suppressed=True),
+        second=2,
+    )
+    response = trend(tmp_path, before, after, json_output=False)
+    assert response.exit_code == 0, response.output
+    assert "Changes while carried: 2" in response.stdout
+    assert "yes" in response.stdout
+    assert "True" not in response.stdout
+
+
 def test_text_output_names_the_counts_and_the_caveat(tmp_path):
     response = trend(tmp_path, *three_runs(), json_output=False)
     assert response.exit_code == 0, response.output
-    assert "Run 1: New: 1 | Carried: 1 | Fixed: 1" in response.stdout
-    assert "Run 2: New: 1 | Carried: 2 | Fixed: 0" in response.stdout
-    assert "Fixed means not observed, not confirmed fixed." in response.stdout
+    assert "Run 1: New: 1 | Carried: 1 | Fixed: 1 | Unobserved: 0" in response.stdout
+    assert "Run 2: New: 1 | Carried: 2 | Fixed: 0 | Unobserved: 0" in response.stdout
+    assert (
+        "Fixed means the scanner evaluated the run and did not report it"
+        in response.stdout
+    )
     assert "B102" in response.stdout
     assert "Snippet that must not appear" not in response.stdout
 
@@ -138,7 +182,7 @@ def test_a_removed_scanner_labels_the_boundary_not_like_for_like(tmp_path):
 )
 def test_too_few_inputs_are_refused(tmp_path, arguments, reason):
     files = [write(tmp_path, "only.json", results(second=1)) for _ in arguments]
-    response = CliRunner().invoke(app, ["trend", *files])
+    response = CliRunner().invoke(app, ["results", "trend", *files])
     assert response.exit_code == 1
     assert reason in response.stderr
 
@@ -172,14 +216,16 @@ def test_a_file_that_is_not_results_is_refused(tmp_path):
     good = write(tmp_path, "good.json", results(second=1))
     bad = tmp_path / "bad.json"
     bad.write_text("{not json", encoding="utf-8")
-    response = CliRunner().invoke(app, ["trend", good, str(bad)])
+    response = CliRunner().invoke(app, ["results", "trend", good, str(bad)])
     assert response.exit_code == 1
     assert "bad.json" in response.stderr
 
 
 def test_files_and_history_together_are_refused(tmp_path):
     files = [write(tmp_path, f"r{i}.json", results(second=i + 1)) for i in range(2)]
-    response = CliRunner().invoke(app, ["trend", *files, "--history", str(tmp_path)])
+    response = CliRunner().invoke(
+        app, ["results", "trend", *files, "--history", str(tmp_path)]
+    )
     assert response.exit_code == 1
     assert "not both" in response.stderr
 
@@ -205,7 +251,7 @@ def record(tmp_path, payloads):
 def test_history_is_read_from_an_output_directory(tmp_path):
     record(tmp_path, three_runs())
     response = CliRunner().invoke(
-        app, ["trend", "--history", str(tmp_path), "--format", "json"]
+        app, ["results", "trend", "--history", str(tmp_path), "--format", "json"]
     )
     assert response.exit_code == 0, response.output
     payload = json.loads(response.stdout)
@@ -220,7 +266,17 @@ def test_history_and_files_give_the_same_series(tmp_path):
     from_files = json.loads(trend(tmp_path, *runs).stdout)
     from_history = json.loads(
         CliRunner()
-        .invoke(app, ["trend", "--history", str(tmp_path / "out"), "--format", "json"])
+        .invoke(
+            app,
+            [
+                "results",
+                "trend",
+                "--history",
+                str(tmp_path / "out"),
+                "--format",
+                "json",
+            ],
+        )
         .stdout
     )
     assert from_history["series"] == from_files["series"]
@@ -247,22 +303,62 @@ def test_a_tampered_record_is_skipped_and_the_trend_still_runs(tmp_path):
         encoding="utf-8",
     )
     response = CliRunner().invoke(
-        app, ["trend", "--history", str(tmp_path), "--format", "json"]
+        app, ["results", "trend", "--history", str(tmp_path), "--format", "json"]
     )
     assert response.exit_code == 0, response.output
     payload = json.loads(response.stdout)
     assert [run["findings"] for run in payload["runs"]] == [0, 1]
     assert tampered_id not in {run["label"] for run in payload["runs"]}
+    # The skip is disclosed: a boundary that spans the skipped record is not
+    # between consecutive runs, which a JSON consumer can now see.
+    assert payload["unreadable_records"] == 1
+    text = (
+        CliRunner().invoke(app, ["results", "trend", "--history", str(tmp_path)]).stdout
+    )
+    assert "1 recorded run(s) were unreadable" in text
+
+
+def test_a_foreign_record_cuts_the_history_to_one_series(tmp_path):
+    record(
+        tmp_path,
+        [
+            results(second=1, project="other"),
+            results(second=2),
+            results(finding("B101"), second=3),
+        ],
+    )
+    response = CliRunner().invoke(
+        app, ["results", "trend", "--history", str(tmp_path), "--format", "json"]
+    )
+    assert response.exit_code == 0, response.output
+    payload = json.loads(response.stdout)
+    assert payload["history_cut"] == ["ASH-20260101000001-0123456789ab"]
+    assert [run["findings"] for run in payload["runs"]] == [0, 1]
+    text = (
+        CliRunner().invoke(app, ["results", "trend", "--history", str(tmp_path)]).stdout
+    )
+    assert "not part of one series with the newest" in text
 
 
 def test_an_empty_history_is_refused(tmp_path):
-    response = CliRunner().invoke(app, ["trend", "--history", str(tmp_path)])
+    response = CliRunner().invoke(app, ["results", "trend", "--history", str(tmp_path)])
     assert response.exit_code == 1
-    assert "no readable run records" in response.stderr
+    assert "no run records" in response.stderr
+
+
+def test_a_history_whose_records_are_all_unreadable_says_so(tmp_path):
+    directory = tmp_path / "history"
+    directory.mkdir()
+    (directory / "ASH-20260101000001-0123456789ab.json").write_text(
+        "{not json", encoding="utf-8"
+    )
+    response = CliRunner().invoke(app, ["results", "trend", "--history", str(tmp_path)])
+    assert response.exit_code == 1
+    assert "none of the 1 run records" in response.stderr
 
 
 def test_a_single_recorded_run_is_refused(tmp_path):
     record(tmp_path, [results(second=1)])
-    response = CliRunner().invoke(app, ["trend", "--history", str(tmp_path)])
+    response = CliRunner().invoke(app, ["results", "trend", "--history", str(tmp_path)])
     assert response.exit_code == 1
     assert "at least two runs" in response.stderr

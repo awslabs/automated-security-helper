@@ -110,7 +110,7 @@
                 ++ old.optional-dependencies.sarif;
             })))
           pkgs.cfn-nag
-          # community scanner; runs when its module is listed. nixpkgs ships 1.8.1 at the
+          # alpha scanner; runs when its module is listed. nixpkgs ships 1.8.1 at the
           # locked revision (34ab9907, checked 2026-11-25 in pkgs/by-name/be/betterleaks),
           # older than the 1.10.1 the image and `ash dependencies install` pin, so this
           # mode runs the nixpkgs build until a flake.lock bump reaches 1.10.x; compare
@@ -121,7 +121,7 @@
           (cfnGuardFor system) # its rules are seeded by the shellHook below
           pkgs.gitleaks
           pkgs.grype
-          pkgs.hadolint # community scanner; runs when its module is listed
+          pkgs.hadolint # alpha scanner; runs when its module is listed
           pkgs.nodejs # provides `npm audit`
           semgrep
           pkgs.syft

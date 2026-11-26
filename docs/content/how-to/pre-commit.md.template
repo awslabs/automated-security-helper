@@ -44,7 +44,7 @@ writes a `.ash/.gitignore` that ignores it, or add the line yourself:
 .ash/ash_output/
 ```
 
-Do not ignore all of `.ash/`: an ASH config file can live there, as `.ash/.ash.yaml`.
+Do not ignore all of `.ash/`: an ASH config file at a legacy location, such as `.ash/.ash.yaml`, can still live there.
 
 ## What the hook runs {#behavior}
 
@@ -236,6 +236,18 @@ while the host was busiest, so do not read that as size making a run cheaper. Th
 spread between the three runs of a row was at most about 3 seconds. Rerun the script on your own
 machine for figures that mean something there.
 
+The table is refreshed from a benchmark job rather than by hand. The workflow
+`ash-scan-benchmark.yml` installs the commit under test, its parent commit and the latest
+release into three environments on one runner and alternates timed runs of `ash --version`,
+a staged scan of one `.py` file, a staged scan of one CI config file and a scan of the whole
+fixture. It prints the minimum, median, mean and maximum of five runs per build in the job
+summary, with the commit under test's difference from each of the other two, and a nightly
+run on `main` appends all three to a trend artifact. The job is informational: it is not a required check,
+and a warning in its summary never fails a build. The rows above were timed by hand, with
+a staged file that held no finding; the script now stages a file with a planted finding,
+so refresh the table from the job's figures, or from the script on a quiet host, and do
+not mix the two.
+
 For scale, `ash --version` alone takes about 0.2 seconds on that host. What is
 left of the fastest runs above is the floor every scan pays: starting the interpreter,
 importing ASH, loading the configuration, and setting up the scanners. A `--staged` run
@@ -357,7 +369,7 @@ global_settings:
       reason: pre-commit autoupdate --freeze pins hooks to commit SHAs
 ```
 
-Put it in your ASH config file, or, if the repository has none, in a new `.ashrc.yaml` at
+Put it in your ASH config file, or, if the repository has none, in a new `.ash.yaml` at
 its root. [Suppress findings](suppress-findings.md) covers expiration dates and narrower
 matches.
 
