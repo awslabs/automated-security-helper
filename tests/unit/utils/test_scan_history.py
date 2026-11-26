@@ -481,19 +481,19 @@ def test_a_cancel_after_the_record_was_written_takes_the_record_back(tmp_path):
     # The CLI's last cancel check lands after the orchestrator recorded the
     # run; the record must not say a cancelled run completed.
     from automated_security_helper.interactions.run_ash_scan import (
-        _discard_history_record,
+        discard_history_record,
     )
 
     run = results(finding("B101"), rid=report_id(1))
     scan_history.write_run_record(run, tmp_path, keep_runs=50)
-    _discard_history_record(run, tmp_path)
+    discard_history_record(run, tmp_path)
     assert list(scan_history.record_names(tmp_path)) == []
     # The dict form a non-model run carries, and shapes that name no record.
     scan_history.write_run_record(run, tmp_path, keep_runs=50)
-    _discard_history_record({"metadata": {"report_id": report_id(1)}}, tmp_path)
+    discard_history_record({"metadata": {"report_id": report_id(1)}}, tmp_path)
     assert list(scan_history.record_names(tmp_path)) == []
-    _discard_history_record(None, tmp_path)
-    _discard_history_record({"metadata": "text"}, tmp_path)
+    discard_history_record(None, tmp_path)
+    discard_history_record({"metadata": "text"}, tmp_path)
 
 
 def test_the_local_scan_takes_the_record_back_when_the_last_cancel_check_fires(
