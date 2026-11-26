@@ -34,17 +34,30 @@
 #   check is gated on the recorded span still being one of the symbol's spans,
 #   so later edits to a listed file relax that entry's check instead of
 #   failing it; `span_at_migration` records the verification at the migration
-#   tip (origin/main b7b85bad79561524ea931ec9374b30a71dc805fb).
+#   tip (origin/main b7b85bad79561524ea931ec9374b30a71dc805fb), except on a
+#   row that carries `span_measured_at`, which names the commit that row's span
+#   (and `flagged_line`) were measured at instead.
 # - scripts/verify_symbol_suppressions_extra.py (the CI control, run by the
 #   symbols-extra-control job in .github/workflows/ash-repo-scan.yml) reads the
 #   `symbol` rows of this record and builds a suppression from each row's
 #   rule_id, path and symbol (it does not read the two configs). Without the
-#   `symbols` extra every row, probed at the line its old pin named, must match
-#   nothing, and the same row with its symbol removed must match (so only the
-#   symbol clause rejects it); with the extra, every row probed at the first
-#   line of its symbol's current definition must match. Rows marked
-#   `old_pin_stale_at_migration` have an old line outside their definition,
-#   which is why the fail-closed probe needs that second, symbol-less check.
+#   `symbols` extra every row, probed at a line known to sit inside its
+#   definition (its `flagged_line`, else its `old_line_start`, which must lie
+#   inside `span_at_migration` or the row is refused), must match nothing, and
+#   the same row with its symbol removed must match (so only the symbol clause
+#   rejects it); with the extra, every row probed at the first line of its
+#   symbol's current definition must match.
+# - Rows marked `old_pin_stale_at_migration` have an old line outside their
+#   definition, so they also carry `flagged_line`: the line their flagged code
+#   really sits on, inside `span_at_migration`, measured in the same tree as
+#   that span. The CI control probes there, and the per-entry oracle and the
+#   innermost-definition check hold that line, not the stale one, inside the
+#   span.
+# - `kept` lists the line pins that stayed, by rule, path and lines. The
+#   agreement test requires each one to be a line pin in the config it names, so
+#   a pin that moved (or a path that was renamed) fails there until the row is
+#   re-measured; a row that was re-measured against a later commit than the
+#   migration says so in `remeasured_at`.
 #
 # Maintenance
 # -----------
@@ -303,10 +316,16 @@ entries:
   # shell=True call anywhere in the install loop. The call that forwards the
   # declared shell flag now lives in its own helper, and the entry names that.
   old_pin_stale_at_migration: true
+  # This row's span and flagged_line were re-measured in one read of main
+  # e19cc22a5d6 (the span first recorded here, 972-979, came from a later
+  # snapshot than the migration tip the header names); the old pin above is in
+  # the migration tip's numbering and is not compared with either.
+  span_measured_at: e19cc22a5d6
+  flagged_line: 989
   symbol: _run_declared_install_command
   span_at_migration:
-  - 972
-  - 979
+  - 982
+  - 989
 - config: .ash.yaml
   rule_id: B608
   path: automated_security_helper/utils/content_db_refresh.py
@@ -587,20 +606,23 @@ kept:
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-  line_start: 141
-  line_end: 141
+  line_start: 145
+  line_end: 145
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-  line_start: 144
-  line_end: 144
+  line_start: 148
+  line_end: 148
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-  line_start: 171
-  line_end: 171
+  line_start: 175
+  line_end: 175
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash.yaml
   rule_id: threat-filesystem-read
@@ -611,8 +633,9 @@ kept:
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: scripts/generate_plugin_data_partial.py
-  line_start: 185
-  line_end: 185
+  line_start: 187
+  line_end: 187
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash.yaml
   rule_id: B104
@@ -635,20 +658,25 @@ kept:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: automated_security_helper/config/tool_config_trust.py
-  line_start: 122
-  line_end: 122
-  kept_because: module-level code; the Python grammar addresses class and function definitions only
+  line_start: 139
+  line_end: 139
+  remeasured_at: e19cc22a5d6
+  kept_because: module-level code; the Python grammar addresses class and function definitions only.
+    The migration kept two pins here (lines 116 and 122); the config now carries one, the
+    detect-secrets baseline_file row, so this row replaces both
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: Dockerfile
-  line_start: 812
-  line_end: 814
+  line_start: 823
+  line_end: 825
+  remeasured_at: e19cc22a5d6
   kept_because: no symbol grammar for this file type
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: automated_security_helper/assets/Dockerfile
-  line_start: 812
-  line_end: 814
+  line_start: 823
+  line_end: 825
+  remeasured_at: e19cc22a5d6
   kept_because: no symbol grammar for this file type
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
@@ -666,12 +694,6 @@ kept:
     coverage would widen against the entry's recorded one-line intent
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
-  path: automated_security_helper/config/tool_config_trust.py
-  line_start: 116
-  line_end: 116
-  kept_because: module-level code; the Python grammar addresses class and function definitions only
-- config: .ash/.ash_alpha_plugins.yaml
-  rule_id: API_KEY_OR_SECRET
   path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret-config.yaml
   line_start: 325
   line_end: 325
@@ -684,18 +706,22 @@ kept:
   kept_because: no symbol grammar for this file type
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
-  path: .ash/.ash.yaml
-  line_start: 1050
-  line_end: 1050
-  kept_because: no symbol grammar for this file type; re-pinned by this migration because the target file's
-    lines moved
+  path: .ash.yaml
+  line_start: 774
+  line_end: 774
+  remeasured_at: e19cc22a5d6
+  kept_because: no symbol grammar for this file type; the target file is now the root .ash.yaml (it was
+    .ash/.ash.yaml, where this pin sat at line 1050), and its lines moved again, so the pin was
+    re-measured at main e19cc22a5d6
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
-  path: .ash/.ash.yaml
-  line_start: 1297
-  line_end: 1297
-  kept_because: no symbol grammar for this file type; re-pinned by this migration because the target file's
-    lines moved
+  path: .ash.yaml
+  line_start: 1021
+  line_end: 1021
+  remeasured_at: e19cc22a5d6
+  kept_because: no symbol grammar for this file type; the target file is now the root .ash.yaml (it was
+    .ash/.ash.yaml, where this pin sat at line 1297), and its lines moved again, so the pin was
+    re-measured at main e19cc22a5d6
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: .github/workflows/ash-repo-docs.yml
@@ -712,14 +738,16 @@ kept:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: automated_security_helper/utils/tool_downloads.py
-  line_start: 398
-  line_end: 538
+  line_start: 388
+  line_end: 528
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: automated_security_helper/utils/tool_downloads.py
-  line_start: 1012
-  line_end: 1057
+  line_start: 1002
+  line_end: 1047
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: B311
@@ -743,20 +771,23 @@ kept:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-  line_start: 141
-  line_end: 141
+  line_start: 145
+  line_end: 145
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-  line_start: 144
-  line_end: 144
+  line_start: 148
+  line_end: 148
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-  line_start: 171
-  line_end: 171
+  line_start: 175
+  line_end: 175
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
@@ -767,6 +798,7 @@ kept:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: scripts/generate_plugin_data_partial.py
-  line_start: 185
-  line_end: 185
+  line_start: 187
+  line_end: 187
+  remeasured_at: e19cc22a5d6
   kept_because: module-level code; the Python grammar addresses class and function definitions only
