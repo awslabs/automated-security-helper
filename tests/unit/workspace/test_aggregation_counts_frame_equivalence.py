@@ -45,6 +45,8 @@ from tests.unit.workspace.test_workspace_reporting import _plan
 
 pytestmark = pytest.mark.unit
 
+_REAL_READER = result_is_suppressed
+
 PER_SCANNER_DICTS = (
     "_scanner_display",
     "_scanner_status",
@@ -453,3 +455,61 @@ def test_the_cases_exercise_what_they_claim(tmp_path):
     assert dict(quiet["dicts"]["_scanner_findings"]) == {"loud": 2}
     assert dict(quiet["dicts"]["_scanner_status"]) == {"quiet": None, "loud": None}
     assert dict(quiet["dicts"]["_scanner_actionable"]) == {"quiet": 0, "loud": 0}
+
+
+class _Boom(RuntimeError):
+    pass
+
+
+def _raising_after(rows: int):
+    """A stand-in for the suppression reader that raises on its (rows + 1)th call.
+
+    Both readers the loop calls are total over a mapping, so only a stand-in
+    can make one raise mid-run."""
+    seen = {"n": 0}
+
+    def reader(result_in_hand: Mapping[str, Any]) -> bool:
+        if seen["n"] == rows:
+            raise _Boom("reader failed")
+        seen["n"] += 1
+        return _REAL_READER(result_in_hand)
+
+    return reader
+
+
+def test_a_reader_that_raises_leaves_earlier_rows_unapplied(tmp_path, monkeypatch):
+    """The one deliberate difference from the loop.
+
+    The loop applied each row's status and finding update as it went, so a
+    reader that raised at row k left rows 0..k-1 counted. The counts are now
+    folded in after the last reading, so nothing of the run is applied. The
+    aggregator is a local of ``execute_workspace`` and nothing catches a raise
+    from ``add``, so no caller reads that state; both sides raise the same
+    error and the host-side reading (the first spelling of each name) is the
+    same."""
+    projects = one([result("a"), result("A"), result("a"), result("b")])
+
+    outcomes = {}
+    # The oracle reads the name this module imported; the aggregator reads its
+    # own module's.
+    for cls, module in (
+        (OracleAggregator, __name__),
+        (WorkspaceAggregator, "automated_security_helper.workspace.aggregation"),
+    ):
+        with monkeypatch.context() as patch:
+            patch.setattr(f"{module}.result_is_suppressed", _raising_after(2))
+            plan = _plan(tmp_path / "ws", "web")
+            aggregator = cls(plan=plan, output_dir=tmp_path / f"out-{cls.__name__}")
+            with pytest.raises(_Boom):
+                _add_all(aggregator, copy.deepcopy(projects))
+        outcomes[cls] = aggregator
+
+    oracle = outcomes[OracleAggregator]
+    folded = outcomes[WorkspaceAggregator]
+    assert dict(oracle._scanner_findings) == {"a": 2}
+    assert dict(oracle._scanner_status) == {"a": None}
+    assert dict(folded._scanner_findings) == {}
+    assert dict(folded._scanner_status) == {}
+    assert list(oracle._scanner_display.items()) == list(
+        folded._scanner_display.items()
+    )

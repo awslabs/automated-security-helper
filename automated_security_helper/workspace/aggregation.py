@@ -1438,7 +1438,23 @@ class WorkspaceAggregator:
 
         # Credit findings to the scanner that produced them, so the rollup sums
         # what the per-project files say rather than re-deriving it.
+        #
+        # The per-result readings (the scanner's folded name, the suppression
+        # state) stay on the host, in row order; the per-scanner counts are one
+        # frame of (name, counted) and two ordered counts over it. The partition
+        # of the results by scanner is read only by the fallback below, so it is
+        # built only when that branch is armed.
+        import polars as pl
+
+        from automated_security_helper.utils.frame_ops import ordered_counts
+        from automated_security_helper.utils.frame_text import unwire, wire
+
+        fallback = outcome.carried_scanner_actionable_counts is None and bool(
+            outcome.actionable_finding_count
+        )
         by_scanner: Dict[str, List[Mapping[str, Any]]] = {}
+        wired_names: List[str] = []
+        counted_flags: List[bool] = []
         for result in rebased.get("results") or []:
             if not isinstance(result, Mapping):
                 continue
@@ -1448,11 +1464,26 @@ class WorkspaceAggregator:
             # scanner's findings and its actionable count sat under two rows.
             scanner = result_scanner_name(result)
             name = self._rollup_key(scanner or UNATTRIBUTED_SCANNER)
-            by_scanner.setdefault(name, []).append(result)
-            self._scanner_status.setdefault(name, None)
-            if result_is_suppressed(result):
-                continue
-            self._scanner_findings[name] = self._scanner_findings.get(name, 0) + 1
+            if fallback:
+                by_scanner.setdefault(name, []).append(result)
+            wired_names.append(wire(name))
+            counted_flags.append(not result_is_suppressed(result))
+        if wired_names:
+            frame = pl.DataFrame(
+                {"name": wired_names, "counted": counted_flags},
+                schema={"name": pl.String, "counted": pl.Boolean},
+            )
+            for wired, _ in ordered_counts(frame, "name").iter_rows():
+                name = unwire(wired)
+                self._scanner_status.setdefault(name, None)
+                self._scanner_actionable.setdefault(name, 0)
+            for wired, found in ordered_counts(
+                frame.filter(pl.col("counted")), "name"
+            ).iter_rows():
+                name = unwire(wired)
+                self._scanner_findings[name] = (
+                    self._scanner_findings.get(name, 0) + found
+                )
 
         # Actionable counts, per scanner: the split the project's own verdict
         # carried, when it carried one. The verdict graded each finding against
@@ -1468,8 +1499,6 @@ class WorkspaceAggregator:
         # the carried split already is: that is how the --min-severity gate reaches
         # this layer, since it is a whole-scan switch in _compute_exit_code rather
         # than a per-finding filter.
-        for name in by_scanner:
-            self._scanner_actionable.setdefault(name, 0)
         carried = outcome.carried_scanner_actionable_counts
         if carried is not None:
             if outcome.actionable_finding_count:
