@@ -28,8 +28,9 @@ pytestmark = pytest.mark.unit
 
 def _resolve(tmp_path: Path, operator_text: str, selected_text: str):
     source = tmp_path / "repo"
-    (source / ".ash").mkdir(parents=True)
-    selected = source / ".ash" / ".ash.yaml"
+    source.mkdir(parents=True)
+    # The selected config sits inside the scanned tree at the canonical location.
+    selected = source / ".ash.yaml"
     selected.write_text(selected_text)
     operator = tmp_path / "operator.yaml"
     operator.write_text(operator_text)

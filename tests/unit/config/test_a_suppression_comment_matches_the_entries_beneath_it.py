@@ -24,7 +24,9 @@ What this checks
   a comment that says one entry carries no expiration has at least one permanent
   entry.
 * Every ``tests/...py`` path a config names, in a comment or in a reason, is a file in
-  the repository.
+  the repository. A path is read with the directories before its ``tests/`` (a
+  subproject's own tests, such as ``deploy/kubernetes-operator/tests/...``), so it is
+  checked as written rather than as a ``tests/`` path at the root.
 """
 
 import re
@@ -54,7 +56,9 @@ _HEADER_DATE = re.compile(r"\(expires (?P<date>\d{4}-\d{2}-\d{2})\)")
 # expiration") promises at least one permanent entry.
 _NO_EXPIRATION_ALL = re.compile(r"carry no expir|never expire\b|no expiry")
 _NO_EXPIRATION_SOME = re.compile(r"carries no expir|never expires\b")
-_TEST_PATH = re.compile(r"tests/[A-Za-z0-9_./-]+\.py")
+# Any directories before tests/ belong to the path: the operator's comments name
+# deploy/kubernetes-operator/tests/test_manifests.py, which is not tests/test_manifests.py.
+_TEST_PATH = re.compile(r"(?:[A-Za-z0-9_.-]+/)*tests/[A-Za-z0-9_./-]+\.py")
 _PATH_KEY = re.compile(r"^\s*(?:-\s+)?path:")
 
 
@@ -375,3 +379,17 @@ def test_the_path_reader_finds_a_test_named_in_prose_and_not_an_entrys_own_path(
         "    - path: tests/own/second_entry.py\n"
     )
     assert _named_test_paths(text) == ["tests/unit/config/test_x.py", "tests/y/z.py"]
+
+
+def test_the_path_reader_keeps_the_directories_before_tests() -> None:
+    """A subproject's test is named by its repository path. Read from ``tests/`` on,
+    the operator's ``deploy/kubernetes-operator/tests/test_manifests.py`` would be
+    checked as a root ``tests/test_manifests.py``, a file the tree never had."""
+    text = (
+        "    # deploy/kubernetes-operator/tests/test_manifests.py pins the bind.\n"
+        "      reason: tests/unit/config/test_x.py fails if the row moves.\n"
+    )
+    assert _named_test_paths(text) == [
+        "deploy/kubernetes-operator/tests/test_manifests.py",
+        "tests/unit/config/test_x.py",
+    ]

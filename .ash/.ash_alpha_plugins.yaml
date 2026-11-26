@@ -1893,9 +1893,9 @@ global_settings:
         False positive. The line passes a placeholder string as the token the test
         writes into a temporary service account directory. It is a fixture value,
         not a credential.
-    # trivy-repo's RBAC rules on the operator's namespaced Role. Each verb below
-    # is the operator's job, and tests/test_least_privilege.py pins the Role rule
-    # for rule, so widening any of them fails there first.
+    # trivy-repo's RBAC rules on the operator's namespaced Role. Each verb below is
+    # the operator's job, and deploy/kubernetes-operator/tests/test_least_privilege.py
+    # pins the Role rule for rule, so widening any of them fails there first.
     - rule_id: KSV-0048
       path: deploy/kubernetes-operator/manifests/rbac.yaml
       reason: >-

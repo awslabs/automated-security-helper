@@ -8,9 +8,11 @@ were narrowed or removed by fixing the source; this test stops the shape coming
 back.
 
 An entry counts as PINNED when its path is a literal file and it carries a
-``symbol``, a package field (``package_name``, ``package_version``,
-``package_path``) that is not just ``*``, or a line range (``line_start`` or
-``line_end``) that leaves part of the file out. Anything else is UNPINNED: a
+``symbol``, a ``resource_id`` that is not just ``*`` (the one-resource scope main's
+symbol migration writes for CloudFormation templates), a package field
+(``package_name``, ``package_version``, ``package_path``) that is not just ``*``,
+or a line range (``line_start`` or ``line_end``) that leaves part of the file
+out. Anything else is UNPINNED: a
 whole-file entry, or a glob, which is whole-file over many files. A line range
 on a glob is still unpinned, because it applies to the same lines of every file
 the glob matches. So is a range that covers the whole file, such as
@@ -64,6 +66,7 @@ SCOPE_FIELDS = (
     "line_start",
     "line_end",
     "symbol",
+    "resource_id",
     "package_name",
     "package_version",
     "package_path",
@@ -83,11 +86,17 @@ ALLOWLIST: dict[tuple[str, str | None, str], str] = {}
 FROZEN_SIZES = {
     # 426: the merge of origin/main at ae28f8411ce added six whole-file entries main
     # wrote for its express tests since 617e17c3629 (the baseline's last block).
-    "main": {".ash/.ash.yaml": 426, ".ash/.ash_community_plugins.yaml": 227},
-    "pre_guard": {".ash/.ash.yaml": 27, ".ash/.ash_community_plugins.yaml": 8},
+    # 454 and 201: the merge of origin/main c15148192f4 dropped the keys main pinned or
+    # removed (1 and 28) and added the whole-file and glob entries main wrote since
+    # ae28f8411ce (29 and 2), keyed by main's new config paths (#1112, #1044).
+    "main": {".ash.yaml": 454, ".ash/.ash_alpha_plugins.yaml": 201},
+    "pre_guard": {".ash.yaml": 27, ".ash/.ash_alpha_plugins.yaml": 8},
 }
 
 PACKAGE_FIELDS = ("package_name", "package_version", "package_path")
+# A resource_id is an fnmatch pattern over the resource identity a finding carries,
+# so like a package field it pins unless it is only wildcards.
+RESOURCE_FIELDS = ("resource_id",)
 MAIN_REF = "origin/main"
 
 Key = tuple[str | None, str]
@@ -134,7 +143,10 @@ def is_unpinned(
         return True
     if entry.get("symbol") is not None:
         return False
-    if any(_pins_a_package(entry.get(field)) for field in PACKAGE_FIELDS):
+    if any(
+        _pins_a_package(entry.get(field))
+        for field in (*RESOURCE_FIELDS, *PACKAGE_FIELDS)
+    ):
         return False
     return _covers_whole_file(entry, line_count)
 
@@ -317,6 +329,11 @@ def test_allowlist_entries_carry_a_reason_and_match_an_entry():
             False,
         ),
         ({"rule_id": "R", "path": "package-lock.json", "package_name": "p*"}, False),
+        # A resource scope names the findings of one resource in the file; one that is
+        # only wildcards names every resource, and a glob path is still many files.
+        ({"rule_id": "R", "path": "t.template.json", "resource_id": "*/Fn1"}, False),
+        ({"rule_id": "R", "path": "t.template.json", "resource_id": "*"}, True),
+        ({"rule_id": "R", "path": "t/*.template.json", "resource_id": "*/Fn1"}, True),
     ],
 )
 def test_classifier(entry: dict[str, Any], unpinned: bool):
@@ -331,7 +348,7 @@ def test_worktree_line_count_reads_the_file():
 
 
 def test_a_new_whole_file_entry_is_an_offender():
-    config = ".ash/.ash.yaml"
+    config = ".ash.yaml"
     entries = suppressions(config) + [
         {"rule_id": "SECRET-*", "path": "deploy/new_module.py", "reason": "x"}
     ]
@@ -354,10 +371,11 @@ def test_a_new_whole_file_entry_is_an_offender():
         {"line_start": 1, "line_end": 100000},
         {"line_start": 1},
         {"package_name": "*"},
+        {"resource_id": "*"},
     ],
 )
 def test_a_range_or_package_that_covers_everything_is_an_offender(widened):
-    config = ".ash/.ash.yaml"
+    config = ".ash.yaml"
     entry = {"rule_id": "SECRET-*", "path": "pyproject.toml", "reason": "x"}
     entries = suppressions(config) + [{**entry, **widened}]
     assert offenders(config, entries) == [("SECRET-*", "pyproject.toml")]
