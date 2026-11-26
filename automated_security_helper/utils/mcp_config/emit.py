@@ -76,7 +76,7 @@ def _ansi_c(text: str) -> str:
     return "$'" + "".join(body) + "'"
 
 
-def slug(text: str, taken: Optional[set] = None) -> str:
+def slug(text: str, taken: Optional[set[str]] = None) -> str:
     """A file-name-safe, deterministic name for ``text``.
 
     Text that is already safe (``A-Za-z0-9._-``, not starting with a dot, short) is kept.
@@ -96,7 +96,7 @@ def slug(text: str, taken: Optional[set] = None) -> str:
     return safe
 
 
-def source_slug(source_file: str, taken: Optional[set] = None) -> str:
+def source_slug(source_file: str, taken: Optional[set[str]] = None) -> str:
     """The directory name for one config file: ``.cursor/mcp.json`` -> ``cursor__mcp.json``."""
     parts = (part.lstrip(".") for part in source_file.split("/"))
     readable = "__".join(part for part in parts if part)
