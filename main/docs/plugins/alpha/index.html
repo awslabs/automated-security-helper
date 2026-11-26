@@ -3485,10 +3485,10 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
-  <a href="#contributing-an-alpha-plugin" class="md-nav__link">
+  <a href="#contributing-a-third-party-plugin" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Contributing an Alpha Plugin
+        Contributing a third-party plugin
       
     </span>
   </a>
@@ -3525,45 +3525,6 @@ SOFTWARE.
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Example Plugin Documentation Template">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#configuration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Configuration
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#features" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Features
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#example-usage" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Example Usage
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -3656,7 +3617,7 @@ SOFTWARE.
 
 
 <h1 id="alpha-plugins">Alpha Plugins<a class="headerlink" href="#alpha-plugins" title="Permanent link">&para;</a></h1>
-<p>This section covers the alpha plugins for ASH. Alpha plugins extend ASH's functionality with additional scanners, reporters, converters, and event handlers. Alpha is a maturity label, not a trust level: these are opt-in plugins that ASH ships but does not yet promote as supported.</p>
+<p>This section covers the alpha plugins for ASH: the opt-in scanner packages (<code>ash_*_plugins</code>) that ship with ASH but are not built in. Alpha is a maturity label, not a trust level: ASH ships these scanners but does not yet promote them as supported. The <code>ash_aws_plugins</code> reporters load the same opt-in way but are not alpha plugins (see <a href="../../../plugins/aws/">AWS reporters</a>).</p>
 <h2 id="available-alpha-plugins">Available Alpha Plugins<a class="headerlink" href="#available-alpha-plugins" title="Permanent link">&para;</a></h2>
 <h3 id="security-scanners">Security Scanners<a class="headerlink" href="#security-scanners" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3671,9 +3632,11 @@ SOFTWARE.
 plugin module in <code>ash_plugin_modules</code> or <code>--ash-plugin-modules</code>, as its page shows.
 The MCP <code>list_scanners</code> tool reports them either way; listing one does not add it to
 any scan.</p>
-<h2 id="contributing-an-alpha-plugin">Contributing an Alpha Plugin<a class="headerlink" href="#contributing-an-alpha-plugin" title="Permanent link">&para;</a></h2>
-<p>We encourage the community to develop and share plugins that extend ASH's capabilities.</p>
-<p>To contribute an alpha plugin:</p>
+<h2 id="contributing-a-third-party-plugin">Contributing a third-party plugin<a class="headerlink" href="#contributing-a-third-party-plugin" title="Permanent link">&para;</a></h2>
+<p>We encourage the community to develop and share plugins that extend ASH's capabilities.
+A plugin you host yourself is a third-party plugin, not one of the alpha plugins that
+ship with ASH.</p>
+<p>To contribute a third-party plugin:</p>
 <ol>
 <li>Develop your plugin following the <a href="../../../plugins/write-a-scanner/">Plugin Development Guide</a></li>
 <li>Host your plugin in a public repository</li>
@@ -3686,7 +3649,7 @@ any scan.</p>
 <li>Example usage</li>
 </ol>
 <h2 id="plugin-submission-guidelines">Plugin Submission Guidelines<a class="headerlink" href="#plugin-submission-guidelines" title="Permanent link">&para;</a></h2>
-<p>To ensure quality and security, alpha plugins should:</p>
+<p>To ensure quality and security, a third-party plugin should:</p>
 <ul>
 <li>Be open source with a compatible license</li>
 <li>Include comprehensive documentation</li>
@@ -3707,40 +3670,43 @@ any scan.</p>
 <div class="language-markdown highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gu">## Plugin Name</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gs">**Description**</span>: Brief description of what the plugin does and its key features.
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>\*Description\*\*: Brief description of what the plugin does and its key features.
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="gs">**Repository**</span>: [<span class="nt">Link to GitHub/GitLab/etc. repository</span>](<span class="na">https://github.com/username/plugin-repo</span>)
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="gs">**Author**</span>: Your Name or Organization
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="gs">**License**</span>: License type (e.g., Apache 2.0, MIT)
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="gu">### Installation</span>
-</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
-</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="sb">```bash</span>
-</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="c1"># Installation instructions</span>
-</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>pip<span class="w"> </span>install<span class="w"> </span>&lt;my-plugin-package-name&gt;
-</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="sb">```</span>
-</span></code></pre></div>
-<h3 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h3>
-<!-- doctest: config kind=other reason="a template for a plugin page, whose plugin name and options are placeholders" -->
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Example configuration in your ASH config file (.ash.yaml in a new project)</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">plugins</span><span class="p">:</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">my-plugin</span><span class="p">:</span>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="nt">options</span><span class="p">:</span>
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">      </span><span class="nt">option1</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">value1</span>
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">      </span><span class="nt">option2</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">value2</span>
-</span></code></pre></div>
-<h3 id="features">Features<a class="headerlink" href="#features" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Feature 1: Description</li>
-<li>Feature 2: Description</li>
-</ul>
-<h3 id="example-usage">Example Usage<a class="headerlink" href="#example-usage" title="Permanent link">&para;</a></h3>
-<!-- doctest: illustrative reason="my_plugin is a placeholder for the module of a plugin you installed" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Example command line usage</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>ash<span class="w"> </span>scan<span class="w"> </span>--ash-plugin-modules<span class="w"> </span>my_plugin
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="gs">**Repository**</span>: [<span class="nt">Link to GitHub/GitLab/etc. repository</span>](<span class="na">https://github.com/username/plugin-repo</span>)
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="gs">**Author**</span>: Your Name or Organization
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="gs">**License**</span>: License type (e.g., Apache 2.0, MIT)
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="gu">### Installation</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="sb">```bash</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="c1"># Installation instructions</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>pip<span class="w"> </span>install<span class="w"> </span>&lt;my-plugin-package-name&gt;
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="sb">```</span>
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="gu">### Configuration</span>
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>
+</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="sb">```yaml</span>
+</span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="c1"># Example configuration in your ASH config file (.ash.yaml in a new project)</span>
+</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="nt">scanners</span><span class="p">:</span>
+</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="w">  </span><span class="nt">my-plugin</span><span class="p">:</span>
+</span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="w">    </span><span class="nt">options</span><span class="p">:</span>
+</span><span id="__span-0-26"><a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a><span class="w">      </span><span class="nt">option1</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">value1</span>
+</span><span id="__span-0-27"><a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a><span class="w">      </span><span class="nt">option2</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">value2</span>
+</span><span id="__span-0-28"><a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a><span class="sb">```</span>
+</span><span id="__span-0-29"><a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>
+</span><span id="__span-0-30"><a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a><span class="gu">### Features</span>
+</span><span id="__span-0-31"><a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>
+</span><span id="__span-0-32"><a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="k">-</span><span class="w"> </span>Feature 1: Description
+</span><span id="__span-0-33"><a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a><span class="k">-</span><span class="w"> </span>Feature 2: Description
+</span><span id="__span-0-34"><a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>
+</span><span id="__span-0-35"><a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a><span class="gu">### Example Usage</span>
+</span><span id="__span-0-36"><a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>
+</span><span id="__span-0-37"><a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a><span class="sb">```bash</span>
+</span><span id="__span-0-38"><a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a><span class="c1"># Example command line usage</span>
+</span><span id="__span-0-39"><a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>ash<span class="w"> </span>scan<span class="w"> </span>--ash-plugin-modules<span class="w"> </span>my_plugin
+</span><span id="__span-0-40"><a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a><span class="sb">```</span>
 </span></code></pre></div>
 <blockquote>
 <p>[!CAUTION] &gt; <strong>Alpha Plugin Security</strong>: The alpha plugins listed above ship with ASH, in <code>automated_security_helper/plugin_modules</code>, and need no separate package. <code>ash scan</code> loads one only when its module is listed in <code>ash_plugin_modules</code> or passed with <code>--ash-plugin-modules</code>. Each runs an external tool: the container image includes trivy, Betterleaks, GuardDog and hadolint, and you install the Snyk CLI and ferret-scan yourself, so check where each tool comes from. A plugin published outside ASH is a third-party package you install separately (for example with <code>pip install</code>), and ASH imports it into its own process, so verify its source and trustworthiness before installing it.</p>

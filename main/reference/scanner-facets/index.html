@@ -5889,13 +5889,13 @@ SOFTWARE.
 <td><code>line_range</code></td>
 <td><code>mapped</code></td>
 <td>(no native line) the 1-based line of the package's entry in an npm lockfile's packages map, read by the adapter</td>
-<td>a result with no readable entry (yarn.lock, pnpm-lock.yaml, a lockfile v1, a node npm names no entry for) carries no region; a line is never invented</td>
+<td>a lockfile-located result with no readable entry (yarn.lock, pnpm-lock.yaml, a lockfile v1, a node npm names no entry for) carries no region; a lockfile line is never invented. A report converted with no lockfile known keeps the line 1 placeholder its install location always carried</td>
 </tr>
 <tr>
 <td><code>column</code></td>
 <td><code>n/a</code></td>
 <td></td>
-<td>npm audit output carries no column and the lockfile location is a line, so the adapter writes none</td>
+<td>npm audit output carries no column; a lockfile-located result gets none, and a report converted with no lockfile known keeps the column 1 (with line 1) placeholder its install location always carried</td>
 </tr>
 <tr>
 <td><code>message</code></td>
