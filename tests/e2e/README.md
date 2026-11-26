@@ -116,7 +116,7 @@ anything else Windows might do differently.
 `ashx scan --mode container` runs the case's command on the host, and the host starts
 `docker run` with a fixed set of variables. The case's `ASH_OFFLINE` and
 `OPENGREP_RULES_CACHE_DIR` are not among them, so they never reach the scan inside the
-image. Measured with an image built online from head by `ashx build-image`, scanned
+image. Measured with an image built online from head by `ashx container build`, scanned
 through `run_case.py ... -- --mode container --no-build`:
 
 | case | extra args | exit | statuses |

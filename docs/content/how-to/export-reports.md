@@ -99,24 +99,24 @@ On the command line, the same settings are
 `--config-overrides reporters.spdx.enabled=true --config-overrides reporters.html.enabled=false`.
 
 To produce one more format after a scan, render it from the saved results with
-`ashx report`. It runs any loaded reporter, including reporters that are disabled, apart from
+`ashx results report`. It runs any loaded reporter, including reporters that are disabled, apart from
 the AWS reporters, which run only when `--config-overrides` turns them on
 ([Rendering a reporter from saved results](../plugins/aws.md#ash-report)), and it prints the
 report alone to standard output:
 
 ```bash
-ashx report --format gitlab-sast > gl-sast-report.json
+ashx results report --format gitlab-sast > gl-sast-report.json
 ```
 
 ## Compare two saved scans {#compare-scans}
 
-Use [`ash diff`](../reference/cli.md#diff) with the earlier results first. It reads both
+Use [`ashx results diff`](../reference/cli.md#results-diff) with the earlier results first. It reads both
 files without running a scan or changing any reports.
 
 <!-- doctest: illustrative reason="requires two saved ASH scan results files" -->
 ```bash
-ash diff baseline/ash_aggregated_results.json current/ash_aggregated_results.json
-ash diff baseline/ash_aggregated_results.json current/ash_aggregated_results.json --format json
+ashx results diff baseline/ash_aggregated_results.json current/ash_aggregated_results.json
+ashx results diff baseline/ash_aggregated_results.json current/ash_aggregated_results.json --format json
 ```
 
 The JSON groups are `new`, `absent_after`, `moved`, `severity_changed`,
@@ -126,7 +126,7 @@ two reports although their IDs differ because the finding changed line, as `befo
 the second report did not record the finding, not that it was fixed; the MCP tool
 `diff_scan_results` returns the same findings under the name `resolved`. Compare full scans of the same project with the same scanner and
 rule configuration. For a workspace, compare results from the same individual
-project; do not mix them with a standalone scan. For a sharded scan, run `ashx merge`
+project; do not mix them with a standalone scan. For a sharded scan, run `ashx results merge`
 first. Results narrowed by `--changed-files-only` are refused. Incomplete scanner
 coverage, different recorded ignore-file exclusions, or inputs marked unscanned
 produce warnings.

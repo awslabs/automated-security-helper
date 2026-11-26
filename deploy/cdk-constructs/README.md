@@ -112,7 +112,7 @@ new ASHScanStep('SecurityScan', {
 `shardCount: 4` produces five actions: four shards that run in parallel, and one
 merge action that runs after them.
 
-Sharding needs `ashx scan --shard-index <i> --shard-count <n>` and `ashx merge`,
+Sharding needs `ashx scan --shard-index <i> --shard-count <n>` and `ashx results merge`,
 which no ASH release up to v3.7.1 has. Set `version` to a tag or commit whose ASH
 has both (or, with `PREINSTALLED`, use an image built from one); otherwise every
 shard action fails and the merge never runs.
@@ -151,7 +151,7 @@ ignore its exit code, so an ASH exit for an incomplete scanner (which ASH checks
 by default), an invalid configuration or an unknown option fails that shard, and
 the merge action does not run.
 
-Because the merge action's exit code *is* the pipeline's verdict, `ashx merge`
+Because the merge action's exit code *is* the pipeline's verdict, `ashx results merge`
 must exit non-zero when the merged findings breach the configured threshold.
 
 Each shard also writes to its own output directory (`<outputDirectory>/shard-N`).
@@ -232,7 +232,7 @@ look like it was set while having no effect on anything.
 
 ### Triaging a failed merge
 
-`ashx merge` refuses results whose `metadata.shard` provenance is missing, which is
+`ashx results merge` refuses results whose `metadata.shard` provenance is missing, which is
 how it distinguishes one shard of several from a whole unsharded scan. Provenance
 is recorded only when a scan runs with both `--shard-index` and `--shard-count`,
 and it is skipped when the scan registered no scanners at all. So a merge action
@@ -241,12 +241,12 @@ shard, not in the merge: either a shard ran `ashx scan` without both flags, or a
 shard's container registered zero scanners, for instance because a scanner plugin
 failed to load. The merge action is where it surfaces, not where it broke.
 
-For `ashx merge`, a shard count higher than the number of enabled scanners is
+For `ashx results merge`, a shard count higher than the number of enabled scanners is
 wasteful rather than broken. The surplus shards are assigned no scanners, still
 record provenance and still merge; each costs a CodeBuild start. That was
-measured with `ashx merge` at 50 shards over a 5-scanner tree (45 empty
+measured with `ashx results merge` at 50 shards over a 5-scanner tree (45 empty
 assignments, all 50 stamped, merged findings identical to one unsharded scan), and
-`ashx merge` carries a regression test at that same count. With this construct,
+`ashx results merge` carries a regression test at that same count. With this construct,
 synthesis fails above 5 shards, for the input-artifact reason under
 [Sharding](#sharding).
 

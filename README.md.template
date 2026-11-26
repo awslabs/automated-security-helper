@@ -32,7 +32,7 @@ ashx --mode container
 ```
 
 The first container run builds the image and prepares scanner dependencies.
-Open `.ash/ash_output/reports/ash.html` or run `ashx inspect findings`.
+Open `.ash/ash_output/reports/ash.html` or run `ashx results inspect findings`.
 
 ### Execution modes
 
@@ -114,8 +114,8 @@ Offline HTML reports include search, filters, finding details, and printing.
 
 <!-- doctest: illustrative reason="opens an interactive explorer on the results of an earlier scan" -->
 ```bash
-ashx inspect findings    # Open the terminal findings explorer
-ashx report              # Read the text summary of the latest scan
+ashx results inspect findings    # Open the terminal findings explorer
+ashx results report              # Read the text summary of the latest scan
 ```
 
 <details>

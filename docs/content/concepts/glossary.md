@@ -152,7 +152,7 @@ The least severe level that counts as actionable: `global_settings.severity_thre
 
 ## Shard
 
-One of several scans of the same repository that each run a share of the scanners, combined afterward with `ashx merge`. See [Scale to large repositories](../how-to/scale-large-repos.md).
+One of several scans of the same repository that each run a share of the scanners, combined afterward with `ashx results merge`. See [Scale to large repositories](../how-to/scale-large-repos.md).
 
 ## Suppression
 

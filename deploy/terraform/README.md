@@ -44,7 +44,7 @@ stale detections even when ASH itself has not changed.
 from, and every release moves them to itself; see
 [Which `AshVersion` to use](../README.md#which-ashversion-to-use). The targets call
 ASH options that no release up to v3.7.1 has: `ash mcp --stateless-http` and
-`--allowed-host`, `ash merge`, the `--shard-index` and `--shard-count` options of
+`--allowed-host`, `ashx results merge`, the `--shard-index` and `--shard-count` options of
 `ash scan`, and `--fail-on-incomplete-scanners`. With such a version, the AgentCore
 and Fargate containers exit at startup, and each CodePipeline executor shard scans
 with every scanner and the merge step fails. The CodeCommit gate needs an `ash scan`

@@ -4,7 +4,7 @@ Builds the ASH image, then runs a pipeline that fans a scan out across 8 shards
 and merges the results into a single verdict.
 
 `ash_version` in `main.tf` names the ASH release this example comes from. Set it to
-a tag or commit whose ASH has `ash merge` and the `--shard-index` and `--shard-count`
+a tag or commit whose ASH has `ashx results merge` and the `--shard-index` and `--shard-count`
 options of `ash scan`, which no release up to v3.7.1 has; with one that lacks them,
 each shard scans with every scanner and the Merge action fails. See
 [Which `AshVersion` to use](../../../../../README.md#which-ashversion-to-use).
@@ -55,8 +55,8 @@ A shard that happens to own no findings exits 0. Gating on shard exit codes woul
 therefore report a clean scan whenever the findings landed in a different shard.
 Shards run with `--no-fail-on-findings` and fail only on a real crash.
 
-The verdict is `ashx merge`'s own exit code, propagated unchanged: 0 clean, 2
+The verdict is `ashx results merge`'s own exit code, propagated unchanged: 0 clean, 2
 findings at or above `min_severity`, 1 refused because shard coverage was
-incomplete, 5 a usage error (ASH releases after 3.7.1; 3.7.0 and 3.7.1 have no `ashx merge`). Nothing in the module recomputes it — ASH shares that calculation with
+incomplete, 5 a usage error (ASH releases after 3.7.1; 3.7.0 and 3.7.1 have no `ashx results merge`). Nothing in the module recomputes it — ASH shares that calculation with
 `ashx scan`, so the pipeline cannot reach a different conclusion than a plain scan
 about the same findings.

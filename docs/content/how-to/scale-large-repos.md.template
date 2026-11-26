@@ -4,7 +4,7 @@ Three features help when one scan of one tree is too slow or too coarse:
 
 - [Changed-files scans](#changed-files) gate a pull request on the files it changed.
 - [Sharding](#sharding) splits the scanners of one scan across several runners, and
-  `ashx merge` recombines the results.
+  `ashx results merge` recombines the results.
 - [Workspace scans](#workspaces) scan the folders of a `.code-workspace` file as separate
   projects in one run, from the command line or over MCP.
 
@@ -83,7 +83,7 @@ explains the baseline and its tradeoff.
 ## Split a scan across runners {#sharding}
 
 `--shard-index` and `--shard-count` (or `ASH_SHARD_INDEX` and `ASH_SHARD_COUNT`) give each
-runner a share of the scanners. Every runner scans the whole tree with its share; `ashx merge`
+runner a share of the scanners. Every runner scans the whole tree with its share; `ashx results merge`
 then combines the shards' results into one set of reports and one exit code.
 
 ASH sorts the names of every registered scanner and deals them out in turn, so shard *i*
@@ -128,7 +128,7 @@ the shards. The merge exits 2 for the finding in `app.py`, whichever shard found
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ashx merge --fail-on-findings --results ../shard-0 --results ../shard-1 --output-dir ../merged
+ashx results merge --fail-on-findings --results ../shard-0 --results ../shard-1 --output-dir ../merged
 ```
 
 ```text
@@ -136,20 +136,20 @@ Scanners: 16 | Findings: 1 | Actionable: 1 | Suppressed: 0
 ```
 
 `--results` takes a shard's `ash_aggregated_results.json` or its output directory, once per
-shard. `ashx merge` writes `ash_aggregated_results.json` and every report the shards'
+shard. `ashx results merge` writes `ash_aggregated_results.json` and every report the shards'
 configuration enables, including `ash.ghas.sarif` and `ash.gl-sast-report.json`, unless
 `--output-formats`, or else the `output_formats` setting in the shards' configuration,
 narrows them. It reads the fail-on-findings setting, the incomplete-scan
 setting, the severity thresholds, and the suppressions from the configuration recorded in
 the lowest-numbered shard; `--fail-on-findings` and
 `--fail-on-incomplete-scanners` on the command line override the first two. A value the
-shards' configuration read from the environment is recorded as its reference, and `ashx merge`
+shards' configuration read from the environment is recorded as its reference, and `ashx results merge`
 does not read the environment for it: a field that takes a fixed choice, a boolean, or a
 number, such as `severity_threshold`, cannot hold the reference, so the merge exits 3 naming
 the field until you supply it with `--config-overrides` or in the file `--config` names
 ([Read values from the environment](configure.md#environment)). The AWS
 reporters send the merged findings only with their `enabled` and destination options in
-`ashx merge`'s `--config-overrides`, not from a config file
+`ashx results merge`'s `--config-overrides`, not from a config file
 ([AWS reporters](../plugins/aws.md#ash-report)). Name their package for the merge too, with
 `--config` or `--config-overrides`, and leave out `--output-formats`, which stops them. It combines
 each converter's results across the shards, failed inputs included, so a notebook or
@@ -245,7 +245,7 @@ jobs:
         with:
           name: ash-shard-${{ matrix.shard }}
           # Not the whole output directory: scanners/ and converted/ hold each
-          # tool's raw output, which is not masked. `ashx merge` reads each
+          # tool's raw output, which is not masked. `ashx results merge` reads each
           # shard's ash_aggregated_results.json.
           path: |
             .ash/ash_output/reports
@@ -297,7 +297,7 @@ jobs:
           fi
           printf '::stop-commands::%s\n' "${token}"
           status=0
-          ashx merge --fail-on-findings --fail-on-incomplete-scanners --output-dir .ash/ash_output \
+          ashx results merge --fail-on-findings --fail-on-incomplete-scanners --output-dir .ash/ash_output \
             --results shards/ash-shard-0 --results shards/ash-shard-1 \
             --results shards/ash-shard-2 --results shards/ash-shard-3 \
             2>&1 || status=$?
@@ -334,7 +334,7 @@ so it passes `--fail-on-findings` and `--fail-on-incomplete-scanners`, and the s
 keep those yours, run the shards with `--config` and a file outside the checkout. Each
 shard installs every tool, because which scanners land on which shard depends on the
 scanner list of the ASH it installs. Every shard must load the same plugin modules, or the merge
-refuses them. Run `ashx merge` with the ASH version the shards ran: an older `ashx merge` refuses
+refuses them. Run `ashx results merge` with the ASH version the shards ran: an older `ashx results merge` refuses
 the results of a newer ASH's shards.
 
 What sharding does not do:
@@ -342,7 +342,7 @@ What sharding does not do:
 - It does not split files. Each shard scans the whole tree.
 - It does not balance by run time.
 - It does not combine with workspace scans (the scan exits 1) and is not available over MCP.
-- `ashx merge` does not remove duplicate findings that two scanners report for the same
+- `ashx results merge` does not remove duplicate findings that two scanners report for the same
   problem, and keeps the software bill of materials of one shard only.
 
 ## Scan a multi-project workspace {#workspaces}

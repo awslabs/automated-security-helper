@@ -102,7 +102,7 @@ scanner's text output. v3 writes `.ash/ash_output/` in the scanned directory:
 - `scanners/`: each scanner's raw output.
 - `ash.log`: the scan's log.
 
-`ashx report` prints a summary of the latest results in the terminal. See
+`ashx results report` prints a summary of the latest results in the terminal. See
 [Output files](../reference/output-files.md).
 
 ## Exit codes

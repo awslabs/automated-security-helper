@@ -2243,8 +2243,8 @@ REGISTRY_OPTIONS = {
     ((DOCS_ROOT, "scan"), "--scanners"): "scanner",
     ((DOCS_ROOT, "scan"), "--exclude-scanners"): "scanner",
     ((DOCS_ROOT, "scan"), "--output-formats"): "output format",
-    ((DOCS_ROOT, "merge"), "--output-formats"): "output format",
-    ((DOCS_ROOT, "report"), "--format"): "reporter",
+    ((DOCS_ROOT, "results", "merge"), "--output-formats"): "output format",
+    ((DOCS_ROOT, "results", "report"), "--format"): "reporter",
     ((DOCS_ROOT, "dependencies", "install"), "--tool"): "tool",
 }
 PLUGIN_KINDS = ("converter", "scanner", "reporter")

@@ -1566,7 +1566,7 @@ ashx --source-dir . --scanners detect-secrets --min-severity urgent --offline --
 To print a summary of the last scan:
 
 ```bash
-ashx report --output-dir .ash/ash_output
+ashx results report --output-dir .ash/ash_output
 ```
 
 ## Read the results

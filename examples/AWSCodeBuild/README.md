@@ -40,7 +40,7 @@ The buildspec's `env.variables` block sets four variables:
 - ASH exits non-zero when it finds actionable findings, which fails the build
 
 ### Post-Build
-- Prints the Markdown summary of the scan's results to the build log with `ash report`. CodeBuild runs this phase even when the build phase failed.
+- Prints the Markdown summary of the scan's results to the build log with `ash results report`. CodeBuild runs this phase even when the build phase failed.
 
 ## Artifacts
 
