@@ -135,6 +135,14 @@
 
 ### Fixes
 
+- **A cancelled scan no longer appears in `ash trend`.** The run's history record is
+  removed on every path a cancel takes the run's results back: a cancel that lands
+  during the final results rewrite or before the MCP server's own check now has the
+  record discarded when the server puts the previous results back, and a cancel that
+  escapes the orchestrator's write step after the record was appended is discarded by
+  the orchestrator itself. A discard that fails leaves a debug-level line saying why
+  the stale record stayed, instead of nothing.
+
 - **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**
   It passes `GITHUB_ACTIONS`, `TF_BUILD` and `TEAMCITY_VERSION` into the container when
   set (by name, or with their values when `OCI_RUNNER_WRAPPER` is set; a value that holds
