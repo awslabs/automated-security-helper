@@ -5,9 +5,13 @@
 
 The integration gate that compares ASH's framework mirror and VCS floor with the
 installed checkov reads the registry through this discovery. None of these tests
-needs checkov: each plants a console script and a package of its own.
+needs checkov: each plants a console script and a package of its own. The planted
+interpreter is a shell script on POSIX and a batch file on Windows, which starts
+no script that begins with a shebang line.
 """
 
+import os
+import shlex
 import sys
 from pathlib import Path
 
@@ -19,6 +23,48 @@ from tests.utils.installed_checkov import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+def _interpreter(
+    path: Path, *, site: Path | None = None, windows: bool | None = None
+) -> Path:
+    """A program at ``path`` that the discovery can start as checkov's interpreter.
+
+    With ``site`` it runs this interpreter with ``site`` on ``PYTHONPATH``, where
+    ``find_spec`` finds the fake package; without it, it exits 1. On POSIX it is a
+    ``#!/bin/sh`` script. ``CreateProcess`` starts executable images and batch
+    files, never a script whose first line is a shebang (WinError 193, "%1 is not a
+    valid Win32 application"), so on Windows it is ``<path>.bat``, and that is the
+    path returned. ``windows`` defaults to the host.
+    """
+    if windows is None:
+        windows = os.name == "nt"
+    if not windows:
+        if site is None:
+            body = "exit 1"
+        else:
+            body = f'PYTHONPATH={site} exec {sys.executable} "$@"'
+        path.write_text(f"#!/bin/sh\n{body}\n")
+        path.chmod(0o755)
+        return path
+
+    # cmd.exe expands a "%" wherever it stands, so a literal one is doubled, and it
+    # reads the file in the console's code page, so only ASCII is written
+    # (tests/utils/stand_ins.py). `set "NAME=value"` keeps the quotes out of the
+    # value; %* passes the discovery's arguments on as they were given.
+    def literal(value: object) -> str:
+        return str(value).replace("%", "%%")
+
+    if site is None:
+        lines = ["@exit /b 1"]
+    else:
+        lines = [
+            f'@set "PYTHONPATH={literal(site)}"',
+            f'@"{literal(sys.executable)}" %*',
+        ]
+    launcher = path.with_name(f"{path.name}.bat")
+    launcher.write_bytes("".join(f"{line}\r\n" for line in lines).encode("ascii"))
+    return launcher
 
 
 def _fake_install(
@@ -38,9 +84,7 @@ def _fake_install(
         )
     python = tmp_path / directory / "python"
     python.parent.mkdir(parents=True)
-    python.write_text(f'#!/bin/sh\nPYTHONPATH={site} exec {sys.executable} "$@"\n')
-    python.chmod(0o755)
-    return python
+    return _interpreter(python, site=site)
 
 
 def _script(tmp_path: Path, text: str) -> str:
@@ -108,7 +152,11 @@ class TestInstalledCheckovFrameworkDiscovery:
 
     def test_found_through_a_shell_trampoline(self, tmp_path):
         python = _fake_install(tmp_path)
-        text = f"#!/bin/sh\n'''exec' {python} \"$0\" \"$@\"\n' '''\n"
+        # The path as a shell reads it back: bare when it holds nothing a shell
+        # reads otherwise, as a POSIX temp path does, and quoted on Windows, where
+        # a bare backslash would escape the character after it.
+        spelled = shlex.quote(str(python))
+        text = f"#!/bin/sh\n'''exec' {spelled} \"$0\" \"$@\"\n' '''\n"
 
         assert "gitlab_configuration" in installed_checkov_frameworks(
             _script(tmp_path, text)
@@ -124,9 +172,7 @@ class TestInstalledCheckovFrameworkDiscovery:
         )
 
     def test_an_interpreter_that_cannot_locate_checkov_fails(self, tmp_path):
-        broken = tmp_path / "python"
-        broken.write_text("#!/bin/sh\nexit 1\n")
-        broken.chmod(0o755)
+        broken = _interpreter(tmp_path / "python")
 
         with pytest.raises(pytest.fail.Exception, match="cannot locate"):
             installed_checkov_frameworks(_script(tmp_path, f"#!{broken}\n"))
