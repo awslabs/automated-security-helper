@@ -19,10 +19,14 @@ from pathlib import Path
 
 import pytest
 
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    gitleaks_scanner,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
     LEAKS_EXIT_CODE,
     drop_regions_without_a_line,
 )
+from automated_security_helper.schemas.scanner_output_ingest import IngestRecord
 from tests.unit.plugin_modules.ash_builtin.test_gitleaks_scanner import (
     _report,
     _result,
@@ -176,3 +180,212 @@ def test_a_report_of_another_shape_is_left_to_the_validation(raw):
     drop_regions_without_a_line(raw)
 
     assert json.dumps(raw, sort_keys=True) == before
+
+
+# --------------------------------------------------------------------------- #
+# What the drop costs, counted
+#
+# The drop is deliberate, and the file keeps its finding. It used to leave no
+# trace, though, so a report whose file-level findings lost their regions read
+# the same as one that had none. Each dropped region is now noted on the scan's
+# record, with its place in gitleaks' document and its rule.
+# --------------------------------------------------------------------------- #
+
+_SHARED_SENTENCE = (
+    "ASH repaired {n} {parts} of gitleaks' report that SARIF does not allow "
+    "(a region with no readable line)."
+)
+
+
+def _region_of(result_index: int) -> str:
+    return f"runs/0/results/{result_index}/locations/0/physicalLocation/region"
+
+
+def _scan_keeping_the_scanner(tmp_path: Path, monkeypatch, report: dict):
+    """``_scan``, with the scanner returned beside the report it produced."""
+    from automated_security_helper.utils import subprocess_utils
+
+    scanner = _scanner(tmp_path)
+    source = scanner.context.source_dir
+    (source / "config.py").write_text("x")
+    monkeypatch.setattr(scanner, "validate_plugin_dependencies", lambda: True)
+
+    def launch(command, **kwargs):
+        path = next(
+            a.split("=", 1)[1] for a in command if a.startswith("--report-path=")
+        )
+        Path(path).write_text(json.dumps(report))
+        return {"returncode": LEAKS_EXIT_CODE}
+
+    monkeypatch.setattr(subprocess_utils, "run_command_with_output_handling", launch)
+    return scanner, scanner.scan(target=source, target_type="source")
+
+
+def _warnings(report) -> list:
+    return [
+        note.message.root.text
+        for invocation in report.runs[0].invocations
+        for note in invocation.toolExecutionNotifications or []
+        if getattr(note.level, "value", note.level) == "warning"
+    ]
+
+
+def test_each_dropped_region_is_noted_with_its_place_and_its_rule():
+    raw = _report(
+        _file_level_result("a.p12"),
+        _result("b.py", "github-pat", 3, column=7),
+        _file_level_result("c.pfx"),
+    )
+    record = IngestRecord()
+
+    drop_regions_without_a_line(raw, record)
+
+    summary = record.summary()
+    assert summary["repaired"] == 2 and summary["left_out"] == 0
+    assert [
+        (e["action"], e["code"], e["pointer"], e["rule_id"])
+        for e in summary["elements"]
+    ] == [
+        ("dropped", "region_line_unreadable", _region_of(0), "pkcs12-file"),
+        ("dropped", "region_line_unreadable", _region_of(2), "pkcs12-file"),
+    ]
+
+
+def test_the_note_names_no_file_and_no_value_of_the_report():
+    raw = _report(_file_level_result("certs/secret-name.pfx"))
+    record = IngestRecord()
+
+    drop_regions_without_a_line(raw, record)
+
+    assert "secret-name" not in json.dumps(record.summary())
+    assert "secret-name" not in record.sentence("gitleaks")
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        _report(_result("b.py", "github-pat", 3, column=7)),
+        [],
+        {"runs": [{"results": [{"locations": [{"physicalLocation": {"region": 7}}]}]}]},
+        {
+            "runs": [
+                {
+                    "results": [
+                        {
+                            "locations": [
+                                {"physicalLocation": {"region": {"startLine": "0"}}}
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+    ],
+    ids=[
+        "a region with a line",
+        "not a report",
+        "a region that is no object",
+        "a text",
+    ],
+)
+def test_nothing_is_noted_where_nothing_is_dropped(raw):
+    record = IngestRecord()
+
+    drop_regions_without_a_line(raw, record)
+
+    assert record.is_empty
+
+
+def test_a_certificate_in_the_tree_is_counted_and_costs_no_finding(
+    tmp_path, monkeypatch
+):
+    scanner, report = _scan_keeping_the_scanner(
+        tmp_path,
+        monkeypatch,
+        _report(
+            _file_level_result("certs/test.pfx"),
+            _result("config.py", "generic-api-key", 1, column=1),
+        ),
+    )
+
+    assert [r.ruleId for r in report.runs[0].results] == [
+        "pkcs12-file",
+        "generic-api-key",
+    ]
+    summary = scanner.output_ingest_record
+    assert summary["repaired"] == 1 and summary["results_read"] == 2
+    assert [(e["code"], e["pointer"], e["rule_id"]) for e in summary["elements"]] == [
+        ("region_line_unreadable", _region_of(0), "pkcs12-file")
+    ]
+    assert _warnings(report) == [_SHARED_SENTENCE.format(n=1, parts="part")]
+
+
+def test_two_certificates_are_two_counted_repairs(tmp_path, monkeypatch):
+    scanner, report = _scan_keeping_the_scanner(
+        tmp_path,
+        monkeypatch,
+        _report(
+            _file_level_result("a.p12"),
+            _result("config.py", "generic-api-key", 1, column=1),
+            _file_level_result("b.pfx"),
+        ),
+    )
+
+    assert len(report.runs[0].results) == 3
+    assert scanner.output_ingest_record["repaired"] == 2
+    assert _warnings(report) == [_SHARED_SENTENCE.format(n=2, parts="parts")]
+
+
+def test_a_region_with_a_line_and_an_end_column_of_zero_keeps_its_finding(
+    tmp_path, monkeypatch
+):
+    """The shared step repairs what the gitleaks drop does not name, and counts it."""
+    odd = _result("config.py", "generic-api-key", 3, column=1)
+    odd["locations"][0]["physicalLocation"]["region"]["endColumn"] = 0
+
+    scanner, report = _scan_keeping_the_scanner(
+        tmp_path, monkeypatch, _report(odd, _file_level_result("a.p12"))
+    )
+
+    assert [r.ruleId for r in report.runs[0].results] == [
+        "generic-api-key",
+        "pkcs12-file",
+    ]
+    kept = report.runs[0].results[0].locations[0].physicalLocation.root.region
+    assert kept.startLine == 3 and kept.endColumn is None
+    summary = scanner.output_ingest_record
+    assert summary["repaired"] == 2
+    assert sorted((e["code"], e["pointer"]) for e in summary["elements"]) == [
+        ("region_field_unreadable", _region_of(0) + "/endColumn"),
+        ("region_line_unreadable", _region_of(1)),
+    ]
+
+
+def test_a_clean_report_is_not_counted(tmp_path, monkeypatch):
+    scanner, report = _scan_keeping_the_scanner(
+        tmp_path,
+        monkeypatch,
+        _report(_result("config.py", "generic-api-key", 1, column=1)),
+    )
+
+    assert scanner.output_ingest_record is None
+    assert _warnings(report) == []
+
+
+def test_control_a_drop_that_is_not_given_the_record_is_silent(tmp_path, monkeypatch):
+    """The same scan with the drop called as it was before: the finding keeps its
+    file and loses its region, and nothing says so."""
+    original = gitleaks_scanner.drop_regions_without_a_line
+    monkeypatch.setattr(
+        gitleaks_scanner,
+        "drop_regions_without_a_line",
+        lambda raw, record=None: original(raw),
+    )
+
+    scanner, report = _scan_keeping_the_scanner(
+        tmp_path, monkeypatch, _report(_file_level_result("a.p12"))
+    )
+
+    assert [r.ruleId for r in report.runs[0].results] == ["pkcs12-file"]
+    assert scanner.output_ingest_record is None
+    assert _warnings(report) == []

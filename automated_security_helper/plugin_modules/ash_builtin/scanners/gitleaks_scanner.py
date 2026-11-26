@@ -192,6 +192,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     SarifReport,
 )
+from automated_security_helper.schemas.scanner_output_ingest import IngestRecord
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
@@ -343,7 +344,9 @@ def _name_length(name: str) -> int:
     return len(name.encode("utf-16-le", "surrogatepass")) // 2
 
 
-def drop_regions_without_a_line(raw: Any) -> None:
+def drop_regions_without_a_line(
+    raw: Any, record: Optional[IngestRecord] = None
+) -> None:
     """Remove each region whose ``startLine`` is below 1, in place.
 
     gitleaks has rules that match a file by its path alone (``pkcs12-file`` for
@@ -356,6 +359,10 @@ def drop_regions_without_a_line(raw: Any) -> None:
     Only an integer ``startLine`` below 1 is read as "no line". Anything else,
     including a document of another shape, is left for the SARIF validation to
     accept or refuse.
+
+    Each region dropped is noted on *record*, when one is given, with its place in
+    gitleaks' document and its rule, as the shared repair step notes the same
+    repair elsewhere, so the drop is counted in the scan's report and not silent.
     """
 
     def items(value: Any) -> List[Any]:
@@ -363,13 +370,13 @@ def drop_regions_without_a_line(raw: Any) -> None:
 
     if not isinstance(raw, dict):
         return
-    for run in items(raw.get("runs")):
+    for run_index, run in enumerate(items(raw.get("runs"))):
         if not isinstance(run, dict):
             continue
-        for result in items(run.get("results")):
+        for result_index, result in enumerate(items(run.get("results"))):
             if not isinstance(result, dict):
                 continue
-            for location in items(result.get("locations")):
+            for location_index, location in enumerate(items(result.get("locations"))):
                 if not isinstance(location, dict):
                     continue
                 physical = location.get("physicalLocation")
@@ -381,6 +388,22 @@ def drop_regions_without_a_line(raw: Any) -> None:
                 line = region.get("startLine")
                 if isinstance(line, int) and not isinstance(line, bool) and line < 1:
                     del physical["region"]
+                    if record is not None:
+                        record.note(
+                            "dropped",
+                            "region_line_unreadable",
+                            (
+                                "runs",
+                                run_index,
+                                "results",
+                                result_index,
+                                "locations",
+                                location_index,
+                                "physicalLocation",
+                                "region",
+                            ),
+                            rule_id=result.get("ruleId"),
+                        )
 
 
 def gitleaksignore_files(data: bytes) -> List[str]:
@@ -1162,7 +1185,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             self.end_time = datetime.now(timezone.utc)
         if raw is not None:
             # After the re-scan, whose results are added to these.
-            drop_regions_without_a_line(raw)
+            drop_regions_without_a_line(raw, self._ingest_record)
         return raw
 
     def _read_tree_ignore_file(self, target: Path) -> bytes:
