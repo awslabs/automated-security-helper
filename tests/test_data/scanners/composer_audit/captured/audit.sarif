@@ -1,0 +1,361 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "results": [
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "composer.lock"
+                },
+                "region": {
+                  "startLine": 66
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "guzzlehttp/psr7 1.8.3: guzzlehttp/psr7: Host Confusion via Weak URI Host Validation (CVE-2026-59882). Affected versions: <2.12.3. https://github.com/advisories/GHSA-c2w2-prh8-qm98"
+          },
+          "partialFingerprints": {
+            "composer-audit/v1": "28a47c2763ef5caf9886755f0e100e87"
+          },
+          "properties": {
+            "advisory_id": "PKSA-vznr-tgp9-fd7d",
+            "advisory_link": "https://github.com/advisories/GHSA-c2w2-prh8-qm98",
+            "affected_versions": "<2.12.3",
+            "composer_severity": "medium",
+            "cve": "CVE-2026-59882",
+            "issue_severity": "MEDIUM",
+            "package_name": "guzzlehttp/psr7",
+            "package_version": "1.8.3",
+            "tags": [
+              "sca",
+              "dependency",
+              "php"
+            ]
+          },
+          "ruleId": "PKSA-vznr-tgp9-fd7d"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "composer.lock"
+                },
+                "region": {
+                  "startLine": 66
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "guzzlehttp/psr7 1.8.3: CRLF injection in HTTP start-line serialization (CVE-2026-55766). Affected versions: <2.12.1. https://github.com/guzzle/psr7/security/advisories/GHSA-vm85-hxw5-5432"
+          },
+          "partialFingerprints": {
+            "composer-audit/v1": "21fe09da21ee43545a40e47b84ab51e8"
+          },
+          "properties": {
+            "advisory_id": "PKSA-7qs6-zvnz-h66r",
+            "advisory_link": "https://github.com/guzzle/psr7/security/advisories/GHSA-vm85-hxw5-5432",
+            "affected_versions": "<2.12.1",
+            "composer_severity": "medium",
+            "cve": "CVE-2026-55766",
+            "issue_severity": "MEDIUM",
+            "package_name": "guzzlehttp/psr7",
+            "package_version": "1.8.3",
+            "tags": [
+              "sca",
+              "dependency",
+              "php"
+            ]
+          },
+          "ruleId": "PKSA-7qs6-zvnz-h66r"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "composer.lock"
+                },
+                "region": {
+                  "startLine": 66
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "guzzlehttp/psr7 1.8.3: CRLF injection via URI host component (CVE-2026-49214). Affected versions: <2.10.2. https://github.com/guzzle/psr7/security/advisories/GHSA-hq7v-mx3g-29hw"
+          },
+          "partialFingerprints": {
+            "composer-audit/v1": "ede6af300770368ccfcf25409ed77b8e"
+          },
+          "properties": {
+            "advisory_id": "PKSA-gm5x-j3mz-71n9",
+            "advisory_link": "https://github.com/guzzle/psr7/security/advisories/GHSA-hq7v-mx3g-29hw",
+            "affected_versions": "<2.10.2",
+            "composer_severity": "medium",
+            "cve": "CVE-2026-49214",
+            "issue_severity": "MEDIUM",
+            "package_name": "guzzlehttp/psr7",
+            "package_version": "1.8.3",
+            "tags": [
+              "sca",
+              "dependency",
+              "php"
+            ]
+          },
+          "ruleId": "PKSA-gm5x-j3mz-71n9"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "composer.lock"
+                },
+                "region": {
+                  "startLine": 66
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "guzzlehttp/psr7 1.8.3: Host confusion via authority reinterpretation (CVE-2026-48998). Affected versions: <2.10.2. https://github.com/guzzle/psr7/security/advisories/GHSA-34xg-wgjx-8xph"
+          },
+          "partialFingerprints": {
+            "composer-audit/v1": "40fbff033f594fc156f75f9461d66c1c"
+          },
+          "properties": {
+            "advisory_id": "PKSA-jj5t-2zs1-dcfm",
+            "advisory_link": "https://github.com/guzzle/psr7/security/advisories/GHSA-34xg-wgjx-8xph",
+            "affected_versions": "<2.10.2",
+            "composer_severity": "medium",
+            "cve": "CVE-2026-48998",
+            "issue_severity": "MEDIUM",
+            "package_name": "guzzlehttp/psr7",
+            "package_version": "1.8.3",
+            "tags": [
+              "sca",
+              "dependency",
+              "php"
+            ]
+          },
+          "ruleId": "PKSA-jj5t-2zs1-dcfm"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "composer.lock"
+                },
+                "region": {
+                  "startLine": 66
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "guzzlehttp/psr7 1.8.3: Improper header validation (CVE-2023-29197). Affected versions: >=2,<2.4.5|<1.9.1. https://github.com/guzzle/psr7/security/advisories/GHSA-wxmh-65f7-jcvw"
+          },
+          "partialFingerprints": {
+            "composer-audit/v1": "de38e9c8e89ce0059d796c9ef95fca89"
+          },
+          "properties": {
+            "advisory_id": "PKSA-hn62-zkx4-1y5q",
+            "advisory_link": "https://github.com/guzzle/psr7/security/advisories/GHSA-wxmh-65f7-jcvw",
+            "affected_versions": ">=2,<2.4.5|<1.9.1",
+            "composer_severity": "medium",
+            "cve": "CVE-2023-29197",
+            "issue_severity": "MEDIUM",
+            "package_name": "guzzlehttp/psr7",
+            "package_version": "1.8.3",
+            "tags": [
+              "sca",
+              "dependency",
+              "php"
+            ]
+          },
+          "ruleId": "PKSA-hn62-zkx4-1y5q"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "composer.lock"
+                },
+                "region": {
+                  "startLine": 66
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "guzzlehttp/psr7 1.8.3: Inproper parsing of HTTP headers (CVE-2022-24775). Affected versions: >=2,<2.1.1|<1.8.4. https://github.com/guzzle/psr7/security/advisories/GHSA-q7rv-6hp3-vh96"
+          },
+          "partialFingerprints": {
+            "composer-audit/v1": "2e04faa36b58c4e3e3004c45dbf99657"
+          },
+          "properties": {
+            "advisory_id": "PKSA-gvzg-s447-b5b5",
+            "advisory_link": "https://github.com/guzzle/psr7/security/advisories/GHSA-q7rv-6hp3-vh96",
+            "affected_versions": ">=2,<2.1.1|<1.8.4",
+            "composer_severity": "medium",
+            "cve": "CVE-2022-24775",
+            "issue_severity": "MEDIUM",
+            "package_name": "guzzlehttp/psr7",
+            "package_version": "1.8.3",
+            "tags": [
+              "sca",
+              "dependency",
+              "php"
+            ]
+          },
+          "ruleId": "PKSA-gvzg-s447-b5b5"
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "composer.lock"
+                },
+                "region": {
+                  "startLine": 10
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "fzaninotto/faker v1.9.2 is abandoned and no replacement is suggested"
+          },
+          "partialFingerprints": {
+            "composer-audit/v1": "ffb886d180a216ff1ef110e17d34119a"
+          },
+          "properties": {
+            "issue_severity": "LOW",
+            "package_name": "fzaninotto/faker",
+            "package_version": "v1.9.2",
+            "tags": [
+              "sca",
+              "dependency",
+              "php",
+              "abandoned"
+            ]
+          },
+          "ruleId": "COMPOSER-ABANDONED"
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "composer.lock"
+                },
+                "region": {
+                  "startLine": 276
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "zendframework/zend-stdlib 3.2.1 is abandoned; its maintainers suggest laminas/laminas-stdlib instead"
+          },
+          "partialFingerprints": {
+            "composer-audit/v1": "aae63cce7493c194a9533d6d61797089"
+          },
+          "properties": {
+            "issue_severity": "LOW",
+            "package_name": "zendframework/zend-stdlib",
+            "package_version": "3.2.1",
+            "replacement_package": "laminas/laminas-stdlib",
+            "tags": [
+              "sca",
+              "dependency",
+              "php",
+              "abandoned"
+            ]
+          },
+          "ruleId": "COMPOSER-ABANDONED"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "name": "Composer Audit",
+          "rules": [
+            {
+              "id": "COMPOSER-ABANDONED",
+              "name": "COMPOSER-ABANDONED",
+              "shortDescription": {
+                "text": "A locked package is abandoned"
+              }
+            },
+            {
+              "helpUri": "https://github.com/guzzle/psr7/security/advisories/GHSA-vm85-hxw5-5432",
+              "id": "PKSA-7qs6-zvnz-h66r",
+              "name": "PKSA-7qs6-zvnz-h66r",
+              "shortDescription": {
+                "text": "CRLF injection in HTTP start-line serialization"
+              }
+            },
+            {
+              "helpUri": "https://github.com/guzzle/psr7/security/advisories/GHSA-hq7v-mx3g-29hw",
+              "id": "PKSA-gm5x-j3mz-71n9",
+              "name": "PKSA-gm5x-j3mz-71n9",
+              "shortDescription": {
+                "text": "CRLF injection via URI host component"
+              }
+            },
+            {
+              "helpUri": "https://github.com/guzzle/psr7/security/advisories/GHSA-q7rv-6hp3-vh96",
+              "id": "PKSA-gvzg-s447-b5b5",
+              "name": "PKSA-gvzg-s447-b5b5",
+              "shortDescription": {
+                "text": "Inproper parsing of HTTP headers"
+              }
+            },
+            {
+              "helpUri": "https://github.com/guzzle/psr7/security/advisories/GHSA-wxmh-65f7-jcvw",
+              "id": "PKSA-hn62-zkx4-1y5q",
+              "name": "PKSA-hn62-zkx4-1y5q",
+              "shortDescription": {
+                "text": "Improper header validation"
+              }
+            },
+            {
+              "helpUri": "https://github.com/guzzle/psr7/security/advisories/GHSA-34xg-wgjx-8xph",
+              "id": "PKSA-jj5t-2zs1-dcfm",
+              "name": "PKSA-jj5t-2zs1-dcfm",
+              "shortDescription": {
+                "text": "Host confusion via authority reinterpretation"
+              }
+            },
+            {
+              "helpUri": "https://github.com/advisories/GHSA-c2w2-prh8-qm98",
+              "id": "PKSA-vznr-tgp9-fd7d",
+              "name": "PKSA-vznr-tgp9-fd7d",
+              "shortDescription": {
+                "text": "guzzlehttp/psr7: Host Confusion via Weak URI Host Validation"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

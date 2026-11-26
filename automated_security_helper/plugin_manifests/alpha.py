@@ -146,6 +146,14 @@ MANIFESTS = (
         owned=(f"{_DOCS}/betterleaks-plugin.md", f"{_FIXTURES}/betterleaks"),
     ),
     _alpha(
+        "composer-audit",
+        "ash_composer_audit_plugins",
+        "composer_audit_scanner",
+        "ComposerAuditScanner",
+        "ComposerAuditScannerConfigOptions",
+        owned=(f"{_DOCS}/composer-audit-plugin.md", f"{_FIXTURES}/composer_audit"),
+    ),
+    _alpha(
         "credsweeper",
         "ash_credsweeper_plugins",
         "credsweeper_scanner",
