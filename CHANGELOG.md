@@ -145,6 +145,19 @@
   being run from the working directory, which is usually the repository being scanned.
   The same path given as `-OCIRunner` is used as written, as before.
 
+- **An MCP scan that exits for incomplete coverage is no longer left running when its
+  coverage cannot be worked out.** The server's fallback built the scan's gap from its
+  scanner rows alone, so an exit for a stale content database, an unevaluated rule, a
+  converter or a tool ASH could not stop, which has no scanner row, carried an empty
+  gap. The registry refused to record an incomplete scan without one, and the entry
+  stayed running, listed as active and blocking the next scan of the same directory.
+  The fallback now reads every field of the exit and reports every coverage key; a row
+  it cannot read is reported as `unknown`, and an exit with nothing readable as one
+  incomplete scanner named `unknown`. A close of an incomplete scan that fails is
+  retried with that gap instead of with no coverage, and a close that fails on the
+  incomplete-coverage path is recorded the way one on the completed path is, instead of
+  ending the scan's task with the entry still running.
+
 ### Features
 
 - **Symbol suppressions are bound to their file's content hash in `.ash.lock`.**
