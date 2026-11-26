@@ -9,14 +9,22 @@ back.
 
 An entry counts as PINNED when its path is a literal file and it carries a
 ``symbol``, a package field (``package_name``, ``package_version``,
-``package_path``) that is not just ``*``, or a line range (``line_start`` or
-``line_end``) that leaves part of the file out. Anything else is UNPINNED: a
-whole-file entry, or a glob, which is whole-file over many files. A line range
-on a glob is still unpinned, because it applies to the same lines of every file
-the glob matches. So is a range that covers the whole file, such as
-``line_start: 1, line_end: 100000``, or ``line_start: 1`` alone, which the
-matcher reads as open-ended. A range on a file that does not exist counts as
-whole-file when it starts at line 1, since nothing bounds it.
+``package_path``) that is not just ``*``, a ``resource_id`` (the entry-level
+spelling or ``scope.resource_id``) that names a resource rather than matching every
+one, or a line range (``line_start`` or ``line_end``) that leaves part of the file
+out. Anything else is UNPINNED: a whole-file entry, or a glob, which is whole-file
+over many files. A line range on a glob is still unpinned, because it applies to
+the same lines of every file the glob matches. So is a range that covers the
+whole file, such as ``line_start: 1, line_end: 100000``, or ``line_start: 1``
+alone, which the matcher reads as open-ended. A range on a file that does not
+exist counts as whole-file when it starts at line 1, since nothing bounds it.
+
+A ``resource_id`` hides the findings about one resource, as the producing engine
+names it (for cdk-nag, the construct path), so a new finding about another
+resource in the same file still reports; a value made only of glob characters
+and ``/`` matches every resource and pins nothing. ``scope.resource_type`` and
+``scope.engines`` alone do not pin: a type covers every resource of that type,
+and an engine block is the plugin's to read.
 
 An unpinned entry passes only if it is in one of three lists:
 
@@ -67,24 +75,29 @@ SCOPE_FIELDS = (
     "package_name",
     "package_version",
     "package_path",
+    "resource_id",
 )
 GLOB_CHARACTERS = "*?["
 
-# (config, rule_id, path) -> why this entry cannot carry a line range, a symbol
-# or a package field. Starts empty. Prefer fixing the source, then a line range
-# with a test that ties it to the line's content, before adding anything here.
+# (config, rule_id, path) -> why this entry cannot carry a line range, a symbol, a
+# package field or a resource_id. Starts empty. Prefer fixing the source, then a
+# line range with a test that ties it to the line's content, before adding anything
+# here.
 ALLOWLIST: dict[tuple[str, str | None, str], str] = {}
 
 # The baseline sizes when the guard was added. Lower them as entries are
-# removed; never raise them. The one exception is the merge of origin/main
-# (617e17c3629): main has no guard, and its configs carry 221 and 108 whole-file entries
-# (one per rule and file) that the guard had never seen. They were added to
-# MAIN_BASELINE and the "main" caps went from 199 and 119 to 420 and 227.
+# removed; never raise them. The one exception is a merge of origin/main: main has
+# no guard, so its configs carry whole-file entries (one per rule and file) that the
+# guard had never seen. The merge at 617e17c3629 added 221 and 108 of them to
+# MAIN_BASELINE, and the "main" caps went from 199 and 119 to 420 and 227.
 FROZEN_SIZES = {
     # 426: the merge of origin/main at ae28f8411ce added six whole-file entries main
     # wrote for its express tests since 617e17c3629 (the baseline's last block).
-    "main": {".ash/.ash.yaml": 426, ".ash/.ash_community_plugins.yaml": 227},
-    "pre_guard": {".ash/.ash.yaml": 27, ".ash/.ash_community_plugins.yaml": 8},
+    # 454 and 201: the merge of origin/main at c15148192f4 dropped the 1 and 28 keys
+    # main had pinned or removed since 84771d0aa4f and added the 29 and 2 whole-file
+    # and glob entries main wrote in that time (the last block of each list).
+    "main": {".ash.yaml": 454, ".ash/.ash_alpha_plugins.yaml": 201},
+    "pre_guard": {".ash.yaml": 27, ".ash/.ash_alpha_plugins.yaml": 8},
 }
 
 PACKAGE_FIELDS = ("package_name", "package_version", "package_path")
@@ -126,6 +139,18 @@ def _pins_a_package(value: Any) -> bool:
     return value is not None and not set(str(value)) <= {"*"}
 
 
+def _pins_a_resource(value: Any) -> bool:
+    # A resource_id is matched literally, then as a glob, against a construct path,
+    # so "*", "**" or "*/*" matches every resource and only a name pins one.
+    return value is not None and bool(set(str(value)) - set("*?[]!/"))
+
+
+def _resource_ids(entry: dict[str, Any]) -> list[Any]:
+    scope = entry.get("scope")
+    nested = scope.get("resource_id") if isinstance(scope, dict) else None
+    return [entry.get("resource_id"), nested]
+
+
 def is_unpinned(
     entry: dict[str, Any], line_count: LineCounter = worktree_line_count
 ) -> bool:
@@ -135,6 +160,8 @@ def is_unpinned(
     if entry.get("symbol") is not None:
         return False
     if any(_pins_a_package(entry.get(field)) for field in PACKAGE_FIELDS):
+        return False
+    if any(_pins_a_resource(value) for value in _resource_ids(entry)):
         return False
     return _covers_whole_file(entry, line_count)
 
@@ -317,6 +344,23 @@ def test_allowlist_entries_carry_a_reason_and_match_an_entry():
             False,
         ),
         ({"rule_id": "R", "path": "package-lock.json", "package_name": "p*"}, False),
+        # A resource_id that names a resource pins the entry to it, in either
+        # spelling; one made of glob characters and "/" matches every resource.
+        ({"rule_id": "R", "path": "t.json", "resource_id": "*/Role1A2B"}, False),
+        (
+            {"rule_id": "R", "path": "t.json", "scope": {"resource_id": "Stack/Fn"}},
+            False,
+        ),
+        ({"rule_id": "R", "path": "t.json", "resource_id": "*"}, True),
+        ({"rule_id": "R", "path": "t.json", "resource_id": "*/*"}, True),
+        ({"rule_id": "R", "path": "t.json", "scope": {"resource_id": "**"}}, True),
+        # A resource type covers every resource of that type, and a glob path is
+        # whole-file over many files whatever resource it names.
+        (
+            {"rule_id": "R", "path": "t.json", "scope": {"resource_type": "AWS::*"}},
+            True,
+        ),
+        ({"rule_id": "R", "path": "*.json", "resource_id": "*/Role1A2B"}, True),
     ],
 )
 def test_classifier(entry: dict[str, Any], unpinned: bool):
@@ -331,7 +375,7 @@ def test_worktree_line_count_reads_the_file():
 
 
 def test_a_new_whole_file_entry_is_an_offender():
-    config = ".ash/.ash.yaml"
+    config = ".ash.yaml"
     entries = suppressions(config) + [
         {"rule_id": "SECRET-*", "path": "deploy/new_module.py", "reason": "x"}
     ]
@@ -346,6 +390,15 @@ def test_a_new_whole_file_entry_is_an_offender():
         }
     ]
     assert offenders(config, pinned) == []
+    resource_scoped = entries[:-1] + [
+        {
+            "rule_id": "SECRET-*",
+            "path": "deploy/new_module.py",
+            "resource_id": "*/NewFunction",
+            "reason": "x",
+        }
+    ]
+    assert offenders(config, resource_scoped) == []
 
 
 @pytest.mark.parametrize(
@@ -354,10 +407,12 @@ def test_a_new_whole_file_entry_is_an_offender():
         {"line_start": 1, "line_end": 100000},
         {"line_start": 1},
         {"package_name": "*"},
+        {"resource_id": "*"},
+        {"scope": {"resource_id": "*/*"}},
     ],
 )
 def test_a_range_or_package_that_covers_everything_is_an_offender(widened):
-    config = ".ash/.ash.yaml"
+    config = ".ash.yaml"
     entry = {"rule_id": "SECRET-*", "path": "pyproject.toml", "reason": "x"}
     entries = suppressions(config) + [{**entry, **widened}]
     assert offenders(config, entries) == [("SECRET-*", "pyproject.toml")]
