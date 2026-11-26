@@ -21,7 +21,10 @@ from automated_security_helper.base.plugin_manifest import (
     ScannerManifest,
 )
 from automated_security_helper.base.plugin_provisioning import provisioning_for
-from automated_security_helper.plugin_manifests import ManifestRegistryError
+from automated_security_helper.plugin_manifests import (
+    ManifestRegistryError,
+    check_table_rows,
+)
 
 _PLUGIN = "automated_security_helper.plugin_modules.ash_builtin"
 _SCANNERS = f"{_PLUGIN}.scanners"
@@ -252,31 +255,11 @@ MANIFESTS = (
 )
 
 
-def _check_tables(
-    manifests: tuple[ScannerManifest, ...],
-    descriptions: dict[str, str],
-    exclusions: dict[str, tuple[ExclusionOption, ...]],
-) -> None:
-    """Refuse a table row that names no builtin scanner.
-
-    ``_builtin`` reads each table by the scanner's name, and ``.get`` on
-    ``_EXCLUSIONS`` answers "none" for a name nothing is declared under, so a
-    row for a renamed or removed scanner would be dropped without a word and the
-    scanner would ship without its exclusion options. Every description belongs
-    to a scanner and every scanner has one; an exclusion row belongs to one.
-    """
-    names = {manifest.name for manifest in manifests}
-    if set(descriptions) != names:
-        raise ManifestRegistryError(
-            "_SECTION_DESCRIPTIONS and the builtin scanners disagree: "
-            f"described but not declared {sorted(set(descriptions) - names)}, "
-            f"declared but not described {sorted(names - set(descriptions))}"
-        )
-    unknown = sorted(set(exclusions) - names)
-    if unknown:
-        raise ManifestRegistryError(
-            f"_EXCLUSIONS names no builtin scanner for {unknown}"
-        )
-
-
-_check_tables(MANIFESTS, _SECTION_DESCRIPTIONS, _EXCLUSIONS)
+#: ``_builtin`` already refuses a scanner with no description, so the rows left to
+#: check are those that name no scanner at all.
+check_table_rows(
+    __name__,
+    {manifest.name for manifest in MANIFESTS},
+    _SECTION_DESCRIPTIONS=_SECTION_DESCRIPTIONS,
+    _EXCLUSIONS=_EXCLUSIONS,
+)

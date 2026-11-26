@@ -66,6 +66,55 @@ def test_a_default_named_materialization_keeps_no_digest_either():
     assert Path(path).as_posix() not in session_profiles._written_digests
 
 
+def test_a_default_named_materialization_cannot_take_a_bindings_digest_away():
+    """Red at the tip it was found on: the per-call write recorded a digest for the
+    path the binding had just written, then removed it, so a bind that followed
+    copied nothing and the binding was checked for presence only.
+
+    The default file name is the binding's own (``config/ash.yaml``), and
+    ``materialize_session_config`` takes no binding lock, so the two can meet."""
+    registered = AshConfig(project_name="strict")
+    config_path, trusted = session_profiles.materialize_session_binding(
+        None, registered, None
+    )
+    session_profiles.materialize_session_config(None, AshConfig(project_name="other"))
+
+    session_profiles.bind_session_config(
+        None,
+        config=registered,
+        profile_name="strict",
+        config_path=config_path,
+        trusted_config_path=trusted,
+    )
+
+    state = session_profiles.get_session_state(None)
+    assert state is not None
+    assert state.config_sha256 is not None
+    assert state.trusted_config_sha256 is not None
+
+
+def test_a_binding_that_fails_between_its_moves_records_no_digest(monkeypatch):
+    """Both digests are recorded once both files are in place, so a failed second
+    move leaves neither behind."""
+    real = session_profiles._replace_staged
+    moves = []
+
+    def refuse_the_second(partial, target):
+        moves.append(target)
+        if len(moves) == 2:
+            raise PermissionError(13, "refused", str(target))
+        return real(partial, target)
+
+    monkeypatch.setattr(session_profiles, "_replace_staged", refuse_the_second)
+
+    with pytest.raises(PermissionError):
+        session_profiles.materialize_session_binding(
+            None, AshConfig(project_name="strict"), AshConfig(project_name="patched")
+        )
+
+    assert session_profiles._written_digests == {}
+
+
 def test_clearing_a_session_leaves_none_of_its_digests():
     config_path, trusted = session_profiles.materialize_session_binding(
         None, AshConfig(project_name="strict"), AshConfig(project_name="patched")

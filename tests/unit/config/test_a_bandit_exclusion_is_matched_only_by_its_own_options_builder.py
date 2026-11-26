@@ -97,10 +97,34 @@ def test_a_bandit_declaration_with_no_builder_is_refused(monkeypatch):
         bandit_would_skip("v", scanner="mine", option="x", **WHERE)
 
 
-def test_a_caller_that_names_no_option_keeps_the_manifest_order_fallback(
-    monkeypatch,
-):
+def test_a_caller_that_names_neither_keeps_the_manifest_order_fallback(monkeypatch):
     _install(monkeypatch, [OTHER])
 
     assert bandit_would_skip("v", **WHERE) is True
-    assert bandit_would_skip("v", scanner="mine", **WHERE) is True
+
+
+def test_a_scanner_alone_is_matched_by_its_own_builder_never_anothers(monkeypatch):
+    """Red at the tip it was found on: a scanner with no bandit option of its own
+    was matched by another tool's builder, and the test that stood here asserted it."""
+    own = (
+        "mine",
+        ExclusionOption(option="x", kind="bandit", glob_builder="pkg.own:build"),
+    )
+    _install(monkeypatch, [OTHER, own])
+
+    assert bandit_would_skip("v", scanner="mine", **WHERE) is False
+
+
+def test_a_scanner_alone_with_no_bandit_option_of_its_own_is_refused(monkeypatch):
+    _install(monkeypatch, [OTHER])
+
+    with pytest.raises(ScannerError, match="mine"):
+        bandit_would_skip("v", scanner="mine", **WHERE)
+
+
+def test_an_option_alone_is_matched_by_the_option_of_that_name_only(monkeypatch):
+    _install(monkeypatch, [OTHER])
+
+    assert bandit_would_skip("v", option="o", **WHERE) is True
+    with pytest.raises(ScannerError, match="nobody-declares-this"):
+        bandit_would_skip("v", option="nobody-declares-this", **WHERE)

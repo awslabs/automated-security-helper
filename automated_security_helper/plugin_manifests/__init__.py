@@ -35,7 +35,7 @@ from __future__ import annotations
 import functools
 import importlib
 import pkgutil
-from typing import Dict, Literal, Optional
+from typing import Dict, Literal, Mapping, Optional
 
 from automated_security_helper.base.plugin_manifest import (
     ConfigSection,
@@ -52,6 +52,27 @@ class ManifestRegistryError(ValueError):
     builtin module knows, a missing description, an options class that cannot
     yield its section class.
     """
+
+
+def check_table_rows(
+    module: str, names: set[str], **tables: Mapping[str, object]
+) -> None:
+    """Refuse a row of a manifest module's table that names no scanner it declares.
+
+    A manifest module builds each manifest from tables keyed by scanner name and
+    reads them with ``.get``, which answers "nothing declared" for a name no
+    scanner has. A row left behind by a renamed or removed scanner is then
+    dropped without a word, and the scanner ships without the options it was
+    meant to carry (a client's exclusion entries, a denied option's default).
+    Each module calls this once, after its ``MANIFESTS``, with the tables it reads.
+    """
+    for table_name, table in tables.items():
+        unknown = sorted(set(table) - names)
+        if unknown:
+            raise ManifestRegistryError(
+                f"{module}.{table_name} has rows for scanners the module does "
+                f"not declare: {unknown}"
+            )
 
 
 def _load_manifests() -> tuple[ScannerManifest, ...]:

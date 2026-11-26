@@ -81,5 +81,15 @@ def test_scan_target_reexports_the_env_name_it_does_not_define():
     assert (
         scan_target.ASH_MCP_ALLOWED_ROOTS_ENV == mcp_sandbox.ASH_MCP_ALLOWED_ROOTS_ENV
     )
-    source = Path(scan_target.__file__).read_text()
-    assert 'ASH_MCP_ALLOWED_ROOTS_ENV = "' not in source
+    # Equal strings cannot tell a re-export from a second literal (identifier-like
+    # literals are interned, so even ``is`` holds for both), so the module's own
+    # syntax tree is read: no statement in it assigns the name.
+    tree = ast.parse(Path(scan_target.__file__).read_text())
+    assigned = [
+        target.id
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Assign, ast.AnnAssign))
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        if isinstance(target, ast.Name)
+    ]
+    assert "ASH_MCP_ALLOWED_ROOTS_ENV" not in assigned

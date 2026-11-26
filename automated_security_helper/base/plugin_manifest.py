@@ -50,7 +50,7 @@ import re
 from enum import Enum
 from typing import Any, Literal, Mapping, Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from automated_security_helper.base.plugin_provisioning import (
     NO_PROVISIONING,
@@ -130,8 +130,11 @@ def _refuse(self: object, *_args: object, **_kwargs: object) -> Any:
 class _FrozenList(list):
     """A ``list`` that refuses every in-place change.
 
-    Still a ``list``: it compares equal to one and dumps as one, which is what a
-    delivered value is compared with. Rebuilt from its items when copied or
+    Still a ``list`` by ``isinstance``: it compares equal to a plain one, which is
+    what a delivered value is compared with, and ``json`` and pydantic read it as
+    one. What reads the exact type does not: ``yaml.safe_dump`` refuses it and a
+    ``type(x) is list`` check fails, so a reader that hands the value to such code
+    takes :func:`thawed` first. Rebuilt from its items when copied or
     pickled (``__reduce__``), because the default rebuild appends one item at a
     time.
     """
@@ -345,7 +348,9 @@ class ScannerManifest(_Frozen):
     #: no section for such a plugin, so a delivered value equal to the default
     #: (which changes nothing) is told from a changed one by this row. A test
     #: binds each row to the options model's own default.
-    denied_option_defaults: dict[str, Any] = {}
+    #: A frozen table either way: pydantic does not validate a default, so the
+    #: empty one is built frozen here rather than passed through the validator.
+    denied_option_defaults: dict[str, Any] = Field(default_factory=_FrozenDict)
 
     @field_validator("denied_option_defaults")
     @classmethod
@@ -360,8 +365,10 @@ class ScannerManifest(_Frozen):
         change what "the default" means for the whole process. The copy cuts that
         tie; freezing it keeps the cached manifest's own table and lists from
         being edited either (``dict`` and ``list`` subclasses that raise
-        ``TypeError`` on every change, equal to and dumped as the plain ones).
-        A reader that needs to edit takes :func:`thawed`.
+        ``TypeError`` on every change and compare equal to the plain ones;
+        ``model_dump`` and ``json`` give plain data). A reader that needs to edit,
+        or that passes the value to code reading the exact type (``yaml.safe_dump``),
+        takes :func:`thawed`.
         """
         return _freeze(copy.deepcopy(value))
 

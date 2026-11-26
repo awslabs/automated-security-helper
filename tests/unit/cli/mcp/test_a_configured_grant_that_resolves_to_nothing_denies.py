@@ -107,6 +107,58 @@ def test_the_degraded_gate_sandbox_denies_too(
 
     assert sandbox.fall_back_to_denylist is False
     assert sandbox.scan_roots == ()
+    # The degraded sandbox carries the flag that adds the variable to the
+    # refusal; the base never set it, so this is what the change adds there.
+    assert sandbox.grant_unresolved is True
+
+
+def test_the_degraded_sandbox_of_a_resolvable_grant_is_not_marked_unresolved(
+    tmp_path, monkeypatch, local_transport
+):
+    monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
+    monkeypatch.setattr(
+        mcp_sandbox,
+        "session_sandbox",
+        lambda session_id=None: (_ for _ in ()).throw(ValueError("bad id")),
+    )
+
+    sandbox = mcp_sandbox._sandbox_for_gate("bad id")
+
+    assert sandbox.grant_unresolved is False
+    assert sandbox.scan_roots == (tmp_path.resolve(),)
+
+
+def test_a_grant_set_but_unresolved_is_read_and_warned_about_once_per_value(
+    tmp_path, monkeypatch, local_transport, a_path_named_loop_cannot_be_resolved
+):
+    """Red at the tip it was found on: the variable was parsed twice per
+    decision and the warning fired at every gate."""
+    warnings = []
+    monkeypatch.setattr(
+        mcp_sandbox._logger, "warning", lambda msg, *args: warnings.append(msg % args)
+    )
+    monkeypatch.setattr(mcp_sandbox, "_WARNED_UNRESOLVED_GRANTS", set())
+    parses = []
+    real = mcp_sandbox._parse_roots
+    monkeypatch.setattr(
+        mcp_sandbox, "_parse_roots", lambda raw: (parses.append(raw), real(raw))[1]
+    )
+    monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path / "loop"))
+
+    for _ in range(3):
+        mcp_sandbox.session_sandbox(None)
+        mcp_sandbox.scan_grant_is_unresolved()
+    ours = [w for w in warnings if "ASH_MCP_ALLOWED_ROOTS" in w]
+
+    assert len(ours) == 1
+    assert str(tmp_path / "loop") not in ours[0]
+    assert parses.count(str(tmp_path / "loop")) == 6, "one parse per decision"
+
+    monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path / "loop2"))
+    mcp_sandbox.session_sandbox(None)
+    assert len([w for w in warnings if "ASH_MCP_ALLOWED_ROOTS" in w]) == 1, (
+        "control: loop2 resolves, so it is not a set-but-unresolved grant"
+    )
 
 
 def test_the_profile_scan_root_check_is_sane_with_no_resolved_root(

@@ -146,6 +146,29 @@ def test_a_manifests_table_of_defaults_cannot_be_edited_in_place():
     assert set(_manifest("guarddog").denied_option_defaults) == keys
 
 
+def test_a_manifest_that_declares_none_has_a_frozen_empty_table():
+    """Red at the tip it was found on: pydantic does not validate a default, so a
+    manifest that passed no table (every builtin one) held a plain ``dict``."""
+    builtin = [m for m in scanner_manifests() if m.default_enabled]
+    assert builtin, "control: there are builtin manifests"
+
+    for manifest in builtin:
+        table = manifest.denied_option_defaults
+        assert table == {}
+        with pytest.raises(TypeError):
+            table["x"] = 1
+        with pytest.raises(TypeError):
+            table.update({"x": 1})
+
+
+def test_every_manifests_table_is_the_same_frozen_type():
+    from automated_security_helper.base.plugin_manifest import _FrozenDict
+
+    kinds = {type(m.denied_option_defaults) for m in scanner_manifests()}
+
+    assert kinds == {_FrozenDict}
+
+
 def test_a_nested_list_is_frozen_too():
     from automated_security_helper.base.plugin_manifest import ScannerManifest
 

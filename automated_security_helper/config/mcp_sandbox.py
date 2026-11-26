@@ -114,7 +114,7 @@ import os
 import platform
 from dataclasses import dataclass
 from pathlib import Path, PurePath
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, List, Optional, Set, Tuple, Union
 
 from automated_security_helper.core.enums import DEFAULT_TRANSPORT, Transport
 from automated_security_helper.core.resource_management.error_handling import (
@@ -365,15 +365,41 @@ def operator_scan_roots() -> Tuple[Path, ...]:
     resolved; :func:`scan_grant_is_unresolved` tells the second from the first.
     """
 
-    return _parse_roots(os.environ.get(ASH_MCP_ALLOWED_ROOTS_ENV))
+    return _scan_grant()[0]
+
+
+#: The raw values of ``ASH_MCP_ALLOWED_ROOTS`` already warned about as set but
+#: unresolved. A value is named once, however many gates read it.
+_WARNED_UNRESOLVED_GRANTS: Set[str] = set()
+
+
+def _scan_grant() -> Tuple[Tuple[Path, ...], bool]:
+    """Read ``ASH_MCP_ALLOWED_ROOTS`` once: ``(roots, set_but_unresolved)``.
+
+    The one reader of the variable for a decision, so the grant is parsed and
+    resolved once and the answer to "is it configured" cannot come from a
+    different read than the roots. The warning for a grant that is set and
+    resolved to nothing is logged once per distinct value and names no path.
+    """
+
+    raw = os.environ.get(ASH_MCP_ALLOWED_ROOTS_ENV)
+    roots = _parse_roots(raw)
+    unresolved = not roots and _grant_is_configured(raw)
+    if unresolved and raw not in _WARNED_UNRESOLVED_GRANTS:
+        _WARNED_UNRESOLVED_GRANTS.add(raw or "")
+        _logger.warning(
+            "MCP sandbox: %s is set but none of its entries could be resolved, "
+            "so no directory is granted and scans outside the session sandbox "
+            "are refused",
+            ASH_MCP_ALLOWED_ROOTS_ENV,
+        )
+    return roots, unresolved
 
 
 def scan_grant_is_unresolved() -> bool:
     """True when ``ASH_MCP_ALLOWED_ROOTS`` is set but none of it resolved."""
 
-    return not operator_scan_roots() and _grant_is_configured(
-        os.environ.get(ASH_MCP_ALLOWED_ROOTS_ENV)
-    )
+    return _scan_grant()[1]
 
 
 def operator_config_roots() -> Tuple[Path, ...]:
@@ -828,7 +854,7 @@ def session_sandbox(session_id: Optional[str] = None) -> SessionSandbox:
         if shared is not None:
             root = shared / session_id
 
-    granted_scan = operator_scan_roots()
+    granted_scan, grant_unresolved = _scan_grant()
     granted_config = operator_config_roots()
 
     scan_roots: List[Path] = list(granted_scan)
@@ -844,19 +870,8 @@ def session_sandbox(session_id: Optional[str] = None) -> SessionSandbox:
     # No grant and a local caller: keep the legacy net. See the module docstring
     # -- refusing every unconfigured local install is the more damaging failure,
     # and on stdio the caller already holds the server's own filesystem
-    # privileges.
-    # A grant that is set but resolved to nothing is not "no grant": the
-    # operator asked to narrow the server, so it denies rather than widens.
-    grant_unresolved = not granted_scan and _grant_is_configured(
-        os.environ.get(ASH_MCP_ALLOWED_ROOTS_ENV)
-    )
-    if grant_unresolved:
-        _logger.warning(
-            "MCP sandbox: %s is set but none of its entries could be resolved, "
-            "so no directory is granted and scans outside the session sandbox "
-            "are refused",
-            ASH_MCP_ALLOWED_ROOTS_ENV,
-        )
+    # privileges. A grant that is set but resolved to nothing is not "no grant":
+    # the operator asked to narrow the server, so it denies rather than widens.
     fall_back = not granted_scan and not remote and not grant_unresolved
 
     config_roots: List[Path] = list(granted_config)
@@ -902,7 +917,7 @@ def _sandbox_for_gate(session_id: Optional[str]) -> SessionSandbox:
         return session_sandbox(session_id)
     except ValueError as exc:
         _logger.debug("MCP sandbox: no session allowance for %r (%s)", session_id, exc)
-        granted_scan = operator_scan_roots()
+        granted_scan, grant_unresolved = _scan_grant()
         return SessionSandbox(
             session_id=None,
             root=None,
@@ -910,7 +925,7 @@ def _sandbox_for_gate(session_id: Optional[str]) -> SessionSandbox:
             config_roots=tuple(operator_config_roots()) + tuple(granted_scan),
             fall_back_to_denylist=False,
             confine_config=True,
-            grant_unresolved=scan_grant_is_unresolved(),
+            grant_unresolved=grant_unresolved,
         )
 
 

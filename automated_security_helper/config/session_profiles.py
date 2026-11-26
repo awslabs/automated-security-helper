@@ -874,12 +874,11 @@ def materialize_session_config(
     partial, target, _sandbox = _stage_session_config(
         session_id, config, client_patched=client_patched, filename=filename
     )
+    # No digest is kept for this file. A binding keeps one for its own two paths
+    # (``materialize_session_binding``), and the default file name here is the
+    # binding's own, so a record or a removal from this function could change
+    # what a binding that is being written at the same moment copies.
     _replace_staged(partial, target)
-    # Not a binding's file, so no digest is kept for it: a binding copies the
-    # entry for its own two paths when it is bound, and nothing reads this one
-    # or drops it when a session ends (a per-call profile file is written once
-    # per call).
-    _written_digests.pop(target.as_posix(), None)
     return target.as_posix()
 
 
@@ -976,7 +975,15 @@ def _rename_waits_on_readers() -> bool:
     return sys.platform == "win32"
 
 
-def _replace_staged(partial: Path, target: Path) -> None:
+def _record_written(target: Path, digest: Optional[str]) -> None:
+    """Keep ``digest`` as what this process wrote at ``target``; None forgets it."""
+    if digest is None:
+        _written_digests.pop(target.as_posix(), None)
+    else:
+        _written_digests[target.as_posix()] = digest
+
+
+def _replace_staged(partial: Path, target: Path) -> Optional[str]:
     """Move a staged ``partial`` over ``target``, and remove what is left of it.
 
     One rename, so a scan reading ``target`` while it is written reads the old
@@ -988,20 +995,19 @@ def _replace_staged(partial: Path, target: Path) -> None:
     would only delay it (half a second, with a scan waiting on the answer).
     Whatever the outcome, the partial is removed afterward.
 
-    The digest of the bytes moved into place is recorded for ``target``
-    (``_written_digests``), taken from the staged file before the move, so it
-    names what this call wrote and not whatever the name holds a moment later.
+    Returns the digest of the bytes moved into place, taken from the staged file
+    before the move, so it names what this call wrote and not whatever the name
+    holds a moment later (None when the staged file could not be read). Nothing is
+    recorded here: only a binding keeps a digest (``_record_written``), and a
+    write that is not a binding's must not touch the table, since it can name the
+    same path.
     """
     digest = _file_sha256(partial)
     try:
         for attempt in range(_REPLACE_ATTEMPTS):
             try:
                 os.replace(partial, target)
-                if digest is not None:
-                    _written_digests[target.as_posix()] = digest
-                else:
-                    _written_digests.pop(target.as_posix(), None)
-                return
+                return digest
             except PermissionError:
                 if not _rename_waits_on_readers() or attempt == _REPLACE_ATTEMPTS - 1:
                     raise
@@ -1070,9 +1076,9 @@ def materialize_session_binding(
             client_partial.unlink(missing_ok=True)
             raise
         try:
-            _replace_staged(client_partial, client_target)
+            client_digest = _replace_staged(client_partial, client_target)
             try:
-                _replace_staged(trusted_partial, trusted_target)
+                trusted_digest = _replace_staged(trusted_partial, trusted_target)
             except BaseException:
                 # The client's copy is already the new profile's and the
                 # operator's is still the old one's: a scan that read the pair
@@ -1083,18 +1089,25 @@ def materialize_session_binding(
                 # and writes both files again from itself on the next read.
                 with contextlib.suppress(OSError):
                     client_target.unlink(missing_ok=True)
+                _record_written(client_target, None)
                 raise
         finally:
             # A rename that failed leaves the other staged file behind.
             trusted_partial.unlink(missing_ok=True)
+        # Both files are in place: only now does the binding keep their digests.
+        _record_written(client_target, client_digest)
+        _record_written(trusted_target, trusted_digest)
         return client_target.as_posix(), trusted_target.as_posix()
     partial, target, sandbox = _stage_session_config(session_id, registered)
     try:
-        (sandbox.client_config_dir / SESSION_CONFIG_FILENAME).unlink(missing_ok=True)
+        old_client_copy = sandbox.client_config_dir / SESSION_CONFIG_FILENAME
+        old_client_copy.unlink(missing_ok=True)
+        # The file is gone, and so is the digest kept for it.
+        _record_written(old_client_copy, None)
     except BaseException:
         partial.unlink(missing_ok=True)
         raise
-    _replace_staged(partial, target)
+    _record_written(target, _replace_staged(partial, target))
     trusted = target.as_posix()
     return trusted, trusted
 
@@ -1554,9 +1567,9 @@ def clear_session_state(session_id: Optional[str]) -> None:
             # The digests kept for this binding's files go with it, so a server
             # that sees one new session id per client keeps none for ended ones.
             # They are all there is to drop: only ``materialize_session_binding``
-            # leaves a digest behind (``materialize_session_config`` removes the
-            # one ``_replace_staged`` recorded), and it writes exactly these two
-            # paths.
+            # records a digest (``_record_written``; ``_replace_staged`` and
+            # ``materialize_session_config`` record none), and a binding is
+            # these two paths.
             for path in (state.config_path, state.trusted_config_path):
                 if path is not None:
                     _written_digests.pop(Path(path).as_posix(), None)
