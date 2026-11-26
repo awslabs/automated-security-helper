@@ -375,10 +375,11 @@ class TestDefaults:
         up to (but not including) the first wildcard segment.
 
         Plugin-provided reporters (`bedrock-summary-reporter`, `cloudwatch-logs`,
-        `aws-security-hub`, `s3`) and scanners (`ferret-scan`, `guarddog`,
-        `hadolint`, `snyk-code`, `trivy-repo`) are NOT present on a default
-        `AshConfig`; we materialize them here via model_validate so the schema
-        check covers extras that real plugins add, from their own models.
+        `aws-security-hub`, `s3`), scanners (`ferret-scan`, `guarddog`,
+        `hadolint`, `snyk-code`, `trivy-repo`) and the `sdist-lock-harvester`
+        converter are NOT present on a default `AshConfig`; we materialize them
+        here via model_validate so the schema check covers extras that real
+        plugins add, from their own models.
         """
         from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
             FerretScannerConfig,
@@ -409,6 +410,10 @@ class TestDefaults:
             SecurityHubReporterConfig,
         )
 
+        from automated_security_helper.plugin_modules.ash_builtin.converters.sdist_lock_harvester import (
+            SdistLockHarvesterConverterConfig,
+        )
+
         cfg = AshConfig.model_validate(
             {
                 # The AWS reporters' sections, from their own models, so an
@@ -432,6 +437,13 @@ class TestDefaults:
                     "hadolint": HadolintScannerConfig().model_dump(by_alias=True),
                     "trivy-repo": TrivyRepoScannerConfig().model_dump(by_alias=True),
                     "snyk-code": SnykCodeScannerConfig().model_dump(by_alias=True),
+                },
+                # The converter is built in, but its section is not a field of a
+                # default converters segment, so it is materialized from its own model.
+                "converters": {
+                    "sdist-lock-harvester": SdistLockHarvesterConverterConfig().model_dump(
+                        by_alias=True
+                    ),
                 },
             }
         )
