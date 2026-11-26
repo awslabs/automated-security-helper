@@ -27,7 +27,11 @@ from automated_security_helper.base.scanner_facets import (
     ScannerFacets,
 )
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.base.uv_tool_mixin import tool_name
+from automated_security_helper.base.uv_tool_mixin import (
+    _record_direct_route_version,
+    _restore_uv_route,
+    tool_name,
+)
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
@@ -431,6 +435,8 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             _command_words(command)[0]
         ):
             return False
+        if uses_uv:
+            _restore_uv_route(self)
         self.use_uv_tool = uses_uv
         self.dependencies_satisfied = True
         return True
@@ -522,9 +528,9 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             )
             # With a default, as the mixin reads it: a verifier stand-in that
             # carries only a status and a detail is an answer without a version.
-            verified_version = getattr(answer, "version", None)
-            if verified_version:
-                self.tool_version = verified_version
+            # A copy with no version leaves the record empty rather than the
+            # uv probe's value, which names another environment.
+            _record_direct_route_version(self, getattr(answer, "version", None))
             return True
         if answer.status == "unsatisfied":
             # The log gets the full story, the copy's path and the answer's
@@ -557,6 +563,8 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             ),
             level=logging.WARNING,
         )
+        # The copy that runs is this one, whether or not it was verified.
+        _record_direct_route_version(self, getattr(answer, "version", None))
         return True
 
     def _get_uv_tool_version(

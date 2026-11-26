@@ -298,6 +298,42 @@ def _tool_name(plugin: Any) -> str:
     return tool_name(plugin)
 
 
+def _record_direct_route_version(plugin: Any, version: Optional[str]) -> None:
+    """Record the version of the copy on PATH that the scan now runs directly.
+
+    ``version`` is that copy's own answer (its verdict's version, read from its
+    ``--version``), or None when it gave none. The deferred uv probe reads the
+    version of uv's environment, which is not what runs on this route, so a value
+    it wrote earlier is replaced -- with None when the copy answered nothing (an
+    earlier probe resolved 3.4.5 while the copy on PATH was 3.3.15) -- and a probe
+    still owed is dropped unasked. ``_select_tool_execution`` and the PATH
+    fallbacks of the bandit, checkov, cfn-lint and semgrep scanners record through
+    here, so on those routes the record follows the route.
+    """
+    plugin.tool_version = version or None
+    plugin._deferred_tool_version_probe = None
+
+
+def _restore_uv_route(plugin: Any) -> None:
+    """Put the uv route back after a decision to run a copy directly is dropped.
+
+    The version recorded for that copy names a binary that no longer runs, so it
+    goes with the decision, and the uv probe is owed again: the next
+    ``resolve_deferred_tool_version`` (the dependency check, the SARIF step, the
+    inventory) records the version of the environment uv runs. The probe is
+    re-armed with no ``--from`` spec, which ``_get_uv_tool_version`` resolves when
+    it runs, so it reads the requirement of the config in place then. A probe
+    already owed is kept as it is. A plugin that is not on a direct route
+    (``use_uv_tool`` is not False) is left untouched.
+    """
+    if getattr(plugin, "use_uv_tool", None) is not False:
+        return
+    plugin.use_uv_tool = True
+    plugin.tool_version = None
+    if getattr(plugin, "_deferred_tool_version_probe", None) is None:
+        plugin._deferred_tool_version_probe = (tool_name(plugin), None)
+
+
 class UVToolMixin:
     """UV tool management methods extracted from PluginBase.
 
@@ -1800,10 +1836,7 @@ class UVToolMixin:
             # value an earlier uv probe wrote names an environment the scan
             # does not run (#955, the probe resolved 3.4.5 while the PATH copy
             # was 3.3.15), and the uv probe is no longer owed on this route.
-            # mypy reads this mixin's tool_version as the str the first assignment above
-            # gave it; PluginBase declares it ``str | None``, which is what this holds.
-            self.tool_version = getattr(verdict, "version", None) or None  # type: ignore[assignment]
-            self._deferred_tool_version_probe = None
+            _record_direct_route_version(self, getattr(verdict, "version", None))
             return True
 
         # A tool from the Nix store is the pinned one `--mode nix` exists to run.
@@ -1901,7 +1934,8 @@ class UVToolMixin:
         False, with nothing changed, when no such decision was made; False
         with the record cleared -- and ``use_uv_tool`` put back on the uv
         route, so the next selection runs afresh instead of skipping into the
-        fallback -- when the verified copy is gone or no longer executable, so
+        fallback, the copy's recorded version dropped and the uv version probe
+        owed again -- when the verified copy is gone or no longer executable, so
         a genuinely unusable tool still fails loudly. A decision something
         re-pointed at uv (``use_uv_tool`` True again) is not honored either:
         whatever flipped it knew more recent facts than the record here.
@@ -1932,9 +1966,10 @@ class UVToolMixin:
             # The dropped decision is what turned the uv route off; put the
             # flag back so the next selection starts where construction left
             # it, instead of skipping its own `if use_uv_tool` branch into the
-            # consolidated resolver's cold probe and flip.
-            if getattr(self, "use_uv_tool", None) is False:
-                self.use_uv_tool = True
+            # consolidated resolver's cold probe and flip. The copy's version
+            # goes with the decision, and the uv probe is owed again: the scan
+            # runs through uv now, and the reports name uv's environment.
+            _restore_uv_route(self)
             return False
         self.dependencies_satisfied = True
         return True

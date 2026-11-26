@@ -17,6 +17,7 @@ from automated_security_helper.base.plugin_config import (
     config_validated_by_declared_model,
 )
 from automated_security_helper.base.uv_tool_mixin import (
+    _restore_uv_route,
     guarded_values,
     guarded_values_read,
     tool_name,
@@ -1432,12 +1433,13 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         resolver, which pays the cold uv probe and flips the route -- the exact
         shape this unit removes -- so the flag goes back to the uv route the
         decision started from, and the next validation runs selection afresh.
+        The version recorded for that copy goes with the route and the uv
+        version probe is owed again, since the scan now runs through uv.
         """
         self._dependencies_validated = None
         if self._verified_pre_installed_executable is not None:
             self._verified_pre_installed_executable = None
-            if self.use_uv_tool is False:
-                self.use_uv_tool = True
+            _restore_uv_route(self)
 
     def _pre_scan(
         self,

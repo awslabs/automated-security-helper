@@ -46,7 +46,10 @@ from automated_security_helper.base.scanner_facets import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
-from automated_security_helper.base.uv_tool_mixin import tool_name
+from automated_security_helper.base.uv_tool_mixin import (
+    _record_direct_route_version,
+    tool_name,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.vocab import SeverityThreshold, TargetType
 from automated_security_helper.base.scanner_plugin import (
@@ -1354,12 +1357,10 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 ),
                 level=logging.WARNING,
             )
-        version = getattr(checked, "version", None)
-        if version:
-            # The copy that runs is this one, so the version the reports name
-            # (the SARIF scanner_version) is its own: the deferred probe read
-            # the version of uv's environment, which is not what runs now.
-            self.tool_version = version
+        # The copy that runs is this one, so the version the reports name
+        # (the SARIF scanner_version) is its own: the deferred probe read
+        # the version of uv's environment, which is not what runs now.
+        _record_direct_route_version(self, getattr(checked, "version", None))
         self.use_uv_tool = False
         self.dependencies_satisfied = True
         return True
