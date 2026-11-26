@@ -146,6 +146,31 @@ class TestSetSourceImage:
         )
         assert locator.ref == "registry.example.com:5000/team/app:1.2.3"
 
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param("/etc", id="absolute-path"),
+            pytest.param("/root/.ssh", id="absolute-home-path"),
+            pytest.param("./src", id="dot-relative"),
+            pytest.param("../escape", id="dot-dot-relative"),
+            pytest.param("team/../etc", id="inner-dot-dot"),
+            pytest.param("app/", id="trailing-slash"),
+        ],
+    )
+    def test_a_path_shaped_ref_is_no_reference(self, workspace, monkeypatch, value):
+        # Read schemeless by grype and syft (a declared remote daemon), a path
+        # is a directory source: an MCP client could have the server catalog
+        # its own files. The registry reading of "/etc" is docker.io, so a
+        # server that lists Hub must still refuse it -- on the grammar, not the
+        # allowlist.
+        monkeypatch.setenv(
+            "ASH_MCP_IMAGE_ALLOWED_REGISTRIES", "registry.example.com docker.io"
+        )
+        with pytest.raises(ValueError, match="not an image reference") as refused:
+            sd.set_source_image(value, session_id=_SESSION)
+        assert not isinstance(refused.value, sd.ImageRegistryRefused)
+        assert sd.get_session_image_locator(_SESSION) is None
+
 
 class TestTheRegistryAllowlist:
     """set_source_image reaches only registries the operator listed.

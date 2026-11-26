@@ -49,6 +49,7 @@ from automated_security_helper.utils.terminal_text import (
 )
 
 from automated_security_helper.core.asset import Asset, AssetKind, ImageLocator
+from automated_security_helper.utils.image_reference import image_reference_problem
 from automated_security_helper.core.cancellation import raise_if_cancelled
 from automated_security_helper.core.previous_results import (
     HELD_DIR_NAME,
@@ -7318,6 +7319,16 @@ def _image_asset_or_refusal(
             _printed_refusal(
                 ASH_EXIT_USAGE_ERROR,
                 "image names no reference: it is empty or whitespace.",
+                one_line=True,
+            )
+        # The one grammar the CLI and the MCP gate read too: a path or an
+        # option-shaped value reaches the scanner tools as a directory to
+        # catalog or as an option, so it is refused before the scan starts.
+        problem = image_reference_problem(image.strip())
+        if problem is not None:
+            _printed_refusal(
+                ASH_EXIT_USAGE_ERROR,
+                f"image {image.strip()!r} {problem}.",
                 one_line=True,
             )
         return Asset.for_image(ImageLocator(ref=image.strip()))

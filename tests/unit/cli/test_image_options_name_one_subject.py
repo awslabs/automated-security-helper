@@ -132,6 +132,32 @@ class TestThePayloadGateReachesTheOperator:
         assert f"Image layout has no oci-layout marker file: {bare}" in result.output
 
 
+class TestANonReferenceIsRefusedBeforeAnyWork:
+    """``--image`` takes references only, checked by the one grammar.
+
+    A path given as ``--image`` (``/etc``, ``../app``) reaches the scanner
+    tools as text they read as a directory to catalog, so it is refused with
+    the usage exit before run_ash_scan starts, in a list as well as alone.
+    """
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param("/etc", id="absolute-path"),
+            pytest.param("../app", id="relative-path"),
+            pytest.param("-x", id="option"),
+            pytest.param("Team/App", id="uppercase-path"),
+            pytest.param(f"{IMAGE_REF},/etc", id="in-a-list"),
+        ],
+    )
+    def test_the_value_is_refused_and_named(self, value):
+        with patch("automated_security_helper.cli.scan.run_ash_scan") as run:
+            result = _scan(f"--image={value}")
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+        assert "not an image reference" in result.output
+        assert run.call_count == 0
+
+
 class TestWhatTheCliHandsRunAshScan:
     def test_an_image_scan_passes_the_ref_and_no_source_dir(self):
         with patch(

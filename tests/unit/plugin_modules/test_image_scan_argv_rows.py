@@ -281,6 +281,62 @@ class TestStereoscopeTargets:
             == f"registry:{IMAGE_REF}"
         )
 
+    @pytest.mark.parametrize(
+        "engine, expected",
+        [
+            (ContainerEngine.DOCKER, ["docker", "registry"]),
+            (ContainerEngine.PODMAN, ["podman", "registry"]),
+        ],
+    )
+    def test_a_schemeless_target_names_its_sources(self, engine, expected):
+        # Schemeless, grype and syft try their LOCAL sources first: measured on
+        # syft 1.57.2 and grype 0.122.1 with DOCKER_HOST=tcp://, "/abs/dir"
+        # and a valid reference that is also a directory in the tool's working
+        # directory ("app" beside ./app) were each cataloged as a directory.
+        # Naming the sources (--from) keeps the declared daemon and then the
+        # registry, the fallback the schemeless form was chosen for, and no
+        # local file or directory source.
+        from automated_security_helper.utils.image_tool_targets import (
+            stereoscope_sources,
+        )
+
+        locator = ImageLocator(ref=IMAGE_REF)
+        assert stereoscope_sources(locator, engine, remote_daemon=True) == expected
+
+    def test_every_schemed_target_names_no_sources(self, tmp_path):
+        from automated_security_helper.utils.image_tool_targets import (
+            stereoscope_sources,
+        )
+
+        ref = ImageLocator(ref=IMAGE_REF)
+        layout = ImageLocator(oci_layout=_layout(tmp_path))
+        archive = ImageLocator(oci_archive=_docker_archive(tmp_path))
+        assert stereoscope_sources(ref, ContainerEngine.DOCKER) == []
+        assert stereoscope_sources(ref, ContainerEngine.PODMAN) == []
+        assert stereoscope_sources(ref, ContainerEngine.NONE, remote_daemon=True) == []
+        for payload in (layout, archive):
+            assert (
+                stereoscope_sources(payload, ContainerEngine.DOCKER, remote_daemon=True)
+                == []
+            )
+
+    @pytest.mark.parametrize(
+        "engine, remote",
+        [
+            (ContainerEngine.DOCKER, True),
+            (ContainerEngine.PODMAN, True),
+            (ContainerEngine.DOCKER, False),
+            (ContainerEngine.NONE, False),
+        ],
+    )
+    @pytest.mark.parametrize("value", ["/etc", "../app", "-x"])
+    def test_a_non_reference_never_becomes_a_target(self, engine, remote, value):
+        # A locator built without validation (model_construct) is the shape no
+        # surface makes; the target is still refused rather than handed over.
+        locator = ImageLocator.model_construct(ref=value)
+        with pytest.raises(ValueError, match="not an image reference"):
+            stereoscope_target(locator, engine, remote_daemon=remote)
+
 
 DIGEST = "sha256:" + "ab" * 32
 
@@ -414,6 +470,37 @@ class TestGrypeImageArgv:
         assert f"docker:{IMAGE_REF}" not in argv
         assert f"registry:{IMAGE_REF}" not in argv
 
+    @pytest.mark.parametrize(
+        "variable, value, engine",
+        [
+            ("DOCKER_HOST", "tcp://docker:2375", "docker"),
+            ("CONTAINER_HOST", "ssh://core@localhost:2222/run/podman.sock", "podman"),
+        ],
+    )
+    def test_a_declared_remote_daemon_reads_no_local_source(
+        self, monkeypatch, tmp_path, variable, value, engine
+    ):
+        # The schemeless ref with its sources named, before the target: the
+        # declared daemon, then the registry, and never a local path that
+        # happens to spell the reference.
+        _no_engine(monkeypatch, tmp_path)
+        monkeypatch.setenv(variable, value)
+        scanner = self._scanner(tmp_path)
+        argv, _results, _env = scanner._execute_image_scan(ImageLocator(ref=IMAGE_REF))
+        target = argv.index(IMAGE_REF)
+        flags = [index for index, token in enumerate(argv) if token == "--from"]
+        assert [argv[index + 1] for index in flags] == [engine, "registry"]
+        assert all(index < target for index in flags)
+
+    def test_a_local_daemon_names_no_sources(self, monkeypatch, tmp_path):
+        _no_engine(monkeypatch, tmp_path)
+        scanner = self._scanner(tmp_path)
+        scanner._image_engine = ContainerEngine.DOCKER
+        scanner._image_engine_socket = str(tmp_path / "docker.sock")
+        argv, _results, _env = scanner._execute_image_scan(ImageLocator(ref=IMAGE_REF))
+        assert f"docker:{IMAGE_REF}" in argv
+        assert "--from" not in argv
+
     def test_an_oci_archive_is_an_oci_archive_target(self, monkeypatch, tmp_path):
         _no_engine(monkeypatch, tmp_path)
         archive = _oci_archive(tmp_path)
@@ -499,6 +586,36 @@ class TestTrivyImageArgv:
             server.close()
         assert argv.index("--image-src=docker,remote") < argv.index(IMAGE_REF)
 
+    def test_the_reference_is_an_operand_after_the_end_of_options(
+        self, monkeypatch, tmp_path
+    ):
+        # trivy reads its target slot as a positional with no scheme, so the
+        # reference goes last, after "--": nothing it holds can be read as an
+        # option, and every option (the output file included) precedes it.
+        _no_engine(monkeypatch, tmp_path)
+        scanner = self._scanner(tmp_path)
+        argv, _results, _env = scanner._execute_image_scan(ImageLocator(ref=IMAGE_REF))
+        assert argv[-2:] == ["--", IMAGE_REF]
+        assert argv.count("--") == 1
+        assert argv.count(IMAGE_REF) == 1
+        assert argv.index("--output") < argv.index("--")
+
+    def test_a_payload_needs_no_end_of_options(self, monkeypatch, tmp_path):
+        _no_engine(monkeypatch, tmp_path)
+        archive = _docker_archive(tmp_path)
+        scanner = self._scanner(tmp_path)
+        argv, _results, _env = scanner._execute_image_scan(
+            ImageLocator(oci_archive=archive)
+        )
+        assert "--" not in argv
+
+    @pytest.mark.parametrize("value", ["--help", "/etc", "../app"])
+    def test_a_non_reference_never_reaches_the_argv(self, monkeypatch, tmp_path, value):
+        _no_engine(monkeypatch, tmp_path)
+        scanner = self._scanner(tmp_path)
+        with pytest.raises(ValueError, match="not an image reference"):
+            scanner._execute_image_scan(ImageLocator.model_construct(ref=value))
+
     def test_an_archive_goes_through_input(self, monkeypatch, tmp_path):
         _no_engine(monkeypatch, tmp_path)
         archive = _docker_archive(tmp_path)
@@ -552,6 +669,43 @@ class TestSyftImageDispatch:
         # syft's result is a CycloneDX document, which the base image template
         # would grade as SARIF, so the override must be the whole dispatch.
         assert "scan_image" in vars(SyftScanner)
+
+    def test_a_declared_remote_daemon_reads_no_local_source(
+        self, monkeypatch, tmp_path
+    ):
+        # syft builds its image argv inside scan_image, so the row stops the
+        # run at the spawn and reads the argv it was about to start.
+        from automated_security_helper.core.exceptions import ScannerError
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
+            SyftScanner,
+            SyftScannerConfig,
+        )
+
+        _no_engine(monkeypatch, tmp_path)
+        monkeypatch.setenv("DOCKER_HOST", "tcp://docker:2375")
+        scanner = SyftScanner(context=_context(tmp_path), config=SyftScannerConfig())
+        seen = {}
+
+        class _Stop(Exception):
+            pass
+
+        def _spawn(command, **_kwargs):
+            seen["argv"] = list(command)
+            raise _Stop
+
+        def _pre_scan(**_kwargs):
+            scanner.dependencies_satisfied = True
+            return True
+
+        monkeypatch.setattr(scanner, "_pre_scan", _pre_scan)
+        monkeypatch.setattr(scanner, "_run_subprocess", _spawn)
+        with pytest.raises(ScannerError):
+            scanner.scan_image(ImageLocator(ref=IMAGE_REF))
+        argv = seen["argv"]
+        target = argv.index(IMAGE_REF)
+        flags = [index for index, token in enumerate(argv) if token == "--from"]
+        assert [argv[index + 1] for index in flags] == ["docker", "registry"]
+        assert all(index < target for index in flags)
 
     @pytest.mark.parametrize("engine_present", [False, True])
     def test_an_offline_ref_is_a_reported_clean_skip(

@@ -130,6 +130,22 @@ class TestExclusivityRefusals:
         text = _refusal_of(image="   ")
         assert "names no reference" in text
 
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param("/etc", id="absolute-path"),
+            pytest.param("../app", id="relative-path"),
+            pytest.param("--insecure", id="option"),
+            pytest.param("app@sha256:abc", id="short-digest"),
+        ],
+    )
+    def test_a_non_reference_is_refused_with_the_grammar_text(self, value):
+        # The library entry point reads the same grammar as the CLI and the
+        # MCP gate: a path reaches the scanner tools as a directory to catalog.
+        text = _refusal_of(image=value)
+        assert "not an image reference" in text
+        assert repr(value) in text
+
 
 class TestPayloadGates:
     def test_a_missing_archive_is_refused_with_the_gate_text(self, tmp_path):

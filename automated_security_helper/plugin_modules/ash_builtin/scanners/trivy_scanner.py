@@ -214,6 +214,7 @@ from automated_security_helper.utils.config_trust import (
     NOT_THE_OPERATORS,
     refusal_warning,
 )
+from automated_security_helper.utils.image_reference import checked_image_reference
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
@@ -698,11 +699,12 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         """Resolve the argv, results path and environment for one image run.
 
         The fs scan's resolution with the image differences and nothing else:
-        the subcommand token is ``image`` for this resolution only, the target
-        slot carries the reference (with ``--image-src`` naming the detected
-        engine's store first, then ``remote``) or ``--input=<path>`` for a
-        direct payload (trivy reads a saved tar of either format and an OCI
-        image-layout directory through the same flag), and
+        the subcommand token is ``image`` for this resolution only, a
+        reference is the last token, after ``--`` (with ``--image-src`` naming
+        the detected engine's store first, then ``remote``), and a direct
+        payload is ``--input=<path>`` in the target slot (trivy reads a saved
+        tar of either format and an OCI image-layout directory through the
+        same flag), and
         none of the fs-shaped plumbing applies -- no skip-dirs budget (nothing
         of the source tree is walked), while ASH's own trivy.yaml, module-dir,
         ignorefile and secret-config neutralizations carry over, because they
@@ -773,7 +775,9 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             # Digest-pinned where the REGISTRY named the digest
             # (ImageLocator.pulled_ref): the remote source then pulls exactly
             # the manifest the finding ids key on, however the tag has moved.
-            target_token = image.pulled_ref()
+            # Read against the one reference grammar once more, whichever way
+            # the locator was built: it lands in a positional slot.
+            target_token = checked_image_reference(image.pulled_ref())
 
         original_subcommands = self.subcommands
         try:
@@ -793,6 +797,14 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             # the offline resolution drops them here exactly as the fs one
             # does (TrivyScannerBase._offline_misconfig_args).
             final_args = self._offline_misconfig_args(final_args)
+        if image.oci_archive is None and image.oci_layout is None:
+            # A reference is trivy's one positional, and it carries no scheme:
+            # it goes LAST, after "--", so nothing it holds can be read as an
+            # option, and every option -- the output file the base builder
+            # puts after the target included -- precedes it. The layer pass
+            # reads the subject as the argv's last token (_attach_image_layers).
+            del final_args[len(final_args) - 1 - final_args[::-1].index(target_token)]
+            final_args.extend(["--", target_token])
 
         subprocess_env = (
             {**snapshot_environ(), **self.extra_env} if self.extra_env else None

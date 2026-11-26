@@ -35,6 +35,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from automated_security_helper.utils.image_reference import image_reference_problem
+
 
 class AssetKind(str, Enum):
     """What kind of subject a scan is about."""
@@ -66,7 +68,9 @@ class ImageLocator(_Frozen):
 
     #: ``registry/repo[:tag][@sha256:digest]``. Digest-pinned refs preferred;
     #: a tag-only ref is accepted and resolved at scan start where an engine
-    #: is present.
+    #: is present. Checked against the one reference grammar
+    #: (``utils/image_reference``): a path or an option-shaped value is no
+    #: reference, and the tools would read it as one of those.
     ref: Optional[str] = None
     #: An OCI image-layout directory (the ``oci-layout`` marker file's parent).
     oci_layout: Optional[Path] = None
@@ -113,8 +117,10 @@ class ImageLocator(_Frozen):
 
     @model_validator(mode="after")
     def _exactly_one_shape(self) -> "ImageLocator":
-        if self.ref is not None and not self.ref.strip():
-            raise ValueError("an image ref of whitespace names nothing")
+        if self.ref is not None:
+            problem = image_reference_problem(self.ref)
+            if problem is not None:
+                raise ValueError(f"the image ref {self.ref!r} {problem}")
         shapes = [
             value
             for value in (self.ref, self.oci_layout, self.oci_archive)

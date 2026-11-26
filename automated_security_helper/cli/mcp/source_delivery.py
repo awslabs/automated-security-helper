@@ -87,6 +87,7 @@ from automated_security_helper.utils.path_containment import (
     validate_contained_path,
 )
 from automated_security_helper.utils.git_command import GIT_PROGRAM, git_argv
+from automated_security_helper.utils.image_reference import image_reference_problem
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.subprocess_utils import (
@@ -3244,7 +3245,12 @@ def validate_image_ref(image_ref: str) -> str:
     ``-`` (an option to any argv), a ``:`` followed by ``/`` (no port and no
     tag starts with a slash, but every ``scheme:/path`` spelling does), and a
     first segment that is a tool source scheme (``docker-archive:x.tar`` would
-    read as a server path, not a registry name).
+    read as a server path, not a registry name). Last, the one reference
+    grammar every surface reads (``utils/image_reference``): a path-shaped
+    value (``/etc``, ``../x``, ``team/../etc``) passes every check above and
+    resolves against docker.io, so a server that lists Hub would otherwise
+    accept it, and a tool trying its local sources first reads it as a server
+    directory.
     """
 
     ref = (image_ref or "").strip()
@@ -3283,6 +3289,9 @@ def validate_image_ref(image_ref: str) -> str:
             "registry reference. Spell the repository in full, as "
             f"docker.io/library/{scheme_like}:<tag>."
         )
+    problem = image_reference_problem(ref)
+    if problem is not None:
+        raise ValueError(f"image_ref {ref!r} {problem}")
     return ref
 
 

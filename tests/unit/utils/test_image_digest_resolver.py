@@ -121,7 +121,10 @@ class TestResolution:
         self, notices
     ):
         registry = FakeRegistry({"--insecure": DIGEST})
-        locator = ImageLocator(ref="--insecure")
+        # No surface builds this locator any more (the reference grammar
+        # refuses a leading '-'); model_construct skips that check so the
+        # resolver's own guard is what this row measures.
+        locator = ImageLocator.model_construct(ref="--insecure")
         assert (
             resolve_image_locator(locator, offline=False, runner=registry, crane=CRANE)
             is locator

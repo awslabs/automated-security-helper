@@ -43,6 +43,13 @@ what `docker save` writes); the layout must be an enterable directory holding th
 `oci-layout` marker file. What is *inside* passes to the scanner tools, which report
 malformed images themselves.
 
+A reference is checked against the image-reference grammar the tools parse
+(`[registry[:port]/]repository[:tag][@digest]`, with a lowercase repository path) before
+anything uses it, by `--image`, by a `run_ash_scan` call and by the MCP server's
+`set_source_image` alike. A path (`/etc`, `./app`, `../app`), a value that starts with
+`-` and a digest a tool cannot verify are refused with the reason, because a scanner
+tool handed one would read it as a directory to catalog or as an option.
+
 Image options run in local mode, single-directory, on a fresh scan: they cannot be
 combined with any other `--mode` (container, nix and precommit are refused), a workspace
 scan, `--use-existing`, `--baseline`, the git-history scopes (`--changed-files-only`,
@@ -115,8 +122,11 @@ through one (Colima, OrbStack, Docker Desktop without the default socket) counts
 engine's content store is the dedup; trivy is told
 `--image-src=<engine>,remote`, so an image the daemon does not hold still scans from
 the registry. For a daemon that is only *declared* (no local socket), grype and syft
-get the reference schemeless, so their client honors the declaration and their own
-source fallback still reaches the registry when the declaration is stale. With no
+get the reference without a scheme and with its sources named
+(`--from <engine> --from registry`): their client honors the declaration, the registry
+is still reached when the declaration is stale, and no local file or directory that
+happens to spell the reference is read in the image's place. trivy always gets the
+reference as its last argument, after `--`. With no
 engine and network allowed, the tools' own registry clients fetch, each into its own
 cache.
 

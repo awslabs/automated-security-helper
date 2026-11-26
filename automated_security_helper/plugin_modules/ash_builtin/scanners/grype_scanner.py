@@ -1224,6 +1224,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         offline database posture carries over unchanged.
         """
         from automated_security_helper.utils.image_tool_targets import (
+            stereoscope_sources,
             stereoscope_target,
         )
 
@@ -1233,6 +1234,10 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             # A direct call outside scan_image (a test driving this hook
             # alone); the template detects once per target otherwise.
             engine, engine_socket = self._detect_image_engine()
+        # Declared in the environment with no local socket: the schemeless
+        # target keeps a source fallback. Only read when the engine is docker
+        # or podman, so the always-socketless NONE case is unaffected.
+        remote_daemon = engine_socket is None
 
         target_results_dir = Path(os.path.abspath(self.results_dir)).joinpath("image")
         results_file = target_results_dir.joinpath("results_sarif.sarif")
@@ -1255,15 +1260,18 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 ToolExtraArg(key="--exclude", value=glob)
                 for glob in self._image_exclude_globs()
             )
+            # A schemeless target names its sources (the declared daemon, then
+            # the registry): left to itself grype reads a local path that
+            # spells the reference first (utils/image_tool_targets).
+            self.args.extra_args.extend(
+                ToolExtraArg(key="--from", value=source)
+                for source in stereoscope_sources(
+                    image, engine=engine, remote_daemon=remote_daemon
+                )
+            )
             final_args = self._resolve_arguments(
                 target=stereoscope_target(
-                    image,
-                    engine=engine,
-                    # Declared in the environment with no local socket: the
-                    # schemeless target keeps stereoscope's source fallback.
-                    # Only read when the engine is docker or podman, so the
-                    # always-socketless NONE case is unaffected.
-                    remote_daemon=engine_socket is None,
+                    image, engine=engine, remote_daemon=remote_daemon
                 ),
                 results_file=results_file,
             )

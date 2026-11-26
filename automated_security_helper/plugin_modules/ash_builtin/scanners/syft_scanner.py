@@ -953,9 +953,15 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         flagged_refusal: ScannerError | None = None
         try:
             from automated_security_helper.utils.image_tool_targets import (
+                stereoscope_sources,
                 stereoscope_target,
             )
 
+            # Declared in the environment with no local socket: the
+            # schemeless target keeps a source fallback. Only read when the
+            # engine is docker or podman, so the always-socketless NONE case
+            # is unaffected.
+            remote_daemon = self._image_engine_socket is None
             target_results_dir = Path(os.path.abspath(self.results_dir)).joinpath(
                 image_target_type
             )
@@ -1021,15 +1027,18 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 ToolExtraArg(key="--exclude", value=glob)
                 for glob in self._image_exclude_globs()
             )
+            # A schemeless target names its sources (the declared daemon, then
+            # the registry): left to itself syft reads a local path that
+            # spells the reference first (utils/image_tool_targets).
+            self.args.extra_args.extend(
+                ToolExtraArg(key="--from", value=source)
+                for source in stereoscope_sources(
+                    image, engine=self._image_engine, remote_daemon=remote_daemon
+                )
+            )
             final_args = self._resolve_arguments(
                 target=stereoscope_target(
-                    image,
-                    engine=self._image_engine,
-                    # Declared in the environment with no local socket: the
-                    # schemeless target keeps stereoscope's source fallback.
-                    # Only read when the engine is docker or podman, so the
-                    # always-socketless NONE case is unaffected.
-                    remote_daemon=self._image_engine_socket is None,
+                    image, engine=self._image_engine, remote_daemon=remote_daemon
                 ),
             )
             subprocess_env = (
