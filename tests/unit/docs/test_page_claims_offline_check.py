@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Claims about ``ash dependencies check --offline`` that the docs make on six pages.
+"""Claims about ``ashx dependencies check --offline`` that the docs make on six pages.
 
 how-to/run-offline.md (Check cached database ages) states what the command reads and
 what each exit code means. reference/exit-codes.md repeats the exit codes, and
@@ -41,7 +41,7 @@ CONTENT_DATABASES = "concepts/content-databases.md"
 PLATFORM_TEAMS = "getting-started/platform-teams.md"
 SECURITY_ANALYST = "personas/security-analyst.md"
 
-COMMAND = "`ash dependencies check --offline`"
+COMMAND = "`ashx dependencies check --offline`"
 
 
 @pytest.fixture
@@ -240,12 +240,12 @@ def test_the_schemas_the_page_names_are_the_ones_the_check_accepts(
 def test_the_other_exit_codes_the_exit_codes_page_lists(
     host: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """exit-codes.md (`ash dependencies check`).
+    """exit-codes.md (`ashx dependencies check`).
 
     A named ``--config`` that does not exist exits 3 and a call without ``--offline``
     exits 5, and neither prints a cache reading.
     """
-    assert_on_page(EXIT_CODES, "## `ash dependencies check` {#dependencies-check}")
+    assert_on_page(EXIT_CODES, "## `ashx dependencies check` {#dependencies-check}")
     assert_on_page(EXIT_CODES, "| 3 | The `--config` file cannot be used |")
     assert_on_page(
         EXIT_CODES, "| 5 | A usage error, including a call without `--offline` |"
@@ -270,7 +270,7 @@ def test_the_other_exit_codes_the_exit_codes_page_lists(
             CONTENT_DATABASES,
             (
                 "To read the age of the cached grype and trivy databases against these "
-                "bounds without running a scan, use `ash dependencies check --offline` "
+                "bounds without running a scan, use `ashx dependencies check --offline` "
                 "(Check cached database ages)."
             ),
         ),
@@ -278,14 +278,14 @@ def test_the_other_exit_codes_the_exit_codes_page_lists(
             PLATFORM_TEAMS,
             (
                 "To read the age of the cached grype and trivy databases against those "
-                "bounds without running a scan, use `ash dependencies check --offline` "
+                "bounds without running a scan, use `ashx dependencies check --offline` "
                 "(Check cached database ages)."
             ),
         ),
         (
             SECURITY_ANALYST,
             (
-                "`ash dependencies check --offline` reads the age of the cached "
+                "`ashx dependencies check --offline` reads the age of the cached "
                 "databases against those bounds without running a scan "
                 "(Check cached database ages)."
             ),

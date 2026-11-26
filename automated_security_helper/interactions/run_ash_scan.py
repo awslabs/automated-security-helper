@@ -5104,7 +5104,7 @@ def _run_nix_mode(
             "ASH the shell runs may be older than this one and not accept an "
             "option this ASH passes it. Run it from the same checkout as this ASH."
         )
-        sys.exit(3)
+        sys.exit(AshExitCode.INVALID_CONFIG)
     results = _read_back_inner_results(output_file, logger)
     if results is not None:
         _refuse_an_inner_run_that_did_not_complete(
