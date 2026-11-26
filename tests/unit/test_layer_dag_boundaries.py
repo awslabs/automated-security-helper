@@ -81,15 +81,23 @@ KNOWN_VIOLATIONS: Dict[Tuple[str, str], int] = {
     # operational facets and the scanner base. The types live in core; moving them
     # to the contract layer is the way to retire these rows.
     ("base", "core"): 17,
-    ("base", "models"): 9,
+    # 9 -> 10: uv_tool_mixin reads models.vocab (the stdlib-enums vocabulary wave;
+    # the controlled vocabularies live in models until a later unit moves them to
+    # the contract layer).
+    ("base", "models"): 10,
     ("base", "plugins"): 5,
-    ("base", "utils"): 96,
+    # 96 -> 97: one more utils import landed with the vocabulary/facets waves this
+    # census re-measured at; the edge itself is long-known debt.
+    ("base", "utils"): 97,
     ("config", "core"): 42,
     ("config", "plugins"): 5,
     ("express", "cli"): 1,
     ("interactions", "cli"): 1,
     ("models", "config"): 12,
-    ("models", "core"): 9,
+    # 9 -> 10: models/__init__ names core.enums.ExportFormat under TYPE_CHECKING
+    # for the lazy re-export table (the stdlib-enums wave); the AST count reads a
+    # TYPE_CHECKING import like any other.
+    ("models", "core"): 10,
     # 68 -> 69: the one plugin -> cli edge (the grep scanner base asking whether a
     # config file is client-supplied) now reads the rule where it moved to, in config.
     # 69 -> 70: npm_audit_scanner reads config.default_config (landed on main with
@@ -116,7 +124,10 @@ KNOWN_VIOLATIONS: Dict[Tuple[str, str], int] = {
     ("utils", "core"): 44,
     # 2 -> 3: utils/scan_history reads interactions.run_ash_scan (landed on main
     # with the scan trend/history work this branch was rebased onto).
-    ("utils", "interactions"): 3,
+    # 3 -> 5: utils/finding_diff and utils/scan_baseline read
+    # interactions.run_ash_scan the way scan_history does (a deferred import inside
+    # the helper), and utils/install_providers reads interactions.run_ash_nix.
+    ("utils", "interactions"): 5,
     ("utils", "plugin_modules"): 2,
 }
 
