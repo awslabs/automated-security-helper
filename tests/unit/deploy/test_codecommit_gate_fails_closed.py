@@ -298,6 +298,23 @@ _NARROWING_OPTIONS_WITH_VALUES = [
         "drops a scanner the completeness gate would otherwise have covered",
     ),
     (
+        "--only-scanners",
+        "bandit",
+        (
+            "states the whole selection: bandit runs and every other scanner is "
+            "recorded SKIPPED"
+        ),
+    ),
+    (
+        "--add-scanners",
+        "bandit",
+        (
+            "outside --mode precommit it means what --scanners means, so with no "
+            "default_scanners in the config the scanners it names are the whole "
+            "selection"
+        ),
+    ),
+    (
         "--mode",
         "precommit",
         "the precommit preset replaces the selection with a fixed list of fast scanners",
@@ -502,11 +519,95 @@ def test_every_reserved_spelling_is_one_the_cli_actually_accepts():
     )
 
 
+#: Options whose spellings name scanners and which the gate deliberately leaves to
+#: ASH_SCAN_EXTRA_ARGS, keyed by click parameter name, each with the reason it cannot
+#: narrow a scan. Every other option whose spelling names scanners must be reserved;
+#: ``test_every_option_that_names_scanners_is_reserved`` holds that.
+_SCANNER_OPTIONS_NOT_RESERVED = {
+    "require_scanner_selection": (
+        "hidden; container mode passes it to the scan it starts, and it only refuses "
+        "a scan whose settled default_scanners differs from the document it names: it "
+        "can stop a scan but cannot narrow one"
+    ),
+}
+
+
+def test_every_option_that_names_scanners_is_reserved():
+    """Every option whose spelling names scanners is one the gate refuses.
+
+    GATE_OWNED_SCAN_OPTIONS is written out by hand while the CLI keeps growing, so an
+    option that chooses scanners can arrive without an entry here.
+    ``--only-scanners`` states the whole selection, and outside ``--mode precommit``
+    ``--add-scanners`` means what ``--scanners`` means, so with no ``default_scanners``
+    in the config the scanners it names are the whole selection; both are reserved
+    for the reason ``--scanners`` is.
+    ``test_every_reserved_spelling_is_one_the_cli_actually_accepts`` cannot see a
+    missing entry: it checks that every reserved spelling is a real option, not that
+    every real option that chooses scanners is reserved.
+
+    So the parameters with a spelling that names scanners are read off the real click
+    command, and every spelling of each, aliases and the other half of a boolean pair
+    included, has to be reserved, unless the parameter is in
+    ``_SCANNER_OPTIONS_NOT_RESERVED`` with the reason it cannot narrow a scan.
+
+    What this does NOT catch is an option that changes the selection under a name with
+    no "scanner" in it. ``--mode``, ``--phases``, ``--config`` and the shard options
+    are of that kind; they are reserved and the refusal tables above hold them, but a
+    new option spelled that way would pass here.
+    """
+    import typer.main
+
+    from automated_security_helper.cli.main import app
+
+    scan_command = typer.main.get_command(app).commands["scan"]
+    naming_scanners = {}
+    for param in scan_command.params:
+        spellings = {*param.opts, *param.secondary_opts}
+        if any("scanner" in spelling for spelling in spellings):
+            naming_scanners[param.name] = spellings
+
+    # Controls on the rule itself. It has to find the selection options already known,
+    # or a rule that matched nothing would pass every check below; and an exemption
+    # that names no current option is a stale entry, not a decision.
+    known = {
+        "scanners",
+        "exclude_scanners",
+        "only_scanners",
+        "add_scanners",
+        "python_based_plugins_only",
+    }
+    assert known <= set(naming_scanners), sorted(naming_scanners)
+    stale = sorted(set(_SCANNER_OPTIONS_NOT_RESERVED) - set(naming_scanners))
+    assert not stale, f"these exemptions name no option that names scanners: {stale}"
+
+    gate_module = _load_gate()
+    reserved = (
+        gate_module.GATE_OWNED_SCAN_OPTIONS | gate_module.GATE_OWNED_SHORT_OPTIONS
+    )
+    unreserved = sorted(
+        spelling
+        for name, spellings in naming_scanners.items()
+        if name not in _SCANNER_OPTIONS_NOT_RESERVED
+        for spelling in spellings
+        if spelling not in reserved
+    )
+    assert not unreserved, (
+        "these options choose scanners and ASH_SCAN_EXTRA_ARGS can set them, so the "
+        f"environment would decide what the gate scans: {unreserved}. Add every "
+        "spelling to GATE_OWNED_SCAN_OPTIONS, or, if the option cannot narrow a scan, "
+        "name it in _SCANNER_OPTIONS_NOT_RESERVED with the reason."
+    )
+
+
 @pytest.mark.parametrize(
     "argv_tail, parameter, expected",
     [
         (["--scanners", "bandit"], "scanners", ("bandit",)),
         (["--exclude-scanners", "semgrep"], "exclude_scanners", ("semgrep",)),
+        (["--only-scanners", "bandit"], "only_scanners", ("bandit",)),
+        (["--only-scanners=bandit"], "only_scanners", ("bandit",)),
+        (["--add-scanners", "bandit"], "add_scanners", ("bandit",)),
+        (["--add-scanners=bandit"], "add_scanners", ("bandit",)),
         (["--python-only"], "python_based_plugins_only", True),
         (["--changed-files-only"], "changed_files_only", True),
         (["--base-ref", "HEAD~1"], "base_ref", "HEAD~1"),
