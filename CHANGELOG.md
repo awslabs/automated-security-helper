@@ -135,6 +135,11 @@
 
 ### Fixes
 
+- **A profile written by v3.8.0's `ash config init` again counts as a shipped default
+  for MCP clients.** The v3.8.0 default `denied_paths` list had been edited in place in
+  the table of shipped defaults, so such a profile was read as the operator's own list
+  and a client-delivered suppression was refused with `config_field_denied`. The v3.8.0
+  list is its own entry again, and a test pins it from a literal kept outside the table.
 - **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**
   It passes `GITHUB_ACTIONS`, `TF_BUILD` and `TEAMCITY_VERSION` into the container when
   set (by name, or with their values when `OCI_RUNNER_WRAPPER` is set; a value that holds
