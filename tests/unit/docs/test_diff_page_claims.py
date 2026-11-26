@@ -217,28 +217,29 @@ def test_the_reviewer_persona_names_ash_diff():
     """personas/security-reviewer.md: the CLI comparison beside the MCP tool."""
     assert_on_page(
         "personas/security-reviewer.md",
-        "For comparing two scans directly, run `ash diff` on the two results files.",
+        "For comparing two scans directly, run `ash results diff` on the two results "
+        "files.",
     )
-    assert CliRunner().invoke(app, ["diff", "--help"]).exit_code == 0
+    assert CliRunner().invoke(app, ["results", "diff", "--help"]).exit_code == 0
 
 
 def test_the_analyst_persona_lists_what_ash_diff_compares():
-    """personas/security-analyst.md: the five groups ``ash diff`` reports."""
+    """personas/security-analyst.md: the five groups ``ash results diff`` reports."""
     assert_on_page(
         "personas/security-analyst.md",
-        "`ash diff` lists the new, absent, moved, severity-changed, and "
+        "`ash results diff` lists the new, absent, moved, severity-changed, and "
         "suppression-changed findings between two scans",
     )
-    assert CliRunner().invoke(app, ["diff", "--help"]).exit_code == 0
+    assert CliRunner().invoke(app, ["results", "diff", "--help"]).exit_code == 0
 
 
 def test_the_sdlc_review_row_names_both_comparisons():
     """personas/sdlc-aidlc.md: the review-the-pull-request row."""
     assert_on_page(
         "personas/sdlc-aidlc.md",
-        "and `ash diff` or `diff_scan_results` between before and after",
+        "and `ash results diff` or `diff_scan_results` between before and after",
     )
     from automated_security_helper.cli.mcp_tools import mcp_diff_scan_results
 
     assert callable(mcp_diff_scan_results)
-    assert CliRunner().invoke(app, ["diff", "--help"]).exit_code == 0
+    assert CliRunner().invoke(app, ["results", "diff", "--help"]).exit_code == 0

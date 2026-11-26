@@ -41,7 +41,7 @@ missing.
 Fix: install the tool, usually with `ash dependencies install --tool grype` (using the
 scanner's name). [When a scanner shows MISSING](../docs/advanced-usage.md#when-a-scanner-shows-missing)
 lists the exceptions: detect-secrets, cdk-nag, npm-audit, and cfn-nag. If you do not need the scanner,
-leave it out with `ash --exclude-scanners grype`, which records it as SKIPPED.
+leave it out with `ash scan fs --exclude-scanners grype`, which records it as SKIPPED.
 
 ### A tool inside the scanned directory is not run {#a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree}
 
@@ -241,11 +241,11 @@ when it scanned no file although Python files that nothing excludes are there; w
 `ignore_paths` or bandit's own `excluded_paths` leave out every Python file, bandit is
 SKIPPED.
 
-Fix: check that `--source-dir` names the project, that `ignore_paths`, and the
+Fix: check that the path you give `ash scan fs` names the project, that `ignore_paths`, and the
 repository's `.gitignore` and `.ignore` files, leave the files you mean to scan, and that
 the scanners you selected read them; [Scanner coverage](../reference/coverage.md) lists
 what each scanner reads. To accept such a scan, pass `--no-fail-on-incomplete-scanners`
-or set `fail_on_incomplete_scanners: false`; it then exits 0. `ash merge` gives the same
+or set `fail_on_incomplete_scanners: false`; it then exits 0. `ash results merge` gives the same
 verdict over the shards.
 
 ### The scan exits 1 because conversion was incomplete {#the-scan-exits-1-because-conversion-was-incomplete}
@@ -297,8 +297,8 @@ Symptom: the command stops before anything runs and writes no report. A mistyped
 prints an `Error` box:
 
 ```text
-Usage: ash scan [OPTIONS]
-Try 'ash scan --help' for help.
+Usage: ash scan fs [OPTIONS] [PATH]
+Try 'ash scan fs --help' for help.
 ╭─ Error ──────────────────────────────────────────────────────────────────────╮
 │ No such option: --fail-on-finding (Possible options: --fail-on-findings,     │
 │ --no-fail-on-findings)                                                       │
@@ -308,9 +308,9 @@ Try 'ash scan --help' for help.
 Cause: a usage error. Every `ash` command exits 5 when its command line is wrong: an
 option or argument the command does not take, a value an option does not accept (such
 as an invalid `--output-formats`, `--mode`, `--strategy`, or `--min-severity`), a
-`--scanners` list that names no scanner, a `--source-dir` that does not exist or
+`--scanners` list that names no scanner, a directory to scan that does not exist or
 cannot be entered, an `--output-dir` that ASH cannot create, enter, or write in,
-`--use-existing` with no results to use, or an `ash report --format` that no reporter
+`--use-existing` with no results to use, or an `ash results report --format` that no reporter
 answers to. The code is not 2, so a CI gate does not read a mistyped flag as a scan
 with findings. Two selections exit 2 instead: an `ash dependencies install --tool` name
 that it has no plugin for, and a `--plugin-type` other than `converter`, `scanner`, or
@@ -318,15 +318,15 @@ that it has no plugin for, and a `--plugin-type` other than `converter`, `scanne
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash scan --output-formats nosuch
+ash scan fs --output-formats nosuch
 ```
 
-`ash report` with a format no reporter answers to lists the ones it has, whether or not
+`ash results report` with a format no reporter answers to lists the ones it has, whether or not
 there are results to report:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash report --format nosuch
+ash results report --format nosuch
 ```
 
 ```text
@@ -412,7 +412,7 @@ global_settings:
       reason: Generated file, scanned upstream
       expiration: "2026-01-31"
 EOF
-ash scan --scanners detect-secrets --no-progress
+ash scan fs --scanners detect-secrets --no-progress
 ```
 
 ```text
@@ -505,7 +505,7 @@ replace the link with a directory. Turning the sandbox off does not change this.
 
 ### The scan stops because a report file is a link
 
-Symptom: the run exits 1 before any reporter writes, with this message (`ash merge`
+Symptom: the run exits 1 before any reporter writes, with this message (`ash results merge`
 prints the same text after `Refusing to write reports:`):
 
 ```text
@@ -514,7 +514,7 @@ ERROR (1) /home/me/out/reports/ash.sarif is a symlink. ASH does not write a repo
 
 Cause: a file a reporter is about to write in `reports/` is a symbolic link or a
 directory junction. A scan clears `reports/` first, so this usually comes from
-`ash scan --use-existing` or `ash merge` writing into an output directory that already
+`ash scan fs --use-existing` or `ash results merge` writing into an output directory that already
 holds the link.
 
 Fix: remove the link and run the command again, or write to a new output directory.
@@ -579,10 +579,10 @@ There is no limit on the scan as a whole.
 Fix: find the scanner in the "still running" lines or in `ash.log`, and look at its
 stderr log under `scanners/<scanner>/` in the output directory. Then do one of these:
 
-- Exclude it for now: `ash --exclude-scanners bandit`.
-- Lower or raise its limit: `ash --config-overrides 'scanners.bandit.options.scan_timeout=600'`.
-- Run scanners one at a time to see where time goes: `ash --strategy sequential`.
-- Get more detail with `ash --verbose` or `ash --debug`.
+- Exclude it for now: `ash scan fs --exclude-scanners bandit`.
+- Lower or raise its limit: `ash scan fs --config-overrides 'scanners.bandit.options.scan_timeout=600'`.
+- Run scanners one at a time to see where time goes: `ash scan fs --strategy sequential`.
+- Get more detail with `ash scan fs --verbose` or `ash scan fs --debug`.
 
 ## Installing and running ASH
 
@@ -642,7 +642,7 @@ Cause: the two runs differ in something ASH does not control:
   cannot list the changes: the base ref does not exist, as in a shallow clone, the
   directory is not in a git repository, or git is not installed. The log says which,
   such as `git diff against origin/main failed (rc=128); falling back to full scan`.
-- Mode. `ash --mode precommit` runs a smaller set of scanners.
+- Mode. `ash scan fs --mode precommit` runs a smaller set of scanners.
 
 Fix: run the same scanner versions in both places, for example with the same container
 image, and fetch enough history in CI for the diff.
@@ -668,11 +668,11 @@ Container mode builds ASH's image on your machine before it scans. Common causes
   image and downloads ASH and its scanners. To use a mirror of the base image, set
   `ASH_BASE_IMAGE_OVERRIDE`.
 
-Run container mode from a directory other than the project you scan, and name the
-project with `--source-dir`.
+Run container mode from a directory other than the project you scan, and give the
+project's path to `ash scan fs`.
 
 To scan offline with an image you already built, add `--no-build`, as in
-`ash scan --mode container --offline --no-build`. Without it, container mode builds the
+`ash scan fs --mode container --offline --no-build`. Without it, container mode builds the
 image first, and the first offline build of a UTC day downloads the databases again,
 which needs network access. See [Run ASH offline](run-offline.md).
 

@@ -20,7 +20,7 @@ export PATH="$HOME/ash-venv/bin:$PATH"
 (cd "$(mktemp -d)" && ash dependencies install \
   --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks \
   --tool grype --tool opengrep --tool syft --tool trivy)
-ash scan --mode local --no-progress \
+ash scan fs --mode local --no-progress \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
 ```
 
@@ -44,7 +44,7 @@ ash() {
 (cd "$(mktemp -d)" && ash dependencies install \
   --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks \
   --tool grype --tool opengrep --tool syft --tool trivy)
-ash scan --mode local --no-progress \
+ash scan fs --mode local --no-progress \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
 ```
 
@@ -92,11 +92,11 @@ installed. In a repository with no npm lockfile, npm-audit is SKIPPED, and this 
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan --mode local --no-progress --offline --scanners detect-secrets --scanners npm-audit
+ash scan fs --mode local --no-progress --offline --scanners detect-secrets --scanners npm-audit
 ```
 
 To run without a scanner, name it in `--exclude-scanners`, for example
-`ash scan --mode local --no-progress --exclude-scanners cfn-nag`. Several scanners also use
+`ash scan fs --mode local --no-progress --exclude-scanners cfn-nag`. Several scanners also use
 the network during the scan, for their vulnerability databases, rules, or registries;
 [What each scanner does offline](../run-offline.md#scanners) lists them.
 
@@ -119,7 +119,7 @@ tool. Two more things differ in CI:
   error before ASH runs ([Run ASH in GitHub Actions](github-actions.md)).
 
 For many repositories, build the image once, push it to your registry, and use it as the
-build image, running `ash scan --mode local` inside it. Nothing is installed per build. See
+build image, running `ash scan fs --mode local` inside it. Nothing is installed per build. See
 [Run ASH in a container](../run-in-a-container.md) and
 [Roll out ASH across repositories](../../getting-started/platform-teams.md).
 
@@ -148,7 +148,7 @@ running ASH from `main` or a fork ([Nix mode](../install.md#nix-mode)):
 ```bash
 uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}'
 ash_exit=0
-ash scan --mode nix --no-progress \
+ash scan fs --mode nix --no-progress \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
   || ash_exit=$?
 tar -czf ash-output.tar.gz .ash/ash_output
@@ -176,7 +176,7 @@ finding or as a clean scan:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash scan --mode local --no-progress --offline --scanners detect-secrets --min-severity hihg
+ash scan fs --mode local --no-progress --offline --scanners detect-secrets --min-severity hihg
 ```
 
 Fail the build on any non-zero code, and keep the reports when it fails: the build tools
@@ -204,7 +204,7 @@ pipeline {
           "$WORKSPACE_TMP/ash/bin/pip" install --quiet "$INSTALL_SPEC"
           export PATH="$WORKSPACE_TMP/ash/bin:$PATH"
           (cd "$WORKSPACE_TMP/tools" && ash dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy)
-          ash scan --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+          ash scan fs --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
         '''
       }
     }
@@ -252,7 +252,7 @@ phases:
       - (cd "$(mktemp -d)" && ash dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy)
   build:
     commands:
-      - ash scan --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+      - ash scan fs --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
 reports:
   ash-findings:
     base-directory: .ash/ash_output/reports
@@ -295,7 +295,7 @@ steps:
   - script: ash dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy
     workingDirectory: $(Agent.TempDirectory)
     displayName: Install scanner tools
-  - script: ash scan --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+  - script: ash scan fs --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
     displayName: Run ASH
   - task: PublishTestResults@2
     condition: succeededOrFailed()
@@ -367,7 +367,7 @@ jobs:
             - ~/.ash/bin
       - run:
           name: Run ASH
-          command: ash scan --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+          command: ash scan fs --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
       - run:
           name: Copy the JUnit file out of .ash
           when: always
@@ -411,7 +411,7 @@ workflows:
   SHA256 each installed tool is checked against, so a cache a fork's pull request can
   write must not carry them. cfn-nag, and the cfn-guard rules in
   `~/.ash/share/cfn-guard-rules`, are installed again on every run.
-- A non-zero exit from `ash scan` fails its step and the job. `store_test_results` and
+- A non-zero exit from `ash scan fs` fails its step and the job. `store_test_results` and
   `store_artifacts` run after a failed step, so the JUnit file appears in the job's
   **Tests** tab, one failed test per actionable finding, and `.ash/ash_output/reports/` and
   `.ash/ash_output/ash_aggregated_results.json` are kept as the job's artifacts. Neither runs when the job is canceled or times out.
@@ -428,7 +428,7 @@ through to the build result:
 <!-- doctest: illustrative reason="runs a full scan with every scanner, which needs the network" -->
 ```bash
 ash_exit=0
-ash scan --mode local --no-progress \
+ash scan fs --mode local --no-progress \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
   || ash_exit=$?
 tar -czf ash-output.tar.gz .ash/ash_output
@@ -442,7 +442,7 @@ and the step exits 2:
 <!-- doctest: run expect-exit=2 -->
 ```bash
 ash_exit=0
-ash scan --mode local --no-progress --offline --scanners detect-secrets \
+ash scan fs --mode local --no-progress --offline --scanners detect-secrets \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
   || ash_exit=$?
 tar -czf ash-output.tar.gz .ash/ash_output

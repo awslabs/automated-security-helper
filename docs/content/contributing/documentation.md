@@ -53,7 +53,7 @@ render on the site.
 ````markdown
 <!-- doctest: illustrative reason="needs Docker" -->
 ```bash
-ash --mode container --source-dir .
+ash scan fs . --mode container
 ```
 ````
 
@@ -104,7 +104,7 @@ This block runs in CI. The default fixture has one finding, so the scan exits wi
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress
+ash scan fs . --scanners detect-secrets --offline --no-progress
 ```
 
 ### Output samples

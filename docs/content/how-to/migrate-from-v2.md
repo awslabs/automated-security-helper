@@ -8,7 +8,7 @@ lists what changes for a v2 user and what to do about each.
 | | v2 | v3 |
 |---|---|---|
 | Install | clone the repository and add it to `PATH` | install from GitHub with uv, pipx, pip, or Homebrew ([Install ASH](install.md)) |
-| Where scanners run | always in a container built on each run | on your machine, or in a container with `ash --mode container` |
+| Where scanners run | always in a container built on each run | on your machine, or in a container with `ash scan fs --mode container` |
 | Configuration | none | a config file, `.ash.yaml` at the project root, with ignore paths, suppressions, thresholds, and scanner settings |
 | Output | `ash_output/aggregated_results.txt` | `.ash/ash_output/`, with a JSON results file and a `reports/` directory |
 | Exit code | the highest exit code of any scanner | 0, 1, 2, 3, 4, or 5, each with one meaning |
@@ -23,16 +23,18 @@ lists what changes for a v2 user and what to do about each.
    - To run them on your machine, as v3 does by default, install them with
      `ash dependencies install`. See [Manage scanner tools](../docs/advanced-usage.md).
    - To keep v2's behavior of running everything in a container, run
-     `ash --mode container`. See [Run ASH in a container](run-in-a-container.md).
+     `ash scan fs --mode container`. See [Run ASH in a container](run-in-a-container.md).
 
 ## Command-line options
 
-v2's options were parsed by its shell scripts. In v3, `ash` with no subcommand is the
-same as `ash scan`.
+v2's options were parsed by its shell scripts. In v3, a scan of a directory is
+`ash scan fs`, which takes the options below. `ash` with no subcommand and `ash scan` with
+no subject still run that scan, with a deprecation warning, until ASH 4.0 removes them
+([Move to the scan subjects](migrate-to-scan-subjects.md)).
 
 | v2 option | v3 |
 |---|---|
-| --source-dir | `--source-dir`, unchanged |
+| --source-dir | the directory argument of `ash scan fs`, as in `ash scan fs ../app`. `--source-dir` still works, with a deprecation warning, until ASH 4.0. |
 | --output-dir | `--output-dir`. The default is now `.ash/ash_output` inside the source directory, instead of `ash_output`. |
 | --ext, -extension | removed. Choose scanners with `--scanners` and `--exclude-scanners`, or turn them on and off in the configuration. |
 | --format text, --format json | changed. `--format` is now an alias of `--output-formats`, which takes reporter names such as `sarif` or `html`. `json` is not one of them, so a v2 `--format json` exits 5, a usage error, with `'json' is not a valid format`. `text` is the text reporter, so a v2 `--format text` keeps only `ash.summary.txt` in `reports/`. v3 always writes its JSON results file. |
@@ -41,7 +43,7 @@ same as `ash scan`.
 | --build-target, --no-build, --no-run, --force | unchanged, for container mode |
 | --no-cleanup | accepted. v3 keeps its working files by default; `--cleanup` removes them. |
 | -c, --no-color | `--no-color`. `-c` now means `--config`. |
-| -s, --single-process | `ash --strategy sequential` |
+| -s, --single-process | `ash scan fs --strategy sequential` |
 | -o, --oci-runner | `--oci-runner` and `-o`, unchanged. The `OCI_RUNNER` variable also works. |
 | -p, --preserve-report | removed. Use a different `--output-dir` for each run. `-p` now means `--progress`. |
 | -d, --debug | `--debug` and `-d`, unchanged |
@@ -49,11 +51,12 @@ same as `ash scan`.
 | -v, --version | `--version` only. `-v` now means `--verbose`. |
 | -h, --help | `--help` only |
 | --container-uid -u, --container-gid | `--container-uid` (`-u`) and `--container-gid` (`-g`) |
-| --finch, -f | removed; use `ash --mode container --oci-runner finch`. `-f` now means `--output-formats`. |
+| --finch, -f | removed; use `ash scan fs --mode container --oci-runner finch`. `-f` now means `--output-formats`. |
 
-Remove v2 options from your scripts. `ash` and `ash scan` reject an option they do not
-know, or a value an option does not accept, with a usage error, exit code 5, so a stale
-command line fails before it scans. A v2 `--format json` fails this way:
+Remove v2 options from your scripts. `ash scan fs`, like the deprecated `ash` and `ash scan`
+with no subject, rejects an option it does not know, or a value an option does not
+accept, with a usage error, exit code 5, so a stale command line fails before it scans. A
+v2 command line with `--format json` fails this way:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
@@ -102,7 +105,7 @@ scanner's text output. v3 writes `.ash/ash_output/` in the scanned directory:
 - `scanners/`: each scanner's raw output.
 - `ash.log`: the scan's log.
 
-`ash report` prints a summary of the latest results in the terminal. See
+`ash results report` prints a summary of the latest results in the terminal. See
 [Output files](../reference/output-files.md).
 
 ## Exit codes

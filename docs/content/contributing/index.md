@@ -91,14 +91,14 @@ copy them from `devfile.yaml` or
 ## Run ASH from your checkout
 
 `uv run` runs a command in the checkout's environment, so `uv run ash` is the ASH you are
-editing. With no arguments, `ash` scans the current directory, which inside the checkout
-is the ASH repository itself. To scan another project with your checkout's code, run
-from that project and point uv at the checkout with `uv run --project`:
+editing. With no path, `ash scan fs` scans the current directory, which inside the
+checkout is the ASH repository itself. To scan another project with your checkout's code,
+run from that project and point uv at the checkout with `uv run --project`:
 
 <!-- doctest: illustrative reason="runs ASH from a checkout of this repository" -->
 ```bash
 cd ~/src/my-project
-uv run --project ~/src/automated-security-helper ash --source-dir . --output-dir .ash/ash_output
+uv run --project ~/src/automated-security-helper ash scan fs . --output-dir .ash/ash_output
 ```
 
 `uv run --project` keeps your working directory. `uv run --directory` also uses the

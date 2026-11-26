@@ -50,7 +50,7 @@ reporters are on by default, and each writes its own file
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan --source-dir . --scanners detect-secrets --offline --no-progress --output-formats sarif,junitxml
+ash scan fs . --scanners detect-secrets --offline --no-progress --output-formats sarif,junitxml
 ```
 
 Suppressed findings ride along in the data formats with their reasons, so your
@@ -64,7 +64,7 @@ else is a [reporter plugin](../plugins/write-a-reporter.md) away.
 
 Two built-in combiners produce one result from several scans:
 
-- `ash merge` recombines the shards of one scan that ran across several
+- `ash results merge` recombines the shards of one scan that ran across several
   runners, recomputing the verdict and every report over all of them, and
   refuses mismatched shards rather than merging a hole into the results
   ([Split a scan across runners](../how-to/scale-large-repos.md#sharding)).
@@ -81,7 +81,7 @@ Across repositories, the aggregation is yours: each scan's
 stable places to build from, and `ash.flat.json` is the one-record-per-finding
 file for quick scripts.
 
-For trend questions, compare results files directly: `ash diff` lists the new,
+For trend questions, compare results files directly: `ash results diff` lists the new,
 absent, moved, severity-changed, and suppression-changed findings between two scans
 ([Compare two saved scans](../how-to/export-reports.md#compare-scans)), and over MCP
 `diff_scan_results` returns the resolved, new, and severity-changed findings

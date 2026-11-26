@@ -1703,9 +1703,9 @@ def test_ash_report_takes_no_aws_reporter_setting_from_a_config_file(
 #: aws.md's paragraph on the pre-flight check ``ash report`` runs, and its quote of
 #: the refusal it prints (Rendering a reporter from saved results).
 _REPORT_RUNS_THE_PREFLIGHT = (
-    "`ash report` runs the reporter's pre-flight check first, as a scan does. When the "
-    "check refuses, for a missing setting or for credentials it cannot find, the "
-    "reporter sends nothing, and `ash report` logs the reason and exits 1."
+    "`ash results report` runs the reporter's pre-flight check first, as a scan does. "
+    "When the check refuses, for a missing setting or for credentials it cannot find, "
+    "the reporter sends nothing, and `ash results report` logs the reason and exits 1."
 )
 _REPORT_PREFLIGHT_REFUSED = (
     "Error: reporter 's3' cannot run: its dependency check refused. See the log above "
@@ -1733,8 +1733,8 @@ def test_ash_report_runs_an_aws_reporter_that_config_overrides_turn_on(
     """
     assert_on_page(
         AWS_PLUGINS,
-        "So `ash report` takes whether the reporter runs, and its destination options, "
-        "from `--config-overrides` only:",
+        "So `ash results report` takes whether the reporter runs, and its destination "
+        "options, from `--config-overrides` only:",
     )
     assert_on_page(AWS_PLUGINS, _REPORT_RUNS_THE_PREFLIGHT)
     assert_on_page(AWS_PLUGINS, _S3_HAS_NO_REGION)
@@ -1806,9 +1806,9 @@ def test_ash_merge_takes_no_aws_reporter_setting_from_its_config_file(
     """
     assert_on_page(
         AWS_PLUGINS,
-        "`ash merge` holds its `--config` file to the same rule, since the shards do not "
-        "record the tree either: the merged findings go off the host only with the "
-        "reporter's `enabled` and destination options in `ash merge`'s "
+        "`ash results merge` holds its `--config` file to the same rule, since the "
+        "shards do not record the tree either: the merged findings go off the host only "
+        "with the reporter's `enabled` and destination options in `ash results merge`'s "
         "`--config-overrides`, and the file's values are ignored with the same warning, "
         "naming `ash merge`.",
     )
@@ -1876,8 +1876,8 @@ def test_ash_merge_runs_the_aws_reporters_only_with_their_package_named_for_it(
     """
     assert_on_page(
         AWS_PLUGINS,
-        "`ash merge` has these reporters only when the package is named for the merge "
-        "itself, in its `--config` file's `ash_plugin_modules` or with "
+        "`ash results merge` has these reporters only when the package is named for the "
+        "merge itself, in its `--config` file's `ash_plugin_modules` or with "
         "`--config-overrides 'ash_plugin_modules+=[automated_security_helper.plugin_"
         "modules.ash_aws_plugins]'`: a package that only the shards' scan loaded is "
         "not loaded. It runs them only when `--output-formats` is not given.",
@@ -2053,8 +2053,8 @@ def test_an_enabled_aws_reporter_missing_a_setting_logs_an_error_naming_it(
 
 #: aws.md's sentence on what one run is, for the error of a missing setting.
 _ONE_RUN_IS = (
-    "A run is one `ash scan`, `ash report`, or `ash merge`, and a workspace run gives "
-    "each error once for all its projects."
+    "A run is one `ash scan`, `ash results report`, or `ash results merge`, and a "
+    "workspace run gives each error once for all its projects."
 )
 #: The settings that turn the S3 reporter on with its bucket and no region.
 _S3_WITHOUT_A_REGION = [
@@ -2408,8 +2408,8 @@ _SAME_NAME_IS_REFUSED = (
     "Two plugins of one type with the very same name, such as a subclass that keeps "
     "its base's config, are refused with exit 3 too, naming both classes and the "
     "modules that define them: a scan and a workspace scan refuse two such scanners, "
-    "converters, or reporters, and `ash report` and `ash merge` refuse two such "
-    "reporters."
+    "converters, or reporters, and `ash results report` and `ash results merge` refuse "
+    "two such reporters."
 )
 
 #: plugins/index.md (Package a third-party plugin): give a plugin a name of its own.
@@ -2420,8 +2420,8 @@ _PLUGIN_NAME_OF_ITS_OWN = [
         "two plugins of one type whose names read as one that way would read each "
         "other's section, and are refused with exit 3, naming both plugins and the "
         "modules that define them: a scan and a workspace scan refuse two such scanners, "
-        "converters, or reporters, and `ash report` and `ash merge` refuse two such "
-        "reporters."
+        "converters, or reporters, and `ash results report` and `ash results merge` "
+        "refuse two such reporters."
     ),
     (
         "A reporter named `csv_` is refused this way beside the built-in `csv`, and one "
@@ -2980,8 +2980,8 @@ _SUBCLASS_BESIDE_ITS_BASE = [
     ),
     (
         "Two reporters with names of their own that write one report file are refused "
-        "with exit 1 by a scan, a workspace scan, and `ash merge`, and without the "
-        "`model_post_init` the subclass starts from its base's config and writes its "
+        "with exit 1 by a scan, a workspace scan, and `ash results merge`, and without "
+        "the `model_post_init` the subclass starts from its base's config and writes its "
         "base's file."
     ),
     "This reporter runs beside the built-in `csv` and writes `ash.copy.csv`:",
@@ -4369,8 +4369,8 @@ def test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_
     """
     assert_on_page(
         RUN_IN_A_CONTAINER,
-        "`ash scan --mode container` and `ash --mode container` mount that file, and each "
-        "file it `extends`, read-only under `/ash-env-config`",
+        "`ash scan fs --mode container` mounts that file, and each file it `extends`, "
+        "read-only under `/ash-env-config`",
     )
     assert_on_page(
         RUN_IN_A_CONTAINER,
@@ -4964,7 +4964,7 @@ def test_container_mode_runs_the_scan_inside_unsandboxed_and_says_so(
     assert_on_page(
         RUN_IN_A_CONTAINER,
         "The scan inside the container gets `sandbox.mode=off` as its last override, and "
-        "`ash scan --mode container` logs a warning that names the mode, such as `The "
+        "`ash scan fs --mode container` logs a warning that names the mode, such as `The "
         "scanner sandbox (bwrap, from sandbox.mode in a config file, --config-overrides or "
         "the operator's config) is not applied in container mode`.",
     )
@@ -4974,7 +4974,7 @@ def test_container_mode_runs_the_scan_inside_unsandboxed_and_says_so(
     )
     assert_on_page(
         SANDBOX,
-        "`ash scan --mode container` turns the sandbox off for the scan inside the "
+        "`ash scan fs --mode container` turns the sandbox off for the scan inside the "
         "container, and logs a warning when the sandbox was asked for; the container is "
         "the boundary there.",
     )
@@ -7272,7 +7272,7 @@ def test_an_offline_scan_logs_a_warning_for_a_scanner_whose_cache_is_not_set_up(
         "exist`, naming the cache grype would read (`GRYPE_DB_CACHE_DIR`, else grype's "
         "default cache directory).",
     )
-    assert_on_page(_OFFLINE_PAGE, "ash scan --offline --scanners detect-secrets")
+    assert_on_page(_OFFLINE_PAGE, "ash scan fs --offline --scanners detect-secrets")
     monkeypatch.delenv("GRYPE_DB_CACHE_DIR", raising=False)
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     tree = _config_scan_tree(tmp_path, {"app.py": _CONFIG_SECRET})
@@ -14302,8 +14302,8 @@ _LINKED_OUTPUT_SENTENCES = [
         OUTPUT_FILES,
         (
             "The check runs before anything is written or deleted, in every run mode "
-            "and whatever the sandbox mode, and also in `ash report` and `ash merge`. "
-            "The command exits 3:"
+            "and whatever the sandbox mode, and also in `ash results report` and "
+            "`ash results merge`. The command exits 3:"
         ),
     ),
     (
@@ -14317,7 +14317,7 @@ _LINKED_OUTPUT_SENTENCES = [
         OUTPUT_FILES,
         (
             "This applies to scans in every run mode, including `--use-existing` and "
-            "workspace scans, and to `ash merge`."
+            "workspace scans, and to `ash results merge`."
         ),
     ),
 ]
@@ -14480,11 +14480,11 @@ _CONTAINER_LINKED_OUTPUT = (
 _CONTAINER_SCAN_REFUSES_A_LINKED_OUTPUT = (
     "An output directory that is a symlink, or that a symlink below the source "
     "directory leads to, such as a committed `.ash` link for the default "
-    "`.ash/ash_output`, stops `ash scan --mode container` and `ash build-image` with exit "
-    "code 3 ([Exit codes](../reference/exit-codes.md#container)), because the scan "
-    "inside the container would write wherever the link points. The refusal comes before "
-    "a container runtime is looked up, with `--no-run` too, so nothing is built, "
-    "created, or mounted."
+    "`.ash/ash_output`, stops `ash scan fs --mode container` and `ash container build` "
+    "with exit code 3 ([Exit codes](../reference/exit-codes.md#container)), because "
+    "the scan inside the container would write wherever the link points. The refusal "
+    "comes before a container runtime is looked up, with `--no-run` too, so nothing is "
+    "built, created, or mounted."
 )
 
 #: A container runtime stand-in's recorded script: it records each command it is
@@ -14757,7 +14757,7 @@ _AN_UNMATCHED_SCANNERS_NAME_IS_RECORDED = (
 _REQUESTED_SCANNERS_NOT_RUN_FIELD = (
     "`requested_scanners_not_run` (the names in `--scanners` or `ASH_SCANNERS` that "
     "matched no scanner, or `null` when every name matched or no list was given; `ash "
-    "merge` records the names of all the shards)"
+    "results merge` records the names of all the shards)"
 )
 
 
@@ -14911,7 +14911,7 @@ def test_ash_merge_records_every_shards_scanners_names_that_matched_nothing(
 _BUILD_IMAGE_TAKES_NO_SCAN_OPTION = (
     "It takes no `--source-dir`, `--output-dir`, or other scan option: an argument its "
     "help does not list stops it with exit code 5 before anything is built, so use "
-    "`ash scan --mode container` to choose the directories."
+    "`ash scan fs --mode container` to choose the directories."
 )
 
 
@@ -14991,7 +14991,7 @@ def test_ash_build_image_refuses_a_scan_option_with_exit_5_before_it_builds(
 _CONTAINER_REFUSES_WHAT_A_LOCAL_SCAN_REFUSES = (
     "A source or output directory that a local scan refuses, such as a source directory "
     "that does not exist or an output directory that cannot be created, stops "
-    "`ash scan --mode container` with exit code 5, also with `--no-run`, and with the "
+    "`ash scan fs --mode container` with exit code 5, also with `--no-run`, and with the "
     "line a local scan prints ([Exit codes](../reference/exit-codes.md#scan)). `./ash` "
     "refuses them as well: it prints the line after `ERROR: ` and exits 5."
 )
@@ -15166,12 +15166,12 @@ _READING_A_RECORD_SENTENCES = [
     (
         CONFIGURE,
         (
-            "`ash merge` and `ash report` read the recorded config and do not read the "
-            "environment for a reference in it. A text field such as `project_name` "
-            "keeps the reference as its value. A field that takes a fixed choice, a "
-            "boolean, or a number, such as `severity_threshold`, cannot hold one: the "
-            "command warns that the field reads as its default, then exits 3 naming the "
-            "field and the reference, until you supply the field with "
+            "`ash results merge` and `ash results report` read the recorded config and do "
+            "not read the environment for a reference in it. A text field such as "
+            "`project_name` keeps the reference as its value. A field that takes a fixed "
+            "choice, a boolean, or a number, such as `severity_threshold`, cannot hold "
+            "one: the command warns that the field reads as its default, then exits 3 "
+            "naming the field and the reference, until you supply the field with "
             "`--config-overrides` or in the file `--config` names."
         ),
     ),
@@ -15916,10 +15916,11 @@ def test_patch_paths_and_overrides_reach_a_section_as_its_name_is_matched(
 
 #: configure.md (Share settings with `extends`): a recorded config with two spellings.
 _A_RECORDED_CONFIG_IS_READ_NOT_REFUSED = (
-    "A config that a results file recorded is read, not refused, by `ash report` and "
-    "`ash merge`: of two such spellings in it, they read the one that the scan which "
-    "recorded it read, and when the spelling not read sets a value the read one does "
-    "not, a warning names the spellings and the one read, never a value."
+    "A config that a results file recorded is read, not refused, by "
+    "`ash results report` and `ash results merge`: of two such spellings in it, they "
+    "read the one that the scan which recorded it read, and when the spelling not read "
+    "sets a value the read one does not, a warning names the spellings and the one "
+    "read, never a value."
 )
 
 
@@ -19118,8 +19119,8 @@ READ_RESULTS = "how-to/read-results.md"
 
 #: read-results.md on where ``ash report`` writes its log.
 _REPORT_LOG_TO_STDERR = (
-    "`ash report` writes its log to standard error, so standard output holds the report "
-    "alone."
+    "`ash results report` writes its log to standard error, so standard output holds the "
+    "report alone."
 )
 
 #: read-results.md on where ``ash report`` looks for the results file.
@@ -19269,8 +19270,8 @@ def test_ash_report_writes_its_log_to_stderr_and_only_the_report_to_stdout(
 #: read-results.md and exit-codes.md (ash report) on what ``ash report`` creates with
 #: no results, and on an output directory it cannot search, enter or look up.
 _REPORT_CREATES_NOTHING = (
-    "`ash report` creates nothing then, and an output directory under a directory it "
-    "cannot search counts as missing."
+    "`ash results report` creates nothing then, and an output directory under a "
+    "directory it cannot search counts as missing."
 )
 _REPORT_REFUSES_AN_UNENTERABLE_DIR = (
     "An output directory that exists but cannot be entered is refused with exit 5, "
@@ -19573,10 +19574,10 @@ def test_ash_report_with_results_in_two_places_reports_on_none_and_exits_5(
 def test_ash_report_refuses_an_unknown_format_before_it_reads_the_results(
     tmp_path: Path, results: str
 ) -> None:
-    """read-results.md (Print a report in the terminal with ``ash report``).
+    """read-results.md (Print a report in the terminal with ``ash results report``).
 
-    The page's doctest command, ``ash report --format nosuch``, run where the results
-    file is missing, where it holds no JSON, and where it holds a stored scan. Each
+    The page's doctest command, ``ash results report --format nosuch``, run where the
+    results file is missing, where it holds no JSON, and where it holds a stored scan. Each
     exits 5 with the refusal and the names of ASH's reporters, and prints neither
     ``No scan results found`` nor a load error, so the results were not read: read
     first, the first would print the no-results refusal and the second the load
@@ -19592,7 +19593,9 @@ def test_ash_report_refuses_an_unknown_format_before_it_reads_the_results(
     assert doctest is not None, "no doctest block right after the sentence"
     assert doctest[1] == "5", doctest[0]
     command = shlex.split(doctest[2])
-    assert command[:2] == ["ash", "report"] and "--format" in command, command
+    assert command[:3] == ["ash", "results", "report"] and "--format" in command, (
+        command
+    )
     name = command[command.index("--format") + 1]
     cwd = tmp_path / "work"
     cwd.mkdir()
@@ -20345,9 +20348,9 @@ def test_an_output_directory_holding_a_nul_is_refused_with_exit_5(
 #: exit-codes.md (ash scan) on a source directory that holds a NUL.
 _NUL_SOURCE_DIR = [
     (
-        "the source directory (`--source-dir` or `ASH_SOURCE_DIR`) does not exist, is not "
-        "a directory, cannot be entered, or is not a valid path because it holds a NUL "
-        "character;"
+        "the source directory (the path given to `ash scan fs`, or `--source-dir` or "
+        "`ASH_SOURCE_DIR`) does not exist, is not a directory, cannot be entered, or is "
+        "not a valid path because it holds a NUL character;"
     ),
     "- `Source directory is not a valid path: <path>`",
     "`--mode container` refuses the same directories, also with `--no-run`.",

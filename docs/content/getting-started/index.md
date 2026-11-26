@@ -71,5 +71,6 @@ that gate. Building the image takes a few minutes.
 ## Other starting points
 
 - Upgrading from ASH v2: [Migrate from v2](../how-to/migrate-from-v2.md).
+- Upgrading scripts written for ASH 3.8 or older: [Move to the scan subjects](../how-to/migrate-to-scan-subjects.md).
 - Adding your own scanner or reporter: [Plugins](../plugins/index.md).
 - Working on ASH itself: [Contribute to ASH](../contributing/index.md).

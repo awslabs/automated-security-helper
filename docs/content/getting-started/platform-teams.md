@@ -95,7 +95,7 @@ Scan it with the operator config:
 
 <!-- doctest: run fixture=empty expect-exit=2 -->
 ```bash
-ash scan --config "$OPERATOR_CONFIG" --scanners detect-secrets
+ash scan fs --config "$OPERATOR_CONFIG" --scanners detect-secrets
 ```
 
 `--scanners detect-secrets` keeps the check fast: detect-secrets ships with ASH, so it
@@ -115,7 +115,7 @@ config:
 <!-- doctest: run fixture=empty expect-exit=0 -->
 ```bash
 printf 'fail_on_findings: false\n' > .ash.yaml
-ash scan --scanners detect-secrets
+ash scan fs --scanners detect-secrets
 ```
 
 `ash.log` now names the repository's file. A file ASH finds on its own appears by its resolved
@@ -130,7 +130,7 @@ The scan exits 0 although the finding is still there. Scan again with your confi
 
 <!-- doctest: run fixture=empty expect-exit=2 -->
 ```bash
-ash scan --config "$OPERATOR_CONFIG" --scanners detect-secrets
+ash scan fs --config "$OPERATOR_CONFIG" --scanners detect-secrets
 ```
 
 The scan exits 2 again, because ASH read only your file.
@@ -182,7 +182,7 @@ docker run --rm \
   --mount type=bind,source=/etc/ash/ash.yaml,destination=/etc/ash/ash.yaml,readonly \
   --env ASH_CONFIG=/etc/ash/ash.yaml \
   registry.example.com/security/ash:3.8.0 \
-  ash scan --source-dir /src --output-dir /out
+  ash scan fs /src --output-dir /out
 ```
 
 The `test -f` line stops the job before `docker run` when the operator config is missing.
@@ -192,7 +192,7 @@ go to a directory outside it. The job fails with exit code 2 on findings and 1 o
 incomplete scan; [Exit codes](../reference/exit-codes.md) lists
 them all.
 
-`ash scan --mode container --no-build`, with `ASH_IMAGE_NAME` naming your image, works too.
+`ash scan fs --mode container --no-build`, with `ASH_IMAGE_NAME` naming your image, works too.
 Container mode mounts your `--config` file read-only for the scan inside the container
 ([The config file](../how-to/run-in-a-container.md#config)). The CI guides show the same
 setup for each service: [Run ASH in GitHub Actions](../how-to/ci/github-actions.md),
@@ -209,7 +209,7 @@ on each runner image or in each job:
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
 uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0'
-ASH_CONFIG=/etc/ash/ash.yaml ash scan --source-dir . --output-dir ../ash-results
+ASH_CONFIG=/etc/ash/ash.yaml ash scan fs . --output-dir ../ash-results
 ```
 
 Pin to a release tag, or to a full commit SHA for a reference that cannot move; do not
@@ -222,7 +222,7 @@ same schedule as the ASH tag; the image route keeps both in one artifact. For on
 jobs, `uvx` runs the same pinned reference without installing it; the
 [GitHub Actions reusable workflow](../how-to/ci/github-actions.md) does this.
 
-Nix mode (`ash --mode nix`) is in the latest release; v3.7.x and older reject
+Nix mode (`ash scan fs --mode nix`) is in the latest release; v3.7.x and older reject
 `--mode nix`, so a fleet rollout on it needs a release newer than those everywhere. See
 [Nix mode](../how-to/install.md#nix-mode).
 

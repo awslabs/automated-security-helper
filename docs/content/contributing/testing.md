@@ -407,7 +407,7 @@ whether every registered scanner is in the results:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress --verbose
+ash scan fs . --scanners detect-secrets --offline --no-progress --verbose
 ```
 
 In a checkout whose environment is not activated, put `uv run` in front. The command

@@ -18,10 +18,10 @@ no other tools and answers in seconds:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress
+ash scan fs . --scanners detect-secrets --offline --no-progress
 ```
 
-`ash inspect findings` opens the last scan's findings in the terminal, and
+`ash results inspect findings` opens the last scan's findings in the terminal, and
 pressing `x` on one writes a suppression entry, with your reason and an
 optional expiration, into the project's config
 ([Add a suppression while you review findings](../how-to/suppress-findings.md#inspect)).
@@ -50,7 +50,7 @@ repos:
     hooks:
       - id: ash
         name: ASH
-        entry: ash --mode precommit
+        entry: ash scan fs --mode precommit
         language: system
         pass_filenames: false
 ```
@@ -75,7 +75,7 @@ answer before CI does, run the fuller scan yourself when you are about to push:
 
 <!-- doctest: illustrative reason="runs every default scanner, which needs each scanner's tool installed" -->
 ```bash
-ash --mode local
+ash scan fs --mode local
 ```
 
 or run the [`ash-full-scan` hook](../how-to/pre-commit.md#full-scan) on a

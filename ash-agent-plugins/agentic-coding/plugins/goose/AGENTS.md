@@ -55,7 +55,7 @@ For progress display, use `finished_scanners / total_scanners` (`completed_scann
 - The server keeps its list of scans in memory. After it restarts, `get_scan_progress` fails with `scan_not_found` for older scan ids; read their results from the output directory.
 - `check_installation` reports the ASH version and whether each built-in scanner's tool is installed: `ready` is false when a scanner that ASH enables by default cannot run and no scan will install its tool, and `missing_dependencies` names those scanners. It does not read the project's config, so a scanner the project turns off can be listed. It installs and downloads nothing. When the tool of a scanner that ASH installs with uv is missing, the first scan installs it if the server is online and has uv; such a scanner is listed in `installs_on_first_scan` and counts toward `ready`, and otherwise it is in `missing_dependencies`. Offline, semgrep is also missing when it has no rules cache. A scanner that has files to scan and whose tool is missing ends as MISSING, listed in `incomplete_scanners`.
 - The server's operator limits how many scans it holds at once, running or waiting (`max_concurrent_scans`, 3 by default), and how long one may run (`scan_timeout_seconds`, 1800 by default). A scan over the first limit is refused with an `error` that names it; start it again when a scan has finished. A scan over the second is stopped and ends `failed`.
-- For a container scan, the user runs the ASH command line, `ash scan --mode container`, instead of the MCP server.
+- For a container scan, the user runs the ASH command line, `ash scan fs --mode container`, instead of the MCP server.
 
 ## Explain, suppress, and compare
 

@@ -63,12 +63,12 @@ pip install .
 <!-- doctest: illustrative reason="container mode needs a container runtime, and every mode runs a scan with all scanner tools" -->
 ```bash
 # Run a scan in local mode (the scanner tools installed on this machine)
-ash --mode local
+ash scan fs --mode local
 
 # Run a scan in container mode (all tools)
-ash --mode container
-ash --mode local
-ash --mode precommit
+ash scan fs --mode container
+ash scan fs --mode local
+ash scan fs --mode precommit
 ```
 
 | Mode | Requirements |
@@ -170,7 +170,7 @@ ASH leaves its own output out of the scan, whether or not `.gitignore` lists it:
 <details>
 <summary>How do I run ASH in an offline/air-gapped environment?</summary>
 
-Build an offline image with `ash --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ash --mode container --offline --no-build` in your air-gapped environment.
+Build an offline image with `ash scan fs --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ash scan fs --mode container --offline --no-build` in your air-gapped environment.
 </details>
 
 <details>

@@ -18,7 +18,7 @@ In a repository with no CloudFormation template and one detect-secrets finding, 
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash --source-dir . --scanners detect-secrets,cfn-nag --offline --no-progress
+ash scan fs . --scanners detect-secrets,cfn-nag --offline --no-progress
 ```
 
 ## Turn scanners off
@@ -39,12 +39,12 @@ To choose scanners for one run, use `--scanners` to run only the ones you name, 
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress
+ash scan fs . --scanners detect-secrets --offline --no-progress
 ```
 
 <!-- doctest: illustrative reason="runs every scanner, which needs each scanner's tool installed" -->
 ```bash
-ash --source-dir . --exclude-scanners trivy,grype
+ash scan fs . --exclude-scanners trivy,grype
 ```
 
 Both options take a comma-separated list or can be repeated, and the `ASH_SCANNERS` and `ASH_EXCLUDED_SCANNERS` environment variables set them too. How they combine with the config:
@@ -94,7 +94,7 @@ Every scanner has `severity_threshold`, which overrides the global threshold for
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress \
+ash scan fs . --scanners detect-secrets --offline --no-progress \
   --config-overrides scanners.bandit.options.severity_level=HIGH
 ```
 
@@ -173,7 +173,7 @@ When a repository config sets one of these to a value other than the operator's,
 
 <!-- doctest: illustrative reason="names a gitleaks config file that the sample project does not have" -->
 ```bash
-ash --source-dir . --config-overrides scanners.gitleaks.options.config_file=/etc/ash/gitleaks.toml
+ash scan fs . --config-overrides scanners.gitleaks.options.config_file=/etc/ash/gitleaks.toml
 ```
 
 These scanners do not read the repository's own config files for their tools, such as `.gitleaks.toml`, `.gitleaksignore`, `zizmor.yml`, `actionlint.yaml`, `.bandit`, `bandit.yaml`, `bandit.toml`, `.grype.yaml`, `.syft.yaml`, `trivy.yaml`, `.trivyignore`, or `.cfnlintrc`. To use one, point the option at it from an operator source.

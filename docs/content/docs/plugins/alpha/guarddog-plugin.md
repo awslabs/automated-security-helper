@@ -21,7 +21,7 @@ ash_plugin_modules:
 <!-- doctest: illustrative reason="runs a full scan, which needs every scanner installed" -->
 ```bash
 # For one run
-ash scan --ash-plugin-modules automated_security_helper.plugin_modules.ash_guarddog_plugins
+ash scan fs --ash-plugin-modules automated_security_helper.plugin_modules.ash_guarddog_plugins
 ```
 
 With the module listed, `guarddog` runs by default, like every other scanner. `scanners.guarddog.enabled: false` turns it off again, and `--scanners` and `--exclude-scanners` select it as they select any scanner. `--scanners guarddog` without the module listed is refused, with a message naming the module to add. If GuardDog is not installed, an online scan installs it with `uv tool install` before running it; offline, in nix mode, or when that install fails, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate).
@@ -159,7 +159,7 @@ which GuardDog logged an error is also a failed target: when the registry cannot
 reached, GuardDog prints an empty result and exits 0, which would otherwise read as a
 clean scan.
 
-GuardDog is not packaged in nixpkgs, so `ash scan --mode nix` does not provide it.
+GuardDog is not packaged in nixpkgs, so `ash scan fs --mode nix` does not provide it.
 Enabled under Nix without a separately installed GuardDog, the scanner is `MISSING`.
 
 ## Failures

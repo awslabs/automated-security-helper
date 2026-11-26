@@ -1951,7 +1951,7 @@ def test_a_built_image_job_with_a_matrix_prints_once_per_entry():
                 ),
             )
         ],
-        [("      ash scan --mode local", "      echo scan --mode local")],
+        [("      ash scan fs --mode local", "      echo scan fs --mode local")],
         [
             ("  script:\n    - ash_exit=0\n    - >-\n", "  script: >-\n"),
             ('    - echo "$ash_exit" > ash-exit-code.txt\n', ""),

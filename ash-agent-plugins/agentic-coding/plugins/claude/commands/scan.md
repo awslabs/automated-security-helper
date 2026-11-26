@@ -18,7 +18,7 @@ Run an ASH security scan on the current project and report what it finds, most s
    - `clean_output=True`
    - `severity_threshold` left unset, so the scan uses the config's `global_settings.severity_threshold`. The argument can only tighten that threshold for one scan, never loosen it: pass it (e.g. `severity_threshold="HIGH"`) only when the user asks for a stricter level. For a looser level, have the user lower the setting in `.ash.yaml` and re-scan.
 
-   Store the returned `scan_id`. Reports land in `<source_dir>/.ash/ash_output/`. The MCP server always runs scans in local mode; for container scans the user needs to invoke the ASH CLI directly (`ash scan --mode container`).
+   Store the returned `scan_id`. Reports land in `<source_dir>/.ash/ash_output/`. The MCP server always runs scans in local mode; for container scans the user needs to invoke the ASH CLI directly (`ash scan fs --mode container`).
 
 4. **Poll progress every 5 seconds** — loop on `get_scan_progress(scan_id=<id>)` until `is_complete` is `true`, which it is for every ending (`completed`, `incomplete`, `failed`, `cancelled`); then read `status`. Show the user a brief status update on each poll: which scanners are running, and `finished_scanners / total_scanners` as the progress fraction (treat `total_scanners == 0` as "initializing").
 
@@ -37,5 +37,5 @@ Run an ASH security scan on the current project and report what it finds, most s
 ## Notes
 
 - If there are no ASH tools, the MCP server is not running. The plugin starts it with `uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.8.0 ash mcp`, which needs uv, and network access to GitHub the first time.
-- The MCP server always scans in local mode. For a container scan, the user runs `ash scan --mode container`.
+- The MCP server always scans in local mode. For a container scan, the user runs `ash scan fs --mode container`.
 - Do not repeat the value of a detected secret. Refer to its file and line.

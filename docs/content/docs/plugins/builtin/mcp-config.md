@@ -111,7 +111,7 @@ Some limits to know:
 ## Running it
 
 ```sh
-ash --source-dir . --scanners mcp-config,semgrep --output-dir ash_output
+ash scan fs . --scanners mcp-config,semgrep --output-dir ash_output
 ```
 
 The policy findings come from `mcp-config` alone. To have the generated scripts scanned as well, run semgrep or opengrep in the same scan, as above.

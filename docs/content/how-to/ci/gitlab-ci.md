@@ -39,7 +39,7 @@ ash-scan:
   script:
     - ash_exit=0
     - >-
-      ash scan --mode local --no-progress
+      ash scan fs --mode local --no-progress
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
       || ash_exit=$?
     - echo "$ash_exit" > ash-exit-code.txt
@@ -83,11 +83,11 @@ What the `before_script` does:
   cannot change what it installs.
 
 To skip a scanner instead of installing what it needs, drop it from the install list and
-name it in `--exclude-scanners` on `ash scan`, for example
-`ash scan --mode local --no-progress --exclude-scanners cfn-nag`.
+name it in `--exclude-scanners` on `ash scan fs`, for example
+`ash scan fs --mode local --no-progress --exclude-scanners cfn-nag`.
 
 A merge request pipeline scans the configuration in the branch it scans, so the branch's
-author can change the gate. The three gate flags on `ash scan` keep the branch from turning
+author can change the gate. The three gate flags on `ash scan fs` keep the branch from turning
 off the gate for findings, incomplete scans, and stale content databases. The branch's
 config can still raise thresholds, add suppressions, and turn scanners off; to keep those
 yours, pass `--config` with a file outside the checkout. See
@@ -112,7 +112,7 @@ report:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan --mode local --no-progress --offline --scanners detect-secrets \
+ash scan fs --mode local --no-progress --offline --scanners detect-secrets \
   --output-formats gitlab-sast,junitxml
 ```
 
@@ -140,7 +140,7 @@ ash-scan:
   script:
     - ash_exit=0
     - >-
-      ash scan --mode local --no-progress
+      ash scan fs --mode local --no-progress
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
       || ash_exit=$?
     - echo "$ash_exit" > ash-exit-code.txt
@@ -194,7 +194,7 @@ ash-scan:
   script:
     - ash_exit=0
     - >-
-      ash scan --mode local --no-progress
+      ash scan fs --mode local --no-progress
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
       --changed-files-only --base-ref "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
       || ash_exit=$?
@@ -219,7 +219,7 @@ git switch -q -c add-version
 echo 'VERSION = "1.0"' > version.py
 git add version.py
 git commit -q -m "Add version.py"
-ash scan --mode local --no-progress --offline --scanners detect-secrets \
+ash scan fs --mode local --no-progress --offline --scanners detect-secrets \
   --changed-files-only --base-ref main
 ```
 
@@ -259,7 +259,7 @@ ash-scan-uvx:
   script:
     - ash_exit=0
     - >-
-      ash scan --mode local --no-progress
+      ash scan fs --mode local --no-progress
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
       || ash_exit=$?
     - echo "$ash_exit" > ash-exit-code.txt
@@ -309,7 +309,7 @@ ash-scan-nix:
   script:
     - ash_exit=0
     - >-
-      ash scan --mode nix --no-progress
+      ash scan fs --mode nix --no-progress
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
       || ash_exit=$?
     - echo "$ash_exit" > ash-exit-code.txt

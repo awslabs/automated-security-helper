@@ -19,7 +19,7 @@ that the cold run would have used. Nothing about images is configured here.
 
 Unix only (Linux and macOS). On Windows, and anywhere else without unix-domain sockets,
 there is no express mode: `ash express start` refuses with a clear message,
-`ash scan --express` prints one line on stderr saying the platform has no express mode
+`ash scan fs --express` prints one line on stderr saying the platform has no express mode
 and runs cold, and every scan without the flag runs cold silently, exactly as before.
 
 ## Use it {#use}
@@ -36,7 +36,7 @@ Start the daemon on demand from a scan:
 
 <!-- doctest: illustrative reason="starts a resident daemon that would outlive the docs run, and only on unix" -->
 ```bash
-ash scan --source-dir . --express
+ash scan fs . --express
 ```
 
 `--express` starts the daemon if it is absent (and replaces it if it is stale), then runs
@@ -56,7 +56,7 @@ Force a cold run without stopping the daemon:
 
 <!-- doctest: illustrative reason="the cold run is the ordinary scan; running it here would only rescan the fixture" -->
 ```bash
-ash scan --source-dir . --no-express
+ash scan fs . --no-express
 ```
 
 The daemon retires itself after 30 minutes without a request (configure with the
@@ -150,8 +150,8 @@ double a scan's side effects. A Ctrl-C or termination signal that lands during t
 handshake itself ends the command with the usual interrupt code instead of starting a
 cold scan you just asked to stop.
 
-Some invocations never use the daemon: anything that is not a scan (`ash report`,
-`ash inspect`, shell tab-completion, ...), any scan with `--no-express`, and scans the
+Some invocations never use the daemon: anything that is not a scan (`ash results report`,
+`ash results inspect`, shell tab-completion, ...), any scan with `--no-express`, and scans the
 MCP server hosts in-process. The console script `ash` gets the full saving; running the
 module form (`python -m automated_security_helper.cli.main`) delegates too, but it has
 already paid the import cost by the time it does.

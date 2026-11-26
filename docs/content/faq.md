@@ -15,7 +15,7 @@ A scanner with nothing to scan shows as SKIPPED whether or not its tool is insta
 npm-audit and cdk-nag need Node.js, and cfn-nag needs Ruby with a C compiler, only in a
 project they have something to scan in: CloudFormation templates for cdk-nag and cfn-nag,
 and a lockfile beside a `package.json` for npm-audit. To scan without a tool you cannot install, leave its scanner out with
-`ash --exclude-scanners cdk-nag,npm-audit`. See
+`ash scan fs --exclude-scanners cdk-nag,npm-audit`. See
 [A scanner shows MISSING](how-to/troubleshoot.md#a-scanner-shows-missing) and
 [Exit codes](reference/exit-codes.md).
 
@@ -24,7 +24,7 @@ with or without Node.js, so the exit code is detect-secrets' verdict alone:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash --scanners cdk-nag,detect-secrets --no-progress
+ash scan fs --scanners cdk-nag,detect-secrets --no-progress
 ```
 
 ## How do I install ASH, and which version should I pin?
@@ -42,7 +42,7 @@ dependency versions locked in that release's `uv.lock`.
 ## Is there a container image?
 
 ASH publishes no image. `ash container build` builds one from a release tag, and
-`ash --mode container` builds one and runs the scan in it. ASH uses the first of finch,
+`ash scan fs --mode container` builds one and runs the scan in it. ASH uses the first of finch,
 docker, nerdctl, and podman that it finds on your `PATH`, or the one you name with
 `--oci-runner`. The default image runs as a non-root user whose UID and GID you can set;
 `--build-target ci` builds the image that runs as root, which a job running as root
@@ -72,7 +72,7 @@ read:
 mkdir -p cdk.out
 echo '{"Resources": {"Bucket": {"Type": "AWS::S3::Bucket"}}}' > cdk.out/App.template.json
 echo cdk.out >> .gitignore
-ash --scanners detect-secrets --offline --no-progress
+ash scan fs --scanners detect-secrets --offline --no-progress
 ```
 
 ```bash
@@ -97,7 +97,7 @@ global_settings:
       reason: The command is a constant string; no user input reaches it.
 ```
 
-`ash report` shows each finding's rule ID. You can add `expires` with a date in quotes,
+`ash results report` shows each finding's rule ID. You can add `expires` with a date in quotes,
 such as `"2027-06-30"`; from that date the suppression stops applying, and
 `ash config lint` reports it as expired. ASH also honors inline `ash-ignore` comments, and
 scanners honor their own, such as bandit's `# nosec`. See
@@ -190,7 +190,7 @@ add `--exclude-scanners npm-audit`:
 ```bash
 echo '{"name": "demo", "version": "1.0.0"}' > package.json
 echo '{"name": "demo", "version": "1.0.0", "lockfileVersion": 3, "packages": {}}' > package-lock.json
-ash --offline --scanners npm-audit,detect-secrets --no-progress
+ash scan fs --offline --scanners npm-audit,detect-secrets --no-progress
 ```
 
 ## What does a scan send over the network?

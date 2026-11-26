@@ -48,7 +48,7 @@ Do not ignore all of `.ash/`: an ASH config file at a legacy location, such as `
 
 ## What the hook runs {#behavior}
 
-The `ash` hook runs `ashv3 --mode=precommit --staged` with your `args`. Precommit mode:
+The `ash` hook runs `ashv3 scan fs --mode=precommit --staged` with your `args`. Precommit mode:
 
 - runs five scanners by default: bandit, detect-secrets, checkov, cdk-nag, and npm-audit.
   `--add-scanners` adds others to that set; `--only-scanners` replaces the set and runs
@@ -99,7 +99,7 @@ scanned and is not listed) and makes it the scan's target set:
 
 What the tools read is the working-tree copy of each staged file. Under the
 pre-commit framework the two are identical, because it stashes unstaged changes
-around the hooks; a direct `ash --mode precommit --staged` run after `git add -p`,
+around the hooks; a direct `ash scan fs --mode precommit --staged` run after `git add -p`,
 or after editing a file it had staged, scans content that differs from what the
 commit will contain.
 
@@ -309,7 +309,7 @@ repos:
     hooks:
       - id: ash
         name: ASH
-        entry: ash --mode precommit
+        entry: ash scan fs --mode precommit
         language: system
         pass_filenames: false
 ```
@@ -376,7 +376,7 @@ matches.
 ## The ash-full-scan hook {#full-scan}
 
 `.pre-commit-hooks.yaml` also defines `ash-full-scan`, which runs
-`ashv3 --mode=container --simple`. It builds ASH's container image from the source that
+`ashv3 scan fs --mode=container --simple`. It builds ASH's container image from the source that
 pre-commit installed, then scans the repository inside it with every scanner the image
 carries. It needs a container runtime on the host: finch, docker, nerdctl, or podman, found
 in that order. The first run builds the image and takes several minutes, so give the hook
@@ -408,7 +408,7 @@ pre-commit run --hook-stage manual ash-full-scan --all-files
 `.pre-commit-hooks.yaml` defines no Nix hook: `ash` and `ash-simple-scan` run precommit
 mode and `ash-full-scan` runs container mode, and ASH takes one `--mode` per run. To scan
 with the scanners that ASH's `flake.nix` supplies, add a `local` hook that calls
-`ash scan --mode nix` on an `ash` already on `PATH`, and give it a slow stage like
+`ash scan fs --mode nix` on an `ash` already on `PATH`, and give it a slow stage like
 `ash-full-scan`:
 
 <!-- doctest: config kind=pre-commit -->
@@ -418,7 +418,7 @@ repos:
     hooks:
       - id: ash-nix
         name: ASH scan in Nix mode
-        entry: ash scan --mode nix --no-progress
+        entry: ash scan fs --mode nix --no-progress
         language: system
         pass_filenames: false
         stages: [manual]

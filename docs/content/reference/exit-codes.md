@@ -2,7 +2,7 @@
 
 The exit code of every `ash` command, with the conditions that produce it. For how to change the scan verdict, see [Set the gate](../how-to/set-the-gate.md).
 
-On every command, a command-line usage error exits 5: an unknown option, subcommand, or argument; a value outside the choices an option takes (such as `--mode` or `--min-severity`) or a number that is not one; a missing required option; or a `--cli-json-input` document that ASH cannot read or use. `ash scan`, `ash container build`, and `ash` with no subcommand reject an option or argument they do not define. An option given to `ash` before a subcommand is passed to the command named right after `ash`, and is a usage error when that command does not take it: `ash --source-dir . config get` exits 5, because `ash config` has no `--source-dir`, while `ash config get --source-dir .` works. Some names and paths that ASH cannot use are usage errors too, such as a `--scanners` list that names no scanner, a `--source-dir` that does not exist, or an `--output-dir` that ASH cannot create, while `ash report`, and a scan with `--use-existing`, exit 1 when they find no results to use. The tables below list both. Some `ash dependencies install` selections exit 2 instead: a `--tool` name that it has no plugin for, or whose plugin type `--plugin-type` leaves out, a `--plugin-type` other than `converter`, `scanner`, or `reporter`, an unknown name in `--providers`, a `--create-virtualenv` or `--no-create-virtualenv` typed without `--virtualenv-path`, and a `--binary-path` entry that is malformed, names no selected scanner, or whose path is not an absolute, executable, regular file outside the scanned directory. A `--virtualenv-path` that does not exist (without `--create-virtualenv`) or that exists and is not a virtualenv exits 3, and a tool that no listed `--providers` entry can install fails the run with 1. Usage errors have a code of their own so that a CI gate does not read a mistyped flag as a scan with findings.
+On every command, a command-line usage error exits 5: an unknown option, subcommand, or argument; a value outside the choices an option takes (such as `--mode` or `--min-severity`) or a number that is not one; a missing required option; or a `--cli-json-input` document that ASH cannot read or use. `ash scan`, `ash container build`, and `ash` with no subcommand reject an option or argument they do not define. An option given to `ash` before a subcommand is passed to the command named right after `ash`, and is a usage error when that command does not take it: `ash --source-dir . config get` exits 5, because `ash config` has no `--source-dir`, while `ash config get --source-dir .` works. Some names and paths that ASH cannot use are usage errors too, such as a `--scanners` list that names no scanner, a directory to scan that does not exist, or an `--output-dir` that ASH cannot create, while `ash results report`, and a scan with `--use-existing`, exit 1 when they find no results to use. The tables below list both. Some `ash dependencies install` selections exit 2 instead: a `--tool` name that it has no plugin for, or whose plugin type `--plugin-type` leaves out, a `--plugin-type` other than `converter`, `scanner`, or `reporter`, an unknown name in `--providers`, a `--create-virtualenv` or `--no-create-virtualenv` typed without `--virtualenv-path`, and a `--binary-path` entry that is malformed, names no selected scanner, or whose path is not an absolute, executable, regular file outside the scanned directory. A `--virtualenv-path` that does not exist (without `--create-virtualenv`) or that exists and is not a virtualenv exits 3, and a tool that no listed `--providers` entry can install fails the run with 1. Usage errors have a code of their own so that a CI gate does not read a mistyped flag as a scan with findings.
 
 ## `ash scan` {#scan}
 
@@ -15,13 +15,13 @@ On every command, a command-line usage error exits 5: an unknown option, subcomm
 | 1 | A rule could not be evaluated, or a scanner tool ASH could not stop (also with `fail_on_incomplete_scanners` off) |
 | 1 | A content database is past its age bound, with `content_db_staleness: fail` (the default). A scanner that passed against that database is recorded ERROR, and one that failed its threshold stays FAILED. This row sets the code for both, also with `fail_on_incomplete_scanners` off. |
 | 1 | A report file a reporter is about to write, such as `reports/ash.sarif`, is a link ([Output files](output-files.md#links)) |
-| 1 | `--use-existing` finds no `ash_aggregated_results.json` in the output directory. The command is well formed, but what it asks to use is not on disk, so this is the code `ash report` gives for missing results and not a usage error |
+| 1 | `--use-existing` finds no `ash_aggregated_results.json` in the output directory. The command is well formed, but what it asks to use is not on disk, so this is the code `ash results report` gives for missing results and not a usage error |
 | 1 | Any other error during the scan |
 | 2 | Actionable findings: an unsuppressed finding at or above its scanner's severity threshold, with `fail_on_findings` on and `--min-severity` met |
 | 3 | The configuration cannot be used: the config file that `--config` or `ASH_CONFIG` names, or that discovery finds, does not exist, is not a regular file, cannot be read, is not UTF-8, or does not parse; it does not validate (an unknown key in a plugin's options makes it invalid, and so does one plugin's section written under two spellings, neither of them the plugin's own name, such as `DetectSecrets` and `DETECT_SECRETS`; an unknown key in a suppression or an ignore-path entry instead warns and leaves the entry applying to nothing, unless `fail_on_unknown_keys: true` is set, the default from ASH v4); an override does not parse or does not validate; a config file an MCP client delivered sets a field the server's policy denies; or two plugins of one type that the scan loads have the same name or names that read as one ([Package a third-party plugin](../plugins/index.md#package-a-third-party-plugin)) |
 | 3 | Refused before writing: the output directory, a directory on the way to it, or a directory or fixed-name file ASH writes in it, such as `reports` or `ash.log`, is a link ([Output files](output-files.md#links)). An output directory that is a symlink, or that a symlink below the source directory leads to, is refused this way in every mode, `--mode container` (also with `--no-run`) and `--mode nix` included, and before the check that the directory can be written, so nothing is made and the link's target keeps its entries. |
 | 4 | A workspace error (see [Workspace mode](#workspace)), or `--dry-run`, `--allow-missing-projects`, or `--workspace-config` given without `--workspace` |
-| 5 | A usage error. For a scan that includes: the source directory (`--source-dir` or `ASH_SOURCE_DIR`) does not exist, is not a directory, cannot be entered, or is not a valid path because it holds a NUL character; the output directory is not a directory, cannot be created, cannot be entered, or cannot be written, or it is not a valid path because it holds a NUL character, which a `--cli-json-input` document can carry and a command line cannot; with `--changed-files-only`, a `--base-ref` that git would read as something other than a revision, such as one that starts with `-`; `--changed-files-only`, or `ASH_CHANGED_FILES_ONLY`, with `--mode container`, which is refused before anything is built or run; the shard options are invalid or combined with `--workspace`; an `--output-formats` value is not a format name ASH accepts; no name in `--scanners` (or `ASH_SCANNERS`) matches a scanner; every scanner `--scanners` names is also excluded; every scanner `--scanners` names is left out of a `--python-only` run. ASH checks the `--scanners` names when the scan phase starts, after the converters have run and the output directory has been written. |
+| 5 | A usage error. For a scan that includes: the source directory (the path given to `ash scan fs`, or `--source-dir` or `ASH_SOURCE_DIR`) does not exist, is not a directory, cannot be entered, or is not a valid path because it holds a NUL character; the output directory is not a directory, cannot be created, cannot be entered, or cannot be written, or it is not a valid path because it holds a NUL character, which a `--cli-json-input` document can carry and a command line cannot; with `--changed-files-only`, a `--base-ref` that git would read as something other than a revision, such as one that starts with `-`; `--changed-files-only`, or `ASH_CHANGED_FILES_ONLY`, with `--mode container`, which is refused before anything is built or run; the shard options are invalid or combined with `--workspace`; an `--output-formats` value is not a format name ASH accepts; no name in `--scanners` (or `ASH_SCANNERS`) matches a scanner; every scanner `--scanners` names is also excluded; every scanner `--scanners` names is left out of a `--python-only` run. ASH checks the `--scanners` names when the scan phase starts, after the converters have run and the output directory has been written. |
 | 5 | A usage error from `--baseline` (or `ASH_BASELINE`), which [Set the gate](../how-to/set-the-gate.md#baseline) explains. The option is refused with `--use-existing`, `--express`, `--mode container`, `--mode nix`, `--workspace`, `--shard-index` or `--shard-count`, and a `--phases` list that has neither scan nor report. The baseline file is refused when it is inside the source or output directory, is not a regular file with exactly one hard link, is not the results of a full scan (results of a workspace aggregate, a shard, `--changed-files-only`, or an earlier `--baseline` are not), or belongs to a different project or scan directory. |
 | 130 | Interrupted with Ctrl-C, in every mode, container and Nix mode included. ASH prints `ASH scan interrupted before it finished: there is no verdict, and the output directory may hold partial results.` on stderr, and no results table and no line saying the scan completed, in the console or in the scan's log file. Container and Nix mode first give the runtime or the Nix shell time to stop ([Container and Nix mode](#container)). |
 
@@ -47,28 +47,28 @@ In a repository where detect-secrets reports one finding, `SECRET-SECRET-KEYWORD
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress
+ash scan fs . --scanners detect-secrets --offline --no-progress
 ```
 
 With `fail_on_findings` off, the same scan exits 0:
 
 <!-- doctest: run expect-exit=0 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress --no-fail-on-findings
+ash scan fs . --scanners detect-secrets --offline --no-progress --no-fail-on-findings
 ```
 
-`--use-existing` with an output directory that holds no results exits 1, the same answer `ash report` gives for missing results. The command is well formed; what it asks to use is not on disk yet, so it is not a usage error:
+`--use-existing` with an output directory that holds no results exits 1, the same answer `ash results report` gives for missing results. The command is well formed; what it asks to use is not on disk yet, so it is not a usage error:
 
 <!-- doctest: run expect-exit=1 -->
 ```bash
-ash --source-dir . --use-existing --output-dir no-scan-here
+ash scan fs . --use-existing --output-dir no-scan-here
 ```
 
-A `--source-dir` that does not exist is a usage error, 5:
+A directory to scan that does not exist is a usage error, 5:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash --source-dir no-such-dir --scanners detect-secrets --offline --no-progress
+ash scan fs no-such-dir --scanners detect-secrets --offline --no-progress
 ```
 
 <!-- doctest: output -->
@@ -80,7 +80,7 @@ A threshold in lowercase does not validate, so the config is invalid, 3:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress \
+ash scan fs . --scanners detect-secrets --offline --no-progress \
   --config-overrides global_settings.severity_threshold=high
 ```
 
@@ -88,7 +88,7 @@ A `--config` that names no file exits 3 too:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress --config no-such-config.yaml
+ash scan fs . --scanners detect-secrets --offline --no-progress --config no-such-config.yaml
 ```
 
 `--dry-run` without `--workspace` exits 4:
@@ -102,7 +102,7 @@ A mistyped `--min-severity` value is a usage error, 5, and nothing is scanned:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress --min-severity hihg
+ash scan fs . --scanners detect-secrets --offline --no-progress --min-severity hihg
 ```
 
 ### Precedence {#scan-precedence}
@@ -138,7 +138,7 @@ In `--mode container` (and `ash container build`) and `--mode nix`, ASH reads th
 
 ### Sharded scans {#shards}
 
-Each shard computes the verdict for its own scanners, so a shard with findings exits 2 and a shard with a MISSING scanner exits 1. The one difference is that a shard that ran no scanner does not fail for that reason. Gate the pipeline on [`ash merge`](#merge), not on the shards.
+Each shard computes the verdict for its own scanners, so a shard with findings exits 2 and a shard with a MISSING scanner exits 1. The one difference is that a shard that ran no scanner does not fail for that reason. Gate the pipeline on [`ash results merge`](#merge), not on the shards.
 
 ### Workspace mode {#workspace}
 
@@ -153,7 +153,7 @@ With `--workspace`, ASH scans each project and combines their verdicts. The firs
 
 A project that is incomplete exits 1 even when it also has findings, as the same project scanned alone does. Workspace mode checks the same unconditional causes as a single scan: a rule a scanner could not evaluate, a scanner tool ASH could not stop, and a stale content database under a `fail` policy each fail the project whatever `fail_on_incomplete_scanners` says. One exception, and only in workspace mode: a stale database of a scanner that the workspace policy alone added (`additional_scanners`) with `policy_scanners_gate` off is listed in the project's `stale_content_databases` and does not fail it, as that scanner's missing tool and findings decide nothing either. The other two unconditional causes have no such exception: a rule that such a scanner could not evaluate, or its tool that ASH could not stop, still fails the project, whichever config asked for the scanner, because a rule that raised says nothing about compliance with it and a tool still running may write into the project's output after the verdict read it.
 
-## `ash merge` {#merge}
+## `ash results merge` {#merge}
 
 | Code | Condition |
 |---|---|
@@ -165,18 +165,18 @@ A project that is incomplete exits 1 even when it also has findings, as the same
 | 5 | A usage error, including a missing `--results` or `--output-dir`, a `--results` path that does not exist or is neither a file nor a directory, and an invalid `--output-formats` or `--min-severity` value |
 | 5 | An output directory it cannot use, refused as a scan refuses it ([`ash scan`](#scan)): it is not a directory, it cannot be created, entered, or written, or it is not a valid path because it holds a NUL character, which a `--cli-json-input` document can carry. The merge prints the scan's `Output directory` line for it, with the path as given, on standard output, where it prints its log, and creates nothing. An output directory that does not exist is created |
 
-A shard whose scanner is ERROR only because its content database is stale counts as having completed that scanner: `ash merge` merges the shard and then exits 1 for the stale database.
+A shard whose scanner is ERROR only because its content database is stale counts as having completed that scanner: `ash results merge` merges the shard and then exits 1 for the stale database.
 
 A `--results` path that does not exist is a usage error:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash merge --results no-such-shard --output-dir merged
+ash results merge --results no-such-shard --output-dir merged
 ```
 
-## `ash report` {#report}
+## `ash results report` {#report}
 
-`ash report` never fails on findings.
+`ash results report` never fails on findings.
 
 | Code | Condition |
 |---|---|
@@ -190,7 +190,7 @@ ASH checks the config first, then `--format`, then the results:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash report --output-dir no-scan-here --format bogus
+ash results report --output-dir no-scan-here --format bogus
 ```
 
 ## `ash mcp` {#mcp}
@@ -363,8 +363,8 @@ ash config validate --config misspelled-strict.yaml
 | | 3 | The config cannot be used or is invalid, as for a scan, or an override does not validate |
 | `ash get-genai-guide` | 0 | The guide was written |
 | | 1 | The installation has no readable copy of the guide; with `--from-github`, the download failed; or the output directory does not exist |
-| `ash inspect findings` | 0 | Always, also when there are no results to show |
-| `ash inspect sarif-fields` | 0 | The analysis was written |
+| `ash results inspect findings` | 0 | Always, also when there are no results to show |
+| `ash results inspect sarif-fields` | 0 | The analysis was written |
 | | 1 | No SARIF files were found, or a scanner's field is missing from the aggregated SARIF |
 
 <!-- doctest: run expect-exit=2 -->

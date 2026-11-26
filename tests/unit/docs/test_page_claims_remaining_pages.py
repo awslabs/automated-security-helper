@@ -291,8 +291,8 @@ def test_plugin_modules_are_named_by_a_config_key_an_option_and_an_environment_v
     )
     assert_on_page(
         INTEGRATIONS_PAGE,
-        "the `ASH_PLUGIN_MODULES` environment variable, which `ash scan` reads as the "
-        "option's default.",
+        "the `ASH_PLUGIN_MODULES` environment variable, which `ash scan fs` reads as "
+        "the option's default.",
     )
     from automated_security_helper.config.ash_config import AshConfig
 

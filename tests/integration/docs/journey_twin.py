@@ -35,7 +35,7 @@ REPO_ROOT = HERE.parents[2]
 FENCE = "```"
 SCAN_TIMEOUT_S = 300
 #: The scan every twin narrows the page's scan to: bandit alone, which needs no network.
-BANDIT_SCAN = "ash --scanners bandit --offline"
+BANDIT_SCAN = "ash scan fs --scanners bandit --offline"
 
 
 def _load(name: str, path: Path):

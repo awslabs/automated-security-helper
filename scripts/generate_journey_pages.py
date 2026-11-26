@@ -41,7 +41,7 @@ A journey is a mapping with exactly these keys::
     template: docs/content/.../page.md.template   # the file this journey renders
     page: docs/content/.../page.md                # what the template renders to
     twin:                                         # optional; the offline twin's scan
-      scan: ash --scanners bandit --offline
+      scan: ash scan fs --scanners bandit --offline
       timeout: 300
     body:                                         # ordered segments
       - prose: |            # Markdown, verbatim
@@ -72,7 +72,7 @@ same kind.
 * ``scan``: a block that runs ``ash``; ``exit`` is the code the page says it exits
   with, ``actionable`` (optional) the count in its ``Exiting due to N actionable
   findings`` line.
-* ``report``: ``ash report``; ``rule-id`` is the rule the page's sample shows.
+* ``report``: ``ash results report``; ``rule-id`` is the rule the page's sample shows.
 * ``save``: a YAML block the twin writes to ``path``.
 * ``fix``: a Python function that replaces ``replaces-function`` in the
   ``project`` file (``file-from: project``).

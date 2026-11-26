@@ -23,8 +23,8 @@
           {{ action("Documentation", 'docs/quick-start-guide/' | url, false, "book-open-variant") }}
         </div>
         <div class="ash-hero__command">
-          <span aria-hidden="true">$</span><code>ash --mode container</code>
-          <button type="button" class="ash-copy" data-ash-copy="ash --mode container" aria-label="Copy container scan command">{{ icon("content-copy") }}</button>
+          <span aria-hidden="true">$</span><code>ash scan fs --mode container</code>
+          <button type="button" class="ash-copy" data-ash-copy="ash scan fs --mode container" aria-label="Copy container scan command">{{ icon("content-copy") }}</button>
         </div>
         <div class="ash-hero__note">Open source <span>·</span> Apache 2.0</div>
       </div>
@@ -94,7 +94,7 @@
         <div class="ash-steps">
           <div><span>01</span><div><h3>Pick a workflow</h3><p>A local scan, pre-commit, CI, or an MCP server.</p></div></div>
           <div><span>02</span><div><h3>Pick how you run ASH</h3><p>uv tool, uvx, pipx, pip, a container, Nix, or Homebrew. Python 3.11+.</p></div></div>
-          <div><span>03</span><div><h3>Review results</h3><p>Open the HTML report or run <code>ash inspect findings</code>.</p></div></div>
+          <div><span>03</span><div><h3>Review results</h3><p>Open the HTML report or run <code>ash results inspect findings</code>.</p></div></div>
         </div>
         <a class="ash-text-link" href="{{ 'docs/installation-guide/' | url }}">Full installation guide {{ icon("arrow-right") }}</a>
         <a class="ash-text-link" href="{{ 'integrations/' | url }}">Integrations overview {{ icon("arrow-right") }}</a>
@@ -144,7 +144,7 @@
     <div class="ash-wrap">
       <div class="ash-section-heading" data-ash-reveal><div><h2 id="fit-title">Integrations</h2></div><a class="ash-text-link" href="{{ 'personas/' | url }}">Who uses ASH {{ icon("arrow-right") }}</a></div>
       <div class="ash-fit-grid">
-        <a href="{{ 'tutorials/running-ash-locally/' | url }}" data-ash-reveal><div class="ash-fit__visual">{{ icon("laptop") }}<code>$ ash --mode local</code></div><h3>Local development {{ icon("arrow-top-right") }}</h3><p>Terminal findings explorer and offline reports.</p></a>
+        <a href="{{ 'tutorials/running-ash-locally/' | url }}" data-ash-reveal><div class="ash-fit__visual">{{ icon("laptop") }}<code>$ ash scan fs --mode local</code></div><h3>Local development {{ icon("arrow-top-right") }}</h3><p>Terminal findings explorer and offline reports.</p></a>
         <a href="{{ 'tutorials/running-ash-in-ci/' | url }}" data-ash-reveal><div class="ash-fit__visual ash-fit__pipeline" aria-hidden="true"><span>{{ icon("source-branch") }}</span><i></i><span>Scan</span><i></i><span>{{ icon("rocket-launch-outline") }}</span></div><h3>CI/CD {{ icon("arrow-top-right") }}</h3><p>Exit codes, pull request comments, and report artifacts.</p></a>
         <a href="{{ 'docs/mcp-server-guide/' | url }}" data-ash-reveal><div class="ash-fit__visual ash-fit__agent" aria-hidden="true">{{ icon("console") }}<span class="ash-fit__agent-line"></span><span>MCP</span></div><h3>MCP clients {{ icon("arrow-top-right") }}</h3><p>Scan tools and result access for coding assistants.</p></a>
       </div>

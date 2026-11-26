@@ -12,7 +12,7 @@ schema: 1
 template: docs/content/getting-started/local.md.template
 page: docs/content/getting-started/local.md
 twin:
-  scan: ash --scanners bandit --offline
+  scan: ash scan fs --scanners bandit --offline
   timeout: 300
 body:
   - prose: |
@@ -148,13 +148,13 @@ body:
 
       ## 5. Run the scan
 
-      Run `ash` with no arguments. It scans the current directory with every scanner:
+      Run `ash scan fs`, with no path or options. It scans the current directory with every scanner:
   - block:
       twin: {kind: scan, exit: "2", actionable: 2}
       lang: bash
       marker: {mode: illustrative, reason: "the exit code depends on which scanner tools the machine has installed; the next block runs the same scan with a fixed scanner set"}
       body: |
-        ash
+        ash scan fs
         echo "exit code: $?"
   - prose: |
       The same scan limited to bandit and detect-secrets gives the same result on every
@@ -163,7 +163,7 @@ body:
       lang: bash
       marker: {mode: run, expect-exit: "2", env: "ASH_OFFLINE=YES"}
       body: |
-        ash --scanners bandit,detect-secrets
+        ash scan fs --scanners bandit,detect-secrets
   - sample: |
       │ bandit         │ 0 │ 0 │ 2 │ 0 │ 1 │ 0 │ 637ms │ 2      │ FAILED  │ MED (g) │
       ...
@@ -250,21 +250,21 @@ body:
       lang: bash
       marker: {mode: illustrative, reason: "same scan as above; needs the network"}
       body: |
-        ash --exclude-scanners grype
+        ash scan fs --exclude-scanners grype
   - prose: |
       An excluded scanner shows as SKIPPED and does not fail the scan. Add the same
       `--exclude-scanners` option to the scans in the rest of this tutorial.
 
       ## 6. Look at a finding
 
-      `ash report` prints the latest results in the terminal. After the scan details, a
+      `ash results report` prints the latest results in the terminal. After the scan details, a
       legend, the scanner table, and the files with the most findings, it prints one block
       per actionable finding:
   - block:
       twin: {kind: report, rule-id: B324}
       lang: bash
       body: |
-        ash report
+        ash results report
   - block:
       lang: text
       body: |
@@ -288,7 +288,7 @@ body:
       lang: bash
       marker: {mode: run}
       body: |
-        ash report --no-color
+        ash results report --no-color
   - sample: |
       ...
       ### Finding 1: B324
@@ -303,7 +303,7 @@ body:
   - prose: |
       Finding 2 is B602, `subprocess call with shell=True`, at `app.py:11`. The Rule ID is
       what a suppression names in the next step. To browse the findings interactively, run
-      `ash inspect findings`, which shows the same value in its Rule ID column, or open
+      `ash results inspect findings`, which shows the same value in its Rule ID column, or open
       `.ash/ash_output/reports/ash.html` in a browser.
 
       ## 7. Suppress the false positive
@@ -335,7 +335,7 @@ body:
       lang: bash
       marker: {mode: illustrative, reason: "the scan needs the network for its scanners; the docs job has none"}
       body: |
-        ash
+        ash scan fs
         echo "exit code: $?"
   - prose: |
       bandit now shows the B324 finding as suppressed (S is 1), and one actionable finding
@@ -365,7 +365,7 @@ body:
       lang: bash
       marker: {mode: illustrative, reason: "the scan needs the network for its scanners; the docs job has none"}
       body: |
-        ash
+        ash scan fs
         echo "exit code: $?"
   - block:
       lang: text

@@ -1040,7 +1040,7 @@ suppressions:
 4. **Re-run Scan to Verify**:
    <!-- doctest: illustrative reason="runs every enabled scanner, which needs each scanner's tool" -->
    ```bash
-   ash --mode local
+   ash scan fs --mode local
    ```
 
 5. **Confirm Suppression Applied**:
@@ -1533,18 +1533,20 @@ From the project's root directory:
 
 <!-- doctest: illustrative reason="runs every scanner, which needs the scanner tools and network access" -->
 ```bash
-ash --source-dir . --no-progress
+ash scan fs . --no-progress
 ```
 
-`ash` and `ash scan` are the same command. The scan runs on this machine and writes its
-output to `.ash/ash_output` under the scanned directory unless you pass `--output-dir`.
+`ash scan fs` scans the directory it is given, the current directory by default. `ash` and
+`ash scan` with no subject still run the same scan, with a deprecation warning, until ASH
+4.0. The scan runs on this machine and writes its output to `.ash/ash_output` under the
+scanned directory unless you pass `--output-dir`.
 `--scanners` runs only the named scanners and `--exclude-scanners` skips them; use them only
 when the user asks for a narrower scan. This scan runs detect-secrets alone, without network
 access:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress
+ash scan fs . --scanners detect-secrets --offline --no-progress
 ```
 
 | Exit code | Meaning |
@@ -1560,13 +1562,13 @@ A value ASH does not accept is a usage error, and no scanner runs:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --min-severity urgent --offline --no-progress
+ash scan fs . --scanners detect-secrets --min-severity urgent --offline --no-progress
 ```
 
 To print a summary of the last scan:
 
 ```bash
-ash report --output-dir .ash/ash_output
+ash results report --output-dir .ash/ash_output
 ```
 
 ## Read the results

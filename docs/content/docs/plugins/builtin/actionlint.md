@@ -59,7 +59,7 @@ Each option names the program actionlint pipes every `run:` script to, started f
 
 <!-- doctest: illustrative reason="runs a full scan, which needs every scanner installed" -->
 ```bash
-ash scan --config-overrides 'scanners.actionlint.options.shellcheck=/opt/shellcheck/bin/shellcheck'
+ash scan fs --config-overrides 'scanners.actionlint.options.shellcheck=/opt/shellcheck/bin/shellcheck'
 ```
 
 Whoever sets it, a program that resolves inside the scanned tree is refused. An operator's relative path is resolved against the source directory and must land outside the tree, and a path inside the tree that a symbolic link there leads out of it is refused too, whether you wrote it or a name was found at it through an absolute `PATH` entry inside the tree, because the link, not you, chose the program. A refused value is logged as a warning and actionlint runs with that integration off.

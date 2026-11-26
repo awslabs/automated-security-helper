@@ -112,7 +112,7 @@ With a `workspace_plan`, `run_ash_scan` returns the workspace result instead of 
 
 ## Parameters
 
-Every parameter is optional and can be passed by keyword. Unless the table says otherwise, a parameter means what the [`ash scan`](cli.md#scan) option of the same name means. An unknown keyword argument raises `TypeError`, so a misspelled parameter name stops the call before anything runs, and so does a positional argument past the last parameter.
+Every parameter is optional and can be passed by keyword. Unless the table says otherwise, a parameter means what the [`ash scan fs`](cli.md#scan-fs) option of the same name means. An unknown keyword argument raises `TypeError`, so a misspelled parameter name stops the call before anything runs, and so does a positional argument past the last parameter.
 
 <!-- doctest: options of=python.automated_security_helper.interactions.run_ash_scan.run_ash_scan -->
 | Parameter | Default | Notes |
@@ -170,9 +170,9 @@ Every parameter is optional and can be passed by keyword. Unless the table says 
 
 `config_base_gate`, `untrusted_config`, `trusted_config_path`, and `client_config_policy` let the MCP server apply the MCP-client limits of the [Configuration trust model](../concepts/trust-model.md) to the scans it runs; leave them at their defaults. `untrusted_config` raises `ValueError` in container or nix mode and with a `workspace_plan`, and `client_config_policy` raises it in container or nix mode.
 
-Some `ash scan` options have no parameter. They become config overrides or an environment variable:
+Some `ash scan fs` options have no parameter. They become config overrides or an environment variable:
 
-| `ash scan` option | Python equivalent |
+| `ash scan fs` option | Python equivalent |
 |---|---|
 | `--sandbox auto` | `config_overrides=["sandbox.mode=auto"]` |
 | `--compact-report` | `config_overrides=["reporters.markdown.options.compact=true"]` |

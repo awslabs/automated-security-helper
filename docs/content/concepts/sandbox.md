@@ -75,7 +75,7 @@ ASH also refuses, rather than runs unsandboxed, a shell command that a scanner t
 - On `firejail` and `sandbox-exec`, files outside your home and temporary directories stay readable.
 - On the Linux backends, a scanner can run programs from the scanned tree inside its sandbox.
 - It shares the host's kernel and sets no resource limits.
-- It does not apply in container mode. `ash scan --mode container` turns the sandbox off for the scan inside the container, and logs a warning when the sandbox was asked for; the container is the boundary there. See [Run ASH in a container](../how-to/run-in-a-container.md).
+- It does not apply in container mode. `ash scan fs --mode container` turns the sandbox off for the scan inside the container, and logs a warning when the sandbox was asked for; the container is the boundary there. See [Run ASH in a container](../how-to/run-in-a-container.md).
 - It does not make a scanner's results trustworthy. A scanner still reads every file in the source tree, and a hostile file can still change what it reports.
 
 One setting to plan for: an offline semgrep or opengrep scan reads its rules from the directory `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR` names, and under the sandbox it can read only directories the sandbox mounts. Keep the rules cache under a system directory such as `/opt`, or add it to `sandbox.extra_read_paths`.

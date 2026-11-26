@@ -16,13 +16,13 @@ Prerequisites:
 ## Scan in container mode
 
 Run container-mode scans from a directory that is not the repository you scan and holds
-no `Dockerfile` of its own. Name the repository with `--source-dir`, and keep the source
+no `Dockerfile` of its own. Give the repository's path to `ash scan fs`, and keep the source
 and the output in separate directory trees:
 
 <!-- doctest: illustrative reason="needs a container runtime and network access to build the image" -->
 ```bash
 cd ~/work
-ash scan --mode container --source-dir src/my-app --output-dir ash-output/my-app
+ash scan fs src/my-app --mode container --output-dir ash-output/my-app
 ```
 
 ASH builds the image (several minutes the first time; later builds reuse the layer
@@ -30,9 +30,9 @@ cache), runs the scan inside it, reads the results back from the output director
 exits with the same [exit codes](../reference/exit-codes.md) as a local scan. A container
 that fails to start, and a build that fails, exit with the runtime's own status instead.
 
-These `ash scan` options control the image:
+These `ash scan fs` options control the image:
 
-<!-- doctest: options of=cli.scan -->
+<!-- doctest: options of=cli.scan.fs -->
 | Option | Effect |
 |---|---|
 | `--no-build` | Run the existing image instead of building it. |
@@ -43,11 +43,11 @@ These `ash scan` options control the image:
 `ash container build` builds the image and then scans the current directory with it, writing
 to `.ash/ash_output` there. Add `--no-run` to build only. It takes no `--source-dir`,
 `--output-dir`, or other scan option: an argument its help does not list stops it with
-exit code 5 before anything is built, so use `ash scan --mode container` to choose the
+exit code 5 before anything is built, so use `ash scan fs --mode container` to choose the
 directories. Every option of both commands is in the
 [CLI reference](../reference/cli.md#container-build).
 
-Spell options out in full: the short flags differ between the two commands. On `ash scan`,
+Spell options out in full: the short flags differ between the two commands. On `ash scan fs`,
 `-o` is `--oci-runner` and `-r` is `--run`; on `ash container build`, `-r` is `--oci-runner`.
 
 ## Choose the container runtime {#runtime}
@@ -141,13 +141,13 @@ the same source directory, output directory, and config file, with the same exit
 
 A source or output directory that a local scan refuses, such as a source directory that
 does not exist or an output directory that cannot be created, stops
-`ash scan --mode container` with exit code 5, also with `--no-run`, and with the line a
+`ash scan fs --mode container` with exit code 5, also with `--no-run`, and with the line a
 local scan prints ([Exit codes](../reference/exit-codes.md#scan)). `./ash` refuses them
 as well: it prints the line after `ERROR: ` and exits 5.
 
 An output directory that is a symlink, or that a symlink below the source directory leads
 to, such as a committed `.ash` link for the default `.ash/ash_output`, stops
-`ash scan --mode container` and `ash container build` with exit code 3
+`ash scan fs --mode container` and `ash container build` with exit code 3
 ([Exit codes](../reference/exit-codes.md#container)), because the scan inside the
 container would write wherever the link points. The refusal comes before a container
 runtime is looked up, with `--no-run` too, so nothing is built, created, or mounted.
@@ -181,12 +181,12 @@ named network.
 `--config` names the config file, or `ASH_CONFIG` when no `--config` is given. With
 neither, the scan inside the container finds the repository's own config file under
 `/src` the way a local scan does. ASH checks a file you name on the host before it builds
-or runs anything, in `ash scan --mode container`, `ash --mode container`, `./ash`, and
+or runs anything, in `ash scan fs --mode container`, `./ash`, and
 `Invoke-ASH`. A path that names no file stops the scan with exit code 3:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ash scan --mode container --config missing.yaml
+ash scan fs --mode container --config missing.yaml
 ```
 
 <!-- doctest: output -->
@@ -201,7 +201,7 @@ Beside a `--config`, the file `ASH_CONFIG` names is still the trusted base, as i
 scan: ASH reads it first, and when the config is a repository's, takes from it the
 settings a repository may not choose
 ([Configuration trust model](../concepts/trust-model.md#how-the-tier-is-decided)).
-`ash scan --mode container` and `ash --mode container` mount that file, and each file it
+`ash scan fs --mode container` mounts that file, and each file it
 `extends`, read-only under `/ash-env-config`, and the scan inside reads it as its
 `ASH_CONFIG`. Each file of that chain is marked for the scan inside on its own, by where
 it sits. A file in the scanned checkout is marked as the scanned repository's and is
@@ -212,12 +212,12 @@ does not parse, or is not a valid config stops the scan with exit code 3 on the 
 before anything is built, run, mounted, or cleared, even when `--config` names a valid
 file.
 
-A relative path is taken from the directory you run ASH in, not from `--source-dir`. The
-scan inside is given the file's path in the container:
+A relative path is taken from the directory you run ASH in, not from the directory you
+scan. The scan inside is given the file's path in the container:
 
-- A file inside `--source-dir` is read through the source mount, at `/src/<path>`, and
-  so is every file it `extends`, which has to be inside `--source-dir` too, as in a
-  local scan.
+- A file inside the directory you scan is read through the source mount, at
+  `/src/<path>`, and so is every file it `extends`, which has to be inside that
+  directory too, as in a local scan.
 - Any other file is mounted read-only under `/ash-config`: `~/ash/ash.yaml` is
   `/ash-config/ash.yaml`. Container mode also mounts each file of its `extends` chain,
   at its place relative to the config, and no other file. `./ash` and `Invoke-ASH` mount
@@ -228,22 +228,22 @@ ASH refuses these with exit code 3 before anything runs, because each would let 
 repository being scanned choose a host file to mount:
 
 - A config named inside the scanned tree, the outermost git checkout at or above
-  `--source-dir`, that is a symbolic link, or is reached through one, to a file outside
-  that tree. A link that stays inside the tree is followed.
-- A config outside `--source-dir` whose `extends` chain includes a file inside
-  `--source-dir`, or in which a file of the scanned checkout extends a file outside that
+  the directory you scan, that is a symbolic link, or is reached through one, to a file
+  outside that tree. A link that stays inside the tree is followed.
+- A config outside the directory you scan whose `extends` chain includes a file inside
+  it, or in which a file of the scanned checkout extends a file outside that
   checkout.
 - In workspace mode, a workspace policy (`ash-workspace.yaml` or `--workspace-config`)
   that is a symbolic link, or is reached through one, out of the workspace's tree. A
   policy outside the workspace root is mounted read-only under `/ash-workspace-config`.
 
-`ash scan --mode container` and `ash --mode container` also refuse, with exit code 3, a
-chain they cannot place in the container where the host reads it, such as an `extends`
+`ash scan fs --mode container` also refuses, with exit code 3, a
+chain it cannot place in the container where the host reads it, such as an `extends`
 entry that names its base by an absolute path. Write each base relative to the file that
 extends it.
 
 A config the host counts as written by a repository, one inside any git checkout or
-inside `--source-dir`, keeps a repository config's limits inside the container, so the
+inside the directory you scan, keeps a repository config's limits inside the container, so the
 host and the container give the same file the same tier
 ([Configuration trust model](../concepts/trust-model.md#how-the-tier-is-decided)). A file
 under `/src` is in the scanned directory there. For a file mounted from a git checkout,
@@ -298,7 +298,7 @@ mode but `off` stops the scan with exit code 5 before anything is built or run:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash scan --mode container --sandbox bwrap
+ash scan fs --mode container --sandbox bwrap
 ```
 
 <!-- doctest: output -->
@@ -311,7 +311,7 @@ To sandbox each scanner, scan with `--mode local --sandbox <mode>`. `./ash` refu
 
 A `sandbox.mode` from a config file or `--config-overrides` is not refused, so one config
 file serves local and container scans. The scan inside the container gets
-`sandbox.mode=off` as its last override, and `ash scan --mode container` logs a warning
+`sandbox.mode=off` as its last override, and `ash scan fs --mode container` logs a warning
 that names the mode, such as `The scanner sandbox (bwrap, from sandbox.mode in a config
 file, --config-overrides or the operator's config) is not applied in container mode`.
 The mode can come from `--config-overrides`, the config file, a workspace project's
@@ -337,7 +337,7 @@ docker push "$ASH_IMAGE_NAME"
 ```
 
 Set the UID and GID to the user your CI jobs run as. Hosts that have `ASH_IMAGE_NAME`
-set run that image with `ash scan --mode container --no-build`, and the runtime pulls it
+set run that image with `ash scan fs --mode container --no-build`, and the runtime pulls it
 when it is not present.
 
 To build without ASH installed, build the Dockerfile from a clone. The clone is the build
@@ -369,7 +369,7 @@ and the build checks each tool against its pin.
 
 To add tools, write a Dockerfile that builds on the ASH image and pass it with
 `--custom-containerfile`; ASH passes the base image's name to that build as a build
-argument, named in the [option's help](../reference/cli.md#scan--custom-containerfile).
+argument, named in the [option's help](../reference/cli.md#scan-fs--custom-containerfile).
 ASH then builds its base image from the root `ci` target and tags the result
 `automated-security-helper:custom`. The final image runs as root unless your Dockerfile
 sets another user, so secure it yourself.
@@ -383,7 +383,7 @@ vulnerability databases, so it ages; see [Run ASH offline](run-offline.md#refres
 rebuild whose inputs did not change comes from the build cache, so pass `--force`, which
 rebuilds every layer, to install current scanner tools. Without `--force`, an offline
 build downloads current databases and rulesets once per UTC day; with `--force`, on
-every build. The same holds for `./ash --offline` and `Invoke-ASH -Offline`.
+every build. The same holds for `./ash scan fs --offline` and `Invoke-ASH -Offline`.
 
 ### Third-party license files {#third-party-licenses}
 
@@ -412,7 +412,7 @@ Go and Rust programs, are not reproduced.
 ASH's own CI tests container mode on Linux only, with docker, podman, finch, and nerdctl.
 
 - On Windows, `ash container build` always builds the root `ci` image, because the non-root
-  user cannot write to the bind-mounted output directory there. `ash scan --mode container`
+  user cannot write to the bind-mounted output directory there. `ash scan fs --mode container`
   does not force it. If `ash` runs a different program, such as the `ash` shell that ships
   with Git for Windows, run `ashv3`, which is the same command.
 - On macOS, the image builds for the host's architecture; the Dockerfile supports amd64
