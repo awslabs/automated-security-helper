@@ -1,16 +1,19 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The pre-rename "community" spellings of the alpha tier are aliases for one release.
+"""The pre-rename "community" spellings of the alpha tier are refused from 4.0.
 
 The opt-in scanners ASH ships but does not promote as supported were called
-"community"; the tier is now "alpha". The old spellings that still work map to
-the new one for one release: the tier values warn once per process, and the
-Dockerfile build argument wins over the new one and warns at build time. The
-docs-lint column headings are the exception: that lint is internal, so the old
-headings are refused with the heading to use rather than kept as aliases. Each
-test here reads one old spelling through the real code path and fails when its
-alias is gone, does not map, or stays silent where a warning is promised.
+"community"; the tier is "alpha". Through 3.x the old spellings were aliases: the
+tier values mapped to alpha and warned, and the Dockerfile build argument
+ASH_COMMUNITY_PLUGIN_MODULES won over ASH_ALPHA_PLUGIN_MODULES. 4.0 removes the
+aliases, as the release that announced the rename said it would: an old tier value
+is refused like any other value that is not a tier, the image build reads only the
+new build argument, and the docs keep no anchor ids for the old headings.
+
+Two things were never aliases and stay: the docs lint refuses the old column
+headings and names the heading to use, and each old docs page redirects to its
+alpha page. Each test here reads one spelling through the real code path.
 """
 
 from __future__ import annotations
@@ -31,12 +34,11 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture
 def warnings_logged(monkeypatch):
-    """Capture ASH_LOGGER warnings and forget which aliases already warned."""
+    """Capture ASH_LOGGER warnings."""
     import automated_security_helper.utils.log as log_module
 
     logger = MagicMock()
     monkeypatch.setattr(log_module, "ASH_LOGGER", logger)
-    monkeypatch.setattr(plugin_manifest, "_WARNED_COMMUNITY_ALIASES", set())
     return logger
 
 
@@ -45,25 +47,17 @@ def _messages(logger: MagicMock) -> list[str]:
 
 
 @pytest.mark.parametrize("old", ["community", "community_optin"])
-def test_the_old_tier_value_maps_to_the_alpha_tier_and_warns(warnings_logged, old):
-    assert PluginTier(old) is PluginTier.ALPHA
-    messages = _messages(warnings_logged)
-    assert len(messages) == 1
-    assert f"'{old}' is deprecated" in messages[0]
-    assert "'alpha'" in messages[0]
-    assert plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN in messages[0]
+def test_an_old_tier_value_is_refused(warnings_logged, old):
+    with pytest.raises(ValueError):
+        PluginTier(old)
+    assert _messages(warnings_logged) == []
 
 
-def test_the_old_tier_value_warns_once_per_process(warnings_logged):
-    PluginTier("community")
-    PluginTier("community")
-    assert len(_messages(warnings_logged)) == 1
-
-
-def test_the_new_tier_value_does_not_warn(warnings_logged):
+def test_the_tier_values_are_the_three_tiers(warnings_logged):
     assert PluginTier("alpha") is PluginTier.ALPHA
     assert PluginTier("supported") is PluginTier.SUPPORTED
     assert PluginTier("deprecated") is PluginTier.DEPRECATED
+    assert [tier.value for tier in PluginTier] == ["supported", "alpha", "deprecated"]
     assert _messages(warnings_logged) == []
 
 
@@ -73,15 +67,35 @@ def test_an_unrelated_tier_value_is_still_refused(warnings_logged):
     assert _messages(warnings_logged) == []
 
 
-def test_the_manifest_model_accepts_the_old_tier_value(warnings_logged):
+def test_the_alias_machinery_is_gone():
+    for name in (
+        "COMMUNITY_ALIASES_DROPPED_IN",
+        "warn_community_alias",
+        "_WARNED_COMMUNITY_ALIASES",
+    ):
+        assert not hasattr(plugin_manifest, name), name
+
+
+@pytest.mark.parametrize("old", ["community", "community_optin"])
+def test_the_manifest_model_refuses_the_old_tier_value(warnings_logged, old):
     from automated_security_helper.plugin_manifests import scanner_manifests
 
     data = scanner_manifests()[0].model_dump(mode="json")
-    data["tier"] = "community"
+    data["tier"] = old
     data["superseded_by"] = None
-    manifest = plugin_manifest.parse_scanner_manifest(data)
-    assert manifest.tier is PluginTier.ALPHA
-    assert len(_messages(warnings_logged)) == 1
+    with pytest.raises(ValueError, match="tier"):
+        plugin_manifest.parse_scanner_manifest(data)
+    assert _messages(warnings_logged) == []
+
+
+def test_the_manifest_model_reads_the_alpha_tier_value(warnings_logged):
+    from automated_security_helper.plugin_manifests import scanner_manifests
+
+    data = scanner_manifests()[0].model_dump(mode="json")
+    data["tier"] = "alpha"
+    data["superseded_by"] = None
+    assert plugin_manifest.parse_scanner_manifest(data).tier is PluginTier.ALPHA
+    assert _messages(warnings_logged) == []
 
 
 def _docs_checks():
@@ -155,57 +169,34 @@ def test_the_new_scanner_column_heading_does_not_warn(tmp_path, warnings_logged)
     assert _messages(warnings_logged) == []
 
 
-def test_the_alias_window_names_the_next_release():
-    assert plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN == "3.9.0"
+def test_the_image_build_reads_only_the_alpha_build_argument():
+    """Both stages take the module list from ASH_ALPHA_PLUGIN_MODULES alone.
 
-
-def test_the_aliases_are_gone_by_the_release_that_says_it_drops_them():
-    """Fails at the version bump that reaches the release, forcing the removal."""
-    from packaging.version import Version
-
-    from automated_security_helper import __version__
-
-    assert Version(__version__) < Version(
-        plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN
-    ), (
-        f"ASH {__version__} reached {plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN}: "
-        "remove the community aliases (plugin_manifest.warn_community_alias, "
-        "PluginTier._missing_, the ASH_COMMUNITY_PLUGIN_MODULES build argument in "
-        "the Dockerfile) and the alias-window tests in this module "
-        "(test_the_old_dockerfile_build_argument_still_wins_over_the_new_one, "
-        "test_the_renamed_anchors_keep_their_old_ids_for_the_alias_window) "
-        "along with this test"
-    )
-
-
-def test_the_old_dockerfile_build_argument_still_wins_over_the_new_one():
-    """`--build-arg ASH_COMMUNITY_PLUGIN_MODULES=...` is read until the alias window ends.
-
-    An EXPLICITLY EMPTY value wins too (the CHANGELOG says a value given for the
-    old name wins), so the default is a sentinel rather than "": a `:-` fallback
-    cannot tell `--build-arg ASH_COMMUNITY_PLUGIN_MODULES=""` from the argument
-    not being given. A build that gives the old name warns.
+    `--build-arg ASH_COMMUNITY_PLUGIN_MODULES=...` is a build argument no ARG
+    declares, so the build ignores it (docker names it as unconsumed) and installs
+    the alpha modules' tools as it does without it.
     """
     text = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
-    assert text.count('ARG ASH_COMMUNITY_PLUGIN_MODULES="__UNSET__"\n') == 2
-    assert text.count('[ "${ASH_COMMUNITY_PLUGIN_MODULES}" = "__UNSET__" ]') == 2
-    assert text.count('--config-overrides "ash_plugin_modules+=[${modules}]"') == 2
-    assert (
-        text.count("the ASH_COMMUNITY_PLUGIN_MODULES build argument is deprecated") == 2
+    instructions = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
     )
-    assert "${ASH_COMMUNITY_PLUGIN_MODULES:-" not in text
+    assert "ASH_COMMUNITY_PLUGIN_MODULES" not in instructions
+    assert "__UNSET__" not in instructions
+    assert text.count('    modules="${ASH_ALPHA_PLUGIN_MODULES}" && \\\n') == 2
+    assert text.count('--config-overrides "ash_plugin_modules+=[${modules}]"') == 2
 
 
-def test_the_renamed_anchors_keep_their_old_ids_for_the_alias_window():
-    """A page redirect cannot carry a #fragment, so the old ids stay as anchors."""
+def test_the_old_anchor_ids_are_gone_and_the_alpha_ones_stay():
     choose = (REPO_ROOT / "docs/content/how-to/choose-scanners.md").read_text(
         encoding="utf-8"
     )
-    assert '<a id="community"></a>' in choose
+    assert '<a id="community"></a>' not in choose
+    assert '<a id="alpha"></a>' in choose
     trivy = (REPO_ROOT / "docs/content/docs/plugins/builtin/trivy.md").read_text(
         encoding="utf-8"
     )
-    assert '<a id="running-it-alongside-the-trivy-repo-community-plugin"></a>' in trivy
+    assert "trivy-repo-community-plugin" not in trivy
+    assert '<a id="running-it-alongside-the-trivy-repo-alpha-plugin"></a>' in trivy
 
 
 def test_every_old_docs_page_redirects_to_its_alpha_page():
