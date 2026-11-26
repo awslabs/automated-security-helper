@@ -379,7 +379,7 @@ def test_ash_report_without_results_names_the_output_dir_on_one_line(tmp_path):
     out = tmp_path / _FORGED
     out.mkdir()
 
-    result = _cli(tmp_path, "report", "--output-dir", str(out))
+    result = _cli(tmp_path, "results", "report", "--output-dir", str(out))
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "No scan results found" in result.stderr, result.stderr
@@ -393,7 +393,7 @@ def test_ash_report_that_cannot_read_its_results_names_them_on_one_line(tmp_path
     out.mkdir()
     (out / "ash_aggregated_results.json").write_text("{", encoding="utf-8")
 
-    result = _cli(tmp_path, "report", "--output-dir", str(out))
+    result = _cli(tmp_path, "results", "report", "--output-dir", str(out))
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "Could not read the scan results in" in result.stderr, result.stderr

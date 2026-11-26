@@ -156,8 +156,8 @@ REFUSALS = {
         r"not our ref|couldn't find remote ref|failed to find branch, tag, or commit"
     ),
 }
-#: A command that runs an ASH scan or merge: ``ash scan``, ``ash merge``, or ``ash``
-#: followed by an option, which scans (reports.RUNS_SCAN_OR_MERGE).
+#: A command that runs an ASH scan or merge: ``ash scan``, ``ash results merge``, or
+#: ``ash`` followed by an option, which scans (reports.RUNS_SCAN_OR_MERGE).
 _RUNS_ASH = reports.RUNS_SCAN_OR_MERGE
 
 
@@ -228,8 +228,8 @@ def _yaml_strings(node: Any) -> Iterator[str]:
 
 
 def runs_ash(text: str, kind: str | None = None) -> bool:
-    """Whether the block runs ASH: ``ash scan``, ``ash merge``, ``ash`` followed by an
-    option (the scan is the CLI's default command), or ASH's reusable workflow.
+    """Whether the block runs ASH: ``ash scan``, ``ash results merge``, ``ash`` followed
+    by an option (the scan is the CLI's default command), or ASH's reusable workflow.
 
     A block of a YAML ``kind`` is read as YAML loads it, as the act plan and the
     GitLab checks read a pipeline: each string is matched on its own, so a folded or
@@ -1480,7 +1480,8 @@ def _act_problems(prepared, launched, log, expected) -> list[str]:
         {job: entry.result for job, entry in plan.items()},
         runs={job: entry.runs for job, entry in plan.items() if entry.caller is None},
     )
-    merge = reports.gating_step(workflow, "merge")
+    # The pages' merge step runs `ashx results merge`; 4.0 has no top-level `merge`.
+    merge = reports.gating_step(workflow, "results merge")
     gating = {job: entry.runs for job, entry in plan.items() if entry.gates}
     if plan and not gating:
         problems.append(

@@ -1407,8 +1407,9 @@ def test_output_formats_note_names_refused_reporters_only_when_there_are_some(
 
 @pytest.mark.unit
 def test_report_format_lists_the_reporters() -> None:
-    """``ash report --format`` takes a loaded reporter's name, not an ExportFormat value."""
-    row = _row(_page("cli.md"), "report--format")
+    """``ashx results report --format`` takes a loaded reporter's name, not an
+    ExportFormat value."""
+    row = _row(_page("cli.md"), "results-report--format")
     accepted = re.search(r"Accepted values: ([^.]*)\.", row).group(1)
     assert _builtin_reporter_names() <= set(re.findall(r"`([^`]+)`", accepted))
 

@@ -1185,6 +1185,8 @@ def test_a_page_whose_block_runs_ash_with_options_and_no_install_fails(
         ("ash --mode local --no-fail-on-findings", False),
         ("ash --version", False),
         ("pipx install ash\n- echo installed\n", False),
+        ("ashx results merge --fail-on-findings --output-dir out", True),
+        ("ashx results \\\n  merge --output-dir out\n", True),
     ],
 )
 def test_a_github_job_that_runs_ash_with_options_gates_on_findings(command, gates):
@@ -1209,6 +1211,24 @@ def test_the_merge_step_is_ash_merge_on_one_line_or_a_continuation(run, found):
     gating_step = _api("reports", "gating_step")
     workflow = {"jobs": {"m": {"steps": [{"name": "Merge", "run": run}]}}}
     assert gating_step(workflow, "merge") == (("m", "Merge") if found else None)
+
+
+@pytest.mark.parametrize(
+    "run,found",
+    [
+        ("ashx results merge --fail-on-findings --output-dir out", True),
+        ("ashx results \\\n  merge --output-dir out", True),
+        ("ashx results\nmerge --output-dir out", False),
+        ("ash merge --output-dir out", False),
+    ],
+)
+def test_the_merge_step_the_pages_run_is_ash_results_merge(run, found):
+    """4.0 has no top-level ``merge``: the sharded page's merge step, the one its
+    verdict is read from, is ``ashx results merge``, its two words split the way
+    ``ash`` is from its first."""
+    gating_step = _api("reports", "gating_step")
+    workflow = {"jobs": {"m": {"steps": [{"name": "Merge", "run": run}]}}}
+    assert gating_step(workflow, "results merge") == (("m", "Merge") if found else None)
 
 
 GITLAB_BARE_ASH = """\
