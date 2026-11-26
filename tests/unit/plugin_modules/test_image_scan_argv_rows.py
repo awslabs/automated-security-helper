@@ -389,6 +389,19 @@ class TestARegistryResolvedTagIsPulledByDigest:
         )
         assert locator.pulled_ref() == self.PINNED
 
+    @pytest.mark.parametrize("digest", ["latest", "sha256:abc", "md5:" + "0" * 32])
+    def test_a_digest_that_is_not_one_pins_nothing(self, digest):
+        # A locator built without validation is the shape no surface makes;
+        # its digest is still read before it reaches an argv, so the tools
+        # are never handed name@latest.
+        locator = ImageLocator.model_construct(
+            ref=IMAGE_REF, resolved_digest=digest, resolved_from="registry"
+        )
+        assert locator.pulled_ref() == IMAGE_REF
+        assert stereoscope_target(locator, ContainerEngine.NONE) == (
+            f"registry:{IMAGE_REF}"
+        )
+
     def test_trivys_target_is_digest_pinned(self, monkeypatch, tmp_path):
         from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
             TrivyScanner,
