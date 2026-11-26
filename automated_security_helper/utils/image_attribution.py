@@ -9,10 +9,11 @@ them back by the names ``utils/finding_identity`` exports. For an image scan the
 properties are the subject itself:
 
 - ``imageRef``: the locator as submitted (``ImageLocator.shown()``), always;
-- ``imageDigest``: the image's sha256 digest: the tool's own run output when it
-  names one, else the locator's ``resolved_digest``, else the digest a pinned
-  reference (``repo@sha256:...``) states. The executor never asks an engine
-  itself;
+- ``imageDigest``: the image's sha256 MANIFEST digest wherever one is named:
+  the tool's own run output first (``repoDigests`` ahead of the config-blob
+  ``imageID``, so every source yields the same value for one image), else the
+  locator's ``resolved_digest``, else the digest a pinned reference
+  (``repo@sha256:...``) states. The executor never asks an engine itself;
 - ``layerDigest``: left to the scanner. None of the wired scanners' SARIF
   output carries per-result layer digests today, so a result has one only when
   a tool (or a post-process of its plugin) wrote it; the property name is the
@@ -51,16 +52,22 @@ def _digest_text(value: Any) -> Optional[str]:
 def image_digest_of_run(run: Any) -> Optional[str]:
     """The subject image's digest, where *run*'s own properties name one.
 
-    trivy's SARIF writer records ``imageID`` and ``repoDigests`` at the run
-    level for an image scan; ``imageID`` is preferred because it names the
-    image's own manifest where a repo digest names the registry's. A run whose
-    properties carry neither (grype's, syft has no SARIF) resolves nothing, and
-    the identity then keys on the submitted ref.
+    trivy's SARIF writer records ``repoDigests`` and ``imageID`` at the run
+    level for an image scan. ``repoDigests`` is preferred: a repo digest is the
+    manifest digest, the value a pinned reference (``repo@sha256:...``) states
+    and the one every other digest source here yields, where ``imageID`` is the
+    config-blob digest, a different value for the same image. Reading the image
+    ID first gave one pinned image two ``image_digest`` values (trivy rows vs
+    grype rows), so an ``image: sha256:<manifest>`` suppression silenced only
+    half the findings. The image ID is still read when no repo digest exists (a
+    locally built, never-pushed image has none). A run whose properties carry
+    neither (grype's, syft has no SARIF) resolves nothing here, and the caller
+    falls back to the locator.
     """
     properties = getattr(run, "properties", None)
     if properties is None:
         return None
-    for name in ("imageID", "repoDigests"):
+    for name in ("repoDigests", "imageID"):
         value = getattr(properties, name, None)
         if isinstance(value, (list, tuple)):
             for entry in value:

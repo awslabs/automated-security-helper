@@ -2156,6 +2156,26 @@ def _apply_suppressions_within_budget(
             # The finding is kept, suppressed and marked, rather than dropped, so the
             # results show what the client chose to hide.
             client_ignored: IgnorePathWithReason | None = None
+            # An image-stamped result's URI is an in-image path (the scanner
+            # executor stamped it): steps 2 and 3 read it as written and never
+            # open a host file for it. Honored only for a scanner whose
+            # register row serves container images, exactly as the flat
+            # extractor honors the attribution columns: a passed-through bag
+            # of a filesystem scanner must not flip this result's suppression
+            # semantics. An unknown scanner is left as read.
+            in_image = _string_property(result, IMAGE_REF_PROPERTY) is not None
+            if in_image:
+                from automated_security_helper.utils.scanner_tool_types import (
+                    scanner_serves_container_images,
+                )
+
+                if (
+                    scanner_serves_container_images(
+                        _suppression_scanner_identity(result, run, scanner_name)
+                    )
+                    is False
+                ):
+                    in_image = False
 
             # --- Step 1: ignore-path check ---
             # A result is dropped for its ignore paths when every location that
@@ -2288,6 +2308,10 @@ def _apply_suppressions_within_budget(
                     None,
                 )
                 uri_as_written = None
+                # No source directory contains an in-image path, so the
+                # host-tree prefix and basename strips must not touch it (a
+                # container mount such as /src can shadow an in-image prefix):
+                # a suppression matches it as the tool reported it.
                 if result.ruleId and location is not None:
                     raw_uri = location.physicalLocation.root.artifactLocation.uri
                     uri = (
@@ -2298,7 +2322,7 @@ def _apply_suppressions_within_budget(
                             _source_dir_prefix_no_drive,
                             _source_dir_basename,
                         )
-                        if raw_uri
+                        if raw_uri and not in_image
                         else (raw_uri or "")
                     )
                     # The spelling the report records, escapes kept: a person who
@@ -2306,8 +2330,9 @@ def _apply_suppressions_within_budget(
                     # entry, written from it) into a suppression named a file the
                     # decoded match never met. Matched second, when the decoded
                     # spelling differs and misses, and never when a sibling file
-                    # literally so named exists (_second_match_spelling).
-                    if raw_uri and "%" in raw_uri:
+                    # literally so named exists (_second_match_spelling). An
+                    # in-image path is matched as written already.
+                    if raw_uri and "%" in raw_uri and not in_image:
                         uri_as_written = _second_match_spelling(
                             raw_uri,
                             uri,
@@ -2377,9 +2402,19 @@ def _apply_suppressions_within_budget(
                         line_start=line_start,
                         line_end=line_end,
                         # An image finding's subject, for an ``image:``-scoped
-                        # suppression (stamped by the scanner executor).
-                        image_ref=_string_property(result, IMAGE_REF_PROPERTY),
-                        image_digest=_string_property(result, IMAGE_DIGEST_PROPERTY),
+                        # suppression (stamped by the scanner executor; the
+                        # register gate above already ruled a passed-through
+                        # bag out).
+                        image_ref=(
+                            _string_property(result, IMAGE_REF_PROPERTY)
+                            if in_image
+                            else None
+                        ),
+                        image_digest=(
+                            _string_property(result, IMAGE_DIGEST_PROPERTY)
+                            if in_image
+                            else None
+                        ),
                     )
 
                 if flat_finding:
@@ -2424,9 +2459,15 @@ def _apply_suppressions_within_budget(
 
             # --- Step 3: inline suppression ---
             # A result whose only suppression is rejected or under review is not
-            # suppressed, so the inline comment is still read for it.
-            if not ignore_suppressions and not suppressions_in_effect(
-                result.suppressions
+            # suppressed, so the inline comment is still read for it. Never for
+            # an image-stamped result: its path names a file inside the image,
+            # and reading source_dir/<in-image path> opens whatever host file
+            # happens to sit at that relative path, whose ash-ignore comment
+            # must not suppress an image finding.
+            if (
+                not ignore_suppressions
+                and not in_image
+                and not suppressions_in_effect(result.suppressions)
             ):
                 if result.ruleId and result.locations:
                     for location in result.locations:

@@ -75,8 +75,23 @@ class TestSetSourceImage:
         stored = sd.get_session_image_locator(_SESSION)
         assert stored is not None
         assert stored.ref == IMAGE_REF
-        # Nothing was fetched: the session has no workspace on disk at all.
+        # Nothing was fetched: the session directory exists -- the TTL sweep
+        # finds sessions through their workspace directories, so a ref-only
+        # session must have one to be collectable -- but holds no image bytes.
+        session_dir = workspace / _SESSION
+        assert session_dir.is_dir()
+        assert not any(session_dir.rglob("*.tar"))
+
+    def test_a_ref_only_session_is_visible_to_the_ttl_sweep(self, workspace):
+        # Before this, set_source_image wrote nothing to disk while the
+        # registry counted the locator as a binding: the session could never
+        # be collected, and past the registry's cap every new session ran an
+        # eviction pass that freed nothing.
+        sd.set_source_image(IMAGE_REF, session_id=_SESSION)
+        assert (workspace / _SESSION).is_dir()
+        assert sd.remove_session_workspace(_SESSION, workspace_root=workspace)
         assert not (workspace / _SESSION).exists()
+        assert sd.get_session_image_locator(_SESSION) is None
 
     def test_an_empty_ref_names_nothing(self, workspace):
         with pytest.raises(ValueError, match="names no reference"):
@@ -199,3 +214,63 @@ class TestImageArchiveFinalize:
         assert locator.oci_archive == delivered
         # The replaced archive is scratch and was removed.
         assert not (workspace / _SESSION / "image" / "up-one.tar").exists()
+
+
+class TestTheArchiveCleanupStaysInItsDirectory:
+    def test_a_binding_outside_the_session_image_dir_deletes_nothing(
+        self, workspace, tmp_path
+    ):
+        # The locator registry is a module global: a binding whose archive
+        # path an operator owns must never have that directory emptied by the
+        # next delivery. The cleanup rebuilds the expected <session>/image
+        # path and acts only there; anything else is dropped, not deleted.
+        from automated_security_helper.core.asset import ImageLocator
+
+        operator_dir = tmp_path / "operator-owned"
+        operator_dir.mkdir()
+        archive = operator_dir / "their-image.tar"
+        archive.write_bytes(b"x")
+        bystander = operator_dir / "unrelated-notes.txt"
+        bystander.write_text("not ASH's to delete")
+        sd._set_session_image_locator(_SESSION, ImageLocator(oci_archive=archive))
+
+        sd._set_session_source_dir(_SESSION, workspace / _SESSION / "source")
+
+        assert archive.exists()
+        assert bystander.exists()
+        assert sd.get_session_image_locator(_SESSION) is None
+
+    def test_a_staged_archive_is_still_cleaned(self, workspace):
+        payload = _tar_bytes()
+        sha = _upload(payload, "up-contained", workspace)
+        sd.set_source_image_archive_finalize(
+            upload_id="up-contained",
+            expected_sha256=sha,
+            workspace_root=workspace,
+            session_id=_SESSION,
+        )
+        staged = workspace / _SESSION / "image" / "up-contained.tar"
+        assert staged.exists()
+        sd._set_session_source_dir(_SESSION, workspace / _SESSION / "source")
+        assert not staged.exists()
+
+
+class TestTheCapNamesWhatTheClientSent:
+    def test_an_oversize_image_archive_upload_names_an_image_archive(
+        self, workspace, monkeypatch
+    ):
+        monkeypatch.setattr(sd, "_MAX_ZIP_BYTES", 8)
+        with pytest.raises(ValueError, match="max image archive size"):
+            _upload(_tar_bytes(), "up-oversize", workspace)
+
+    def test_the_zip_channels_own_cap_still_names_a_zip(self, workspace, monkeypatch):
+        monkeypatch.setattr(sd, "_MAX_ZIP_BYTES", 8)
+        with pytest.raises(ValueError, match="max zip size"):
+            sd.set_source_zip_chunk(
+                upload_id="up-zip-oversize",
+                sequence=0,
+                data_b64=base64.b64encode(b"0123456789abcdef").decode("ascii"),
+                last=True,
+                workspace_root=workspace,
+                session_id=_SESSION,
+            )

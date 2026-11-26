@@ -2106,26 +2106,18 @@ class ScannerExecutor:
                             # info here and as MEDIUM in ash.sarif. Idempotent: a
                             # result with a level keeps it.
                             resolve_missing_levels(raw_results)
-                            raw_results = sanitize_sarif_paths(
-                                raw_results, self.plugin_context.source_dir
-                            )
-                            # Before suppressions, and whatever --ignore-suppressions
-                            # says: ASH's own output is not part of the scanned tree.
-                            # Most scanners are told to skip it; this catches the ones
-                            # whose tool has no such option (snyk-code) or was not
-                            # told (bandit, and any third-party scanner).
-                            drop_results_in_ash_output_dirs(
-                                raw_results,
-                                self.plugin_context,
-                                scanner_name=scanner_config_name,
-                            )
-                            # So a converted file's finding keeps its id wherever the
-                            # output directory is.
-                            mark_converted_results(raw_results, self.plugin_context)
                             if target_type == "image":
-                                # Before suppressions and flattening: an
-                                # image:-scoped suppression matches on these
-                                # properties, and the identity keys on them.
+                                # An image result's paths name files inside the
+                                # image. The host-tree steps below must not
+                                # touch them: sanitizing rebases any absolute
+                                # path under the source dir (a container mount
+                                # such as /src shadows an in-image prefix), the
+                                # output-dir drop compares them against host
+                                # directories, and a converter never wrote
+                                # them. Stamp the subject instead, before
+                                # suppressions and flattening: an image:-scoped
+                                # suppression matches on these properties, and
+                                # the identity keys on them.
                                 from automated_security_helper.utils.image_attribution import (
                                     mark_image_results,
                                 )
@@ -2138,6 +2130,24 @@ class ScannerExecutor:
                                         None,
                                     ),
                                 )
+                            else:
+                                raw_results = sanitize_sarif_paths(
+                                    raw_results, self.plugin_context.source_dir
+                                )
+                                # Before suppressions, and whatever
+                                # --ignore-suppressions says: ASH's own output is
+                                # not part of the scanned tree. Most scanners are
+                                # told to skip it; this catches the ones whose
+                                # tool has no such option (snyk-code) or was not
+                                # told (bandit, and any third-party scanner).
+                                drop_results_in_ash_output_dirs(
+                                    raw_results,
+                                    self.plugin_context,
+                                    scanner_name=scanner_config_name,
+                                )
+                                # So a converted file's finding keeps its id
+                                # wherever the output directory is.
+                                mark_converted_results(raw_results, self.plugin_context)
                             if not self.plugin_context.ignore_suppressions:
                                 raw_results = apply_suppressions_to_sarif(
                                     sarif_report=raw_results,

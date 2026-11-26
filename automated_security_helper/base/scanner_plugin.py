@@ -529,6 +529,20 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     #: staged scope is active and ``staged_target_style`` is declared; consumed by
     #: ``_resolve_arguments`` in place of the directory target. Reset per scan().
     _staged_scan_files: Optional[List[Path]] = PrivateAttr(default=None)
+
+    #: True while ``scan_image`` runs the tool and grades its results. The
+    #: post-processing hooks read it to leave in-image paths as the tool wrote
+    #: them and to skip host-tree work (lockfile joins, source-dir URI strips)
+    #: that only a filesystem target has. ``scan()`` resets it with the other
+    #: per-target state, so an aborted image scan cannot leak it into a later
+    #: filesystem target.
+    _image_scan_in_progress: bool = PrivateAttr(default=False)
+
+    #: The container engine ``scan_image`` detected for the current image
+    #: target, so the skip decision and the argv build read ONE answer: each
+    #: detecting on its own could disagree (a socket appearing or vanishing
+    #: between the two reads) and send a ref to an engine the skip never saw.
+    _image_engine: Optional[Any] = PrivateAttr(default=None)
     #: Whether staged files matched this scanner and the run's scan set then left
     #: every one of them out; the skip's reason says so instead of "no staged
     #: file matches". Reset per scan().
@@ -2275,10 +2289,14 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             return True
 
         # Per target, like exit_code above: a converted scan must not run on the
-        # source target's staged file list or carry its skip reason.
+        # source target's staged file list or carry its skip reason, and a
+        # filesystem target must never post-process under a leftover image
+        # flag or engine reading.
         self._staged_scan_files = None
         self._staged_all_filtered = False
         self._nothing_scanned_reason = None
+        self._image_scan_in_progress = False
+        self._image_engine = None
         staged_targets = self._staged_scope_paths(target, target_type)
         if staged_targets is not None:
             if not staged_targets:
@@ -2396,72 +2414,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
             self._post_scan(target=target, target_type=target_type)
 
-            # A run the subprocess layer flagged says what happened before the
-            # results file it may never have written is read.
-            self._refuse_flagged_response(response, effective_timeout)
-
-            # Before the results file is read: a failed tool's file decides nothing.
-            self._record_target_exit_code(response)
-            self._refuse_rejected_exit_code()
-
-            raw = self._read_results_file(results_file)
-            if raw is None:
-                # Empty result file: defer to _handle_empty_results, which raises
-                # unless the scanner says an empty file is a clean scan.
-                error_msg = (
-                    f"{self.__class__.__name__} results file is empty "
-                    f"(exit code: {self.exit_code}). "
-                )
-                if self.errors:
-                    error_msg += f"Stderr: {' '.join(self.errors)}"
-                else:
-                    error_msg += "No stderr output captured."
-                # Redacted: the tool's stderr can name a path or option the
-                # config read from the environment, and ash.log keeps this line.
-                ASH_LOGGER.warning(
-                    self._text_without_hooked_values(
-                        error_msg,
-                        f"{self.__class__.__name__} results file is empty "
-                        f"(exit code: {self.exit_code})",
-                    )
-                )
-                report = self._handle_empty_results()
-                if not isinstance(report, SarifReport):
-                    return report
-                # A report the scanner's hook answers for an empty file is
-                # finished as a tool-written one is: it is checked for a run,
-                # gets the invocation record (timing, exit code, command) and
-                # the scanner's own adjustments.
-                if not report.runs:
-                    # The results file was empty, so this is not the file's
-                    # doing: the scanner's own hook answered with no run.
-                    raise ScannerError(
-                        "the report its empty-results hook returned holds no "
-                        "SARIF run, so there is nothing to grade"
-                    )
-                self._inject_invocation(report, final_args, target)
-                return self._post_process_sarif(report, final_args, target)
-
-            try:
-                sarif_report: SarifReport = SarifReport.model_validate(raw)
-            except Exception as e:
-                # Not returned as it is: the executor would grade a dict without a
-                # verdict on its zero findings, which is how a clean scan reads.
-                raise ScannerError(
-                    f"its results file is not SARIF ASH can read, so its findings "
-                    f"could not be graded: {error_text(e)}"
-                )
-            if not sarif_report.runs:
-                # Every field of a SARIF log is optional, so `{}` validates. No run
-                # is no scan; see _handle_empty_results. Checked on the report as
-                # the tool wrote it, before any scanner adjusts it.
-                raise ScannerError(
-                    "its results file holds no SARIF run, so there is nothing to grade"
-                )
-            # Failures from here on are ASH's or the scanner's own code, and the
-            # outer handler reports them as what they are.
-            self._inject_invocation(sarif_report, final_args, target)
-            return self._post_process_sarif(sarif_report, final_args, target)
+            return self._graded_results(
+                response, results_file, final_args, target, effective_timeout
+            )
 
         except Exception as e:
             # A failure before _post_scan ran (the arguments, the spawn) ends
@@ -2472,6 +2427,91 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             raise ScannerError(
                 self._describe_scan_failure(e, results_file, tool_started=tool_started)
             )
+
+    def _graded_results(
+        self,
+        response: Any,
+        results_file: "Path",
+        final_args: List[str],
+        target: Path,
+        effective_timeout: float | None,
+    ) -> Any | SarifReport:
+        """Grade one finished tool run: the tail both templates share.
+
+        Everything after ``_post_scan``: the flagged-response and exit-code
+        readings, the results reading, the invocation record and the scanner's
+        own post-processing, in the order ``scan()`` has always run them. One
+        body for the filesystem and image templates, because a hand copy had
+        already drifted twice (a rejected result's failure described two ways,
+        the empty-results warning written on one path only). Raises out to the
+        caller's handler, which owns the timing and the failure description.
+        """
+        # A run the subprocess layer flagged says what happened before the
+        # results file it may never have written is read.
+        self._refuse_flagged_response(response, effective_timeout)
+
+        # Before the results file is read: a failed tool's file decides nothing.
+        self._record_target_exit_code(response)
+        self._refuse_rejected_exit_code()
+
+        raw = self._read_results_file(results_file)
+        if raw is None:
+            # Empty result file: defer to _handle_empty_results, which raises
+            # unless the scanner says an empty file is a clean scan.
+            error_msg = (
+                f"{self.__class__.__name__} results file is empty "
+                f"(exit code: {self.exit_code}). "
+            )
+            if self.errors:
+                error_msg += f"Stderr: {' '.join(self.errors)}"
+            else:
+                error_msg += "No stderr output captured."
+            # Redacted: the tool's stderr can name a path or option the
+            # config read from the environment, and ash.log keeps this line.
+            ASH_LOGGER.warning(
+                self._text_without_hooked_values(
+                    error_msg,
+                    f"{self.__class__.__name__} results file is empty "
+                    f"(exit code: {self.exit_code})",
+                )
+            )
+            report = self._handle_empty_results()
+            if not isinstance(report, SarifReport):
+                return report
+            # A report the scanner's hook answers for an empty file is
+            # finished as a tool-written one is: it is checked for a run,
+            # gets the invocation record (timing, exit code, command) and
+            # the scanner's own adjustments.
+            if not report.runs:
+                # The results file was empty, so this is not the file's
+                # doing: the scanner's own hook answered with no run.
+                raise ScannerError(
+                    "the report its empty-results hook returned holds no "
+                    "SARIF run, so there is nothing to grade"
+                )
+            self._inject_invocation(report, final_args, target)
+            return self._post_process_sarif(report, final_args, target)
+
+        try:
+            sarif_report: SarifReport = SarifReport.model_validate(raw)
+        except Exception as e:
+            # Not returned as it is: the executor would grade a dict without a
+            # verdict on its zero findings, which is how a clean scan reads.
+            raise ScannerError(
+                f"its results file is not SARIF ASH can read, so its findings "
+                f"could not be graded: {error_text(e)}"
+            )
+        if not sarif_report.runs:
+            # Every field of a SARIF log is optional, so `{}` validates. No run
+            # is no scan; see _handle_empty_results. Checked on the report as
+            # the tool wrote it, before any scanner adjusts it.
+            raise ScannerError(
+                "its results file holds no SARIF run, so there is nothing to grade"
+            )
+        # Failures from here on are ASH's or the scanner's own code, and the
+        # outer handler reports them as what they are.
+        self._inject_invocation(sarif_report, final_args, target)
+        return self._post_process_sarif(sarif_report, final_args, target)
 
     @staticmethod
     def _target_is_empty(target: Path) -> bool:
@@ -2537,27 +2577,26 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """Why *image* cannot be scanned by this scanner at all, or None.
 
         Two reasons exist today, checked in order: the locator shape
-        (:meth:`_unsupported_image_shape_reason`), and a reference that
-        nothing can resolve -- no container engine detected and the scanner
-        offline, so neither a daemon nor the tool's own registry client may
-        fetch (the design's C6 skip row). A direct payload needs no engine,
-        which is why only the ref shape has the second reason.
+        (:meth:`_unsupported_image_shape_reason`), and a reference in offline
+        mode (the design's C6 skip row). A reference is skipped offline even
+        with an engine present, because scanning through one is not fetch-free:
+        a daemon asked for an image it does not hold pulls it from the
+        registry, and the tool's own registry client always fetches, so
+        offline's no-network promise cannot be kept for any ref. A direct
+        payload (a saved archive, an OCI layout) needs no fetch, which is why
+        only the ref shape has the second reason.
         """
         shape_reason = self._unsupported_image_shape_reason(image)
         if shape_reason is not None:
             return shape_reason
         if image.ref is not None and self._scanner_offline():
-            from automated_security_helper.core.container_engine import (
-                ContainerEngine,
-                detect_container_engine,
+            return (
+                f"container image {image.shown()} was not scanned: offline "
+                "mode cannot rule out a network fetch for a reference (an "
+                "engine pulls what it does not hold, and the tool's registry "
+                "client always fetches); submit a saved archive or an OCI "
+                "layout to scan the image offline"
             )
-
-            if detect_container_engine() == ContainerEngine.NONE:
-                return (
-                    f"container image {image.shown()} was not scanned: no "
-                    "container engine was detected and network fetching is "
-                    "unavailable (offline mode)"
-                )
         return None
 
     def scan_image(
@@ -2591,6 +2630,15 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self._staged_scan_files = None
         self._staged_all_filtered = False
         self._nothing_scanned_reason = None
+
+        # One engine reading for the whole target: the skip decision and the
+        # argv build must agree on it, and two detections could not (a socket
+        # appearing or vanishing between them).
+        from automated_security_helper.core.container_engine import (
+            detect_container_engine,
+        )
+
+        self._image_engine = detect_container_engine()
 
         not_scanned = self._image_not_scanned_reason(image)
         if not_scanned is not None:
@@ -2627,6 +2675,11 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         results_file = None
         tool_started = False
         self.exit_code = None
+        # Read by the post-processing hooks: in-image paths are left as the
+        # tool wrote them, and the host-tree steps (lockfile joins, source-dir
+        # URI strips) are skipped. Cleared on every exit; scan() also resets it
+        # per target, so an aborted image scan cannot leak it.
+        self._image_scan_in_progress = True
 
         try:
             final_args, results_file, subprocess_env = self._execute_image_scan(image)
@@ -2645,36 +2698,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
             self._post_scan(target=anchor, target_type=image_target_type)
 
-            self._refuse_flagged_response(response, effective_timeout)
-            self._record_target_exit_code(response)
-            self._refuse_rejected_exit_code(results_file)
-
-            raw = self._read_results_file(results_file)
-            if raw is None:
-                report = self._handle_empty_results()
-                if not isinstance(report, SarifReport):
-                    return report
-                if not report.runs:
-                    raise ScannerError(
-                        "the report its empty-results hook returned holds no "
-                        "SARIF run, so there is nothing to grade"
-                    )
-                self._inject_invocation(report, final_args, anchor)
-                return self._post_process_sarif(report, final_args, anchor)
-
-            try:
-                sarif_report: SarifReport = SarifReport.model_validate(raw)
-            except Exception as e:
-                raise ScannerError(
-                    f"its results file is not SARIF ASH can read, so its findings "
-                    f"could not be graded: {error_text(e)}"
-                )
-            if not sarif_report.runs:
-                raise ScannerError(
-                    "its results file holds no SARIF run, so there is nothing to grade"
-                )
-            self._inject_invocation(sarif_report, final_args, anchor)
-            return self._post_process_sarif(sarif_report, final_args, anchor)
+            return self._graded_results(
+                response, results_file, final_args, anchor, effective_timeout
+            )
 
         except Exception as e:
             if self.end_time is None:
@@ -2682,6 +2708,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             raise ScannerError(
                 self._describe_scan_failure(e, results_file, tool_started=tool_started)
             )
+        finally:
+            self._image_scan_in_progress = False
 
     def _refuse_flagged_response(self, response: Any, timeout: float | None) -> None:
         """Raise for a run the subprocess layer flagged, before its file is read.

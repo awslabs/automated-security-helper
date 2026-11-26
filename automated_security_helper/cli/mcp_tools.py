@@ -7758,8 +7758,8 @@ def mcp_set_source_image(
 
     Args:
         image_ref: ``registry/repo[:tag][@sha256:digest]``. Digest-pinned refs
-            preferred; a tag-only ref is resolved at scan start where a
-            container engine is present.
+            preferred; a tag-only ref is handed to the scanner tools as
+            written (ASH resolves nothing itself).
         session_id: MCP session identifier.
 
     Returns:
@@ -7774,6 +7774,11 @@ def mcp_set_source_image(
         set_source_image,
     )
 
+    from automated_security_helper.cli.mcp.source_delivery import (
+        SESSION_WORKSPACE_UNAVAILABLE,
+        SessionWorkspaceError,
+    )
+
     try:
         locator = set_source_image(image_ref, session_id=session_id)
     except SourceDeliveryBusyError as e:
@@ -7781,6 +7786,15 @@ def mcp_set_source_image(
             "success": False,
             "error": raw_controls_on_one_line(str(e)),
             "error_type": SOURCE_DELIVERY_BUSY,
+        }
+    except SessionWorkspaceError as e:
+        # The delivery now anchors the session's workspace directory (the TTL
+        # sweep finds sessions through it), so its creation can fail here as
+        # it can for every other delivery.
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(error_text(e)),
+            "error_type": SESSION_WORKSPACE_UNAVAILABLE,
         }
     except ValueError as e:
         return {"success": False, "error": raw_controls_on_one_line(error_text(e))}

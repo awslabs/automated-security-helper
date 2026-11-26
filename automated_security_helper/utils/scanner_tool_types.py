@@ -190,3 +190,38 @@ def scanner_resource_id_state(scanner_name: Any) -> Optional[str]:
         if state is not None:
             return str(getattr(state, "value", state))
     return None
+
+
+def scanner_serves_container_images(scanner_name: Any) -> Optional[bool]:
+    """Whether the loaded scanner class named ``scanner_name`` declares
+    container-image targets in its operational facets, or None if unknown.
+
+    The by-name form of ``serves_asset_kind`` (``base/scanner_operational_facets``),
+    found the way :func:`scanner_resource_id_state` finds a class: among the
+    already-imported subclasses of ``ScannerPluginBase``, importing and
+    instantiating nothing else. The flat extractor reads it to honor the image
+    attribution properties only for a scanner the executor could have stamped;
+    None means "cannot decide", and the caller leaves the properties as read.
+    """
+    if not isinstance(scanner_name, str) or not scanner_name:
+        return None
+    try:
+        from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+        from automated_security_helper.base.scanner_operational_facets import (
+            serves_asset_kind,
+        )
+        from automated_security_helper.core.asset import AssetKind
+    except ImportError:
+        return None
+    pending = list(ScannerPluginBase.__subclasses__())
+    seen: Set[type] = set()
+    while pending:
+        cls = pending.pop()
+        if cls in seen:
+            continue
+        seen.add(cls)
+        pending.extend(cls.__subclasses__())
+        if _class_config_name(cls) != scanner_name:
+            continue
+        return serves_asset_kind(cls, AssetKind.CONTAINER_IMAGE)
+    return None

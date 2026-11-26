@@ -65,15 +65,16 @@ class ImageLocator(_Frozen):
     """
 
     #: ``registry/repo[:tag][@sha256:digest]``. Digest-pinned refs preferred;
-    #: a tag-only ref is accepted and resolved at scan start where an engine
-    #: is present.
+    #: a tag-only ref is handed to the tools as written (ASH resolves
+    #: nothing itself).
     ref: Optional[str] = None
     #: An OCI image-layout directory (the ``oci-layout`` marker file's parent).
     oci_layout: Optional[Path] = None
     #: A saved-image tarball (``docker save`` / an OCI archive).
     oci_archive: Optional[Path] = None
-    #: Filled at scan start when an engine can resolve the submitted ref to a
-    #: digest; carried into identity and attribution, never required.
+    #: A digest the SUBMITTER already resolved for the ref (an infrastructure
+    #: caller that knows one); carried into identity and attribution, never
+    #: required, and never filled by ASH itself.
     resolved_digest: Optional[str] = None
 
     @model_validator(mode="after")

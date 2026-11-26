@@ -96,6 +96,20 @@ def test_a_repo_digest_is_read_when_there_is_no_image_id():
     assert image_digest_of_run(run) == DIGEST
 
 
+def test_the_repo_digest_beats_the_image_id():
+    # The repo digest is the MANIFEST digest, the value a pinned ref states
+    # and every other source here yields; trivy's imageID is the config-blob
+    # digest, a different value for the same image. Reading the image id
+    # first gave one pinned image two image_digest values (trivy rows vs
+    # grype rows), so an image: suppression by manifest digest silenced only
+    # half the findings.
+    run = _run(
+        imageID=OTHER_DIGEST,
+        repoDigests=[f"registry.example.com/team/app@{DIGEST}"],
+    )
+    assert image_digest_of_run(run) == DIGEST
+
+
 def test_a_run_that_names_no_digest_leaves_the_property_off():
     run = _run()
     mark_image_results(_Report(run), ImageLocator(ref=REF))
@@ -125,11 +139,15 @@ def test_a_tag_only_ref_names_no_digest():
 
 
 def test_a_pinned_ref_and_a_tag_of_the_same_image_share_ids_when_the_run_names_the_digest():
+    # The run's repoDigests entry IS the manifest digest a pinned ref states,
+    # so the two readings agree for one real image (an imageID never would:
+    # it is the config digest).
+    repo_digest = [f"registry.example.com/team/app@{DIGEST}"]
     pinned = _stamped(
-        _run(imageID=DIGEST),
+        _run(repoDigests=repo_digest),
         ImageLocator(ref=f"registry.example.com/team/app@{DIGEST}"),
     )
-    tagged = _stamped(_run(imageID=DIGEST), ImageLocator(ref=REF))
+    tagged = _stamped(_run(repoDigests=repo_digest), ImageLocator(ref=REF))
     assert pinned.id == tagged.id
 
 
@@ -147,7 +165,8 @@ def test_the_runs_own_digest_beats_the_locators():
 def test_the_flat_finding_carries_the_attribution_columns():
     flat = _stamped(_run(imageID=DIGEST), ImageLocator(ref=REF))
     assert (flat.image_ref, flat.image_digest) == (REF, DIGEST)
-    assert flat.file_path.endswith("/usr/lib/libssl.so.3")
+    # Exactly as the tool reported it: a host-path rebase would fail this.
+    assert flat.file_path == "/usr/lib/libssl.so.3"
 
 
 def test_two_ref_spellings_that_resolve_to_one_digest_share_an_id():
@@ -225,11 +244,15 @@ def test_a_filesystem_result_keeps_its_id_and_has_no_attribution():
 ATTRIBUTION_COLUMNS = {"image_ref", "image_digest", "layer_digest"}
 
 
-def test_a_filesystem_finding_dumps_none_of_the_attribution_columns():
-    flat = _flat(_run("src/app.py"))
-    assert not ATTRIBUTION_COLUMNS & set(flat.model_dump())
-    assert not ATTRIBUTION_COLUMNS & set(flat.model_dump(exclude_none=False))
-    assert not any(name in flat.model_dump_json() for name in ATTRIBUTION_COLUMNS)
+def test_every_finding_dumps_the_same_key_set():
+    # Always dumped, None off an image: a per-row omission gave a MIXED report
+    # (grype serves both trees) rows with different key sets, which breaks any
+    # consumer that takes its header or schema from the first row.
+    filesystem = _flat(_run("src/app.py")).model_dump()
+    image = _stamped(_run(imageID=DIGEST), ImageLocator(ref=REF)).model_dump()
+    assert set(filesystem) == set(image)
+    assert ATTRIBUTION_COLUMNS <= set(filesystem)
+    assert all(filesystem[name] is None for name in ATTRIBUTION_COLUMNS)
 
 
 def test_an_image_finding_dumps_all_three_attribution_columns():
@@ -240,12 +263,78 @@ def test_an_image_finding_dumps_all_three_attribution_columns():
     assert dumped["image_ref"] == REF
 
 
-def test_the_csv_header_of_a_scan_with_no_findings_has_no_attribution_columns():
+def test_the_serialization_schema_still_names_every_field():
+    # A wrap serializer with a -> Dict[str, Any] annotation replaced the
+    # serialization-mode JSON schema with a bare object; there is none now.
+    schema = FlatVulnerability.model_json_schema(mode="serialization")
+    assert "image_ref" in schema.get("properties", {})
+    assert "file_path" in schema.get("properties", {})
+
+
+def test_the_csv_header_is_one_shape_with_and_without_findings():
     from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter import (
         CsvReporter,
     )
 
-    assert not ATTRIBUTION_COLUMNS & set(CsvReporter._header(False))
+    header = CsvReporter._header(False)
+    assert ATTRIBUTION_COLUMNS <= set(header)
+    dumped = _flat(_run("src/app.py")).model_dump()
+    assert header == CsvReporter._order(list(dumped.keys()), False)
+
+
+def _run_named(tool: str, path: str = "src/app.py", **run_properties) -> Run:
+    run = _run(path, **run_properties)
+    run.tool.driver.name = tool
+    return run
+
+
+def test_a_filesystem_scanners_passed_through_bag_binds_no_image(tmp_path):
+    # The resource_id gate's sibling: a scanner whose register row does not
+    # serve container images was never stamped by the executor, so image
+    # properties arriving in its own passed-through bag (or a merged results
+    # file) must not re-tree the identity or make the finding matchable by an
+    # image-scoped suppression.
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (  # noqa: F401
+        BanditScanner,
+    )
+
+    run = _run_named("bandit")
+    plain_id = FlatVulnerability.from_sarif_result(
+        run.results[0], tool_name="bandit", tool_type="SAST", run=run
+    ).id
+    stamped = _run_named("bandit")
+    mark_image_results(_Report(stamped), ImageLocator(ref=REF))
+    flat = FlatVulnerability.from_sarif_result(
+        stamped.results[0], tool_name="bandit", tool_type="SAST", run=stamped
+    )
+    assert (flat.image_ref, flat.image_digest, flat.layer_digest) == (None, None, None)
+    assert flat.id == plain_id
+    assert not _suppression(image="*").matches(flat)
+
+
+def test_an_unknown_scanners_image_properties_are_left_as_read():
+    # None from the register means "cannot decide", never "drop": a
+    # third-party image scanner ASH has not loaded keeps its attribution.
+    run = _run_named("some-third-party-image-tool")
+    mark_image_results(_Report(run), ImageLocator(ref=REF))
+    flat = FlatVulnerability.from_sarif_result(
+        run.results[0],
+        tool_name="some-third-party-image-tool",
+        tool_type="SCA",
+        run=run,
+    )
+    assert flat.image_ref == REF
+
+
+def test_a_wired_image_scanners_stamp_is_honored():
+    # The positive control for the gate: trivy's register row serves
+    # container images, so its loaded class admits the stamp.
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (  # noqa: F401
+        TrivyScanner,
+    )
+
+    flat = _stamped(_run(imageID=DIGEST), ImageLocator(ref=REF))
+    assert (flat.image_ref, flat.image_digest) == (REF, DIGEST)
 
 
 def test_marking_with_no_locator_changes_nothing():

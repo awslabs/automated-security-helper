@@ -992,8 +992,8 @@ class ScanPhase(EnginePhase):
                 return
             reason = (
                 "every image-capable scanner declined it cleanly (typically "
-                "no container engine was detected and network fetching is "
-                "unavailable, or the locator shape is one the tool cannot read)"
+                "offline mode with a reference, whose fetch cannot be ruled "
+                "out, or a locator shape the tool cannot read)"
             )
         text = (
             f"container image {shown} was not scanned: {reason}. This scan "
@@ -1001,7 +1001,12 @@ class ScanPhase(EnginePhase):
         )
         sarif = aggregated_results.sarif
         if sarif is None or not sarif.runs:
-            ASH_LOGGER.warning(text, extra=NO_MARKUP)
+            # With no run to carry the note, the log line is the whole record,
+            # and the per-scan dedup below cannot run: an instance flag keeps
+            # the second call site (after the executor) from logging it again.
+            if not getattr(self, "_unscanned_image_noted", False):
+                self._unscanned_image_noted = True
+                ASH_LOGGER.warning(text, extra=NO_MARKUP)
             return
         for run in sarif.runs:
             for result in run.results or []:

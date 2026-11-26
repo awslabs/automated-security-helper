@@ -265,7 +265,8 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 selection=(
                     "the whole directory, cataloged into an SBOM; a "
                     "container-image asset through a stereoscope target "
-                    "(scan_image: oci-archive:/oci-dir: for a payload, "
+                    "(scan_image: oci-archive:/docker-archive: by the tar's "
+                    "own format, oci-dir: for a layout, "
                     "docker:/podman:/registry: for a reference by the "
                     "detected engine)"
                 ),
@@ -827,6 +828,14 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         self._reset_errors()
         self._nothing_scanned_reason = None
 
+        # One engine reading for the whole target, as the base template takes
+        # it: the skip decision and the stereoscope target must agree.
+        from automated_security_helper.core.container_engine import (
+            detect_container_engine,
+        )
+
+        self._image_engine = detect_container_engine()
+
         not_scanned = self._image_not_scanned_reason(image)
         if not_scanned is not None:
             self._nothing_scanned_reason = not_scanned
@@ -873,6 +882,13 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             # Re-apply config options (config file, additional outputs) that
             # the ToolArgs rebuild above dropped, as scan() re-applies them.
             self._process_config_options()
+            # ... except the exclude set: options.exclude globs are paths
+            # relative to the scanned DIRECTORY, and handing them to syft here
+            # would filter in-image paths that happen to match a source-tree
+            # glob. This is what makes the docstring's "no exclude set" true.
+            self.args.extra_args = [
+                arg for arg in self.args.extra_args if arg.key != "--exclude"
+            ]
             if not any(arg.key == "--config" for arg in self.args.extra_args):
                 empty = empty_tool_config(
                     "syft-empty.yaml", "{}\n", context=self.context
@@ -895,7 +911,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                     )
                 )
             final_args = self._resolve_arguments(
-                target=stereoscope_target(image),
+                target=stereoscope_target(image, engine=self._image_engine),
             )
             subprocess_env = (
                 {**snapshot_environ(), **self.extra_env} if self.extra_env else None

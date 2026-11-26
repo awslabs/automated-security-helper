@@ -527,9 +527,9 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                     "`trivy fs` over the target; the default scanner is vuln only, and "
                     "secret, misconfig and license are opt-in (options.scanners); a "
                     "container-image asset through `trivy image` "
-                    "(_execute_image_scan: a reference by --image-src from the "
-                    "detected engine, --input for a saved archive; an OCI layout "
-                    "directory is a reported clean skip, which trivy cannot read)"
+                    "(_execute_image_scan: a reference by --image-src, the detected "
+                    "engine's store then remote; --input for a saved archive or an "
+                    "OCI image-layout directory)"
                 ),
             ),
             runtime=opsf.RuntimeFacet(
@@ -788,22 +788,6 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         )
         return final_args, results_file, subprocess_env
 
-    def _unsupported_image_shape_reason(self, image) -> Optional[str]:
-        """trivy reads a reference or a saved archive; an OCI layout is neither.
-
-        ``trivy image`` takes a reference (resolved through its --image-src
-        order) or ``--input`` with a saved tarball; it has no input mode for an
-        image-layout directory. The scan is then a reported clean skip, and
-        grype and syft, whose stereoscope reads ``oci-dir:``, still scan it.
-        """
-        if image.oci_layout is not None:
-            return (
-                f"container image at {image.shown()} was not scanned by trivy: "
-                "trivy image reads a reference or a saved archive (--input), "
-                "not an OCI image-layout directory"
-            )
-        return None
-
     def _execute_image_scan(
         self, image
     ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
@@ -812,7 +796,9 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         The fs scan's resolution with the image differences and nothing else:
         the subcommand token is ``image`` for this resolution only, the target
         slot carries the reference (with ``--image-src`` naming the detected
-        engine, else ``remote``) or ``--input=<tar>`` for a saved archive, and
+        engine's store first, then ``remote``) or ``--input=<path>`` for a
+        direct payload (trivy reads a saved tar of either format and an OCI
+        image-layout directory through the same flag), and
         none of the fs-shaped plumbing applies -- no skip-dirs budget (nothing
         of the source tree is walked), while ASH's own trivy.yaml, module-dir,
         ignorefile and secret-config neutralizations carry over, because they
@@ -826,6 +812,11 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
 
         if self.results_dir is None:
             raise ScannerError("TrivyScanner has no results directory")
+        engine = self._image_engine
+        if engine is None:
+            # A direct call outside scan_image (a test driving this hook
+            # alone); the template detects once per target otherwise.
+            engine = detect_container_engine()
         results_file = self.results_dir.joinpath("image", "results_sarif.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
         results_file.unlink(missing_ok=True)
@@ -841,12 +832,22 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
 
         if image.oci_archive is not None:
             target_token = f"--input={Path(image.oci_archive).absolute().as_posix()}"
+        elif image.oci_layout is not None:
+            # The same flag: trivy's --input reads an OCI image-layout
+            # directory as well as a saved tar (its container_image target
+            # docs show skopeo/buildah oci: output scanned this way).
+            target_token = f"--input={Path(image.oci_layout).absolute().as_posix()}"
         else:
-            engine = detect_container_engine()
-            if engine == ContainerEngine.NONE:
-                extra.append("--image-src=remote")
-            else:
-                extra.append(f"--image-src={engine.value}")
+            # The engine's store first, then the registry: trivy's daemon
+            # sources only INSPECT what the daemon already holds and never
+            # pull, so a single-source value made every not-yet-pulled
+            # reference an ERROR on any host with a socket while grype and
+            # syft (whose stereoscope pulls through the daemon) succeeded.
+            # Offline never reaches here for a reference (the base template
+            # skips it), so remote is always an admitted fallback.
+            sources = [] if engine == ContainerEngine.NONE else [engine.value]
+            sources.append("remote")
+            extra.append(f"--image-src={','.join(sources)}")
             target_token = image.ref
 
         original_subcommands = self.subcommands
@@ -885,8 +886,12 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         """Tie each dependency result to one package copy and set trivy's severity.
 
         The severity step is ``TrivyScannerBase._attach_trivy_severity``, shared
-        with trivy-repo; see "Severity" above for the rule.
+        with trivy-repo; see "Severity" above for the rule. The package step is
+        host-tree work (it joins results to the TARGET's lockfiles) and is
+        skipped for an image scan: joining image packages to the host's
+        lockfiles would attribute a copy the image does not hold.
         """
-        sarif_report = self._attach_package_identity(sarif_report, target)
+        if not self._image_scan_in_progress:
+            sarif_report = self._attach_package_identity(sarif_report, target)
         sarif_report = self._attach_misconfig_resources(sarif_report, final_args)
         return self._attach_trivy_severity(sarif_report)

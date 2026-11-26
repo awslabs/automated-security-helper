@@ -597,9 +597,10 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 selection=(
                     "a dir: scan of the source tree, with a lockfile join for "
                     "locations; a container-image asset through a stereoscope "
-                    "target (_execute_image_scan: oci-archive:/oci-dir: for a "
-                    "payload, docker:/podman:/registry: for a reference by the "
-                    "detected engine)"
+                    "target (_execute_image_scan: oci-archive:/docker-archive: "
+                    "by the tar's own format, oci-dir: for a layout, "
+                    "docker:/podman:/registry: for a reference by the detected "
+                    "engine)"
                 ),
                 covers_note=(
                     "the display string reads 'Packages and dependency files'; "
@@ -1227,7 +1228,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                     ToolExtraArg(key="--config", value=empty.as_posix())
                 )
             final_args = self._resolve_arguments(
-                target=stereoscope_target(image),
+                target=stereoscope_target(image, engine=self._image_engine),
                 results_file=results_file,
             )
         finally:
@@ -1277,6 +1278,12 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             output_dir_exclude_globs,
         )
 
+        if self._image_scan_in_progress:
+            # An image target is a stereoscope string, not a dir: source, and
+            # nothing of the host tree is scanned: no output directory can be
+            # inside the image, so no --exclude patterns are built.
+            return super()._resolve_arguments(target=target, results_file=results_file)
+
         directory = str(target).removeprefix("dir:")
         original_extra_args = self.args.extra_args
         self.args.extra_args = [
@@ -1299,13 +1306,22 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         final_args: List[str],
         target: Path,
     ) -> SarifReport:
-        """Strip leading slashes from artifact URIs and attach package identity."""
-        lock_index = NpmLockIndex(target)
+        """Strip leading slashes from artifact URIs and attach package identity.
+
+        Both steps are host-tree work and are skipped for an image scan: an
+        in-image path stays as grype wrote it (absolute; no host root may
+        rebase it), and joining image packages to the HOST's lockfiles would
+        attribute a copy the image does not hold. ``fix_available`` is read
+        from the report itself and holds for images too.
+        """
+        in_image = self._image_scan_in_progress
+        lock_index = None if in_image else NpmLockIndex(target)
         for run in sarif_report.runs or []:
             fixes = _rule_fix_statements(run)
             for result in run.results or []:
-                self._normalize_result_uris(result, target)
-                self._attach_package_identity(result, lock_index)
+                if not in_image:
+                    self._normalize_result_uris(result, target)
+                    self._attach_package_identity(result, lock_index)
                 self._attach_fix_available(result, run, fixes)
         return sarif_report
 

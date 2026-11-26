@@ -64,7 +64,7 @@ def _report() -> SarifReport:
                                 {
                                     "physicalLocation": {
                                         "artifactLocation": {
-                                            "uri": "usr/lib/libssl.so.3"
+                                            "uri": "/usr/lib/libssl.so.3"
                                         },
                                         "region": {"startLine": 1},
                                     }
@@ -151,3 +151,69 @@ def test_a_source_task_stamps_nothing(tmp_path):
     row = _row(_context(tmp_path, image=False), "source")
     properties = _properties(row)
     assert properties is None or getattr(properties, IMAGE_REF_PROPERTY, None) is None
+
+
+def test_a_source_task_with_an_asset_on_the_context_still_stamps_nothing(tmp_path):
+    # The discriminator is the TASK type, not the context: an asset on the
+    # context must not stamp a filesystem task's results (the "and only then"
+    # of the module docstring, split from the no-asset case so an executor
+    # that stamped whenever context.asset is set could not pass).
+    row = _row(_context(tmp_path, image=True), "source")
+    properties = _properties(row)
+    assert properties is None or getattr(properties, IMAGE_REF_PROPERTY, None) is None
+
+
+def test_the_stamp_lands_before_suppressions_run(tmp_path):
+    # What makes image: suppressions work at all: if the executor applied
+    # suppressions before stamping, every image-scoped entry would silently
+    # match nothing in a real scan.
+    from automated_security_helper.models.core import AshSuppression
+
+    context = _context(tmp_path, image=True)
+    context.config.global_settings.suppressions = [
+        AshSuppression(
+            path="**",
+            rule_id="CVE-*",
+            image="registry.example.com/*",
+            reason="accepted for this base image",
+        )
+    ]
+    row = _row(context, "image")
+    suppressions = row.raw_results.runs[0].results[0].suppressions
+    assert suppressions, "the image-scoped suppression did not reach the result"
+
+
+def test_an_image_result_inside_the_anchor_is_not_rebased(tmp_path):
+    # The host-tree sanitizing step is skipped for an image task: an in-image
+    # path that happens to sit under the anchor directory (a container /src
+    # mount shadowing an in-image prefix) must stay the absolute in-image
+    # path, not become a path in the host tree.
+    context = _context(tmp_path, image=True)
+    shadowed = (Path(context.source_dir) / "package-lock.json").as_posix()
+    report = _report()
+    report.runs[0].results[0].locations[
+        0
+    ].physicalLocation.root.artifactLocation.uri = shadowed
+
+    class _ShadowedScanner(ImageShapeScanner):
+        def scan_image(self, image, config=None, *args, **kwargs):
+            self._pre_scan(target=Path("."), target_type="image", config=config)
+            self._post_scan(target=Path("."), target_type="image")
+            return report
+
+    scanner = _ShadowedScanner(config=_Config(), context=context)
+    executor = ScannerExecutor(
+        plugin_context=context, progress_display=MagicMock(), scanner_tasks=[]
+    )
+    (row,) = executor._execute_scanner(
+        "image-shape-tool",
+        scanner,
+        [{"path": Path(context.source_dir), "type": "image"}],
+    )
+    uri = (
+        row.raw_results.runs[0]
+        .results[0]
+        .locations[0]
+        .physicalLocation.root.artifactLocation.uri
+    )
+    assert uri == shadowed

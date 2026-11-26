@@ -319,7 +319,8 @@ def get_session_source_dir(session_id: str) -> Optional[Path]:
 
 
 def delivered_session_count() -> int:
-    """Return how many sessions currently have a recorded ``source_dir``.
+    """How many sessions currently hold a scan subject: a recorded
+    ``source_dir`` or an image binding.
 
     Deliberately a count and not the ids. The one caller is a diagnostic that
     needs to distinguish "nobody has delivered anything" from "somebody
@@ -349,17 +350,40 @@ def _clear_image_dir_except(image_dir: Path, keep: Optional[Path] = None) -> Non
             continue
         with contextlib.suppress(OSError):
             if entry.is_dir() and not entry.is_symlink():
-                shutil.rmtree(entry)
+                # _remove_tree, not a bare rmtree: it clears the read-only
+                # bit of an entry the process owns, as every other scratch
+                # removal in this module does.
+                _remove_tree(entry)
             else:
                 entry.unlink()
 
 
 def _remove_delivered_image_archive(session_id: str) -> None:
-    """Remove the archive directory of the session's current image binding."""
+    """Remove the staged archive of the session's current image binding.
+
+    Only when the binding's archive sits where the finalize itself stages one,
+    ``<session>/image``: the locator registry is a module global, and emptying
+    whatever directory a stored path's parent happens to be would let a future
+    caller that binds an operator-owned archive path have that operator's
+    directory emptied by the next delivery. A binding outside the expected
+    directory is simply dropped by the caller; nothing of it is deleted.
+    """
 
     previous = _SESSION_IMAGE_LOCATORS.get(session_id)
-    if previous is not None and previous.oci_archive is not None:
-        _clear_image_dir_except(previous.oci_archive.parent)
+    if previous is None or previous.oci_archive is None:
+        return
+    parent = Path(previous.oci_archive).parent
+    try:
+        expected = _session_workspace(resolve_workspace_root(), session_id) / "image"
+    except (OSError, ValueError):
+        return
+    if parent != expected:
+        try:
+            if not os.path.samefile(parent, expected):
+                return
+        except OSError:
+            return
+    _clear_image_dir_except(parent)
 
 
 def _set_session_source_dir(session_id: str, source_dir: Path) -> None:
@@ -388,11 +412,11 @@ def ensure_session_workspace(
 ) -> Path:
     """The session's workspace directory, created and marked as the server's.
 
-    The anchor an image scan runs in: an image asset has no target directory
-    of its own, so its output tree (``<workspace>/<session>/.ash/ash_output``)
-    goes under the directory the server already owns for the session, which is
-    also why ``ASH_MCP_ALLOWED_ROOTS`` is not implicated by a bare ref -- the
-    sandbox already permits a session its own workspace.
+    What every delivery anchors in: the uploads, the staged archives and,
+    through :func:`ensure_session_image_scan_dir`, the directory an image
+    scan is anchored in (an image asset has no target directory of its own).
+    The directory the server already owns for the session is also why
+    ``ASH_MCP_ALLOWED_ROOTS`` is not implicated by a bare ref.
     """
 
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
@@ -2466,6 +2490,7 @@ def set_source_zip_chunk(
     *,
     workspace_root: Optional[Path] = None,
     session_id: str,
+    payload_noun: str = "zip",
 ) -> Dict[str, object]:
     """Append a base64-encoded chunk to an in-flight zip upload.
 
@@ -2477,6 +2502,9 @@ def set_source_zip_chunk(
             ``upload_id`` are rejected.
         workspace_root: Override workspace root.
         session_id: MCP session identifier used to scope the upload.
+        payload_noun: What the cap refusal calls the upload. The image
+            channel shares this machinery and passes ``"image archive"``, so
+            its clients are never told about a zip they did not send.
 
     Returns:
         ``{"received": <bytes-so-far>, "next_sequence": <int>, "last": <bool>}``
@@ -2505,6 +2533,7 @@ def set_source_zip_chunk(
             last,
             workspace_root=workspace_root,
             session_id=session_id,
+            payload_noun=payload_noun,
         )
 
 
@@ -2516,6 +2545,7 @@ def _append_zip_chunk(
     *,
     workspace_root: Optional[Path],
     session_id: str,
+    payload_noun: str = "zip",
 ) -> Dict[str, object]:
     """:func:`set_source_zip_chunk`, once the session is held against the sweep."""
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
@@ -2564,7 +2594,8 @@ def _append_zip_chunk(
         part.unlink(missing_ok=True)
         _meta_path(session_dir, upload_id).unlink(missing_ok=True)
         raise ValueError(
-            f"upload exceeds max zip size {_MAX_ZIP_BYTES} bytes (got {new_total})"
+            f"upload exceeds max {payload_noun} size {_MAX_ZIP_BYTES} bytes "
+            f"(got {new_total})"
         )
 
     next_seq = sequence + 1
@@ -2979,8 +3010,8 @@ def remove_session_workspace(
     session_dir = _session_workspace(root, session_id)
     doomed = _set_aside_for_removal(session_dir, session_id)
     gone = True if doomed is None else _remove_tree(doomed)
+    # Ends the source record AND the image binding (its docstring's contract).
     _drop_session_source_dir(session_id)
-    _drop_session_image_locator(session_id)
     return gone
 
 
@@ -3092,8 +3123,9 @@ def set_source_image(
     Under the session's change lock, as every delivery is: the scan subject
     must not flip while a scan of the session reads it. Returns the stored
     locator. Digest-pinned refs are preferred (the attribution then agrees
-    across machines); a tag-only ref is accepted and resolved at scan start
-    where an engine is present.
+    across machines); a tag-only ref is accepted and handed to the scanner
+    tools as written -- ASH itself resolves nothing, and a digest the scan's
+    own output names is read back into the attribution.
 
     Raises:
         ValueError: for a value that can never be a reference
@@ -3101,6 +3133,13 @@ def set_source_image(
     """
 
     locator = ImageLocator(ref=validate_image_ref(image_ref))
+    # The session directory exists from this delivery on, although a bare ref
+    # writes nothing into it: the TTL sweep finds sessions through their
+    # workspace directories, so a session whose only delivery is a ref would
+    # otherwise never be collected (and on a stateless server with one new id
+    # per client, the registry's eviction pass past its cap would find
+    # nothing to free).
+    ensure_session_workspace(session_id)
     # A reference replaces a delivered archive as the subject: the archive is
     # scratch now and must not stay in the session workspace.
     _remove_delivered_image_archive(session_id)
@@ -3132,23 +3171,17 @@ def set_source_image_archive_chunk(
     (:func:`set_source_image_archive_finalize`).
     """
 
-    try:
-        return set_source_zip_chunk(
-            upload_id,
-            sequence,
-            data_b64,
-            last,
-            workspace_root=workspace_root,
-            session_id=session_id,
-        )
-    except ValueError as error:
-        # The zip channel's cap wording names a zip; this is an image archive.
-        text = str(error)
-        if "max zip size" in text:
-            raise ValueError(
-                text.replace("max zip size", "max image archive size")
-            ) from error
-        raise
+    return set_source_zip_chunk(
+        upload_id,
+        sequence,
+        data_b64,
+        last,
+        workspace_root=workspace_root,
+        session_id=session_id,
+        # The cap refusal then names what this client sent, with no
+        # string-rewrite of another channel's wording.
+        payload_noun="image archive",
+    )
 
 
 @_while_no_scan_runs(removes_workspace=False)

@@ -363,3 +363,26 @@ class TestTheNotScannedNoteStaysTrue:
         row = result.scanner_results.get("trivy")
         assert row is None or row.status != ScannerStatus.SKIPPED
         assert _informational_results(result) == []
+
+
+class TestTheNoRunWarningIsWrittenOnce:
+    def test_a_model_with_no_sarif_run_logs_one_warning(self, scan_phase, caplog):
+        # With no run to carry the note, the log line is the whole record and
+        # the per-scan ruleId dedup cannot run: the method is called before
+        # the executor AND after it, and without its own dedup the second call
+        # logged the warning again.
+        import logging
+
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+        scan_phase._scanner_tasks = []
+        model = AshAggregatedResults()
+        model.sarif = None
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            scan_phase._record_unscanned_image_asset(model)
+            scan_phase._record_unscanned_image_asset(model)
+        lines = [
+            record.getMessage()
+            for record in caplog.records
+            if "was not scanned" in record.getMessage()
+        ]
+        assert len(lines) == 1

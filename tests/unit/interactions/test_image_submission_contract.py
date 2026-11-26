@@ -114,6 +114,18 @@ class TestExclusivityRefusals:
         text = _refusal_of(image=IMAGE_REF, changed_files_only=True)
         assert "changed_files_only" in text
 
+    def test_an_image_beside_the_staged_scope_is_refused(self):
+        # The rule lives in the shared gate, so a library caller is refused
+        # exactly as the CLI's own loop refuses the typed flag.
+        text = _refusal_of(image=IMAGE_REF, staged=True)
+        assert "staged" in text
+
+    def test_an_image_beside_a_baseline_is_refused(self):
+        # The CLI refused --baseline while the library half-applied it (the
+        # baseline read against the anchor directory): one gate, one answer.
+        text = _refusal_of(image=IMAGE_REF, baseline="previous.json")
+        assert "baseline" in text
+
     def test_a_whitespace_ref_names_nothing(self):
         text = _refusal_of(image="   ")
         assert "names no reference" in text

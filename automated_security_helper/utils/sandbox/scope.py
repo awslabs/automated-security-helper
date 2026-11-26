@@ -520,6 +520,25 @@ def scanner_sandbox_scope(
         )
 
     name = _plugin_name(scanner_plugin)
+
+    # A container-image scan's inputs live outside every path this scope is
+    # built from: a saved archive or OCI layout can sit anywhere on the host,
+    # a reference needs the engine's socket or the network, and the read
+    # grants here are the source tree, the output directory and the scan
+    # target. Rather than starting a tool that fails partway on an unreadable
+    # payload, the combination is refused with the reason; the scan runs
+    # without a sandbox or not at all (ERROR, as every non-availability
+    # refusal grades).
+    asset = getattr(context, "asset", None)
+    asset_kind = getattr(asset, "kind", None)
+    if getattr(asset_kind, "value", asset_kind) == "container_image":
+        raise SandboxUnavailable(
+            f"{name}: a container-image scan cannot run sandboxed yet: the "
+            "sandbox's read scope is built from the source tree and the "
+            "output directory, which hold neither an image payload nor an "
+            "engine socket. Run the image scan without the sandbox."
+        )
+
     declared, declared_config = _declared_identity(scanner_plugin)
     config = getattr(scanner_plugin, "config", None)
     # A class (the phases pass one while constructing a plugin) has no config yet,

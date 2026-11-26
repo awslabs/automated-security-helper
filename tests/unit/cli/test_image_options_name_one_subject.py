@@ -69,10 +69,12 @@ class TestExclusivityIsRefusedBeforeAnyWork:
         assert "--workspace" in result.output
 
 
-class TestOptionsThatReadTheWorkingDirectoryAreRefused:
-    """These flags resolve against the directory a scan starts in, which is not an
-    image scan's subject: ``--staged`` could exit 0 as "nothing staged" without the
-    image ever being scanned, and the others would read or filter by the cwd."""
+class TestScopesAnImageScanCannotObeyAreRefused:
+    """Each with its own reason: the git-history scopes (an image has none),
+    saved results (nothing would be scanned) and a baseline (unsupported for an
+    image scan). The rules live in run_ash_scan's shared gate; the CLI loop
+    exists for the wording, naming the flag as typed or the variable that set
+    it."""
 
     @pytest.mark.parametrize(
         "image_options",
@@ -96,6 +98,16 @@ class TestOptionsThatReadTheWorkingDirectoryAreRefused:
         assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert other[0] in result.output
         assert image_options[0] in result.output
+
+    def test_a_value_set_through_the_environment_names_the_variable(self, monkeypatch):
+        # A PR pipeline exports ASH_CHANGED_FILES_ONLY; the operator never
+        # typed the flag, so the refusal names what actually set it, as the
+        # sibling env-aware refusals do.
+        monkeypatch.setenv("ASH_CHANGED_FILES_ONLY", "true")
+        result = _scan("--image", IMAGE_REF)
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
+        assert "ASH_CHANGED_FILES_ONLY is set" in result.output
+        assert "--changed-files-only" in result.output
 
 
 class TestThePayloadGateReachesTheOperator:

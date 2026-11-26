@@ -9,7 +9,13 @@ suite owns, and each row asserts the one translation the design names --
 stereoscope schemes for grype (and syft, whose shared translation
 ``utils/image_tool_targets.stereoscope_target`` is pinned per shape), the
 ``image`` subcommand with ``--image-src`` or ``--input`` for trivy -- plus the
-control: the filesystem argv is byte-for-byte what it was.
+control: the image dispatch leaves the filesystem argv exactly as it was.
+
+The engine rows that bind a real AF_UNIX socket are skipped where CPython has
+none (Windows), and every bind uses a relative name from inside the socket's
+directory: an AF_UNIX path holds about 100 bytes, and a deep basetemp (a CI
+runner's, a macOS ``/private/var/folders`` one) makes the full path too long
+for the bind.
 """
 
 from __future__ import annotations
@@ -28,11 +34,19 @@ from automated_security_helper.core.container_engine import (
     ContainerEngine,
     detect_container_engine,
 )
-from automated_security_helper.utils.image_tool_targets import stereoscope_target
+from automated_security_helper.utils.image_tool_targets import (
+    archive_scheme,
+    stereoscope_target,
+)
 
 pytestmark = pytest.mark.unit
 
 IMAGE_REF = "registry.example.com/team/app:1.2.3"
+
+needs_af_unix = pytest.mark.skipif(
+    not hasattr(socket, "AF_UNIX"),
+    reason="binding a unix socket needs AF_UNIX, which this platform lacks",
+)
 
 
 def _context(tmp_path) -> PluginContext:
@@ -49,13 +63,24 @@ def _context(tmp_path) -> PluginContext:
     )
 
 
-def _archive(tmp_path) -> Path:
-    path = tmp_path / "image.tar"
+def _tar_with(tmp_path, names, file_name="image.tar") -> Path:
+    path = tmp_path / file_name
     with tarfile.open(path, "w") as archive:
-        info = tarfile.TarInfo(name="manifest.json")
-        info.size = 2
-        archive.addfile(info, io.BytesIO(b"[]"))
+        for name in names:
+            info = tarfile.TarInfo(name=name)
+            info.size = 2
+            archive.addfile(info, io.BytesIO(b"[]"))
     return path
+
+
+def _docker_archive(tmp_path) -> Path:
+    """What ``podman save`` (and docker save before 25) writes: no index.json."""
+    return _tar_with(tmp_path, ["manifest.json"], "docker-image.tar")
+
+
+def _oci_archive(tmp_path) -> Path:
+    """A tar holding an OCI layout, as newer ``docker save`` writes."""
+    return _tar_with(tmp_path, ["oci-layout", "index.json"], "oci-image.tar")
 
 
 def _layout(tmp_path) -> Path:
@@ -70,6 +95,7 @@ def _no_engine(monkeypatch, tmp_path):
     import automated_security_helper.core.container_engine as engine_module
 
     monkeypatch.delenv("DOCKER_HOST", raising=False)
+    monkeypatch.delenv("CONTAINER_HOST", raising=False)
     monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
     monkeypatch.setattr(
         engine_module, "DOCKER_DEFAULT_SOCKET", str(tmp_path / "absent-docker.sock")
@@ -80,11 +106,14 @@ def _no_engine(monkeypatch, tmp_path):
 
 
 def _docker_engine(monkeypatch, tmp_path):
+    """A real unix socket, bound by a RELATIVE name (the AF_UNIX path cap)."""
     _no_engine(monkeypatch, tmp_path)
-    sock_path = tmp_path / "docker.sock"
+    sock_dir = tmp_path / "sock"
+    sock_dir.mkdir(exist_ok=True)
     server = socket.socket(socket.AF_UNIX)
-    server.bind(str(sock_path))
-    monkeypatch.setenv("DOCKER_HOST", f"unix://{sock_path}")
+    monkeypatch.chdir(sock_dir)
+    server.bind("docker.sock")
+    monkeypatch.setenv("DOCKER_HOST", f"unix://{sock_dir / 'docker.sock'}")
     return server
 
 
@@ -93,6 +122,7 @@ class TestEngineDetection:
         _no_engine(monkeypatch, tmp_path)
         assert detect_container_engine() == ContainerEngine.NONE
 
+    @needs_af_unix
     def test_a_docker_host_unix_socket_is_docker(self, monkeypatch, tmp_path):
         server = _docker_engine(monkeypatch, tmp_path)
         try:
@@ -100,11 +130,40 @@ class TestEngineDetection:
         finally:
             server.close()
 
-    def test_a_tcp_docker_host_is_not_probed(self, monkeypatch, tmp_path):
+    def test_a_dead_unix_docker_host_is_none(self, monkeypatch, tmp_path):
+        # A leftover variable naming a removed socket is not an engine: a
+        # local path is still stat'ed, unlike a declared remote daemon.
         _no_engine(monkeypatch, tmp_path)
-        monkeypatch.setenv("DOCKER_HOST", "tcp://127.0.0.1:2375")
+        monkeypatch.setenv("DOCKER_HOST", f"unix://{tmp_path / 'gone.sock'}")
         assert detect_container_engine() == ContainerEngine.NONE
 
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "tcp://docker:2375",
+            "ssh://build@ci-daemon",
+            "npipe:////./pipe/docker_engine",
+        ],
+    )
+    def test_a_declared_remote_docker_host_is_docker(
+        self, monkeypatch, tmp_path, value
+    ):
+        # GitLab docker-in-docker, ssh daemons and Docker Desktop on Windows
+        # declare the daemon in DOCKER_HOST; a dead one behind the declaration
+        # is the tool's own error, as a dead local socket's daemon is.
+        _no_engine(monkeypatch, tmp_path)
+        monkeypatch.setenv("DOCKER_HOST", value)
+        assert detect_container_engine() == ContainerEngine.DOCKER
+
+    def test_a_declared_container_host_is_podman(self, monkeypatch, tmp_path):
+        _no_engine(monkeypatch, tmp_path)
+        monkeypatch.setenv(
+            "CONTAINER_HOST",
+            "ssh://core@localhost:2222/run/user/1000/podman/podman.sock",
+        )
+        assert detect_container_engine() == ContainerEngine.PODMAN
+
+    @needs_af_unix
     def test_a_podman_runtime_socket_is_podman(self, monkeypatch, tmp_path):
         _no_engine(monkeypatch, tmp_path)
         runtime = tmp_path / "runtime"
@@ -122,12 +181,44 @@ class TestEngineDetection:
             server.close()
 
 
+class TestArchiveScheme:
+    def test_an_oci_layout_tar_is_oci_archive(self, tmp_path):
+        assert archive_scheme(_oci_archive(tmp_path)) == "oci-archive"
+
+    def test_a_manifest_only_tar_is_docker_archive(self, tmp_path):
+        # podman save's default, and docker save before 25: stereoscope's
+        # oci-archive provider cannot read these, its docker-archive one can.
+        assert archive_scheme(_docker_archive(tmp_path)) == "docker-archive"
+
+    def test_a_repositories_tar_is_docker_archive(self, tmp_path):
+        tar = _tar_with(tmp_path, ["repositories"], "legacy.tar")
+        assert archive_scheme(tar) == "docker-archive"
+
+    def test_a_markerless_tar_is_left_to_the_tool(self, tmp_path):
+        # Neither marker: the tool owns the verdict on image bytes, so the
+        # label defaults rather than refusing here.
+        tar = _tar_with(tmp_path, ["something-else.json"], "odd.tar")
+        assert archive_scheme(tar) == "oci-archive"
+
+    def test_an_unreadable_file_is_left_to_the_tool(self, tmp_path):
+        not_tar = tmp_path / "not-a.tar"
+        not_tar.write_bytes(b"PK\x03\x04 definitely a zip")
+        assert archive_scheme(not_tar) == "oci-archive"
+
+
 class TestStereoscopeTargets:
-    def test_an_archive_needs_no_engine(self, tmp_path):
-        archive = _archive(tmp_path)
+    def test_an_oci_archive_needs_no_engine(self, tmp_path):
+        archive = _oci_archive(tmp_path)
         locator = ImageLocator(oci_archive=archive)
         assert stereoscope_target(locator, ContainerEngine.NONE) == (
             f"oci-archive:{archive.absolute().as_posix()}"
+        )
+
+    def test_a_docker_archive_gets_its_own_scheme(self, tmp_path):
+        archive = _docker_archive(tmp_path)
+        locator = ImageLocator(oci_archive=archive)
+        assert stereoscope_target(locator, ContainerEngine.NONE) == (
+            f"docker-archive:{archive.absolute().as_posix()}"
         )
 
     def test_a_layout_needs_no_engine(self, tmp_path):
@@ -172,6 +263,7 @@ class TestGrypeImageArgv:
         assert not any(str(value).startswith("dir:") for value in argv)
         assert results_file.parent.name == "image"
 
+    @needs_af_unix
     def test_a_ref_with_a_daemon_is_a_docker_target(self, monkeypatch, tmp_path):
         server = _docker_engine(monkeypatch, tmp_path)
         try:
@@ -183,14 +275,35 @@ class TestGrypeImageArgv:
             server.close()
         assert f"docker:{IMAGE_REF}" in argv
 
-    def test_an_archive_is_an_oci_archive_target(self, monkeypatch, tmp_path):
+    def test_the_detected_engine_is_read_once_per_target(self, monkeypatch, tmp_path):
+        # scan_image detects once and the argv build reads that one answer
+        # (_image_engine), so the skip decision and the target cannot disagree
+        # when a socket appears or vanishes between two reads.
         _no_engine(monkeypatch, tmp_path)
-        archive = _archive(tmp_path)
+        scanner = self._scanner(tmp_path)
+        scanner._image_engine = ContainerEngine.PODMAN
+        argv, _results, _env = scanner._execute_image_scan(ImageLocator(ref=IMAGE_REF))
+        assert f"podman:{IMAGE_REF}" in argv
+
+    def test_an_oci_archive_is_an_oci_archive_target(self, monkeypatch, tmp_path):
+        _no_engine(monkeypatch, tmp_path)
+        archive = _oci_archive(tmp_path)
         scanner = self._scanner(tmp_path)
         argv, _results, _env = scanner._execute_image_scan(
             ImageLocator(oci_archive=archive)
         )
         assert f"oci-archive:{archive.absolute().as_posix()}" in argv
+
+    def test_a_saved_docker_archive_is_a_docker_archive_target(
+        self, monkeypatch, tmp_path
+    ):
+        _no_engine(monkeypatch, tmp_path)
+        archive = _docker_archive(tmp_path)
+        scanner = self._scanner(tmp_path)
+        argv, _results, _env = scanner._execute_image_scan(
+            ImageLocator(oci_archive=archive)
+        )
+        assert f"docker-archive:{archive.absolute().as_posix()}" in argv
 
     def test_a_layout_is_an_oci_dir_target(self, monkeypatch, tmp_path):
         _no_engine(monkeypatch, tmp_path)
@@ -202,15 +315,19 @@ class TestGrypeImageArgv:
         assert f"oci-dir:{layout.absolute().as_posix()}" in argv
 
     def test_the_filesystem_argv_is_unchanged(self, monkeypatch, tmp_path):
-        # The control: the dir: scan's target spelling is byte-for-byte what
-        # it was, whatever the image dispatch added beside it.
+        # The control, whole-argv: the image dispatch leaves the dir: scan's
+        # resolution exactly as it was, no token added, dropped or moved.
         _no_engine(monkeypatch, tmp_path)
         scanner = self._scanner(tmp_path)
         source = Path(scanner.context.source_dir)
-        argv, _results, _env = scanner._execute_scan(source, "source", [])
+        before, _results, _env = scanner._execute_scan(source, "source", [])
+        scanner._execute_image_scan(ImageLocator(ref=IMAGE_REF))
+        scanner._image_scan_in_progress = False
+        after, _results2, _env2 = scanner._execute_scan(source, "source", [])
+        assert after == before
         import os
 
-        assert f"dir:{Path(os.path.abspath(source)).as_posix()}" in argv
+        assert f"dir:{Path(os.path.abspath(source)).as_posix()}" in before
 
 
 class TestTrivyImageArgv:
@@ -235,7 +352,13 @@ class TestTrivyImageArgv:
         assert argv.index("--image-src=remote") < argv.index(IMAGE_REF)
         assert results_file.parent.name == "image"
 
-    def test_a_ref_with_a_daemon_scans_through_it(self, monkeypatch, tmp_path):
+    @needs_af_unix
+    def test_a_ref_with_a_daemon_scans_through_it_then_remote(
+        self, monkeypatch, tmp_path
+    ):
+        # The daemon's store first, the registry second: trivy's engine
+        # sources never pull, so a single-source value made every
+        # not-yet-pulled reference an ERROR on any host with a socket.
         server = _docker_engine(monkeypatch, tmp_path)
         try:
             scanner = self._scanner(tmp_path)
@@ -244,35 +367,47 @@ class TestTrivyImageArgv:
             )
         finally:
             server.close()
-        assert argv.index("--image-src=docker") < argv.index(IMAGE_REF)
+        assert argv.index("--image-src=docker,remote") < argv.index(IMAGE_REF)
 
     def test_an_archive_goes_through_input(self, monkeypatch, tmp_path):
         _no_engine(monkeypatch, tmp_path)
-        archive = _archive(tmp_path)
+        archive = _docker_archive(tmp_path)
         scanner = self._scanner(tmp_path)
         argv, _results, _env = scanner._execute_image_scan(
             ImageLocator(oci_archive=archive)
         )
         assert argv[:2] == ["trivy", "image"]
         assert f"--input={archive.absolute().as_posix()}" in argv
-        assert not any(token.startswith("--image-src") for token in argv)
         assert IMAGE_REF not in argv
-        assert not any(value.startswith("--image-src") for value in argv)
+        assert not any(str(value).startswith("--image-src") for value in argv)
 
-    def test_a_layout_is_a_reported_clean_skip(self, tmp_path):
-        scanner = self._scanner(tmp_path)
+    def test_a_layout_goes_through_input_too(self, monkeypatch, tmp_path):
+        # trivy's --input reads an OCI image-layout directory as well as a
+        # saved tar (its container_image target docs), so a layout is scanned,
+        # not skipped.
+        _no_engine(monkeypatch, tmp_path)
         layout = _layout(tmp_path)
-        reason = scanner._unsupported_image_shape_reason(
+        scanner = self._scanner(tmp_path)
+        argv, _results, _env = scanner._execute_image_scan(
             ImageLocator(oci_layout=layout)
         )
-        assert reason is not None
-        assert "OCI image-layout" in reason
+        assert f"--input={layout.absolute().as_posix()}" in argv
+        assert (
+            scanner._unsupported_image_shape_reason(ImageLocator(oci_layout=layout))
+            is None
+        )
 
-    def test_the_filesystem_subcommand_is_unchanged(self, monkeypatch, tmp_path):
+    def test_the_filesystem_argv_is_unchanged(self, monkeypatch, tmp_path):
+        # The control, whole-argv: the image resolution swaps the subcommand
+        # for itself only and leaves the fs resolution untouched.
         _no_engine(monkeypatch, tmp_path)
         scanner = self._scanner(tmp_path)
-        # The image resolution swaps the subcommand for itself only.
+        source = Path(scanner.context.source_dir)
+        before, _results, _env = scanner._execute_scan(source, "source", [])
         scanner._execute_image_scan(ImageLocator(ref=IMAGE_REF))
+        scanner._image_scan_in_progress = False
+        after, _results2, _env2 = scanner._execute_scan(source, "source", [])
+        assert after == before
         assert scanner.subcommands == ["fs"]
 
 
@@ -286,19 +421,25 @@ class TestSyftImageDispatch:
         # would grade as SARIF, so the override must be the whole dispatch.
         assert "scan_image" in vars(SyftScanner)
 
-    def test_an_offline_ref_with_no_engine_is_a_reported_clean_skip(
-        self, monkeypatch, tmp_path
+    @pytest.mark.parametrize("engine_present", [False, True])
+    def test_an_offline_ref_is_a_reported_clean_skip(
+        self, monkeypatch, tmp_path, engine_present
     ):
+        # Offline gates the PULL path too: an engine asked for an image it
+        # does not hold pulls it, so a reference is skipped offline whether or
+        # not a daemon is present (a payload is not).
         from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
             SyftScanner,
             SyftScannerConfig,
         )
 
         _no_engine(monkeypatch, tmp_path)
+        if engine_present:
+            monkeypatch.setenv("DOCKER_HOST", "tcp://docker:2375")
         monkeypatch.setenv("ASH_OFFLINE", "true")
         scanner = SyftScanner(context=_context(tmp_path), config=SyftScannerConfig())
         result = scanner.scan_image(ImageLocator(ref=IMAGE_REF))
         assert result is True
         assert scanner._nothing_scanned_reason is not None
-        assert "no container engine" in scanner._nothing_scanned_reason
         assert "offline" in scanner._nothing_scanned_reason
+        assert "archive" in scanner._nothing_scanned_reason

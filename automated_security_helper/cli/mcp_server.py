@@ -3094,8 +3094,8 @@ async def set_source_image(
     (registry/repo[:tag][@sha256:digest]) is stored on the session and NOTHING
     is fetched at delivery time -- image fetching, caching and preparing are
     delegated to a container engine or the scanner tools' own registry clients
-    at scan start. Digest-pinned refs are preferred; a tag-only ref is resolved
-    where an engine is present. run_ash_scan with no source_dir then scans this
+    at scan start. Digest-pinned refs are preferred; a tag-only ref is handed
+    to the tools as written. run_ash_scan with no source_dir then scans this
     image; scanners that do not declare container_image targets are reported
     SKIPPED, and when nothing scanned the image the report carries one
     informational note saying so.

@@ -7128,6 +7128,8 @@ def _refuse_an_image_scan_scope(
     workspace_plan: "WorkspacePlan | None",
     existing_results: str | None,
     changed_files_only: bool,
+    staged: bool = False,
+    baseline: str | None = None,
     shard_index: int | None = None,
     shard_count: int | None = None,
 ) -> None:
@@ -7135,8 +7137,11 @@ def _refuse_an_image_scan_scope(
 
     Shared by the image OPTIONS (:func:`_image_asset_or_refusal`) and the
     pre-built ``asset`` an infrastructure caller passes: an image scan runs in
-    local mode, single-directory, on a fresh scan, with no git-history scope.
-    Each refusal exits with the usage code (5).
+    local mode, single-directory, on a fresh scan, with no git-history scope,
+    no staged scope and no baseline. The CLI refuses the same combinations
+    first only to word them as the operator typed them (the flag, or the
+    variable that set it); the rules live here, so a library call obeys them
+    too. Each refusal exits with the usage code (5).
     """
     if workspace_plan is not None:
         _printed_refusal(
@@ -7175,6 +7180,21 @@ def _refuse_an_image_scan_scope(
             "scopes a scan by git history: an image has none.",
             one_line=True,
         )
+    if staged:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "an image option cannot be combined with staged, which scopes a "
+            "scan to the git index: an image has none.",
+            one_line=True,
+        )
+    if baseline is not None:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "an image option cannot be combined with a baseline: comparing an "
+            "image scan against a saved one is not supported yet. Run the "
+            "image scan without baseline.",
+            one_line=True,
+        )
 
 
 def _image_asset_or_refusal(
@@ -7187,6 +7207,8 @@ def _image_asset_or_refusal(
     workspace_plan: "WorkspacePlan | None",
     existing_results: str | None,
     changed_files_only: bool,
+    staged: bool = False,
+    baseline: str | None = None,
     shard_index: int | None = None,
     shard_count: int | None = None,
 ) -> Asset | None:
@@ -7236,6 +7258,8 @@ def _image_asset_or_refusal(
         workspace_plan=workspace_plan,
         existing_results=existing_results,
         changed_files_only=changed_files_only,
+        staged=staged,
+        baseline=baseline,
         shard_index=shard_index,
         shard_count=shard_count,
     )
@@ -7363,7 +7387,8 @@ def run_ash_scan(
     #
     # ``asset`` is the pre-built form for an infrastructure caller (the MCP
     # scan runner), which anchors the scan's output and config discovery in a
-    # directory it owns -- the session workspace -- while the subject is the
+    # directory it owns -- the session's dedicated image-scan directory
+    # (``ensure_session_image_scan_dir``) -- while the subject is the
     # image: for it, source_dir is the deliberate anchor, not a second
     # subject, so the source_dir exclusivity rule binds the OPTIONS only.
     # The mode, workspace and scope rules bind both forms alike.
@@ -7383,6 +7408,8 @@ def run_ash_scan(
                 workspace_plan=workspace_plan,
                 existing_results=existing_results,
                 changed_files_only=changed_files_only,
+                staged=staged,
+                baseline=baseline,
                 shard_index=shard_index,
                 shard_count=shard_count,
             )
@@ -7396,6 +7423,8 @@ def run_ash_scan(
             workspace_plan=workspace_plan,
             existing_results=existing_results,
             changed_files_only=changed_files_only,
+            staged=staged,
+            baseline=baseline,
             shard_index=shard_index,
             shard_count=shard_count,
         )
