@@ -279,12 +279,14 @@ class TestMainOverTheRealPins:
         def lookup(project: str) -> str:
             return latest_for(project)
 
+        # Every upstream kind the checker looks up is stubbed, not only GitHub, PyPI
+        # and RubyGems: main() also checks the repository's own pins (REPO_PINS), and
+        # on v4 those include image digests, dated snapshots and a pyproject floor.
         monkeypatch.setattr(
             checker,
             "DEFAULT_FETCHERS",
             {
-                checker.GITHUB: lookup,
-                checker.PYPI: lookup,
+                **dict.fromkeys(checker.DEFAULT_FETCHERS, lookup),
                 checker.RUBYGEMS: lambda project: [
                     {
                         "number": lookup(project),
@@ -299,10 +301,19 @@ class TestMainOverTheRealPins:
         return code, capsys.readouterr().out
 
     def _versions(self) -> dict[str, str]:
-        return {
-            p.project: p.version
-            for p in checker.enumerate_pins(checker.load_pins_module())
-        }
+        """project -> pinned value over the module's pins and REPO_PINS, so a stub that
+        answers with these reports every pin current. A bundled library is never looked
+        up; a project pinned twice keeps its first spelling (the version check test
+        asserts the two name one release)."""
+        versions: dict[str, str] = {}
+        every = (
+            checker.enumerate_pins(checker.load_pins_module())
+            + checker.enumerate_repo_pins()
+        )
+        for p in every:
+            if p.kind != checker.BUNDLED_LIBRARY:
+                versions.setdefault(p.project, p.version)
+        return versions
 
     def test_pygit2_at_its_acknowledged_release_passes_and_is_listed(
         self, monkeypatch, capsys
