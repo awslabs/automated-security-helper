@@ -33,7 +33,11 @@ FILES = (".ash.yaml", ".ash/.ash_alpha_plugins.yaml")
         ("tests/pytest-temp/**", "tests/pytest-temp/a/b.py", True),
         ("tests/pytest-temp/**", "tests/pytest-temp/b.py", True),
         ("tests/pytest-temp/**", "tests/other/b.py", False),
-        ("tests/pytest-temp", "tests/pytest-temp/b.py", False),
+        # A bare directory spelling with no glob is a prefix: it matches what is
+        # below it, the same as "docs" and "docs/" do in the matcher's own tests.
+        # It does not match a sibling that only shares the leading characters.
+        ("tests/pytest-temp", "tests/pytest-temp/b.py", True),
+        ("tests/pytest-temp", "tests/pytest-temp-other/b.py", False),
         ("docs/**", "docs/content/x.md", True),
         ("tests/**/__snapshots__/**", "tests/unit/__snapshots__/a.json", True),
         ("tests/**/__snapshots__/**/*", "tests/unit/__snapshots__/a.json", True),

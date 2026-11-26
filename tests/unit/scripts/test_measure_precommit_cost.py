@@ -70,9 +70,9 @@ def fakes(tmp_path: Path, monkeypatch):
     return exes, log
 
 
-def _builds(script, exes, tmp_path: Path):
+def _builds(script, exes, tmp_path: Path, tags=("base", "head")):
     builds = []
-    for tag in ("base", "head"):
+    for tag in tags:
         root = tmp_path / f"repo_{tag}"
         script.build_fixture(root, "bench")
         script.init_repository(root)
@@ -725,14 +725,7 @@ def test_the_trend_line_keeps_the_old_keys_and_adds_the_baselines(script):
 
 def test_three_builds_alternate_in_the_order_given(script, fakes, tmp_path: Path):
     exes, log = fakes
-    builds = []
-    for tag in ("base", "mid", "head"):
-        root = tmp_path / f"repo_{tag}"
-        script.build_fixture(root, "bench")
-        script.init_repository(root)
-        builds.append(
-            script.Build(tag, [sys.executable, str(exes[tag])], root, f"{tag}-sha")
-        )
+    builds = _builds(script, exes, tmp_path, tags=("base", "mid", "head"))
     script.collect(builds, _scenario(script, "version"), repeats=2)
     assert _calls(log) == ["base", "mid", "head"] * 3
 
