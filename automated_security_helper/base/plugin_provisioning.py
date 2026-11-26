@@ -246,6 +246,11 @@ _GOSEC = Provisioning(tool_pins=(ToolPin("gosec", "v2.30.0"),))
 # records the version its digests were taken at (_DIGESTS_TAKEN_AT).
 _KINGFISHER = Provisioning(tool_pins=(ToolPin("kingfisher", "v2.19.1"),))
 
+# The alpha Kubernetes linter from StackRox. Its release names its assets without a
+# version (kube-linter-linux.tar.gz in every release), so tool_downloads also records
+# the version its digests were taken at (_DIGESTS_TAKEN_AT).
+_KUBE_LINTER = Provisioning(tool_pins=(ToolPin("kube-linter", "v0.8.3"),))
+
 # The Go toolchain syft or grype may run: no module proxy, no toolchain download. On a Go
 # module, syft (golang.use-packages-lib, on by default) and grype run the Go toolchain found
 # on PATH (``go list``; measured with a fake ``go``). A real toolchain resolves missing
@@ -514,6 +519,7 @@ PROVISIONING: Mapping[str, Provisioning] = MappingProxyType(
         "grype": _GRYPE,
         "hadolint": _HADOLINT,
         "kingfisher": _KINGFISHER,
+        "kube-linter": _KUBE_LINTER,
         "npm-audit": _NPM_AUDIT,
         "opengrep": _OPENGREP,
         "semgrep": _SEMGREP,

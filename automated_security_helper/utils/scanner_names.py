@@ -147,6 +147,7 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
     "hadolint": ScannerToolType.IAC.value,
     "kics": ScannerToolType.IAC.value,
     "kingfisher": ScannerToolType.SECRETS.value,
+    "kube-linter": ScannerToolType.IAC.value,
     "mcp-config": ScannerToolType.SAST.value,
     "npm-audit": ScannerToolType.SCA.value,
     "opengrep": ScannerToolType.SAST.value,

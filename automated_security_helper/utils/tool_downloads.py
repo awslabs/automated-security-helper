@@ -284,6 +284,22 @@ _KINGFISHER_ASSETS: dict[PlatformArch, str] = {
     ("windows", "arm64"): "kingfisher-windows-arm64.zip",
 }
 
+# kube-linter (the alpha Kubernetes linter from StackRox) names its assets without a
+# version -- every release publishes kube-linter-<os>[_arm64].tar.gz -- so the version
+# lives only in the release tag in the URL, and the pin is completed by its
+# _DIGESTS_TAKEN_AT row, like kingfisher's. The same release also publishes each
+# platform's executable bare (kube-linter-linux, kube-linter.exe, ...) with a sigstore
+# bundle; the archives are used because each carries the LICENSE beside the
+# executable, which is byte-identical to the bare asset of the same platform.
+_KUBE_LINTER_ASSETS: dict[PlatformArch, str] = {
+    ("linux", "amd64"): "kube-linter-linux.tar.gz",
+    ("linux", "arm64"): "kube-linter-linux_arm64.tar.gz",
+    ("darwin", "amd64"): "kube-linter-darwin.tar.gz",
+    ("darwin", "arm64"): "kube-linter-darwin_arm64.tar.gz",
+    ("windows", "amd64"): "kube-linter-windows.tar.gz",
+    ("windows", "arm64"): "kube-linter-windows_arm64.tar.gz",
+}
+
 _SYFT_ASSETS: dict[PlatformArch, str] = {
     ("linux", "amd64"): "syft_1.57.2_linux_amd64.tar.gz",
     ("linux", "arm64"): "syft_1.57.2_linux_arm64.tar.gz",
@@ -384,6 +400,14 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # Windows zips) and hashed the same day. The extracted linux/x64 binary was run; it
 # reports "kingfisher 2.19.1". The first real install re-checks every value: a wrong
 # entry fails that install rather than sitting here unnoticed.
+#
+# kube-linter publishes no checksums file either. Its six archive digests are the
+# `digest` field GitHub reports for each asset of the v0.8.3 release, each confirmed on
+# 2026-11-26 by downloading the asset and hashing it with sha256sum (all six agreed).
+# Its executable digests were taken from those checked archives the same day: each
+# member extracted with GNU tar and hashed, and each equals the digest GitHub reports
+# for the same platform's bare executable asset. The extracted linux/amd64 binary was
+# run; `kube-linter version` prints "0.8.3".
 #
 # Every line carries `# pragma: allowlist secret`, which is detect-secrets' own
 # inline marker. It is needed and it is honest: a 64-character hex string is exactly
@@ -498,6 +522,13 @@ _DIGESTS: dict[str, str] = {
     "kingfisher-darwin-arm64.tgz": "c7441bb1708f65fb146121e351546661c5ace52fd948eff7fd7c6adb68e7c556",  # pragma: allowlist secret
     "kingfisher-windows-x64.zip": "0318f322351da4b012d8c9619513ba3538f6f6c7aa10447003c3590da074efef",  # pragma: allowlist secret
     "kingfisher-windows-arm64.zip": "9d4b6d2a97040ef7b05cbabfbe241ca315b71b439bf8e42db76954001fbb5f87",  # pragma: allowlist secret
+    # kube-linter v0.8.3 (no published checksums file; GitHub's asset digests, re-verified)
+    "kube-linter-linux.tar.gz": "1a6d8419b11971372971fdbc22682b684ebfb7cf1c39591662d1b6ca736c41df",  # pragma: allowlist secret
+    "kube-linter-linux_arm64.tar.gz": "802e1b09eabd08f6f0a060a6b8ab2bf7bc7e6bf4f673bb2692303704c84b3e22",  # pragma: allowlist secret
+    "kube-linter-darwin.tar.gz": "c62e8af3c9df2557c7a3922119ea1b35597794737d1ccad493f63a0d66e7b8fc",  # pragma: allowlist secret
+    "kube-linter-darwin_arm64.tar.gz": "6e3443a8ff8625a9fc31a38682c783988d7559018f7ff707a4f8c77c18c92f14",  # pragma: allowlist secret
+    "kube-linter-windows.tar.gz": "27132f8505d156e3877c6235970f567f47bedf11102f79fd6780d4ab536f6525",  # pragma: allowlist secret
+    "kube-linter-windows_arm64.tar.gz": "23e6bf5fe694219187c24a01692acdfcfb077aac821cb3d5bdf393f5a536f599",  # pragma: allowlist secret
     # syft v1.57.2
     "syft_1.57.2_linux_amd64.tar.gz": "ad92bd3ec1b94a3df01d4d0aec199afa9c42b72e86da436ff5f837914d32706b",  # pragma: allowlist secret
     "syft_1.57.2_linux_arm64.tar.gz": "8efe605309c98798e1ee0cffdcf8c05ca26819b4cd44c0b03650f1e963e9bdb6",  # pragma: allowlist secret
@@ -578,6 +609,13 @@ _EXECUTABLE_DIGESTS: dict[str, str] = {
     "kingfisher-darwin-arm64.tgz": "831e2bafbb344644632490ada21c55e4843d8908ca794eb2bbe7b590ccb6bc2b",  # pragma: allowlist secret
     "kingfisher-windows-x64.zip": "0b539b708725ecd0db8ed88be98aea87c5a0e52643954da191ec73e40bd5a0d6",  # pragma: allowlist secret
     "kingfisher-windows-arm64.zip": "a16c881cdc4afc55862a8cf6f57c531a2f9a84136b161237ad898d07ea89eddf",  # pragma: allowlist secret
+    # kube-linter v0.8.3
+    "kube-linter-linux.tar.gz": "618d299a3e2839c8ca9d86fce0db617be0fba41f0fecbbbfb7fbf1c04299fae1",  # pragma: allowlist secret
+    "kube-linter-linux_arm64.tar.gz": "9c39d35252e0dcafb16b26197b9e93ba578e44eb402c3c6660fc94e08f94094f",  # pragma: allowlist secret
+    "kube-linter-darwin.tar.gz": "d935e2bc89e272c74227cdc4ac4dba35f468e0e486e846e5892231a301c91a67",  # pragma: allowlist secret
+    "kube-linter-darwin_arm64.tar.gz": "662277a6a267ba2cb1371b56539a371872ef142b196fa0d87195e4213773cdf8",  # pragma: allowlist secret
+    "kube-linter-windows.tar.gz": "8b0ccf51f18ab786fdcdede55046afc701a75c75122e046a2f0d3244bc91274a",  # pragma: allowlist secret
+    "kube-linter-windows_arm64.tar.gz": "344ddf355c0445851d1acd64905e9dd345e2360a80f4917a36050e72775f1b62",  # pragma: allowlist secret
     # syft v1.57.2
     "syft_1.57.2_linux_amd64.tar.gz": "17cc40c1e40dbfdeb8c84b6d9928909bceb793f22e8a8023ef408625f1d96ec5",  # pragma: allowlist secret
     "syft_1.57.2_linux_arm64.tar.gz": "2bbe674996bbe831dcc68fa50b0c5e68acd728c5d9da7cc68d88713a9ef6b748",  # pragma: allowlist secret
@@ -636,6 +674,9 @@ _DIGESTS_TAKEN_AT: dict[str, str] = {
     # kingfisher names its assets for the platform only (kingfisher-linux-x64.tgz),
     # the version being in the tag.
     "kingfisher": "v2.19.1",
+    # kube-linter names its assets for the platform only (kube-linter-linux.tar.gz),
+    # the version being in the tag.
+    "kube-linter": "v0.8.3",
     "opengrep": "v2.0.0",
     "uv": "0.13.9",
 }
@@ -655,6 +696,7 @@ _RELEASE_BASE_URLS: dict[str, str] = {
     "grype": "https://github.com/anchore/grype/releases/download",
     "hadolint": "https://github.com/hadolint/hadolint/releases/download",
     "kingfisher": "https://github.com/mongodb/kingfisher/releases/download",
+    "kube-linter": "https://github.com/stackrox/kube-linter/releases/download",
     "opengrep": "https://github.com/opengrep/opengrep/releases/download",
     "syft": "https://github.com/anchore/syft/releases/download",
     "trivy": "https://github.com/aquasecurity/trivy/releases/download",
@@ -671,6 +713,7 @@ _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
     "grype": _GRYPE_ASSETS,
     "hadolint": _HADOLINT_ASSETS,
     "kingfisher": _KINGFISHER_ASSETS,
+    "kube-linter": _KUBE_LINTER_ASSETS,
     "opengrep": _OPENGREP_ASSETS,
     "syft": _SYFT_ASSETS,
     "trivy": _TRIVY_ASSETS,
@@ -1124,6 +1167,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "hadolint/ThirdPartyNotices.txt": "424561d8aade37960e8db594ca5403f9a4a98f593ff1126a296298f11d3d1a27",  # pragma: allowlist secret
     "kingfisher commit": "0b57b8122e10050db3cefffde1a555a061e0b280",  # pragma: allowlist secret
     "kingfisher/LICENSE": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",  # pragma: allowlist secret
+    "kube-linter commit": "10ae003038c81855aca8489df5e35da150f4dc2e",  # pragma: allowlist secret
     "libgit2 commit": "0060d9cf5666f015b1067129bd874c6cc4c9c7ac",  # pragma: allowlist secret
     "libgit2/AUTHORS": "126ed06438e488d71f5232b39436b3a1dffccb9c2697e3a332fbe868975cd55f",  # pragma: allowlist secret
     "libgit2/COPYING": "e3712465634e97cfd850822a4eb5ac7d2f8a10f753189366d5a2060046f28288",  # pragma: allowlist secret
@@ -1428,6 +1472,20 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             LicenseFile("THIRD_PARTY_NOTICES"),
             LicenseFile("kingfisher-vectorscan-NOTICE"),
         ),
+    ),
+    # The alpha kube-linter scanner's tool. Every release archive holds the executable,
+    # a README.md and the Apache-2.0 text as LICENSE, byte-identical across the six
+    # pinned archives and to the repository's LICENSE at the pinned commit (compared on
+    # 2026-11-26); the repository has no NOTICE file. `kube-linter --version` is an
+    # unknown flag, so the version check runs `kube-linter version` (prints "0.8.3").
+    "kube-linter": ThirdPartyLicense(
+        tool="kube-linter",
+        version="v0.8.3",
+        license="Apache-2.0",
+        repository="https://github.com/stackrox/kube-linter",
+        commit=_THIRD_PARTY_HASHES["kube-linter commit"],
+        files=(LicenseFile("LICENSE"),),
+        version_probe=("kube-linter", "version"),
     ),
     # Compiled into the pygit2 wheel GuardDog depends on (pygit2.libs/libgit2-*.so),
     # in GuardDog's uv tool environment. COPYING carries the linking exception and

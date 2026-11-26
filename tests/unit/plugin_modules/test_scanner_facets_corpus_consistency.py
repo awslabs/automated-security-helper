@@ -226,6 +226,9 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
     "hadolint": CorpusSpec("hadolint", sarif=("captured/*.sarif",)),
     "kics": CorpusSpec("kics", sarif=("captured/*.sarif",)),
     "kingfisher": CorpusSpec("kingfisher", sarif=("captured/*.sarif",)),
+    # The committed SARIF is what a real KubeLinter v0.8.3 run wrote (see
+    # captured/README.md for the argv and inputs); nothing in it was edited.
+    "kube-linter": CorpusSpec("kube-linter", sarif=("captured/*.sarif",)),
     "mcp-config": CorpusSpec("mcp_config", sarif=("captured/*.sarif",)),
     "npm-audit": CorpusSpec("npmaudit", prep="npm-audit"),
     "opengrep": CorpusSpec("opengrep", sarif=("captured/*.sarif",)),

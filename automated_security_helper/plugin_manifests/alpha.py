@@ -218,6 +218,14 @@ MANIFESTS = (
         owned=(f"{_DOCS}/kingfisher-plugin.md", f"{_FIXTURES}/kingfisher"),
     ),
     _alpha(
+        "kube-linter",
+        "ash_kube_linter_plugins",
+        "kube_linter_scanner",
+        "KubeLinterScanner",
+        "KubeLinterScannerConfigOptions",
+        owned=(f"{_DOCS}/kube-linter-plugin.md", f"{_FIXTURES}/kube-linter"),
+    ),
+    _alpha(
         "polaris",
         "ash_polaris_plugins",
         "polaris_scanner",
