@@ -216,10 +216,13 @@ SCAN_ENV_DROPPED_VARIABLES = frozenset(
 #: is split on the first = in `_is_gate_owned_option`, because `click` accepts it for
 #: options that take a value, --min-severity among them.
 #:
-#: The set is still written out by hand, so it can fall behind the CLI. The test
-#: test_every_option_that_names_scanners_is_reserved, in
-#: tests/unit/deploy/test_codecommit_gate_fails_closed.py, reads the real click
-#: command and fails when an option whose spelling names scanners is missing here.
+#: The set is still written out by hand, so it can fall behind the CLI. Two tests in
+#: tests/unit/deploy/test_codecommit_gate_fails_closed.py read the real click command
+#: and fail when it gains an option this set misses:
+#: test_every_option_that_names_scanners_is_reserved, for an option whose spelling
+#: names scanners (unless the test exempts it with the reason it cannot narrow a
+#: scan), and test_every_option_handled_before_the_scan_runs_is_reserved, for one
+#: that click handles before the scan function is called.
 GATE_OWNED_SCAN_OPTIONS = frozenset(
     {
         # Passed by this gate, so a repeat here would resolve last and win.
@@ -236,9 +239,10 @@ GATE_OWNED_SCAN_OPTIONS = frozenset(
         # scanners.
         "--scanners",
         "--exclude-scanners",
-        # --only-scanners states the whole selection. Outside --mode precommit,
-        # --add-scanners means what --scanners means, so with no default_scanners in
-        # the config the scanners it names are the whole selection too.
+        # --only-scanners states the whole selection, and --add-scanners means what
+        # --scanners means: in the local mode this gate scans in, with no
+        # default_scanners.only in the config, the scanners it names are the whole
+        # selection too.
         "--only-scanners",
         "--add-scanners",
         "--python-only",
@@ -271,6 +275,16 @@ GATE_OWNED_SCAN_OPTIONS = frozenset(
         # history, so --base-ref has real refs to point at.
         "--changed-files-only",
         "--base-ref",
+        # End `ash scan` with exit 0 before any scanner starts, which is the outcome
+        # this gate reads as "pass". check_completeness_flag's own `ash scan --help`
+        # probe is a separate command, built here and never from the extra args.
+        "--help",
+        "--version",
+        "--generate-cli-skeleton",
+        # Read parameter values from a JSON document. The document's values stand for
+        # every parameter the command line does not set, so it reaches each option
+        # above that this gate does not pass itself, the scanner selection included.
+        "--cli-json-input",
     }
 )
 
