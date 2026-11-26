@@ -165,8 +165,8 @@ def scene(tmp_path: Path) -> SimpleNamespace:
     w = tmp_path / "W"
     mark_git_checkout(w / "repo")
     source = w / "repo" / "svc"
-    (source / ".ash").mkdir(parents=True)
-    (source / ".ash" / ".ash.yaml").write_text(REPOSITORY, encoding="utf-8")
+    source.mkdir(parents=True)
+    (source / ".ash.yaml").write_text(REPOSITORY, encoding="utf-8")
     return SimpleNamespace(w=w, source=source, out=tmp_path / "out")
 
 
@@ -336,9 +336,9 @@ def test_a_config_in_another_checkout_grants_nothing_inside_in_a_workspace_scan(
     ws = scene.w / "repo" / "ws"
     (ws / "bare").mkdir(parents=True)
     (ws / "bare" / "a.py").write_text("x = 1\n", encoding="utf-8")
-    (ws / "own" / ".ash").mkdir(parents=True)
+    (ws / "own").mkdir(parents=True)
     (ws / "own" / "b.py").write_text("y = 2\n", encoding="utf-8")
-    (ws / "own" / ".ash" / ".ash.yaml").write_text(REPOSITORY, encoding="utf-8")
+    (ws / "own" / ".ash.yaml").write_text(REPOSITORY, encoding="utf-8")
     definition = ws / "ash.code-workspace"
     definition.write_text(
         json.dumps({"folders": [{"path": "bare"}, {"path": "own"}]}), encoding="utf-8"
@@ -641,11 +641,11 @@ def test_control_a_config_in_the_scanned_checkout_is_marked_as_the_scanned_trees
 
 
 def test_control_a_config_inside_the_source_directory_needs_no_mark(launch):
-    config = _write(launch["source"] / ".ash" / "ash.yaml")
+    config = _write(launch["source"] / ".ash.yaml")
 
     inner = _inner_args(_assemble(launch["source"], launch["out"], config=str(config)))
 
-    assert inner[inner.index("--config") + 1] == "/src/.ash/ash.yaml"
+    assert inner[inner.index("--config") + 1] == "/src/.ash.yaml"
     assert _flags(inner, FLAG) == []
     assert CHAIN_FLAG not in inner
 
@@ -876,7 +876,7 @@ def test_the_mark_does_not_lift_the_limits_on_a_file_inside_the_scanned_director
 
     source = tmp_path / "src"
     config = _write(
-        source / ".ash" / "ash.yaml",
+        source / ".ash.yaml",
         f"project_name: p\nash_plugin_modules:\n  - {UNINSTALLED}\n"
         "sandbox:\n  extra_read_paths: [/data]\n",
     )

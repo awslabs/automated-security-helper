@@ -179,7 +179,11 @@ class TestTheConfigIsReadableInsideTheContainer:
         assert str(config) not in inner_args
 
     def test_the_extends_chain_is_mounted_where_relative_bases_find_it(self, tree):
-        """``.ash/`` confines a chain to its parent, so a sibling base is reachable."""
+        """``.ash/`` confines a chain to its parent, so a sibling base is reachable.
+
+        Legacy location: this test's subject is the deprecated ``.ash/.ash.yaml``
+        path and the ``.ash`` directory's confinement.
+        """
         (tree["operator"] / ".ash").mkdir()
         config = tree["operator"] / ".ash" / ".ash.yaml"
         config.write_text("extends: ../shared.yaml\n", encoding="utf-8")
@@ -225,7 +229,7 @@ class TestTheConfigIsReadableInsideTheContainer:
         """
         target = tree["operator"] / "ash.yaml"
         target.write_text("project_name: p\n", encoding="utf-8")
-        link = tree["source"] / ".ash" / ".ash.yaml"
+        link = tree["source"] / ".ash.yaml"
         link.symlink_to(target)
 
         with pytest.raises(ValueError, match="link"):

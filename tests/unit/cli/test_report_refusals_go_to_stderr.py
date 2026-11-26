@@ -199,12 +199,12 @@ def test_an_off_host_reporter_only_a_config_file_enabled_is_refused_on_stderr(
     )
 
     work, output_dir = _stored_results(tmp_path)
-    (work / ".ash" / ".ash.yaml").write_text(
+    (work / ".ash.yaml").write_text(
         "project_name: from-the-repository\n", encoding="utf-8"
     )
     operator_file = tmp_path / "operator.yaml"
     operator_file.write_text(
-        "extends: work/.ash/.ash.yaml\n"
+        "extends: work/.ash.yaml\n"
         "reporters:\n"
         "  s3:\n"
         "    enabled: true\n"

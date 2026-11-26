@@ -750,8 +750,7 @@ class TestTheResolveConfigLevel:
 
         checkout = tmp_path / "checkout"
         _checkout(checkout)
-        env_config = checkout / ".ash" / ".ash.yaml"
-        env_config.parent.mkdir(parents=True)
+        env_config = checkout / ".ash.yaml"
         env_config.write_text(json.dumps(_OPERATOR_ONLY_DOC), encoding="utf-8")
         monkeypatch.setenv("ASH_CONFIG", str(env_config))
         named = tmp_path / "operator.yaml"
@@ -833,7 +832,7 @@ class TestTheResolveConfigLevel:
         base = checkout / ".ash" / "gate" / "base.yaml"
         base.parent.mkdir(parents=True)
         base.write_text(json.dumps({"project_name": "base"}), encoding="utf-8")
-        env_config = checkout / ".ash" / ".ash.yaml"
+        env_config = checkout / ".ash.yaml"
         env_config.write_text(
             json.dumps({**_OPERATOR_ONLY_DOC, "extends": base.as_posix()}),
             encoding="utf-8",

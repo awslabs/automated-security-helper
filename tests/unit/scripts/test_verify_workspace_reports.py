@@ -28,12 +28,8 @@ def reports(script_loader):
 class TestFixture:
     def test_the_api_project_declares_no_project_name(self, reports, tmp_path: Path):
         reports.build_workspace(tmp_path)
-        api_config = (tmp_path / "api" / ".ash" / "ash.yaml").read_text(
-            encoding="utf-8"
-        )
-        web_config = (tmp_path / "web" / ".ash" / "ash.yaml").read_text(
-            encoding="utf-8"
-        )
+        api_config = (tmp_path / "api" / ".ash.yaml").read_text(encoding="utf-8")
+        web_config = (tmp_path / "web" / ".ash.yaml").read_text(encoding="utf-8")
         assert "project_name" not in api_config
         assert "project_name: web-app" in web_config
 

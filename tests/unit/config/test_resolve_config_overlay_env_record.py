@@ -44,7 +44,7 @@ def _environment(monkeypatch):
 
 
 def _project(tmp_path: Path, document) -> Path:
-    path = tmp_path / "repo" / ".ash" / ".ash.yaml"
+    path = tmp_path / "repo" / ".ash.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(document), encoding="utf-8")
     return path

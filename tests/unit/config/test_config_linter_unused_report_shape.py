@@ -42,8 +42,7 @@ CONFIG = (
 
 
 def _layout(tmp_path: Path):
-    config = tmp_path / ".ash" / ".ash.yaml"
-    config.parent.mkdir(parents=True)
+    config = tmp_path / ".ash.yaml"
     config.write_bytes(CONFIG.encode("utf-8"))
     reports = tmp_path / ".ash" / "ash_output" / "reports"
     reports.mkdir(parents=True)

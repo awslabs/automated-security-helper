@@ -281,7 +281,7 @@ def test_with_no_config_at_all_the_forwarding_is_unchanged(container, tmp_path):
 def _checkout_with_config(tmp_path, body):
     checkout = tmp_path / "repo"
     mark_git_checkout(checkout)
-    config = checkout / ".ash" / ".ash.yaml"
+    config = checkout / ".ash.yaml"
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text(body, encoding="utf-8")
     return checkout, config

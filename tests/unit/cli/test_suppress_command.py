@@ -44,8 +44,7 @@ def repo(tmp_path, monkeypatch):
     monkeypatch.setenv("NO_COLOR", "1")
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "app.py").write_text(SOURCE, encoding="utf-8")
-    config = tmp_path / ".ash" / ".ash.yaml"
-    config.parent.mkdir()
+    config = tmp_path / ".ash.yaml"
     config.write_text(CONFIG, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     return tmp_path
@@ -74,7 +73,7 @@ def _lock(repo) -> dict:
 
 
 def _suppressions(repo) -> list[dict]:
-    text = (repo / ".ash" / ".ash.yaml").read_text(encoding="utf-8")
+    text = (repo / ".ash.yaml").read_text(encoding="utf-8")
     return yaml.safe_load(text)["global_settings"]["suppressions"]
 
 
@@ -94,9 +93,9 @@ class TestAdd:
         entry = _lock(repo)["files"]["src/app.py"]
         assert len(entry["sha256"]) == 64
         assert entry["scopes"] == [{"rule_id": "B602", "symbol": "risky"}]
-        assert "A comment the writer must keep." in (
-            repo / ".ash" / ".ash.yaml"
-        ).read_text(encoding="utf-8")
+        assert "A comment the writer must keep." in (repo / ".ash.yaml").read_text(
+            encoding="utf-8"
+        )
 
     def test_a_second_symbol_in_the_same_file_joins_the_entry(self, repo):
         assert _add(repo).exit_code == 0
@@ -109,15 +108,15 @@ class TestAdd:
     def test_adding_the_same_suppression_twice_writes_it_once(self, repo):
         assert _add(repo).exit_code == 0
         lock_before = (repo / LOCK_RELATIVE_PATH).read_bytes()
-        config_before = (repo / ".ash" / ".ash.yaml").read_bytes()
+        config_before = (repo / ".ash.yaml").read_bytes()
         again = _add(repo)
         assert again.exit_code == 0, again.output
         assert "Already in" in again.output
         assert (repo / LOCK_RELATIVE_PATH).read_bytes() == lock_before
-        assert (repo / ".ash" / ".ash.yaml").read_bytes() == config_before
+        assert (repo / ".ash.yaml").read_bytes() == config_before
 
     def test_a_suppression_already_in_the_config_is_only_locked(self, repo):
-        config = repo / ".ash" / ".ash.yaml"
+        config = repo / ".ash.yaml"
         config.write_text(
             CONFIG
             + "    - rule_id: B602\n      path: src/app.py\n      symbol: risky\n"
@@ -133,11 +132,11 @@ class TestAdd:
     def test_a_changed_locked_file_is_refused_before_anything_is_written(self, repo):
         assert _add(repo).exit_code == 0
         (repo / "src" / "app.py").write_text(SOURCE + "# edit\n", encoding="utf-8")
-        config_before = (repo / ".ash" / ".ash.yaml").read_bytes()
+        config_before = (repo / ".ash.yaml").read_bytes()
         result = _add(repo, symbol="other")
         assert result.exit_code == 1
         assert "ash suppress refresh" in result.output
-        assert (repo / ".ash" / ".ash.yaml").read_bytes() == config_before
+        assert (repo / ".ash.yaml").read_bytes() == config_before
 
     @pytest.mark.parametrize(
         "args, fragment",
@@ -148,11 +147,11 @@ class TestAdd:
         ],
     )
     def test_bad_input_is_refused_and_writes_nothing(self, repo, args, fragment):
-        before = (repo / ".ash" / ".ash.yaml").read_bytes()
+        before = (repo / ".ash.yaml").read_bytes()
         result = _run("add", "B602", *args, "--reason", "r")
         assert result.exit_code == 1
         assert fragment in result.output
-        assert (repo / ".ash" / ".ash.yaml").read_bytes() == before
+        assert (repo / ".ash.yaml").read_bytes() == before
         assert not (repo / LOCK_RELATIVE_PATH).exists()
 
     def test_a_blank_reason_is_refused(self, repo):
@@ -204,7 +203,7 @@ class TestRoundTrip:
         assert "missing:" in gone.output
 
     def test_verify_lists_a_symbol_suppression_with_no_entry(self, repo):
-        config = repo / ".ash" / ".ash.yaml"
+        config = repo / ".ash.yaml"
         config.write_text(
             CONFIG
             + "    - rule_id: B602\n      path: src/app.py\n      symbol: risky\n"
@@ -224,6 +223,7 @@ class TestRoundTrip:
         assert _add(repo).exit_code == 0
         text = (repo / ".ash.lock").read_bytes()
         (repo / ".ash.lock").unlink()
+        (repo / ".ash").mkdir()
         (repo / ".ash" / "ash.lock").write_bytes(text)
 
         result = _run("refresh")

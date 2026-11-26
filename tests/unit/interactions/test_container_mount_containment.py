@@ -653,7 +653,11 @@ class TestABaseOutsideTheConfigDirectoryIsNotMounted:
         }
 
     def test_a_config_in_dot_ash_may_reach_its_parent(self, tree):
-        """Control: ``.ash/`` confines the chain to the directory above it."""
+        """Control: ``.ash/`` confines the chain to the directory above it.
+
+        Legacy location: this test's subject is the deprecated ``.ash/.ash.yaml``
+        path and the ``.ash`` directory's confinement.
+        """
         ops = tree["operator"]
         (ops / ".ash").mkdir()
         (ops / "shared.yaml").write_text("project_name: s\n", encoding="utf-8")

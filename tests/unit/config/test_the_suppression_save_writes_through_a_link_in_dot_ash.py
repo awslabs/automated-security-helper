@@ -43,6 +43,7 @@ NEW = AshSuppression(rule_id="NEW-1", path="a.py", reason="kept")
 
 
 def test_a_dot_ash_link_to_a_config_beside_it_saves_through(tmp_path: Path) -> None:
+    """Legacy location: this test's subject is the deprecated .ash/.ash.yaml path."""
     repo = tmp_path / "repo"
     (repo / ".ash").mkdir(parents=True)
     target = repo / ".ash.yaml"
@@ -59,6 +60,7 @@ def test_a_dot_ash_link_to_a_config_beside_it_saves_through(tmp_path: Path) -> N
 def test_a_dot_ash_link_out_of_the_repository_is_still_refused(
     tmp_path: Path,
 ) -> None:
+    """Legacy location: this test's subject is the deprecated .ash/.ash.yaml path."""
     repo = tmp_path / "repo"
     (repo / ".ash").mkdir(parents=True)
     outside = tmp_path / "outside.yaml"

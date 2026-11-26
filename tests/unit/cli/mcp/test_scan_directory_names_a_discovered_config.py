@@ -33,9 +33,9 @@ pytestmark = pytest.mark.unit
 CANARY = "CANARY-VALUE-5e2b"
 
 #: (file name under the target, content). A defect of each kind discovery can
-#: select a file with: a YAML, JSON and TOML name, under .ash/ and at the root.
+#: select a file with: a YAML, JSON and TOML name, all at the root.
 BROKEN = [
-    pytest.param(".ash/.ash.yaml", f"project_name: *{CANARY}\n", id="yaml-alias"),
+    pytest.param(".ash.yaml", f"project_name: *{CANARY}\n", id="yaml-alias"),
     pytest.param(".ash.yml", f"project_name: [{CANARY}\n  : :\n", id="yaml-unparsable"),
     pytest.param(
         "ash.yaml",
@@ -124,7 +124,7 @@ UNSET_VARIABLE = "ASH_TEST_UNSET_VARIABLE_5e2b"
     ("name", "content"),
     [
         pytest.param(
-            ".ash/.ash.yaml",
+            ".ash.yaml",
             f"project_name: !ENV ${{{UNSET_VARIABLE}}}\n",
             id="yaml-explicit",
         ),
@@ -173,7 +173,7 @@ def test_a_discovered_pyproject_that_declares_ash_but_does_not_parse(target, cap
 
 
 def test_control_a_usable_discovered_config_starts_the_scan(target):
-    _write(target / ".ash" / ".ash.yaml", "project_name: fine\n")
+    _write(target / ".ash.yaml", "project_name: fine\n")
 
     result, started = _scan(target)
 

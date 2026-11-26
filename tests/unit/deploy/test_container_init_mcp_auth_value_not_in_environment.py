@@ -285,7 +285,7 @@ class TestTheExecdCommandsEnvironment:
     ):
         probe = tmp_path / "probe.py"
         probe.write_text(PROBE, encoding="utf-8")
-        config = tmp_path / "project" / ".ash" / ".ash.yaml"
+        config = tmp_path / "project" / ".ash.yaml"
         config.parent.mkdir(parents=True)
         config.write_text(
             "project_name: ${ASH_MCP_AUTH_HEADER_VALUE:not-set}\n", encoding="utf-8"
@@ -302,7 +302,7 @@ class TestTheExecdCommandsEnvironment:
                 sys.executable,
                 str(probe),
                 str(config),
-                str(config.parent.parent),
+                str(config.parent),
                 str(report),
                 str(handover),
             ],

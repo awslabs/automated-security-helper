@@ -156,7 +156,7 @@ def test_control_a_false_only_the_checkout_base_wrote_is_replaced_and_names_the_
 def _repository_with_a_config(tmp_path: Path) -> Path:
     repository = tmp_path / "repo"
     mark_git_checkout(repository)
-    _write(repository / ".ash" / ".ash.yaml", "project_name: repo\n")
+    _write(repository / ".ash.yaml", "project_name: repo\n")
     return repository
 
 

@@ -1140,12 +1140,12 @@ def test_loading_the_aws_plugins_without_enabling_it_never_contacts_aws(
 @pytest.mark.unit
 def test_an_override_turns_it_off_whatever_the_repositorys_config_says(tmp_path):
     """The CI examples pass enabled=false on the jobs that must not import: a
-    pull request can edit .ash/.ash.yaml, and its enabled: true must lose."""
+    pull request can edit .ash.yaml, and its enabled: true must lose."""
     from automated_security_helper.config.resolve_config import resolve_config
 
     checkout = tmp_path / "checkout"
-    (checkout / ".ash").mkdir(parents=True)
-    (checkout / ".ash" / ".ash.yaml").write_text(
+    checkout.mkdir(parents=True, exist_ok=True)
+    (checkout / ".ash.yaml").write_text(
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -1198,7 +1198,7 @@ def test_enabled_true_in_the_config_turns_it_on(tmp_path):
 # and archives, and archive_resolved_findings whether it archives the ones it no
 # longer reports. The operator ran `--ash-plugin-modules ash_aws_plugins` with
 # --config-overrides for enabled and findings_scope and no --config. A pull
-# request's .ash/.ash.yaml set archive_resolved_findings: true, and that
+# request's .ash.yaml set archive_resolved_findings: true, and that
 # survived, so a pull request that deletes files archived that scope's findings
 # in the operator's account.
 
@@ -1211,8 +1211,8 @@ _OPERATOR_SCOPE = "reporters.aws-security-hub.options.findings_scope=operator-sc
 
 def _checkout_with_config(tmp_path: Path, text: str) -> Path:
     checkout = tmp_path / "checkout"
-    (checkout / ".ash").mkdir(parents=True)
-    (checkout / ".ash" / ".ash.yaml").write_text(text, encoding="utf-8")
+    checkout.mkdir(parents=True, exist_ok=True)
+    (checkout / ".ash.yaml").write_text(text, encoding="utf-8")
     return checkout
 
 
@@ -1248,7 +1248,7 @@ def _sent_by_ash_report(
     setting reaches Security Hub, not only the repository's is kept out. They
     go through report_command, so the reporter gets its section the way the
     product gives it, whatever decides that. *config* defaults to the
-    checkout's own ``.ash/.ash.yaml``: ash report discovers no config file, so
+    checkout's own ``.ash.yaml``: ash report discovers no config file, so
     without one named the repository's file would not be read at all. Security
     Hub and STS are stubbed: the import must happen, and GetFindings is
     answered only when *archives*, so archiving that was not asked for, or is
@@ -1265,7 +1265,7 @@ def _sent_by_ash_report(
 
     mark_git_checkout(checkout)
     if config is None:
-        config = checkout / ".ash" / ".ash.yaml"
+        config = checkout / ".ash.yaml"
     output = checkout / ".ash" / "ash_output"
     output.mkdir(parents=True, exist_ok=True)
     (output / "ash_aggregated_results.json").write_text(
@@ -1425,8 +1425,8 @@ def test_ash_report_sends_with_the_operators_scope_past_a_linked_config(
     test_a_discovered_config_that_links_out_of_the_tree_is_confined."""
     payload = _payload_outside(tmp_path)
     checkout = tmp_path / "checkout"
-    (checkout / ".ash").mkdir(parents=True)
-    _symlink_or_skip(checkout / ".ash" / ".ash.yaml", payload)
+    checkout.mkdir(parents=True, exist_ok=True)
+    _symlink_or_skip(checkout / ".ash.yaml", payload)
 
     sent = _sent_by_ash_report(
         checkout, monkeypatch, config_overrides=_OPERATOR_SENDS, archives=False
@@ -1445,7 +1445,7 @@ def test_ash_report_sends_with_the_overrides_beside_a_config_outside_the_tree(
     sent."""
     payload = _payload_outside(tmp_path)
     checkout = tmp_path / "checkout"
-    (checkout / ".ash").mkdir(parents=True)
+    checkout.mkdir(parents=True, exist_ok=True)
 
     sent = _sent_by_ash_report(
         checkout,
@@ -1464,7 +1464,7 @@ def test_ash_report_sends_with_the_overrides_beside_a_config_outside_the_tree(
 @pytest.mark.unit
 def test_the_scans_report_phase_sends_with_the_operators_scope(tmp_path):
     """The positive send through a scan's own report phase, from the config the
-    scan discovers in the checkout. The repository's .ash/.ash.yaml asks for
+    scan discovers in the checkout. The repository's .ash.yaml asks for
     archiving and names its own scope; the operator's overrides turn the reporter
     on and set the scope. The import carries the operator's scope, and nothing
     is archived: GetFindings is never answered, so archiving the repository's
@@ -1684,7 +1684,7 @@ def test_a_config_file_outside_the_tree_sets_both(tmp_path, caplog):
 def test_a_repository_patch_at_a_scope_left_out_of_its_base_still_loads(
     tmp_path, caplog, op, below, value
 ):
-    """The repository's .ash/.ash.yaml extends its own base, which sets the
+    """The repository's .ash.yaml extends its own base, which sets the
     scope, and patches it. The base's scope is left out before the patch
     applies, so the place the patch names is not in the document: the file
     still loads, as it would without the trust rules (a replace or a test of
@@ -1701,7 +1701,7 @@ def test_a_repository_patch_at_a_scope_left_out_of_its_base_still_loads(
         f"    path: /reporters/aws-security-hub/options/findings_scope{below}\n"
         + ("" if value is None else f"    value: {value}\n"),
     )
-    (checkout / ".ash" / "base.yaml").write_text(
+    (checkout / "base.yaml").write_text(
         "reporters:\n"
         "  aws-security-hub:\n"
         "    options:\n"
@@ -1725,7 +1725,7 @@ def test_an_operator_file_keeps_both_over_a_repository_base(
     tmp_path, caplog, repository
 ):
     """The operator's file outside the tree sets both options and extends the
-    repository's .ash/.ash.yaml, which either names neither or sets both; the
+    repository's .ash.yaml, which either names neither or sets both; the
     operator's file is merged over it either way. Both are the operator's, and
     no warning charges the repository's file."""
     from automated_security_helper.config.resolve_config import resolve_config
@@ -1743,7 +1743,7 @@ def test_an_operator_file_keeps_both_over_a_repository_base(
     # Beside the checkout, so its bases may be read from inside it.
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -1779,7 +1779,7 @@ def test_the_reporter_runs_with_the_operator_s_config_that_extends_the_repositor
     checkout = _checkout_with_config(tmp_path, "project_name: checkout\n")
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -1824,7 +1824,7 @@ def test_what_the_repository_s_base_wrote_inside_the_section_does_not_run(
     )
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -1858,7 +1858,7 @@ def test_an_override_sets_the_section_past_the_operator_s_own_file(tmp_path, cap
     checkout = _checkout_with_config(tmp_path, "project_name: checkout\n")
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -1894,8 +1894,7 @@ def _base_the_repository_chose(tmp_path: Path, where: str) -> Path:
     else:
         other = tmp_path / "other"
         mark_git_checkout(other)
-        (other / ".ash").mkdir()
-        base = other / ".ash" / ".ash.yaml"
+        base = other / ".ash.yaml"
     base.write_text(
         "reporters:\n"
         "  aws-security-hub:\n"
@@ -1919,7 +1918,7 @@ def test_a_base_the_repository_s_file_reaches_is_the_repository_s(
     tmp_path, caplog, where
 ):
     """The operator's --config outside the tree extends the repository's
-    .ash/.ash.yaml, which says only `extends:` a file outside the tree (beside
+    .ash.yaml, which says only `extends:` a file outside the tree (beside
     it, or in another checkout). That base is reached through the
     repository's file, so the repository chose it, whatever directory it sits
     in: neither off-host reporter is turned on, and nothing it wrote is in the
@@ -1938,13 +1937,12 @@ def test_a_base_the_repository_s_file_reaches_is_the_repository_s(
     checkout = _checkout_with_config(
         tmp_path,
         "extends: "
-        + Path(os.path.relpath(base, tmp_path / "checkout" / ".ash")).as_posix()
+        + Path(os.path.relpath(base, tmp_path / "checkout")).as_posix()
         + "\n",
     )
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
-        "project_name: operator\n",
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\nproject_name: operator\n",
         encoding="utf-8",
     )
 
@@ -2007,7 +2005,7 @@ def test_the_operator_s_file_folds_onto_the_trusted_base_s_spelling(
     monkeypatch.setenv("ASH_CONFIG", str(named))
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         f"  {spelling}:\n"
         "    options:\n"
@@ -2051,7 +2049,7 @@ def test_a_spelling_that_names_another_plugin_does_not_fold(tmp_path, monkeypatc
     monkeypatch.setenv("ASH_CONFIG", str(named))
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n  bedrock-summary-repo_rter:\n    enabled: false\n",
         encoding="utf-8",
     )
@@ -2076,7 +2074,7 @@ def test_the_operator_s_root_wins_over_the_operator_s_own_base(tmp_path, caplog)
     checkout = _checkout_with_config(tmp_path, "project_name: checkout\n")
     base = tmp_path / "operator-base.yaml"
     base.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -2137,7 +2135,7 @@ def test_two_trusted_spellings_keep_a_third_spelling_s_write_its_own(
     monkeypatch.setenv("ASH_CONFIG", str(named))
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n  aws_security_hub:\n    options:\n"
         "      findings_scope: operator-scope\n",
         encoding="utf-8",
@@ -2183,7 +2181,7 @@ def test_a_shared_base_the_operator_reaches_through_its_own_base_runs(tmp_path, 
     checkout = _checkout_with_config(
         tmp_path,
         "extends: "
-        + Path(os.path.relpath(shared, tmp_path / "checkout" / ".ash")).as_posix()
+        + Path(os.path.relpath(shared, tmp_path / "checkout")).as_posix()
         + "\n",
     )
     op_base = tmp_path / "operator-base.yaml"
@@ -2192,7 +2190,7 @@ def test_a_shared_base_the_operator_reaches_through_its_own_base_runs(tmp_path, 
     operator.write_text(
         "extends:\n"
         f"  - {op_base.as_posix()}\n"
-        f"  - {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"  - {(checkout / '.ash.yaml').as_posix()}\n"
         "project_name: operator\n",
         encoding="utf-8",
     )
@@ -2232,15 +2230,14 @@ def test_a_repository_file_that_names_its_base_twice_still_confines_it(
         f"      findings_scope: {_REPOSITORY_CHOSE}\n",
         encoding="utf-8",
     )
-    rel = Path(os.path.relpath(shared, tmp_path / "checkout" / ".ash")).as_posix()
+    rel = Path(os.path.relpath(shared, tmp_path / "checkout")).as_posix()
     checkout = _checkout_with_config(
         tmp_path,
         f"extends:\n  - {rel}\n  - {rel}\n",
     )
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
-        "project_name: operator\n",
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\nproject_name: operator\n",
         encoding="utf-8",
     )
 
@@ -2307,7 +2304,7 @@ def test_an_operator_patch_with_an_array_pointer_applies_only_to_a_held_list(
     )
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -2346,7 +2343,7 @@ def test_an_operator_patch_stepping_through_a_held_list_applies(tmp_path, caplog
     checkout = _checkout_with_config(tmp_path, "project_name: checkout\n")
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -2382,7 +2379,7 @@ def test_an_operator_patch_removing_a_held_list_element_removes_it(tmp_path, cap
     checkout = _checkout_with_config(tmp_path, "project_name: checkout\n")
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -2430,7 +2427,7 @@ def test_a_middle_index_into_a_list_only_the_repository_wrote_is_dropped(
     )
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -2480,7 +2477,7 @@ def test_a_whole_reporters_patch_value_folds_onto_the_trusted_spelling(
     monkeypatch.setenv("ASH_CONFIG", str(named))
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "patch:\n"
         "  - op: add\n"
         "    path: /reporters\n"
@@ -2514,7 +2511,7 @@ def test_a_patch_created_section_anchors_the_fold_for_later_files(tmp_path, capl
     )
     base = tmp_path / "base.yaml"
     base.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "patch:\n"
         "  - op: add\n"
         "    path: /reporters/aws-security-hub\n"
@@ -2553,7 +2550,7 @@ def test_a_digit_mapping_key_in_a_patch_lands_on_a_held_mapping(tmp_path, caplog
     checkout = _checkout_with_config(tmp_path, "project_name: checkout\n")
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -2602,8 +2599,7 @@ def test_a_remove_at_an_index_the_view_holds_a_string_at_is_dropped(
 
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    repository = checkout / ".ash" / ".ash.yaml"
-    repository.parent.mkdir(parents=True, exist_ok=True)
+    repository = checkout / ".ash.yaml"
     repository.write_text(
         "reporters:\n  foo:\n    options:\n      tags: [x, y]\n", encoding="utf-8"
     )
@@ -2639,7 +2635,7 @@ def test_an_operator_s_own_array_op_is_not_blamed_on_the_repository(tmp_path, ca
     checkout = _checkout_with_config(tmp_path, "project_name: checkout\n")
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -2680,7 +2676,7 @@ def test_a_mid_path_dash_step_lands_on_the_written_mapping(tmp_path, caplog):
     checkout = _checkout_with_config(tmp_path, "project_name: checkout\n")
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -2718,7 +2714,7 @@ def test_a_dash_spelled_step_before_an_index_lands_on_the_written_list(tmp_path)
     checkout = _checkout_with_config(tmp_path, "project_name: checkout\n")
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -2748,7 +2744,7 @@ def _dash_spelled_option_patch(tmp_path):
     checkout = _checkout_with_config(tmp_path, "project_name: checkout\n")
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -2829,7 +2825,7 @@ def test_an_operator_patch_pointer_unescapes_tilde_sequences(tmp_path, caplog):
     checkout = _checkout_with_config(tmp_path, "project_name: checkout\n")
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -2871,7 +2867,7 @@ def test_an_operator_patch_remove_takes_only_what_the_view_holds(tmp_path, caplo
     )
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -2921,7 +2917,7 @@ def test_colliding_spellings_fold_in_chain_order_not_first_appearance(
     monkeypatch.setenv("ASH_CONFIG", str(named))
     base_a = tmp_path / "base-a.yaml"
     base_a.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n  aws-security-hub:\n    enabled: false\n    options:\n"
         f"      aws_region: {REGION}\n"
         "      findings_scope: base-scope\n",
@@ -2966,7 +2962,7 @@ def test_a_null_section_under_another_spelling_takes_the_section_away(tmp_path, 
     checkout = _checkout_with_config(tmp_path, "project_name: checkout\n")
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -2999,7 +2995,7 @@ def test_an_operator_patch_under_another_spelling_folds_onto_the_section(
     checkout = _checkout_with_config(tmp_path, "project_name: checkout\n")
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -3036,7 +3032,7 @@ def test_an_operator_patch_that_adds_the_reporters_section_runs(tmp_path, caplog
     checkout = _checkout_with_config(tmp_path, "project_name: checkout\n")
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "patch:\n"
         "  - op: add\n"
         "    path: /reporters\n"
@@ -3074,7 +3070,7 @@ def test_an_operator_root_patch_sets_an_option_over_its_own_base(tmp_path, caplo
     checkout = _checkout_with_config(tmp_path, "project_name: checkout\n")
     base = tmp_path / "operator-base.yaml"
     base.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -3130,8 +3126,7 @@ def test_a_repository_patch_of_the_section_does_not_run(tmp_path, caplog):
     )
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
-        "project_name: operator\n",
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\nproject_name: operator\n",
         encoding="utf-8",
     )
 
@@ -3179,11 +3174,11 @@ def test_the_chain_rebuild_counts_an_empty_list_and_a_single_string(
             f"      findings_scope: {_REPOSITORY_CHOSE}\n",
             encoding="utf-8",
         )
-        rel = Path(os.path.relpath(shared, tmp_path / "checkout" / ".ash")).as_posix()
+        rel = Path(os.path.relpath(shared, tmp_path / "checkout")).as_posix()
         checkout = _checkout_with_config(tmp_path, f"extends: {rel}\n")
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    enabled: true\n"
@@ -3275,7 +3270,7 @@ def test_the_resolve_hands_the_chain_walk_the_environment_chosen_paths(
     checkout = _checkout_with_config(tmp_path, "project_name: checkout\n")
     base = tmp_path / "env-chosen-base.yaml"
     base.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n  aws-security-hub:\n    enabled: true\n    options:\n"
         f"      aws_region: {REGION}\n",
         encoding="utf-8",
@@ -3359,7 +3354,7 @@ def test_the_operator_s_file_merges_over_the_trusted_base_for_the_section(
     monkeypatch.setenv("ASH_CONFIG", str(named))
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    options:\n"
@@ -3393,7 +3388,7 @@ def test_a_value_the_reporter_runs_with_from_the_environment_is_redacted(
     tmp_path, monkeypatch, option, overrides
 ):
     """ASH_CONFIG's file, outside the tree, sets the reporter up and reads one
-    of its options from ${VAR}, and the repository's .ash/.ash.yaml is the
+    of its options from ${VAR}, and the repository's .ash.yaml is the
     scan's config file. The reporter sends findings off the host, so it runs
     with the operator's section (reporter_section), and the value is one a
     message of the scan can quote: the scan's configuration redacts it, an
@@ -3462,7 +3457,7 @@ def test_an_operator_file_s_scope_read_from_the_environment_is_recorded_as_writt
     tmp_path, monkeypatch, repository
 ):
     """The operator's file outside the tree extends the repository's
-    .ash/.ash.yaml, which names no scope, its own, or the same ${VAR}, and
+    .ash.yaml, which names no scope, its own, or the same ${VAR}, and
     writes findings_scope as ${VAR}. The scope is the operator's and is kept, so
     the record of the configuration and what `ash config get` shows hold the
     reference there, as the operator's file wrote it, and not the value the
@@ -3483,7 +3478,7 @@ def test_an_operator_file_s_scope_read_from_the_environment_is_recorded_as_writt
     )
     operator = tmp_path / "operator.yaml"
     operator.write_text(
-        f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    options:\n"
@@ -3575,7 +3570,7 @@ def test_a_trusted_reference_is_not_recorded_where_the_scope_is_kept(
     else:
         operator = tmp_path / "operator.yaml"
         operator.write_text(
-            f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+            f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
             "reporters:\n"
             "  aws-security-hub:\n"
             "    options:\n"
@@ -3682,7 +3677,7 @@ def test_a_repository_reference_is_not_recorded_where_the_scope_is_kept(
     else:
         operator = tmp_path / "operator.yaml"
         operator.write_text(
-            f"extends: {(checkout / '.ash' / '.ash.yaml').as_posix()}\n"
+            f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
             "reporters:\n"
             "  aws-security-hub:\n"
             "    options:\n"
@@ -3709,7 +3704,7 @@ def test_a_repository_reference_is_not_recorded_where_the_scope_is_kept(
 def test_a_reference_from_a_repository_file_that_links_out_of_the_tree_is_not_recorded(
     tmp_path, monkeypatch
 ):
-    """The repository's .ash/.ash.yaml is a link to a file outside the tree,
+    """The repository's .ash.yaml is a link to a file outside the tree,
     which writes findings_scope as ${VAR}; the scan judges the file by the name
     it reached it through and leaves the scope out, and an override keeps the
     operator's, the same text. The reference names the file the link resolves
@@ -3729,8 +3724,8 @@ def test_a_reference_from_a_repository_file_that_links_out_of_the_tree_is_not_re
         encoding="utf-8",
     )
     checkout = tmp_path / "checkout"
-    (checkout / ".ash").mkdir(parents=True)
-    _symlink_or_skip(checkout / ".ash" / ".ash.yaml", target)
+    checkout.mkdir(parents=True, exist_ok=True)
+    _symlink_or_skip(checkout / ".ash.yaml", target)
 
     config = resolve_config(
         source_dir=checkout,
@@ -3951,7 +3946,7 @@ def test_ash_report_refuses_an_override_key_with_a_space_before_it(
     )
     mark_git_checkout(checkout)
     output = checkout / ".ash" / "ash_output"
-    output.mkdir()
+    output.mkdir(parents=True)
     (output / "ash_aggregated_results.json").write_text(
         _model([_result()], completed=("bandit",)).model_dump_json(),
         encoding="utf-8",
@@ -4047,13 +4042,13 @@ def test_confinement_reads_an_override_key_as_it_was_applied(tmp_path):
 
 @pytest.mark.unit
 def test_the_warning_takes_an_in_tree_path_as_text_not_markup(tmp_path, caplog):
-    """The repository names its own files. A base at .ash/a[/x].yaml held a
+    """The repository names its own files. A base at a[/x].yaml held a
     closing Rich tag, and the console handler raised MarkupError out of
     resolve_config, which ended the scan."""
     from automated_security_helper.config.resolve_config import resolve_config
 
     checkout = _checkout_with_config(tmp_path, "extends: a[/x].yaml\n")
-    base = checkout / ".ash" / "a[" / "x].yaml"
+    base = checkout / "a[" / "x].yaml"
     base.parent.mkdir()
     base.write_text(
         "reporters:\n"
@@ -4230,15 +4225,15 @@ def _symlink_or_skip(link: Path, target: Path) -> None:
 
 @pytest.mark.unit
 def test_a_discovered_config_that_links_out_of_the_tree_is_confined(tmp_path):
-    """The scan root is no git checkout, and its .ash/.ash.yaml is a symlink to
+    """The scan root is no git checkout, and its .ash.yaml is a symlink to
     a file outside it. The file is judged by the in-tree path the scan reached it
     through, not only its resolved path, so its findings_scope and archiving are
     dropped."""
     from automated_security_helper.config.resolve_config import resolve_config
 
     checkout = tmp_path / "checkout"
-    (checkout / ".ash").mkdir(parents=True)
-    _symlink_or_skip(checkout / ".ash" / ".ash.yaml", _payload_outside(tmp_path))
+    checkout.mkdir(parents=True, exist_ok=True)
+    _symlink_or_skip(checkout / ".ash.yaml", _payload_outside(tmp_path))
 
     config = resolve_config(
         source_dir=checkout, config_overrides=[*_OPERATOR_ENABLES, _OPERATOR_SCOPE]
@@ -4338,7 +4333,7 @@ def test_the_trusted_bases_value_replaces_the_repositorys(
 def test_ash_report_judges_the_config_against_the_results_tree(
     tmp_path, monkeypatch, capsys
 ):
-    """`ash report --config <checkout>/.ash/.ash.yaml --output-dir
+    """`ash report --config <checkout>/.ash.yaml --output-dir
     <checkout>/.ash/ash_output`, run from outside the checkout. The file is
     judged against the results tree as well as the working directory, so the
     checkout's findings_scope does not reach the reporter."""
@@ -4353,7 +4348,7 @@ def test_ash_report_judges_the_config_against_the_results_tree(
     # A checkout: its repository is the tree the results' directory is in.
     mark_git_checkout(checkout)
     output = checkout / ".ash" / "ash_output"
-    output.mkdir()
+    output.mkdir(parents=True)
     (output / "ash_aggregated_results.json").write_text(
         _model([_result()], completed=("bandit",)).model_dump_json(),
         encoding="utf-8",
@@ -4368,7 +4363,7 @@ def test_ash_report_judges_the_config_against_the_results_tree(
             report_command(
                 report_format="aws-security-hub",
                 output_dir=str(output),
-                config=str(checkout / ".ash" / ".ash.yaml"),
+                config=str(checkout / ".ash.yaml"),
                 config_overrides=[
                     (
                         "ash_plugin_modules+="
@@ -4467,16 +4462,15 @@ def test_get_config_marks_the_operator_only_options_a_repository_file_sets(
     outside = tmp_path / "outside"
     outside.mkdir()
     if layout == "in a checkout":
-        named = _checkout_with_config(tmp_path, repository_options) / ".ash/.ash.yaml"
+        named = _checkout_with_config(tmp_path, repository_options) / ".ash.yaml"
     elif layout == "a link into a checkout":
         target = _checkout_with_config(tmp_path, repository_options)
         named = outside / "ash.yaml"
-        named.symlink_to(target / ".ash" / ".ash.yaml")
+        named.symlink_to(target / ".ash.yaml")
     elif layout == "a link out of one":
         target = outside / "real.yaml"
         target.write_text(repository_options, encoding="utf-8")
-        named = checkout / ".ash" / ".ash.yaml"
-        named.parent.mkdir()
+        named = checkout / ".ash.yaml"
         named.symlink_to(target)
     else:
         nested = outside / "vendored"
@@ -4620,7 +4614,7 @@ def test_get_config_shows_the_operators_value_where_the_target_holds_the_file(
     monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
 
     options = _security_hub_options(
-        mcp_get_config(config_path=str(checkout / ".ash" / ".ash.yaml"))
+        mcp_get_config(config_path=str(checkout / ".ash.yaml"))
     )
 
     assert options["findings_scope"] == "operator-scope"

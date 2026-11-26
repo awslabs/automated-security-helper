@@ -46,7 +46,7 @@ def ash_warnings():
 def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     root = tmp_path / "repo"
-    (root / ".ash").mkdir(parents=True)
+    root.mkdir(parents=True)
     monkeypatch.chdir(root)
     return root
 
@@ -85,7 +85,7 @@ def test_which_overrides_are_replayed_onto_the_trusted_base(override, sets):
 
 
 def test_an_override_raises_a_limit_for_a_repository_with_its_own_config(tree):
-    write_options(tree / ".ash" / ".ash.yaml", max_member_bytes=1000)
+    write_options(tree / ".ash.yaml", max_member_bytes=1000)
 
     config = resolve_config(
         source_dir=tree,
@@ -112,7 +112,7 @@ def test_an_ash_config_inside_the_tree_is_not_a_trusted_base(
 
 
 def test_a_repository_config_may_lower_a_limit_without_a_warning(tree, ash_warnings):
-    write_options(tree / ".ash" / ".ash.yaml", max_members=10, max_total_bytes=4096)
+    write_options(tree / ".ash.yaml", max_members=10, max_total_bytes=4096)
 
     config = resolve_config(source_dir=tree)
 

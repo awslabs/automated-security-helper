@@ -35,10 +35,7 @@ def source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_a_discovered_config_comes_before_ash_config(source: Path) -> None:
-    (source / ".ash").mkdir()
-    (source / ".ash" / ".ash.yaml").write_text(
-        "project_name: discovered\n", encoding="utf-8"
-    )
+    (source / ".ash.yaml").write_text("project_name: discovered\n", encoding="utf-8")
 
     assert resolve_config(source_dir=source).project_name == "discovered"
 
@@ -52,9 +49,6 @@ def test_the_defaults_come_last(source: Path, monkeypatch) -> None:
     from automated_security_helper.config.ash_config import AshConfig
 
     monkeypatch.delenv("ASH_CONFIG")
-    (source.parent / ".ash").mkdir()
-    (source.parent / ".ash" / ".ash.yaml").write_text(
-        "project_name: parent\n", encoding="utf-8"
-    )
+    (source.parent / ".ash.yaml").write_text("project_name: parent\n", encoding="utf-8")
 
     assert resolve_config(source_dir=source).project_name == AshConfig().project_name

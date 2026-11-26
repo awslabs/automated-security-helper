@@ -134,7 +134,7 @@ def _scanner(
     if operator is not None:
         record_provenance(
             config,
-            in_tree=[] if operator else [source_dir / ".ash" / ".ash.yaml"],
+            in_tree=[] if operator else [source_dir / ".ash.yaml"],
             trusted=AshConfig(),
         )
     context = PluginContext(

@@ -34,7 +34,7 @@ def _config_with_an_in_tree_file() -> SimpleNamespace:
     config = SimpleNamespace()
     record_provenance(
         config,
-        in_tree=[Path("repo/.ash/.ash.yaml")],
+        in_tree=[Path("repo/.ash.yaml")],
         trusted={"scanners": {"gitleaks": {"options": {"baseline_path": OPERATORS}}}},
     )
     return config

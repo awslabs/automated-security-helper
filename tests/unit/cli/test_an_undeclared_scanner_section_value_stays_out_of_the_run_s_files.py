@@ -69,9 +69,9 @@ def test_the_value_read_at_an_undeclared_section_is_in_none_of_the_runs_files(
     home = tmp_path / "home"
     home.mkdir()
     source = tmp_path / "src"
-    (source / ".ash").mkdir(parents=True)
+    source.mkdir(parents=True)
     (source / "app.py").write_text("print('hello')\n")
-    config_file = source / ".ash" / ".ash.yaml"
+    config_file = source / ".ash.yaml"
     config_file.write_text(
         "project_name: undeclared-section\n"
         "scanners:\n"

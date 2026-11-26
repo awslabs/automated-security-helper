@@ -420,7 +420,7 @@
     'exit_code': 3,
     'stderr': '''
       Configuration validation failed: Invalid value at 'fail_on_findings': Input should be a valid boolean
-      Project 'service-a' at '<TMP>/service-a' has an invalid configuration: Configuration validation failed for '<TMP>/service-a/.ash/.ash.yaml': Invalid value at 'fail_on_findings': Input should be a valid boolean. Run: ash config lint --config <TMP>/service-a/.ash/.ash.yaml --source-dir <TMP>/service-a
+      Project 'service-a' at '<TMP>/service-a' has an invalid configuration: Configuration validation failed for '<TMP>/service-a/.ash.yaml': Invalid value at 'fail_on_findings': Input should be a valid boolean. Run: ash config lint --config <TMP>/service-a/.ash.yaml --source-dir <TMP>/service-a
   
     ''',
     'stdout': '',

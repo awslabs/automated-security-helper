@@ -52,6 +52,7 @@ def test_a_path_without_links_has_none(tmp_path: Path) -> None:
 
 
 def test_each_link_on_the_way_is_found_where_it_sits(tmp_path: Path) -> None:
+    """Legacy location: this test's subject is a symlinked ``.ash`` directory."""
     real = Path(os.path.realpath(tmp_path))
     target = real / "host" / "ash.yaml"
     target.parent.mkdir()

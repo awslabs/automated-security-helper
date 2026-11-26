@@ -24,7 +24,7 @@ from automated_security_helper.utils.suppression_matcher import file_path_matche
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-FILES = (".ash.yaml",".ash/.ash_alpha_plugins.yaml")
+FILES = (".ash.yaml", ".ash/.ash_alpha_plugins.yaml")
 
 
 @pytest.mark.parametrize(

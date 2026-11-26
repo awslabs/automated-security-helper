@@ -33,8 +33,7 @@ NOT_IMPORTABLE = "another_plugin_module"
 
 
 def _in_tree_config(run: _Run, name: str) -> None:
-    (run.tree / ".ash").mkdir(exist_ok=True)
-    (run.tree / ".ash" / ".ash.yaml").write_text(
+    (run.tree / ".ash.yaml").write_text(
         f"project_name: tree\nash_plugin_modules:\n  - {name}\n", encoding="utf-8"
     )
 
@@ -88,8 +87,7 @@ class TestTheTrustFilterLeavesTheNameToTheRefusal:
         source = tmp_path / "repo"
         (source / IN_TREE).mkdir(parents=True)
         (source / IN_TREE / "__init__.py").write_text("LOADED = True\n")
-        (source / ".ash").mkdir()
-        (source / ".ash" / ".ash.yaml").write_text(
+        (source / ".ash.yaml").write_text(
             f"project_name: repo\nash_plugin_modules:\n  - {IN_TREE}\n"
             f"  - {NOT_IMPORTABLE}\n"
         )

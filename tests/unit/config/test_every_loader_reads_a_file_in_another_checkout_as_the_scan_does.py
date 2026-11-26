@@ -104,7 +104,7 @@ def _repository(tmp_path: Path, with_config: bool) -> Path:
     repository = tmp_path / "repo"
     mark_git_checkout(repository)
     if with_config:
-        _write(repository / ".ash" / ".ash.yaml", "project_name: checked\n")
+        _write(repository / ".ash.yaml", "project_name: checked\n")
     return repository
 
 
@@ -196,7 +196,7 @@ def _trusted_base_read(tmp_path: Path, repository: Path, file: Path) -> bool:
 def _validator_ash_config_check(tmp_path: Path, repository: Path, file: Path) -> bool:
     from automated_security_helper.config.config_validator import ConfigValidator
 
-    checked = repository / ".ash" / ".ash.yaml"
+    checked = repository / ".ash.yaml"
     return (
         ConfigValidator.check_config_file(checked, source_dir=repository).errors == []
     )
@@ -211,7 +211,7 @@ def _get_config_search_read(tmp_path: Path, repository: Path, file: Path) -> boo
 def _get_config_named_file(tmp_path: Path, repository: Path, file: Path) -> bool:
     from automated_security_helper.cli.mcp_tools import mcp_get_config
 
-    checked = repository / ".ash" / ".ash.yaml"
+    checked = repository / ".ash.yaml"
     answer = mcp_get_config(config_path=str(checked), search_dir=str(repository))
     return answer.get("project_name") == "checked"
 

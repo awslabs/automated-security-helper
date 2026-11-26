@@ -5,7 +5,7 @@
 
 Why this exists
 ---------------
-``.ash/.ash.yaml`` and ``.ash/.ash_alpha_plugins.yaml`` are read by different scans,
+``.ash.yaml`` and ``.ash/.ash_alpha_plugins.yaml`` are read by different scans,
 and a suppression list is not inherited from one to the other, so entries that guard
 the same finding are written in both ("kept in step", say the comments). Nothing held
 them in step: an expiry moved in one file left the other file's entry to lapse, or to
@@ -79,7 +79,7 @@ def test_the_two_files_share_entries() -> None:
 def test_a_shared_entry_has_the_same_expiry_and_package_in_both_files(key: Key) -> None:
     default, alpha = _by_key(_entries(DEFAULT)), _by_key(_entries(ALPHA))
     assert default[key] == alpha[key], (
-        f"{key}: .ash/.ash.yaml reads (expires, package, version) {default[key]}, "
+        f"{key}: .ash.yaml reads (expires, package, version) {default[key]}, "
         f".ash_alpha_plugins.yaml reads {alpha[key]}; the entry must say the same "
         "thing in both"
     )

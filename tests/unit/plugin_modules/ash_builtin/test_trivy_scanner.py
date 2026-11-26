@@ -169,10 +169,10 @@ def _scanner(
     context = _context(tmp_path)
     source = Path(context.source_dir)
     # operator=True: built from no file in the scanned tree. Otherwise from the
-    # tree's .ash/.ash.yaml, judged against the defaults plus ``overrides``.
+    # tree's .ash.yaml, judged against the defaults plus ``overrides``.
     record_provenance(
         context.config,
-        in_tree=[] if operator else [source / ".ash" / ".ash.yaml"],
+        in_tree=[] if operator else [source / ".ash.yaml"],
         trusted=AshConfig(),
         config_overrides=list(overrides),
     )
@@ -1453,7 +1453,7 @@ def _repo_scan_argv(
     source = Path(scanner.context.source_dir)
     record_provenance(
         scanner.context.config,
-        in_tree=[] if operator else [source / ".ash" / ".ash.yaml"],
+        in_tree=[] if operator else [source / ".ash.yaml"],
         trusted=AshConfig(),
         config_overrides=list(overrides),
     )

@@ -422,7 +422,7 @@ def test_the_events_cover_every_trigger_case() -> None:
 def _context(tmp_path: Path, event_name: str, **on: bool) -> dict[str, Any]:
     """Every input at its default, then each install-* input as given (else off)."""
     inputs = {name: spec.get("default") for name, spec in _inputs().items()}
-    inputs["config"] = ".ash/.ash.yaml"
+    inputs["config"] = ".ash.yaml"
     for name in _install_inputs():
         inputs[name] = on.get(name.removeprefix("install-").replace("-", "_"), False)
     return {

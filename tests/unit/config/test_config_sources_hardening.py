@@ -56,7 +56,7 @@ class TestMalformedDirectivesFailClosed:
 
 class TestUnrelatedPyprojectCannotBreakAWorkingConfig:
     def test_non_utf8_pyproject_is_ignored_when_a_dedicated_file_exists(self, tmp_path):
-        _write(tmp_path / ".ash" / ".ash.yaml", "project_name: marker\n")
+        _write(tmp_path / ".ash.yaml", "project_name: marker\n")
         (tmp_path / "pyproject.toml").write_bytes(
             "[project]\nname = 'café'\n".encode("latin-1")
         )
@@ -69,7 +69,7 @@ class TestUnrelatedPyprojectCannotBreakAWorkingConfig:
     def test_unreadable_pyproject_is_ignored_when_a_dedicated_file_exists(
         self, tmp_path
     ):
-        _write(tmp_path / ".ash" / ".ash.yaml", "project_name: marker\n")
+        _write(tmp_path / ".ash.yaml", "project_name: marker\n")
         pyproject = _write(tmp_path / "pyproject.toml", '[project]\nname = "x"\n')
         pyproject.chmod(0)
         try:
@@ -78,7 +78,7 @@ class TestUnrelatedPyprojectCannotBreakAWorkingConfig:
             pyproject.chmod(0o644)
 
     def test_broken_tool_ash_is_ignored_when_a_dedicated_file_exists(self, tmp_path):
-        _write(tmp_path / ".ash" / ".ash.yaml", "project_name: marker\n")
+        _write(tmp_path / ".ash.yaml", "project_name: marker\n")
         _write(tmp_path / "pyproject.toml", '[tool]\nash = "x"\n')
         assert resolve_config(source_dir=tmp_path).project_name == "marker"
 
@@ -109,8 +109,8 @@ class TestConfinementDoesNotWidenToTheCwd:
         # fix the cwd became the root, so this base was readable.
         _write(tmp_path / "private" / "hosts.yaml", "project_name: leaked\n")
         config = _write(
-            tmp_path / "src" / "repo" / ".ash" / ".ash.yaml",
-            "extends: ../../../private/hosts.yaml\n",
+            tmp_path / "src" / "repo" / ".ash.yaml",
+            "extends: ../../private/hosts.yaml\n",
         )
         monkeypatch.chdir(tmp_path)
         with pytest.raises(ASHConfigValidationError, match="outside the directory"):
@@ -188,6 +188,7 @@ class TestEveryReaderUsesTheSameDiscovery:
 
 class TestMcpConfigTools:
     def test_get_config_keeps_the_repo_as_the_root_for_a_dot_ash_file(self, tmp_path):
+        """Legacy location: this test's subject is the deprecated .ash/.ash.yaml path."""
         from automated_security_helper.cli.mcp_tools import mcp_get_config
 
         _write(tmp_path / "shared" / "base.yaml", "project_name: shared-base\n")

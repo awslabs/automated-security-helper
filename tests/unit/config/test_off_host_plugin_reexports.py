@@ -182,7 +182,7 @@ def _write(path: Path, document: Dict[str, Any]) -> Path:
 def _tree(tmp_path: Path, modules: List[str]) -> Path:
     source = tmp_path / "repo"
     _write(
-        source / ".ash" / ".ash.yaml",
+        source / ".ash.yaml",
         {"project_name": "scanned", "ash_plugin_modules": modules},
     )
     return source
@@ -267,7 +267,7 @@ def test_an_operator_config_naming_the_package_selects_them(tmp_path, site):
     result = _engine(
         site,
         source,
-        config_path=str(source / ".ash" / ".ash.yaml"),
+        config_path=str(source / ".ash.yaml"),
         trusted_config_path=str(operator),
     )
 
@@ -538,9 +538,7 @@ def test_ash_report_runs_a_re_exported_reporter_only_from_the_operators_config(
     repo = tmp_path / "repo"
     document = {"ash_plugin_modules": [PACKAGE]}
     config = _write(
-        repo / ".ash" / ".ash.yaml"
-        if where == "tree"
-        else tmp_path / "operator" / "ash.yaml",
+        repo / ".ash.yaml" if where == "tree" else tmp_path / "operator" / "ash.yaml",
         document,
     )
     output = repo / ".ash" / "ash_output"

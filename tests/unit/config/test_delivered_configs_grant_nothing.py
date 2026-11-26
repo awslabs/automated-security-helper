@@ -79,7 +79,7 @@ class Layout:
     def repo_config(self) -> None:
         """A repository config that writes the same grants, so a trusted base
         built from a client's file would let them through."""
-        self.write(self.repo / ".ash" / ".ash.yaml", GRANTS)
+        self.write(self.repo / ".ash.yaml", GRANTS)
 
     def link(self, link: Path, target: Path) -> Path:
         link.symlink_to(target)
@@ -156,7 +156,7 @@ def config_a_delivered_root_extending_a_sibling(layout, monkeypatch):
 
 def discovered_in_a_delivered_tree(layout, monkeypatch):
     """The scan of a client's delivered tree discovers the config it holds."""
-    layout.write(layout.delivered / ".ash" / ".ash.yaml", GRANTS)
+    layout.write(layout.delivered / ".ash.yaml", GRANTS)
     return {"source_dir": layout.delivered}
 
 

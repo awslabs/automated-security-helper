@@ -44,7 +44,7 @@ def test_the_policy_check_refuses_when_the_checkout_walk_fails(tmp_path, monkeyp
     from automated_security_helper.cli import mcp_tools
     from automated_security_helper.config.config_validator import ConfigValidator
 
-    checkout = _checkout_with(tmp_path, ".ash/.ash.yaml", "project_name: checkout\n")
+    checkout = _checkout_with(tmp_path, ".ash.yaml", "project_name: checkout\n")
     named = tmp_path / "named.yaml"
     named.write_text("project_name: named\n", encoding="utf-8")
     monkeypatch.delenv("ASH_CONFIG", raising=False)
@@ -71,12 +71,12 @@ def test_the_host_config_refusal_is_a_refusal_when_the_checkout_walk_fails(
         _outer_mode_config_refusal,
     )
 
-    checkout = _checkout_with(tmp_path, ".ash/.ash.yaml", "project_name: checkout\n")
+    checkout = _checkout_with(tmp_path, ".ash.yaml", "project_name: checkout\n")
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     opts = ScanOptions(
         source_dir=checkout,
         output_dir=tmp_path / "out",
-        config=str(checkout / ".ash" / ".ash.yaml"),
+        config=str(checkout / ".ash.yaml"),
     )
 
     with monkeypatch.context() as patched:

@@ -139,7 +139,7 @@ class TestAppInitialization:
         assert custom.title == "Custom Title"
 
     def test_custom_config_path(self, sample_findings, tmp_path):
-        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         custom = FindingsExplorerApp(sample_findings, config_path=config_path)
         assert custom.config_path == config_path
 
@@ -152,7 +152,7 @@ class TestAppInitialization:
     def test_suppress_dialog_uses_config_path(
         self, sample_findings, tmp_path, monkeypatch
     ):
-        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         custom = FindingsExplorerApp(sample_findings, config_path=config_path)
         table = MagicMock(row_count=1, cursor_row=0)
         monkeypatch.setattr(custom, "query_one", MagicMock(return_value=table))
@@ -168,7 +168,7 @@ class TestAppInitialization:
     def test_suppression_result_names_config_path(
         self, sample_findings, tmp_path, monkeypatch
     ):
-        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path = tmp_path / ".ash.yaml"
         custom = FindingsExplorerApp(sample_findings, config_path=config_path)
         status_bar = MagicMock()
         table = MagicMock(cursor_row=None)
@@ -1129,6 +1129,7 @@ class TestSuppressionConfigPath:
         assert _resolve_suppression_config_path(config_path) == config_path
 
     def test_discovers_nested_config(self, tmp_path, monkeypatch):
+        """Legacy location: this test's subject is the deprecated .ash/.ash.yaml path."""
         config_path = tmp_path / ".ash" / ".ash.yaml"
         config_path.parent.mkdir()
         config_path.touch()
@@ -1136,6 +1137,7 @@ class TestSuppressionConfigPath:
         assert _resolve_suppression_config_path() == config_path
 
     def test_prefers_root_config(self, tmp_path, monkeypatch):
+        """Legacy location: the canonical file wins over the deprecated .ash/.ash.yaml."""
         root_config = tmp_path / ".ash.yaml"
         root_config.touch()
         nested_config = tmp_path / ".ash" / ".ash.yaml"
@@ -1171,8 +1173,7 @@ class TestFindingsCommand:
 
         report_path = tmp_path / "report.json"
         report_path.write_text("{}")
-        config_path = tmp_path / ".ash" / ".ash.yaml"
-        config_path.parent.mkdir()
+        config_path = tmp_path / ".ash.yaml"
         config_path.write_text("project_name: test")
         mock_model_cls.load_model.return_value = MagicMock()
         mock_extract.return_value = [{"rule_id": "TEST"}]

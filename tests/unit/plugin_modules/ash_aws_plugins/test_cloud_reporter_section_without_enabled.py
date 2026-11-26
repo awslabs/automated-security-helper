@@ -206,7 +206,7 @@ class TestASectionWithOptionsButNoEnabled:
         warning tells the operator to turn on a section only the repository wrote.
         """
         source_dir = _source_tree(tmp_path)
-        repo_config = source_dir / ".ash" / ".ash.yaml"
+        repo_config = source_dir / ".ash.yaml"
         repo_config.parent.mkdir(parents=True, exist_ok=True)
         repo_config.write_text(f"reporters:\n{_section('s3')}", encoding="utf-8")
 

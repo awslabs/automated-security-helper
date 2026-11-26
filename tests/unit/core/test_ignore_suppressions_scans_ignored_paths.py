@@ -48,8 +48,7 @@ def _tree(root: Path) -> Path:
     """A checkout with one secret in app.py and an ignore path naming app.py."""
     root.mkdir(parents=True, exist_ok=True)
     (root / "app.py").write_text(APP_PY, encoding="utf-8")
-    (root / ".ash").mkdir(exist_ok=True)
-    (root / ".ash" / ".ash.yaml").write_text(
+    (root / ".ash.yaml").write_text(
         yaml.safe_dump(
             {
                 "project_name": "ignore-paths",

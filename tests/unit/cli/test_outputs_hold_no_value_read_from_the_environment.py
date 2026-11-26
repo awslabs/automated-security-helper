@@ -196,13 +196,13 @@ def run(tmp_path_factory):
     )
 
     source = work / "src"
-    (source / ".ash").mkdir(parents=True)
+    source.mkdir(parents=True)
     (source / "ignored").mkdir()
     # A keyword detect-secrets reports, made here too.
     finding = f'password = "{secrets.token_hex(10)}"\n'
     for name in ("app.py", "suppressed.py", "ignored/skip.py"):
         (source / name).write_text(finding, encoding="utf-8")
-    config = source / ".ash" / ".ash.yaml"
+    config = source / ".ash.yaml"
     config.write_text(CONFIG, encoding="utf-8")
 
     # The child's probes are answered first (CHILD_TOOL_PROBE_STUBS): it found the

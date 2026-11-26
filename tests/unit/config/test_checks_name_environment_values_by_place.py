@@ -754,8 +754,8 @@ def test_the_in_tree_module_warning_names_a_module_read_from_the_environment_by_
     monkeypatch.setenv("ASH_PROBE_CANARY_MODULE", in_namespace_module)
     monkeypatch.setenv("ASH_PROBE_CANARY_PAIR", ",".join(in_namespace_pair))
     source = tmp_path / "src"
-    (source / ".ash").mkdir(parents=True)
-    (source / ".ash" / ".ash.yaml").write_text(
+    source.mkdir(parents=True)
+    (source / ".ash.yaml").write_text(
         "project_name: probe\n"
         "ash_plugin_modules:\n"
         "  - ${ASH_PROBE_CANARY_MODULE}\n"
@@ -1496,7 +1496,7 @@ def test_an_in_tree_warning_names_a_base_the_environment_chose_by_place(
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
     if root_from == "discovered":
-        root = _in_tree_chain(checkout, ".ash/.ash.yaml", settings, layout, monkeypatch)
+        root = _in_tree_chain(checkout, ".ash.yaml", settings, layout, monkeypatch)
     else:
         root = _in_tree_chain(
             checkout, "chosen-by-ash-config.yaml", settings, layout, monkeypatch

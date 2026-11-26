@@ -107,7 +107,11 @@ def test_init_without_force_names_the_existing_file_not_an_ignored_source(
 
 
 def test_init_still_refuses_a_new_file_beside_the_one_ash_reads(tmp_path, monkeypatch):
-    """The refusal still names the selected source when the target is another name."""
+    """The refusal still names the selected source when the target is another name.
+
+    Legacy location: this test's subject is the deprecated .ash/.ash.yaml path,
+    which is not the file ``init`` would write.
+    """
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".ash").mkdir()
     (tmp_path / ".ash" / ".ash.yaml").write_text(

@@ -467,7 +467,7 @@
               label:      web
               path:       <TMP>/allowed/work/web
               relative:   web
-              config:     <TMP>/allowed/work/web/.ash/.ash.yaml
+              config:     <TMP>/allowed/work/web/.ash.yaml
               threshold:  HIGH
               scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
               pins:       bandit >=1.7.8,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
@@ -520,7 +520,7 @@
           'threshold_tightened_by_policy': False,
         }),
         dict({
-          'config_source': '<TMP>/allowed/work/web/.ash/.ash.yaml',
+          'config_source': '<TMP>/allowed/work/web/.ash.yaml',
           'display_label': 'web',
           'effective_severity_threshold': 'HIGH',
           'operator_config': None,
@@ -634,7 +634,7 @@
               label:      web
               path:       <TMP>/allowed/work/web
               relative:   web
-              config:     <TMP>/allowed/work/web/.ash/.ash.yaml
+              config:     <TMP>/allowed/work/web/.ash.yaml
               threshold:  HIGH
               scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
               pins:       bandit >=1.7.8,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
@@ -684,7 +684,7 @@
           'threshold_tightened_by_policy': False,
         }),
         dict({
-          'config_source': '<TMP>/allowed/work/web/.ash/.ash.yaml',
+          'config_source': '<TMP>/allowed/work/web/.ash.yaml',
           'display_label': 'web',
           'effective_severity_threshold': 'HIGH',
           'operator_config': None,

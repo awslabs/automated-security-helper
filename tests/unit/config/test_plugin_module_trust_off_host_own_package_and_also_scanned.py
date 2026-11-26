@@ -314,8 +314,7 @@ def test_the_operators_off_host_package_is_kept_when_the_configs_list_omits_it(
 ):
     repo = tmp_path / "repo"
     mark_git_checkout(repo)
-    (repo / ".ash").mkdir()
-    in_tree = repo / ".ash" / ".ash.yaml"
+    in_tree = repo / ".ash.yaml"
     in_tree.write_text("project_name: repo\n", encoding="utf-8")
     trusted = AshConfig.model_validate({"ash_plugin_modules": [AWS_PLUGINS]})
     config = AshConfig.model_validate({"project_name": "repo"})
@@ -355,8 +354,7 @@ def _repository_naming(tmp_path: Path, *modules: str) -> Path:
     """A scanned repository whose own config file names *modules*."""
     repo = tmp_path / "repo"
     mark_git_checkout(repo)
-    config_file = repo / ".ash" / ".ash.yaml"
-    config_file.parent.mkdir(parents=True)
+    config_file = repo / ".ash.yaml"
     config_file.write_text(
         "project_name: x\nash_plugin_modules:\n"
         + "".join(f"  - {name}\n" for name in modules),
@@ -419,7 +417,7 @@ def test_confine_to_trusted_base_passes_also_scanned_to_the_module_step(
     monkeypatch.syspath_prepend(str(site))
     repo = tmp_path / "repo"
     mark_git_checkout(repo)
-    in_tree = [repo / ".ash" / ".ash.yaml"]
+    in_tree = [repo / ".ash.yaml"]
     modules = {"ash_plugin_modules": [RESULTS_MODULE, SITE_MODULE]}
 
     # The control: with no also_scanned the results' module is kept.

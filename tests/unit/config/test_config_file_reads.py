@@ -280,6 +280,7 @@ class TestDiscoveryThatCannotLookIsRefused:
 
     @needs_permissions
     def test_an_unsearchable_ash_directory_is_refused(self, tmp_path):
+        """Legacy location: this test's subject is the deprecated .ash/.ash.yaml path."""
         dot_ash = tmp_path / ".ash"
         dot_ash.mkdir()
         (dot_ash / ".ash.yaml").write_text(

@@ -97,8 +97,7 @@ def _project(tmp_path: Path, name: str, own_limit: int | None = None) -> Path:
     project.mkdir(parents=True)
     (project / "app.py").write_text("x = 1\n", encoding="utf-8")
     if own_limit is not None:
-        (project / ".ash").mkdir()
-        (project / ".ash" / ".ash.yaml").write_text(
+        (project / ".ash.yaml").write_text(
             "project_name: repo\n"
             "mcp-resource-management:\n"
             f"  max_concurrent_scans: {own_limit}\n",
@@ -1239,8 +1238,7 @@ async def test_a_project_past_its_project_timeout_is_stopped_before_the_call_ret
         monkeypatch, tmp_path, {"api": 60.0}, scripts={"api": _slow_to_stop(marker)}
     )
     workspace_file = _workspace(tmp_path, "api")
-    (workspace_file.parent / ".ash").mkdir()
-    (workspace_file.parent / ".ash" / ".ash.yaml").write_text(
+    (workspace_file.parent / ".ash.yaml").write_text(
         "project_name: ws\nworkspace:\n  project_timeout: 1\n", encoding="utf-8"
     )
     held.set()
@@ -1397,8 +1395,7 @@ async def test_a_worker_freed_by_a_stopped_project_runs_the_rest_of_the_queue(
         parallel=1,
     )
     workspace_file = _workspace(tmp_path, "slow", "next", "last")
-    (workspace_file.parent / ".ash").mkdir()
-    (workspace_file.parent / ".ash" / ".ash.yaml").write_text(
+    (workspace_file.parent / ".ash.yaml").write_text(
         "project_name: ws\nworkspace:\n  project_timeout: 1\n", encoding="utf-8"
     )
     pid_file = tmp_path / "slow.pid"
@@ -1562,8 +1559,7 @@ async def test_a_scanned_workspace_cannot_raise_its_own_parallelism(
 
     monkeypatch.setattr(workspace_module, "execute_workspace", _execute)
     workspace_file = _workspace(tmp_path, "api", "web")
-    (workspace_file.parent / ".ash").mkdir()
-    (workspace_file.parent / ".ash" / ".ash.yaml").write_text(
+    (workspace_file.parent / ".ash.yaml").write_text(
         f"project_name: ws\nworkspace:\n  max_parallel_projects: {configured}\n",
         encoding="utf-8",
     )
