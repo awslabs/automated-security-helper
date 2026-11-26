@@ -134,6 +134,12 @@ def test_no_directory_glob_suppresses_secret_or_actions_rules(config_path):
         # A universal rule hides secrets too.
         ("*", "tests/test_data/**"),
         (None, "docs/**"),
+        # The glob that once covered every sdist-lock harvest manifest; each
+        # manifest is named in its own entry now.
+        (
+            "SECRET-HEX-HIGH-ENTROPY-STRING",
+            "**/sdist-lock-harvester/sdist-locks/**/harvest-manifest.json",
+        ),
     ],
 )
 def test_a_directory_glob_on_a_guarded_rule_is_reported(rule_id, path):
@@ -156,6 +162,11 @@ def test_a_directory_glob_on_a_guarded_rule_is_reported(rule_id, path):
         ),
         # A wildcard inside a file name stays within one directory.
         ("SECRET-SECRET-KEYWORD", "tests/unit/utils/test_secret_masking*.py"),
+        # One harvest manifest, named in full: a file, not a directory.
+        (
+            "SECRET-HEX-HIGH-ENTROPY-STRING",
+            ".ash/ash_output/converted/sdist-lock-harvester/sdist-locks/ruff/0.16.10/harvest-manifest.json",
+        ),
         # Other rule families are out of this guard's scope.
         ("B101", "tests/**/*.py"),
         ("*:MIT", "**"),
