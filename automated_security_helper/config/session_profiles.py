@@ -553,8 +553,9 @@ class SessionState:
 _session_lock = RLock()
 _session_state: Dict[str, SessionState] = {}
 
-#: The sha256 of the bytes this process last moved into place at each
-#: materialized path (``_replace_staged``), by the path's POSIX spelling.
+#: The sha256 of the bytes this process last moved into place at each of a
+#: binding's materialized paths (``_replace_staged``, kept only for the files of
+#: ``materialize_session_binding``), by the path's POSIX spelling.
 #: ``bind_session_config`` and the rewrite of a gone file copy the entry for a
 #: binding's two paths into its ``SessionState``, so the binding can tell its own
 #: file from another server's. A path this process did not write has no entry,
@@ -874,6 +875,11 @@ def materialize_session_config(
         session_id, config, client_patched=client_patched, filename=filename
     )
     _replace_staged(partial, target)
+    # Not a binding's file, so no digest is kept for it: a binding copies the
+    # entry for its own two paths when it is bound, and nothing reads this one
+    # or drops it when a session ends (a per-call profile file is written once
+    # per call).
+    _written_digests.pop(target.as_posix(), None)
     return target.as_posix()
 
 
@@ -1304,27 +1310,32 @@ def _rematerialize_binding(sid: str) -> Tuple[Optional[str], Optional[str]]:
         adopted = False
         with _session_lock:
             current = _session_state.get(sid)
-            if current is not state:
-                if current is None or current.config_path is None:
-                    return None, None
-                if _binding_intact(current):
-                    return current.config_path, current.trusted_config_path
-                if current.profile_name is None or current.bound_config is None:
-                    # Not a profile binding: nothing to write it again from.
-                    return current.config_path, current.trusted_config_path
-                state = current
-                profile_name = current.profile_name
-                patched = current.bound_config if current.client_changed else None
-                adopted = True
-            elif _binding_intact(current):
-                # The same binding, whose files another thread wrote while this
-                # one waited for the lock: they are there, so they are the
-                # answer. Writing them again would replace files a scan of that
-                # thread is reading (on Windows the rename waits out the reader
-                # for about half a second and then fails a healthy session; a
-                # failed rename of the operator copy removes the client copy the
-                # other scan was handed).
-                return current.config_path, current.trusted_config_path
+            # A copy, so the checks below, which stat and read every recorded
+            # file, run outside the lock on the paths and digests of one moment
+            # (as ``_bound_config_paths`` does). The binding's write lock is held,
+            # so no bind writes these files meanwhile.
+            snapshot = copy.copy(current) if current is not None else None
+        if current is not state:
+            if snapshot is None or snapshot.config_path is None:
+                return None, None
+            if _binding_intact(snapshot):
+                return snapshot.config_path, snapshot.trusted_config_path
+            if snapshot.profile_name is None or snapshot.bound_config is None:
+                # Not a profile binding: nothing to write it again from.
+                return snapshot.config_path, snapshot.trusted_config_path
+            state = current
+            profile_name = snapshot.profile_name
+            patched = snapshot.bound_config if snapshot.client_changed else None
+            adopted = True
+        elif _binding_intact(snapshot):
+            # The same binding, whose files another thread wrote while this
+            # one waited for the lock: they are there, so they are the
+            # answer. Writing them again would replace files a scan of that
+            # thread is reading (on Windows the rename waits out the reader
+            # for about half a second and then fails a healthy session; a
+            # failed rename of the operator copy removes the client copy the
+            # other scan was handed).
+            return snapshot.config_path, snapshot.trusted_config_path
         if adopted:
             entry = get_profile_registry().get(profile_name)
             if entry is None:
@@ -1542,6 +1553,10 @@ def clear_session_state(session_id: Optional[str]) -> None:
         if state is not None:
             # The digests kept for this binding's files go with it, so a server
             # that sees one new session id per client keeps none for ended ones.
+            # They are all there is to drop: only ``materialize_session_binding``
+            # leaves a digest behind (``materialize_session_config`` removes the
+            # one ``_replace_staged`` recorded), and it writes exactly these two
+            # paths.
             for path in (state.config_path, state.trusted_config_path):
                 if path is not None:
                     _written_digests.pop(Path(path).as_posix(), None)
