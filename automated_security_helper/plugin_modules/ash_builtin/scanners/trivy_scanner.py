@@ -378,6 +378,9 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                     opsf.Fetched.VULN_DB,
                     opsf.Fetched.CHECKS_BUNDLE,
                     opsf.Fetched.MODULE_SOURCES,
+                    # The one-manifest registry read that keys this scanner's
+                    # image finding ids (utils/image_digest_resolver).
+                    opsf.Fetched.IMAGE_DIGEST,
                 ),
                 prefetch=(opsf.Prefetch.CONTENT_DB_REFRESH,),
                 offline_outcome=opsf.OfflineOutcome.DEGRADED,
@@ -394,7 +397,11 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                 source=(
                     "_trivy_scanner_base.py offline_strategy, sandbox_requirements, "
                     "SCAN_FLAGS (--offline-scan always) and OFFLINE_FLAGS; "
-                    "utils/content_databases.py trivy-db (also_read_by trivy)"
+                    "utils/content_databases.py trivy-db (also_read_by trivy); "
+                    "IMAGE_DIGEST is the scan phase's read, not trivy's: "
+                    "core/phases/scan_phase.py ScanPhase._execute_phase calls "
+                    "utils/image_digest_resolver.resolve_image_locator before any "
+                    "scanner is built, and its registry rung runs crane digest"
                 ),
                 unconfirmed=(
                     "module sources are fetched only when the opt-in misconfig scanner "
