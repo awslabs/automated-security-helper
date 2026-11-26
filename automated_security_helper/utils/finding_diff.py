@@ -172,9 +172,10 @@ def fallback_key(finding: FlatVulnerability) -> tuple[Any, ...] | None:
 #: :func:`~automated_security_helper.models.frame_model.to_frame` fills one
 #: column at a time, so without this memo the three key columns would each
 #: compute :func:`fallback_key` — an identity-base copy and a ``json.dumps``
-#: — once per finding, tripling the join's own cost centre. ``_side`` holds
-#: the findings for the whole fill, so their ids are stable while the memo
-#: lives; it is reset before ``_side`` returns.
+#: — once per finding, tripling the join's own cost centre. The id-stability
+#: guarantee is ``to_frame``'s own ``items = list(models)``, which holds the
+#: findings for the whole fill, so their ids are stable while the memo lives;
+#: it is reset before ``_side`` returns.
 _SIDE_KEYS: ContextVar[dict[int, tuple[Any, ...] | None] | None] = ContextVar(
     "_SIDE_KEYS", default=None
 )

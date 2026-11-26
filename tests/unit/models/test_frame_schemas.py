@@ -123,10 +123,12 @@ def test_the_graded_readers_read_declared_columns_over_a_real_row():
         flag_total,
     )
 
-    frame = graded_frame(["high"], [False], [True], [True])
-    assert active_level_counts(frame) == [("high", 1)]
+    # The three flag totals are pairwise distinct (0, 2, 1), so a reader that
+    # cross-reads one flag column for another cannot pass by coincidence.
+    frame = graded_frame(["high", "low"], [False, False], [True, True], [True, False])
+    assert active_level_counts(frame) == [("high", 1), ("low", 1)]
     assert flag_total(frame, "is_suppressed") == 0
-    assert flag_total(frame, "left_out") == 1
+    assert flag_total(frame, "left_out") == 2
     assert flag_total(frame, "actionable") == 1
     suppressed = graded_frame(["high"], [True], [False])
     assert active_level_counts(suppressed) == []
