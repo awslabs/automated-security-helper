@@ -36,6 +36,8 @@ from automated_security_helper.config.ash_config import (
     AshConfig,
     SandboxConfig,
     plugin_key_lookup_names,
+    plugin_section_claims,
+    plugin_section_key,
     reduced_plugin_name,
     sandbox_mode_in_document,
 )
@@ -44,10 +46,14 @@ from automated_security_helper.config.patch_ops import (
     VALUE_WRITING_OPS,
 )
 from automated_security_helper.models.vocab import PluginKind
+from automated_security_helper.plugin_manifests import UNTYPED_LIST_OPTION_DEFAULTS
 from automated_security_helper.utils import unknown_keys as _unknown_keys
 from automated_security_helper.utils.unknown_keys import WARN_UNKNOWN_KEYS
 from automated_security_helper.config.plugin_section_names import (
+    PLUGIN_SEGMENT_KEYS,
+    declared_section_names,
     fold_known_plugin_sections,
+    folded_section_name,
 )
 from automated_security_helper.config.config_sources import (
     EXTENDS_KEY,
@@ -456,6 +462,51 @@ def _sets_network_scanners(override: str) -> bool:
     return parts[0] == "sandbox" and (len(parts) == 1 or parts[1] == "network_scanners")
 
 
+def _is_in_an_untyped_plugin_section(resolved_keys: Sequence[str]) -> bool:
+    """Whether an override landed at a key inside the section of a plugin the
+    configuration does not type: three or more segments, the first a plugin
+    segment (``scanners``, ``reporters``, ``converters``) and the second none of
+    that segment's declared sections. An override of such a section as a whole
+    (two segments), of a typed section, and of a key outside the plugin segments
+    is not."""
+    return (
+        len(resolved_keys) >= 3
+        and resolved_keys[0] in PLUGIN_SEGMENT_KEYS
+        and folded_section_name(resolved_keys[1])
+        not in declared_section_names(resolved_keys[0])
+    )
+
+
+def _default_of_an_untyped_plugin_option(
+    segment: Dict[str, Any], resolved_keys: Sequence[str]
+) -> Optional[Tuple[Any, ...]]:
+    """The default list of the option an override landed at inside an untyped
+    plugin section, or None when no plugin ASH ships has such a list option there.
+
+    *segment* is the document's plugin segment the override landed in
+    (``config_dict["reporters"]``), *resolved_keys* the override's key as
+    ``_apply_config_override`` resolved it. The section belongs to the shipped
+    plugin that ``AshConfig.get_plugin_config`` reads it for: the key spelled as
+    the plugin's own name when the segment holds it, else the first key that claims
+    the plugin's reduced name (``plugin_section_key``), the choice
+    ``refuse_unknown_plugin_options`` makes when it checks the same section. Only
+    the shipped plugins are asked: a plugin from a module outside ASH is known
+    when that module loads, after the overrides are applied.
+    """
+    claims = plugin_section_claims(segment)
+    for plugin, options in UNTYPED_LIST_OPTION_DEFAULTS.get(
+        resolved_keys[0], {}
+    ).items():
+        read = (
+            plugin
+            if plugin in segment
+            else plugin_section_key(segment, reduced_plugin_name(plugin), claims)
+        )
+        if read == resolved_keys[1]:
+            return options.get(tuple(resolved_keys[2:]))
+    return None
+
+
 def _apply_config_override(
     config_dict: Dict[str, Any],
     key_path: str,
@@ -537,9 +588,41 @@ def _apply_config_override(
         # None, starts the list: as a plain set, a scalar appended stored a
         # bare string a list field refuses, and a list appended replaced the
         # field's None with no word of the append.
-        current[final_key] = (
-            list(parsed_value) if isinstance(parsed_value, list) else [parsed_value]
-        )
+        #
+        # Inside the section of a plugin the configuration does not type (an
+        # alpha scanner, an AWS reporter, a plugin a module outside ASH adds) the
+        # document holds only what a file wrote, so an option the file left out
+        # is absent though the plugin's model gives it a default, and starting
+        # the list from the items alone would drop that default. The list starts
+        # from the default of a plugin ASH ships (UNTYPED_LIST_OPTION_DEFAULTS)
+        # and takes the items after it. For any other option of such a section
+        # no default is known here, because the plugin is read when it loads,
+        # after the overrides are applied: the append is refused, and the whole
+        # list is set with ``=``. A typed section holds every default already,
+        # and an override of a section as a whole has no option to read one for,
+        # so both keep the rule above.
+        items = list(parsed_value) if isinstance(parsed_value, list) else [parsed_value]
+        if _is_in_an_untyped_plugin_section(resolved_keys):
+            default = _default_of_an_untyped_plugin_option(
+                config_dict[resolved_keys[0]], resolved_keys
+            )
+            if default is None:
+                # The key only, redacted as the log line below is: the value can
+                # be a credential.
+                raise ASHConfigValidationError(
+                    f"Cannot apply '{logged_path}+=': no configuration sets that "
+                    "key, and its section belongs to a plugin that is read only "
+                    "when it loads, after the overrides are applied, so ASH has "
+                    "no default list to add to there. Set the whole list with "
+                    f"'{logged_path}=[...]' instead."
+                )
+            current[final_key] = [*default, *items]
+            ASH_LOGGER.debug(
+                f"Appended to the list at {logged_path}, after the option's default",
+                extra=NO_MARKUP,
+            )
+            return resolved_keys, parsed_value, True
+        current[final_key] = items
         ASH_LOGGER.debug(f"Appended to the list at {logged_path}", extra=NO_MARKUP)
         return resolved_keys, parsed_value, True
     else:
