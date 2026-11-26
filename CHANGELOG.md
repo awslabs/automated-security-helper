@@ -81,6 +81,12 @@
 
 ### Maintenance
 
+- Removed the four stale `.ash.yaml` suppressions for GHSA-g3hv-75wg-m249 /
+  CVE-2026-118764 (minimatch globparts amplification): they pinned the minimatch
+  10.2.5 copy bundled inside aws-cdk-lib 2.273.0, and the aws-cdk-lib 2.278.0 bump
+  put minimatch 11.0.9 — outside the advisory's vulnerable range (`>= 7.0.0,
+  < 11.0.1`) — inside both deploy lockfiles, so the entries matched no installed
+  copy. A unit test pins that no suppression matches the bundled copy again.
 - Removed the ASH v2 in-container scanner scripts `utils/common.sh`,
   `utils/git-docker-execute.sh`, `utils/grype-docker-execute.sh`,
   `utils/js-docker-execute.sh`, and `utils/yaml-docker-execute.sh`. ASH v3 has not run
