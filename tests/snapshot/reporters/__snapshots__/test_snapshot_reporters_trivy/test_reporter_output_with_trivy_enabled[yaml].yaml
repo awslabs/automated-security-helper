@@ -2877,6 +2877,8 @@ scanner_results:
     actionable_finding_count: 10
     dependencies_satisfied: true
     duration: 0.5
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: 0
     finding_count: 10

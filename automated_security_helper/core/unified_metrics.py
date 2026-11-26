@@ -48,6 +48,7 @@ from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
 )
 from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.core.exceptions import DEFAULT_SENTENCES, ReasonCode
 from automated_security_helper.core.status_order import grade as grade_status
 from automated_security_helper.models.workspace import is_workspace_scan
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -134,6 +135,14 @@ class ScannerMetrics(ScannerSeverityCount):
     missing_reason: Optional[str] = None
     skipped_reason: Optional[str] = None
     exit_code: Optional[int] = None
+
+    # Why an ERROR scanner failed: one short sentence that names no path, and the code
+    # of its kind. Both are None on every other status, and on an ERROR row whose
+    # cause nothing recorded. Read from the scanner's row, then its per-target reports
+    # (the code and the sentence from one of them), else derived from the counts and
+    # statuses the row itself was graded from; see ``recorded_error_reason``.
+    error_reason: Optional[str] = None
+    error_reason_code: Optional[str] = None
 
     @computed_field
     @property
@@ -451,6 +460,92 @@ def recorded_error(
             for error in errors:
                 if isinstance(error, str) and error:
                     return text_without_values(error, values)
+    return None
+
+
+def _reason_pair(holder: object) -> tuple[str, str] | None:
+    """``(code, sentence)`` as *holder* records them, or None unless it records both.
+
+    *holder* is a ``scanner_results`` row (a model, or the dict of a results file
+    read back) or one per-target report. The two parts are read from the one holder
+    and never mixed: a code from one report beside the sentence of another would
+    say something neither recorded.
+    """
+    if isinstance(holder, dict):
+        code = holder.get("error_reason_code")
+        sentence = holder.get("error_reason")
+    else:
+        code = getattr(holder, "error_reason_code", None)
+        sentence = getattr(holder, "error_reason", None)
+    if isinstance(code, str) and code and isinstance(sentence, str) and sentence:
+        return code, sentence
+    return None
+
+
+def recorded_error_reason(
+    asharp_model: AshAggregatedResults, scanner_name: str
+) -> tuple[str, str] | None:
+    """The ``(code, sentence)`` recorded for the ERROR scanner *scanner_name*, or None.
+
+    From the scanner's ``scanner_results`` row when it records one, which is where
+    an earlier rebuild left it (``ash report`` and ``ash merge`` rebuild a model
+    read back from disk), else from its per-target reports in ``_report_order``,
+    which is where the executor records the reason of a scanner it ran. Both
+    parts come from the same row or report.
+
+    Not read for a scanner that is not ERROR: a PASSED or FAILED scanner can carry
+    an error beside its findings (a target that was lost, with findings on the
+    rest), and its status says what its reason would only contradict.
+    """
+    found = _reason_pair((asharp_model.scanner_results or {}).get(scanner_name))
+    if found is not None:
+        return found
+    reports = own_target_reports(asharp_model, scanner_name)
+    for key in sorted(reports, key=_report_order):
+        found = _reason_pair(reports[key])
+        if found is not None:
+            return found
+    return None
+
+
+def _records_a_status(asharp_model: AshAggregatedResults, scanner_name: str) -> bool:
+    """True when a row or a per-target report of *scanner_name* records a status."""
+    if (asharp_model.scanner_results or {}).get(scanner_name) is not None:
+        return True
+    return any(
+        report.get("status")
+        for report in own_target_reports(asharp_model, scanner_name).values()
+    )
+
+
+def derived_error_reason(
+    asharp_model: AshAggregatedResults,
+    scanner_name: str,
+    *,
+    unusable_counters: bool,
+    targets_attempted: int | None,
+    targets_failed: int,
+) -> tuple[str, str] | None:
+    """The reason an ERROR row has from its own counts and statuses, or None.
+
+    For the ERRORs the statistics decide and no scanner recorded a cause for: stored
+    counters that cannot be read, a scanner no row and no report gives a status
+    (nothing says it ran), and one that failed on some of the targets it attempted.
+    Only the counts are in the sentence, never the names of the targets, which are
+    paths of the scanned tree.
+    """
+    if unusable_counters:
+        return (
+            ReasonCode.COUNTERS_UNUSABLE,
+            DEFAULT_SENTENCES[ReasonCode.COUNTERS_UNUSABLE],
+        )
+    if not _records_a_status(asharp_model, scanner_name):
+        return ReasonCode.NO_STATUS, DEFAULT_SENTENCES[ReasonCode.NO_STATUS]
+    if targets_attempted is not None and 0 < targets_failed <= targets_attempted:
+        return (
+            ReasonCode.TARGETS_FAILED,
+            f"it failed on {targets_failed} of its {targets_attempted} target(s)",
+        )
     return None
 
 
@@ -892,6 +987,25 @@ def get_unified_scanner_metrics(
                 else:
                     skipped_reason = "skipped; no reason was recorded"
 
+        # An ERROR row says why when something recorded it: the row, then the
+        # per-target reports, then what the counts and statuses it was graded from say
+        # (``derived_error_reason``). Every other status has none, so a row that
+        # stops being ERROR drops it when it is rebuilt.
+        error_reason = None
+        error_reason_code = None
+        if status == ScannerStatus.ERROR.value:
+            reason = recorded_error_reason(
+                asharp_model, scanner_name
+            ) or derived_error_reason(
+                asharp_model,
+                scanner_name,
+                unusable_counters=unusable_counters,
+                targets_attempted=scanner_targets_attempted,
+                targets_failed=scanner_targets_failed,
+            )
+            if reason is not None:
+                error_reason_code, error_reason = reason
+
         # No exit code for a scanner the run left out, nor from a target its tool
         # did not run on, whatever that target's report claims (tool_exit_code).
         exit_code = (
@@ -926,6 +1040,8 @@ def get_unified_scanner_metrics(
             missing_reason=missing_reason,
             skipped_reason=skipped_reason,
             exit_code=exit_code,
+            error_reason=error_reason,
+            error_reason_code=error_reason_code,
         )
 
         metrics_list.append(metrics)
@@ -1266,6 +1382,7 @@ def _populate_scanner_results_from_unified_metrics(
         )
 
         # Convert status from string to enum (the ingest point for the row's text)
+        status_unrecognized = False
         try:
             status = ScannerStatus(metrics.status)
         except (ValueError, TypeError):
@@ -1276,6 +1393,7 @@ def _populate_scanner_results_from_unified_metrics(
                 f"{metrics.status!r}; its row is written as ERROR"
             )
             status = ScannerStatus.ERROR
+            status_unrecognized = True
 
         # Built from the scanner's existing row, with only the fields the metrics
         # compute replaced. Building it from the metrics alone dropped everything
@@ -1340,6 +1458,22 @@ def _populate_scanner_results_from_unified_metrics(
             fields.pop("skipped_reason", None)
         else:
             fields["skipped_reason"] = metrics.skipped_reason
+        # The reason of an ERROR row follows the metrics the same way: written when
+        # the row is ERROR and the metrics have one (read off this row first, so a
+        # rebuild of a rebuilt row gives the answer it already holds), dropped on
+        # every other row, and on an ERROR row nothing recorded a cause for. A status
+        # the rebuild could not read is its own cause.
+        error_reason_code = metrics.error_reason_code
+        error_reason = metrics.error_reason
+        if status_unrecognized:
+            error_reason_code = ReasonCode.STATUS_UNKNOWN
+            error_reason = DEFAULT_SENTENCES[ReasonCode.STATUS_UNKNOWN]
+        if status == ScannerStatus.ERROR and error_reason_code and error_reason:
+            fields["error_reason_code"] = error_reason_code
+            fields["error_reason"] = error_reason
+        else:
+            fields.pop("error_reason_code", None)
+            fields.pop("error_reason", None)
         # The scan phase's reason for a MISSING row comes with the row's other fields:
         # the metrics know the status, not why. It stays while the row is MISSING, and
         # on a FAILED row whose dependencies were missing on one tree, the reason

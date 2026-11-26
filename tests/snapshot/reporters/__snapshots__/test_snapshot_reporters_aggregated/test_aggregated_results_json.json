@@ -728,7 +728,9 @@
       "exit_code": null,
       "duration": null,
       "missing_reason": "its dependencies were not available; no reason was recorded, and ash.log has the scanner's own message",
-      "skipped_reason": null
+      "skipped_reason": null,
+      "error_reason": null,
+      "error_reason_code": null
     },
     "cdk-nag": {
       "status": "SKIPPED",
@@ -748,7 +750,9 @@
       "exit_code": null,
       "duration": null,
       "missing_reason": null,
-      "skipped_reason": "left out of this run"
+      "skipped_reason": "left out of this run",
+      "error_reason": null,
+      "error_reason_code": null
     },
     "bandit": {
       "status": "FAILED",
@@ -768,7 +772,9 @@
       "exit_code": 0,
       "duration": 1.25,
       "missing_reason": null,
-      "skipped_reason": null
+      "skipped_reason": null,
+      "error_reason": null,
+      "error_reason_code": null
     },
     "cfn-nag": {
       "status": "ERROR",
@@ -788,7 +794,9 @@
       "exit_code": 1,
       "duration": 0.25,
       "missing_reason": null,
-      "skipped_reason": null
+      "skipped_reason": null,
+      "error_reason": "it failed on 1 of its 1 target(s)",
+      "error_reason_code": "targets_failed"
     },
     "checkov": {
       "status": "FAILED",
@@ -808,7 +816,9 @@
       "exit_code": 0,
       "duration": 7.5,
       "missing_reason": null,
-      "skipped_reason": null
+      "skipped_reason": null,
+      "error_reason": null,
+      "error_reason_code": null
     },
     "detect-secrets": {
       "status": "PASSED",
@@ -828,7 +838,9 @@
       "exit_code": 0,
       "duration": 0.5,
       "missing_reason": null,
-      "skipped_reason": null
+      "skipped_reason": null,
+      "error_reason": null,
+      "error_reason_code": null
     },
     "grype": {
       "status": "FAILED",
@@ -848,7 +860,9 @@
       "exit_code": 0,
       "duration": 3.0,
       "missing_reason": null,
-      "skipped_reason": null
+      "skipped_reason": null,
+      "error_reason": null,
+      "error_reason_code": null
     },
     "semgrep": {
       "status": "PASSED",
@@ -868,7 +882,9 @@
       "exit_code": 0,
       "duration": 4.0,
       "missing_reason": null,
-      "skipped_reason": null
+      "skipped_reason": null,
+      "error_reason": null,
+      "error_reason_code": null
     },
     "syft": {
       "status": "PASSED",
@@ -888,7 +904,9 @@
       "exit_code": 0,
       "duration": 2.0,
       "missing_reason": null,
-      "skipped_reason": null
+      "skipped_reason": null,
+      "error_reason": null,
+      "error_reason_code": null
     }
   },
   "converter_results": {},

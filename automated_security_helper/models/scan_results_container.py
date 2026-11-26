@@ -86,6 +86,14 @@ class ScanResultsContainer(BaseModel):
     # and it fails the run whatever ``fail_on_incomplete_scanners`` says: the
     # tool may still write into the output directory after the gate reads it.
     could_not_stop: str | None = None
+    # Why this container ended in ERROR, as one short sentence with no path in it
+    # and the code of its kind (``core.exceptions.ReasonCode``), or None for both.
+    # Two plain strings, assigned together by ``record_error_reason`` and never
+    # appended to, for the reason the fields above give: the ``exclude_unset``
+    # per-target dump is the report ``core.unified_metrics`` reads them from. Not a
+    # ``core.exceptions.FailureReason``: this package does not import ``core``.
+    error_reason: str | None = None
+    error_reason_code: str | None = None
     # The content databases whose staleness turned a clean result into ERROR, under
     # ``content_db_staleness: fail``. Set only then, and assigned for the same reason
     # as the two above. It is what lets the exit-1 message, the MCP payload and
@@ -200,6 +208,29 @@ class ScanResultsContainer(BaseModel):
         error = home_as_tilde(error)
         if error not in self.errors:
             self.errors = [*self.errors, error]
+
+    def record_error_reason(self, code: str, sentence: str) -> None:
+        """Record why this scanner ended in ERROR, unless a reason is recorded already.
+
+        The first reason is the one kept: the first error is the row's cause (it is
+        the one ``core.unified_metrics.recorded_error`` reads), and a later one is
+        what followed from it. The code and the sentence are assigned together, so
+        a report never holds the one without the other. A code or a sentence that
+        is not a non-empty string records nothing.
+
+        The caller says what is fit to show: the executor passes the two parts of
+        a ``core.exceptions.FailureReason``, which holds no path. The reports
+        check the sentence again when they show it, since a results file read back
+        is not trusted.
+        """
+        if self.error_reason_code is not None or self.error_reason is not None:
+            return
+        if not (
+            isinstance(code, str) and code and isinstance(sentence, str) and sentence
+        ):
+            return
+        self.error_reason_code = code
+        self.error_reason = sentence
 
     def record_target_attempt(self, count: int = 1) -> None:
         """Record that the scanner is about to process ``count`` more targets.

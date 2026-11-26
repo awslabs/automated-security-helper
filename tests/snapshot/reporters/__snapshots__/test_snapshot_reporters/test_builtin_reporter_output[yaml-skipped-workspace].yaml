@@ -658,6 +658,8 @@ scanner_results:
     actionable_finding_count: 1
     dependencies_satisfied: true
     duration: 0.0
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: 0
     finding_count: 1
@@ -676,6 +678,8 @@ scanner_results:
     actionable_finding_count: 1
     dependencies_satisfied: true
     duration: 0.0
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: 0
     finding_count: 1
@@ -694,6 +698,8 @@ scanner_results:
     actionable_finding_count: 0
     dependencies_satisfied: false
     duration: 0.0
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: 125
     finding_count: 0
@@ -713,6 +719,8 @@ scanner_results:
     actionable_finding_count: 0
     dependencies_satisfied: true
     duration: 0.0
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: 0
     finding_count: 1

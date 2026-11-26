@@ -1689,6 +1689,8 @@ scanner_results:
     actionable_finding_count: 3
     dependencies_satisfied: true
     duration: 12.5
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: null
     finding_count: 4
@@ -1707,6 +1709,8 @@ scanner_results:
     actionable_finding_count: 0
     dependencies_satisfied: true
     duration: 7.0
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: null
     finding_count: 0
@@ -1725,6 +1729,8 @@ scanner_results:
     actionable_finding_count: 0
     dependencies_satisfied: true
     duration: 0.5
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: null
     finding_count: 3
@@ -1743,6 +1749,8 @@ scanner_results:
     actionable_finding_count: 0
     dependencies_satisfied: true
     duration: 0.25
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: null
     finding_count: 0
@@ -1761,6 +1769,8 @@ scanner_results:
     actionable_finding_count: 0
     dependencies_satisfied: false
     duration: null
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: null
     finding_count: 0
@@ -1780,6 +1790,8 @@ scanner_results:
     actionable_finding_count: 0
     dependencies_satisfied: true
     duration: 1.0
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: null
     finding_count: 0
@@ -1798,6 +1810,8 @@ scanner_results:
     actionable_finding_count: 0
     dependencies_satisfied: true
     duration: 95.0
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: null
     finding_count: 1
@@ -1816,6 +1830,8 @@ scanner_results:
     actionable_finding_count: 1
     dependencies_satisfied: true
     duration: 48.0
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: null
     finding_count: 3
@@ -1834,6 +1850,8 @@ scanner_results:
     actionable_finding_count: 0
     dependencies_satisfied: true
     duration: null
+    error_reason: null
+    error_reason_code: null
     excluded: true
     exit_code: null
     finding_count: 0

@@ -2412,6 +2412,8 @@ scanner_results:
     actionable_finding_count: 1
     dependencies_satisfied: true
     duration: 1.25
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: 0
     finding_count: 2
@@ -2430,6 +2432,8 @@ scanner_results:
     actionable_finding_count: 0
     dependencies_satisfied: true
     duration: null
+    error_reason: null
+    error_reason_code: null
     excluded: true
     exit_code: null
     finding_count: 0
@@ -2448,6 +2452,8 @@ scanner_results:
     actionable_finding_count: 0
     dependencies_satisfied: true
     duration: 0.25
+    error_reason: it failed on 1 of its 1 target(s)
+    error_reason_code: targets_failed
     excluded: false
     exit_code: 1
     finding_count: 0
@@ -2466,6 +2472,8 @@ scanner_results:
     actionable_finding_count: 3
     dependencies_satisfied: true
     duration: 7.5
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: 0
     finding_count: 4
@@ -2484,6 +2492,8 @@ scanner_results:
     actionable_finding_count: 0
     dependencies_satisfied: true
     duration: 0.5
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: 0
     finding_count: 0
@@ -2502,6 +2512,8 @@ scanner_results:
     actionable_finding_count: 2
     dependencies_satisfied: true
     duration: 3.0
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: 0
     finding_count: 2
@@ -2520,6 +2532,8 @@ scanner_results:
     actionable_finding_count: 0
     dependencies_satisfied: false
     duration: null
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: null
     finding_count: 0
@@ -2539,6 +2553,8 @@ scanner_results:
     actionable_finding_count: 0
     dependencies_satisfied: true
     duration: 4.0
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: 0
     finding_count: 2
@@ -2557,6 +2573,8 @@ scanner_results:
     actionable_finding_count: 0
     dependencies_satisfied: true
     duration: 2.0
+    error_reason: null
+    error_reason_code: null
     excluded: false
     exit_code: 0
     finding_count: 0

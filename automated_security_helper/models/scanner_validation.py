@@ -47,6 +47,14 @@ class EnablementStatus(str, Enum):
         return self.value
 
 
+#: The code and the sentence of the ERROR row backfilled for a scanner that was queued
+#: and never completed: ``core.exceptions.ReasonCode.QUEUED_NOT_COMPLETED`` and its
+#: default sentence. Written out here because this package does not import
+#: ``core.exceptions`` (the layer test counts every such statement);
+#: tests/unit/core/test_error_reason_reaches_the_row.py holds the two equal.
+QUEUED_NOT_COMPLETED_CODE = "queued_not_completed"
+QUEUED_NOT_COMPLETED_SENTENCE = "it was queued for execution but did not complete"
+
 #: The state fields that hold one of the two status vocabularies above, by name.
 _STATUS_FIELD_ENUMS: Dict[str, type] = {
     "registration_status": RegistrationStatus,
@@ -1313,12 +1321,28 @@ class ValidationCheckpointer:
         elif status == ScannerStatus.SKIPPED:
             skipped_reason = recorded or "it was registered but not run"
 
+        # An ERROR row says why when the tracker knows: the scanner was queued and
+        # never completed. Any other recorded failure is text of whoever recorded it,
+        # which can hold a path, so it is left to the log and the row says nothing.
+        error_reason_code = None
+        error_reason = None
+        if (
+            status == ScannerStatus.ERROR
+            and scanner_state is not None
+            and scanner_state.queued_for_execution
+            and not scanner_state.execution_completed
+        ):
+            error_reason_code = QUEUED_NOT_COMPLETED_CODE
+            error_reason = QUEUED_NOT_COMPLETED_SENTENCE
+
         return ScannerTargetStatusInfo(
             status=status,
             dependencies_satisfied=status_info["dependencies_satisfied"],
             excluded=status_info["excluded"],
             missing_reason=missing_reason,
             skipped_reason=skipped_reason,
+            error_reason_code=error_reason_code,
+            error_reason=error_reason,
         )
 
 

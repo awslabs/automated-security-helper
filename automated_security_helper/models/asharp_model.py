@@ -383,6 +383,34 @@ class ScannerTargetStatusInfo(StrippedRecordModel):
             ),
         ),
     ] = None
+    # Set by core.unified_metrics when it rebuilds the row, from what the scan phase
+    # and the executor recorded, and only on an ERROR row whose cause was recorded.
+    error_reason: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "Why the scanner is ERROR, in one short sentence that names no path: "
+                "its tool timed out, could not be started, or exited with a code the "
+                "scanner does not accept; ASH could not record, read or grade what "
+                "it returned; no rule was evaluated against its targets, or it failed "
+                "on some of them. Set on an ERROR row whose cause was recorded, and "
+                "None on every other row, including an ERROR row of a results file "
+                "written before reasons were recorded."
+            ),
+        ),
+    ] = None
+    error_reason_code: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "The kind of failure error_reason says, as a short lower-case code "
+                "such as timed_out, could_not_start, exit_code_rejected or "
+                "no_result. Set and cleared together with error_reason."
+            ),
+        ),
+    ] = None
 
     @property
     def total_duration(self) -> float:

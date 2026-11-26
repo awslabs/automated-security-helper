@@ -4,6 +4,8 @@
     'actionable_finding_count': 8,
     'dependencies_satisfied': True,
     'duration': 0.25,
+    'error_reason': None,
+    'error_reason_code': None,
     'excluded': False,
     'exit_code': 0,
     'finding_count': 13,
