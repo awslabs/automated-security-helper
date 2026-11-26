@@ -427,9 +427,10 @@ def _vocabulary_cell(value: Any, info: ColumnInfo) -> Optional[str]:
 
     A member of a ``str`` enum is read as its value. Nothing is wired: the cell is
     one of the vocabulary's own ASCII words or the build stops, and the refused
-    value is shown by ``repr`` cut to 40 characters, never as a cell.
+    value is shown by ``repr`` cut to 40 characters, never as a cell. ``None`` is
+    a cell only in a nullable column.
     """
-    if value is None:
+    if value is None and info.nullable:
         return None
     word = value.value if isinstance(value, Enum) else value
     if isinstance(word, str) and word in (info.vocabulary or ()):

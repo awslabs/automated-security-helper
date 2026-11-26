@@ -27,6 +27,7 @@ from automated_security_helper.cli.mcp.sandbox import (
     caller_is_remote,
     get_server_transport,
 )
+from automated_security_helper.core.enums import TRANSPORT_VALUES
 
 UNKNOWN = ["http", "streamable_http", "stdi0", "tcp", "stream able-http", "sse,stdio"]
 
@@ -104,6 +105,9 @@ def test_the_server_refuses_to_start_with_an_unknown_value(
     assert started == {}, "the server started"
     message = " ".join(stderr.getvalue().split())
     assert "ASH_MCP_TRANSPORT" in message and repr(value) in message, message
+    # The refusal tells the operator what would have worked: every spelling.
+    for spelling in TRANSPORT_VALUES:
+        assert spelling in message, (spelling, message)
 
 
 @pytest.mark.unit

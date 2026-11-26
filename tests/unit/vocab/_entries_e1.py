@@ -89,9 +89,9 @@ def _derived_constants() -> None:
     _is(sarif_utils._CANONICAL_SEVERITIES, SEVERITY_VALUES, "_CANONICAL_SEVERITIES")
     _is(ui_theme.SEVERITY_LEVELS, SEVERITY_BUCKETS, "SEVERITY_LEVELS")
     _eq(
-        scan_tracking.SEVERITY_BUCKETS,
+        scan_tracking.SEVERITY_TALLY_BUCKETS,
         SEVERITY_BUCKETS + ("suppressed",),
-        "scan_tracking.SEVERITY_BUCKETS",
+        "scan_tracking.SEVERITY_TALLY_BUCKETS",
     )
     _eq(
         result_filters._SEVERITY_KEYS,

@@ -184,18 +184,20 @@ class TestSandboxParityLeg:
         assert re.search(r'required="\$required,betterleaks"', text)
         assert re.search(r"--require \"\$required\" \\", text)
 
-    def test_parity_compares_betterleaks_on_bwrap_and_not_yet_on_sandbox_exec(self):
-        """The macOS sandbox-exec leg crashes betterleaks before it writes results.
+    def test_parity_compares_betterleaks_on_bwrap_and_on_sandbox_exec(self):
+        """Both parity legs compare betterleaks.
 
-        That leg's matrix row switches betterleaks off until the denial it hits is read
-        (the denial filter names betterleaks for that), and the bwrap leg keeps it on.
+        The macOS sandbox-exec leg once crashed betterleaks before it wrote results and
+        its matrix row switched betterleaks off. The scanner now runs under a private
+        HOME there (#1132), so the row is back on, as the bwrap row always was. The
+        denial filter keeps naming betterleaks so a regression shows up in the log.
         """
         text = UNIFIED.read_text()
         legs = text.split("sandbox-scanner-parity:", 1)[1].split("steps:", 1)[0]
         assert re.search(r"sandbox: bwrap\n\s+betterleaks: \"true\"", legs), (
             "the bwrap leg must keep comparing betterleaks"
         )
-        assert re.search(r"sandbox: sandbox-exec\n\s+betterleaks: \"false\"", legs), (
-            "the sandbox-exec leg is the one that leaves it out"
+        assert re.search(r"sandbox: sandbox-exec\n\s+betterleaks: \"true\"", legs), (
+            "the sandbox-exec leg compares betterleaks since #1132"
         )
         assert "|env|betterleaks)" in text, "the denial filter must name betterleaks"

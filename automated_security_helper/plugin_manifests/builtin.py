@@ -21,7 +21,10 @@ from automated_security_helper.base.plugin_manifest import (
     ScannerManifest,
 )
 from automated_security_helper.base.plugin_provisioning import provisioning_for
-from automated_security_helper.plugin_manifests import ManifestRegistryError
+from automated_security_helper.plugin_manifests import (
+    ManifestRegistryError,
+    check_table_rows,
+)
 
 _PLUGIN = "automated_security_helper.plugin_modules.ash_builtin"
 _SCANNERS = f"{_PLUGIN}.scanners"
@@ -249,4 +252,14 @@ MANIFESTS = (
         "ZizmorScannerConfigOptions",
         fixtures="zizmor",
     ),
+)
+
+
+#: ``_builtin`` already refuses a scanner with no description, so the rows left to
+#: check are those that name no scanner at all.
+check_table_rows(
+    __name__,
+    {manifest.name for manifest in MANIFESTS},
+    _SECTION_DESCRIPTIONS=_SECTION_DESCRIPTIONS,
+    _EXCLUSIONS=_EXCLUSIONS,
 )

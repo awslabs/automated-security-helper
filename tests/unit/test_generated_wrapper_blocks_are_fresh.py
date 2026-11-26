@@ -72,8 +72,8 @@ def test_every_block_has_its_markers_in_its_file(generator):
         (
             "utils/ash_helpers.ps1",
             "ps1-option-subcommands",
-            "= 'scan build-image'\n",
-            "= 'scan'\n",
+            "'--ignore-suppressions'  = 'scan merge'\n",
+            "'--ignore-suppressions'  = 'scan'\n",
         ),
         (
             "utils/ash_helpers.ps1",

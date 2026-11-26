@@ -1599,6 +1599,16 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             "that integration."
         )
 
+    def _forced_binary_precluded_reason(self) -> Optional[str]:
+        """With a configured integration missing, a forced actionlint must not pass.
+
+        The integrations (shellcheck, pyflakes) are separate executables the
+        scan hands to actionlint; a ``--binary-path`` record names actionlint's
+        own binary and says nothing about them, so the same check
+        ``validate_plugin_dependencies`` makes runs first here.
+        """
+        return self._missing_integrations(self._integration_executables())
+
     def validate_plugin_dependencies(self) -> bool:
         self.dependency_unavailable_reason = self._missing_integrations(
             self._integration_executables()

@@ -106,6 +106,10 @@ from automated_security_helper.config.path_trust import (
 )
 from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.plugin_base import (
+    PROGRAMMING_ERRORS,
+    side_run_skip_reason,
+)
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -2109,6 +2113,10 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             self._attach_resources_unguarded(
                 report, arguments, batch_file, option_args, results_dir, cwd, child_env
             )
+        except PROGRAMMING_ERRORS:
+            # A defect in ASH's own code is not a condition of the second run:
+            # it surfaces instead of passing as a skipped report.
+            raise
         except Exception as error:  # noqa: BLE001 -- best-effort enrichment
             self._warn_side_report_skipped(type(error).__name__)
 
@@ -2176,11 +2184,22 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             )
             # cfn-lint exits with a bit set per finding class, so a non-zero exit
             # is expected; the report's presence is what says it ran.
-            if not isinstance(response, dict) or not json_file.is_file():
+            flagged = side_run_skip_reason(response)
+            if (
+                not isinstance(response, dict)
+                or flagged is not None
+                or not json_file.is_file()
+            ):
+                # The response's own flags first: a run stopped at its timeout
+                # or one whose tool could not be stopped has no exit code to
+                # name, and "exited None" says nothing about why.
                 self._warn_side_report_skipped(
-                    f"the second run exited {response.get('returncode')} and wrote no report"
-                    if isinstance(response, dict)
-                    else "the second run gave no response"
+                    flagged
+                    or (
+                        f"the second run exited {response.get('returncode')} and wrote no report"
+                        if isinstance(response, dict)
+                        else "the second run gave no response"
+                    )
                 )
                 return
             document = json.loads(json_file.read_text(encoding="utf-8"))
@@ -2193,7 +2212,17 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             return
         finally:
             json_file.unlink(missing_ok=True)
-        attach_cfn_lint_resources(report, cfn_lint_resources(document))
+        resources = cfn_lint_resources(document)
+        attached = attach_cfn_lint_resources(report, resources)
+        if attached == 0 and any(
+            name is not None for named in resources.values() for name in named
+        ):
+            # The JSON report named resources and none reached a result: the two
+            # reports did not line up, and nothing else in the run says why a
+            # resource-scoped suppression never matches.
+            self._warn_side_report_skipped(
+                "the report named resources and none matched a result"
+            )
 
     def _probe_run_wide_failure(
         self,

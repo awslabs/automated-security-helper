@@ -644,14 +644,14 @@ runs:
         $ReportExit = $LASTEXITCODE
         # This exit code used to be discarded outright (`$null = $LASTEXITCODE`),
         # and that was an exception this leg alone made. The container, Unix and
-        # bash legs run the same `ash report` under `shell: bash`, which the runner
+        # bash legs run the same `ash results report` under `shell: bash`, which the runner
         # invokes as `bash --noprofile --norc -eo pipefail {0}` -- so `-e` aborts
         # those steps when the report command fails. `shell: pwsh` is
         # `pwsh -command ". '{0}'"`, which does not abort on a native non-zero
         # exit; it only sets $LASTEXITCODE. Discarding it therefore made a report
         # failure fatal on three legs and invisible on the fourth.
         #
-        # Why that matters here rather than being cosmetic: `ash report` failing
+        # Why that matters here rather than being cosmetic: `ash results report` failing
         # means ASH could not load the very results file the counter below is
         # about to reach a verdict from. Measured on run 35137617199 --
         # `Error loading results file: 'charmap' codec can't decode byte 0x9d`,

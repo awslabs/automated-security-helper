@@ -690,6 +690,19 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 return True
         return False
 
+    def _forced_binary_precluded_reason(self) -> Optional[str]:
+        """detect-secrets runs in process, so no forced binary satisfies it.
+
+        The scan runs the library (utils/detect_secrets_worker.py), never the
+        CLI, so a ``--binary-path`` record can neither stand in for the import
+        nor change what runs; the record is never consulted for this scanner and
+        the docs name it as an exception.
+        """
+        return (
+            "detect-secrets runs as an in-process Python library, never a CLI, "
+            "so a forced path cannot stand in for the import"
+        )
+
     def validate_plugin_dependencies(self) -> bool:
         """Validate the scanner configuration and requirements.
 
