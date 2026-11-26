@@ -215,6 +215,30 @@ describe('extraScanArguments', () => {
       /cannot be passed through extraScanArguments/,
     );
   });
+
+  test('a --source-dir names the directory scanned, once, the way the installed ASH does', () => {
+    const { actions } = synthesizeWithStep({
+      extraScanArguments: ['--source-dir', 'services/api'],
+    });
+    const commands = ashActions(actions)[0].commands.join('\n');
+
+    expect(commands).toContain('ash scan fs services/api --output-dir');
+    expect(commands).toContain('ash scan --source-dir services/api --output-dir');
+    // ASH 3.9 refuses a second --source-dir beside the PATH, so there is none.
+    expect(commands.match(/--source-dir/g)).toHaveLength(1);
+  });
+
+  test.each<[string[], RegExp]>([
+    [['--source-dir'], /needs a directory after it/],
+    [['--source-dir='], /needs a directory after it/],
+    [['--source-dir', ' '], /needs a directory after it/],
+    [['--source-dir', '--verbose'], /reads as an option/],
+    [['--source-dir services/api'], /an element of its own/],
+    [['--offline --source-dir=services/api'], /an element of its own/],
+  ])('refuses the --source-dir of %j', (extraScanArguments, message) => {
+    expect(() => buildStep({ extraScanArguments })).toThrow(message);
+    expect(() => buildStep({ extraScanArguments })).toThrow(/^ASHScanStep 'SecurityScan': /);
+  });
 });
 
 describe('severityThreshold', () => {

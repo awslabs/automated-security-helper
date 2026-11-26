@@ -57,7 +57,11 @@ export interface CommonCommandOptions {
   readonly outputDirectory: string;
   /** Lowest severity that produces a non-zero exit code. */
   readonly severityThreshold: ASHSeverityThreshold;
-  /** Extra arguments appended verbatim to the `ash scan` invocation. */
+  /**
+   * Extra arguments appended verbatim to the `ash scan` invocation, except a
+   * `--source-dir`, which names the directory scanned in place of
+   * `sourceDirectory`; see `withoutSourceDirectory`.
+   */
   readonly extraScanArguments: string[];
 }
 
@@ -304,17 +308,100 @@ function onEitherAsh(ash: string, probe: string[], current: string[], older: str
   );
 }
 
+/** The option the scan's directory used to be named with, and still is before ASH 3.9. */
+const SOURCE_DIR_OPTION = '--source-dir';
+
+/** Extra scan arguments with a `--source-dir` among them taken out. */
+export interface ExtraScanArguments {
+  /** The directory the last `--source-dir` named, as the caller wrote it; absent if none did. */
+  readonly sourceDirectory?: string;
+  /** The extra arguments without any `--source-dir` and its directory, in their order. */
+  readonly rest: string[];
+}
+
+/**
+ * Take the directory a `--source-dir` among the extra arguments names out of them.
+ *
+ * Before ASH 3.9 every scan rendered here named its own directory with
+ * `--source-dir`, ahead of the extra arguments, so a `--source-dir DIR` among them
+ * came later and click scanned DIR; that was the way to scan part of the input.
+ * ASH 3.9 takes the directory as the argument of `ash scan fs` and refuses a
+ * `--source-dir` that names another one beside it, so DIR left among the extra
+ * arguments would fail the scan when it runs. `directoryScanCommand` names DIR the
+ * way the installed ASH names a directory instead.
+ *
+ * The arguments are read one element at a time: `--source-dir` and the directory
+ * as two elements, or `--source-dir=DIR` as one. An element that holds a
+ * `--source-dir` among other words, a `--source-dir` with no directory after it, and
+ * a directory that starts with a dash (which `ash scan fs` would read as an option)
+ * are refused rather than guessed at. The directory is shell text the caller
+ * wrote, like every extra argument, and is passed on as written. When several are
+ * given, the last one is the directory, as click resolves a repeated option.
+ */
+export function withoutSourceDirectory(extraScanArguments: string[]): ExtraScanArguments {
+  let sourceDirectory: string | undefined;
+  const rest: string[] = [];
+  for (let index = 0; index < extraScanArguments.length; index++) {
+    const argument = extraScanArguments[index];
+    let directory: string;
+    if (argument === SOURCE_DIR_OPTION) {
+      index += 1;
+      directory = extraScanArguments[index] ?? '';
+    } else if (argument.startsWith(`${SOURCE_DIR_OPTION}=`)) {
+      directory = argument.slice(SOURCE_DIR_OPTION.length + 1);
+    } else {
+      const words = argument.trim().split(/\s+/);
+      if (
+        words.some((word) => word === SOURCE_DIR_OPTION || word.startsWith(`${SOURCE_DIR_OPTION}=`))
+      ) {
+        throw new Error(
+          `${SOURCE_DIR_OPTION} must be an element of its own in extraScanArguments, ` +
+            `followed by the directory as the next element, or written ${SOURCE_DIR_OPTION}=DIR; ` +
+            `${JSON.stringify(argument)} holds it among other words.`,
+        );
+      }
+      rest.push(argument);
+      continue;
+    }
+    if (directory.trim() === '') {
+      throw new Error(
+        `${SOURCE_DIR_OPTION} in extraScanArguments needs a directory after it: pass ` +
+          `['${SOURCE_DIR_OPTION}', 'DIR'] or ['${SOURCE_DIR_OPTION}=DIR'].`,
+      );
+    }
+    if (directory.startsWith('-')) {
+      throw new Error(
+        `${SOURCE_DIR_OPTION} in extraScanArguments needs a directory after it, but ` +
+          `${JSON.stringify(directory)} reads as an option.`,
+      );
+    }
+    sourceDirectory = directory;
+  }
+  return { sourceDirectory, rest };
+}
+
 /**
  * A directory scan: `ash scan fs DIR` on an ASH that has the subject, and
  * `ash scan --source-dir DIR` on one that does not, with the same options after.
+ *
+ * DIR is the one a `--source-dir` among the extra arguments names, else
+ * `sourceDirectory`; see `withoutSourceDirectory`. The options come first, then the
+ * rest of the extra arguments, so an option the caller repeats wins as it always did.
  */
-function directoryScanCommand(ash: string, sourceDirectory: string, options: string[]): string {
-  const directory = shellArg(sourceDirectory);
+function directoryScanCommand(
+  ash: string,
+  sourceDirectory: string,
+  options: string[],
+  extraScanArguments: string[],
+): string {
+  const extra = withoutSourceDirectory(extraScanArguments);
+  const directory = extra.sourceDirectory ?? shellArg(sourceDirectory);
+  const after = [...options, ...extra.rest];
   return onEitherAsh(
     ash,
     ['scan', 'fs'],
-    ['scan', 'fs', directory, ...options],
-    ['scan', '--source-dir', directory, ...options],
+    ['scan', 'fs', directory, ...after],
+    ['scan', SOURCE_DIR_OPTION, directory, ...after],
   );
 }
 
@@ -331,14 +418,18 @@ export function scanCommands(
   install: InstallOptions,
 ): string[] {
   return [
-    directoryScanCommand(ashInvocation(install), options.sourceDirectory, [
-      '--output-dir',
-      shellArg(options.outputDirectory),
-      '--min-severity',
-      options.severityThreshold,
-      '--fail-on-findings',
-      ...options.extraScanArguments,
-    ]),
+    directoryScanCommand(
+      ashInvocation(install),
+      options.sourceDirectory,
+      [
+        '--output-dir',
+        shellArg(options.outputDirectory),
+        '--min-severity',
+        options.severityThreshold,
+        '--fail-on-findings',
+      ],
+      options.extraScanArguments,
+    ),
   ];
 }
 
@@ -363,16 +454,20 @@ export function shardScanCommands(
   install: InstallOptions,
 ): string[] {
   return [
-    directoryScanCommand(ashInvocation(install), options.sourceDirectory, [
-      '--output-dir',
-      shellArg(options.outputDirectory),
-      '--shard-index',
-      shellArg(options.shardIndex),
-      '--shard-count',
-      shellArg(options.shardCount),
-      '--no-fail-on-findings',
-      ...options.extraScanArguments,
-    ]),
+    directoryScanCommand(
+      ashInvocation(install),
+      options.sourceDirectory,
+      [
+        '--output-dir',
+        shellArg(options.outputDirectory),
+        '--shard-index',
+        shellArg(options.shardIndex),
+        '--shard-count',
+        shellArg(options.shardCount),
+        '--no-fail-on-findings',
+      ],
+      options.extraScanArguments,
+    ),
   ];
 }
 

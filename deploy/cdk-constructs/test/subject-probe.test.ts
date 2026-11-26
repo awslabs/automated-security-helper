@@ -203,6 +203,59 @@ describe('the unsharded scan names its subject on an ASH that has one', () => {
   });
 });
 
+describe('a --source-dir among the extra arguments names the directory scanned', () => {
+  // Before ASH 3.9 the scan named its own directory with --source-dir ahead of the
+  // extra arguments, so a later --source-dir won and that directory was scanned.
+  // ASH 3.9 refuses a --source-dir beside a PATH that names another directory, so
+  // the caller's directory is the PATH there, and the only --source-dir before it.
+  function unsharded(extraScanArguments: string[]): string {
+    return only(
+      scanCommands(
+        {
+          sourceDirectory: '.',
+          outputDirectory: '.ash/ash_output',
+          severityThreshold: ASHSeverityThreshold.LOW,
+          extraScanArguments,
+        },
+        PIP,
+      ),
+    );
+  }
+
+  test.each<[string[], string, string]>([
+    [['--source-dir', 'services/api'], 'services/api', ''],
+    [['--source-dir=services/api'], 'services/api', ''],
+    // The last one wins, as click resolves a repeated option.
+    [['--log-level', 'INFO', '--source-dir', 'a', '--source-dir=b'], 'b', ' --log-level INFO'],
+  ])('%j', (extraScanArguments, directory, rest) => {
+    const options = `--output-dir .ash/ash_output --min-severity low --fail-on-findings${rest}`;
+    const command = unsharded(extraScanArguments);
+    expect(run(command, '3.9').calls).toEqual([`scan fs ${directory} ${options}`]);
+    expect(run(command, '3.8').calls).toEqual([`scan --source-dir ${directory} ${options}`]);
+  });
+
+  test('a shard names it the same way', () => {
+    const shard = only(
+      shardScanCommands(
+        {
+          sourceDirectory: '.',
+          outputDirectory: '.ash/ash_output/shard-1',
+          shardIndex: '1',
+          shardCount: '3',
+          severityThreshold: ASHSeverityThreshold.LOW,
+          extraScanArguments: ['--source-dir', 'services/api', '--offline'],
+        },
+        PIP,
+      ),
+    );
+    const options =
+      '--output-dir .ash/ash_output/shard-1 --shard-index 1 --shard-count 3 ' +
+      '--no-fail-on-findings --offline';
+    expect(run(shard, '3.9').calls).toEqual([`scan fs services/api ${options}`]);
+    expect(run(shard, '3.8').calls).toEqual([`scan --source-dir services/api ${options}`]);
+  });
+});
+
 describe('a shard names its subject on an ASH that has one', () => {
   test('`scan fs` with the directory, then the shard options', () => {
     expect(run(SHARD, '3.9').calls).toEqual([

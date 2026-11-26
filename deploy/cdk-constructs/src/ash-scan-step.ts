@@ -15,6 +15,7 @@ import {
   scanCommands,
   shardOutputDirectory,
   shardScanCommands,
+  withoutSourceDirectory,
 } from './private/commands';
 import { ASHInstallMode, ASHSeverityThreshold } from './types';
 
@@ -150,6 +151,12 @@ export interface ASHScanStepProps {
    * those, because letting a shard gate on its own findings would replace the
    * aggregate verdict with a partial one.
    *
+   * `--source-dir DIR` names the directory scanned, relative to the input's root,
+   * instead of the whole input. Pass it as two elements, `['--source-dir', 'DIR']`,
+   * or as one, `['--source-dir=DIR']`. The construct names DIR the way the installed
+   * ASH names a directory: as the argument of `ash scan fs` from ASH 3.9, which
+   * refuses a `--source-dir` beside it, and with `--source-dir` before that.
+   *
    * @default - none
    */
   readonly extraScanArguments?: string[];
@@ -168,7 +175,8 @@ export interface ASHScanStepProps {
  *
  * `--shard-index` and `--shard-count` are computed per shard. The
  * fail-on-findings pair decides which action owns the verdict, and a shard is
- * never allowed to own it.
+ * never allowed to own it. `--source-dir` is not among them: it names the
+ * directory scanned (see `extraScanArguments`).
  */
 const RESERVED_SCAN_ARGUMENTS = [
   '--shard-index',
@@ -284,7 +292,13 @@ export class ASHScanStep extends pipelines.Step implements pipelines.ICodePipeli
     }
   }
 
-  /** Reject escape-hatch arguments that would take over the verdict. */
+  /**
+   * Reject escape-hatch arguments that would take over the verdict, and a
+   * `--source-dir` the scan could not name its directory from.
+   *
+   * The second check is the one the command renderer makes; it runs here as well so
+   * that the error names this step and is raised where the step is built.
+   */
   private validateExtraScanArguments(): void {
     for (const argument of this.extraScanArguments) {
       const flag = argument.split('=')[0];
@@ -295,6 +309,11 @@ export class ASHScanStep extends pipelines.Step implements pipelines.ICodePipeli
             'merge step owns the pass/fail verdict.',
         );
       }
+    }
+    try {
+      withoutSourceDirectory(this.extraScanArguments);
+    } catch (error) {
+      throw new Error(`ASHScanStep '${this.id}': ${(error as Error).message}`);
     }
   }
 
