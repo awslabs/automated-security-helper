@@ -714,7 +714,7 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                 if total > len(findings):
                     parts.append(
                         f"> Showing {len(findings)} of {total} total actionable findings. "
-                        "Open the HTML report or use `ash inspect findings` to review the full set. "
+                        "Open the HTML report or use `ash results inspect findings` to review the full set. "
                         "Configure `max_detailed_findings` to adjust this limit.\n"
                     )
 

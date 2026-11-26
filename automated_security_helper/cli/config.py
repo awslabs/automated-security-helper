@@ -141,8 +141,8 @@ config_app = typer.Typer(
 
 
 _SOURCE_DIR_HELP = (
-    "The directory a scan would scan, as `ash scan --source-dir`: the config is "
-    "discovered there unless --config names one, and a config inside it may only "
+    "The directory a scan would scan, as `ash scan fs <path>` names it: the config "
+    "is discovered there unless --config names one, and a config inside it may only "
     "extend files inside it. Defaults to the current directory."
 )
 
@@ -2393,7 +2393,7 @@ def _apply_unused_fixes(
             fg=typer.colors.YELLOW,
         )
         secho(
-            "   Consider running a fresh scan: ash scan",
+            "   Consider running a fresh scan: ash scan fs",
             fg=typer.colors.YELLOW,
         )
 

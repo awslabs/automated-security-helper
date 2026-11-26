@@ -5482,7 +5482,7 @@ def test_a_wrapper_runs_results_say_once_on_stderr_that_nothing_is_archived(
     assert "./ash" in notice and "Invoke-ASH" in notice
     # The wrapper's own reason, not the list of every possible one.
     assert "without ASH_SCAN_SOURCE" in notice
-    assert "ash --mode container" in notice
+    assert "ash scan fs --mode container" in notice
     # One reason was given, so the advice points at the documented list rather
     # than at "these".
     assert "none of these" not in notice
@@ -5532,7 +5532,7 @@ def test_results_from_elsewhere_with_no_directory_give_the_possible_reasons(
     ):
         assert case in notice, case
         assert case in document["archive_skipped"], case
-    assert "ash --mode container" in notice
+    assert "ash scan fs --mode container" in notice
     # Advice that fits every case, a merge included.
     assert "not inside another one" not in notice
 

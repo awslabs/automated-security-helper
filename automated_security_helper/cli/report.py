@@ -1163,7 +1163,7 @@ def report_command(
             "{} does not exist" if len(results_file_paths) == 1 else "none of {} exists"
         )
         _print_refusal(
-            f"[red]No scan results found: {missing}. Run 'ash scan' first, "
+            f"[red]No scan results found: {missing}. Run 'ash scan fs' first, "
             "or point --output-dir at the output directory of a previous scan.[/red]",
             searched,
         )

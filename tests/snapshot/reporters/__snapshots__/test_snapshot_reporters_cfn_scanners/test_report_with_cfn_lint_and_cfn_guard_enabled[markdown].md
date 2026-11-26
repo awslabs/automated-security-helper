@@ -352,7 +352,7 @@ Check was not compliant as property \[VersioningConfiguration.Status\] to compar
 
 </details>
 
-> Showing 20 of 26 total actionable findings. Open the HTML report or use `ash inspect findings` to review the full set. Configure `max_detailed_findings` to adjust this limit.
+> Showing 20 of 26 total actionable findings. Open the HTML report or use `ash results inspect findings` to review the full set. Configure `max_detailed_findings` to adjust this limit.
 
 <details>
 <summary>Scan metadata</summary>

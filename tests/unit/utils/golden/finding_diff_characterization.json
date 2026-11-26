@@ -822,10 +822,10 @@
       "ok": null
     },
     "sharded": {
-      "refused": "use ash merge before comparing sharded results"
+      "refused": "use ash results merge before comparing sharded results"
     },
     "sharded_and_filtered": {
-      "refused": "use ash merge before comparing sharded results"
+      "refused": "use ash results merge before comparing sharded results"
     },
     "workspace_aggregate": {
       "refused": "use the per-project results instead of a workspace aggregate"
@@ -868,10 +868,10 @@
   },
   "compare.comparable_findings_checks_in_order": {
     "baseline_sharded": {
-      "refused": "use ash merge before comparing sharded results"
+      "refused": "use ash results merge before comparing sharded results"
     },
     "both_sharded_names_baseline_first": {
-      "refused": "use ash merge before comparing sharded results"
+      "refused": "use ash results merge before comparing sharded results"
     },
     "clean_pair": {
       "ok": [
@@ -880,7 +880,7 @@
       ]
     },
     "current_sharded": {
-      "refused": "use ash merge before comparing sharded results"
+      "refused": "use ash results merge before comparing sharded results"
     },
     "duplicate_baseline_ids": {
       "refused": "Baseline scan contains duplicate finding IDs"
@@ -898,7 +898,7 @@
       "refused": "the results name different projects"
     },
     "sharded_wins_over_duplicates": {
-      "refused": "use ash merge before comparing sharded results"
+      "refused": "use ash results merge before comparing sharded results"
     }
   },
   "compare.coverage_warnings_matrix": {

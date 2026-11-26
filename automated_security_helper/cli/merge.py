@@ -3242,7 +3242,7 @@ def merge_command(
             "--ignore-suppressions",
             help=(
                 "Ignore all suppression rules and report every finding regardless "
-                "of suppression status. Mirrors 'ash scan --ignore-suppressions', "
+                "of suppression status. Mirrors 'ash scan fs --ignore-suppressions', "
                 "so the same tree gives the same verdict sharded or not."
             ),
         ),

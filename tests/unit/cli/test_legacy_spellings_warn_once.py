@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The 3.9 contract for every command spelling that moved.
+"""The 3.9 contract for every command spelling that moved, and the hints that name one.
 
 ASH 3.9 moves the directory scan under ``ash scan fs``, the commands that read saved
 results under ``ash results`` and the image build under ``ash container build``. Each
@@ -12,9 +12,14 @@ old spelling keeps working through 3.x:
 * its stdout and its exit code are those of the new spelling;
 * the new spelling prints no deprecation line.
 
-ASH 4.0 removes the old spellings. This file is the record that removal starts from:
-each row here becomes a refusal row in 4.0. The rows were green when written, since
-they pin behavior the scan group, results group and container group already deliver.
+ASH 4.0 removes the old spellings. The first half of this file is the record that
+removal starts from: each row there becomes a refusal row in 4.0. The rows were green
+when written, since they pin behavior the scan group, results group and container
+group already deliver.
+
+The second half pins the hints ASH prints and its help text: each one names the
+spelling that does not warn, so following a hint never leads to a deprecation line.
+Each of those rows failed before the hint moved.
 
 Every scan row passes ``--shard-index 3`` without ``--shard-count``, which the engine
 refuses with the usage-error code right after the deprecation line would print, so no
@@ -26,9 +31,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Callable, List
+from unittest.mock import MagicMock, patch
 
 import pytest
+import typer.main
+from pydantic import BaseModel
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
@@ -49,6 +58,10 @@ def _invoke(args: List[str]):
 
 def _deprecation_lines(text: str) -> List[str]:
     return [line for line in text.splitlines() if line.startswith(DEPRECATION_PREFIXES)]
+
+
+def _one_line(text: str) -> str:
+    return " ".join(text.split())
 
 
 @dataclass(frozen=True)
@@ -174,3 +187,252 @@ def test_both_build_spellings_start_the_same_build(tmp_path, isolated):
 
     assert len(isolated) == 2
     assert isolated[0] == isolated[1]
+
+
+# --------------------------------------------------------------------------- #
+# Hints and help text name the spellings that do not warn
+# --------------------------------------------------------------------------- #
+
+
+def test_the_config_commands_source_dir_help_names_the_scan_fs_argument():
+    from automated_security_helper.cli.config import _SOURCE_DIR_HELP
+
+    assert "`ash scan fs <path>`" in _SOURCE_DIR_HELP, _SOURCE_DIR_HELP
+    assert "--source-dir`" not in _SOURCE_DIR_HELP, _SOURCE_DIR_HELP
+
+
+def test_an_old_unused_suppressions_report_suggests_scan_fs(tmp_path):
+    from automated_security_helper.cli.config import config_app
+    from tests.utils.unused_report_layout import ENTRY, lay_out
+
+    config, _path = lay_out(
+        tmp_path, {"unused_suppressions": [ENTRY]}, age_seconds=7200
+    )
+
+    result = CliRunner().invoke(
+        config_app, ["lint", "--config", str(config), "--fix-unused"], input="n\n"
+    )
+
+    assert "   Consider running a fresh scan: ash scan fs" in (
+        result.output.splitlines()
+    ), result.output
+
+
+def test_the_container_build_help_names_scan_fs_for_a_scan_with_scan_options():
+    from automated_security_helper.cli.container import BUILD_HELP
+
+    assert "run `ash scan fs --mode container`" in BUILD_HELP, BUILD_HELP
+
+
+def test_the_merge_ignore_suppressions_help_names_scan_fs():
+    merge = typer.main.get_command(app).commands["results"].commands["merge"]
+    (option,) = [p for p in merge.params if "--ignore-suppressions" in p.opts]
+
+    assert "'ash scan fs --ignore-suppressions'" in option.help, option.help
+
+
+def test_a_report_with_no_results_suggests_scan_fs(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    result = _invoke(
+        ["results", "report", "--output-dir", str(tmp_path / "no-such-output")]
+    )
+
+    text = _one_line(result.stderr)
+    assert "No scan results found" in text, text
+    assert "Run 'ash scan fs' first" in text, text
+
+
+@pytest.mark.parametrize("field", ["annotate", "fold"])
+def test_the_deduplication_settings_name_the_cli_flag_on_scan_fs_and_results_report(
+    field,
+):
+    from automated_security_helper.config.ash_config import AshDeduplicationConfig
+
+    description = AshDeduplicationConfig.model_fields[field].description
+
+    assert "on `ash scan fs` and `ash results report`." in description, description
+
+
+class _Workspace(BaseModel):
+    """Stands in for the results' ``workspace`` record: any model, not None."""
+
+
+def _workspace_model():
+    model = MagicMock()
+    model.to_simple_dict.return_value = {"a": 1}
+    model.sarif = None
+    model.metadata.generated_at = "2026-01-15T12:00:00+00:00"
+    model.metadata.workspace_project = None
+    model.workspace = _Workspace()
+    return model
+
+
+def _context(tmp_path):
+    from automated_security_helper.base.plugin_context import PluginContext
+
+    return PluginContext(
+        source_dir=Path(tmp_path / "src"),
+        output_dir=Path(tmp_path / "output"),
+        work_dir=Path(tmp_path / "work"),
+    )
+
+
+def test_s3_on_workspace_results_suggests_results_report(tmp_path):
+    from automated_security_helper.plugin_modules.ash_aws_plugins import s3_reporter
+
+    reporter = s3_reporter.S3Reporter(
+        context=_context(tmp_path),
+        config=s3_reporter.S3ReporterConfig(
+            options=s3_reporter.S3ReporterConfigOptions(
+                aws_region="us-west-2", bucket_name="a-bucket"
+            )
+        ),
+    )
+    reporter._plugin_log = MagicMock()
+
+    with patch.object(s3_reporter, "boto3") as boto3:
+        assert reporter.report(_workspace_model()) is None
+    boto3.Session.assert_not_called()
+
+    message = reporter._plugin_log.call_args[0][0]
+    assert "Run ash results report with --output-dir" in message, message
+
+
+def test_cloudwatch_logs_on_workspace_results_suggests_results_report(tmp_path):
+    from automated_security_helper.plugin_modules.ash_aws_plugins import (
+        cloudwatch_logs_reporter as cloudwatch,
+    )
+
+    reporter = cloudwatch.CloudWatchLogsReporter(
+        context=_context(tmp_path),
+        config=cloudwatch.CloudWatchLogsReporterConfig(
+            options=cloudwatch.CloudWatchLogsReporterConfigOptions(
+                aws_region="us-west-2",
+                log_group_name="a-log-group",
+                log_stream_name="a-stream",
+            )
+        ),
+    )
+    reporter._plugin_log = MagicMock()
+
+    with patch.object(cloudwatch, "boto3") as boto3:
+        assert reporter.report(_workspace_model()) is None
+    boto3.client.assert_not_called()
+
+    message = reporter._plugin_log.call_args[0][0]
+    assert "Run ash results report with --output-dir" in message, message
+
+
+def test_security_hub_on_workspace_results_suggests_results_report():
+    from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter import (
+        _workspace_results_message,
+    )
+
+    message = _workspace_results_message(
+        SimpleNamespace(workspace=SimpleNamespace(projects=[]))
+    )
+
+    assert "Run ash results report with --output-dir" in message, message
+
+
+def test_security_hub_with_no_scanned_directory_suggests_scan_fs(tmp_path, monkeypatch):
+    from automated_security_helper.plugin_modules.ash_aws_plugins import (
+        security_hub_reporter as securityhub,
+    )
+
+    printed: List[str] = []
+    monkeypatch.setattr(
+        securityhub, "echo", lambda message, err=False, **_: printed.append(message)
+    )
+    monkeypatch.setattr(
+        "automated_security_helper.utils.scan_source.why_no_scan_source",
+        lambda source_dir, environ: "The scan recorded no directory.",
+    )
+    securityhub.reset_no_scan_source_notice()
+    try:
+        securityhub.SecurityHubReporter._notify_no_scan_source(
+            SimpleNamespace(context=SimpleNamespace(source_dir=tmp_path))
+        )
+    finally:
+        securityhub.reset_no_scan_source_notice()
+
+    (notice,) = printed
+    assert "To archive, scan with `ash scan fs --mode container`" in notice, notice
+
+
+def test_the_markdown_reports_cut_note_names_results_inspect(test_plugin_context):
+    from automated_security_helper.config.default_config import get_default_config
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_reporter import (
+        MarkdownReporter,
+        MarkdownReporterConfig,
+        MarkdownReporterConfigOptions,
+    )
+    from automated_security_helper.schemas.sarif_schema_model import SarifReport
+    from tests.utils.scanner_thresholds import without_scanner_thresholds
+
+    model = AshAggregatedResults(ash_config=get_default_config())
+    without_scanner_thresholds(model)
+    model.ash_config.global_settings.severity_threshold = "MEDIUM"
+    model.sarif = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "ASH"}},
+                    "results": [
+                        {
+                            "ruleId": f"ERR-{index}",
+                            "level": "error",
+                            "message": {"text": f"actionable {index}"},
+                            "properties": {"scanner_name": "bandit"},
+                        }
+                        for index in range(3)
+                    ],
+                    "invocations": [],
+                }
+            ],
+        }
+    )
+    reporter = MarkdownReporter(
+        context=test_plugin_context,
+        config=MarkdownReporterConfig(
+            options=MarkdownReporterConfigOptions(max_detailed_findings=2)
+        ),
+    )
+
+    text = _one_line(reporter.report(model))
+
+    assert "Showing 2 of 3 total actionable findings" in text, text
+    assert "use `ash results inspect findings` to review the full set" in text, text
+
+
+def test_ferret_scans_show_suppressed_refusal_names_scan_fs():
+    from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+        UNSUPPORTED_FERRET_OPTIONS,
+    )
+
+    reason = UNSUPPORTED_FERRET_OPTIONS["show_suppressed"]
+
+    assert "ash scan fs --ignore-suppressions reports them" in reason, reason
+
+
+def test_comparing_sharded_results_is_refused_naming_results_merge():
+    from automated_security_helper.utils.finding_diff import (
+        ComparabilityRefusal,
+        check_comparable,
+    )
+
+    sharded = SimpleNamespace(
+        workspace=None,
+        metadata=SimpleNamespace(shard=object()),
+        baseline_filtered=False,
+    )
+
+    with pytest.raises(ComparabilityRefusal) as refused:
+        check_comparable(sharded)
+
+    assert str(refused.value) == (
+        "use ash results merge before comparing sharded results"
+    )

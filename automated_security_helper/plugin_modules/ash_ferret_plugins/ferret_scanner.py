@@ -261,7 +261,7 @@ UNSUPPORTED_FERRET_OPTIONS = {
     "memory_scrub": "Redaction is not supported in ASH integration. Use ferret-scan CLI directly for redaction.",
     # Suppression options - ASH has its own system
     "generate_suppressions": "ASH manages suppressions centrally. Add them to global_settings.suppressions in the ASH config file (for example .ash.yaml) instead.",
-    "show_suppressed": "ASH manages suppressions centrally. ASH's reports count suppressed findings, and ash scan --ignore-suppressions reports them as findings.",
+    "show_suppressed": "ASH manages suppressions centrally. ASH's reports count suppressed findings, and ash scan fs --ignore-suppressions reports them as findings.",
     "suppressions_file": "ASH manages suppressions centrally. Add them to global_settings.suppressions in the ASH config file (for example .ash.yaml) instead.",
     # Text extraction mode - not scanning
     "extract_text": "Text extraction mode is not supported. Use ferret-scan CLI directly for text extraction.",
