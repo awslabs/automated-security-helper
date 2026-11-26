@@ -343,6 +343,46 @@ def _name_length(name: str) -> int:
     return len(name.encode("utf-16-le", "surrogatepass")) // 2
 
 
+def drop_regions_without_a_line(raw: Any) -> None:
+    """Remove each region whose ``startLine`` is below 1, in place.
+
+    gitleaks has rules that match a file by its path alone (``pkcs12-file`` for
+    every ``.p12`` and ``.pfx``). Their findings have no line, and gitleaks writes
+    the region as ``startLine: 0`` with the columns and end line 0 too. SARIF
+    requires a ``startLine`` of 1 or more, so the report failed validation as a
+    whole and every other finding of the run was lost with it. Without the region
+    the finding names its file, which is what gitleaks found.
+
+    Only an integer ``startLine`` below 1 is read as "no line". Anything else,
+    including a document of another shape, is left for the SARIF validation to
+    accept or refuse.
+    """
+
+    def items(value: Any) -> List[Any]:
+        return value if isinstance(value, list) else []
+
+    if not isinstance(raw, dict):
+        return
+    for run in items(raw.get("runs")):
+        if not isinstance(run, dict):
+            continue
+        for result in items(run.get("results")):
+            if not isinstance(result, dict):
+                continue
+            for location in items(result.get("locations")):
+                if not isinstance(location, dict):
+                    continue
+                physical = location.get("physicalLocation")
+                if not isinstance(physical, dict):
+                    continue
+                region = physical.get("region")
+                if not isinstance(region, dict):
+                    continue
+                line = region.get("startLine")
+                if isinstance(line, int) and not isinstance(line, bool) and line < 1:
+                    del physical["region"]
+
+
 def gitleaksignore_files(data: bytes) -> List[str]:
     """The candidate files of ``gitleaksignore_candidates``, without the count left unread."""
     return gitleaksignore_candidates(data)[0]
@@ -1120,6 +1160,9 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             # The re-scan is part of this run: the base's _post_scan recorded
             # the end before it, and the invocation record is written after.
             self.end_time = datetime.now(timezone.utc)
+        if raw is not None:
+            # After the re-scan, whose results are added to these.
+            drop_regions_without_a_line(raw)
         return raw
 
     def _read_tree_ignore_file(self, target: Path) -> bytes:

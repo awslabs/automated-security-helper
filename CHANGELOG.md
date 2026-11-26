@@ -135,6 +135,15 @@
 
 ### Fixes
 
+- **A `.p12` or `.pfx` file no longer makes gitleaks lose every finding of the scan.**
+  gitleaks' `pkcs12-file` rule reports such a file by its path, with no line, and
+  gitleaks writes that finding's region as line 0. SARIF requires a line of 1 or more,
+  so ASH refused the whole report and gitleaks ended in ERROR: a test certificate
+  anywhere in the tree hid every secret gitleaks found, and the scan exited 1. The
+  region of a finding with no line is now dropped before the report is read, so the
+  finding names its file and the others are kept. A suppression by `rule_id` and `path`
+  matches it.
+
 - **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**
   It passes `GITHUB_ACTIONS`, `TF_BUILD` and `TEAMCITY_VERSION` into the container when
   set (by name, or with their values when `OCI_RUNNER_WRAPPER` is set; a value that holds
