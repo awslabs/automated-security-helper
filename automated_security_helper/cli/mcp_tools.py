@@ -4802,6 +4802,10 @@ def mcp_diff_scan_results(
             "error_type": McpErrorType.RESULTS_NOT_COMPARABLE.value,
         }
     diff = compare_findings(before_findings, after_findings)
+    # A python-mode dump: ``severity`` is the ``Severity`` member here, a str
+    # subclass that json writes as its text. A yaml writer refuses it, so do not
+    # route these lists to one (pinned in
+    # tests/unit/models/test_the_python_dump_of_a_finding_carries_a_severity_member.py).
     return {
         "new": [finding.model_dump() for finding in diff.new],
         "resolved": [finding.model_dump() for finding in diff.absent_after],

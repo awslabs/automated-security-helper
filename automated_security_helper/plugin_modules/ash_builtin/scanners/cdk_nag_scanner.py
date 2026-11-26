@@ -1440,6 +1440,19 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         self.tool_version = _cdk_nag_version
         return super().model_post_init(context)
 
+    def _forced_binary_precluded_reason(self) -> Optional[str]:
+        """cdk-nag's dependencies are never one binary, so no force satisfies them.
+
+        The scan imports aws-cdk-lib and cdk-nag in ASH's own interpreter and
+        needs Node.js for the CDK CLI; a ``--binary-path`` record names one
+        executable file and can supply none of that, so the record is never
+        consulted for this scanner and the docs name it as an exception.
+        """
+        return (
+            "cdk-nag's dependencies are Python packages (aws-cdk-lib, cdk-nag) "
+            "and Node.js, not one binary, so a forced path cannot supply them"
+        )
+
     def validate_plugin_dependencies(self) -> bool:
         """Validate the scanner configuration and requirements.
 

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import functools
 import json
 import logging
 import os
@@ -407,6 +408,11 @@ class ScannerPluginConfigBase(PluginConfigBase):
 T = TypeVar("T", bound=ScannerPluginConfigBase)
 
 
+#: Marks a ``validate_plugin_dependencies`` that already runs the forced-binary
+#: record read first, so ``__pydantic_init_subclass__`` never wraps one twice.
+_FORCED_RECORD_PREFIX_MARK = "_ash_reads_forced_binary_record"
+
+
 class ScannerPluginBase(PluginBase, Generic[T]):
     """Base class for all scanner plugins.
 
@@ -793,6 +799,103 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             at=("scanners", str(getattr(self.config, "name", "") or "")),
         )
 
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        """Make the ``--binary-path`` record read a prefix of EVERY dependency check.
+
+        ``ash dependencies install --binary-path <scanner>=<path>`` records the
+        forced path "for dependency validation", and the docs promise the scanners'
+        dependency validation resolves the scanner to the forced path before any
+        PATH or uv lookup. The read used to live only in the base
+        ``validate_plugin_dependencies``, so every scanner that overrides without
+        chaining (checkov, bandit, cfn-lint, zizmor, cfn-guard, actionlint, the
+        grep family, guarddog, npm-audit, ...) never reached it. Adding the read to
+        each override is the shape this repository has already paid for
+        (``GrepScannerBase._validate_tool_dependencies``: "would work today and
+        break on the third scanner"), and adding it to the call sites leaks the
+        same way -- the method is called from the scan phase, the engine phase, the
+        inventory, the installer and the workspace report. So the prefix is affixed
+        here, where every subclass passes exactly once: an override defined by the
+        class being created is wrapped so ``_forced_binary_satisfies`` runs first,
+        and an inherited or already-wrapped method is left alone. What the force
+        may not outvote is expressed in ``_forced_binary_satisfies`` and the
+        ``_forced_binary_precluded_reason`` hook, never by skipping the wrap.
+        """
+        super().__pydantic_init_subclass__(**kwargs)
+        override = cls.__dict__.get("validate_plugin_dependencies")
+        if override is None or not callable(override):
+            return
+        if getattr(override, _FORCED_RECORD_PREFIX_MARK, False):
+            return
+
+        @functools.wraps(override)
+        def validate_with_forced_record(self, *args, **kw):
+            if self._forced_binary_satisfies():
+                return True
+            return override(self, *args, **kw)
+
+        setattr(validate_with_forced_record, _FORCED_RECORD_PREFIX_MARK, True)
+        cls.validate_plugin_dependencies = validate_with_forced_record  # type: ignore[method-assign]
+
+    def _forced_binary_precluded_reason(self) -> Optional[str]:
+        """Why a recorded ``--binary-path`` force cannot satisfy this scanner, or None.
+
+        The force answers one question: where the scanner's own binary is. A
+        scanner whose dependency check also answers a different question gives
+        that question's refusal here, so the record never outvotes it: npm-audit
+        refuses to run offline (npm prints a clean audit offline, so a bypass is a
+        silent false clean), snyk-code refuses offline, trivy needs its offline
+        vulnerability database, cfn-guard its rules files, actionlint its
+        configured integrations -- and cdk-nag, detect-secrets and mcp-config run
+        Python libraries rather than one binary, so for them a forced path can
+        satisfy nothing and the reason is constant.
+
+        Consulted by ``_forced_binary_satisfies`` only; returning a reason does
+        not record it and does not fail validation, it only sends the check down
+        the scanner's own route. The default is None: for a scanner whose
+        dependency is its binary's presence, the operator's force is the answer.
+        A scanner that adds a semantic gate to its override must mirror it here,
+        or the force bypasses the gate.
+        """
+        return None
+
+    def _forced_binary_satisfies(self) -> bool:
+        """Whether the recorded ``--binary-path`` force satisfies validation now.
+
+        True only when no construction-time refusal is recorded
+        (``dependency_unavailable_reason`` is consulted first, as the base check
+        consults it: a force is a binary-presence answer and must not outvote an
+        offline-mode or sandbox verdict), nothing precludes the force
+        (``_forced_binary_precluded_reason``), and the record still holds: the
+        file is re-checked and re-hashed on every read
+        (``recorded_forced_binary``), never executed. The record is looked up
+        under the name the installer wrote it under: the config's name, or the
+        class name when the config carries none, exactly as
+        ``ash dependencies install`` keys it.
+        """
+        if self.dependency_unavailable_reason:
+            return False
+        precluded = self._forced_binary_precluded_reason()
+        name = str(getattr(self.config, "name", "") or "") or type(self).__name__
+        if precluded:
+            ASH_LOGGER.debug(
+                f"{name}: a forced --binary-path record cannot satisfy this "
+                f"scanner: {precluded}"
+            )
+            return False
+        from automated_security_helper.utils.install_providers import (
+            recorded_forced_binary,
+        )
+
+        forced = recorded_forced_binary(name)
+        if forced is None:
+            return False
+        ASH_LOGGER.debug(
+            f"{name}: satisfied by the forced binary recorded by "
+            f"--binary-path at {forced.path}"
+        )
+        return True
+
     def validate_plugin_dependencies(self) -> bool:
         """Check whether the scanner's command is available on PATH.
 
@@ -823,6 +926,17 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """
         if self.dependency_unavailable_reason:
             return False
+        # A binary the operator forced with `ash dependencies install
+        # --binary-path <scanner>=<path>` satisfies the dependency first: the
+        # record is what that flag's "recorded for dependency validation"
+        # promises, judged afresh by a file check and the recorded SHA-256
+        # (the file is read, never executed). No record, or one whose file went
+        # stale, falls through to the PATH probe unchanged. Overriding scanners
+        # get the same read as a prefix: ``__pydantic_init_subclass__`` wraps
+        # every override of this method with ``_forced_binary_satisfies``, so
+        # the check here serves only the instances that run the base method.
+        if self._forced_binary_satisfies():
+            return True
         if not self.command:
             # No tool to look for: nothing can be found, and an empty name is
             # never handed to the lookup.

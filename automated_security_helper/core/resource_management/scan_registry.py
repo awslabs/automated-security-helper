@@ -121,7 +121,9 @@ ENDED = frozenset(
 #: The session a scan belongs to when its registrar named none: stdio's single
 #: client and in-process callers. The same value as
 #: ``config.session_profiles.DEFAULT_SESSION_ID``, spelled here rather than
-#: imported because this module sits below the MCP CLI package.
+#: imported because the config layer imports ``core.resource_management``
+#: (``config/mcp_sandbox.py`` takes its error types from it), so importing the
+#: constant from ``config`` here would make the two packages import each other.
 DEFAULT_SCAN_SESSION = "__default__"
 
 

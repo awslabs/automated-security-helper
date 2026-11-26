@@ -23,6 +23,7 @@ from automated_security_helper.base.plugin_manifest import (
     ScannerManifest,
 )
 from automated_security_helper.base.plugin_provisioning import provisioning_for
+from automated_security_helper.plugin_manifests import check_table_rows
 
 _BASE = "automated_security_helper.plugin_modules"
 _SOURCES = "automated_security_helper/plugin_modules"
@@ -182,4 +183,11 @@ MANIFESTS = (
         "TrivyRepoScannerConfigOptions",
         owned=(f"{_DOCS}/trivy-plugin.md",),
     ),
+)
+
+check_table_rows(
+    __name__,
+    {manifest.name for manifest in MANIFESTS},
+    _EXCLUSIONS=_EXCLUSIONS,
+    _DENIED_OPTION_DEFAULTS=_DENIED_OPTION_DEFAULTS,
 )

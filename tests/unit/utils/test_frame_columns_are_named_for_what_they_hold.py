@@ -11,6 +11,10 @@ what these pin is that each column holds what its name says:
 - the identity message and the upper-cased severity are not under the bare
   ``message`` and ``severity`` names the model uses for other values;
 - the grading frame always has the same four typed columns.
+
+The no-bare-name-for-transformed-values rule binds ``SIDE_SPEC``, whose columns
+are join inputs; the reporter-local ASFF derived frame and GitLab projection
+keep ``severity`` for their own transformed grades, which nothing joins on.
 """
 
 from __future__ import annotations
@@ -50,6 +54,35 @@ def _finding(**overrides) -> FlatVulnerability:
     fields.update(overrides)
     severity = fields.pop("severity")
     return flat_with_severity(severity, **fields)
+
+
+def _keyed_finding(line: int, message: str, severity: str) -> FlatVulnerability:
+    """A finding :func:`finding_diff.fallback_key` keys: built from a SARIF
+    result, so it carries an identity, with no fingerprint, so the key is the
+    line-free fallback and base/key_message/severity_uc are non-null."""
+    from automated_security_helper.models.flat_vulnerability import (
+        assign_identity_ids,
+    )
+    from automated_security_helper.schemas.sarif_schema_model import Result
+
+    result = Result.model_validate(
+        {
+            "ruleId": "R1",
+            "message": {"text": message},
+            "properties": {"issue_severity": severity},
+            "locations": [
+                {
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": "a.py"},
+                        "region": {"startLine": line},
+                    }
+                }
+            ],
+        }
+    )
+    finding = FlatVulnerability.from_sarif_result(result, "scanner", "scanner")
+    assign_identity_ids([finding])
+    return finding
 
 
 class TestSideFrameColumnNames:
@@ -96,6 +129,60 @@ class TestSideFrameColumnNames:
         )
         assert side["line_start"].to_list() == [0, None]
         assert side["line_end"].to_list() == [1, None]
+
+
+class TestSideFrameKeyMemo:
+    def test_the_fallback_key_is_computed_once_per_finding(self, monkeypatch):
+        """Three columns read the key's members; the memo keeps the identity-base
+        copy and the json.dumps to one pass over the findings."""
+        calls = 0
+        real = finding_diff.fallback_key
+
+        def counting(finding):
+            nonlocal calls
+            calls += 1
+            return real(finding)
+
+        monkeypatch.setattr(finding_diff, "fallback_key", counting)
+        findings = [_finding(id="a"), _finding(id="b"), _finding(id="c")]
+        side = finding_diff._side(findings)
+        assert calls == len(findings)
+        assert dict(side.schema) == frame_schema(finding_diff.SIDE_SPEC)
+
+    def test_the_memo_does_not_outlive_the_call(self):
+        finding_diff._side([_finding()])
+        assert finding_diff._SIDE_KEYS.get() is None
+
+    def test_the_key_columns_read_the_same_without_the_memo(self):
+        """``to_frame`` over SIDE_SPEC outside ``_side`` (no memo installed)
+        computes the key per column and fills the same cells. The keyed
+        finding holds non-null base/key_message/severity_uc on both paths, so
+        the equality discriminates a memo serving a wrong key; the unkeyed one
+        keeps the all-null path compared too."""
+        from automated_security_helper.models.frame_model import to_frame
+
+        keyed = _keyed_finding(7, "the key message", "HIGH")
+        assert finding_diff.fallback_key(keyed) is not None
+        findings = [keyed, _finding(id="b")]
+        direct = to_frame(findings, finding_diff.SIDE_SPEC)
+        through = finding_diff._side(findings)
+        assert direct.to_dicts() == through.to_dicts()
+        for column in ("base", "key_message", "severity_uc"):
+            assert through[column].null_count() == 1, column
+        assert through["key_message"].to_list()[0] == "the key message"
+        assert through["severity_uc"].to_list()[0] == "HIGH"
+
+    def test_the_memo_is_reset_when_the_frame_build_raises(self, monkeypatch):
+        """The ``finally`` path: a reader that throws mid-fill must not leave
+        the memo installed for a later ``to_frame`` outside ``_side``."""
+
+        def throwing(finding):
+            raise RuntimeError("reader boom")
+
+        monkeypatch.setattr(finding_diff, "fallback_key", throwing)
+        with pytest.raises(RuntimeError, match="reader boom"):
+            finding_diff._side([_finding()])
+        assert finding_diff._SIDE_KEYS.get() is None
 
 
 class TestGradedFrameSchema:

@@ -165,11 +165,23 @@ def test_the_historical_recordings_are_the_ones_older_than_their_pin() -> None:
     }
 
 
-def test_a_transcript_file_is_found_by_its_name_alone() -> None:
+def test_a_transcript_file_is_found_by_its_name_alone(tmp_path) -> None:
     """Discovery needs no list: every directory holding a ``transcripts.json`` is one
-    discovery returned, so a new fixture directory cannot be forgotten."""
-    on_disk = {p.parent for p in _ROOT.rglob(TRANSCRIPT_FILE_NAME)}
-    assert on_disk and on_disk == {base for base, _ in _FILES}
+    discovery returns, so a new fixture directory cannot be forgotten.
+
+    Proven over a planted tree discovery has never seen. The committed corpus cannot
+    prove it: ``_FILES`` is built by the same ``rglob`` a comparison there would use,
+    so that comparison could not fail."""
+    import shutil
+
+    donor = next(_ROOT.rglob(TRANSCRIPT_FILE_NAME))
+    for name in ("a", "b/nested"):
+        target = tmp_path / name
+        target.mkdir(parents=True)
+        shutil.copyfile(donor, target / TRANSCRIPT_FILE_NAME)
+    (tmp_path / "c").mkdir()  # no transcripts.json: not a fixture directory
+    found = discover_transcript_files(tmp_path)
+    assert {base for base, _ in found} == {tmp_path / "a", tmp_path / "b" / "nested"}
 
 
 def test_the_committed_files_are_in_the_canonical_text() -> None:

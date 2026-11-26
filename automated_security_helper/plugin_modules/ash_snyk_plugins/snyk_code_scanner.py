@@ -10,7 +10,7 @@ import re
 import shutil
 import time
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Iterable, List, Literal, Set
+from typing import Annotated, Any, ClassVar, Iterable, List, Literal, Optional, Set
 
 import yaml
 from pydantic import Field, PrivateAttr
@@ -622,6 +622,20 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             extra_args=[],
         )
         super().model_post_init(context)
+
+    def _forced_binary_precluded_reason(self) -> Optional[str]:
+        """Offline, a forced snyk binary must not satisfy validation.
+
+        snyk code audits against Snyk's service, so the offline refusal below is
+        a semantic verdict a ``--binary-path`` record has no say in. The
+        credential check is not mirrored here: a forced snyk without credentials
+        fails loudly at scan time rather than reporting a clean result.
+        """
+        if self._is_offline_mode():
+            return (
+                "snyk code does not run offline; the offline check precedes any binary"
+            )
+        return None
 
     def validate_plugin_dependencies(self) -> bool:
         """Validate scanner configuration.

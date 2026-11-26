@@ -62,7 +62,14 @@ def test_a_scanner_with_no_command_is_not_looked_up(monkeypatch):
         raise AssertionError("find_executable was handed a name")
 
     monkeypatch.setattr(scanner_plugin, "find_executable", _never)
-    stand_in = SimpleNamespace(command=None, dependency_unavailable_reason=None)
+    # The base method consults the forced --binary-path record before the PATH
+    # probe; a stand-in with no record answers False there, as a scanner with
+    # nothing forced does.
+    stand_in = SimpleNamespace(
+        command=None,
+        dependency_unavailable_reason=None,
+        _forced_binary_satisfies=lambda: False,
+    )
 
     assert ScannerPluginBase.validate_plugin_dependencies(stand_in) is False
 
@@ -74,7 +81,11 @@ def test_a_stand_in_that_carries_only_a_command_is_looked_up_by_it(monkeypatch):
         "find_executable",
         lambda name: looked_up.append(name) or "/usr/bin/sometool",
     )
-    stand_in = SimpleNamespace(command="sometool", dependency_unavailable_reason=None)
+    stand_in = SimpleNamespace(
+        command="sometool",
+        dependency_unavailable_reason=None,
+        _forced_binary_satisfies=lambda: False,
+    )
 
     assert ScannerPluginBase.validate_plugin_dependencies(stand_in) is True
     assert looked_up == ["sometool"]

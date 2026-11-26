@@ -13,7 +13,6 @@ never the ``*`` that would trust every directory.
 
 import os
 import sys
-from pathlib import Path
 
 import pytest
 
@@ -22,7 +21,10 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scan
     OpengrepScannerConfig,
     OpengrepScannerConfigOptions,
 )
-from automated_security_helper.utils.sandbox.policy import build_scanner_policy
+from automated_security_helper.utils.sandbox.policy import (
+    SandboxUnavailable,
+    build_scanner_policy,
+)
 from tests.utils.env_assertions import environ_names
 from tests.utils.tool_guard import stub_tool_probes
 
@@ -32,6 +34,28 @@ pytestmark = pytest.mark.unit
 @pytest.fixture(autouse=True)
 def _no_tool_probe(monkeypatch):
     stub_tool_probes(monkeypatch)
+
+
+@pytest.fixture(autouse=True)
+def _no_checkout_above_the_test_directory(monkeypatch, tmp_path):
+    """A ``.git`` counts only where the test made it.
+
+    The scanner walks up from its target, and the temporary directory may sit inside
+    a checkout (a CI workspace, a developer's ``/tmp`` under a repository); every
+    exact-count assertion below would then read that checkout's top as well. The
+    walk asks ``os.path.lexists``, so the answer is fixed there: the real one inside
+    ``tmp_path``, no ``.git`` anywhere else.
+    """
+    root = os.path.realpath(tmp_path)
+    real = os.path.lexists
+
+    def lexists(path):
+        text = os.fspath(path)
+        if os.path.basename(text) == ".git" and not text.startswith(root + os.sep):
+            return False
+        return real(path)
+
+    monkeypatch.setattr(os.path, "lexists", lexists)
 
 
 def _scanner(test_plugin_context):
@@ -203,27 +227,24 @@ def test_an_operator_block_leaves_the_sandboxed_count_coherent(
     assert os.path.realpath(target) in [v for _k, v in _git_entries(sandboxed)]
 
 
-def test_a_listed_block_with_a_gap_does_not_leave_a_gap(
-    test_plugin_context, monkeypatch, tmp_path
-):
+def test_a_listed_block_is_refused_rather_than_merged_or_dropped(monkeypatch, tmp_path):
     monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
     target = tmp_path / "source"
     target.mkdir()
-    # Count 2 with one entry: git refuses a block like that outright.
-    policy = _production_policy(
-        tmp_path,
-        target,
-        environment=[
-            "GIT_CONFIG_COUNT=2",
-            "GIT_CONFIG_KEY_0=core.pager",
-            "GIT_CONFIG_VALUE_0=cat",
-        ],
-    )
 
-    env = _sandboxed_env(_scanner(test_plugin_context), policy, target)
-
-    _assert_coherent(env)
-    assert os.path.realpath(target) in [v for _k, v in _git_entries(env)]
+    # The scanner's own block is written from the directories the policy names; an
+    # operator's entry, valued or not, would be passed unchanged or dropped, so the
+    # list is refused with the entry named.
+    with pytest.raises(SandboxUnavailable, match="GIT_CONFIG_COUNT"):
+        _production_policy(
+            tmp_path,
+            target,
+            environment=[
+                "GIT_CONFIG_COUNT=2",
+                "GIT_CONFIG_KEY_0=core.pager",
+                "GIT_CONFIG_VALUE_0=cat",
+            ],
+        )
 
 
 def test_the_sandbox_does_not_leak_the_private_hand_over_name(
@@ -273,9 +294,6 @@ def test_outside_a_checkout_only_the_scanned_directory_is_named(
     test_plugin_context, monkeypatch, tmp_path
 ):
     monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
-    real = Path(os.path.realpath(tmp_path))
-    if any((parent / ".git").exists() for parent in [real, *real.parents]):
-        pytest.skip("the test directory sits inside a git checkout")
     target = tmp_path / "plain"
     target.mkdir()
 
