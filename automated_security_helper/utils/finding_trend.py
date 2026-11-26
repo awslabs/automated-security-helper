@@ -452,36 +452,42 @@ def build_trend(runs: Sequence[TrendRun]) -> Trend:
     )
 
 
+def _changes_schema() -> dict[str, Any]:
+    """The declared columns of the frame :func:`_sorted_changes` sorts."""
+    return {
+        "position": pl.Int64,
+        "run": pl.Int64,
+        "kind": pl.String,
+        "scanner": pl.String,
+        "rule": pl.String,
+        "file": pl.String,
+        "id": pl.String,
+    }
+
+
+def _changes_frame(changes: list[dict[str, Any]]) -> pl.DataFrame:
+    """One row per change, in order, as :func:`_changes_schema`."""
+    return pl.DataFrame(
+        {
+            "position": list(range(len(changes))),
+            "run": [change["run"] for change in changes],
+            "kind": [wire(change["kind"]) for change in changes],
+            "scanner": [wire(change["scanner"] or "") for change in changes],
+            "rule": [wire(change["rule_id"] or "") for change in changes],
+            "file": [wire(change["file_path"] or "") for change in changes],
+            "id": [wire(change["finding_id"] or "") for change in changes],
+        },
+        schema=_changes_schema(),
+    )
+
+
 def _sorted_changes(changes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """*changes* by run, kind, scanner, rule, path and finding id, ties in given order.
 
     A missing text sorts as the empty one. The position is the last key, so
     changes that tie on every key stay in the order they were found.
     """
-    frame = pl.DataFrame(
-        [
-            (
-                position,
-                change["run"],
-                wire(change["kind"]),
-                wire(change["scanner"] or ""),
-                wire(change["rule_id"] or ""),
-                wire(change["file_path"] or ""),
-                wire(change["finding_id"] or ""),
-            )
-            for position, change in enumerate(changes)
-        ],
-        schema={
-            "position": pl.Int64,
-            "run": pl.Int64,
-            "kind": pl.String,
-            "scanner": pl.String,
-            "rule": pl.String,
-            "file": pl.String,
-            "id": pl.String,
-        },
-        orient="row",
-    )
+    frame = _changes_frame(changes)
     order = frame.sort(
         ["run", "kind", "scanner", "rule", "file", "id", "position"],
         maintain_order=True,
@@ -558,18 +564,56 @@ def _series(
     ]
 
 
+def _status_schema() -> dict[str, Any]:
+    """The declared columns of the frame :func:`status_totals` groups."""
+    return {"run": pl.Int64, "status": pl.String, "count": pl.Int64}
+
+
+def _status_frame(series: Sequence[dict[str, Any]]) -> pl.DataFrame:
+    """One row per series entry, in order, as :func:`_status_schema`."""
+    return pl.DataFrame(
+        {
+            "run": [entry["run"] for entry in series],
+            "status": [wire(entry["status"]) for entry in series],
+            "count": [entry["count"] for entry in series],
+        },
+        schema=_status_schema(),
+    )
+
+
 def status_totals(series: Sequence[dict[str, Any]]) -> dict[tuple[int, str], int]:
     """How many findings each status holds at each run, over a series' entries.
 
     Keyed by ``(run, status)``; a pair the series does not hold is absent.
     """
-    frame = pl.DataFrame(
-        [(entry["run"], wire(entry["status"]), entry["count"]) for entry in series],
-        schema={"run": pl.Int64, "status": pl.String, "count": pl.Int64},
-        orient="row",
-    )
+    frame = _status_frame(series)
     totals = frame.group_by(["run", "status"]).agg(pl.col("count").sum())
     return {(run, unwire(status)): count for run, status, count in totals.iter_rows()}
+
+
+def _cell_schema() -> dict[str, Any]:
+    """The declared columns of the frame :func:`cell_counts` groups."""
+    return {
+        "run": pl.Int64,
+        "scanner": pl.String,
+        "severity": pl.String,
+        "status": pl.String,
+        "count": pl.Int64,
+    }
+
+
+def _cell_frame(series: Sequence[dict[str, Any]]) -> pl.DataFrame:
+    """One row per series entry, in order, as :func:`_cell_schema`."""
+    return pl.DataFrame(
+        {
+            "run": [entry["run"] for entry in series],
+            "scanner": [wire(entry["scanner"]) for entry in series],
+            "severity": [wire(entry["severity"]) for entry in series],
+            "status": [wire(entry["status"]) for entry in series],
+            "count": [entry["count"] for entry in series],
+        },
+        schema=_cell_schema(),
+    )
 
 
 def cell_counts(
@@ -583,26 +627,7 @@ def cell_counts(
     tie, a missing scanner and an empty one, stay in the order the series first
     holds them.
     """
-    frame = pl.DataFrame(
-        [
-            (
-                entry["run"],
-                wire(entry["scanner"]),
-                wire(entry["severity"]),
-                wire(entry["status"]),
-                entry["count"],
-            )
-            for entry in series
-        ],
-        schema={
-            "run": pl.Int64,
-            "scanner": pl.String,
-            "severity": pl.String,
-            "status": pl.String,
-            "count": pl.Int64,
-        },
-        orient="row",
-    )
+    frame = _cell_frame(series)
     cells = (
         frame.group_by(["run", "scanner", "severity"], maintain_order=True)
         .agg(
@@ -631,6 +656,87 @@ def cell_counts(
     ]
 
 
+def _presence_schema() -> dict[str, Any]:
+    """The declared columns of the (run, track) presence frame of :func:`_streaks`."""
+    return {"run": pl.Int64, "track": pl.Int64}
+
+
+def _presence_frame(track_of: list[dict[int, int]]) -> pl.DataFrame:
+    """One row per finding track present in each run, as :func:`_presence_schema`."""
+    pairs = [
+        (k, track) for k, tracks in enumerate(track_of) for track in tracks.values()
+    ]
+    return pl.DataFrame(
+        {
+            "run": [k for k, _ in pairs],
+            "track": [track for _, track in pairs],
+        },
+        schema=_presence_schema(),
+    )
+
+
+def _candidates_schema() -> dict[str, Any]:
+    """The declared columns of the last run's candidate frame of :func:`_streaks`."""
+    return {
+        "position": pl.Int64,
+        "track": pl.Int64,
+        "scanner": pl.String,
+        "scanner_key": pl.String,
+        "rule_key": pl.String,
+        "file_key": pl.String,
+        "line_key": pl.Int64,
+        "id_key": pl.String,
+    }
+
+
+def _candidates_frame(
+    rows: list[_Row],
+    tracks: dict[int, int],
+    line_keys: list[int],
+    line_rank: dict[int, int],
+) -> pl.DataFrame:
+    """One row per finding of the last run, as :func:`_candidates_schema`.
+
+    *tracks* maps a finding's index to its track; *line_rank* maps each of
+    *line_keys* (one per row) to the rank the frame holds.
+    """
+    return pl.DataFrame(
+        {
+            "position": list(range(len(rows))),
+            "track": [tracks[row.index] for row in rows],
+            "scanner": [wire(row.scanner) for row in rows],
+            "scanner_key": [wire(row.scanner or "") for row in rows],
+            "rule_key": [wire(row.rule_id or "") for row in rows],
+            "file_key": [wire(row.file_path or "") for row in rows],
+            "line_key": [line_rank[line_key] for line_key in line_keys],
+            "id_key": [wire(row.id or "") for row in rows],
+        },
+        schema=_candidates_schema(),
+    )
+
+
+def _evaluated_schema() -> dict[str, Any]:
+    """The declared columns of the evaluated-scanner frame of :func:`_streaks`."""
+    return {"run": pl.Int64, "scanner": pl.String, "evaluated": pl.Boolean}
+
+
+def _evaluated_frame(runs: list[TrendRun]) -> pl.DataFrame:
+    """One row per scanner each run evaluated, as :func:`_evaluated_schema`."""
+    pairs = [
+        (k, wire(name))
+        for k, run in enumerate(runs)
+        for name in set(run.record["coverage"]["evaluated_scanners"])
+    ]
+    return pl.DataFrame(
+        {
+            "run": [k for k, _ in pairs],
+            "scanner": [name for _, name in pairs],
+            "evaluated": [True for _ in pairs],
+        },
+        schema=_evaluated_schema(),
+    )
+
+
 def _streaks(
     runs: list[TrendRun], rows: list[list[_Row]], track_of: list[dict[int, int]]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -642,11 +748,7 @@ def _streaks(
     further back than ``open_since_run``: it begins at the series' first run,
     or at a run whose predecessor did not evaluate the finding's scanner.
     """
-    presence = pl.DataFrame(
-        [(k, track) for k, tracks in enumerate(track_of) for track in tracks.values()],
-        schema={"run": pl.Int64, "track": pl.Int64},
-        orient="row",
-    )
+    presence = _presence_frame(track_of)
     spans = presence.group_by("track").agg(
         pl.len().alias("runs"),
         pl.col("run").min().alias("first"),
@@ -658,41 +760,8 @@ def _streaks(
     # as ranks, so one past 2**63 stays a line.
     line_keys = [-1 if row.line_start is None else row.line_start for row in rows[last]]
     line_rank = ranks(line_keys)
-    candidates = pl.DataFrame(
-        [
-            (
-                position,
-                track_of[last][row.index],
-                wire(row.scanner),
-                wire(row.scanner or ""),
-                wire(row.rule_id or ""),
-                wire(row.file_path or ""),
-                line_rank[line_key],
-                wire(row.id or ""),
-            )
-            for position, (row, line_key) in enumerate(zip(rows[last], line_keys))
-        ],
-        schema={
-            "position": pl.Int64,
-            "track": pl.Int64,
-            "scanner": pl.String,
-            "scanner_key": pl.String,
-            "rule_key": pl.String,
-            "file_key": pl.String,
-            "line_key": pl.Int64,
-            "id_key": pl.String,
-        },
-        orient="row",
-    )
-    evaluated = pl.DataFrame(
-        [
-            (k, wire(name), True)
-            for k, run in enumerate(runs)
-            for name in set(run.record["coverage"]["evaluated_scanners"])
-        ],
-        schema={"run": pl.Int64, "scanner": pl.String, "evaluated": pl.Boolean},
-        orient="row",
-    )
+    candidates = _candidates_frame(rows[last], track_of[last], line_keys, line_rank)
+    evaluated = _evaluated_frame(runs)
     # A streak is censored when it starts at the first run, or when the run
     # before it did not evaluate its scanner (a finding with no scanner has none
     # to miss). The join leaves ``evaluated`` null where that run did not.

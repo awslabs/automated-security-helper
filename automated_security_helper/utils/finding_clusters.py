@@ -186,6 +186,34 @@ def _key_parts(key: Tuple[Any, ...]) -> Tuple[Optional[str], ...]:
     return (resource, resource_type, where, ",".join(cwes), rule)
 
 
+def _key_schema() -> Dict[str, Any]:
+    """The declared columns of the key-class frame :func:`_key_groups` builds."""
+    import polars as pl
+
+    names = ("i", "project", "cls", *_PART_COLUMNS, "scanner", "version")
+    integers = ("i", "project")
+    return {n: pl.Int64 if n in integers else pl.String for n in names}
+
+
+def _key_columns() -> Dict[str, List[Any]]:
+    """The columns :func:`_key_groups` fills, each an empty list, in order."""
+    return {
+        "i": [],
+        "project": [],
+        "cls": [],
+        **{name: [] for name in _PART_COLUMNS},
+        "scanner": [],
+        "version": [],
+    }
+
+
+def _key_frame(columns: Dict[str, List[Any]]) -> Any:
+    """The key-class frame over *columns* (one list per declared column)."""
+    import polars as pl
+
+    return pl.DataFrame(columns, schema=_key_schema())
+
+
 def _key_groups(
     rows: Sequence[FlatVulnerability],
     keyed: Sequence[Tuple[int, Tuple[Any, ...]]],
@@ -205,8 +233,7 @@ def _key_groups(
         return []
     import polars as pl
 
-    names = ("i", "project", "cls", *_PART_COLUMNS, "scanner", "version")
-    columns: Dict[str, List[Any]] = {name: [] for name in names}
+    columns = _key_columns()
     codes: Dict[Any, int] = {}
     for index, key in keyed:
         row = rows[index]
@@ -219,11 +246,7 @@ def _key_groups(
             columns[name].append(wire(part))
         columns["scanner"].append(wire(row.scanner or ""))
         columns["version"].append(wire(_text(row.package_version)))
-    integers = ("i", "project")
-    frame = pl.DataFrame(
-        columns,
-        schema={n: pl.Int64 if n in integers else pl.String for n in names},
-    )
+    frame = _key_frame(columns)
     group = ["project", "cls", *_PART_COLUMNS]
     sized = (
         frame.lazy()

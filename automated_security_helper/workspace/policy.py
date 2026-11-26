@@ -322,6 +322,20 @@ def _refuse_unless_a_file(candidate: Path) -> None:
         raise _refuse(f"{label} is not a regular file")
 
 
+def _unreachable_name_schema() -> dict:
+    """The declared column of the frame :func:`ceiling_unreachable_counts` counts."""
+    import polars as pl
+
+    return {"name": pl.String}
+
+
+def _unreachable_name_frame(names: list):
+    """One row per unreachable finding: its wired scanner name."""
+    import polars as pl
+
+    return pl.DataFrame({"name": names}, schema=_unreachable_name_schema())
+
+
 def ceiling_unreachable_counts(
     results: Iterable[Mapping[str, Any]],
     declared_threshold: str | None,
@@ -420,9 +434,7 @@ def ceiling_unreachable_counts(
     if not names:
         return {}
 
-    import polars as pl
-
-    frame = pl.DataFrame({"name": names}, schema={"name": pl.String})
+    frame = _unreachable_name_frame(names)
     return {unwire(name): n for name, n in ordered_counts(frame, "name").iter_rows()}
 
 

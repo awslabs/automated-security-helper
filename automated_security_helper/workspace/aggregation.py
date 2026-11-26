@@ -1334,6 +1334,22 @@ def _larger_code(first: Optional[int], second: Optional[int]) -> Optional[int]:
     return max(first, second)
 
 
+def _scanner_count_schema() -> Dict[str, Any]:
+    """The declared columns of the per-scanner frame ``WorkspaceAggregator.add`` counts."""
+    import polars as pl
+
+    return {"name": pl.String, "counted": pl.Boolean}
+
+
+def _scanner_count_frame(names: List[Optional[str]], counted: List[bool]) -> Any:
+    """One row per result: its wired scanner name and whether it counts."""
+    import polars as pl
+
+    return pl.DataFrame(
+        {"name": names, "counted": counted}, schema=_scanner_count_schema()
+    )
+
+
 def _workspace_report_id(workspace_file: str) -> str:
     """The unified report's id: ``ASH-WORKSPACE-<file name>-<time>-<random>``.
 
@@ -1469,10 +1485,7 @@ class WorkspaceAggregator:
             wired_names.append(wire(name))
             counted_flags.append(not result_is_suppressed(result))
         if wired_names:
-            frame = pl.DataFrame(
-                {"name": wired_names, "counted": counted_flags},
-                schema={"name": pl.String, "counted": pl.Boolean},
-            )
+            frame = _scanner_count_frame(wired_names, counted_flags)
             for wired, _ in ordered_counts(frame, "name").iter_rows():
                 name = unwire(wired)
                 self._scanner_status.setdefault(name, None)
