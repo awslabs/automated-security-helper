@@ -226,11 +226,13 @@ versions of ASH. The job summary names the commit.
 The job then checks out the calling repository, with the whole history when
 `changed-files-only` is `true`, reads the config from `config-ref` when that is set, and
 installs the tools that the `install-*` inputs select.
-It runs ASH with `uvx --reinstall`, passing `--source-dir .`, the output directory,
-`--no-progress`, the fail-on-findings choice, `--build-target ci`, `--mode`, and
-`--config` when a config is set; `--verbose` unless `verbose` is `false`;
-`--changed-files-only` and `--base-ref` when `changed-files-only` is `true`; and then
-`ash-args`.
+It runs ASH with `uvx --reinstall` as `ash scan fs .`, which names the checkout as the
+directory to scan, passing the output directory, `--no-progress`, the fail-on-findings
+choice, `--build-target ci`, `--mode`, and `--config` when a config is set; `--verbose`
+unless `verbose` is `false`; `--changed-files-only` and `--base-ref` when
+`changed-files-only` is `true`; and then `ash-args`. When `ash-version` names an ASH
+older than 3.9, which has no `fs` subject, the checkout is passed as `--source-dir .`
+instead.
 
 After the scan, whether it passed or failed, the scan job appends `ash.summary.md` to the
 job summary and uploads the artifact `ash_output`, kept for 7 days. The artifact holds

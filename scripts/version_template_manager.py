@@ -196,6 +196,74 @@ ASH_PIN_PATTERNS = {
     "ash-version:": (rf"({_FORM_PREFIX['ash-version:']}v){_SEMVER}",),
 }
 
+# The first release whose CLI spells a scan of a directory `ash scan fs [PATH]`, groups
+# the commands that read stored results under `ash results`, and names the image build
+# `ash container build`. A page that pins an earlier release has to show that release's
+# spellings: a reader copies its install command and then its other commands, and an
+# earlier `ash` refuses all three (its `scan` takes no path argument and no
+# subcommand). The templates hold the newest spellings, and `render` writes the older
+# ones when it renders for a release before this one (spellings_for_release); a render
+# for this release or a later one leaves them, so the bump that cuts it moves every
+# page at once.
+SUBJECTS_RELEASE = (3, 9, 0)
+
+# `ash` or `ashv3` as a command word: not the end of a longer name (`dash`, `flash`) and
+# not a path that ends in `ash` (`/usr/local/bin/ash`).
+_ASH_COMMAND = r"(?<![\w./-])(?P<ash>ash|ashv3)"
+_BLANKS = r"[ \t]+"
+# The word after `fs` that is its path argument: a quoted string, a `<placeholder>`, or
+# a word that starts no option (`-`), continues no line (`\`), and is not a shell
+# operator, a comment, or the end of a code span or of quoted text.
+_FS_PATH = (
+    r"(?P<path>\"[^\"\n]*\"|'[^'\n]*'|<[A-Za-z][\w-]*>"
+    r"|[^\s`'\"\\|;&()<>#-][^\s`'\"|;&()<>]*)"
+)
+# `fs` ends where a word ends; a `.` after it ends a sentence, but `fs.py` is a name.
+_SCAN_FS = re.compile(
+    rf"{_ASH_COMMAND}(?P<before_scan>{_BLANKS})scan{_BLANKS}fs(?![\w/-])(?!\.\w)"
+    rf"(?:(?P<before_path>{_BLANKS}){_FS_PATH})?"
+)
+_RESULTS_VERB = re.compile(
+    rf"{_ASH_COMMAND}(?P<blank>{_BLANKS})results{_BLANKS}"
+    r"(?P<verb>report|diff|trend|merge|inspect)(?![\w-])"
+)
+_CONTAINER_BUILD = re.compile(
+    rf"{_ASH_COMMAND}(?P<blank>{_BLANKS})container{_BLANKS}build(?![\w-])"
+)
+_RELEASE_NUMBER = re.compile(r"(\d+)\.(\d+)\.(\d+)(?!\d)")
+
+
+def _scan_before_the_subjects(found: "re.Match[str]") -> str:
+    """`ash scan fs [PATH]` as a release before SUBJECTS_RELEASE spells it."""
+    command = f"{found['ash']}{found['before_scan']}scan"
+    if found["path"] is None:
+        return command
+    return f"{command}{found['before_path']}--source-dir {found['path']}"
+
+
+def spellings_for_release(text: str, version: str) -> str:
+    """``text`` with ASH's commands spelled as release ``version`` reads them.
+
+    For a release before SUBJECTS_RELEASE, ``ash scan fs PATH`` becomes
+    ``ash scan --source-dir PATH`` and ``ash scan fs`` with no path ``ash scan``,
+    ``ash results <verb>`` becomes ``ash <verb>``, and ``ash container build`` becomes
+    ``ash build-image``; ``ashv3`` is read as ``ash``. Text for SUBJECTS_RELEASE or a
+    later release comes back unchanged, as does text for a version that does not start
+    with a release number (a branch name, a placeholder).
+    """
+    found = _RELEASE_NUMBER.match(version.strip())
+    if found is None:
+        return text
+    if tuple(int(part) for part in found.groups()) >= SUBJECTS_RELEASE:
+        return text
+    text = _SCAN_FS.sub(_scan_before_the_subjects, text)
+    text = _RESULTS_VERB.sub(
+        lambda verb: f"{verb['ash']}{verb['blank']}{verb['verb']}", text
+    )
+    return _CONTAINER_BUILD.sub(
+        lambda build: f"{build['ash']}{build['blank']}build-image", text
+    )
+
 
 def _ash_pins(text: str) -> List[Tuple[str, str, int]]:
     """(form name, release number, where the number starts) of every ASH pin in text."""
@@ -406,10 +474,13 @@ class VersionTemplateManager:
         ]
 
     def render(self, content: str, version: str) -> str:
-        """A template rendered for a release: both placeholders become the version."""
-        return content.replace(self.version_placeholder, version).replace(
+        """A template rendered for a release: both placeholders become the version, and
+        ASH's commands take the spellings that release reads (spellings_for_release),
+        since the page pins that release's install command."""
+        rendered = content.replace(self.version_placeholder, version).replace(
             self.release_placeholder, version
         )
+        return spellings_for_release(rendered, version)
 
     def packaged_release(self) -> str:
         """The current release number: `[tool.commitizen] version` in pyproject.toml.

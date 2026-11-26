@@ -142,11 +142,11 @@ committed. Add it to `.gitignore`, or run `ash config init`, which writes a
 
 ## 5. Run the scan
 
-Run `ash scan fs`, with no path or options. It scans the current directory with every scanner:
+Run `ash scan`, with no path or options. It scans the current directory with every scanner:
 
 <!-- doctest: illustrative reason="the exit code depends on which scanner tools the machine has installed; the next block runs the same scan with a fixed scanner set" -->
 ```bash
-ash scan fs
+ash scan
 echo "exit code: $?"
 ```
 
@@ -155,7 +155,7 @@ machine that has those two tools, without the network:
 
 <!-- doctest: run expect-exit=2 env="ASH_OFFLINE=YES" -->
 ```bash
-ash scan fs --scanners bandit,detect-secrets
+ash scan --scanners bandit,detect-secrets
 ```
 
 <!-- doctest: output -->
@@ -245,7 +245,7 @@ lists the fix for each), or leave out the scanners you cannot run:
 
 <!-- doctest: illustrative reason="same scan as above; needs the network" -->
 ```bash
-ash scan fs --exclude-scanners grype
+ash scan --exclude-scanners grype
 ```
 
 An excluded scanner shows as SKIPPED and does not fail the scan. Add the same
@@ -253,12 +253,12 @@ An excluded scanner shows as SKIPPED and does not fail the scan. Add the same
 
 ## 6. Look at a finding
 
-`ash results report` prints the latest results in the terminal. After the scan details, a
+`ash report` prints the latest results in the terminal. After the scan details, a
 legend, the scanner table, and the files with the most findings, it prints one block
 per actionable finding:
 
 ```bash
-ash results report
+ash report
 ```
 
 ```text
@@ -282,7 +282,7 @@ Piped to another program, or with `--no-color`, it prints the same report as Mar
 
 <!-- doctest: run -->
 ```bash
-ash results report --no-color
+ash report --no-color
 ```
 
 <!-- doctest: output -->
@@ -301,7 +301,7 @@ Use of weak MD5 hash for security. Consider usedforsecurity=False
 
 Finding 2 is B602, `subprocess call with shell=True`, at `app.py:11`. The Rule ID is
 what a suppression names in the next step. To browse the findings interactively, run
-`ash results inspect findings`, which shows the same value in its Rule ID column, or open
+`ash inspect findings`, which shows the same value in its Rule ID column, or open
 `.ash/ash_output/reports/ash.html` in a browser.
 
 ## 7. Suppress the false positive
@@ -330,7 +330,7 @@ covers line ranges, symbols, and inline suppressions.
 
 <!-- doctest: illustrative reason="the scan needs the network for its scanners; the docs job has none" -->
 ```bash
-ash scan fs
+ash scan
 echo "exit code: $?"
 ```
 
@@ -358,7 +358,7 @@ Scan once more:
 
 <!-- doctest: illustrative reason="the scan needs the network for its scanners; the docs job has none" -->
 ```bash
-ash scan fs
+ash scan
 echo "exit code: $?"
 ```
 

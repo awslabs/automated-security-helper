@@ -32,6 +32,14 @@ committed pages pin the current release, which scripts/docs_versions.py check
 enforces). It is left unset on any other build, whose pages this hook has not
 vouched for. docs/overrides/partials/ash-snippet-builder.html renders its snippets
 with it.
+
+A snippet that pins a release has to show that release's commands as well: its reader
+installs the release and then runs the commands beside the install. The
+`release_spellings` filter this hook gives the theme writes ASH's commands as the
+release a ref names reads them (`{{ text | release_spellings(ref) }}`), by the same
+rule a template's render follows (scripts/version_template_manager.py
+spellings_for_release). The snippet builder and the home page's commands pass through
+it.
 """
 
 from __future__ import annotations
@@ -78,6 +86,32 @@ def _kind(config) -> tuple[str, str | None]:
     if versions.RELEASE_VERSION.fullmatch(version):
         return version, "release"
     return version, None
+
+
+def release_spellings(text, ref, *, module: ModuleType) -> str:
+    """``text`` with ASH's commands spelled as the release ``ref`` names reads them.
+
+    ``ref`` is a pin as an install command writes it, ``v`` and the release number; a
+    ref that names no release (a branch) leaves the text as it is. Markup stays markup:
+    a snippet captured with ``{% set %}`` under autoescape is unescaped for the rewrite
+    and escaped again after it.
+    """
+    version = str(ref or "").removeprefix("v")
+    try:
+        from markupsafe import Markup
+    except ImportError:  # pragma: no cover - mkdocs installs markupsafe with jinja2
+        Markup = None
+    if Markup is not None and isinstance(text, Markup):
+        return Markup.escape(module.spellings_for_release(text.unescape(), version))
+    return module.spellings_for_release(str(text), version)
+
+
+def on_env(env, config, files):
+    module = _load(_root(config), MANAGER)
+    env.filters["release_spellings"] = lambda text, ref: release_spellings(
+        text, ref, module=module
+    )
+    return env
 
 
 def on_config(config):

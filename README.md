@@ -26,19 +26,19 @@ Finch, or Podman.
 pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.8.0
 
 # Run from the project you want to scan
-ash scan fs --mode container
+ash scan --mode container
 ```
 
 The first container run builds the image and prepares scanner dependencies.
-Open `.ash/ash_output/reports/ash.html` or run `ash results inspect findings`.
+Open `.ash/ash_output/reports/ash.html` or run `ash inspect findings`.
 
 ### Execution modes
 
 | Mode | Command | Requirements |
 | --- | --- | --- |
-| Container | `ash scan fs --mode container` | OCI-compatible runtime |
-| Local | `ash scan fs --mode local` | Local scanner dependencies |
-| Pre-commit | `ash scan fs --mode precommit` | Python-based scanners with simplified output |
+| Container | `ash scan --mode container` | OCI-compatible runtime |
+| Local | `ash scan --mode local` | Local scanner dependencies |
+| Pre-commit | `ash scan --mode precommit` | Python-based scanners with simplified output |
 
 Local and pre-commit workflows use [uv](https://docs.astral.sh/uv/getting-started/installation/)
 for managed tool installation. The [installation guide](docs/content/how-to/install.md)
@@ -52,7 +52,7 @@ Run with uv:
 <!-- doctest: illustrative reason="runs ASH from GitHub over the network" -->
 ```bash
 uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.8.0 ash --help
-uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.8.0 ash scan fs --mode container
+uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.8.0 ash scan --mode container
 ```
 
 Install in a Python environment:
@@ -109,8 +109,8 @@ Offline HTML reports include search, filters, finding details, and printing.
 
 <!-- doctest: illustrative reason="opens an interactive explorer on the results of an earlier scan" -->
 ```bash
-ash results inspect findings    # Open the terminal findings explorer
-ash results report              # Read the text summary of the latest scan
+ash inspect findings    # Open the terminal findings explorer
+ash report              # Read the text summary of the latest scan
 ```
 
 <details>

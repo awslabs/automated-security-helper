@@ -45,7 +45,7 @@ global_settings:
 To try a suppression before you write it into the file, pass it for one run. In a repository where detect-secrets reports `SECRET-SECRET-KEYWORD` in `app.py`, this run passes:
 
 ```bash
-ash scan fs . --scanners detect-secrets --offline --no-progress \
+ash scan --source-dir . --scanners detect-secrets --offline --no-progress \
   --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "rule_id": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password"}]'
 ```
 
@@ -82,7 +82,7 @@ same GHSA id, each with the evidence in its reason.
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs . --scanners detect-secrets --offline --no-progress \
+ash scan --source-dir . --scanners detect-secrets --offline --no-progress \
   --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "ruleId": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password"}]'
 ```
 
@@ -94,7 +94,7 @@ An expired suppression no longer applies, so this run fails on the finding and n
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs . --scanners detect-secrets --offline --no-progress \
+ash scan --source-dir . --scanners detect-secrets --offline --no-progress \
   --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "rule_id": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password", "expires": "2020-01-01"}]'
 ```
 
@@ -123,9 +123,9 @@ ASH finds the definition by parsing the file with tree-sitter, for Python, JavaS
 
 ### Lock a symbol suppression to its file {#lock}
 
-A symbol suppression follows its definition when the code moves, so a definition that is rewritten would keep a review that no longer describes it. The lock prevents that. `.ash.lock`, a committed JSON file at the top of the scanned directory (the path given to `ash scan fs`, usually the repository root -- the lock follows the scanned directory, wherever the config file lives), records the SHA-256 of each file a symbol suppression names, taken when the suppression was reviewed, and the `(rule_id, symbol)` scopes reviewed on it:
+A symbol suppression follows its definition when the code moves, so a definition that is rewritten would keep a review that no longer describes it. The lock prevents that. `.ash.lock`, a committed JSON file at the top of the scanned directory (the path given to `ash scan`, usually the repository root -- the lock follows the scanned directory, wherever the config file lives), records the SHA-256 of each file a symbol suppression names, taken when the suppression was reviewed, and the `(rule_id, symbol)` scopes reviewed on it:
 
-- A symbol suppression the lock does not record is refused when the config is validated, by `ash scan fs` and by `ash config validate`: a file with no entry, and equally a `(rule_id, symbol)` the file's entry does not record, so locking a file for one rule does not approve suppressions added to it later. The message names the `ash suppress add` command to run, which records a new scope on an existing entry without re-hashing. The rule id is compared case-insensitively, the symbol exactly.
+- A symbol suppression the lock does not record is refused when the config is validated, by `ash scan` and by `ash config validate`: a file with no entry, and equally a `(rule_id, symbol)` the file's entry does not record, so locking a file for one rule does not approve suppressions added to it later. The message names the `ash suppress add` command to run, which records a new scope on an existing entry without re-hashing. The rule id is compared case-insensitively, the symbol exactly.
 - A symbol suppression's `path` must name one file. A glob or directory path cannot be hashed, so it is refused with its own message; lock each file that holds a suppressed definition with its own entry.
 - When the file's bytes no longer hash to the entry, every symbol suppression bound to that file stops applying. Its findings are reported again, and the scan prints one notice that names the file, the suppressions, and the refresh command.
 - Line-range suppressions are not affected.
@@ -267,7 +267,7 @@ An ignore path can also have an `expires` date, which works the way a suppressio
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs . --scanners detect-secrets --offline --no-progress \
+ash scan --source-dir . --scanners detect-secrets --offline --no-progress \
   --config-overrides 'global_settings.ignore_paths+=[{"path": "app.py", "reason": "Fixture value, not a real password", "expires": "2020-01-01"}]'
 ```
 
@@ -275,7 +275,7 @@ A trailing slash names the files under a directory. With a copy of `app.py` in `
 
 ```bash
 mkdir -p vendor && cp app.py vendor/app.py
-ash scan fs . --scanners detect-secrets --offline --no-progress \
+ash scan --source-dir . --scanners detect-secrets --offline --no-progress \
   --config-overrides 'global_settings.ignore_paths+=[{"path": "vendor/", "reason": "Third-party code"}]' \
   --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "rule_id": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password"}]'
 rm -r vendor
@@ -306,7 +306,7 @@ After a scan, `ash config lint --fix-unused` comments out the entries that the r
 
 ## Add a suppression while you review findings {#inspect}
 
-`ash results inspect findings` opens the last scan's findings in your terminal. Select a finding and press `x` to suppress it: ASH asks for a reason and an optional expiration, and adds an entry with the finding's path and rule ID, and its line as `line_start` and `line_end`, to the config file (the `--config` file, else the config ASH discovers, else a new `.ash.yaml` in the current directory). It keeps the comments of a YAML file, except one whose `global_settings` is written inline (`global_settings: {...}`), which it rewrites in full, and it writes a JSON config back as JSON. If the file already has an identical entry, nothing is added, and the status bar says so; an entry for another line, reason, or expiration with the same rule ID and path is added. It does not edit TOML files, or a file that uses `extends` but has no suppressions list of its own.
+`ash inspect findings` opens the last scan's findings in your terminal. Select a finding and press `x` to suppress it: ASH asks for a reason and an optional expiration, and adds an entry with the finding's path and rule ID, and its line as `line_start` and `line_end`, to the config file (the `--config` file, else the config ASH discovers, else a new `.ash.yaml` in the current directory). It keeps the comments of a YAML file, except one whose `global_settings` is written inline (`global_settings: {...}`), which it rewrites in full, and it writes a JSON config back as JSON. If the file already has an identical entry, nothing is added, and the status bar says so; an entry for another line, reason, or expiration with the same rule ID and path is added. It does not edit TOML files, or a file that uses `extends` but has no suppressions list of its own.
 
 ## See every finding {#ignore-suppressions}
 
@@ -314,7 +314,7 @@ After a scan, `ash config lint --fix-unused` comments out the entries that the r
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs . --scanners detect-secrets --offline --no-progress --ignore-suppressions \
+ash scan --source-dir . --scanners detect-secrets --offline --no-progress --ignore-suppressions \
   --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "rule_id": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password"}]'
 ```
 

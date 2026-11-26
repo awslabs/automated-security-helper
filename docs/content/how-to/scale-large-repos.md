@@ -83,8 +83,9 @@ explains the baseline and its tradeoff.
 ## Split a scan across runners {#sharding}
 
 `--shard-index` and `--shard-count` (or `ASH_SHARD_INDEX` and `ASH_SHARD_COUNT`) give each
-runner a share of the scanners. Every runner scans the whole tree with its share; `ash merge`
-then combines the shards' results into one set of reports and one exit code.
+runner a share of the scanners. Every runner scans the whole tree with its share;
+`ash merge` then combines the shards' results into one set of reports and one exit
+code.
 
 ASH sorts the names of every registered scanner and deals them out in turn, so shard *i*
 of *n* gets the scanners at positions *i*, *i + n*, and so on. Counts above about four save
@@ -143,8 +144,8 @@ narrows them. It reads the fail-on-findings setting, the incomplete-scan
 setting, the severity thresholds, and the suppressions from the configuration recorded in
 the lowest-numbered shard; `--fail-on-findings` and
 `--fail-on-incomplete-scanners` on the command line override the first two. A value the
-shards' configuration read from the environment is recorded as its reference, and `ash merge`
-does not read the environment for it: a field that takes a fixed choice, a boolean, or a
+shards' configuration read from the environment is recorded as its reference, and
+`ash merge` does not read the environment for it: a field that takes a fixed choice, a boolean, or a
 number, such as `severity_threshold`, cannot hold the reference, so the merge exits 3 naming
 the field until you supply it with `--config-overrides` or in the file `--config` names
 ([Read values from the environment](configure.md#environment)). The AWS
@@ -334,8 +335,8 @@ so it passes `--fail-on-findings` and `--fail-on-incomplete-scanners`, and the s
 keep those yours, run the shards with `--config` and a file outside the checkout. Each
 shard installs every tool, because which scanners land on which shard depends on the
 scanner list of the ASH it installs. Every shard must load the same plugin modules, or the merge
-refuses them. Run `ash merge` with the ASH version the shards ran: an older `ash merge` refuses
-the results of a newer ASH's shards.
+refuses them. Run `ash merge` with the ASH version the shards ran: an older ASH's
+merge refuses the results of a newer ASH's shards.
 
 What sharding does not do:
 

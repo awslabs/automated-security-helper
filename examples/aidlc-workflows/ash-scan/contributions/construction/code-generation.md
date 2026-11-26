@@ -11,9 +11,11 @@ fragments:
 ### ash-scan: Scan the Unit's code with ASH
 
 Before the completion handoff, run a fast security scan of the project from its
-root: `ash --mode precommit --no-progress`. Precommit mode runs bandit,
+root: `ash scan fs --mode precommit --no-progress`. Precommit mode runs bandit,
 detect-secrets, checkov, cdk-nag, and npm-audit, and writes its reports to
-`.ash/ash_output/` in the project.
+`.ash/ash_output/` in the project. When `ash --version` prints a version older
+than 3.9, that ASH has no `ash scan fs`: run the same scan as
+`ash --mode precommit --no-progress`.
 
 Act on the exit code:
 

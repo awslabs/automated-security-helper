@@ -38,6 +38,11 @@ What is asserted
   is not a flag or a count, long and short spellings, each taking one word.
 * Click does read a bare word after the options as a subcommand, and a word after a
   value-taking option as its value (a control on ASH's own CLI).
+* An ASH that has the `fs` subject (3.9 and later) scans the checkout as the path of
+  `ash scan fs`, so its log carries no deprecation line for the subject-less form;
+  the step asks that ASH's `ash scan fs --help`, from RUNNER_TEMP, before it scans. An
+  ASH whose help does not name `scan fs` (an older release that ash-version names), or
+  a help that cannot be read, gets the command line it always got.
 
 What it does not cover
 ----------------------
@@ -92,13 +97,64 @@ _OWN_OPTIONS = [
 ]
 
 
-def _run(tmp_path: Path, ash_args: str):
-    """Run the step's script with a uvx that records its argv; return (result, argv)."""
+#: What the step passes before ash-args to an ASH that has the `fs` subject.
+_SUBJECT_OPTIONS = [
+    "--reinstall",
+    "--from",
+    "ash-source",
+    "ash",
+    "scan",
+    "fs",
+    ".",
+    "--output-dir",
+    "out",
+    "--no-progress",
+    "--fail-on-findings",
+    "--build-target",
+    "ci",
+    "--mode",
+    "local",
+]
+#: The first lines `ash scan fs --help` prints, from an ASH with the subject and from
+#: one without it (which prints its subject-less scan's help, as click reads --help
+#: before it refuses `fs` as an extra argument). The first is written with the color
+#: codes rich puts around each part of the usage line in a terminal that takes them.
+SUBJECT_HELP = (
+    "\n \x1b[33mUsage:\x1b[0m \x1b[1mash scan\x1b[0m \x1b[1mfs\x1b[0m [OPTIONS] [PATH]\n\n"
+    " Scan a directory for code, infrastructure, secrets, and dependency findings.\n"
+)
+OLDER_HELP = (
+    "\n Usage: ash scan [OPTIONS]\n\n"
+    " Scan code, infrastructure, secrets, dependencies.\n"
+)
+
+
+def _run(tmp_path: Path, ash_args: str, help_text: str = "", help_exit: int = 0):
+    """Run the step's script with a uvx that records its argv; return (result, argv).
+
+    A call whose last word is ``--help`` is the step asking which spelling the ASH it
+    installed reads: the stand-in prints ``help_text``, exits ``help_exit``, and writes
+    the directory it was started in to ``uvx-help-cwd``. Any other call is the scan,
+    whose argv is returned.
+    """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     calls = tmp_path / "uvx-argv"
+    help_file = tmp_path / "uvx-help.txt"
+    help_file.write_text(help_text, encoding="utf-8")
+    help_cwd = tmp_path / "uvx-help-cwd"
     uvx = bin_dir / "uvx"
-    uvx.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{calls}"\n', encoding="utf-8")
+    uvx.write_text(
+        "#!/bin/sh\n"
+        "for last; do :; done\n"
+        'if [ "${last:-}" = "--help" ]; then\n'
+        f'  pwd > "{help_cwd}"\n'
+        f'  cat "{help_file}"\n'
+        f"  exit {help_exit}\n"
+        "fi\n"
+        f'printf "%s\\n" "$@" > "{calls}"\n',
+        encoding="utf-8",
+    )
     uvx.chmod(0o755)
     # The job's definer runs before this step does, into the same RUNNER_TEMP.
     runner_temp = tmp_path / "runner_temp"
@@ -283,6 +339,51 @@ def test_ash_runs_the_scan_with_the_workflows_options(tmp_path, ash_args):
     assert params["fail_on_findings"] is True, params
     assert params["source_dir"] == ".", params
     assert params["build_target"] == "ci", params
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize(
+    "ash_args", ["", "--exclude-scanners grype", *_VALUES_NAMING_A_SUBCOMMAND]
+)
+def test_an_ash_with_the_fs_subject_scans_the_checkout_as_its_path(tmp_path, ash_args):
+    """ASH 3.9 and later print a deprecation line for the subject-less scan (bare
+    `ash` with --source-dir), so an ASH whose help names `scan fs` is run as
+    `ash scan fs .`, and its own CLI reads that as the fs scan of the checkout with
+    the workflow's options."""
+    result, argv = _run(tmp_path, ash_args, help_text=SUBJECT_HELP)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert argv == _SUBJECT_OPTIONS + ash_args.split(), argv
+    # The help is asked outside the checkout, as the install preflight asks it.
+    assert (tmp_path / "uvx-help-cwd").read_text(encoding="utf-8").strip() == str(
+        tmp_path / "runner_temp"
+    )
+    fs = _ash_group().commands["scan"].commands["fs"]
+    after_fs = argv[argv.index("fs") + 1 :]
+    params = fs.make_context("fs", after_fs, resilient_parsing=True).params
+    assert params["path"] == ".", params
+    assert params["source_dir"] is None, params
+    assert params["fail_on_findings"] is True, params
+    assert params["build_target"] == "ci", params
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize(
+    ("help_text", "help_exit"),
+    [(OLDER_HELP, 0), ("", 0), (SUBJECT_HELP, 1)],
+    ids=["an-older-ash", "no-help", "help-failed"],
+)
+def test_an_ash_without_the_fs_subject_gets_the_command_line_it_always_got(
+    tmp_path, help_text, help_exit
+):
+    """ash-version can name an ASH older than 3.9, which has no `fs` subject; a help
+    that does not name it, or that cannot be read, gives the spelling every ASH reads."""
+    result, argv = _run(tmp_path, "--verbose", help_text=help_text, help_exit=help_exit)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert argv == _OWN_OPTIONS + ["--verbose"], argv
 
 
 def _value_option_lists() -> dict[str, set[str]]:

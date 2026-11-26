@@ -86,18 +86,26 @@ _ANY_SPACE = r"(?:\s|\\\r?\n)+"
 _OPTION_SCAN = r"-(?:[A-Za-z]|-(?!(?:help|version)(?![\w-]))[A-Za-z])"
 
 
-def _runs_ash(subcommands: str, space: str = _ASH_SPACE) -> re.Pattern[str]:
-    """``ash`` followed by one of ``subcommands`` or by an option."""
-    return re.compile(rf"(?<![\w.-])ash{space}(?:(?:{subcommands})\b|{_OPTION_SCAN})")
+def _runs_ash(*commands: tuple[str, ...], space: str = _ASH_SPACE) -> re.Pattern[str]:
+    """``ash`` followed by one of ``commands``, each a run of words with ``space``
+    between them, or by an option."""
+    words = "|".join(space.join(map(re.escape, command)) for command in commands)
+    return re.compile(rf"(?<![\w.-])ash{space}(?:(?:{words})\b|{_OPTION_SCAN})")
 
 
-#: A command that runs an ASH scan: ``ash scan``, or ``ash`` followed by an option,
-#: since the scan is the CLI's default command (``ash --source-dir .`` scans).
-RUNS_SCAN = _runs_ash("scan")
-#: A command that runs an ASH scan or ``ash merge``.
-RUNS_SCAN_OR_MERGE = _runs_ash("scan|merge")
+#: The merge's command words: ASH 3.9 groups it under ``results``, and the older
+#: top-level ``ash merge`` still runs it. A page that pins an older release spells it
+#: as that release reads it (scripts/version_template_manager.py
+#: spellings_for_release), so both are read.
+_MERGE = (("results", "merge"), ("merge",))
+#: A command that runs an ASH scan: ``ash scan`` (``ash scan fs`` included), or
+#: ``ash`` followed by an option, since the scan is the CLI's default command
+#: (``ash --source-dir .`` scans).
+RUNS_SCAN = _runs_ash(("scan",))
+#: A command that runs an ASH scan or the merge.
+RUNS_SCAN_OR_MERGE = _runs_ash(("scan",), *_MERGE)
 #: RUNS_SCAN_OR_MERGE for a YAML block that does not parse, read as written.
-RUNS_SCAN_OR_MERGE_ANY_LINE = _runs_ash("scan|merge", _ANY_SPACE)
+RUNS_SCAN_OR_MERGE_ANY_LINE = _runs_ash(("scan",), *_MERGE, space=_ANY_SPACE)
 _GATES = RUNS_SCAN_OR_MERGE
 _MATRIX = re.compile(r"\$\{\{\s*matrix\.([\w-]+)\s*\}\}")
 _RUNS_ASH = re.compile(r"(?<![\w.-])uvx\b.*?(?<![\w.-])ash(?![\w.-])")

@@ -17,15 +17,19 @@ are the places to check when a later release changes one.
 What the plugin adds once it is composed in:
 
 - At Code Generation, once per Unit of work, the developer agent runs
-  `ash --mode precommit --no-progress` and fixes actionable findings, or
+  `ash scan fs --mode precommit --no-progress` and fixes actionable findings, or
   records suppressions with reasons and expiration dates, before the Unit's
   completion handoff.
 - At Build and Test, once per intent, the quality agent runs a full
-  `ash scan --no-progress`, copies the scanner table into the stage summary
+  `ash scan fs --no-progress`, copies the scanner table into the stage summary
   for the approval gate, and does not proceed while the scan exits 1 or 2.
 - In every stage, a short rules file keeps the ASH habits in front of the
   agent: read the exit code, never loosen the gate to pass, never commit
   `.ash/ash_output/`.
+
+An ASH older than 3.9 has no `ash scan fs`, so with one the agent runs the
+same two scans as `ash --mode precommit --no-progress` and
+`ash scan --no-progress`. The plugin has it read `ash --version` to tell which.
 
 ## 1. Install AI-DLC and configure your project
 

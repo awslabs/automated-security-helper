@@ -19,9 +19,13 @@ Every github-actions and gitlab-ci block of the docs, fragments and ``runner=non
 blocks included, and a .md.template twin as well as its page. Each block is read as
 written, so a fragment is checked on the fragment. In each block:
 
-- Each ``ash scan``, which needs all three flags.
-- Each ``ash merge``, which needs the ones ``ash merge`` takes, read from its CLI:
-  ``--fail-on-findings`` and ``--fail-on-incomplete-scanners``.
+- Each ``ash scan`` (``ash scan fs`` included), which needs all three flags.
+- Each ``ash results merge``, or ``ash merge`` as ASH 3.8 and older spell it, which
+  needs the ones the merge takes, read from its CLI: ``--fail-on-findings`` and
+  ``--fail-on-incomplete-scanners``. A page that pins a release spells its commands as
+  that release reads them (scripts/version_template_manager.py spellings_for_release),
+  so a template and its page can spell the same merge differently, and both
+  spellings are read.
 - Each job that calls run-ash-security-scan.yml. The workflow's scan step passes
   ``--fail-on-findings``, or ``--no-fail-on-findings`` when the job sets
   ``fail-on-findings: false``, and then the job's ``ash-args`` split on spaces, last.
@@ -64,6 +68,10 @@ GATED_KINDS = frozenset({"github-actions", "gitlab-ci"})
 GHA_PAGE = "docs/content/how-to/ci/github-actions.md"
 GITLAB_PAGE = "docs/content/how-to/ci/gitlab-ci.md"
 SHARDS_PAGE = "docs/content/how-to/scale-large-repos.md"
+SHARDS_TEMPLATE = SHARDS_PAGE + ".template"
+#: The merge's command words: ASH 3.9 groups it under ``results``, and the older
+#: top-level spelling still runs it.
+MERGE_COMMANDS = (("results", "merge"), ("merge",))
 
 # What each entry of gating_scans is.
 SCAN = "an ash scan"
@@ -147,7 +155,7 @@ def _gate(args: list[str]) -> tuple[str, tuple[str, ...]] | None:
     none."""
     chosen = [arg for arg in args if arg in (GATES_ON_FINDINGS, NOT_GATING)]
     gates = not chosen or chosen[-1] == GATES_ON_FINDINGS
-    if args[:1] == ["merge"]:
+    if any(tuple(args[: len(words)]) == words for words in MERGE_COMMANDS):
         return (MERGE, _merge_flags()) if gates else None
     if args[:1] != ["scan"]:
         return None
@@ -203,6 +211,8 @@ def test_every_gating_scan_on_the_ci_pages_keeps_the_gate_flags():
         (GITLAB_PAGE, SCAN),
         (SHARDS_PAGE, SHARD_SCAN),
         (SHARDS_PAGE, MERGE),
+        (SHARDS_TEMPLATE, SHARD_SCAN),
+        (SHARDS_TEMPLATE, MERGE),
     } | {(rel, CALL) for rel in MINIMAL_CALL_PAGES}
     assert expected <= read, f"none of these was read: {sorted(expected - read)}"
     on_pages = [scan for scan in scans if scan[0] in (GHA_PAGE, GITLAB_PAGE)]
@@ -240,32 +250,62 @@ def test_a_gating_scan_that_drops_a_gate_flag_is_reported(rel, flag):
 
 
 @pytest.mark.unit
-def test_a_shard_scan_does_not_gate_until_it_drops_no_fail_on_findings():
+@pytest.mark.parametrize("rel", [SHARDS_PAGE, SHARDS_TEMPLATE])
+def test_a_shard_scan_does_not_gate_until_it_drops_no_fail_on_findings(rel):
     """The sharded example's shard scan, the page's last command with
     --no-fail-on-findings, is not held to the flags its merge job passes; without that
     flag it gates, and lacks the two flags it does not pass."""
-    text = (REPO_ROOT / SHARDS_PAGE).read_text(encoding="utf-8")
-    assert not _lacking(gating_scans([_page(SHARDS_PAGE, text)]))
+    text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+    assert not _lacking(gating_scans([_page(rel, text)]))
     at = text.rindex(f" {NOT_GATING}")
     gated = text[:at] + text[at + len(NOT_GATING) + 1 :]
-    lacking = _lacking(gating_scans([_page(SHARDS_PAGE, gated)]))
+    lacking = _lacking(gating_scans([_page(rel, gated)]))
     assert [missing for _, _, missing in lacking] == [
         ["--fail-on-findings", "--fail-on-incomplete-scanners"]
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("words", MERGE_COMMANDS, ids=" ".join)
+def test_the_merge_is_read_in_either_spelling(words):
+    """``ash results merge`` is the merge, as ``ash merge`` is: a template and the page
+    rendered from it for an older release spell it differently."""
+    flags = list(_merge_flags())
+    assert _gate([*words, *flags]) == (MERGE, tuple(flags))
+    assert _gate([*words, NOT_GATING]) is None
+
+
+def _manager():
+    return _load(
+        "_ash_version_template_manager_for_runner",
+        REPO_ROOT / "scripts" / "version_template_manager.py",
+    ).VersionTemplateManager(REPO_ROOT)
+
+
+def _rendered(line: str) -> str:
+    """``line`` of a template as its page spells it: the page pins the current release
+    and names its commands as that release reads them."""
+    manager = _manager()
+    return manager.render(line, manager.packaged_release())
 
 
 # The lines the cells below change, each found once on its page.
 CALL_ARGS_LINE = (
     "      ash-args: --fail-on-incomplete-scanners --no-allow-stale-content-db\n"
 )
-SHARD_LINE = (
-    "          ash scan --mode local --no-progress --no-fail-on-findings "
+#: The sharded example's shard and merge lines as the template spells them.
+TEMPLATE_SHARD_LINE = (
+    "          ash scan fs --mode local --no-progress --no-fail-on-findings "
     "--no-allow-stale-content-db \\\n"
 )
-MERGE_LINE = (
-    "          ash merge --fail-on-findings --fail-on-incomplete-scanners "
+TEMPLATE_MERGE_LINE = (
+    "          ash results merge --fail-on-findings --fail-on-incomplete-scanners "
     "--output-dir .ash/ash_output \\\n"
 )
+SHARDS_LINES = {
+    SHARDS_TEMPLATE: (TEMPLATE_SHARD_LINE, TEMPLATE_MERGE_LINE),
+    SHARDS_PAGE: (_rendered(TEMPLATE_SHARD_LINE), _rendered(TEMPLATE_MERGE_LINE)),
+}
 
 
 def _text_with(rel: str, line: str) -> str:
@@ -350,42 +390,41 @@ def test_ash_merge_takes_the_findings_and_incomplete_scan_flags():
 
 
 @pytest.mark.unit
-def test_the_sharded_example_is_read_with_its_shard_and_merge():
-    text = _text_with(SHARDS_PAGE, MERGE_LINE)
-    fence = _fence_of(SHARDS_PAGE, text, MERGE_LINE)
-    assert _fence_of(SHARDS_PAGE, _text_with(SHARDS_PAGE, SHARD_LINE), SHARD_LINE) == (
-        fence
-    )
-    assert _at(gating_scans([_page(SHARDS_PAGE, text)]), fence) == [
-        (SHARDS_PAGE, []),
-        (SHARDS_PAGE, []),
-    ]
+@pytest.mark.parametrize("rel", sorted(SHARDS_LINES))
+def test_the_sharded_example_is_read_with_its_shard_and_merge(rel):
+    shard_line, merge_line = SHARDS_LINES[rel]
+    text = _text_with(rel, merge_line)
+    fence = _fence_of(rel, text, merge_line)
+    assert _fence_of(rel, _text_with(rel, shard_line), shard_line) == fence
+    assert _at(gating_scans([_page(rel, text)]), fence) == [(rel, []), (rel, [])]
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("rel", sorted(SHARDS_LINES))
 @pytest.mark.parametrize(
     "flag", ["--fail-on-findings", "--fail-on-incomplete-scanners"]
 )
-def test_a_merge_that_drops_a_gate_flag_is_reported(flag):
-    """The sharded example's merge job gives the verdict; a scratch copy whose ash merge
-    lacks one of the flags ash merge takes is reported at that block, for that flag."""
-    text = _text_with(SHARDS_PAGE, MERGE_LINE)
-    fence = _fence_of(SHARDS_PAGE, text, MERGE_LINE)
-    dropped = text.replace(MERGE_LINE, MERGE_LINE.replace(f" {flag}", ""))
-    assert _lacking(gating_scans([_page(SHARDS_PAGE, dropped)])) == [
-        (SHARDS_PAGE, fence, [flag])
-    ]
+def test_a_merge_that_drops_a_gate_flag_is_reported(flag, rel):
+    """The sharded example's merge job gives the verdict; a scratch copy whose merge
+    lacks one of the flags the merge takes is reported at that block, for that flag."""
+    _shard_line, merge_line = SHARDS_LINES[rel]
+    text = _text_with(rel, merge_line)
+    fence = _fence_of(rel, text, merge_line)
+    dropped = text.replace(merge_line, merge_line.replace(f" {flag}", ""))
+    assert _lacking(gating_scans([_page(rel, dropped)])) == [(rel, fence, [flag])]
 
 
 @pytest.mark.unit
-def test_a_shard_that_drops_no_allow_stale_content_db_is_reported():
-    """ash merge cannot pass --no-allow-stale-content-db, so the shards that read the
+@pytest.mark.parametrize("rel", sorted(SHARDS_LINES))
+def test_a_shard_that_drops_no_allow_stale_content_db_is_reported(rel):
+    """The merge cannot pass --no-allow-stale-content-db, so the shards that read the
     content databases have to."""
-    text = _text_with(SHARDS_PAGE, SHARD_LINE)
-    fence = _fence_of(SHARDS_PAGE, text, SHARD_LINE)
+    shard_line, _merge_line = SHARDS_LINES[rel]
+    text = _text_with(rel, shard_line)
+    fence = _fence_of(rel, text, shard_line)
     dropped = text.replace(
-        SHARD_LINE, SHARD_LINE.replace(" --no-allow-stale-content-db", "")
+        shard_line, shard_line.replace(" --no-allow-stale-content-db", "")
     )
-    assert _lacking(gating_scans([_page(SHARDS_PAGE, dropped)])) == [
-        (SHARDS_PAGE, fence, ["--no-allow-stale-content-db"])
+    assert _lacking(gating_scans([_page(rel, dropped)])) == [
+        (rel, fence, ["--no-allow-stale-content-db"])
     ]

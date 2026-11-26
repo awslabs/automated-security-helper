@@ -103,7 +103,7 @@ with:
 | `output-dir` | `.ash/ash_output` | Output directory. The reporting job downloads the scan's artifact into the same path. |
 | `fail-on-findings` | `true` | Passes `--fail-on-findings` or `--no-fail-on-findings`. Either one overrides `fail_on_findings` in the repository's config. |
 | `verbose` | `true` | Passes `--verbose`. |
-| `ash-args` | empty | More `ash scan fs` options, on one line; a value of more than one line fails the job (see [How the workflow checks its inputs](#input-checks)). They are split on spaces with no quoting or glob expansion, and passed last, so they override the workflow's own `--mode`, `--config`, `--base-ref`, and fail-on-findings choice. |
+| `ash-args` | empty | More `ash scan` options, on one line; a value of more than one line fails the job (see [How the workflow checks its inputs](#input-checks)). They are split on spaces with no quoting or glob expansion, and passed last, so they override the workflow's own `--mode`, `--config`, `--base-ref`, and fail-on-findings choice. |
 | `collect-sarif-report` | `true` | Upload `ash.ghas.sarif` to code scanning from the reporting job. It works on pull requests from branches of the same repository only, and is skipped on `merge_group`; for other events set it to `false` and call `upload-ash-sarif.yml`, as in [Upload SARIF](#sarif). |
 | `collect-junit-xml-report` | `true` | Publish `ash.junit.xml` as the check run **ASH Scan JUnit Test Report** from the reporting job. Every actionable finding is a failed test, so the check is red when there are findings. This step does not fail the job. |
 | `post-pr-comment` | `true` | Post `ash.summary.md` as a pull request comment, and update that comment on later runs. |
@@ -226,11 +226,13 @@ versions of ASH. The job summary names the commit.
 The job then checks out the calling repository, with the whole history when
 `changed-files-only` is `true`, reads the config from `config-ref` when that is set, and
 installs the tools that the `install-*` inputs select.
-It runs ASH with `uvx --reinstall`, passing `--source-dir .`, the output directory,
-`--no-progress`, the fail-on-findings choice, `--build-target ci`, `--mode`, and
-`--config` when a config is set; `--verbose` unless `verbose` is `false`;
-`--changed-files-only` and `--base-ref` when `changed-files-only` is `true`; and then
-`ash-args`.
+It runs ASH with `uvx --reinstall` as `ash scan --source-dir .`, which names the checkout as the
+directory to scan, passing the output directory, `--no-progress`, the fail-on-findings
+choice, `--build-target ci`, `--mode`, and `--config` when a config is set; `--verbose`
+unless `verbose` is `false`; `--changed-files-only` and `--base-ref` when
+`changed-files-only` is `true`; and then `ash-args`. When `ash-version` names an ASH
+older than 3.9, which has no `fs` subject, the checkout is passed as `--source-dir .`
+instead.
 
 After the scan, whether it passed or failed, the scan job appends `ash.summary.md` to the
 job summary and uploads the artifact `ash_output`, kept for 7 days. The artifact holds
@@ -416,7 +418,7 @@ jobs:
           fi
           printf '::stop-commands::%s\n' "${token}"
           status=0
-          ash scan fs --mode local --no-progress \
+          ash scan --mode local --no-progress \
             --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
             2>&1 || status=$?
           printf '\n::%s::\n' "${token}"
@@ -539,7 +541,7 @@ the install and scan steps of the job above:
     fi
     printf '::stop-commands::%s\n' "${token}"
     status=0
-    ash scan fs --mode local --no-progress \
+    ash scan --mode local --no-progress \
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
       2>&1 || status=$?
     printf '\n::%s::\n' "${token}"
@@ -612,7 +614,7 @@ These two steps replace the checkout and `Run ASH` steps of the job in
     fi
     printf '::stop-commands::%s\n' "${token}"
     status=0
-    ash scan fs --mode local --no-progress \
+    ash scan --mode local --no-progress \
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
       "$@" \
       2>&1 || status=$?
@@ -630,7 +632,7 @@ SARIF upload alone you do not need this option.
 ## Gate on new findings {#baseline}
 
 A full scan of the default branch can be saved as a baseline for later local or
-precommit scans. `ash scan fs --baseline PATH` removes matched SARIF findings from
+precommit scans. `ash scan --baseline PATH` removes matched SARIF findings from
 the shared results used by reports, the summary, and the exit code. Additional
 (non-SARIF) report findings are not filtered. It also matches findings that only moved
 lines. The saved results record a SHA-256 digest and match counts, not the path.
@@ -669,7 +671,7 @@ repository; make it available only to trusted jobs.
     fi
     printf '::stop-commands::%s\n' "${token}"
     status=0
-    ash scan fs --mode local --no-progress \
+    ash scan --mode local --no-progress \
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
       --baseline "$BASELINE_DIR/ash_aggregated_results.json" 2>&1 || status=$?
     printf '\n::%s::\n' "${token}"
@@ -767,7 +769,7 @@ jobs:
           status=0
           {
             export PATH="$(uv tool dir --bin):${PATH}"
-            ash scan fs --mode nix --no-progress \
+            ash scan --mode nix --no-progress \
               --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
           } 2>&1 || status=$?
           printf '\n::%s::\n' "${token}"

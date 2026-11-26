@@ -420,7 +420,9 @@ ash scan fs --mode local --no-progress \
       {% for label, text in blocks %}
       <div class="ash-builder__block">
         <div class="ash-terminal__comment"># {{ label }}</div>
-        <div class="ash-builder__code"><pre tabindex="0"><code>{{ text | e }}</code></pre><button class="ash-copy" type="button" data-ash-copy="{{ text | e }}" aria-label="Copy {{ title | e }}: {{ label | e }}">{{ icon("content-copy") }}</button></div>
+        {#- The snippet installs the release `ref` names, so its commands are spelled as that release reads them (docs/hooks/install_refs.py release_spellings). -#}
+        {% set shown = text | release_spellings(ref) %}
+        <div class="ash-builder__code"><pre tabindex="0"><code>{{ shown | e }}</code></pre><button class="ash-copy" type="button" data-ash-copy="{{ shown | e }}" aria-label="Copy {{ title | e }}: {{ label | e }}">{{ icon("content-copy") }}</button></div>
       </div>
       {% endfor %}
       <p class="ash-builder__links">{% for label, path in links %}<a href="{{ path | url }}">{{ label }}</a>{% if not loop.last %} <span aria-hidden="true">·</span> {% endif %}{% endfor %}</p>

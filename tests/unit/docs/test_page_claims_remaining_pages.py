@@ -335,21 +335,39 @@ def test_the_aidlc_plugin_the_page_points_to_is_there_and_named_as_the_page_says
 def test_the_plugin_runs_the_two_scans_at_the_two_checkpoints_the_page_names():
     assert_on_page(
         AIDLC_PAGE,
-        "the developer agent runs `ash --mode precommit --no-progress` and fixes "
-        "actionable findings, or records suppressions with reasons and expiration "
-        "dates, before the Unit's completion handoff.",
+        "the developer agent runs `ash scan fs --mode precommit --no-progress` and "
+        "fixes actionable findings, or records suppressions with reasons and "
+        "expiration dates, before the Unit's completion handoff.",
     )
     assert_on_page(
         AIDLC_PAGE,
-        "the quality agent runs a full `ash scan --no-progress`, copies the scanner "
-        "table into the stage summary for the approval gate, and does not proceed "
-        "while the scan exits 1 or 2.",
+        "the quality agent runs a full `ash scan fs --no-progress`, copies the "
+        "scanner table into the stage summary for the approval gate, and does not "
+        "proceed while the scan exits 1 or 2.",
     )
     construction = AIDLC_PLUGIN / "contributions" / "construction"
     generation = (construction / "code-generation.md").read_text(encoding="utf-8")
-    assert "ash --mode precommit --no-progress" in generation
+    assert "`ash scan fs --mode precommit --no-progress`" in generation
     build = (construction / "build-and-test.md").read_text(encoding="utf-8")
-    assert "ash scan --no-progress" in build
+    assert "`ash scan fs --no-progress`" in build
+
+    # The page installs ASH with the install page's commands, which pin the current
+    # release, and an ASH older than 3.9 has no `scan fs`. So the page and each
+    # checkpoint name the same scan as such a release spells it, and how the agent
+    # tells which one it has.
+    assert_on_page(
+        AIDLC_PAGE,
+        "An ASH older than 3.9 has no `ash scan fs`, so with one the agent runs the "
+        "same two scans as `ash --mode precommit --no-progress` and "
+        "`ash scan --no-progress`.",
+    )
+    for text, older in (
+        (generation, "`ash --mode precommit --no-progress`"),
+        (build, "`ash scan --no-progress`"),
+    ):
+        prose = " ".join(text.split())
+        assert "When `ash --version` prints a version older than 3.9" in prose, prose
+        assert f"run the same scan as {older}." in prose, prose
 
     commands = _click_commands()
     scan = commands.commands["scan"].commands["fs"]

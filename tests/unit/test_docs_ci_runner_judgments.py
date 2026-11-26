@@ -884,6 +884,12 @@ RUNS_ASH = [
     "ash \\\n  --source-dir . \\\n  --mode local",
     "ash \\\r\n  scan",
     "ash -v --version",
+    # The ASH 3.9 spellings: the scan of a directory, and the merge under `results`.
+    "ash scan fs --mode local",
+    "ash scan fs . --output-dir out",
+    "ash results merge --output-dir out",
+    "- ash results merge --fail-on-findings || ash_exit=$?",
+    "ash results \\\n  merge --fail-on-findings",
 ]
 #: Commands that do not: ASH's own help and version, another program, a word that
 #: holds ``ash``, a subcommand that is neither a scan nor a merge, a dash that starts
@@ -899,6 +905,8 @@ RUNS_NO_ASH = [
     "ash --help",
     "ash --version",
     "ash report",
+    "ash results report",
+    "ash results inspect findings",
     "ash config validate",
     "echo ash",
     "flash --erase",
@@ -1072,6 +1080,25 @@ def test_a_scan_split_over_yaml_lines_needs_a_control_as_it_gates(scalar):
     plan = reports.act_job_plan(reports.load_workflow(text), {})
     assert plan["scan"].gates, plan
     assert _api("pipelines", "runs_ash")(text, "github-actions"), text
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "ash results merge --fail-on-findings --output-dir out",
+        "ash merge --fail-on-findings --output-dir out",
+        "ash scan fs --mode local --fail-on-findings",
+    ],
+    ids=["results-merge", "merge", "scan-fs"],
+)
+def test_a_merge_or_scan_job_gates_in_either_spelling(command):
+    """The merge job of a sharded pipeline gives its verdict. ASH 3.9 spells it
+    ``ash results merge``; read only as ``ash merge``, that job no longer counted as
+    gating, and the runner stopped asking whether it failed."""
+    text = f"jobs:\n  merge:\n    steps:\n      - run: {command}\n"
+    reports = _module("reports")
+    plan = reports.act_job_plan(reports.load_workflow(text), {})
+    assert plan["merge"].gates, plan
 
 
 def test_a_page_whose_block_splits_ash_scan_over_yaml_lines_needs_a_control(

@@ -11,9 +11,11 @@ fragments:
 ### ash-scan: Run the full ASH scan
 
 After the build and tests, run a full security scan of the project from its
-root: `ash scan --no-progress`. Unlike the per-Unit precommit scan, this runs
+root: `ash scan fs --no-progress`. Unlike the per-Unit precommit scan, this runs
 every scanner the project's ASH configuration enables, across all Units'
-changes at once, and writes its reports to `.ash/ash_output/`.
+changes at once, and writes its reports to `.ash/ash_output/`. When
+`ash --version` prints a version older than 3.9, that ASH has no `ash scan fs`:
+run the same scan as `ash scan --no-progress`.
 
 Act on the exit code:
 

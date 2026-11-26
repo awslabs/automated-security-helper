@@ -2258,8 +2258,30 @@ jobs:
             betterleaks_args+=(--config-overrides 'scanners.betterleaks.enabled=true')
             betterleaks_args+=(--config-overrides 'scanners.gitleaks.enabled=false')
           fi
+          # ASH 3.9 and later name what a scan scans, `ash scan fs PATH`, and print a
+          # deprecation line on standard error for the subject-less form this step
+          # ran before, `ash --source-dir .`, which goes in ASH v4.0. ash-version can
+          # name an older ASH, which has no `fs` subject, so the ASH installed above is
+          # asked first. Only an ASH with the subject prints `scan fs` in
+          # `ash scan fs --help`: an older one prints its subject-less scan's help
+          # there, since click reads --help before it refuses `fs` as an extra
+          # argument. The help is asked from RUNNER_TEMP, as the install preflight
+          # asks its own, with color off and the codes stripped, and it is not
+          # printed. A help that cannot be read gives the older spelling, which every
+          # ASH reads. With the subject the checkout is the path argument, right after
+          # `fs` and ahead of ash-args, where a bare word would be a second path; the
+          # check above refuses one before that.
+          shopt -s extglob
+          scan_help_status=0
+          scan_help="$(cd "${RUNNER_TEMP}" && NO_COLOR=1 COLUMNS=200 uvx --from "${ASH_UVX_SOURCE}" ash scan fs --help 2>/dev/null)" || scan_help_status=$?
+          scan_help="${scan_help//$'\e'\[*([0-9;])m/}"
+          if [ "${scan_help_status}" -eq 0 ] && [[ "${scan_help}" == *"scan fs"* ]]; then
+            scan_subject=(scan fs .)
+          else
+            scan_subject=(--source-dir .)
+          fi
           uvx --reinstall --from "${ASH_UVX_SOURCE}" ash \
-            --source-dir . --output-dir "${ASH_OUTPUT_DIR}" --no-progress "${FAIL_ON_FINDINGS_PARAM}" --build-target ci --mode "${ASH_MODE}" ${ASH_CONFIG:+--config "${ASH_CONFIG}"} ${VERBOSE:+"${VERBOSE}"} ${CHANGED_FILES_ONLY:+"${CHANGED_FILES_ONLY}" --base-ref "${BASE_REF}"} "${ASH_ARGS_LIST[@]}" ${betterleaks_args[@]+"${betterleaks_args[@]}"}
+            "${scan_subject[@]}" --output-dir "${ASH_OUTPUT_DIR}" --no-progress "${FAIL_ON_FINDINGS_PARAM}" --build-target ci --mode "${ASH_MODE}" ${ASH_CONFIG:+--config "${ASH_CONFIG}"} ${VERBOSE:+"${VERBOSE}"} ${CHANGED_FILES_ONLY:+"${CHANGED_FILES_ONLY}" --base-ref "${BASE_REF}"} "${ASH_ARGS_LIST[@]}" ${betterleaks_args[@]+"${betterleaks_args[@]}"}
 
       # Default branch only, after the scan, so what is saved is the database grype
       # actually scanned with. The save is refused unless that database is at most

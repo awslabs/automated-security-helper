@@ -55,6 +55,7 @@ import getpass
 import hashlib
 import http.client
 import importlib
+import importlib.util
 import inspect
 import io
 import itertools
@@ -183,14 +184,43 @@ def _closest_paragraph(text: str, sentence: str) -> Tuple[str, int]:
     return best[1], best[2]
 
 
+@lru_cache(maxsize=1)
+def _template_manager():
+    path = REPO_ROOT / "scripts" / "version_template_manager.py"
+    spec = importlib.util.spec_from_file_location(
+        "_version_template_manager_for_page_claims", path
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module.VersionTemplateManager(REPO_ROOT)
+
+
+def as_the_page_spells_it(page: str, sentence: str) -> str:
+    """``sentence``, written with the newest command spellings as a template is, as the
+    committed ``docs/content/<page>`` spells it.
+
+    A page rendered from a template pins the current release and names ASH's commands
+    as that release reads them (scripts/version_template_manager.py
+    spellings_for_release), so a claim about it is rendered the same way. Any other
+    page describes this tree and is read as written.
+    """
+    manager = _template_manager()
+    if f"docs/content/{page}" not in manager.target_files:
+        return sentence
+    return manager.render(sentence, manager.packaged_release())
+
+
 def assert_on_page(page: str, sentence: str) -> None:
     """Fail unless ``sentence`` is on ``docs/content/<page>``, both normalized.
 
     The failure names the page and the heading of the paragraph closest to the sentence,
-    which is usually where it was reworded.
+    which is usually where it was reworded. A page rendered from a template is read in
+    the spellings it pins (as_the_page_spells_it).
     """
     text = (CONTENT / page).read_text(encoding="utf-8")
-    wanted = _normalize(sentence)
+    wanted = _normalize(as_the_page_spells_it(page, sentence))
     if wanted in _normalize(text):
         return
     heading, line = _closest_paragraph(text, wanted)
