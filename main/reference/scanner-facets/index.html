@@ -5737,7 +5737,7 @@ SOFTWARE.
 <td><code>tags</code></td>
 <td><code>unconfirmed</code></td>
 <td></td>
-<td>UNCONFIRMED: the survey reads SARIF rule properties.tags off the conformance tests' presenter shape (rule-level, which the flat reader never takes as the tags column anyway); no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles whether results carry tags</td>
+<td>UNCONFIRMED: the survey reads SARIF rule properties.tags off the conformance tests' presenter shape (rule-level, which the flat reader takes as the tags column only when the result itself carries none); no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles whether results carry tags</td>
 </tr>
 <tr>
 <td><code>extras</code></td>

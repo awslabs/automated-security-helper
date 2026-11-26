@@ -4419,6 +4419,11 @@ not <code>--stateless-http</code>. Use it only for a client that cannot use stre
 <td>The hosts <code>set_source_git</code> may clone from, separated by spaces or commas, matched without regard to case. See <a href="#deliver-source-to-the-server">Deliver source to the server</a>.</td>
 </tr>
 <tr>
+<td><code>ASH_MCP_IMAGE_ALLOWED_REGISTRIES</code></td>
+<td>No registry: <code>set_source_image</code> accepts no reference.</td>
+<td>The registries <code>set_source_image</code> accepts references into, as <code>host[:port]</code> entries separated by spaces or commas, matched without regard to case (<code>:443</code> is the default and may be left off; bare Docker Hub references such as <code>alpine:3</code> need <code>docker.io</code> listed). Scanning a delivered reference makes the server's own tools reach that registry with the server's network, daemon store and registry credentials, so the list is the image twin of <code>ASH_MCP_GIT_ALLOWED_HOSTS</code>. The archive upload needs no registry and is not gated.</td>
+</tr>
+<tr>
 <td><code>ASH_MCP_WORKSPACE_ROOT</code></td>
 <td><code>$XDG_CACHE_HOME/ash-mcp</code>, or <code>~/.cache/ash-mcp</code></td>
 <td>Where each session's workspace lives: delivered source, uploads, and session configs.</td>
@@ -4522,7 +4527,10 @@ gives <code>git_clone_failed</code> or <code>git_checkout_failed</code>, with gi
 </ul>
 <p>A session can deliver a container image as its scan subject instead of a tree.
 <code>set_source_image</code> records an image reference and fetches nothing: resolution belongs to a
-container engine or the scanner tools' own registry clients at scan start.
+container engine or the scanner tools' own registry clients at scan start. The reference's
+registry must be on the operator's <code>ASH_MCP_IMAGE_ALLOWED_REGISTRIES</code> list (empty, the
+default, admits none); a reference into an unlisted registry is refused with <code>error_type</code>
+<code>image_registry_not_permitted</code>, naming the archive upload as the ungated alternative.
 <code>set_source_image_archive_chunk</code> and <code>set_source_image_archive_finalize</code> take a saved image
 (an uncompressed <code>docker save</code> tar) in the zip channel's exact shape -- the same chunk rules
 and caps, a SHA-256 verified at finalize -- but nothing is extracted: the archive is one file

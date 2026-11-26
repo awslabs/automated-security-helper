@@ -3803,12 +3803,13 @@ with <code>--source-dir</code> and with the others:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># An indirect reference: resolved by an engine or the tools&#39; own registry clients.</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>ash<span class="w"> </span>scan<span class="w"> </span>--image<span class="w"> </span>registry.example.com/team/app:1.2.3
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># A saved image you already hold: an uncompressed `docker save` tarball.</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>docker<span class="w"> </span>save<span class="w"> </span>registry.example.com/team/app:1.2.3<span class="w"> </span>-o<span class="w"> </span>app.tar
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>ash<span class="w"> </span>scan<span class="w"> </span>--image-archive<span class="w"> </span>app.tar
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1"># An OCI image-layout directory (the directory holding the oci-layout marker file).</span>
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>ash<span class="w"> </span>scan<span class="w"> </span>--image-layout<span class="w"> </span>./app-layout/
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># A saved image you already hold: an uncompressed `docker save` or</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># `podman save` tarball (either archive format; ASH reads which it is).</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>docker<span class="w"> </span>save<span class="w"> </span>registry.example.com/team/app:1.2.3<span class="w"> </span>-o<span class="w"> </span>app.tar
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>ash<span class="w"> </span>scan<span class="w"> </span>--image-archive<span class="w"> </span>app.tar
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1"># An OCI image-layout directory (the directory holding the oci-layout marker file).</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>ash<span class="w"> </span>scan<span class="w"> </span>--image-layout<span class="w"> </span>./app-layout/
 </span></code></pre></div>
 <p>Naming two of them in one call is refused before anything runs, with exit code 5 (a
 usage error):</p>
@@ -3816,28 +3817,37 @@ usage error):</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ash<span class="w"> </span>scan<span class="w"> </span>--image<span class="w"> </span>registry.example.com/team/app:1.2.3<span class="w"> </span>--image-archive<span class="w"> </span>app.tar
 </span></code></pre></div>
 <p>Prefer a digest-pinned reference (<code>repo@sha256:...</code>): two scans of the same pinned
-image then agree across machines. A tag-only reference is accepted and handed to the
-tool as written; ASH does not resolve it to a digest.</p>
+image then agree across machines. A tag-only reference is resolved to its digest once
+at scan start where an engine or the registry can answer (see
+<a href="#tag-only-references-and-their-digest">Tag-only references and their digest</a>); when
+no rung answers, it is handed to the tools as written.</p>
 <p><strong>Current status.</strong> grype, syft and trivy are the scanners that read images; every other
 scanner is filesystem-only and is reported SKIPPED. ASH detects an engine (below) to pick
-how the tools reach the image, but it does not ask the engine for a digest, and an image
-scan is only as complete as those three tools' own coverage.</p>
+how the tools reach the image, and an image scan is only as complete as those three
+tools' own coverage.</p>
 <p>The two payload shapes are checked at the stat level before anything uses them, the way
 a source directory is: the archive must exist, be readable and carry tar magic (a
 gzip-compressed archive is refused with the remedy -- save it uncompressed, which is
 what <code>docker save</code> writes); the layout must be an enterable directory holding the
 <code>oci-layout</code> marker file. What is <em>inside</em> passes to the scanner tools, which report
 malformed images themselves.</p>
+<p>A reference is checked against the image-reference grammar the tools parse
+(<code>[registry[:port]/]repository[:tag][@digest]</code>, with a lowercase repository path) before
+anything uses it, by <code>--image</code>, by a <code>run_ash_scan</code> call and by the MCP server's
+<code>set_source_image</code> alike. A path (<code>/etc</code>, <code>./app</code>, <code>../app</code>), a value that starts with
+<code>-</code> and a digest a tool cannot verify are refused with the reason, because a scanner
+tool handed one would read it as a directory to catalog or as an option.</p>
 <p>Image options run in local mode, single-directory, on a fresh scan: they cannot be
 combined with any other <code>--mode</code> (container, nix and precommit are refused), a workspace
-scan, <code>--use-existing</code>, <code>--changed-files-only</code> or a shard (<code>--shard-index</code>,
-<code>--shard-count</code>). The convert phase does not run (converters read source files, which an
-image presents none of), so asking for the convert phase alone is refused. The scan
-records the image, not the directory it was started from, as its scan source, and does
-not walk that directory.</p>
-<p><code>--changed-files-only</code> scopes a scan by git history, and an image has no diff base, so it
-means nothing there. It is not refused: ASH warns once that it has no meaning for an image
-scan and scans the whole image.</p>
+scan, <code>--use-existing</code>, <code>--baseline</code>, the git-history scopes (<code>--changed-files-only</code>,
+<code>--staged</code>) or a shard (<code>--shard-index</code>, <code>--shard-count</code>). The same rules bind a library
+call through <code>run_ash_scan</code>, not only the CLI. The convert phase does not run
+(converters read source files, which an image presents none of), so asking for the
+convert phase alone is refused. The scan records the image, not the directory it was
+started from, as its scan source, and does not walk that directory; in-image paths are
+reported as the tool wrote them and are never rebased into the host tree. A requested
+<code>--sandbox</code> is refused for an image scan: the sandbox's read scope is built from the
+source tree, which holds neither an image payload nor an engine socket.</p>
 <p><strong>One subject per scan, several scans per call.</strong> A scan reports on one asset, and each
 image keeps its own report, its own identity scope and its own exit code. To scan several
 images in one call, repeat <code>--image</code> or give a comma-separated list (the two forms mix):</p>
@@ -3873,26 +3883,41 @@ excluded, left out of an allowlist or disabled is still SKIPPED, because nothing
 selected it. An image scan's report therefore says which scanners did not look, rather
 than looking clean.</p>
 <p>When <em>nothing</em> scanned the image -- no selected scanner declares the kind, or
-no engine is present on an offline host -- the report carries one
-informational SARIF result (<code>kind=informational</code>, <code>level=note</code>, rule
+the subject is a reference in <code>--offline</code> mode, where every reference is
+skipped (see Engine delegation below) -- the report carries one
+informational SARIF result (<code>kind=informational</code>, <code>level=none</code>, rule
 <code>ASH-container-image-not-scanned</code>) naming the image. It is information, not a finding:
 it never grades, never fails a threshold and never lands in a SIEM as a vulnerability,
 so an offline CI run stays green by contract and visibly incomplete rather than
 silently clean.</p>
 <h2 id="engine-delegation">Engine delegation<a class="headerlink" href="#engine-delegation" title="Permanent link">&para;</a></h2>
 <p>At scan start ASH detects what can prepare the image, in this order: the docker daemon
-(<code>DOCKER_HOST</code> if set, else the platform's default socket), then podman, then none.
-With a daemon present, one pull serves every scanner -- the engine's content store is
-the dedup. With no engine and network allowed, the tools' own registry clients fetch,
-each into its own cache. With no engine and no network, the image portion of the scan
-is skipped as described above. The direct-payload shapes (<code>--image-archive</code>,
-<code>--image-layout</code>, and the MCP archive upload) need no engine and no network at all,
-which is what air-gapped hosts use.</p>
+(<code>DOCKER_HOST</code> of any transport if set -- <code>tcp://</code>, <code>ssh://</code> and <code>npipe://</code> count as
+declared daemons -- else the platform's default socket), then podman (<code>CONTAINER_HOST</code>,
+then its sockets), then none. Docker <em>contexts</em> are not read: a daemon reachable only
+through one (Colima, OrbStack, Docker Desktop without the default socket) counts once
+<code>DOCKER_HOST</code> names it. With a daemon present, one pull serves every scanner -- the
+engine's content store is the dedup; trivy is told
+<code>--image-src=&lt;engine&gt;,remote</code>, so an image the daemon does not hold still scans from
+the registry. For a daemon that is only <em>declared</em> (no local socket), grype and syft
+get the reference without a scheme and with its sources named
+(<code>--from &lt;engine&gt; --from registry</code>): their client honors the declaration, the registry
+is still reached when the declaration is stale, and no local file or directory that
+happens to spell the reference is read in the image's place. trivy always gets the
+reference as its last argument, after <code>--</code>. With no
+engine and network allowed, the tools' own registry clients fetch, each into its own
+cache.</p>
+<p>In <code>--offline</code> mode a <em>reference</em> is always skipped, engine or no engine: a daemon
+asked for an image it does not hold pulls it from the registry, and the tools' own
+registry clients always fetch, so offline's no-network promise cannot be kept for any
+ref. The direct-payload shapes (<code>--image-archive</code>, <code>--image-layout</code>, and the MCP
+archive upload) need no engine and no network at all, which is what air-gapped and
+offline hosts use.</p>
 <p>containerd is reached only through a tool's own options and is never probed by ASH.</p>
-<p>trivy reads a reference or a saved archive, not an OCI layout directory, so for
-<code>--image-layout</code> ASH re-packs the layout as a docker-archive tarball in a temporary file
-of the scan's own, in pure Python, and gives trivy that archive. The layout is only read.
-A layout whose layers are compressed any way but gzip is reported with the layer named.</p>
+<p>trivy reads an OCI image-layout directory directly through the same <code>--input</code> flag
+that reads a saved archive (the pinned trivy's own container-image target
+documentation, its OCI Layout section), so every submission shape reaches every image
+scanner without re-packing.</p>
 <h3 id="tag-only-references-and-their-digest">Tag-only references and their digest<a class="headerlink" href="#tag-only-references-and-their-digest" title="Permanent link">&para;</a></h3>
 <p>A reference that already carries its digest (<code>repo@sha256:...</code>) needs no lookup. For a
 tag-only reference (<code>repo:tag</code>) ASH resolves the digest once at scan start, trying two
@@ -3900,25 +3925,43 @@ rungs in order and stopping at the first that answers:</p>
 <ol>
 <li><strong>The local engine.</strong> ASH asks the detected docker or podman daemon, over its unix
    socket, for the image's inspect record and takes the <code>RepoDigests</code> entry of the
-   reference's own repository (Docker Hub names are normalized), else the image ID. This
-   works offline and fetches nothing, but only for an image the engine already holds.</li>
+   reference's own repository (Docker Hub names are normalized), else the image ID --
+   which is the <em>config</em> digest, the same value as trivy's <code>imageID</code>, used because a
+   locally built, never-pushed image has no manifest digest to name. This works offline
+   and fetches nothing, but only for an image the engine already holds.</li>
 <li><strong>The registry.</strong> <code>crane digest &lt;ref&gt;</code>, a registry request for the manifest's digest
    that needs no engine and fetches no layer. <code>crane</code> is a pinned tool like grype, and
    the container image carries it. It is skipped when ASH is offline (<code>--offline</code>,
    <code>ASH_OFFLINE</code>) or <code>crane</code> is not installed.</li>
 </ol>
+<p>A daemon that is only <em>declared</em> (a <code>tcp://</code> or <code>ssh://</code> <code>DOCKER_HOST</code>, a remote
+<code>CONTAINER_HOST</code>) stops the ladder instead: ASH has no socket to ask it over, and the
+scanners read the image through that daemon, so a digest from the registry could name
+other bytes than the ones scanned -- a CI job that builds <code>app:latest</code> inside a
+docker-in-docker daemon and scans it before pushing must not key its findings on the
+registry's <em>previous</em> <code>latest</code>. The ids then key on the reference text, and the one
+warning says so.</p>
 <p>The digest is recorded for the scan, so finding ids and the scan's identity scope key on
 it, and one log line names the rung that answered. Ids stay the same when the tag is moved
 to another name and change when the tag moves to a different image; a re-tagged image
 therefore never archives or overwrites the findings of the image it replaced. Only when
 every rung fails do the ids and the scope key on the reference text; ASH then logs one
 warning that lists why each rung failed, and the scan itself is never failed or skipped by
-it. A reference that begins with <code>-</code> is refused before any rung runs.</p>
+it. A reference that begins with <code>-</code> skips the lookup (nothing is handed to an engine or
+to <code>crane</code> as a word that could read as one of their options); the submission checks
+refuse such a reference before a scan starts, so the skip is the resolver's own guard,
+not the scan's.</p>
 <h2 id="over-the-mcp-server">Over the MCP server<a class="headerlink" href="#over-the-mcp-server" title="Permanent link">&para;</a></h2>
 <p>The MCP server carries both shapes beside its git and zip channels:</p>
 <ul>
 <li><code>set_source_image</code> records a reference on the session; nothing is fetched at
-  delivery time.</li>
+  delivery time. The reference's registry must be on the operator's
+  <code>ASH_MCP_IMAGE_ALLOWED_REGISTRIES</code> list (<code>host[:port]</code> entries; bare Docker
+  Hub references need <code>docker.io</code> listed; empty, the default, admits none):
+  scanning a delivered reference makes the <em>server's</em> tools reach that
+  registry with the server's network, daemon store and registry credentials,
+  the same reach <code>ASH_MCP_GIT_ALLOWED_HOSTS</code> closes for the git channel. The
+  archive upload needs no registry and is not gated.</li>
 <li><code>set_source_image_archive_chunk</code> + <code>set_source_image_archive_finalize</code> upload a
   saved image in the zip channel's exact shape: ordered base64 chunks of at most
   1 MiB, a SHA-256 verified at finalize, the same size caps -- and no extraction,
@@ -3946,7 +3989,7 @@ as written. Three attribution columns say which image it came from:</p>
 </tr>
 <tr>
 <td><code>image_digest</code></td>
-<td>The image's sha256 digest, when there is one: the tool's own run output (trivy records the image ID), else the digest the lookup ladder resolved for a tag-only reference (the local engine, then <code>crane digest</code>; see above), else the digest a pinned reference (<code>repo@sha256:...</code>) states. Empty only when every rung failed.</td>
+<td>The image's sha256 <strong>manifest digest</strong>, when one is named, read from these sources in order: the tool's own run output (trivy records <code>repoDigests</code>), the digest the lookup ladder resolved for a tag-only reference (the local engine, then <code>crane digest</code>; see above) or the digest a pinned reference (<code>repo@sha256:...</code>) states, else trivy's config-blob <code>imageID</code> -- last because it is a <em>different</em> value for the same image, used only when nothing names the manifest, as for a locally built, never-pushed image. Empty only when every source failed, as for a tag-only reference with no engine record whose registry read also failed (<code>crane</code> missing, or the registry unreachable).</td>
 </tr>
 <tr>
 <td><code>layer_digest</code></td>
@@ -3954,13 +3997,38 @@ as written. Three attribution columns say which image it came from:</p>
 </tr>
 </tbody>
 </table>
-<p>A finding's id keys on the in-image path and the image's digest, or on the submitted
-reference when there is no digest. Pin the reference by digest when ids must survive a
-tag moving. Two scans of one pinned image therefore agree
-across machines and output directories, a re-tagged image that resolves to the same
-digest keeps its ids, and an image finding never shares an id with a source finding at
-the same path. The layer digest is not part of the id: a rebuilt layer that still
-carries the same vulnerable file at the same path is the same finding.</p>
+<p><strong>The id-stability contract.</strong> A finding's id keys on the in-image path and the scan's
+one subject key: the digest the scan start resolved (the ladder above, a pinned
+reference, or -- for a saved archive or layout -- the digest the payload itself names),
+else the submitted reference. The key is per scan, so every scanner's ids in one scan
+share one basis -- a digest that only one tool's run output names stays in the
+<code>image_digest</code> column and never re-keys half a scan. So:</p>
+<ul>
+<li>a <strong>pinned reference</strong> gives ids that agree across machines, output directories and
+  scanners (the manifest digest is one value everywhere);</li>
+<li>a <strong>tag with no resolvable digest</strong> gives ids stable across rescans of that tag --
+  until a scan resolves a digest, which re-keys the findings to the image's content;</li>
+<li>a <strong>rebuild pushed to the same tag</strong> is a new subject wherever a digest resolves:
+  its contents changed, and diffs showing old findings closed and new ones opened is
+  the intended reading. Pin by digest when ids must survive a tag moving.</li>
+<li>a <strong>saved archive or layout</strong> keys on the digest its own index or manifest names
+  (an OCI index's manifest digest; a <code>docker save</code> tarball's config digest), so the
+  same payload uploaded twice is one subject wherever it lands on disk.</li>
+</ul>
+<p>An image finding never shares an id with a source finding at the same path. The layer
+digest is not part of the id: a rebuilt layer that still carries the same vulnerable
+file at the same path is the same finding.</p>
+<p>The digest is also the scan's <strong>reporting scope</strong> (the recorded scan source a
+reporter that archives resolved findings compares within, such as
+aws-security-hub). The consequence cuts both ways: a tag that moves to a
+<em>different</em> image never archives the old image's findings as fixed, and for the
+same reason a <em>rebuild</em> pushed to the same tag is a new scope -- an unfixed CVE
+present in both builds appears under each build's digest, and the old build's
+copy is not archived by the new build's scan. Scanning a moving tag repeatedly
+therefore accumulates per-build finding sets; pin a rebuild cadence's reporting
+on the digests you keep, or suppress the accepted CVE with an <code>image:</code> glob that
+covers the repository. A per-repository reporting granularity is not an option
+yet.</p>
 <p>To scope a suppression to one image, add <code>image</code>, a case-insensitive glob matched
 against the submitted reference and the resolved digest:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">global_settings</span><span class="p">:</span>
@@ -3971,7 +4039,12 @@ against the submitted reference and the resolved digest:</p>
 </span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Base image CVE, fixed in the next rebuild</span>
 </span></code></pre></div>
 <p>A suppression without <code>image</code> applies to any finding, image or filesystem, as before.
-One with <code>image</code> never applies to a filesystem finding.</p>
+<strong>That widens existing configs</strong>: an entry written before image scans existed (say,
+<code>path: "**"</code> with a CVE rule id, "not affected here") now also hides that CVE inside
+every image this project scans. Review broad suppressions when you adopt image
+scanning, or scope them with <code>image:</code>. One with <code>image</code> never applies to a filesystem
+finding. Inline <code>ash-ignore</code> comments are never read for image findings (there is no
+file to read them from).</p>
 <p><code>ignore_paths</code> filters image findings by the in-image path, through the same matcher as a
 directory scan and after the scan, like a suppression: an entry names the path as the tool
 reports it, leading slash included (<code>/usr/share/doc/</code>), and a finding whose every location
@@ -4007,8 +4080,11 @@ skip the path, ASH passes it as well, so the tool does less work:</p>
 <p>Only an entry that starts with <code>/</code> or <code>**</code> is translated. A relative pattern, a glob that
 ends in <code>/</code>, a pattern that names no path, and one holding a newline, carriage return or
 NUL are left to the report filter alone, and ASH logs one line saying so; at most 200
-globs are passed to a tool. <code>--changed-files-only</code> has no meaning for an image and is
-warned about once, as above. The convert phase stays filesystem-only.</p>
+globs are passed to a tool. The convert phase stays filesystem-only.</p>
+<p>Like a suppression without <code>image:</code>, an <code>ignore_paths</code> entry written before image scans
+existed now also filters in-image findings: a broad <code>**</code>-glob (say <code>**/vendor/**</code>,
+meant for the source tree) drops a CVE reported at <code>/vendor/...</code> inside every image this
+project scans. Review broad ignore entries when you adopt image scanning.</p>
 <h2 id="tests-never-pull">Tests never pull<a class="headerlink" href="#tests-never-pull" title="Permanent link">&para;</a></h2>
 <p>ASH's own test fixtures build OCI layout directories and a small saved-image archive from
 scratch; no third-party image is pulled by a test, and no engine is required for CI. One
@@ -4027,7 +4103,8 @@ registry rung).</p>
 <li>Only grype, syft and trivy read images. Every other scanner is filesystem-only and is
   reported SKIPPED for an image scan.</li>
 <li><code>layer_digest</code> is filled for trivy findings only.</li>
-<li><code>--baseline</code>, shards, <code>--staged</code> and convert-only are refused with an image, as above.</li>
+<li><code>--baseline</code>, shards, <code>--staged</code>, <code>--changed-files-only</code>, <code>--use-existing</code>,
+  <code>--sandbox</code> and convert-only are refused with an image, as above.</li>
 <li>Ignore paths reach the tools as absolute in-image globs only; relative patterns and
   globs ending in <code>/</code> are applied by the report filter after the scan, and trivy gets
   <code>trivy --skip-files</code> only because <code>trivy --skip-dirs</code> has no effect on images.</li>

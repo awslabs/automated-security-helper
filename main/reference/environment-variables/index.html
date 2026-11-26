@@ -3698,7 +3698,7 @@ SOFTWARE.
 
 <h1 id="environment-variables">Environment variables<a class="headerlink" href="#environment-variables" title="Permanent link">&para;</a></h1>
 <p>This page is generated from the code that reads each variable by <code>scripts/generate_env_var_reference.py</code>. Edits made to this file by hand are overwritten the next time it is generated.</p>
-<p>ASH reads 172 environment variables: 62 of its own (<code>ASH_</code> prefix) and 110 set by other tools or the platform. The tables list every place each one is read. A variable that sets a CLI option links to that option; the option on the command line takes precedence over the variable.</p>
+<p>ASH reads 173 environment variables: 63 of its own (<code>ASH_</code> prefix) and 110 set by other tools or the platform. The tables list every place each one is read. A variable that sets a CLI option links to that option; the option on the command line takes precedence over the variable.</p>
 <p>Columns:</p>
 <ul>
 <li>Default: the value the code uses when the variable is unset, as written in the code, at each read that supplies one. Where none does, or the only one is an empty string, it is the default of the CLI option the variable sets, or of the configuration key it is the default of. Blank means none of these supplies one (the code checks whether the variable is set, or treats unset as empty).</li>
@@ -3962,6 +3962,13 @@ SOFTWARE.
 <td></td>
 <td><code>automated_security_helper/cli/mcp/source_delivery.py</code> (<code>_git_allowed_entries</code>)</td>
 <td>Where <code>set_source_git</code> may clone from, set by the operator. Comma- or whitespace-separated <code>[scheme://]host[:port]</code> entries. A bare host stands for its scheme's default port (https 443, ssh 22) on either scheme; <code>host:port</code> names the port, and <code>https://</code> or <code>ssh://</code> the scheme. (<code>automated_security_helper/cli/mcp/source_delivery.py</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_MCP_IMAGE_ALLOWED_REGISTRIES</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/cli/mcp/source_delivery.py</code> (<code>image_registry_allowed</code>)</td>
+<td>The registries <code>set_source_image</code> accepts references into, set by the operator. Comma- or whitespace-separated <code>host[:port]</code> entries, compared case-insensitively with a <code>:443</code> suffix dropped on both sides; (<code>automated_security_helper/cli/mcp/source_delivery.py</code>)</td>
 </tr>
 <tr>
 <td><code>ASH_MCP_TRANSPORT</code></td>
