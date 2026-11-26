@@ -15,7 +15,7 @@ replaced. The comparison now reads both sides as JSON, the way
 
 from __future__ import annotations
 
-import datetime
+import datetime as dt
 import logging
 import sys
 from pathlib import Path
@@ -216,9 +216,9 @@ def test_a_value_that_is_not_json_is_compared_with_equality() -> None:
     assert _same_option_value(Path("a.yaml"), Path("a.yaml")) is True
     assert _same_option_value(Path("a.yaml"), Path("b.yaml")) is False
     assert _same_option_value(Path("a.yaml"), "a.yaml") is False
-    day = datetime.date(2026, 1, 1)
-    assert _same_option_value(day, datetime.date(2026, 1, 1)) is True
-    assert _same_option_value(day, datetime.date(2026, 1, 2)) is False
+    day = dt.date(2026, 1, 1)
+    assert _same_option_value(day, dt.date(2026, 1, 1)) is True
+    assert _same_option_value(day, dt.date(2026, 1, 2)) is False
 
 
 def test_a_value_nested_too_deep_does_not_raise_and_is_never_a_match_for_none() -> None:

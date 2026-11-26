@@ -1315,7 +1315,7 @@ def record_forced_binaries(
     calls this, so records persist until the operator replaces or erases them
     (``--binary-path <scanner>=`` with an empty path).
     """
-    import datetime
+    import datetime as dt
 
     from automated_security_helper.utils.atomic_write import write_text_atomically
     from automated_security_helper.utils.download_utils import _private_dir
@@ -1325,7 +1325,7 @@ def record_forced_binaries(
     entries = read_forced_binaries()
     for key in erase:
         entries.pop(key, None)
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now = dt.datetime.now(dt.timezone.utc).isoformat()
     for binary in binaries:
         entries[binary.scanner_key] = {
             "scanner_key": binary.scanner_key,

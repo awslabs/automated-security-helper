@@ -1887,29 +1887,6 @@
           },
           "description": "Configuration for MCP server resource management and limits"
         },
-        "mcp_resource_management": {
-          "$ref": "#/$defs/MCPResourceManagementConfig",
-          "default": {
-            "enable_health_checks": true,
-            "enable_resource_logging": true,
-            "health_check_interval_seconds": 60,
-            "log_resource_operations": false,
-            "max_concurrent_scans": 3,
-            "max_concurrent_scans_per_session": 2,
-            "max_concurrent_tasks": 20,
-            "max_directory_size_mb": 1000,
-            "max_message_size_bytes": 10485760,
-            "max_path_length": 4096,
-            "memory_critical_threshold_mb": 2048,
-            "memory_warning_threshold_mb": 1024,
-            "operation_timeout_seconds": 180,
-            "scan_timeout_seconds": 1800,
-            "shutdown_timeout_seconds": 30,
-            "task_count_warning_threshold": 15,
-            "thread_pool_max_workers": 4
-          },
-          "description": "Configuration for MCP server resource management and limits"
-        },
         "output_formats": {
           "anyOf": [
             {

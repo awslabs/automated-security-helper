@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import collections.abc
 import dataclasses
-import datetime
+import datetime as dt
 import decimal
 import enum
 import ipaddress
@@ -104,7 +104,7 @@ def _assert_named_not_echoed(text: str, field: str) -> None:
         conint(ge=0),
         Union[int, float],
         decimal.Decimal,
-        datetime.date,
+        dt.date,
     ],
     ids=[
         "optional-positive-int",
@@ -2150,7 +2150,7 @@ class _Options(BaseModel):
         Union[Literal["all"], float],
         Union[Literal["all"], bool],
         Union[Literal["all"], decimal.Decimal],
-        Union[Literal["all"], datetime.date],
+        Union[Literal["all"], dt.date],
         Union[Literal["all"], Path],
         Union[Literal["all"], _Level],
         Union[Literal["all"], _CountRoot],

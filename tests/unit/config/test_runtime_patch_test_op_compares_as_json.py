@@ -11,7 +11,7 @@ client sends, so no test op could pass there, the right value included.
 
 from __future__ import annotations
 
-import datetime
+import datetime as dt
 
 import pytest
 
@@ -35,7 +35,7 @@ PATH = "/scanners/acme-scan/since"
 def _base() -> AshConfig:
     # As a YAML file that writes `since: 2024-01-31` unquoted loads it.
     return AshConfig.model_validate(
-        {"scanners": {"acme-scan": {"since": datetime.date(2024, 1, 31)}}}
+        {"scanners": {"acme-scan": {"since": dt.date(2024, 1, 31)}}}
     )
 
 
@@ -43,7 +43,7 @@ def test_the_dump_holds_a_date_object() -> None:
     """The control: the Python dump is where the two forms differ."""
     dumped = _base().model_dump(mode="python", by_alias=False)
     held = dumped["scanners"]["acme-scan"]["since"]
-    assert isinstance(held, datetime.date)
+    assert isinstance(held, dt.date)
 
 
 def test_a_test_op_with_the_value_as_json_passes() -> None:

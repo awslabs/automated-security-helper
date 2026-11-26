@@ -7,7 +7,10 @@ readme = "README.md"
 license = "Apache-2.0"
 classifiers = [ "Development Status :: 5 - Production/Stable", "Intended Audience :: Developers", "License :: OSI Approved :: Apache Software License", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12", "Programming Language :: Python :: 3.13", "Programming Language :: Python :: 3.14",]
 dependencies = [
- "uv>=0.13.4,<0.14",
+ # floor is advisory-driven: GHSA-c8m5-c952-6cm4 (rustls < 0.23.46) reaches uv through the
+ # rustls statically linked into its wheel; uv 0.13.7 is the first release whose sdist-embedded
+ # Cargo.lock carries rustls 0.23.46 (0.13.5 and 0.13.6 carry 0.23.45).
+ "uv>=0.13.7,<0.14",
  "requests>=2.34,<3.0.0",
  "attrs>=26.1,<27.0.0",
  "jsonschema>=4.26,<5.0.0",
@@ -20,11 +23,15 @@ dependencies = [
  # Was "pydantic[email]". Split into two bare requirements because Dependabot could not compute
  # a semver level for a name carrying extras, so every bump of it escaped its group and arrived
  # as its own pull request. `pydantic[email]` is exactly pydantic plus email-validator: pydantic
- # 2.13.5 declares 'email-validator>=2.0.0; extra == "email"' and nothing else under that extra.
+ # 2.14.4 declares 'email-validator>=2.0.0; extra == "email"' and nothing else under that extra.
  # Unbundled rather than pinned: this list is published to PyPI, so an exact pin here would
  # force a resolution conflict on any consumer that also depends on pydantic. Two bare names
  # cost consumers nothing and keep the automatic patch adoption that the floors here exist for.
- "pydantic>=2.13.5,<2.14",
+ # The floor is advisory-driven: pydantic pins pydantic-core exactly, and pydantic-core's
+ # sdist-embedded Cargo.lock carries pyo3, whose < 0.29.0 releases are under
+ # GHSA-36hh-v3qg-5jq4 and GHSA-chgr-c6px-7xpp. pydantic 2.14.4 pins pydantic-core 2.50.5
+ # (pyo3 0.30.1); every pydantic 2.13.x pins a pydantic-core that embeds pyo3 0.28.x.
+ "pydantic>=2.14.4,<2.15",
  "email-validator>=2.0,<3.0.0",
  "typer>=0.27.2,<0.28",
  "rich>=15.0,<16",
@@ -126,7 +133,10 @@ email = "ntheule@amazon.com"
 
 [dependency-groups]
 dev = [
- "ruff>=0.16.10,<1.0.0",
+ # floor is advisory-driven: ruff's sdist-embedded Cargo.lock carried zip 8.6.0 through
+ # 0.17.3, which sits under CVE-2026-115905..09; 0.17.4 is the first release embedding
+ # the fixed zip (9.0.5).
+ "ruff>=0.17.4,<1.0.0",
  "pytest>=9.1,<10.0.0",
  "pytest-cov>=7.1,<8.0.0",
  "pytest-mock>=3.16.0,<4.0.0",
@@ -431,7 +441,7 @@ legacy_tag_formats = [
 line-length = 88
 target-version = "py310"
 
-# Floor matches the `ruff>=0.16.10` in [dependency-groups].dev. It is here because the
+# Floor matches the `ruff>=0.17.4` in [dependency-groups].dev. It is here because the
 # select below is only meaningful against a ruff that knows these rules, and this
 # repository had TWO ruffs when that select was written: .pre-commit-config.yaml pinned
 # astral-sh/ruff-pre-commit at v0.11.8, five minor versions behind the dev floor. Ruff's
@@ -439,11 +449,11 @@ target-version = "py310"
 # what an error IS -- a contributor would see a clean hook, then a red build. That pin
 # was moved to v0.16.7 in this same pull request, so the two agree again as of now; this
 # line is what keeps them from drifting apart a second time, by making the mismatch fail
-# loudly ("Required version `>=0.16.10` does not match the running version", exit 2)
+# loudly ("Required version `>=0.17.4` does not match the running version", exit 2)
 # instead of silently linting with a different rule set.
 # No upper bound: [dependency-groups].dev already caps at <1.0.0, and duplicating the
 # cap here would mean editing two places to adopt a new ruff.
-required-version = ">=0.16.10"
+required-version = ">=0.17.4"
 
 # tests/test_data/ is SCANNER INPUT, not source. ASH is a security scanner and these
 # files exist to be analyzed: their content IS the test oracle. A linter that edits them
