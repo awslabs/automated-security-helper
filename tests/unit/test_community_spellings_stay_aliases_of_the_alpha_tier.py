@@ -4,10 +4,13 @@
 """The pre-rename "community" spellings of the alpha tier are aliases for one release.
 
 The opt-in scanners ASH ships but does not promote as supported were called
-"community"; the tier is now "alpha". Every old user-facing spelling still works,
-maps to the new one, and warns once, naming the release that drops it. Each test
-here reads one old spelling through the real code path and fails when the alias
-is gone, does not map, or stays silent.
+"community"; the tier is now "alpha". The old spellings that still work map to
+the new one for one release: the tier values warn once per process, and the
+Dockerfile build argument wins over the new one and warns at build time. The
+docs-lint column headings are the exception: that lint is internal, so the old
+headings are refused with the heading to use rather than kept as aliases. Each
+test here reads one old spelling through the real code path and fails when its
+alias is gone, does not map, or stays silent where a warning is promised.
 """
 
 from __future__ import annotations
@@ -108,24 +111,36 @@ def _docs_checks():
         ("Community scanners", "alpha scanners"),
     ],
 )
-def test_an_old_scanner_column_heading_is_checked_as_alpha_and_warns(
+def test_an_old_scanner_column_heading_is_refused_naming_the_new_one(
     tmp_path, warnings_logged, old_heading, new_heading
 ):
+    """The docs lint is internal: the old heading is a finding, not an alias."""
     dc = _docs_checks()
     page = tmp_path / "docs" / "page.md"
     page.parent.mkdir(parents=True)
-    # bandit is built in: under the old heading it must be refused as built in,
-    # which proves the heading still names the (renamed) alpha kind.
     page.write_text(
-        f"| What | {old_heading} |\n|---|---|\n| Python | bandit |\n",
+        f"| What | {old_heading} |\n|---|---|\n| Python | snyk-code |\n",
         encoding="utf-8",
     )
     findings = dc.check_scanner_names([page], tmp_path)
-    assert any("is a built-in scanner" in str(f) for f in findings), findings
-    messages = _messages(warnings_logged)
-    assert len(messages) == 1
-    assert f"'{old_heading.lower()}' is deprecated" in messages[0]
-    assert f"'{new_heading}'" in messages[0]
+    old = [f for f in findings if "is the old heading" in str(f)]
+    assert len(old) == 1, findings
+    assert str(page.relative_to(tmp_path)) in str(old[0]).replace("\\", "/")
+    assert f"use '{new_heading.capitalize()}'" in str(old[0])
+    assert _messages(warnings_logged) == []
+
+
+def test_a_second_page_with_the_old_heading_is_reported_too(tmp_path):
+    dc = _docs_checks()
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    for name in ("a.md", "b.md"):
+        (docs / name).write_text(
+            "| What | Community plugins |\n|---|---|\n| Python | snyk-code |\n",
+            encoding="utf-8",
+        )
+    findings = dc.check_scanner_names([docs / "a.md", docs / "b.md"], tmp_path)
+    assert len([f for f in findings if "is the old heading" in str(f)]) == 2
 
 
 def test_the_new_scanner_column_heading_does_not_warn(tmp_path, warnings_logged):
@@ -142,6 +157,55 @@ def test_the_new_scanner_column_heading_does_not_warn(tmp_path, warnings_logged)
 
 def test_the_alias_window_names_the_next_release():
     assert plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN == "3.9.0"
+
+
+def test_the_aliases_are_gone_by_the_release_that_says_it_drops_them():
+    """Fails at the version bump that reaches the release, forcing the removal."""
+    from packaging.version import Version
+
+    from automated_security_helper import __version__
+
+    assert Version(__version__) < Version(
+        plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN
+    ), (
+        f"ASH {__version__} reached {plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN}: "
+        "remove the community aliases (plugin_manifest.warn_community_alias, "
+        "PluginTier._missing_, the ASH_COMMUNITY_PLUGIN_MODULES build argument in "
+        "the Dockerfile) and the alias-window tests in this module "
+        "(test_the_old_dockerfile_build_argument_still_wins_over_the_new_one, "
+        "test_the_renamed_anchors_keep_their_old_ids_for_the_alias_window) "
+        "along with this test"
+    )
+
+
+def test_the_old_dockerfile_build_argument_still_wins_over_the_new_one():
+    """`--build-arg ASH_COMMUNITY_PLUGIN_MODULES=...` is read until the alias window ends.
+
+    An EXPLICITLY EMPTY value wins too (the CHANGELOG says a value given for the
+    old name wins), so the default is a sentinel rather than "": a `:-` fallback
+    cannot tell `--build-arg ASH_COMMUNITY_PLUGIN_MODULES=""` from the argument
+    not being given. A build that gives the old name warns.
+    """
+    text = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert text.count('ARG ASH_COMMUNITY_PLUGIN_MODULES="__UNSET__"\n') == 2
+    assert text.count('[ "${ASH_COMMUNITY_PLUGIN_MODULES}" = "__UNSET__" ]') == 2
+    assert text.count('--config-overrides "ash_plugin_modules+=[${modules}]"') == 2
+    assert (
+        text.count("the ASH_COMMUNITY_PLUGIN_MODULES build argument is deprecated") == 2
+    )
+    assert "${ASH_COMMUNITY_PLUGIN_MODULES:-" not in text
+
+
+def test_the_renamed_anchors_keep_their_old_ids_for_the_alias_window():
+    """A page redirect cannot carry a #fragment, so the old ids stay as anchors."""
+    choose = (REPO_ROOT / "docs/content/how-to/choose-scanners.md").read_text(
+        encoding="utf-8"
+    )
+    assert '<a id="community"></a>' in choose
+    trivy = (REPO_ROOT / "docs/content/docs/plugins/builtin/trivy.md").read_text(
+        encoding="utf-8"
+    )
+    assert '<a id="running-it-alongside-the-trivy-repo-community-plugin"></a>' in trivy
 
 
 def test_every_old_docs_page_redirects_to_its_alpha_page():

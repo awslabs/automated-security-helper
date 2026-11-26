@@ -1,4 +1,4 @@
-$ ash report --format aws-security-hub --log-level ERROR
+$ ash results report --format aws-security-hub --log-level ERROR
 [exit 5]
 
 [stderr]

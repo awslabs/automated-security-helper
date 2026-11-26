@@ -93,8 +93,6 @@ from automated_security_helper.utils.path_containment import (
 
 _logger = ASH_LOGGER
 
-ASH_MCP_ALLOWED_ROOTS_ENV = "ASH_MCP_ALLOWED_ROOTS"
-
 #: The exit code a scan tool reports when :func:`validate_output_tree` refuses its
 #: output tree: 3, ASH's code for an input it will not use. The same from the
 #: single-directory tools and the workspace tools, because a link in the output
@@ -107,6 +105,7 @@ OUTPUT_TREE_REFUSED_EXIT_CODE = 3
 # ``config.mcp_sandbox``, beside the sandbox rules that apply them, and are
 # imported here so this module's names stay what they were.
 from automated_security_helper.config.mcp_sandbox import (  # noqa: E402
+    ASH_MCP_ALLOWED_ROOTS_ENV as ASH_MCP_ALLOWED_ROOTS_ENV,
     _POSIX_DENIED_ROOTS as _POSIX_DENIED_ROOTS,
     _WINDOWS_DENIED_ROOT_ENV_VARS as _WINDOWS_DENIED_ROOT_ENV_VARS,
     _denied_root_values as _denied_root_values,

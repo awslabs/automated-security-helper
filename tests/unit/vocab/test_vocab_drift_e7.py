@@ -241,6 +241,128 @@ def test_the_cured_sites_stay_cured():
     assert not hits, f"a cured site spells its vocabulary by hand again: {hits}"
 
 
+#: Callees that end the process or the command with the integer they are given.
+_EXIT_CALLEES = {"Exit", "SystemExit", "exit", "_exit"}
+
+
+def _callee(call: ast.Call) -> str | None:
+    func = call.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _is_int_literal(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, int)
+        and not isinstance(node.value, bool)
+    )
+
+
+def int_literal_exits(source: str) -> List[Tuple[int, str]]:
+    """``(line, spelling)`` of each integer literal handed to an exit.
+
+    The AST shape of the ``typer.Exit(1)`` fragments above, so ``Exit(code=1)``,
+    ``raise SystemExit(2)``, ``sys.exit(0)`` and a subclass of ``typer.Exit`` that
+    calls ``super().__init__(1)`` are caught however they are spelled. A member
+    (``AshExitCode.X``), a name or an attribute is not flagged.
+    """
+    tree = ast.parse(source)
+    found: List[Tuple[int, str]] = []
+    exit_classes = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef)
+        and any(
+            (isinstance(b, ast.Name) and b.id in _EXIT_CALLEES)
+            or (isinstance(b, ast.Attribute) and b.attr in _EXIT_CALLEES)
+            for b in node.bases
+        )
+    }
+    in_exit_class: Set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name in exit_classes:
+            in_exit_class.update(id(child) for child in ast.walk(node))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _callee(node)
+        if name in _EXIT_CALLEES:
+            args = list(node.args[:1]) + [
+                k.value for k in node.keywords if k.arg in {"code", "exit_code"}
+            ]
+            for arg in args:
+                if _is_int_literal(arg):
+                    found.append((node.lineno, f"{name}({arg.value})"))
+        elif (
+            name == "__init__"
+            and id(node) in in_exit_class
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Call)
+            and _callee(node.func.value) == "super"
+            and any(_is_int_literal(a) for a in node.args[:1])
+        ):
+            found.append((node.lineno, f"super().__init__({node.args[0].value})"))
+    return sorted(found)
+
+
+#: Integer exits that stay literal on purpose, by file: ``ash plugin``'s own usage
+#: refusal is 2, a command-specific code with no ``AshExitCode`` member (the one
+#: member that is 2, ``ACTIONABLE_FINDINGS``, would misname it).
+ALLOWED_INT_EXITS = {"cli/plugin.py": {"Exit(2)"}}
+
+
+#: The files the exit-code cure touched: every ``bare exit code`` row above.
+EXIT_SCOPE = sorted(
+    {path for path, _frag, what in POSITIVE if what == "bare exit code"}
+)
+
+
+@pytest.mark.parametrize("relative", EXIT_SCOPE)
+def test_no_cured_file_hands_an_integer_literal_to_an_exit(relative):
+    source = (PACKAGE / relative).read_text(encoding="utf-8")
+    allowed = ALLOWED_INT_EXITS.get(relative, set())
+    assert [s for s in int_literal_exits(source) if s[1] not in allowed] == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "raise typer.Exit(1)\n",
+        "raise typer.Exit(code=1)\n",
+        "raise Exit(3)\n",
+        "raise SystemExit(2)\n",
+        "sys.exit(0)\n",
+        "sys.exit(code=4)\n",
+        "class Done(typer.Exit):\n    def __init__(self):\n        super().__init__(1)\n",
+    ],
+)
+def test_the_int_exit_scan_flags_a_planted_spelling(source):
+    assert int_literal_exits(source), source
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "raise typer.Exit(AshExitCode.SCAN_ERRORS)\n",
+        "raise typer.Exit(code=AshExitCode.OK)\n",
+        "sys.exit(code)\n",
+        "raise SystemExit(int(code))\n",
+        "class Plain:\n    def __init__(self):\n        super().__init__(1)\n",
+        "raise typer.Exit()\n",
+    ],
+)
+def test_the_int_exit_scan_leaves_members_and_other_calls_alone(source):
+    assert int_literal_exits(source) == []
+
+
+def test_the_exit_scope_is_not_empty():
+    assert len(EXIT_SCOPE) >= 10, EXIT_SCOPE
+
+
 def test_the_positive_pins_find_a_planted_fragment(tmp_path):
     (tmp_path / "planted.py").write_text(
         'def go():\n    raise typer.Exit(1)\n    return {"op": "scan"}\n',

@@ -110,6 +110,42 @@ WIRE_SPELLINGS = frozenset(
 )
 
 
+#: Callees whose error type is a positional argument, with its index:
+#: ``refused(error, error_type)`` in ``mcp_tools``, ``GitCommandError(message,
+#: error_type)`` and ``_config_problem(field, message, kind)``.
+POSITIONAL_SINKS = {"refused": 1, "GitCommandError": 1, "_config_problem": 2}
+
+#: The ``type`` spellings ``validate_config`` gives a message it classifies by the
+#: validator's own prefixes. They are an open vocabulary of that tool, not
+#: ``McpErrorType`` members, so a literal in this set is the one allowed bare
+#: spelling at the ``_config_problem`` sink; any other literal there is flagged.
+CONFIG_PROBLEM_KINDS = frozenset(
+    {
+        "denied_by_runtime_policy",
+        "duplicate_field",
+        "extends_error",
+        "file_not_found",
+        "internal_field",
+        "invalid_field",
+        "json_parse_error",
+        "missing_required_field",
+        "toml_parse_error",
+        "unknown_field",
+        "validation_error",
+        "yaml_parse_error",
+    }
+)
+
+
+def _callee_name(call: ast.Call) -> str | None:
+    func = call.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
 def _python_files(root: Path) -> Iterator[Path]:
     yield from sorted(p for p in root.rglob("*.py") if p.is_file())
 
@@ -212,6 +248,18 @@ def bad_error_type_writes(root: Path) -> List[str]:
                 for keyword in node.keywords:
                     if keyword.arg == "error_type":
                         checks.append(keyword.value)
+                # The positional sinks: the helpers whose error_type is an
+                # argument, not a keyword, so a literal there is as live as a
+                # dict value.
+                index = POSITIONAL_SINKS.get(_callee_name(node))
+                if index is not None and len(node.args) > index:
+                    value = node.args[index]
+                    if not (
+                        _callee_name(node) == "_config_problem"
+                        and isinstance(value, ast.Constant)
+                        and value.value in CONFIG_PROBLEM_KINDS
+                    ):
+                        checks.append(value)
         for value in checks:
             problem = _value_shape_problem(value)
             if problem is not None:
@@ -313,7 +361,9 @@ def test_every_error_type_the_surface_writes_has_an_allowed_shape():
 @pytest.fixture
 def planted(tmp_path: Path) -> Path:
     (tmp_path / "stray.py").write_text(
-        '"""A docstring naming config_input_not_permitted is not a site."""\n'
+        # A docstring that IS a member's spelling: only the docstring skip keeps
+        # it out of the report, so dropping the skip fails the control below.
+        '"""config_input_not_permitted"""\n'
         "\n"
         "\n"
         "def refuse():\n"
@@ -344,6 +394,42 @@ def test_the_shape_scan_flags_a_planted_literal_the_enum_does_not_know(planted):
         "5: 'config_input_not_permitted'",
         "9: 'a_new_refusal'",
     ]
+
+
+@pytest.mark.parametrize(
+    ("sink", "line"),
+    [
+        ("refused", 'return refused(e, "a_new_refusal")\n'),
+        ("git-command-error", 'raise GitCommandError("msg", "a_new_refusal")\n'),
+        ("config-problem", 'return _config_problem("", raw, "a_new_refusal")\n'),
+        ("method-call", 'return self.refused(e, "a_new_refusal")\n'),
+    ],
+)
+def test_the_shape_scan_flags_a_planted_positional_literal_per_sink(
+    tmp_path, sink, line
+):
+    (tmp_path / f"{sink}.py").write_text(
+        f"def site(e, raw):\n    {line}", encoding="utf-8"
+    )
+
+    found = bad_error_type_writes(tmp_path)
+
+    assert [re.sub(r"^[^:]+:", "", f) for f in found] == ["2: 'a_new_refusal'"], sink
+
+
+def test_the_shape_scan_leaves_the_allowed_positional_shapes_alone(tmp_path):
+    (tmp_path / "fine.py").write_text(
+        "def site(e, raw, kind):\n"
+        "    refused(e, McpErrorType.CLONE_REFUSED.value)\n"
+        "    refused(e, e.error_type)\n"
+        "    GitCommandError('msg', kind)\n"
+        "    _config_problem('', raw, 'validation_error')\n"
+        "    _config_problem('', raw, McpErrorType.SCAN_NOT_FOUND.value)\n"
+        "    other_helper(e, 'a_literal_at_an_unwatched_callee')\n",
+        encoding="utf-8",
+    )
+
+    assert bad_error_type_writes(tmp_path) == []
 
 
 def test_the_scan_walks_the_real_tree():

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -167,11 +168,30 @@ def fallback_key(finding: FlatVulnerability) -> tuple[Any, ...] | None:
     )
 
 
+#: The fallback keys of the findings :func:`_side` is framing, by ``id()``.
+#: :func:`~automated_security_helper.models.frame_model.to_frame` fills one
+#: column at a time, so without this memo the three key columns would each
+#: compute :func:`fallback_key` — an identity-base copy and a ``json.dumps``
+#: — once per finding, tripling the join's own cost centre. The id-stability
+#: guarantee is ``to_frame``'s own ``items = list(models)``, which holds the
+#: findings for the whole fill, so their ids are stable while the memo lives;
+#: it is reset before ``_side`` returns.
+_SIDE_KEYS: ContextVar[dict[int, tuple[Any, ...] | None] | None] = ContextVar(
+    "_SIDE_KEYS", default=None
+)
+
+
 def _key_member(place: int) -> Callable[[FlatVulnerability], Any]:
     """A reader of one member of :func:`fallback_key`; null for an unkeyed finding."""
 
     def read(finding: FlatVulnerability) -> Any:
-        key = fallback_key(finding)
+        memo = _SIDE_KEYS.get()
+        if memo is None:
+            key = fallback_key(finding)
+        elif id(finding) in memo:
+            key = memo[id(finding)]
+        else:
+            key = memo[id(finding)] = fallback_key(finding)
         return None if key is None else key[place]
 
     return read
@@ -188,11 +208,14 @@ _FALLBACK_READS = (
 
 _OFF_KEY = "joined through the identity base and the fallback key, never a column"
 
-# One scan's side of the diff. The canonical column vocabulary: a column that
+# One scan's side of the diff. This spec's column vocabulary: a column that
 # projects a model field bears the field's pydantic name (is_suppressed,
 # line_start, line_end), and a transformed value never bears a field's bare name
 # -- severity_uc is the uppercased severity of the fallback key, identity_message
-# the identity's message, not the model's description. The line columns are the
+# the identity's message, not the model's description. The rule binds SIDE_SPEC,
+# whose columns are join inputs; a reporter-local frame (the ASFF derived frame,
+# the GitLab projection) keeps ``severity`` for its own transformed grade, which
+# nothing joins on. The line columns are the
 # per-site Ranked override of the fields' flat-frame overflow policy: only their
 # order is ever used here, a null line is a null rank, and _PLACE's fill_null(-1)
 # puts it before every real line, as the old -1 sentinel did.
@@ -283,9 +306,14 @@ def _side(findings: list[FlatVulnerability]) -> pl.DataFrame:
     them is a Python pass; everything after it is frame operations. ``base`` is
     null for a finding :func:`fallback_key` does not key. Lines are unbounded
     ints and the frame column is 64-bit, so the line columns hold each line's
-    rank; only the order of lines is ever used.
+    rank; only the order of lines is ever used. :func:`fallback_key` runs once
+    per finding (:data:`_SIDE_KEYS`), though three columns read its members.
     """
-    return to_frame(findings, SIDE_SPEC)
+    token = _SIDE_KEYS.set({})
+    try:
+        return to_frame(findings, SIDE_SPEC)
+    finally:
+        _SIDE_KEYS.reset(token)
 
 
 def match_findings(

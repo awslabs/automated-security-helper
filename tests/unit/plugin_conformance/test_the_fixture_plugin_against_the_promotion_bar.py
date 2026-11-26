@@ -153,6 +153,28 @@ def test_a_tool_type_declared_nowhere_is_none_not_a_crash() -> None:
     assert _tool_type_of("not-a-shipped-scanner", Undeclared, "SCA") == "SCA"
 
 
+def test_a_shipped_scanners_tool_type_comes_from_the_table_not_its_own_row() -> None:
+    """The parity gates read flat rows through ``observed_frame``, which resolves a
+    shipped scanner from ``SCANNER_TOOL_TYPES``; the verify bar resolves through
+    ``_tool_type_of``. An operational row that drifts from the table must not make
+    the two surfaces read one scanner's rows under two tool types, so for a shipped
+    scanner the table wins and the row speaks only outside it."""
+    from types import SimpleNamespace
+
+    from automated_security_helper.core.plugin_conformance import _tool_type_of
+    from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
+
+    class Drifted:
+        operational_facets = SimpleNamespace(targets=SimpleNamespace(tool_type="IAC"))
+
+    assert SCANNER_TOOL_TYPES["bandit"] == "SAST"
+    assert _tool_type_of("bandit", Drifted, None) == "SAST"
+    # outside the shipped table the operational row still speaks
+    assert _tool_type_of("not-a-shipped-scanner", Drifted, None) == "IAC"
+    # and the caller's override outranks both
+    assert _tool_type_of("bandit", Drifted, "SCA") == "SCA"
+
+
 # ---- row 1: facets over committed transcripts ------------------------------
 
 
@@ -273,6 +295,57 @@ def test_planted_a_transcript_file_that_names_no_scanner_is_told_to_every_scanne
     )
 
 
+def test_planted_a_transcripts_key_that_is_not_a_list_is_a_red_row_not_a_traceback(
+    fixture_manifest, transcripts_copy
+) -> None:
+    """The damaged shape the walk exists to survive: ``transcripts: 5`` fails the
+    parse, and the scanner-naming read over the damage must not raise either."""
+    _plant_a_foreign_transcript_file(
+        transcripts_copy,
+        json.dumps({"schema_version": 1, "transcripts": 5, "unrecorded": 7}),
+    )
+    report = _verify(fixture_manifest, transcripts_copy)
+    _expect(report, r1=RED)
+    details = " ".join(_row(report, 1).details)
+    assert "other/transcripts.json is not a transcript file this ASH reads" in details
+
+
+def test_planted_a_deeply_nested_file_does_not_abort_the_walk(
+    fixture_manifest, transcripts_copy
+) -> None:
+    """One file nested past the interpreter's recursion limit is one damaged file
+    (the walk's own contract), never a RecursionError out of the whole discovery.
+
+    The depth is a constant well past any interpreter's limit: 3.14's C decoder
+    probes the real stack and parses thousands of levels before it raises, where
+    older interpreters raise near ``sys.getrecursionlimit()``."""
+    depth = 200_000
+    _plant_a_foreign_transcript_file(transcripts_copy, "[" * depth + "]" * depth)
+    found = discover_transcripts(transcripts_copy)
+    assert len(found.files) == 1 and len(found.unreadable) == 1
+    assert "cannot be read as JSON" in found.unreadable[0].problem
+    assert "RecursionError" in found.unreadable[0].problem
+    report = _verify(fixture_manifest, transcripts_copy)
+    _expect(report, r1=RED)
+
+
+def test_planted_a_damaged_mapping_naming_no_scanner_concerns_every_scanner(
+    fixture_manifest, transcripts_copy
+) -> None:
+    """A parsed-but-refused file with no v1 scanner keys is everyone's problem: an
+    empty name set would report it to NO scanner, who would instead read 'has no
+    recorded transcript; record one'."""
+    _plant_a_foreign_transcript_file(
+        transcripts_copy, json.dumps({"schema_version": 1, "transcripts": {}})
+    )
+    found = discover_transcripts(transcripts_copy)
+    assert len(found.unreadable) == 1
+    assert found.unreadable[0].scanners is None
+    assert found.unreadable[0].concerns("fixture-lint")
+    report = _verify(fixture_manifest, transcripts_copy)
+    _expect(report, r1=RED)
+
+
 def test_discovery_once_serves_many_manifests(
     fixture_manifest, transcripts_copy
 ) -> None:
@@ -326,6 +399,120 @@ def test_planted_a_mapped_cell_only_a_historical_recording_still_fills_fails(
     assert "fixture-lint.line_range declared mapped" in details
     # and a N/A cell is still judged over every recording
     assert "declared n/a" not in details
+
+
+def _plant_a_historical_recording(root) -> None:
+    """A sound historical recording beside the current one (the :0.9.0 shape)."""
+    import shutil
+
+    from automated_security_helper.base.tool_transcript import file_sha256
+
+    sarif = next(root.rglob("fixture-lint-1.0.0.sarif"))
+    old = sarif.with_name("fixture-lint-0.9.0.sarif")
+    shutil.copyfile(sarif, old)
+    path = next(root.rglob("transcripts.json"))
+    data = json.loads(path.read_text())
+    historical = json.loads(json.dumps(data["transcripts"][0]))
+    historical.update(
+        id="fixture-lint-0.9.0-app",
+        retention="historical",
+        reason="the previous release's output shape",
+        tool={"name": "fixture-lint", "version": "0.9.0"},
+        results=[
+            {
+                "format": "sarif",
+                "path": "captured/fixture-lint-0.9.0.sarif",
+                "sha256": file_sha256(old),
+            }
+        ],
+    )
+    data["transcripts"].append(historical)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_planted_a_current_recording_that_failed_its_digest_is_one_finding(
+    fixture_manifest, transcripts_copy
+) -> None:
+    """The cause row is the finding: with the current recording out on its digest and
+    only a historical one left sound, the per-facet MAPPED judgments would restate
+    'no current recording' once per facet on top of the digest detail that already
+    names why. One cause, one detail; the N/A and DROPPED cells are still judged
+    over the historical corpus."""
+    _plant_a_historical_recording(transcripts_copy)
+    sarif = next(transcripts_copy.rglob("fixture-lint-1.0.0.sarif"))
+    sarif.write_text(sarif.read_text().replace("FX001", "FX999"), encoding="utf-8")
+    report = _verify(fixture_manifest, transcripts_copy)
+    _expect(report, r1=RED)
+    details = " ".join(_row(report, 1).details)
+    assert "no longer matches the digest" in details
+    assert "declared mapped" not in details
+    # the skip is only of the MAPPED judgments: the rest are judged over every
+    # readable recording, so the verdict list is not empty
+    assert report.verdicts and all(v.facet for v in report.verdicts)
+
+
+def test_a_historical_only_corpus_with_no_cause_recorded_still_fails_mapped_cells(
+    fixture_manifest, transcripts_copy
+) -> None:
+    """The guard on the skip: an unpinned scanner whose only recording is historical
+    records no cause row (the pinned-but-historical detail needs a pin), so its
+    MAPPED cells are still judged and red rather than silently absent."""
+    _plant_a_historical_recording(transcripts_copy)
+    path = next(transcripts_copy.rglob("transcripts.json"))
+    data = json.loads(path.read_text())
+    data["transcripts"] = [
+        t for t in data["transcripts"] if t["retention"] == "historical"
+    ]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    report = _verify(fixture_manifest, transcripts_copy)
+    _expect(report, r1=RED)
+    details = " ".join(_row(report, 1).details)
+    assert "fixture-lint.file_path declared mapped" in details
+
+
+def test_an_unreadable_only_current_set_stays_red_not_silently_green(
+    fixture_manifest, transcripts_copy
+) -> None:
+    """The other guard on the skip: the skip's premise is that the cause of 'no
+    current frame' is already a detail on the row, and a current recording that
+    ``_readable`` leaves out (native bytes, no adapter prep) used to record none.
+    With a sound historical recording beside it the N/A cells read ok over the
+    historical corpus, the MAPPED judgments are skipped, and before the fix the row
+    read GREEN with no facet observed (the live shape: a corpus scanner's one
+    readable current SARIF entry losing its ``adapter_prep``)."""
+    _plant_a_historical_recording(transcripts_copy)
+    path = next(transcripts_copy.rglob("transcripts.json"))
+    data = json.loads(path.read_text())
+    current = next(
+        t for t in data["transcripts"] if t.get("retention", "current") == "current"
+    )
+    for entry in current["results"]:
+        entry["format"] = "json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    report = _verify(fixture_manifest, transcripts_copy)
+    _expect(report, r1=RED)
+    details = " ".join(_row(report, 1).details)
+    assert "cannot be read as findings" in details
+    assert current["id"] in details
+
+
+def test_an_unreadable_current_recording_beside_a_readable_one_stays_quiet(
+    fixture_manifest, transcripts_copy
+) -> None:
+    """The scope of the guard above: the shipped corpus keeps current native-bytes
+    recordings beside readable current ones on purpose, so an excluded current
+    transcript is named only when it leaves the scanner with no current frame at
+    all."""
+    path = next(transcripts_copy.rglob("transcripts.json"))
+    data = json.loads(path.read_text())
+    unreadable = json.loads(json.dumps(data["transcripts"][0]))
+    unreadable["id"] = "fixture-lint-native-bytes"
+    for entry in unreadable["results"]:
+        entry["format"] = "json"
+    data["transcripts"].append(unreadable)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    report = _verify(fixture_manifest, transcripts_copy)
+    _expect(report)
 
 
 def test_planted_an_unrecorded_row_names_what_to_record(
@@ -396,13 +583,18 @@ def test_planted_an_na_cell_whose_column_is_now_populated_fails(
 def test_planted_a_transcript_that_cannot_be_read_as_results_leaves_mapped_cells_corpusless(
     fixture_manifest, transcripts_copy
 ) -> None:
+    """The one current recording is marked not observable: nothing can witness the
+    facets, and the row names that recording rather than reading green (or restating
+    the cause once per facet)."""
     path = next(transcripts_copy.rglob("transcripts.json"))
     document = json.loads(path.read_text())
     document["transcripts"][0]["observable"] = False
     path.write_text(json.dumps(document), encoding="utf-8")
     report = _verify(fixture_manifest, transcripts_copy)
     _expect(report, r1=RED)
-    assert "has no corpus to observe" in " ".join(_row(report, 1).details)
+    details = " ".join(_row(report, 1).details)
+    assert "cannot be read as findings" in details
+    assert "it is marked not observable" in details
 
 
 def _restamp_digest(root, sarif) -> None:

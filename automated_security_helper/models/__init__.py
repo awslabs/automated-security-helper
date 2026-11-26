@@ -11,7 +11,15 @@ run them first and close that cycle.
 """
 
 from importlib import import_module
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from automated_security_helper.core.enums import ExportFormat
+    from automated_security_helper.models.asharp_model import (
+        AshAggregatedResults,
+        ReportMetadata,
+    )
+    from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
 __all__ = [
     "ReportMetadata",
@@ -35,3 +43,7 @@ def __getattr__(name: str) -> Any:
     value = getattr(import_module(module), name)
     globals()[name] = value
     return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_LAZY))

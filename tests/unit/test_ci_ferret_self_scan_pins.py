@@ -624,12 +624,12 @@ def test_an_every_line_pattern_that_matches_nothing_is_reported():
         ),
         (
             ("API_KEY_OR_SECRET", OPERATIONAL_FACETS),
-            "    AUTH_" + 'TOKEN = "auth_' + 'token"',
+            "    AUTH_" + "TOK" + 'EN = "auth_' + "tok" + 'en"',
             '    AUTH_HEADER = "auth_header"',
         ),
         (
             ("API_KEY_OR_SECRET", FINDING_TREND_TEST),
-            "def report_id(second, token=" + '"012345678901"):',
+            "def report_id(second, tok" + "en=" + '"012345678901"):',
             "def other_id(second, count=3):",
         ),
         (
@@ -639,7 +639,7 @@ def test_an_every_line_pattern_that_matches_nothing_is_reported():
         ),
         (
             ("API_KEY_OR_SECRET", ".ash.yaml"),
-            "`" + 'secret = "abcdefghijklmnop"` is a fixture fed into',
+            "`sec" + 'ret = "abcdefghijklmnop"` is a fixture fed into',
             "`value` is a fixture fed into",
         ),
         (
@@ -702,3 +702,53 @@ def test_only_ranged_entries_that_have_a_row_are_selected(tmp_path):
         ("B404", "pinned.py"),
         ("B404", "open-ended.py"),
     ]
+
+
+# This file is scanned too, and no entry covers it. The docstring promises that none of
+# its patterns has a keyword name beside an assignment, so the test strings that stand
+# for the flagged lines are built from halves, and this reads the file's own text to
+# keep them that way. The keywords are built from halves for the same reason.
+_KEYWORD_NAMES = ("sec" + "ret", "tok" + "en", "pass" + "word", "api" + "_key")
+_KEYWORD_ASSIGNMENT = re.compile(
+    r"(?i)(?:" + "|".join(_KEYWORD_NAMES) + r")\w*\s*=\s*"
+    r"(?:\"[^\"\n]{3,}\"|'[^'\n]{3,}')"
+)
+
+
+def _keyword_assignment_lines(text: str) -> list[str]:
+    return [
+        f"{number}: {line.strip()}"
+        for number, line in enumerate(text.splitlines(), start=1)
+        if _KEYWORD_ASSIGNMENT.search(line)
+    ]
+
+
+def test_this_file_spells_no_keyword_name_beside_an_assignment_with_a_value():
+    own_text = Path(__file__).read_text(encoding="utf-8")
+
+    assert _keyword_assignment_lines(own_text) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "flagged"),
+    [
+        ("sec" + "ret" + ' = "abcdefghijklmnop"', True),
+        ("    AUTH_" + "TOKEN" + ' = "auth_' + "' + 'token\"", True),
+        ("def report_id(second, tok" + "en=" + '" + \'"012345678901"):', True),
+        ("sec" + "ret", False),
+        ("AUTH_" + "TOKEN" + ' = ",', False),
+        ('HEAD = "unset" and nothing else', False),
+    ],
+    ids=[
+        "a quoted value",
+        "a value cut by a concatenation",
+        "an argument default cut by a concatenation",
+        "the bare keyword",
+        "an assignment that ends the string",
+        "no keyword",
+    ],
+)
+def test_the_keyword_assignment_reader_flags_a_flagged_line_and_not_a_near_miss(
+    text, flagged
+):
+    assert bool(_keyword_assignment_lines(text)) is flagged

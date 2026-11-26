@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ash report --format <f>`` for every ``ExportFormat`` value, through the real CLI.
+"""``ash results report --format <f>`` for every ``ExportFormat`` value, through the real CLI.
 
 ``report_command`` writes a reporter's output to stdout exactly as the reporter produced it
 when stdout is not a terminal, which it never is here (it pretty-prints JSON and renders
@@ -87,6 +87,7 @@ def test_report_command(
     result = CliRunner().invoke(
         app,
         [
+            "results",
             "report",
             "--format",
             report_format,
@@ -101,7 +102,7 @@ def test_report_command(
     # stdout is the report alone; an error goes to stderr, so a format with no
     # reporter records its message under a separate heading.
     document = (
-        f"$ ash report --format {report_format} --log-level ERROR\n"
+        f"$ ash results report --format {report_format} --log-level ERROR\n"
         f"[exit {result.exit_code}]\n"
         f"{result.stdout}"
     )

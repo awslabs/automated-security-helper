@@ -47,10 +47,11 @@ from __future__ import annotations
 import copy
 import importlib
 import re
+import threading
 from enum import Enum
 from typing import Any, Literal, Mapping, Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from automated_security_helper.base.plugin_provisioning import (
     NO_PROVISIONING,
@@ -76,19 +77,24 @@ _MODULE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
 _VERSION = re.compile(r"\d+(?:\.\d+)*(?:[A-Za-z0-9.+-]*)")
 
 _WARNED_COMMUNITY_ALIASES: set[str] = set()
+# Workspace mode builds engines on several threads, so the check-then-add below
+# is taken under a lock to keep the warning to once per process.
+_WARNED_LOCK = threading.Lock()
 
 
 def warn_community_alias(old: str, new: str) -> None:
     """Say once per process that the "community" spelling *old* is now *new*."""
-    if old in _WARNED_COMMUNITY_ALIASES:
-        return
-    _WARNED_COMMUNITY_ALIASES.add(old)
+    with _WARNED_LOCK:
+        if old in _WARNED_COMMUNITY_ALIASES:
+            return
+        _WARNED_COMMUNITY_ALIASES.add(old)
     # Imported here: the log module is not needed to read a manifest.
     from automated_security_helper.utils.log import ASH_LOGGER
 
     ASH_LOGGER.warning(
         f"'{old}' is deprecated: the community tier is now called alpha, so use "
-        f"'{new}'. The old spelling is accepted until ASH {COMMUNITY_ALIASES_DROPPED_IN}.",
+        f"'{new}'. The old spelling is accepted until ASH "
+        f"{COMMUNITY_ALIASES_DROPPED_IN} and is removed in that release.",
         extra={"markup": False},
     )
 
@@ -119,6 +125,63 @@ class PluginTier(str, Enum):
 
 class _Frozen(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
+
+
+def _refuse(self: object, *_args: object, **_kwargs: object) -> Any:
+    raise TypeError(
+        f"{type(self).__name__} is part of a frozen manifest and cannot be changed"
+    )
+
+
+class _FrozenList(list):
+    """A ``list`` that refuses every in-place change.
+
+    Still a ``list`` by ``isinstance``: it compares equal to a plain one, which is
+    what a delivered value is compared with, and ``json`` and pydantic read it as
+    one. What reads the exact type does not: ``yaml.safe_dump`` refuses it and a
+    ``type(x) is list`` check fails, so a reader that hands the value to such code
+    takes :func:`thawed` first. Rebuilt from its items when copied or
+    pickled (``__reduce__``), because the default rebuild appends one item at a
+    time.
+    """
+
+    __slots__ = ()
+
+    append = extend = insert = remove = pop = clear = sort = reverse = _refuse
+    __setitem__ = __delitem__ = __iadd__ = __imul__ = _refuse
+
+    def __reduce__(self):
+        return (_FrozenList, (list(self),))
+
+
+class _FrozenDict(dict):
+    """A ``dict`` that refuses every in-place change; see :class:`_FrozenList`."""
+
+    __slots__ = ()
+
+    __setitem__ = __delitem__ = __ior__ = _refuse
+    pop = popitem = setdefault = update = clear = _refuse
+
+    def __reduce__(self):
+        return (_FrozenDict, (dict(self),))
+
+
+def _freeze(value: Any) -> Any:
+    """``value`` with every dict and list in it replaced by a frozen one."""
+    if isinstance(value, dict):
+        return _FrozenDict({k: _freeze(v) for k, v in value.items()})
+    if isinstance(value, (list, tuple)):
+        return _FrozenList(_freeze(v) for v in value)
+    return value
+
+
+def thawed(value: Any) -> Any:
+    """``value`` as plain, editable ``dict`` and ``list`` objects, deeply."""
+    if isinstance(value, dict):
+        return {k: thawed(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [thawed(v) for v in value]
+    return value
 
 
 class EntryPoints(_Frozen):
@@ -291,21 +354,29 @@ class ScannerManifest(_Frozen):
     #: no section for such a plugin, so a delivered value equal to the default
     #: (which changes nothing) is told from a changed one by this row. A test
     #: binds each row to the options model's own default.
-    denied_option_defaults: dict[str, Any] = {}
+    #: A frozen table either way: pydantic does not validate a default, so the
+    #: empty one is built frozen here rather than passed through the validator.
+    denied_option_defaults: dict[str, Any] = Field(default_factory=_FrozenDict)
 
     @field_validator("denied_option_defaults")
     @classmethod
     def _denied_option_defaults_are_the_manifests_own(
         cls, value: dict[str, Any]
     ) -> dict[str, Any]:
-        """Deep-copied, so the values are this manifest's own objects.
+        """Deep-copied and frozen, so the values are this manifest's own and fixed.
 
         Validating a ``dict[str, Any]`` builds a new outer dict and keeps the
         value objects it was given, so a list default here would be the very list
         a module-level constant holds, and an in-place change to either would
-        change what "the default" means for the whole process.
+        change what "the default" means for the whole process. The copy cuts that
+        tie; freezing it keeps the cached manifest's own table and lists from
+        being edited either (``dict`` and ``list`` subclasses that raise
+        ``TypeError`` on every change and compare equal to the plain ones;
+        ``model_dump`` and ``json`` give plain data). A reader that needs to edit,
+        or that passes the value to code reading the exact type (``yaml.safe_dump``),
+        takes :func:`thawed`.
         """
-        return copy.deepcopy(value)
+        return _freeze(copy.deepcopy(value))
 
     @field_validator("name")
     @classmethod

@@ -5,7 +5,7 @@
 
 Why this exists
 ---------------
-`.ash/.ash.yaml` and `.ash/.ash_alpha_plugins.yaml` once said, in comments, that
+`.ash.yaml` and `.ash/.ash_alpha_plugins.yaml` once said, in comments, that
 ASH's path matcher ignores a trailing ``**`` on a multi-segment pattern, and a
 neighbouring comment said ``/**`` is what makes ``tests/pytest-temp/**`` match
 anything. Both cannot be true. ``file_path_matches`` is the matcher the SARIF
@@ -33,9 +33,10 @@ FILES = (".ash.yaml", ".ash/.ash_alpha_plugins.yaml")
         ("tests/pytest-temp/**", "tests/pytest-temp/a/b.py", True),
         ("tests/pytest-temp/**", "tests/pytest-temp/b.py", True),
         ("tests/pytest-temp/**", "tests/other/b.py", False),
-        # A bare directory spelling with no glob is a prefix: it matches what is
-        # below it, the same as "docs" and "docs/" do in the matcher's own tests.
-        # It does not match a sibling that only shares the leading characters.
+        # A bare directory name matches the subtree below it, like the "/**"
+        # spelling (tests/unit/utils/test_bare_directory_path_matching.py pins
+        # that behavior; this row only keeps the two suites agreeing). A
+        # sibling that only shares the leading characters stays unmatched.
         ("tests/pytest-temp", "tests/pytest-temp/b.py", True),
         ("tests/pytest-temp", "tests/pytest-temp-other/b.py", False),
         ("docs/**", "docs/content/x.md", True),
