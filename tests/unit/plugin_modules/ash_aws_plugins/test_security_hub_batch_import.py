@@ -4444,12 +4444,13 @@ def test_get_config_marks_the_operator_only_options_a_repository_file_sets(
     them. A scan of that checkout ignores both, so they are shown marked. The
     file counts as the repository's by the name it was given or by its target,
     and so does a base it extends. A scope the file reads from the
-    environment is shown neither by the value nor by a marker made of it:
-    the option is absent from the answer. The
-    rest of the section (aws_region) is the operator's too and is confined
-    for a file in another checkout, so it is absent rather than shown as
-    applied (docs/content/docs/plugins/aws/security-hub-reporter.md, "Options
-    only the operator sets")."""
+    environment is shown as ignored too, and never by the value: the load
+    drops the reference at the place, so the marker is
+    `<from the environment>`. The rest of the section (aws_region) is the
+    operator's too and is confined for a file in another checkout, so it is
+    absent rather than shown as applied
+    (docs/content/docs/plugins/aws/security-hub-reporter.md, "Options only the
+    operator sets")."""
     _not_in_a_checkout(tmp_path)
     repository_options = _REPOSITORY_OPTIONS
     if scope == "from-the-environment":
@@ -4488,11 +4489,13 @@ def test_get_config_marks_the_operator_only_options_a_repository_file_sets(
         )
     else:
         # The confinement settles the place and drops the reference the file
-        # wrote there, so get_config (``_without_environment_read_markers``)
-        # withdraws a marker that would print the server's environment value:
-        # the option is absent, never the value and never a marker made of it.
+        # wrote there, so the marker has none to show: it is the placeholder,
+        # which says the file set an option the scan ignores and holds no part
+        # of the server's environment value.
         assert "victim-from-the-environment" not in json.dumps(result), result
-        assert "findings_scope" not in options, options
+        assert options["findings_scope"] == (
+            "<operator only; ignored from this file: <from the environment>>"
+        ), options
     assert options["archive_resolved_findings"] == (
         "<operator only; ignored from this file: true>"
     )

@@ -5158,8 +5158,11 @@ def mcp_get_config(
         apply, so a file the client delivered shows no grants of its own. The reporter options only the operator may set
         (``config/operator_only_options.py``) that a file in a checkout sets are
         shown as a scan of that checkout applies them, ignored:
-        ``<operator only; ignored from this file: VALUE>``. A refused path
-        returns ``success`` False with ``error_type``
+        ``<operator only; ignored from this file: VALUE>``. A value the file
+        read from the environment is the server's, so VALUE is never that
+        value: it is the reference the file wrote, ``<from ${VAR}>``, where one
+        sits at its place, and ``<from the environment>`` where none does. A
+        refused path returns ``success`` False with ``error_type``
         ``config_input_not_permitted``, and a file a client delivered that
         reads from the environment the same with ``config_env_not_resolved``.
         A resolved config whose ``ash_plugin_modules`` a scan of the answered
@@ -5449,6 +5452,11 @@ def _answer_get_config(
         # and never touches ash_plugin_modules, whose display is the
         # answered document's own.
         marking_references = tuple(getattr(base, "_environment_references", ()) or ())
+        # The values this read recorded go with its references: where no
+        # reference shows a value the chain read, the marker shows
+        # ``<from the environment>``, and these are what tell such a value
+        # from a literal. The answered configuration's own join them below.
+        marking_values = config_environment_values(base)
         if not raw:
             # The answer IS the scan's own resolution: resolve_config's
             # no-file branch reads the ASH_CONFIG chain exactly as a scan of
@@ -5518,12 +5526,13 @@ def _answer_get_config(
                     ),
                     None,
                 )
+        environment_values = tuple(
+            dict.fromkeys((*marking_values, *config_environment_values(base)))
+        )
         return shown_config(
             base,
             mark_operator_only_options(
-                base.model_dump(),
-                settings,
-                marking_references,
+                base.model_dump(), settings, marking_references, environment_values
             ),
         )
 
@@ -5833,7 +5842,31 @@ def _answer_get_config(
     # The record is the resolution's own (repository_out): the chain is not
     # resolved again, so a chain file that changed on disk since the read
     # cannot raise past the structured refusals above or put a second read's
-    # values in the answer.
+    # values in the answer. The load appends exactly one record before it reads
+    # the chain. Any other count means the record the marking below is judged
+    # by is not the one this read made, and an answer shown without that
+    # judgment would print an option a scan of the file's checkout ignores as if
+    # it applied, so the answer is refused, as an internal failure of the
+    # server and not of the file. The message names no path and no value; the
+    # count goes to the log.
+    if len(chain_repository) != 1:
+        _logger.warning(
+            f"get_config was refused: the load recorded {len(chain_repository)} "
+            "sets of settings for the operator-only options, where it records one."
+        )
+        return with_exit_code(
+            create_error_response(
+                MCPResourceError(
+                    "The configuration was loaded, but the load did not leave the "
+                    "one record of what its files wrote for the operator-only "
+                    "options, so the answer is refused instead of shown without "
+                    "that judgment.",
+                    context={"error_category": ErrorCategory.UNEXPECTED_ERROR.value},
+                ),
+                "get_config",
+            ),
+            REFUSED_INTERNAL_EXIT_CODE,
+        )
     [written] = chain_repository
     # Marked when no chain file is inside the scanned trees -- judged against
     # the trees the resolution confined with (RepositorySettings.trees), with
@@ -5860,84 +5893,21 @@ def _answer_get_config(
         # environment is marked by the reference it was written as, never by
         # its value. The confinement rewrite (_take_confined_references) drops
         # the references at the places it settled, a chain file in another
-        # checkout included, so a marker for an environment-read option may
-        # find no reference and would fall back to the value the server's
-        # environment gave. Such a marker is not written: the option stays as
-        # the load left it, absent or at the configuration's own value.
-        shown = _without_environment_read_markers(
+        # checkout included, so no reference may sit at the place of such an
+        # option. The marker then shows ``<from the environment>``, and the
+        # option stays marked: the client reads that the file set an option a
+        # scan ignores. What tells a value read from the environment from a
+        # literal, in whatever shape the file wrote it, is the configuration's
+        # own record of what its chain read (config_environment_values, every
+        # read included, the ones at dropped places too) and the loader's mark
+        # on each scalar it read.
+        shown = mark_operator_only_options(
             shown,
-            mark_operator_only_options(
-                shown,
-                written,
-                tuple(getattr(resolved, "_environment_references", ()) or ()),
-            ),
+            written,
+            tuple(getattr(resolved, "_environment_references", ()) or ()),
             config_environment_values(resolved),
         )
     return shown_config(resolved, shown)
-
-
-_OPERATOR_ONLY_MARKER_HEAD = "<operator only; ignored from this file: "
-
-
-def _without_environment_read_markers(
-    before: Dict[str, Any],
-    marked: Dict[str, Any],
-    environment_values: Tuple[str, ...],
-) -> Dict[str, Any]:
-    """*marked*, with each operator-only marker that would print a value the
-    configuration read from the environment put back to what *before* held.
-
-    ``mark_operator_only_options`` shows an environment-read value as the
-    reference the file wrote only when a reference still sits at the place;
-    otherwise it shows the value itself, as JSON. The references at a settled
-    place are the ones the confinement rewrite drops, so for a chain file in
-    another checkout the fallback is reached, and the value is one the server's
-    environment gave. A marker whose text is that fallback for any of
-    *environment_values* (the configuration's own record of what its chain read,
-    every read included) is withdrawn: the option is left as *before* has it,
-    absent where the load left it out, or at the value the configuration holds
-    there. A literal that happens to equal an environment value is withheld
-    too, which errs toward showing less. *marked* is changed in place and
-    returned.
-    """
-    import json as _json
-
-    from automated_security_helper.utils.terminal_text import shown_on_one_line
-
-    fallbacks = {
-        f"{_OPERATOR_ONLY_MARKER_HEAD}{shown_on_one_line(_json.dumps(value))}>"
-        for value in environment_values
-        if isinstance(value, str)
-    }
-    if not fallbacks:
-        return marked
-    for kind in ("reporters", "scanners"):
-        sections = marked.get(kind)
-        if not isinstance(sections, dict):
-            continue
-        before_sections = before.get(kind)
-        before_sections = before_sections if isinstance(before_sections, dict) else {}
-        for key, section in sections.items():
-            options = section.get("options") if isinstance(section, dict) else None
-            if not isinstance(options, dict):
-                continue
-            before_section = before_sections.get(key)
-            before_options = (
-                before_section.get("options")
-                if isinstance(before_section, dict)
-                else None
-            )
-            before_options = before_options if isinstance(before_options, dict) else {}
-            for option, text in list(options.items()):
-                if not isinstance(text, str) or text not in fallbacks:
-                    continue
-                if before_options.get(option) == text:
-                    continue
-                if option in before_options:
-                    options[option] = before_options[option]
-                else:
-                    options.pop(option)
-    return marked
 
 
 def _config_problem(field: str, message: str, kind: str) -> Dict[str, Any]:

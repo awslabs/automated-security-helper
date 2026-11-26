@@ -87,6 +87,7 @@ from typing import (
     Any,
     Collection,
     Dict,
+    Iterable,
     List,
     NamedTuple,
     Optional,
@@ -116,6 +117,7 @@ from automated_security_helper.config.sandbox_grants import (
 )
 from automated_security_helper.utils.error_text import config_environment_values
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.redacted_model import environment_strings
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:
@@ -1232,34 +1234,65 @@ def drop_recorded_operator_only_options(config: "AshConfig") -> "AshConfig":
     return confined
 
 
+#: What the ignored marker shows where it would show a value the configuration
+#: read from the environment and no reference sits at that place
+#: (``_marker_value``). Nothing of the value is in it.
+ENVIRONMENT_PLACEHOLDER = "<from the environment>"
+
+
+def operator_only_marker(shown: str) -> str:
+    """The text an ignored operator-only option is shown as: *shown* (the
+    value as ``_marker_value`` shows it) inside the one marker format,
+    ``<operator only; ignored from this file: SHOWN>``."""
+    return f"<operator only; ignored from this file: {shown}>"
+
+
 def _marker_value(
     value: Any,
     kind: str,
     key: str,
     option: str,
     references: Sequence["EnvironmentReference"],
+    environment_values: Sequence[str] = (),
 ) -> str:
     """How the ignored marker shows *value*, what the chain wrote at
-    ``kind.key.options.option``: a value the chain read from the environment
-    as the reference it was written as (``<from ${VAR}>``), never the value
-    itself; any other value as JSON, on one line.
+    ``kind.key.options.option``. Never a value the chain read from the
+    environment: each leaf of *value*, and each mapping key, is shown the first
+    way that applies.
 
-    A value is read from the environment when a reference of *references*
-    (the chain's ``environment_references``, every read included, the ones at
-    places the load left out too) sits at that place, under any spelling of
-    the section, and resolved to it. The loader records a reference at every
-    place a read value lands: a YAML alias's place included, and a ``patch``
-    value at the place the operation puts it (``copy`` and ``move`` are not
-    allowed ops), so no read value reaches one of these places without one.
-    A literal a later file wrote over a read value is shown as the literal. A
-    mapping key the file read from the environment (a key reference, recorded
-    at the mapping's place) is shown as its reference too.
+    1. A reference of *references* (the chain's ``environment_references``)
+       sits at that place, under any spelling of the section, and resolved to
+       the leaf: it is shown as the reference the file wrote,
+       ``<from ${VAR}>``. A literal a later file wrote over a read value is not
+       that read, and is shown as the literal. A mapping key the file read from
+       the environment (a key reference, recorded at the mapping's place) is
+       shown as its reference too.
+    2. Otherwise, if the leaf reads the environment, the whole of *value* is
+       ``ENVIRONMENT_PLACEHOLDER`` and none of it is shown, the entries beside
+       the read one included. A leaf reads the environment when the loader
+       marked it so (``EnvResolvedScalar.from_environment``), or when its text
+       equals or contains one of *environment_values*, the values and keys the
+       chain read; for a scalar that is not a string that text is its ``str``
+       and its JSON. The loader drops the references at the places it settles,
+       which for a file in a checkout other than the scanned one is every
+       place of the options marked here, so there this is the only way a read
+       value is kept out of the marker. A literal that happens to equal or
+       contain such a value gets the placeholder too: it cannot be told from
+       the read, and showing less is the safe side.
+    3. Any other leaf is shown as JSON, on one line. A date, time or bytes a
+       YAML or TOML file writes is not JSON and is shown as text
+       (``default=str``) instead of raising out of the marking.
+
+    A set or frozenset is shown as a JSON list of its members, in the order
+    of their shown text, so one set always has one marker.
     """
     from automated_security_helper.config.environment_record import (
         environment_marker,
     )
 
     wanted = (kind, folded_section_name(key), "options", option)
+    needles = environment_strings(environment_values)
+    reads_the_environment = False
 
     def at_place(reference: Any, *, within: bool) -> bool:
         # The option's own place, or (``within``) a place under it: an entry
@@ -1289,41 +1322,80 @@ def _marker_value(
                 return environment_marker(reference.written)
         return None
 
+    def holds_a_read(leaf: Any) -> bool:
+        # The loader's own mark on a scalar it read from the environment, or
+        # text that equals or contains a value the chain read. The mark needs
+        # no record of values, so it covers a read the configuration's record
+        # does not hold (a set member).
+        if getattr(leaf, "from_environment", False):
+            return True
+        if not needles:
+            return False
+        texts = (
+            (leaf,)
+            if isinstance(leaf, str)
+            else (str(leaf), json.dumps(leaf, default=str))
+        )
+        return any(needle in text for needle in needles for text in texts)
+
+    def note_a_read(leaf: Any) -> None:
+        nonlocal reads_the_environment
+        if holds_a_read(leaf):
+            reads_the_environment = True
+
     if isinstance(value, str):
         marker = read_as(value, within=False)
         if marker is not None:
             return marker
+        note_a_read(value)
+        if reads_the_environment:
+            return ENVIRONMENT_PLACEHOLDER
         return shown_on_one_line(json.dumps(value))
 
-    # A list or mapping the file wrote holds its read values as leaves: each
-    # leaf a reference at or under this place resolved to is shown as the
+    # A list, mapping or set the file wrote holds its read values as leaves:
+    # each leaf a reference at or under this place resolved to is shown as the
     # reference, never the value. A mapping key is shown the same way, and as
     # text: ``json.dumps`` applies ``default=`` to values only, so a date or
-    # other non-JSON key a YAML file writes would raise out of the marking.
+    # other non-JSON key a YAML file writes would raise out of the marking. A
+    # leaf or key no reference shows, and that reads the environment, is noted:
+    # the whole value is then the placeholder, whatever else it holds.
     def shown_key(name: Any) -> str:
         text = name if isinstance(name, str) else str(name)
         marker = read_as(text, within=True, key=True)
-        return text if marker is None else marker
+        if marker is not None:
+            return marker
+        note_a_read(name)
+        return text
 
     def shown_leaves(node: Any) -> Any:
         if isinstance(node, dict):
             return {shown_key(name): shown_leaves(item) for name, item in node.items()}
         if isinstance(node, (list, tuple)):
             return [shown_leaves(item) for item in node]
-        if isinstance(node, str):
-            marker = read_as(node, within=True)
-            return node if marker is None else marker
+        if isinstance(node, (set, frozenset)):
+            # No order of its own, and a repr that is Python's: a JSON list,
+            # its members in the order of their shown text.
+            members = [shown_leaves(item) for item in node]
+            return sorted(members, key=lambda member: json.dumps(member, default=str))
+        marker = read_as(node, within=True)
+        if marker is not None:
+            return marker
+        note_a_read(node)
         return node
 
-    # A date, time, bytes or set a YAML or TOML file writes is not JSON: it is
-    # shown as text (``default=str``) instead of raising out of the marking.
-    return shown_on_one_line(json.dumps(shown_leaves(value), default=str))
+    shown = shown_leaves(value)
+    if reads_the_environment:
+        return ENVIRONMENT_PLACEHOLDER
+    # A date, time or bytes a YAML or TOML file writes is not JSON: it is shown
+    # as text (``default=str``) instead of raising out of the marking.
+    return shown_on_one_line(json.dumps(shown, default=str))
 
 
 def mark_operator_only_options(
     data: Dict[str, Any],
     written: Optional[RepositorySettings] = None,
     references: Sequence["EnvironmentReference"] = (),
+    environment_values: Iterable[str] = (),
 ) -> Dict[str, Any]:
     """A copy of *data*, a dumped AshConfig, with these options shown as ignored.
 
@@ -1336,7 +1408,8 @@ def mark_operator_only_options(
     The marker is only as wide as the callers and *written* make it: a shape
     whose load already dropped an option and whose record does not carry it
     answers without the option and without a marker, so a caller-named file's
-    dropped reporter options read as an empty options table.
+    dropped reporter options read as an empty options table. *data* and
+    everything in it are left as they are: the marker is written into a copy.
 
     *written* is what the file's chain wrote for these options (a
     ``RepositorySettings`` that read the chain): only those are marked, with
@@ -1349,11 +1422,29 @@ def mark_operator_only_options(
     configuration's own, and is shown as it is. Without *written*, every one
     *data* holds is marked, with the dump's value.
 
-    VALUE is shown as ``_marker_value`` shows it: a value the chain read from
-    the environment (*references*, its ``environment_references``) as the
-    reference the file wrote, ``<from ${VAR}>``, never the value; a literal
-    as JSON on one line, the repository's own text.
+    VALUE is shown as ``_marker_value`` shows it, never as a value the chain
+    read from the environment: as the reference the file wrote,
+    ``<from ${VAR}>``, where one of *references* (the chain's
+    ``environment_references``) sits at that place, and as
+    ``<from the environment>`` where none does. *environment_values* are the
+    values and keys the configuration read from the environment
+    (``config_environment_values(config)``). That record walks mappings, lists
+    and strings, so a set member is not in it; the loader's own mark on the
+    scalar covers that. A value that is, or holds, one of them, or that the
+    loader marked as read, is shown as the placeholder. A literal that happens
+    to equal or contain one of them gets the placeholder too: the two cannot be
+    told apart, and the marker shows less rather than more. A literal no read
+    touches is shown as JSON on one line, the repository's own text.
+
+    The rest of an off-host reporter's section (``aws_region`` and the other
+    aws-security-hub options) is not marked: it is not an operator-only
+    option. The off-host rule takes that whole section from the operator's
+    configuration (``reporter_section``), and the record this marking reads
+    (``RepositorySettings``) holds only the operator-only places, so what a
+    repository's file wrote there is not recorded, and the option is absent
+    from the answer.
     """
+    needles = environment_strings(environment_values)
     marked = copy.deepcopy(data)
     for kind, listed in (
         ("reporters", OPERATOR_ONLY_OPTIONS),
@@ -1400,9 +1491,8 @@ def mark_operator_only_options(
                         ):
                             continue
                         value = wrote[place]
-                    shown = _marker_value(value, kind, key, option, references)
-                    options[option] = (
-                        f"<operator only; ignored from this file: {shown}>"
+                    options[option] = operator_only_marker(
+                        _marker_value(value, kind, key, option, references, needles)
                     )
     return marked
 
