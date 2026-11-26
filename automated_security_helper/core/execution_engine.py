@@ -982,10 +982,6 @@ class ScanExecutionEngine:
                     plugin_context=self._context,
                     used_suppressions=getattr(self._results, "used_suppressions", None),
                 )
-                # A suppression path ending in "/" names its directory and
-                # matches the files below it (the bare-directory rule, issue
-                # #894), so the warning that such a path matches no file is
-                # gone with the behavior it described.
             else:
                 self._results.sarif = exclude_output_dir_results(
                     sarif_report=self._results.sarif,
