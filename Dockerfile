@@ -726,8 +726,14 @@ ENV _ASH_EXEC_MODE="local"
 # loaded for this install only (ASH_ALPHA_PLUGIN_MODULES), so those tools
 # (GuardDog's uv tool among them) are installed and pinned too, and the image carries
 # them; a scan in the image still loads a module only when it is listed. trivy-repo,
-# snyk and ferret are not in the list: their tools come another way.
-ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_ggshield_plugins,automated_security_helper.plugin_modules.ash_gosec_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins,automated_security_helper.plugin_modules.ash_kingfisher_plugins,automated_security_helper.plugin_modules.ash_polaris_plugins"
+# snyk and ferret are not in the list: their tools come another way. Nor, each for a
+# reason tests/unit/utils/test_third_party_licenses.py re-checks, are credsweeper (the
+# image has no compiler for its twofish dependency; see ggshield below),
+# dependency-check (it needs a Java runtime, which the image does not carry), kics (its
+# release is not pinned in tool_downloads, so the install has nothing to place) and
+# secretlint (its npm tree is not locked and its packages have no license entries, and
+# the image bundles no tool without both).
+ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_ggshield_plugins,automated_security_helper.plugin_modules.ash_gosec_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins,automated_security_helper.plugin_modules.ash_kingfisher_plugins,automated_security_helper.plugin_modules.ash_polaris_plugins,automated_security_helper.plugin_modules.ash_retire_js_plugins"
 # The pre-rename name of the build argument, honored until ASH 3.9.0: a value given
 # for it, an explicitly empty one included, wins over ASH_ALPHA_PLUGIN_MODULES below.
 # The default is a sentinel because an empty-string default cannot tell "not given"
@@ -786,6 +792,22 @@ RUN ggshield --version
 # flag; `polaris version` is the version query.
 #
 RUN polaris version
+
+#
+# retire.js (alpha scanner). Installed by `ash dependencies install` above through its
+# module-local pinned installer (retire_js_install.py): `npm ci` of a lockfile that
+# pins all six packages of the tree by the integrity the npm registry publishes for
+# each, into ${ASH_BIN_PATH}/ash-retire-js, refused unless the installed files hash
+# to the module's tree digest. The license files of retire and of the five packages
+# its tree carries come from each repository at the release's commit, checked against
+# their SHA256. RETIRE_VERSION is that module's RETIRE_VERSION (a unit test keeps the
+# two equal), and the build fails unless the retire on PATH reports it. The version
+# query reads no vulnerability repository and makes no network call.
+#
+RUN with-retry 'install-pinned-tool --licenses-only astronomical commander meriyah retire walkdir zod'
+ARG RETIRE_VERSION="6.1.1"
+RUN reported="$(retire --version)" && echo "${reported}" && \
+    test "${reported}" = "${RETIRE_VERSION}"
 
 #
 # Every bundled third-party tool has its license files, they match their pins, and
@@ -907,7 +929,7 @@ ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 # Python tools are installed again here and would otherwise float. The same alpha
 # modules are loaded for it; an ARG does not reach a stage built FROM another, so it
 # is declared again (a unit test keeps the two equal).
-ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_ggshield_plugins,automated_security_helper.plugin_modules.ash_gosec_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins,automated_security_helper.plugin_modules.ash_kingfisher_plugins,automated_security_helper.plugin_modules.ash_polaris_plugins"
+ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_ggshield_plugins,automated_security_helper.plugin_modules.ash_gosec_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins,automated_security_helper.plugin_modules.ash_kingfisher_plugins,automated_security_helper.plugin_modules.ash_polaris_plugins,automated_security_helper.plugin_modules.ash_retire_js_plugins"
 # The pre-rename name of the build argument, honored until ASH 3.9.0: a value given
 # for it, an explicitly empty one included, wins over ASH_ALPHA_PLUGIN_MODULES below.
 # The default is a sentinel because an empty-string default cannot tell "not given"
@@ -930,6 +952,10 @@ RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
 # GuardDog again, for the non-root user's own uv tool install.
 RUN guarddog --version
+# retire.js: the install above finds the core stage's tree in ${ASH_BIN_PATH}, which
+# this user may write while the install runs, still hashing to the pinned digest, and
+# keeps it; this checks the command it left resolves.
+RUN retire --version
 
 # ASH_BIN_PATH back to root, readable and executable by this user but not writable:
 # nothing writes there at scan time. Then the core stage's sweep again, for the lock

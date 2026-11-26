@@ -70,6 +70,10 @@ REAL_TOOL_MODULES = frozenset(
         # the real uv, against this environment.
         "utils/test_ash_install.py",
         "utils/test_pre_installed_tool.py",
+        # The version probes of retire.js's package tree are node code: the module
+        # runs the real node on a fake tree to read the release each package.json
+        # holds, which a stand-in cannot answer for.
+        "utils/test_retire_js_tree_version_probes.py",
         "utils/test_uv_ignores_repository_config.py",
     }
 )

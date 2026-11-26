@@ -848,6 +848,13 @@ def get_rules_bundle(name: str) -> RulesBundle:
 # file the wheel lacks is URL-pinned as in step 3. The entry's ``tool`` must be the
 # scanner's name, because it is also the key ``--uv-tool-pins`` overrides.
 #
+# For an npm package tree a plugin installs with ``npm ci`` from its own lockfile (the
+# retire.js scanner's ``retire_js_install.py``), the tool's entry is URL-pinned as in
+# step 3, and every other package the lockfile names gets an entry of its own:
+# ``bundled_in`` names the tree, ``registry`` the registry the package came from, and a
+# ``version_probe`` reads the version of the package as installed. All of them go on
+# the tree's ``--licenses-only`` line in the Dockerfile.
+#
 # ``scripts/check_pinned_tool_versions.py`` reads new entries from these tables and
 # needs no edit to start reporting the tool's upstream releases and what a bump of it
 # changes, as long as ``TOOL_VERSIONS`` or ``RULES_BUNDLES`` pins its download or it
@@ -977,6 +984,11 @@ class ThirdPartyLicense:
     # Set for a library another wheel bundles: what bundles it, for SOURCE. Its version
     # is that wheel's choice, so the pin checker lists it without looking it up.
     bundled_in: "str | None" = None
+    # Set with ``bundled_in`` for a package another tool's locked dependency tree
+    # carries as its project published it, rather than a binary built for the bundler
+    # the way a wheel's grafted library is: the registry it was published to, for
+    # SOURCE.
+    registry: "str | None" = None
 
     @property
     def executable_names(self) -> tuple[str, ...]:
@@ -1035,7 +1047,13 @@ class ThirdPartyLicense:
         ]
         if installed_from:
             lines.append(f"Installed from:      {installed_from}")
-        if self.bundled_in:
+        if self.bundled_in and self.registry:
+            statement = (
+                f"ASH ships this package as {self.bundled_in} carries it, unmodified: "
+                f"the release its project published to {self.registry}. The commit "
+                "above is the one that release was published from."
+            )
+        elif self.bundled_in:
             statement = (
                 f"ASH ships this library as {self.bundled_in} bundles it, unmodified. "
                 "The binary was built for that wheel, not published by the project "
@@ -1100,9 +1118,16 @@ def _source_file(repository: str, commit: str, path: str) -> str:
 # have no digest here: the archive digest in _DIGESTS covers them. For grype, syft
 # and trivy the archive's LICENSE was also checked byte-identical to the
 # repository's at the same commit. semgrep's two files are byte-identical to
-# opengrep's, which forked it, so they share digests.
+# opengrep's, which forked it, so they share digests. For the npm packages of the
+# retire.js tree (retire, astronomical, commander, meriyah, walkdir, zod) the commit is
+# the ``gitHead`` the registry records for the release, which is also what each
+# release tag points to (walkdir 0.4.1 has no tag), and each license file is
+# byte-identical to the copy inside that release's npm tarball (compared on
+# 2026-11-26).
 _THIRD_PARTY_HASHES: dict[str, str] = {
     "actionlint commit": "914e7df21a07ef503a81201c76d2b11c789d3fca",  # pragma: allowlist secret
+    "astronomical commit": "eb7362e25328fa99782fbfb3771ce01e8b04ea5e",  # pragma: allowlist secret
+    "astronomical/LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",  # pragma: allowlist secret
     "aws-guard-rules-registry commit": "72352d1e5414e496ab75fae216119e65d8e61d53",  # pragma: allowlist secret
     "aws-guard-rules-registry/LICENSE": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b",  # pragma: allowlist secret
     "aws-guard-rules-registry/NOTICE": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287",  # pragma: allowlist secret
@@ -1113,6 +1138,8 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "cfn-guard commit": "db494a17fb6030b365d5a5144a397517c7746797",  # pragma: allowlist secret
     "cfn-guard/LICENSE": "28878a48de57252ed2c9119db71b2fc9766833a0c159d9f5df54cba4dea52dba",  # pragma: allowlist secret
     "cfn-guard/NOTICE": "ba249a48f79f76c72cffea8689eb7a5ce450a4a67ad6b1e44e8ff15a95b2b751",  # pragma: allowlist secret
+    "commander commit": "8247364da749736570161e95682b07fc2d72497b",  # pragma: allowlist secret
+    "commander/LICENSE": "04512a63dce4d2d506ad612dc0bd7681ccf6e3655f7b6eaef7dfac8323d1ec0b",  # pragma: allowlist secret
     "crane commit": "8a72a424fdecb4caa14f2d525e5d2503331442b5",  # pragma: allowlist secret
     "ggshield commit": "4cccd600fd3890a7aba07fd0a45e483f3099fe70",  # pragma: allowlist secret
     "gitleaks commit": "83d9cd684c87d95d656c1458ef04895a7f1cbd8e",  # pragma: allowlist secret
@@ -1129,6 +1156,8 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "libgit2/COPYING": "e3712465634e97cfd850822a4eb5ac7d2f8a10f753189366d5a2060046f28288",  # pragma: allowlist secret
     "libssh2 commit": "a312b43325e3383c865a87bb1d26cb52e3292641",  # pragma: allowlist secret
     "libssh2/COPYING": "f7f9633cf9ff2f1333f3d7ce46973a8716a4d2a2815ad56f30d437d5fea7bafe",  # pragma: allowlist secret
+    "meriyah commit": "9aca9b5b3ecadf68f2bda1e8023b9857602ace52",  # pragma: allowlist secret
+    "meriyah/LICENSE.md": "e9a5df5a6ae5cd51ca430715f4c62fb5424946e8da07b7caa058a1ba0582a848",  # pragma: allowlist secret
     "opengrep commit": "526deafe6f0519c272bbee316fea8df26dd85dfa",  # pragma: allowlist secret
     "opengrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "opengrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
@@ -1143,6 +1172,8 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "pygit2 commit": "d88fa3dcbab21a7eb33ff354222c4ec8e5ff6ece",  # pragma: allowlist secret
     "pygit2/AUTHORS.md": "4ecad3164600b3c7a216cdd636288d1434afd6307737cfeba8fc1372dc04ba20",  # pragma: allowlist secret
     "pygit2/COPYING": "3f2a642de5f24ed216404873b875e9d1c5dd112a4e0ae27a42f7303583f69683",  # pragma: allowlist secret
+    "retire commit": "9a09cd11ae83ba67439a1ad73c4afafa7f1409d5",  # pragma: allowlist secret
+    "retire/LICENSE.md": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",  # pragma: allowlist secret
     "semgrep commit": "a5844e7c2d9d04548f86048f525d467a00742656",  # pragma: allowlist secret
     "semgrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "semgrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
@@ -1152,7 +1183,11 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "uv commit": "6b2d39dcc390293d51c9c0d2bbcd650f4bcbfdce",  # pragma: allowlist secret
     "uv/LICENSE-APACHE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",  # pragma: allowlist secret
     "uv/LICENSE-MIT": "860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c",  # pragma: allowlist secret
+    "walkdir commit": "9fa8b74cb504a2a07d97db171e7634c87eebf448",  # pragma: allowlist secret
+    "walkdir/license": "8df47c6ad9ac2c41eb9b2a72def9908959da0ede8dadd56c7b249c1bdb0c5ce6",  # pragma: allowlist secret
     "zizmor commit": "0af0be985a4cae71ecfaa64ef574a94b35dc722a",  # pragma: allowlist secret
+    "zod commit": "b500a2ee95134f81d74da7911d7378dd2853d042",  # pragma: allowlist secret
+    "zod/LICENSE": "3f1189b28e3866e0d979968d466b78f813f76827cfdca1fbb124cc0a5c8841f8",  # pragma: allowlist secret
 }
 
 
@@ -1195,6 +1230,37 @@ def _pygit2_bundled_library_probe(
     return _bundled_library_probe("pygit2", "pygit2.libs", 2, glob, pattern, prefix)
 
 
+#: What the retire.js scanner's tree carries beside retire itself, in its lockfile
+#: (``ash_retire_js_plugins/retire_js_install.py``).
+_RETIRE_TREE = (
+    "the retire 6.1.1 npm tree the retire.js scanner installs from its lockfile"
+)
+
+
+def _retire_tree_probe(package: str) -> "tuple[str, ...]":
+    """A version_probe for a package of the retire.js scanner's npm tree.
+
+    The tree is where the ``retire`` on PATH leads: the scanner's installer puts
+    ``<bin dir>/retire`` there as a link to ``node_modules/retire/lib/cli.js``, and
+    ``npm ci``'s flat layout puts each package beside retire in that
+    ``node_modules``. The probe follows the link and prints the version the package's
+    own ``package.json`` records. No ``retire`` on PATH, or no ``package.json``,
+    throws, so the image build fails rather than vouching for a package that is not
+    there.
+    """
+    code = (
+        'const fs = require("fs"), path = require("path"); '
+        'const bin = (process.env.PATH || "").split(path.delimiter)'
+        '.filter((d) => path.isAbsolute(d)).map((d) => path.join(d, "retire"))'
+        ".find((f) => fs.existsSync(f)); "
+        "const modules = path.resolve(path.dirname(fs.realpathSync(bin)), "
+        '"..", ".."); '
+        f'const manifest = path.join(modules, "{package}", "package.json"); '
+        'console.log(JSON.parse(fs.readFileSync(manifest, "utf8")).version);'
+    )
+    return ("node", "-e", code)
+
+
 # Alphabetical, one entry per tool.
 THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     "actionlint": ThirdPartyLicense(
@@ -1204,6 +1270,22 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         repository="https://github.com/rhysd/actionlint",
         commit=_THIRD_PARTY_HASHES["actionlint commit"],
         files=(LicenseFile("LICENSE.txt"),),
+    ),
+    # A dependency of retire in the retire.js scanner's npm tree (see "retire" below).
+    "astronomical": ThirdPartyLicense(
+        tool="astronomical",
+        bundled_in=_RETIRE_TREE,
+        registry="the npm registry",
+        version="3.2.0",
+        license="Apache-2.0",
+        repository="https://github.com/RetireJS/ASTronomical",
+        commit=_THIRD_PARTY_HASHES["astronomical commit"],
+        files=(
+            _from_source(
+                "astronomical", "https://github.com/RetireJS/ASTronomical", "LICENSE"
+            ),
+        ),
+        version_probe=_retire_tree_probe("astronomical"),
     ),
     # The rule files cfn-guard evaluates, installed by
     # `install-pinned-tool aws-guard-rules-registry --rules-bundle` (RULES_BUNDLES).
@@ -1314,6 +1396,20 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         commit=_THIRD_PARTY_HASHES["checkov commit"],
         files=(LicenseFile("LICENSE"),),
         distribution="checkov",
+    ),
+    # A dependency of retire in the retire.js scanner's npm tree (see "retire" below).
+    "commander": ThirdPartyLicense(
+        tool="commander",
+        bundled_in=_RETIRE_TREE,
+        registry="the npm registry",
+        version="v14.0.3",
+        license="MIT",
+        repository="https://github.com/tj/commander.js",
+        commit=_THIRD_PARTY_HASHES["commander commit"],
+        files=(
+            _from_source("commander", "https://github.com/tj/commander.js", "LICENSE"),
+        ),
+        version_probe=_retire_tree_probe("commander"),
     ),
     "crane": ThirdPartyLicense(
         tool="crane",
@@ -1467,6 +1563,21 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             "libssh2-*", rb"SSH-2\.0-libssh2_([0-9.]+)", "libssh2-"
         ),
     ),
+    # A dependency of astronomical in the retire.js scanner's npm tree (see "retire"
+    # below).
+    "meriyah": ThirdPartyLicense(
+        tool="meriyah",
+        bundled_in=_RETIRE_TREE,
+        registry="the npm registry",
+        version="v7.4.3",
+        license="ISC",
+        repository="https://github.com/meriyah/meriyah",
+        commit=_THIRD_PARTY_HASHES["meriyah commit"],
+        files=(
+            _from_source("meriyah", "https://github.com/meriyah/meriyah", "LICENSE.md"),
+        ),
+        version_probe=_retire_tree_probe("meriyah"),
+    ),
     # Installed by `ash dependencies install`, which publishes a bare executable
     # with no archive around it, so both files come from the repository.
     "opengrep": ThirdPartyLicense(
@@ -1590,6 +1701,26 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         ),
         version_probe=("polaris", "version"),
     ),
+    # The alpha retire.js scanner's tool. Pinned and installed by its own module
+    # (``ash_retire_js_plugins/retire_js_install.py``): ``npm ci`` of a lockfile that
+    # holds every package of the tree with the integrity the registry publishes for
+    # it, refused unless the installed files hash to the module's tree digest. So its
+    # license is staged from the repository at the release commit on its own
+    # --licenses-only line; the LICENSE.md inside the npm tarball is byte-identical to
+    # that file (compared on 2026-11-26). ``retire --version`` prints "6.1.1". The five
+    # packages its tree carries have entries of their own, bundled in _RETIRE_TREE.
+    "retire": ThirdPartyLicense(
+        tool="retire",
+        version="6.1.1",
+        license="Apache-2.0",
+        repository="https://github.com/RetireJS/retire.js",
+        commit=_THIRD_PARTY_HASHES["retire commit"],
+        files=(
+            _from_source(
+                "retire", "https://github.com/RetireJS/retire.js", "LICENSE.md"
+            ),
+        ),
+    ),
     # The wheel's dist-info holds no license file, only METADATA's
     # `License-Expression: LGPL-2.1-or-later`, so both files come from the
     # repository. COPYRIGHT grants "version 2.1" with no "or later", the narrower
@@ -1640,6 +1771,26 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         ),
         executables=("uv", "uvx"),
     ),
+    # A dependency of retire in the retire.js scanner's npm tree (see "retire" above).
+    # 0.4.1 has no release tag in the repository; the commit is the one the registry
+    # records it was published from. The file is named ``license`` there and in the
+    # tarball.
+    "walkdir": ThirdPartyLicense(
+        tool="walkdir",
+        bundled_in=_RETIRE_TREE,
+        registry="the npm registry",
+        tag="",
+        version="0.4.1",
+        license="MIT",
+        repository="https://github.com/soldair/node-walkdir",
+        commit=_THIRD_PARTY_HASHES["walkdir commit"],
+        files=(
+            _from_source(
+                "walkdir", "https://github.com/soldair/node-walkdir", "license"
+            ),
+        ),
+        version_probe=_retire_tree_probe("walkdir"),
+    ),
     # The zizmor scanner's uv tool, a compiled Rust binary in a wheel. The
     # wheel's dist-info carries licenses/LICENSE.
     "zizmor": ThirdPartyLicense(
@@ -1650,6 +1801,20 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         commit=_THIRD_PARTY_HASHES["zizmor commit"],
         files=(LicenseFile("LICENSE"),),
         distribution="zizmor",
+    ),
+    # A dependency of retire in the retire.js scanner's npm tree (see "retire" above).
+    # The repository is a monorepo; its root LICENSE is byte-identical to the
+    # packages/zod copy and to the tarball's.
+    "zod": ThirdPartyLicense(
+        tool="zod",
+        bundled_in=_RETIRE_TREE,
+        registry="the npm registry",
+        version="v4.6.7",
+        license="MIT",
+        repository="https://github.com/colinhacks/zod",
+        commit=_THIRD_PARTY_HASHES["zod commit"],
+        files=(_from_source("zod", "https://github.com/colinhacks/zod", "LICENSE"),),
+        version_probe=_retire_tree_probe("zod"),
     ),
 }
 

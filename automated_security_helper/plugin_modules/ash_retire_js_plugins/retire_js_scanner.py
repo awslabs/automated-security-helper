@@ -106,11 +106,16 @@ source tree and writes only the results directory.
 
 Install
 -------
-``ash dependencies install`` runs ``npm install -g retire@6.1.1`` on every platform npm
-runs on. npm checks the tarball it downloads against the integrity the registry
-publishes for that version, and the registry never republishes a version, so the
-version names the bytes; the 6.1.1 tarball was downloaded and checked against that
-integrity on 2026-11-26. The ASH container image does not include retire.js.
+``ash dependencies install`` installs the whole npm tree retire 6.1.1 runs on from a
+lockfile, not only the retire package: ``retire_js_install.py`` holds the lockfile, in
+which each of the six packages carries the integrity (SHA-512) the registry publishes
+for its release, and the digest of the installed files, and ``npm ci`` installs that
+lockfile into ``<bin dir>/ash-retire-js`` with ``<bin dir>/retire`` pointing into it.
+The tree is refused unless its files hash to that digest. ``npm install -g
+retire@6.1.1``, which this replaced, pinned retire alone: its dependencies are declared
+as ranges and its tarball carries no shrinkwrap, so each install took whatever releases
+were newest in those ranges. The ASH container image installs the same tree in both of
+its stages and ships the license files of all six packages.
 """
 
 from __future__ import annotations
@@ -126,7 +131,6 @@ from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.options import ScannerOptionsBase
-from automated_security_helper.base.plugin_base import PackageManager, PluginDependency
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -139,16 +143,18 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
+from automated_security_helper.plugin_modules.ash_retire_js_plugins.retire_js_install import (
+    INSTALL_PLATFORMS,
+    RETIRE_NPM_PACKAGE,
+    RETIRE_VERSION,
+    retire_install_commands,
+)
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.package_identity import identity_properties
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.subprocess_utils import find_executable
-
-#: The npm package that provides the ``retire`` command, and the version ASH installs.
-RETIRE_NPM_PACKAGE = "retire"
-RETIRE_VERSION = "6.1.1"
 
 #: Exit code retire.js uses when it finds a vulnerability (its documented default),
 #: passed as ``--exitwith`` so it is not a default ASH relies on.
@@ -173,13 +179,6 @@ NUMBERED_IDENTIFIERS: Tuple[str, ...] = ("issue", "bug", "PR", "retid")
 
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 INFORMATION_URI = "https://retirejs.github.io/retire.js/"
-
-#: Platforms ``npm install -g`` is declared for. The package is plain JavaScript.
-INSTALL_PLATFORMS: Tuple[Tuple[str, str], ...] = tuple(
-    (platform, arch)
-    for platform in ("linux", "darwin", "windows")
-    for arch in ("amd64", "arm64")
-)
 
 #: The justification ASH writes beside each path entry of its own ignore file.
 _OUTPUT_DIR_JUSTIFICATION = (
@@ -604,8 +603,11 @@ class RetireJsScanner(ScannerPluginBase[RetireJsScannerConfig]):
             runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
-                note="an npm package (retire@6.1.1) installed with npm install -g; "
-                "ASH downloads no binary for it",
+                note="installed by the plugin's own pinned installer "
+                "(retire_js_install.py: npm ci of a lockfile pinning all six "
+                "packages by integrity, on linux, darwin and windows, amd64 and "
+                "arm64), not by the shared tool_downloads table, so the register "
+                "lists none",
             ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.NATIVE,
@@ -649,8 +651,10 @@ class RetireJsScanner(ScannerPluginBase[RetireJsScannerConfig]):
                 upstream_license=(
                     "Apache-2.0 (source: the LICENSE.md file inside the retire@6.1.1 "
                     "npm tarball, byte-identical to LICENSE.md at the release commit "
-                    "9a09cd11ae83, and the package.json license field; read "
-                    "2026-11-26)"
+                    "9a09cd11ae83ba67439a1ad73c4afafa7f1409d5, SHA256 "
+                    "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4 "
+                    "as THIRD_PARTY_LICENSES pins it, and the package.json license "
+                    "field; read 2026-11-26)"
                 ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
@@ -675,22 +679,13 @@ class RetireJsScanner(ScannerPluginBase[RetireJsScannerConfig]):
         super().model_post_init(context)
 
     @model_validator(mode="after")
-    def setup_dependencies(self) -> "RetireJsScanner":
-        """Install the pinned version with npm, on every platform npm runs on."""
-        self.dependencies = {
-            platform: {
-                arch: [
-                    PluginDependency(
-                        name=RETIRE_NPM_PACKAGE,
-                        version=RETIRE_VERSION,
-                        package_manager=PackageManager.NPM,
-                    )
-                ]
-                for p, arch in INSTALL_PLATFORMS
-                if p == platform
-            }
-            for platform in {p for p, _ in INSTALL_PLATFORMS}
-        }
+    def setup_custom_install_commands(self) -> "RetireJsScanner":
+        """Install the locked npm tree with ``retire_js_install.py``.
+
+        Not a ``PackageManager.NPM`` dependency: that renders ``npm install -g
+        retire@6.1.1``, which pins retire and lets every package under it float.
+        """
+        self.custom_install_commands.update(retire_install_commands())
         return self
 
     def _source_dir(self) -> Path:

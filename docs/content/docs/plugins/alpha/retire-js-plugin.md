@@ -24,9 +24,10 @@ It needs no license acceptance, account or token.
 
 ## Installing retire.js
 
-retire.js is a Node.js tool and needs Node.js 20.19 or later (or 22.12 or later) and npm. The ASH container image does not include it.
+retire.js is a Node.js tool and needs Node.js 20.19 or later (or 22.12 or later) and npm.
 
-- **Local mode:** `ash dependencies install --tool retire-js`, with the module listed in `ash_plugin_modules` (or added with `--config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_retire_js_plugins"]'`), runs `npm install -g retire@6.1.1`. npm checks the downloaded package against the integrity the npm registry publishes for that version.
+- **Container mode:** the ASH image includes retire.js 6.1.1, installed as below in both image stages, with the license files of retire.js and of the five packages it runs on.
+- **Local mode:** `ash dependencies install --tool retire-js`, with the module listed in `ash_plugin_modules` (or added with `--config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_retire_js_plugins"]'`), installs the whole package tree retire.js 6.1.1 runs on, not only retire.js itself: it runs `npm ci` on a lockfile ASH ships, in which each of the six packages (retire, astronomical, commander, meriyah, walkdir and zod) is pinned to one release and to the integrity the npm registry publishes for it, into `ash-retire-js` under ASH's bin directory, and puts `retire` in the bin directory. npm refuses a package that does not match its integrity, and ASH refuses the installed tree unless its files hash to the digest ASH pins. No install script of any package runs.
 - Any `retire` already on `PATH` is also used.
 
 ## What is scanned
@@ -95,4 +96,4 @@ retire.js downloads its vulnerability repository from `raw.githubusercontent.com
 
 ## License
 
-retire.js is Apache-2.0. ASH does not redistribute it: `ash dependencies install` installs it from npm, and the ASH container image does not include it.
+retire.js is Apache-2.0. Of the packages it runs on, astronomical is Apache-2.0, commander, walkdir and zod are MIT, and meriyah is ISC. ASH does not modify them. `ash dependencies install` downloads them from the npm registry, and the ASH container image, which includes them, ships each one's license file under `/usr/share/doc/ash/third-party/<package>`, beside a `SOURCE` file naming the upstream repository and the commit the release was published from.

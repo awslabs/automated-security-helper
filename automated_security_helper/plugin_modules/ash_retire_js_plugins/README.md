@@ -30,7 +30,7 @@ retire.js is a Node.js program (Node.js 20.19+ or 22.12+). Locally:
 ash dependencies install --config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_retire_js_plugins"]' --tool retire-js
 ```
 
-This runs `npm install -g retire@6.1.1`. Any `retire` already on `PATH` is also used. The ASH container image does not include it.
+This installs the whole package tree retire.js 6.1.1 runs on from a lockfile ASH ships (`retire_js_install.py`): `npm ci` installs the six packages, each pinned to one release and to the integrity the npm registry publishes for it, into `ash-retire-js` under ASH's bin directory, and ASH refuses the tree unless its files hash to the digest it pins. Any `retire` already on `PATH` is also used. The ASH container image includes the same tree, with the license files of all six packages.
 
 ## Configuration
 

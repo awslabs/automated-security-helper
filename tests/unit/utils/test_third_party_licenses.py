@@ -434,6 +434,54 @@ def _uv_tool_scanners() -> list:
     return found
 
 
+_ALPHA = "automated_security_helper.plugin_modules"
+
+#: The opt-in modules the image's ASH_ALPHA_PLUGIN_MODULES leaves out, each with why.
+#: Loading one in the image's install would install nothing (its tool comes another
+#: way, or nothing pins it) or would ship a tool the image cannot build, run or
+#: attribute, so each absence is a decision with a reason, and a module in neither the
+#: list nor this table fails ``test_every_ash_dependencies_install_takes_the_pins``.
+_NOT_IN_THE_IMAGE = {
+    f"{_ALPHA}.ash_credsweeper_plugins": (
+        "the image has no compiler for its twofish dependency, an sdist-only C "
+        "extension (measured in an image build)"
+    ),
+    f"{_ALPHA}.ash_dependency_check_plugins": (
+        "it needs a Java runtime, which the image does not carry"
+    ),
+    f"{_ALPHA}.ash_ferret_plugins": "its tool comes another way",
+    f"{_ALPHA}.ash_kics_plugins": (
+        "its release is not pinned in tool_downloads, so the install has nothing "
+        "to place"
+    ),
+    f"{_ALPHA}.ash_secretlint_plugins": (
+        "its npm tree is not locked and its packages have no license entries, and "
+        "the image bundles no tool without both"
+    ),
+    f"{_ALPHA}.ash_snyk_plugins": "its tool comes another way",
+    f"{_ALPHA}.ash_trivy_plugins": "its tool comes another way",
+}
+
+_JAVA_RUNTIME = re.compile(
+    r"\b(?:openjdk|default-jre|default-jdk|temurin|corretto|java-\d+)", re.IGNORECASE
+)
+
+#: The reasons above that the tree itself can confirm, each read from the Dockerfile
+#: text or the pin tables. The "comes another way" rows are not re-checked here.
+_NOT_IN_THE_IMAGE_CHECKS = {
+    f"{_ALPHA}.ash_credsweeper_plugins": lambda dockerfile: (
+        "twofish" in dockerfile and "credsweeper" not in THIRD_PARTY_LICENSES
+    ),
+    f"{_ALPHA}.ash_dependency_check_plugins": lambda dockerfile: (
+        _JAVA_RUNTIME.search(dockerfile) is None
+    ),
+    f"{_ALPHA}.ash_kics_plugins": lambda dockerfile: "kics" not in TOOL_VERSIONS,
+    f"{_ALPHA}.ash_secretlint_plugins": lambda dockerfile: (
+        "secretlint" not in THIRD_PARTY_LICENSES
+    ),
+}
+
+
 class TestThePythonTools:
     """bandit, checkov and semgrep: installed by `uv tool install`, licensed from
     their wheels, and pinned so the entry describes the release in the image."""
@@ -567,15 +615,27 @@ class TestThePythonTools:
             opt_in_scanner_modules,
         )
 
-        expected = sorted(
-            set(opt_in_scanner_modules().values())
-            - {
-                "automated_security_helper.plugin_modules.ash_ferret_plugins",
-                "automated_security_helper.plugin_modules.ash_snyk_plugins",
-                "automated_security_helper.plugin_modules.ash_trivy_plugins",
-            }
+        opt_in = set(opt_in_scanner_modules().values())
+        assert set(_NOT_IN_THE_IMAGE) <= opt_in, (
+            "an exclusion names a module that is no longer an opt-in scanner's: "
+            f"{sorted(set(_NOT_IN_THE_IMAGE) - opt_in)}"
         )
-        assert sorted(declared[0].split(",")) == expected
+        expected = sorted(opt_in - set(_NOT_IN_THE_IMAGE))
+        assert sorted(declared[0].split(",")) == expected, (
+            "every opt-in module is in the image's list or in _NOT_IN_THE_IMAGE "
+            "with its reason"
+        )
+
+    @pytest.mark.parametrize("module", sorted(_NOT_IN_THE_IMAGE_CHECKS))
+    def test_each_module_left_out_of_the_image_still_has_its_reason(self, module):
+        """An exclusion lapses the day its reason does: the module then belongs in
+        the image's list, and this says so instead of the list silently missing it."""
+        reason = _NOT_IN_THE_IMAGE[module]
+        assert _NOT_IN_THE_IMAGE_CHECKS[module](DOCKERFILE.read_text()), (
+            f"{module} is left out of the image because {reason}, which no longer "
+            "holds: add it to ASH_ALPHA_PLUGIN_MODULES (both copies), with its "
+            "license entries and a version check, and drop it from _NOT_IN_THE_IMAGE"
+        )
 
     def test_their_licenses_are_staged_between_install_and_verification(self):
         core = _core_stage(DOCKERFILE.read_text())

@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
+from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.enums import OfflineStrategy
@@ -668,13 +669,37 @@ class TestDependencyCheck:
 
 
 class TestInstall:
-    def test_install_commands_cover_every_platform(self, tmp_path):
+    def test_install_commands_cover_every_platform(self, tmp_path, monkeypatch):
+        """Each platform runs the module's locked-tree installer, into ASH_BIN_PATH."""
+        bin_dir = tmp_path / "bin"
+        monkeypatch.setenv("ASH_BIN_PATH", str(bin_dir))
         scanner = _scanner(tmp_path, tmp_path)
         for platform, arch in INSTALL_PLATFORMS:
             commands = scanner.get_installation_commands(platform, arch)
-            assert commands == [["npm", "install", "-g", f"retire@{RETIRE_VERSION}"]], (
-                f"wrong install command for {platform}/{arch}"
-            )
+            assert len(commands) == 1, f"{platform}/{arch}: {commands}"
+            (command,) = commands
+            assert isinstance(command, CustomCommand), command
+            assert command.shell is False
+            assert command.args[:2] == [sys.executable, "-c"]
+            assert "retire_js_install import install_retire" in command.args[2]
+            assert command.args[3:5] == [platform, arch]
+            assert Path(command.args[5]) == bin_dir.absolute()
+
+    def test_retire_is_not_an_npm_global_install(self, tmp_path):
+        """``npm install -g retire@6.1.1`` pinned retire and let every package under
+        it float, so the scanner declares no npm dependency for it to render."""
+        scanner = _scanner(tmp_path, tmp_path)
+        declared = [
+            dep
+            for platforms in scanner.dependencies.values()
+            for deps in platforms.values()
+            for dep in deps
+        ]
+        assert declared == []
+        for platform, arch in INSTALL_PLATFORMS:
+            for command in scanner.get_installation_commands(platform, arch):
+                args = command.args if isinstance(command, CustomCommand) else command
+                assert "-g" not in args and "npm" not in args, args
 
     def test_the_pin_is_a_stable_release(self):
         assert RETIRE_VERSION == "6.1.1"
