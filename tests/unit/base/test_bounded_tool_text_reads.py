@@ -215,11 +215,6 @@ _ALLOWED_SIZED_READS = {
     ): "a 64 KiB head of the environment's own pyvenv.cfg; parsed as key=value "
     "lines, and only a version matching the number shape leaves the reader",
     (
-        "utils/oci_layout_archive.py",
-        "_write_layer",
-    ): "a 4-byte magic sniff of a layer blob before it is streamed into the "
-    "re-packed archive; bytes compared and copied, not shown",
-    (
         "utils/scan_output_dirs.py",
         "_read_span_rows",
     ): "a converter's span-map sidecar at MAX_SPAN_MAP_BYTES + 1, refused over "
