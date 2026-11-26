@@ -250,7 +250,12 @@ _REPORT_ID_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]+")
 # separate table from the severity ladder because this is the --min-severity
 # scale, which has no "info" and treats critical and high as equal -- SARIF
 # cannot distinguish them.
-_MIN_SEVERITY_RANK: Dict[MinSeverity, int] = {
+#
+# Keyed by the MinSeverity members and typed by the text a lookup passes (the
+# --min-severity value, a result's severity word): the members are str, so text
+# finds its rank. tests/unit/vocab/test_status_family_vocab.py holds this table
+# equal to run_ash_scan._SEVERITY_RANK and pins a text lookup there.
+_MIN_SEVERITY_RANK: Dict[str, int] = {
     MinSeverity.CRITICAL: 3,
     MinSeverity.HIGH: 3,
     MinSeverity.MEDIUM: 2,
@@ -1005,7 +1010,7 @@ def has_finding_at_min_severity(
     # turned a mistyped --min-severity into the strictest gate short of "none".
     min_rank = _MIN_SEVERITY_RANK.get(min_severity.lower())
     if min_rank is None:
-        accepted = ", ".join(member.value for member in _MIN_SEVERITY_RANK)
+        accepted = ", ".join(member.value for member in MinSeverity)
         raise ValueError(
             f"min_severity must be one of {accepted}, not {min_severity!r}"
         )
