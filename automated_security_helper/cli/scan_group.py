@@ -179,6 +179,11 @@ def run_ash_scan_fs_cli_command(*args: Any, **kwargs: Any) -> Any:
         getattr(ctx.get_parameter_source("source_dir"), "name", None) == "COMMANDLINE"
     )
     if path is not None:
+        if kwargs.get("source_git") is not None:
+            ctx.fail(
+                "--source-git cannot be combined with the PATH argument: the clone "
+                "is the directory that is scanned."
+            )
         # On the command line a word that is not a subject never reaches here (the
         # group refuses it), so a path in the subject-less form came from a
         # --cli-json-input document, whose skeleton lists `path`.

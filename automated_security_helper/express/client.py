@@ -77,7 +77,8 @@ NON_SCAN_SUBCOMMANDS = frozenset(
         "plugin",
         "suppress",
         "express",
-        "trend",
+        "results",
+        "container",
     }
 )
 

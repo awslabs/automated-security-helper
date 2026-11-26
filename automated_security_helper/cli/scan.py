@@ -1749,6 +1749,38 @@ def run_ash_scan_cli_command(
             ),
         ),
     ] = None,
+    source_git: Annotated[
+        str | None,
+        typer.Option(
+            "--source-git",
+            rich_help_panel="Scan",
+            help=(
+                "Scan a remote git repository: ASH clones it into a temporary "
+                "directory, scans that, and removes it afterwards. The request "
+                "is checked by the rules the MCP set_source_git tool applies "
+                "(https, ssh or scp-like URLs only; no local paths). Exclusive "
+                "with --source-dir, --image, --image-archive, --image-layout, "
+                "--staged, --use-existing and --changed-files-only. The output "
+                "directory defaults to .ash/ash_output in the working directory."
+            ),
+        ),
+    ] = None,
+    git_ref: Annotated[
+        str | None,
+        typer.Option(
+            "--git-ref",
+            rich_help_panel="Scan",
+            help="Branch or tag to clone with --source-git (default: the remote's default branch).",
+        ),
+    ] = None,
+    git_depth: Annotated[
+        int | None,
+        typer.Option(
+            "--git-depth",
+            rich_help_panel="Scan",
+            help="History depth of the --source-git clone (default 1).",
+        ),
+    ] = None,
 ):
     """Scan code, infrastructure, secrets, and dependencies.
 
@@ -1876,6 +1908,36 @@ def run_ash_scan_cli_command(
                 err=True,
             )
             changed_files_only = False
+
+    if source_git is None:
+        if git_ref is not None or git_depth is not None:
+            _fail_usage("--git-ref and --git-depth only apply with --source-git.")
+    else:
+        source_dir_given = (
+            getattr(ctx.get_parameter_source("source_dir"), "name", None)
+            == "COMMANDLINE"
+        )
+        for other_flag, other_given in (
+            ("--source-dir", source_dir_given),
+            ("--image", bool(images)),
+            ("--image-archive", image_archive is not None),
+            ("--image-layout", image_layout is not None),
+            ("--staged", staged),
+            ("--use-existing", use_existing),
+            ("--changed-files-only", changed_files_only),
+        ):
+            if other_given:
+                _fail_usage(
+                    f"--source-git cannot be combined with {other_flag}: the "
+                    "clone is the directory that is scanned. Use one or the other."
+                )
+        source_dir = _clone_git_source(
+            ctx, source_git, git_ref, git_depth if git_depth is not None else 1
+        )
+        if output_dir is None:
+            # The default is beside the source directory, which here is a
+            # temporary clone that is removed when the command ends.
+            output_dir = Path.cwd().joinpath(".ash", "ash_output").as_posix()
 
     if baseline is not None:
         from automated_security_helper.express.runtime import CHILD_ENV
