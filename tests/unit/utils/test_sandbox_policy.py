@@ -2279,13 +2279,18 @@ class TestBwrapAndLandlockGrantNothingInThePasswdHome:
                 # command it runs, not a mount.
                 options = plan.argv[1 : plan.argv.index("--")]
                 # A --tmpfs or --tmp-overlay target is a fresh empty mount over the
-                # host path and hides it; only bind and overlay sources are grants.
-                hiding = ("--tmpfs", "--tmp-overlay")
-                paths = [
-                    a
-                    for before, a in zip([""] + options, options)
-                    if a.startswith("/") and before not in hiding
-                ]
+                # host path and hides it, and a --symlink makes a link inside the
+                # sandbox (its target is a spelling for a path a bind may or may
+                # not show, never a mount of it: a host whose home is itself
+                # reached through a link has one pointing at the real home). Only
+                # what a bind or an overlay source shows is a grant.
+                showing = ("--bind", "--ro-bind", "--overlay-src")
+                paths = []
+                for index, option in enumerate(options):
+                    if option in showing:
+                        paths.append(options[index + 1])
+                        if option != "--overlay-src":
+                            paths.append(options[index + 2])
         finally:
             plan.run_cleanup()
         return {Path(p) for p in paths}

@@ -139,7 +139,7 @@ class FacetDecl(BaseModel):
     register at all.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
     state: FacetState
     #: The native field carrying the value, verbatim, for MAPPED and DROPPED.
@@ -179,7 +179,7 @@ class ScannerFacets(BaseModel):
     stale declaration instead of defaulting it.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
     rule_id: FacetDecl
     severity: FacetDecl

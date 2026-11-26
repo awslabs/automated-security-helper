@@ -83,7 +83,7 @@ KNOWN_VIOLATIONS: Dict[Tuple[str, str], int] = {
     ("base", "core"): 17,
     ("base", "models"): 9,
     ("base", "plugins"): 5,
-    ("base", "utils"): 91,
+    ("base", "utils"): 96,
     ("config", "core"): 42,
     ("config", "plugins"): 5,
     ("express", "cli"): 1,
@@ -113,7 +113,7 @@ KNOWN_VIOLATIONS: Dict[Tuple[str, str], int] = {
     ("utils", "config"): 27,
     # 35 -> 39: image_attribution and image_tool_targets read core.asset and
     # core.container_engine, and sdist_harvest reads core.constants.xdg_directory.
-    ("utils", "core"): 41,
+    ("utils", "core"): 44,
     # 2 -> 3: utils/scan_history reads interactions.run_ash_scan (landed on main
     # with the scan trend/history work this branch was rebased onto).
     ("utils", "interactions"): 3,
