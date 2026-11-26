@@ -764,6 +764,18 @@ _CLASS_ARGUMENT_SITES = {
         "self._tracker.update_scanner_state",
         "scanner_instance.__class__",
     ): "records each registered scanner's class",
+    (
+        "automated_security_helper/base/uv_tool_mixin.py",
+        "declared_runtime_compat",
+        "type(self)",
+    ): "asks the operational-facets register for the scanner class's "
+    "runtime-compat rows: the one derivation point of the interpreter request",
+    (
+        "automated_security_helper/utils/runtime_compat_env.py",
+        "declared_runtime_compat",
+        "type(plugin)",
+    ): "asks the operational-facets register for the plugin class's polyfill "
+    "rows at tool launch",
 }
 
 #: Assignments to ``__class__`` in the package other than the maker's, by module,
@@ -793,6 +805,12 @@ _EXCEPTION_INFO_SITES = {
         "hook",
         "type(exc)",
     ): "calls the installed exception hook with the failure",
+    (
+        "automated_security_helper/assets/polyfills/checkov_json_array_hook/sitecustomize.py",
+        "sys.excepthook",
+        "type(exc)",
+    ): "reports a broken chained sitecustomize under PYTHONVERBOSE the way "
+    "stock site.execsitecustomize does",
     (
         "automated_security_helper/cli/entrypoint.py",
         "_ash_traceback",

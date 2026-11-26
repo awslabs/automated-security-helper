@@ -51,10 +51,20 @@ def _polyfill(**changes) -> opsf.RuntimeCompatRow:
 # ---- valid controls -------------------------------------------------------
 
 
+def _open(**changes) -> opsf.RuntimeCompatRow:
+    """A valid open-ended control: issue URL and the recorded constraint."""
+    base = {
+        "open_ended": True,
+        "upstream_issue": ISSUE,
+        "recorded_default_constraint": ">=3.2.0,<4.0.0",
+    }
+    return _pin(**{**base, **changes})
+
+
 def test_the_controls_construct() -> None:
     assert _pin().resolution is opsf.CompatResolution.PIN
     assert _polyfill().resolution is opsf.CompatResolution.POLYFILL
-    assert _pin(open_ended=True, upstream_issue=ISSUE).open_ended
+    assert _open().open_ended
 
 
 def test_an_empty_rows_tuple_constructs_without_a_reason() -> None:
@@ -84,8 +94,84 @@ def test_an_upstream_issue_must_be_a_url() -> None:
         _pin(upstream_issue="not a url")
 
 
+def test_a_blank_upstream_issue_is_refused_outright() -> None:
+    """Blank-but-non-None slipped between the URL check (which skips blanks)
+    and the renderer (to which any non-empty string is truthy): it would emit
+    a broken whitespace link and drop the recheck_note standing in for it."""
+    with pytest.raises(ValidationError, match="never blank"):
+        _pin(upstream_issue="   ")
+    with pytest.raises(ValidationError, match="never blank"):
+        _open(upstream_issue="   ", recheck_note="what was searched, and where")
+
+
 def test_a_closed_row_needs_no_upstream_issue() -> None:
     assert _pin(open_ended=False).upstream_issue is None
+
+
+def test_an_open_ended_row_without_an_issue_carries_a_recheck_note() -> None:
+    """The URL-less escape: a genuinely unresolved gap with no upstream issue
+    to cite (guarddog's yara-python wheel gap) is still declared open-ended,
+    with the note saying what was searched and found absent."""
+    row = _open(
+        upstream_issue=None,
+        recheck_note="searched the yara-python issues for a cp314 report; none "
+        "exists to cite (a 'wheel' search returned issues, so the search works)",
+    )
+    assert row.open_ended and row.upstream_issue is None
+
+
+def test_a_blank_recheck_note_does_not_satisfy_the_open_ended_rule() -> None:
+    with pytest.raises(ValidationError, match="upstream_issue"):
+        _open(upstream_issue=None, recheck_note="   ")
+
+
+def test_a_recheck_note_on_a_closed_row_is_refused() -> None:
+    with pytest.raises(ValidationError, match="recheck_note"):
+        _pin(recheck_note="a note with nothing to re-check")
+
+
+# ---- the open-ended re-check record -----------------------------------------
+
+
+def test_an_open_ended_row_records_the_default_tool_constraint() -> None:
+    """The record the re-check gate compares against; without it the gate
+    cannot fire for a blank tool range or a range default constraint."""
+    with pytest.raises(ValidationError, match="recorded_default_constraint"):
+        _pin(open_ended=True, upstream_issue=ISSUE)
+
+
+def test_a_closed_row_carries_no_recorded_constraint() -> None:
+    with pytest.raises(ValidationError, match="recorded_default_constraint"):
+        _pin(recorded_default_constraint=">=3.2.0,<4.0.0")
+
+
+def test_a_recorded_constraint_must_parse_in_the_rows_grammar() -> None:
+    with pytest.raises(ValidationError, match="PEP 440"):
+        _open(recorded_default_constraint="^3.2")
+
+
+def test_the_recheck_fires_when_the_default_constraint_moves() -> None:
+    """The reachable red case the gate ships for: a BLANK tool range and a
+    RANGE default constraint -- checkov's exact shape -- where ``applies_to``
+    alone can never go red (a blank range applies everywhere, and a range
+    constraint keeps the row the safe side). A default-constraint bump is
+    precisely "the tool bumped -- re-read the row"."""
+    row = _open()
+    assert row.tool_versions == ""
+    assert not row.recheck_fires(">=3.2.0,<4.0.0")
+    assert row.recheck_fires(">=3.16.0"), "the bump the gate exists to catch"
+    assert row.applies_to(">=3.16.0"), "applies_to alone cannot red here"
+    assert row.recheck_fires(None), "a dropped default is a move too"
+
+
+def test_the_recheck_never_fires_for_a_closed_row() -> None:
+    assert not _pin().recheck_fires(">=9.0.0")
+
+
+def test_an_empty_record_means_no_default_constraint_existed() -> None:
+    row = _open(recorded_default_constraint="")
+    assert not row.recheck_fires(None)
+    assert row.recheck_fires("==1.2.3")
 
 
 # ---- the resolution kinds, prefer PIN -------------------------------------

@@ -104,6 +104,7 @@ def _compat_planted():
         reason="PLANTED-COMPAT-REASON | with a pipe",
         upstream_issue="https://example.com/planted/issues/1",
         open_ended=True,
+        recorded_default_constraint="",
     )
 
     class Planted:
@@ -146,3 +147,74 @@ def test_the_facets_page_renders_runtime_compat_rows(compat_page: str) -> None:
 def test_a_scanner_with_no_operational_row_is_counted_not_listed(page: str) -> None:
     assert "0 of 1 scanners declare a row. The other 1 declare none" in page
     assert "| Scanner | Runtime | Tool versions |" not in page
+
+
+@pytest.fixture
+def subclass_page(monkeypatch) -> str:
+    """A discovered plugin that INHERITS its declaring base's compat rows."""
+    monkeypatch.syspath_prepend(str(SCRIPTS))
+    import _plugin_reference
+    import generate_facets_reference
+
+    class Child(_compat_planted()):
+        facets: ClassVar[ScannerFacets] = _row()
+
+    plugins = [SimpleNamespace(name="planted-child", cls=Child)]
+    monkeypatch.setattr(_plugin_reference, "discover", lambda kind: plugins)
+    content, _ = generate_facets_reference.generate()
+    sys.modules.pop("generate_facets_reference", None)
+    return content
+
+
+def test_an_inherited_compat_row_is_listed_for_the_subclass(subclass_page: str) -> None:
+    """The page reads the rows as the installer does (an MRO walk), so a
+    subclass that installs under an inherited pin is never documented as
+    "no incompatibility known"."""
+    assert (
+        "| [`planted-child`](#planted-child) | `python` | all | `>=3.10,<3.15` |"
+        in subclass_page
+    )
+    assert "1 of 1 scanners declare a row" in subclass_page
+
+
+@pytest.fixture
+def noteworthy_page(monkeypatch) -> str:
+    """An open-ended row with no upstream issue to cite, only a recheck_note."""
+    from automated_security_helper.base import scanner_operational_facets as opsf
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
+        ZizmorScanner,
+    )
+
+    monkeypatch.syspath_prepend(str(SCRIPTS))
+    import _plugin_reference
+    import generate_facets_reference
+
+    row = opsf.RuntimeCompatRow(
+        runtime=opsf.RuntimeName.PYTHON,
+        tool_versions="",
+        runtime_request=">=3.10,<3.14",
+        resolution=opsf.CompatResolution.PIN,
+        reason="PLANTED-NOTE-REASON",
+        open_ended=True,
+        recheck_note="PLANTED-RECHECK-NOTE | with a pipe",
+        recorded_default_constraint="==1.0.0",
+    )
+
+    class Planted:
+        facets: ClassVar[ScannerFacets] = _row()
+        operational_facets = ZizmorScanner.operational_facets.model_copy(
+            update={"runtime_compat": opsf.RuntimeCompatFacet(rows=(row,))}
+        )
+
+    plugins = [SimpleNamespace(name="planted-note", cls=Planted)]
+    monkeypatch.setattr(_plugin_reference, "discover", lambda kind: plugins)
+    content, _ = generate_facets_reference.generate()
+    sys.modules.pop("generate_facets_reference", None)
+    return content
+
+
+def test_a_url_less_open_ended_row_renders_its_recheck_note(
+    noteworthy_page: str,
+) -> None:
+    assert "yes, PLANTED-RECHECK-NOTE \\| with a pipe" in noteworthy_page
+    assert "[None]" not in noteworthy_page
