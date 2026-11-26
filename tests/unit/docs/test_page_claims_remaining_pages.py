@@ -404,7 +404,7 @@ def test_the_daemon_idles_out_after_30_minutes_and_two_settings_change_that():
     assert_on_page(
         EXPRESS_PAGE,
         "The daemon retires itself after 30 minutes without a request (configure "
-        "with the `--idle-seconds` option of `ash express start`, or the "
+        "with the `--idle-seconds` option of `ashx express start`, or the "
         "`ASH_EXPRESS_IDLE_SECONDS` environment variable)",
     )
     from automated_security_helper.express import runtime
