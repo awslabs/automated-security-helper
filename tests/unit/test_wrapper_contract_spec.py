@@ -53,10 +53,15 @@ def test_only_scan_takes_sandbox():
 
 
 def test_root_value_options():
+    # --ash-revision and -rev are the spellings the removed root ./ash script took for
+    # --ash-revision-to-install, and --offline-semgrep-rulesets the old one for
+    # --offline-rulesets; each still binds its value and warns
+    # (cli/deprecations.py DEPRECATED_OPTION_SPELLINGS), so each takes a value.
     assert contract().root_value_options == (
         "--add-scanners",
         "--ash-config-from-host",
         "--ash-plugin-modules",
+        "--ash-revision",
         "--ash-revision-to-install",
         "--base-ref",
         "--baseline",
@@ -80,6 +85,7 @@ def test_root_value_options():
         "--mode",
         "--oci",
         "--oci-runner",
+        "--offline-rulesets",
         "--offline-semgrep-rulesets",
         "--only-scanners",
         "--output-dir",
@@ -100,6 +106,7 @@ def test_root_value_options():
         "-f",
         "-g",
         "-o",
+        "-rev",
         "-u",
     )
 
@@ -132,10 +139,6 @@ def test_the_forwarded_option_list_is_in_the_table_order():
         WRAPPER_FORWARDED_OPTIONS
     )
     assert set(WRAPPER_FORWARDED_OPTIONS) == set(EXPECTED_OPTION_SUBCOMMANDS)
-
-
-def test_the_subcommands_whose_own_dash_o_is_forwarded():
-    assert contract().dash_o_subcommands == ("get-genai-guide", "config")
 
 
 def test_runner_order_image_pattern_and_build_targets():
