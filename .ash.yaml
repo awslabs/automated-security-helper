@@ -744,9 +744,9 @@ global_settings:
         config-schema-translation.json.
     #
     # bandit B104 (the 0.0.0.0 bind in contract.py, manifests.py and
-    # tests/test_manifests.py) and B108 (TMP_MOUNT in constants.py) are not listed
-    # here. Each is a `# nosec` on its one line, with the reason beside it, so
-    # anything else in those files is still scanned.
+    # deploy/kubernetes-operator/tests/test_manifests.py) and B108 (TMP_MOUNT in
+    # constants.py) are not listed here. Each is a `# nosec` on its one line, with
+    # the reason beside it, so anything else in those files is still scanned.
     #
     # checkov on manifests/operator.yaml. Eight rules fired when the operator was
     # first scanned with the kubernetes framework. Five were fixed in the manifest
@@ -777,8 +777,8 @@ global_settings:
         and creates Jobs through the API server, authenticating with the projected
         service account token that ash_operator/auth.py reads. Every pod the
         operator creates sets automountServiceAccountToken false, and so does the
-        scan ServiceAccount in rbac.yaml. tests/test_manifests.py and
-        tests/test_least_privilege.py pin those two.
+        scan ServiceAccount in rbac.yaml. deploy/kubernetes-operator/tests/test_manifests.py and
+        deploy/kubernetes-operator/tests/test_least_privilege.py pin those two.
     # === detect-secrets: the docs-CI-runner pin tables ===
     #
     # Three TOML fixtures under tests/integration/docs/ci_runners/ pin every

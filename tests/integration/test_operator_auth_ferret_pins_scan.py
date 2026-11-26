@@ -3,7 +3,7 @@
 
 """``ashx scan`` with ferret-scan over the operator's auth module and its test.
 
-``.ash/.ash_community_plugins.yaml`` suppresses ferret-scan's API_KEY_OR_SECRET
+``.ash/.ash_alpha_plugins.yaml`` suppresses ferret-scan's API_KEY_OR_SECRET
 on one line of each file. This copies both files into a scratch project at their
 repository paths, plants a hardcoded credential on two other lines of each (one
 replaced in place, so the pinned line does not move, and one appended), and runs
@@ -35,7 +35,7 @@ from tests.utils.helpers import checkout_env
 pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CONFIG = REPO_ROOT / ".ash" / ".ash_community_plugins.yaml"
+CONFIG = REPO_ROOT / ".ash" / ".ash_alpha_plugins.yaml"
 RULE = "API_KEY_OR_SECRET"
 FERRET_MODULE = "automated_security_helper.plugin_modules.ash_ferret_plugins"
 PATHS = (
@@ -69,10 +69,10 @@ def _planted_line() -> str:
     return "pass" + f'word = "{value[:24]}"'
 
 
-def _scan_config(community: dict[str, Any]) -> dict[str, Any]:
+def _scan_config(alpha: dict[str, Any]) -> dict[str, Any]:
     entries = [
         entry
-        for entry in community["global_settings"]["suppressions"]
+        for entry in alpha["global_settings"]["suppressions"]
         if entry.get("path") in PATHS and entry.get("rule_id") == RULE
     ]
     assert len(entries) == len(PATHS), entries
@@ -80,7 +80,7 @@ def _scan_config(community: dict[str, Any]) -> dict[str, Any]:
         "project_name": "operator-auth-ferret-pins",
         "fail_on_findings": False,
         "ash_plugin_modules": [FERRET_MODULE],
-        "scanners": {"ferret-scan": community["scanners"]["ferret-scan"]},
+        "scanners": {"ferret-scan": alpha["scanners"]["ferret-scan"]},
         "global_settings": {"suppressions": entries},
     }
 
@@ -89,8 +89,8 @@ def test_pinned_lines_are_suppressed_and_planted_secrets_are_not(
     tmp_path: Path,
 ) -> None:
     ferret = _ferret_binary()
-    community = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
-    config = _scan_config(community)
+    alpha = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    config = _scan_config(alpha)
     pinned = {
         e["path"]: e["line_start"] for e in config["global_settings"]["suppressions"]
     }

@@ -585,22 +585,25 @@ kept:
 - config: .ash.yaml
   rule_id: threat-runtime-environment-read
   path: deploy/cdk/lib/ash-container-scripts.ts
-  line_start: 559
-  line_end: 559
+  line_start: 549
+  line_end: 549
+  remeasured_at: a66965518b0
   kept_because: 'no enclosing named definition: the pinned line sits in a template-literal string or an
     anonymous callback, which the TypeScript grammar does not name'
 - config: .ash.yaml
   rule_id: threat-filesystem-destruction
   path: deploy/cdk-constructs/test/ash-scan-step.test.ts
-  line_start: 367
-  line_end: 367
+  line_start: 443
+  line_end: 443
+  remeasured_at: a66965518b0
   kept_because: 'no enclosing named definition: the pinned line sits in a template-literal string or an
     anonymous callback, which the TypeScript grammar does not name'
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: deploy/cdk-constructs/test/ash-scan-step.test.ts
-  line_start: 362
-  line_end: 362
+  line_start: 438
+  line_end: 438
+  remeasured_at: a66965518b0
   kept_because: 'no enclosing named definition: the pinned line sits in a template-literal string or an
     anonymous callback, which the TypeScript grammar does not name'
 - config: .ash.yaml
@@ -633,9 +636,9 @@ kept:
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: scripts/generate_plugin_data_partial.py
-  line_start: 187
-  line_end: 187
-  remeasured_at: e19cc22a5d6
+  line_start: 185
+  line_end: 185
+  remeasured_at: a66965518b0
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash.yaml
   rule_id: B104
@@ -707,21 +710,23 @@ kept:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: .ash.yaml
-  line_start: 715
-  line_end: 715
-  remeasured_at: adc5e7c2270
+  line_start: 857
+  line_end: 857
+  remeasured_at: a66965518b0
   kept_because: no symbol grammar for this file type; the target file is now the root .ash.yaml (it was
-    .ash/.ash.yaml, where this pin sat at line 1050, then line 774), and its lines moved again, so the
-    pin was re-measured in the merge of main adc5e7c2270 into the facets fold branch
+    .ash/.ash.yaml, where this pin sat at line 1050, then line 774, then 715, and main's config pins it
+    at 654), and the merge of main c15148192f4 into v4-capabilities (a66965518b0) moved its lines
+    again, so the pin was re-measured there
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: .ash.yaml
-  line_start: 962
-  line_end: 962
-  remeasured_at: adc5e7c2270
+  line_start: 1102
+  line_end: 1102
+  remeasured_at: a66965518b0
   kept_because: no symbol grammar for this file type; the target file is now the root .ash.yaml (it was
-    .ash/.ash.yaml, where this pin sat at line 1297, then line 1021), and its lines moved again, so the
-    pin was re-measured in the merge of main adc5e7c2270 into the facets fold branch
+    .ash/.ash.yaml, where this pin sat at line 1297, then line 1021, then 962, and main's config pins it
+    at 901), and the merge of main c15148192f4 into v4-capabilities (a66965518b0) moved its lines
+    again, so the pin was re-measured there
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: .github/workflows/ash-repo-docs.yml
@@ -764,8 +769,9 @@ kept:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-runtime-environment-read
   path: deploy/cdk/lib/ash-container-scripts.ts
-  line_start: 559
-  line_end: 559
+  line_start: 549
+  line_end: 549
+  remeasured_at: a66965518b0
   kept_because: 'no enclosing named definition: the pinned line sits in a template-literal string or an
     anonymous callback, which the TypeScript grammar does not name'
 - config: .ash/.ash_alpha_plugins.yaml
@@ -798,7 +804,7 @@ kept:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: scripts/generate_plugin_data_partial.py
-  line_start: 187
-  line_end: 187
-  remeasured_at: e19cc22a5d6
+  line_start: 185
+  line_end: 185
+  remeasured_at: a66965518b0
   kept_because: module-level code; the Python grammar addresses class and function definitions only
