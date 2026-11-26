@@ -35,15 +35,15 @@ global_settings:
         one is shown as. No value is held.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/scanner_tool_types.py
-      line_start: 34
-      line_end: 34
+      line_start: 38
+      line_end: 38
       reason: >-
         False positive. The constant names the secrets tool category; it is a label,
         not a credential.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/scanner_names.py
-      line_start: 133
-      line_end: 133
+      line_start: 136
+      line_end: 136
       reason: >-
         False positive. The table entry maps the detect-secrets scanner to the secrets
         tool category.
@@ -553,7 +553,7 @@ global_settings:
       path: "deploy/cdk/package-lock.json"
       package_name: "minimatch"
       package_version: "10.2.5"
-      expires: "2027-02-06"
+      expires: "2026-12-27"
       reason: >-
         CVE-2026-118764 (GHSA-g3hv-75wg-m249, trivy spelling): minimatch 10.2.5 bundled
         inside aws-cdk-lib 2.273.0 in deploy/cdk/package-lock.json. The lockfile's own
@@ -1062,12 +1062,17 @@ global_settings:
         OSError matching TMPDIR). The unsafe mode is the input of a refusal test.
     - rule_id: B104
       path: automated_security_helper/cli/mcp/__init__.py
+      symbol: _log_where_the_server_listens
       reason: >-
         Not a bind. The flagged line is the startup LOG helper that reproduces
         uvicorn's "running on" message: host = "0.0.0.0" if config.host is None
         mirrors the display default uvicorn itself logs; the socket was bound
         elsewhere, where tests/unit/cli/test_mcp_non_loopback_bind_is_refused.py
         asserts a non-loopback bind is refused without the explicit opt-in.
+        Pinned to the helper (kept in step with the same entry in
+        .ash/.ash_alpha_plugins.yaml) so a bind added anywhere else in the
+        file still reports; tests/unit/cli/mcp/test_b104_suppressions_stay_pinned.py
+        fails if the helper loses the expression or either entry goes file-wide.
     - rule_id: B104
       path: tests/unit/cli/test_mcp_loopback_accepts_only_its_own_origin.py
       reason: >-
@@ -3752,10 +3757,11 @@ global_settings:
     # --ignore-gitleaks-allow and neutralizes .gitleaksignore, so the inline
     # "gitleaks:allow" markers these fixture lines carry are inert by design
     # in ASH scans; this config is the suppression mechanism the existing
-    # gitleaks entries already use. All seven findings are deliberate,
-    # permanent test fixtures, so the entries carry no expiration, as the
-    # other gitleaks false-positive entries do. The required PR check reads
-    # this config from the BASE commit, so these entries take effect at
+    # gitleaks entries already use. All seven findings are deliberate test
+    # fixtures. The five generic-api-key entries expire on 2027-05-06, the
+    # review date their alpha-config copies carry, so each is looked at again
+    # then; the private-key entry carries no expiration. The required PR check
+    # reads this config from the BASE commit, so these entries take effect at
     # merge; the pre-merge residual on the PR's own run is by design.
     - rule_id: "generic-api-key"
       path: "tests/unit/base/test_uv_tool_mixin_guards_and_decisions.py"
@@ -3794,8 +3800,8 @@ global_settings:
     # bounded in length, so none of these is wider than it has to be.
     - rule_id: B104
       path: automated_security_helper/utils/secret_masking.py
-      line_start: 458
-      line_end: 458
+      line_start: 463
+      line_end: 463
       reason: >-
         False positive. "0.0.0.0" here is a schema-satisfying placeholder in the
         tuple of synthetic replacement values a masked SARIF field can take, not
@@ -3824,8 +3830,8 @@ global_settings:
         shown_flake_ref REDACTS. No value is held.
     - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-      line_start: 155
-      line_end: 155
+      line_start: 171
+      line_end: 171
       reason: >-
         False positive. A comment placeholder URL above the regex that MASKS a
         URL's userinfo in log excerpts. No value is held.
@@ -3844,8 +3850,8 @@ global_settings:
         the quoting lambda below it covers. No value is held.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/plugin_modules/ash_builtin/reporters/gitlab_sast_reporter.py
-      line_start: 50
-      line_end: 50
+      line_start: 82
+      line_end: 82
       reason: >-
         False positive. The constant names the rule-id PREFIX the reporter
         strips when classifying secret findings; a label, not a value.

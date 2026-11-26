@@ -47,6 +47,7 @@ from __future__ import annotations
 import copy
 import importlib
 import re
+import threading
 from enum import Enum
 from typing import Any, Literal, Mapping, Optional
 
@@ -76,19 +77,24 @@ _MODULE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
 _VERSION = re.compile(r"\d+(?:\.\d+)*(?:[A-Za-z0-9.+-]*)")
 
 _WARNED_COMMUNITY_ALIASES: set[str] = set()
+# Workspace mode builds engines on several threads, so the check-then-add below
+# is taken under a lock to keep the warning to once per process.
+_WARNED_LOCK = threading.Lock()
 
 
 def warn_community_alias(old: str, new: str) -> None:
     """Say once per process that the "community" spelling *old* is now *new*."""
-    if old in _WARNED_COMMUNITY_ALIASES:
-        return
-    _WARNED_COMMUNITY_ALIASES.add(old)
+    with _WARNED_LOCK:
+        if old in _WARNED_COMMUNITY_ALIASES:
+            return
+        _WARNED_COMMUNITY_ALIASES.add(old)
     # Imported here: the log module is not needed to read a manifest.
     from automated_security_helper.utils.log import ASH_LOGGER
 
     ASH_LOGGER.warning(
         f"'{old}' is deprecated: the community tier is now called alpha, so use "
-        f"'{new}'. The old spelling is accepted until ASH {COMMUNITY_ALIASES_DROPPED_IN}.",
+        f"'{new}'. The old spelling is accepted until ASH "
+        f"{COMMUNITY_ALIASES_DROPPED_IN} and is removed in that release.",
         extra={"markup": False},
     )
 
