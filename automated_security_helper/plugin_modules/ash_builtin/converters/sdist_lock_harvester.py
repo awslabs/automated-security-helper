@@ -8,7 +8,18 @@ import ntpath
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Dict, Iterable, List, Literal, Optional, Tuple, Union, cast
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    Union,
+    cast,
+)
 
 from automated_security_helper.base.converter_plugin import (
     ConverterPluginBase,
@@ -113,7 +124,7 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
         "dependencies, so the SBOM covers cross-toolchain packages"
     )
 
-    def model_post_init(self, context):
+    def model_post_init(self, context: Any) -> None:
         if self.config is None:
             self.config = SdistLockHarvesterConverterConfig()
         return super().model_post_init(context)
@@ -352,15 +363,17 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
             names = list(cached.get("lockfiles", []))
             digests = cached.get("digests")
         except Exception as error:
-            return self._evict_cache_entry(
+            self._evict_cache_entry(
                 cache_root,
                 entry,
                 f"its index could not be read ({type(error).__name__})",
             )
+            return None
         if not isinstance(digests, dict):
-            return self._evict_cache_entry(
+            self._evict_cache_entry(
                 cache_root, entry, "its index records no content digests"
             )
+            return None
         from automated_security_helper.utils.download_utils import sha256_file
 
         wanted = {
@@ -380,12 +393,13 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
             except OSError:
                 matches = False
             if not matches:
-                return self._evict_cache_entry(
+                self._evict_cache_entry(
                     cache_root,
                     entry,
                     f"'{name}' does not match the digest recorded when the "
                     "entry was written",
                 )
+                return None
         return served
 
     def _evict_cache_entry(self, cache_root: Path, entry: Path, why: str) -> None:
@@ -393,8 +407,8 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
 
         Serving is refused on ANY doubt; eviction then makes the next online
         run re-fetch and re-verify against the lock's pin instead of meeting
-        the same unverifiable bytes again. Returns None, the caller's cold-miss
-        answer.
+        the same unverifiable bytes again. The caller then answers None, its
+        cold miss.
         """
         confined = confined_path(cache_root, entry.name)
         if confined is None or confined != Path(entry).resolve():
@@ -516,7 +530,7 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
         )
         offline = is_offline_mode() or bool(options["syft_offline"])
         cache_root = self._cache_root(options["cache_dir"])
-        run_private_cache: Optional[tempfile.TemporaryDirectory] = None
+        run_private_cache: Optional[tempfile.TemporaryDirectory[str]] = None
         if cache_root is None:
             # No usable persistent root (_cache_root said why): cache in a
             # private directory of this run alone, which no repository content
@@ -627,7 +641,7 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
         offline: bool,
         results: List[Path],
         sources: Dict[Path, str],
-        skip,
+        skip: Callable[[FlaggedPackage, str], None],
     ) -> None:
         """Harvest one flagged package, or record why it was skipped."""
         if package.rejected_reason is not None:

@@ -16,7 +16,7 @@ config names, and it starts no process.
 """
 
 from pathlib import Path
-from typing import Annotated, Dict, List, Literal, Set
+from typing import Annotated, Any, Dict, List, Literal, Set
 
 from pydantic import Field
 
@@ -86,14 +86,14 @@ class McpConfigConverter(ConverterPluginBase[McpConfigConverterConfig]):
         "script, with a sidecar that maps script lines back to the config"
     )
 
-    def model_post_init(self, context):
+    def model_post_init(self, context: Any) -> None:
         # Without a config, ConverterPluginBase would give a nameless one, and the
         # work directory would be named for the class rather than the converter.
         if self.config is None:
             self.config = McpConfigConverterConfig()
         return super().model_post_init(context)
 
-    def validate_plugin_dependencies(self):
+    def validate_plugin_dependencies(self) -> bool:
         # Entirely Python: there is no tool to check for.
         return True
 
