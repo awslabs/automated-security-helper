@@ -1,0 +1,68 @@
+{
+  "capabilityInfo": [
+    {
+      "capability": "CAPABILITY_FILES",
+      "capabilityName": "FILES",
+      "capabilityType": "CAPABILITY_TYPE_DIRECT",
+      "depPath": "example.com/dep.Read example.com/dep.Read$1 os.ReadFile",
+      "packageDir": "example.com/dep",
+      "packageName": "dep",
+      "path": [
+        {
+          "name": "example.com/dep.Read",
+          "package": "example.com/dep"
+        },
+        {
+          "name": "example.com/dep.Read$1",
+          "package": "example.com/dep"
+        },
+        {
+          "name": "os.ReadFile",
+          "package": "os",
+          "site": {
+            "column": "24",
+            "filename": "read.go",
+            "line": "14"
+          }
+        }
+      ]
+    },
+    {
+      "capability": "CAPABILITY_FILES",
+      "capabilityName": "FILES",
+      "capabilityType": "CAPABILITY_TYPE_DIRECT",
+      "depPath": "example.com/dep.Read$1 os.ReadFile",
+      "packageDir": "example.com/dep",
+      "packageName": "dep",
+      "path": [
+        {
+          "name": "example.com/dep.Read$1",
+          "package": "example.com/dep"
+        },
+        {
+          "name": "os.ReadFile",
+          "package": "os",
+          "site": {
+            "column": "24",
+            "filename": "read.go",
+            "line": "14"
+          }
+        }
+      ]
+    }
+  ],
+  "moduleInfo": [
+    {
+      "path": "golang.org/x/sync",
+      "version": "v0.23.0"
+    }
+  ],
+  "packageInfo": [
+    {
+      "path": "example.com/dep"
+    },
+    {
+      "path": "golang.org/x/sync/errgroup"
+    }
+  ]
+}

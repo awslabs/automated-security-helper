@@ -429,6 +429,34 @@ def _prep_betterleaks(
     yield report, [r for run in report.runs or [] for r in run.results or []]
 
 
+def _prep_capslock(
+    transcript: ToolTranscript, base: Path, file: Path
+) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The recorded ``capslock -output=json`` report through the adapter's own
+    conversion. Capslock names a call site's file by its base name only, so the
+    conversion reads the module the run was over: the transcript's fixture tree, whose
+    one path is the module directory (its ``go.mod`` names the module path)."""
+    scanner = (
+        "automated_security_helper.plugin_modules.ash_capslock_plugins.capslock_scanner"
+    )
+    tree = transcript.fixture_tree
+    if tree is None or len(tree.paths) != 1:
+        raise ValueError(
+            "a capslock recording names the one module it ran over as its fixture tree"
+        )
+    module_dir = base / tree.paths[0]
+    results = resolve_ref(f"{scanner}:convert_capslock_output")(
+        json.loads(file.read_text(encoding="utf-8")),
+        module_dir,
+        module_dir,
+        resolve_ref(f"{scanner}:read_module_path")(module_dir / "go.mod"),
+    )
+    report = SarifReport.model_validate(
+        resolve_ref(f"{scanner}:capslock_sarif_document")(results)
+    )
+    yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
 def _prep_checkov(
     transcript: ToolTranscript, base: Path, file: Path
 ) -> Iterator[tuple[SarifReport, list[Result]]]:
@@ -658,6 +686,7 @@ def _prep_snyk_code(
 PREPS: Mapping[str, Prep] = {
     "actionlint": _prep_actionlint,
     "betterleaks": _prep_betterleaks,
+    "capslock": _prep_capslock,
     "cdk-nag": _prep_cdk_nag,
     "cfn-guard": _prep_cfn_guard,
     "cfn-lint": _prep_cfn_lint,

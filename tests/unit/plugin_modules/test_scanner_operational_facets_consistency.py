@@ -213,6 +213,7 @@ def classify_output(document: object) -> opsf.OutputFormat:
 _NATIVE_FIXTURES: dict[str, tuple[str, opsf.OutputFormat]] = {
     "bandit": ("bandit/captured/bandit-1.9.4-m0.sarif", opsf.OutputFormat.SARIF),
     "betterleaks": ("betterleaks/captured/positive.sarif", opsf.OutputFormat.SARIF),
+    "capslock": ("capslock/captured/positive.json", opsf.OutputFormat.TOOL_JSON),
     "gitleaks": ("gitleaks/gitleaks-8.30.1.sarif", opsf.OutputFormat.SARIF),
     "cfn-lint": (
         "cfn_lint_guard/captured/cfn-lint-1.57.1-insecure.sarif",

@@ -17,16 +17,25 @@ With the module listed, `capslock` runs by default. `scanners.capslock.enabled: 
 
 ## Installing Capslock
 
-Capslock publishes no release binaries, so ASH neither bundles nor installs it, and the ASH container image does not carry it. The plugin is written against Capslock's `v0.3.4` module tag. Install that version with Go 1.26 or later and make sure the Go bin directory is on `PATH`:
+Capslock publishes no release binaries, so ASH builds it from source. The plugin is written against Capslock's `v0.3.4` module tag, and `ash dependencies install` builds that version with the Go toolchain on `PATH` (Go 1.26 or later) and puts the executable in ASH's bin directory:
+
+<!-- doctest: illustrative reason="downloads and builds a Go module" -->
+```bash
+ash dependencies install --config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_capslock_plugins"]' --tool capslock
+```
+
+Before it builds, ASH has the go command download the module and refuses it unless the digest the go command reports is the pinned one (`h1:eS3/PLl++R96+Ub8b7uIDgCWzQh8CsY1CzVQbnt+Vhs=`, the Go checksum database's record for `v0.3.4`). The module's own `go.sum` pins its dependencies, and after the build the executable's embedded build information has to name the pinned module and this machine's platform. The build uses your toolchain as it is (`GOTOOLCHAIN=local`): an older Go is refused with its version named, not upgraded behind your back. Your `GOPROXY`, `GOPRIVATE` and module cache settings are used, so a mirror works. Offline, nothing is built.
+
+The same build by hand is:
 
 <!-- doctest: illustrative reason="installs a program from the network" -->
 ```bash
 go install github.com/google/capslock/cmd/capslock@v0.3.4
 ```
 
-Capslock runs the `go` command to load your packages, so Go has to be on `PATH` when ASH scans too. `ash dependencies install` has nothing to install for this scanner. When the binary is missing, the scan log prints the command above.
+Capslock runs the `go` command to load your packages, so Go has to be on `PATH` when ASH scans too. The ASH container image carries neither Capslock nor Go, so this scanner runs in local mode. When the binary is missing, the scan log prints both commands.
 
-ASH does not check which Capslock version you installed. A later version runs as is, and if its flags or its report format changed, the scan fails rather than reporting different findings without saying so. `capslock -version` prints the version you have.
+A `capslock` already on `PATH` is used as it is, and ASH does not check its version. A later version runs as is, and if its flags or its report format changed, the scan fails rather than reporting different findings without saying so. `capslock -version` prints the version you have.
 
 ## What is scanned
 
@@ -83,8 +92,25 @@ Package-scoped and symbol-scoped suppressions do not apply.
 
 ## Offline and air-gapped use
 
-The analysis is local, but loading Go packages needs their modules in the module cache or a `vendor` directory. The scanner sandbox has no network, so a module that is not cached makes Capslock exit 2 and the scan fails. Run `go mod download` or `go mod vendor` first.
+The analysis is local, but loading Go packages needs their modules in the module cache or a `vendor` directory, and a module that is not there makes Capslock exit 2 and the scan fails. Run `go mod download` (or `go mod vendor`) first: the loader reads the `.info` record `go mod download` writes beside each cached module.
+
+## Sandboxed scans
+
+Under `--sandbox`, Capslock gets the strict default (no network, the baseline environment) and one grant: it runs the `go` command, so the directory of the `go` on `PATH` and its installation (GOROOT) are mounted read-only. The go command's build cache is written in the sandbox's private home and thrown away. Measured with bubblewrap and Landlock on Linux: a module that uses only the standard library, or vendors its dependencies, scans as it does unsandboxed.
+
+The module cache is not mounted, because its location comes from your environment. A module whose dependencies are only in the module cache exits 2 under the sandbox. Vendor the dependencies, or grant the cache from a config file outside every git checkout (see [Give a scanner more access](../../scanner-sandbox.md#grants)):
+
+```yaml
+sandbox:
+  mode: bwrap
+  extra_read_paths:
+    - /home/me/go/pkg/mod
+  environment:
+    - GOMODCACHE=/home/me/go/pkg/mod
+```
+
+`go env GOMODCACHE` prints the directory. A `sandbox.environment` list replaces the default one, so add back the proxy and certificate variables you need ([Pass other variables](../../scanner-sandbox.md#environment)). firejail and macOS `sandbox-exec` have not been measured with this scanner.
 
 ## License
 
-Capslock is BSD-3-Clause: the `LICENSE` file at the commit the `v0.3.4` tag points to (`29ad626`). ASH does not redistribute it; you install it yourself.
+Capslock is BSD-3-Clause: the `LICENSE` file at the commit the `v0.3.4` tag points to (`29ad626`). ASH builds the pinned module on your machine when you run `ash dependencies install` and does not redistribute it.

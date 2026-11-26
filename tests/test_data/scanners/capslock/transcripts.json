@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": "capslock",
+      "also_for": [],
+      "argv": [
+        "capslock",
+        "-packages=./...",
+        "-output=json",
+        "-force_local_module"
+      ],
+      "env_allowlist": [],
+      "exit_code": 0,
+      "fixture_tree": {
+        "paths": [
+          "captured/in/pos"
+        ],
+        "sha256": "4a40af1bc3d4b4e27e431dc8f34ceea7f12fd396e4f20940a02b03f871d07751"
+      },
+      "id": "capslock-0.3.4-positive",
+      "live_input": false,
+      "note": "A standard-library-only module whose packages reach FILES, NETWORK, READ_SYSTEM_STATE, UNSAFE_POINTER and EXEC (direct and transitive). Go go1.26.11, offline (GOPROXY=off, GOFLAGS=-mod=readonly), from the module's own directory. The report is re-serialized by the repository's JSON formatter (two-space indent, sorted keys); no value changed. captured/README.md says how the run was made.",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "captured",
+      "reason": null,
+      "recorded_on": "2026-11-26",
+      "results": [
+        {
+          "format": "json",
+          "path": "captured/positive.json",
+          "sha256": "8539e643d989bd4e522786c93ec778327227a305a6c110014079ce873334125c"
+        }
+      ],
+      "retention": "current",
+      "scanner": "capslock",
+      "side_reports": [],
+      "stderr_tail": "",
+      "tool": {
+        "name": "capslock",
+        "version": "v0.3.4"
+      }
+    },
+    {
+      "adapter_prep": "capslock",
+      "also_for": [],
+      "argv": [
+        "capslock",
+        "-packages=./...",
+        "-output=json",
+        "-force_local_module"
+      ],
+      "env_allowlist": [],
+      "exit_code": 0,
+      "fixture_tree": {
+        "paths": [
+          "captured/in/dep"
+        ],
+        "sha256": "a1c8212c56468324c7c89d7c85016e49ae9dc734be6e4041e73d43437e8be34b"
+      },
+      "id": "capslock-0.3.4-dependency",
+      "live_input": false,
+      "note": "A module with one dependency (golang.org/x/sync v0.23.0) that reads a file inside a closure it creates. Go go1.26.11, offline (GOPROXY=off, GOFLAGS=-mod=readonly), from the module's own directory. The report is re-serialized by the repository's JSON formatter (two-space indent, sorted keys); no value changed. captured/README.md says how the run was made.",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "captured",
+      "reason": null,
+      "recorded_on": "2026-11-26",
+      "results": [
+        {
+          "format": "json",
+          "path": "captured/dependency.json",
+          "sha256": "f0845f716d6e53e6c5fe5f3d485c6e1d17baf7ed70308009d6e890cdb6d2343d"
+        }
+      ],
+      "retention": "current",
+      "scanner": "capslock",
+      "side_reports": [],
+      "stderr_tail": "",
+      "tool": {
+        "name": "capslock",
+        "version": "v0.3.4"
+      }
+    },
+    {
+      "adapter_prep": "capslock",
+      "also_for": [],
+      "argv": [
+        "capslock",
+        "-packages=./...",
+        "-output=json",
+        "-force_local_module"
+      ],
+      "env_allowlist": [],
+      "exit_code": 0,
+      "fixture_tree": {
+        "paths": [
+          "captured/in/neg"
+        ],
+        "sha256": "80da26ebec70d0f0bbaef32eed99dfb79409757b186c54cc34693898056667a8"
+      },
+      "id": "capslock-0.3.4-negative",
+      "live_input": false,
+      "note": "A module with no capability: the report lists its package and has no capabilityInfo. Go go1.26.11, offline (GOPROXY=off, GOFLAGS=-mod=readonly), from the module's own directory. The report is re-serialized by the repository's JSON formatter (two-space indent, sorted keys); no value changed. captured/README.md says how the run was made.",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "captured",
+      "reason": null,
+      "recorded_on": "2026-11-26",
+      "results": [
+        {
+          "format": "json",
+          "path": "captured/negative.json",
+          "sha256": "729770579a59b6a336262566fefb73cca60ccd719d96dc05c945aeac9fe55ee4"
+        }
+      ],
+      "retention": "current",
+      "scanner": "capslock",
+      "side_reports": [],
+      "stderr_tail": "",
+      "tool": {
+        "name": "capslock",
+        "version": "v0.3.4"
+      }
+    }
+  ],
+  "unrecorded": []
+}

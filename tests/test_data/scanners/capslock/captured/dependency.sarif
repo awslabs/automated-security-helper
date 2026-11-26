@@ -1,0 +1,73 @@
+{
+  "runs": [
+    {
+      "results": [
+        {
+          "kind": "informational",
+          "level": "none",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "go.mod"
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Package example.com/dep can read or modify the file system (FILES, direct). Example call path: example.com/dep.Read example.com/dep.Read$1 os.ReadFile"
+          },
+          "properties": {
+            "capslock_capability": "FILES",
+            "capslock_package": "example.com/dep",
+            "capslock_type": "DIRECT",
+            "issue_severity": "INFO",
+            "tags": [
+              "capability",
+              "go"
+            ]
+          },
+          "ruleId": "CAPSLOCK-FILES"
+        },
+        {
+          "kind": "informational",
+          "level": "none",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "read.go"
+                },
+                "region": {
+                  "startColumn": 24,
+                  "startLine": 14
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Package example.com/dep can read or modify the file system (FILES, direct). Example call path: example.com/dep.Read$1 os.ReadFile"
+          },
+          "properties": {
+            "capslock_capability": "FILES",
+            "capslock_package": "example.com/dep",
+            "capslock_type": "DIRECT",
+            "issue_severity": "INFO",
+            "tags": [
+              "capability",
+              "go"
+            ]
+          },
+          "ruleId": "CAPSLOCK-FILES"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "informationUri": "https://github.com/google/capslock",
+          "name": "Capslock"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

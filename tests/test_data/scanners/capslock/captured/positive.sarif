@@ -1,0 +1,197 @@
+{
+  "runs": [
+    {
+      "results": [
+        {
+          "kind": "informational",
+          "level": "none",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "store/load.go"
+                },
+                "region": {
+                  "startColumn": 20,
+                  "startLine": 8
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Package example.com/app/store can read or modify the file system (FILES, direct). Example call path: example.com/app/store.Load os.ReadFile"
+          },
+          "properties": {
+            "capslock_capability": "FILES",
+            "capslock_package": "example.com/app/store",
+            "capslock_type": "DIRECT",
+            "issue_severity": "INFO",
+            "tags": [
+              "capability",
+              "go"
+            ]
+          },
+          "ruleId": "CAPSLOCK-FILES"
+        },
+        {
+          "kind": "informational",
+          "level": "none",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "server/serve.go"
+                },
+                "region": {
+                  "startColumn": 28,
+                  "startLine": 8
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Package example.com/app/server can interact with the network (NETWORK, direct). Example call path: example.com/app/server.Serve net/http.ListenAndServe"
+          },
+          "properties": {
+            "capslock_capability": "NETWORK",
+            "capslock_package": "example.com/app/server",
+            "capslock_type": "DIRECT",
+            "issue_severity": "INFO",
+            "tags": [
+              "capability",
+              "go"
+            ]
+          },
+          "ruleId": "CAPSLOCK-NETWORK"
+        },
+        {
+          "kind": "informational",
+          "level": "none",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app.go"
+                },
+                "region": {
+                  "startColumn": 18,
+                  "startLine": 8
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Package example.com/app can read information about the system state and environment (READ_SYSTEM_STATE, direct). Example call path: example.com/app.Mode os.Getenv"
+          },
+          "properties": {
+            "capslock_capability": "READ_SYSTEM_STATE",
+            "capslock_package": "example.com/app",
+            "capslock_type": "DIRECT",
+            "issue_severity": "INFO",
+            "tags": [
+              "capability",
+              "go"
+            ]
+          },
+          "ruleId": "CAPSLOCK-READ_SYSTEM_STATE"
+        },
+        {
+          "kind": "informational",
+          "level": "none",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "go.mod"
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Package example.com/app/util can use unsafe.Pointer (UNSAFE_POINTER, direct). Example call path: example.com/app/util.FirstByte"
+          },
+          "properties": {
+            "capslock_capability": "UNSAFE_POINTER",
+            "capslock_package": "example.com/app/util",
+            "capslock_type": "DIRECT",
+            "issue_severity": "INFO",
+            "tags": [
+              "capability",
+              "go"
+            ]
+          },
+          "ruleId": "CAPSLOCK-UNSAFE_POINTER"
+        },
+        {
+          "kind": "informational",
+          "level": "none",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "internal/exe/start.go"
+                },
+                "region": {
+                  "startColumn": 21,
+                  "startLine": 8
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Package example.com/app/internal/exe can execute other programs (EXEC, direct). Example call path: example.com/app/internal/exe.Start os/exec.Command"
+          },
+          "properties": {
+            "capslock_capability": "EXEC",
+            "capslock_package": "example.com/app/internal/exe",
+            "capslock_type": "DIRECT",
+            "issue_severity": "INFO",
+            "tags": [
+              "capability",
+              "go"
+            ]
+          },
+          "ruleId": "CAPSLOCK-EXEC"
+        },
+        {
+          "kind": "informational",
+          "level": "none",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "util/run.go"
+                },
+                "region": {
+                  "startColumn": 18,
+                  "startLine": 8
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Package example.com/app/util can execute other programs (EXEC, transitive). Example call path: example.com/app/util.Run example.com/app/internal/exe.Start os/exec.Command"
+          },
+          "properties": {
+            "capslock_capability": "EXEC",
+            "capslock_package": "example.com/app/util",
+            "capslock_type": "TRANSITIVE",
+            "issue_severity": "INFO",
+            "tags": [
+              "capability",
+              "go"
+            ]
+          },
+          "ruleId": "CAPSLOCK-EXEC"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "informationUri": "https://github.com/google/capslock",
+          "name": "Capslock"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

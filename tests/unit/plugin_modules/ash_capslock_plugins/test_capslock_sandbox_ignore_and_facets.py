@@ -1,16 +1,17 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Capslock: sandbox declaration, operator ignore paths, schema-derived fixtures, registers.
+"""Capslock: sandbox declaration and grant, operator ignore paths, registers.
 
-The fixtures under tests/test_data/scanners/capslock/schema_derived are written
-from Capslock v0.3.4's source, not captured from a run; their README says so,
-and the facets register declares UNCONFIRMED every cell a real run would settle.
+The facets register's cells are settled by the captured runs under
+tests/test_data/scanners/capslock/captured (read in
+test_capslock_install_and_captured.py and by the corpus consistency gate).
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,35 +33,38 @@ from automated_security_helper.plugin_modules.ash_capslock_plugins import (
 )
 from automated_security_helper.plugin_modules.ash_capslock_plugins.capslock_scanner import (
     CapslockScanner,
-    convert_capslock_output,
     drop_ignored_modules,
     find_go_modules,
 )
+from automated_security_helper.utils.sandbox import scope as scope_module
 from automated_security_helper.utils.sandbox.policy import (
     SandboxRequirements,
     build_scanner_policy,
 )
+from automated_security_helper.utils.subprocess_utils import (
+    clear_find_executable_cache,
+)
+
+from .test_capslock_scanner_behavior import _scanner
 
 pytestmark = pytest.mark.unit
 
-FIXTURES = (
+CAPTURED = (
     Path(__file__).resolve().parents[3]
     / "test_data"
     / "scanners"
     / "capslock"
-    / "schema_derived"
+    / "captured"
 )
 
-#: The cells a real Capslock run would settle; the rest cannot exist.
-UNREAD_CELLS = {
+#: The cells the captured runs settle as MAPPED; the rest cannot exist.
+MAPPED_CELLS = {
     "rule_id",
     "severity",
     "file_path",
     "line_range",
     "column",
     "message",
-    "package_name",
-    "package_path",
     "tags",
     "extras",
 }
@@ -124,6 +128,62 @@ class TestSandboxRequirements:
     def test_the_scanner_still_sets_its_own_readonly_flag_for_unsandboxed_runs(self):
         assert CapslockScanner._subprocess_env()["GOFLAGS"] == "-mod=readonly"
 
+    def test_every_spawn_also_runs_go(self, tmp_path, monkeypatch):
+        # Capslock runs the go command; the spawn names it so a sandbox grants its
+        # directory and GOROOT as it grants capslock's own.
+        source = tmp_path / "src"
+        (source / "a").mkdir(parents=True)
+        (source / "go.mod").write_text("module example.com/m\n")
+        (source / "a" / "go.mod").write_text("module example.com/a\n")
+        monkeypatch.setattr(cs, "find_executable", lambda cmd: f"/fake/bin/{cmd}")
+        scanner = _scanner(source, tmp_path)
+        granted = []
+
+        def run(command, **kwargs):
+            granted.append(scope_module._ALSO_RUNS.get())
+            scanner.exit_code = 0
+            return {"returncode": 0, "stdout": json.dumps({"packageInfo": []})}
+
+        monkeypatch.setattr(scanner, "_run_subprocess", run)
+        scanner.scan(target=source, target_type="source")
+        assert granted == [("go",), ("go",)]
+        assert scope_module._ALSO_RUNS.get() == ()
+
+    @pytest.mark.skipif(os.name == "nt", reason="a POSIX executable stands in for go")
+    def test_the_go_grant_mounts_the_toolchain_read_only(
+        self, layout, tmp_path, monkeypatch
+    ):
+        goroot = tmp_path / "toolchains" / "go1.26.11" / "go"
+        (goroot / "bin").mkdir(parents=True)
+        (goroot / "src" / "runtime").mkdir(parents=True)
+        go = goroot / "bin" / "go"
+        go.write_text("#!/bin/sh\nexit 0\n")
+        go.chmod(0o755)
+        monkeypatch.setenv("PATH", str(goroot / "bin"))
+        monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "ash-bin"))
+        clear_find_executable_cache()
+        try:
+            granted = build_scanner_policy(
+                "capslock",
+                CapslockScanner.sandbox_requirements,
+                argv0=sys.executable,
+                source_dir=layout.source,
+                output_dir=layout.output,
+                results_dir=layout.output / "scanners" / "capslock",
+                scan_target=layout.source,
+                cwd=layout.source,
+                offline=False,
+                network_scanners=None,
+                also_runs=("go",),
+            )
+            without = _policy(layout, CapslockScanner.sandbox_requirements)
+        finally:
+            clear_find_executable_cache()
+        real_root = goroot.resolve()
+        assert real_root in _real(granted.read_only)
+        assert real_root not in _real(without.read_only)
+        assert real_root not in _real(granted.writable)
+
 
 class TestOperatorIgnorePaths:
     @staticmethod
@@ -178,47 +238,11 @@ class TestOperatorIgnorePaths:
         assert len(kept) == 3
 
 
-class TestSchemaDerivedFixtures:
-    def test_positive_fixture_is_converted_row_by_row(self, tmp_path):
-        document = json.loads((FIXTURES / "positive.json").read_text())
-        target = tmp_path / "t"
-        results = convert_capslock_output(document, target, target, "example.com/app")
-        rows = [
-            (
-                r["ruleId"],
-                r["level"],
-                r["properties"]["issue_severity"],
-                r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
-                r["locations"][0]["physicalLocation"]
-                .get("region", {})
-                .get("startLine"),
-                r["properties"]["capslock_type"],
-            )
-            for r in results
-        ]
-        assert rows == [
-            ("CAPSLOCK-FILES", "none", "INFO", "store/load.go", 30, "DIRECT"),
-            ("CAPSLOCK-NETWORK", "none", "INFO", "server/serve.go", 12, "DIRECT"),
-            # util.Cast is itself the capability: one step, no site.
-            ("CAPSLOCK-UNSAFE_POINTER", "none", "INFO", "go.mod", None, "DIRECT"),
-            # The call inside util.Run, not the later call in internal/exe.
-            ("CAPSLOCK-EXEC", "none", "INFO", "util/run.go", 7, "TRANSITIVE"),
-        ]
-        # Severity and level agree on every result: the only severity is INFO.
-        assert {r["properties"]["issue_severity"] for r in results} == {"INFO"}
-        assert {r["level"] for r in results} == {"none"}
-
-    def test_negative_fixture_has_no_results(self, tmp_path):
-        document = json.loads((FIXTURES / "negative.json").read_text())
-        target = tmp_path / "t"
-        assert (
-            convert_capslock_output(document, target, target, "example.com/app") == []
-        )
-
-    def test_the_fixture_directory_says_it_is_not_captured_output(self):
-        readme = (FIXTURES / "README.md").read_text()
-        assert "NOT captured output" in readme
-        assert not (FIXTURES.parent / "captured").exists()
+class TestCapturedCorpus:
+    def test_the_captures_replace_the_schema_derived_documents(self):
+        assert (CAPTURED / "positive.json").is_file()
+        assert (CAPTURED / "positive.sarif").is_file()
+        assert not (CAPTURED.parent / "schema_derived").exists()
 
 
 class TestFacetsDeclaration:
@@ -227,20 +251,17 @@ class TestFacetsDeclaration:
         assert isinstance(declared, ScannerFacets)
         assert set(FACET_NAMES) == set(type(declared).model_fields)
 
-    def test_every_cell_a_real_run_settles_is_unconfirmed_and_says_why(self):
+    def test_no_cell_is_unconfirmed_and_the_mapped_ones_name_their_field(self):
         declared = vars(CapslockScanner)[SCANNER_FACETS_ATTR]
-        unconfirmed = {
-            name
-            for name in FACET_NAMES
-            if getattr(declared, name).state is FacetState.UNCONFIRMED
-        }
-        assert unconfirmed == UNREAD_CELLS
-        for name in UNREAD_CELLS:
-            assert getattr(declared, name).reason.startswith(cs._NO_CAPTURE), name
+        states = {name: getattr(declared, name).state for name in FACET_NAMES}
+        assert FacetState.UNCONFIRMED not in states.values()
+        assert {n for n, s in states.items() if s is FacetState.MAPPED} == MAPPED_CELLS
+        for name in MAPPED_CELLS:
+            assert (getattr(declared, name).native_field or "").strip(), name
 
     def test_the_other_cells_cannot_exist_and_say_why(self):
         declared = vars(CapslockScanner)[SCANNER_FACETS_ATTR]
-        for name in set(FACET_NAMES) - UNREAD_CELLS:
+        for name in set(FACET_NAMES) - MAPPED_CELLS:
             cell = getattr(declared, name)
             assert cell.state is FacetState.NA, name
             assert (cell.reason or "").strip(), name
@@ -258,6 +279,16 @@ class TestFacetsDeclaration:
         assert row.runtime_compat.rows == ()
         assert row.severity.severity_class is opsf.SeverityClass.CONSTANT
         assert row.provenance.source is opsf.ProvenanceSource.USER_INSTALLED
+        assert "capslock_install.py" in row.platforms.note
+
+    def test_the_prerequisites_row_records_the_sandbox_measurement(self):
+        row = CapslockScanner.operational_facets.prerequisites
+        assert row.kinds == (opsf.Prerequisite.MANIFEST,)
+        assert "Measured under --sandbox bwrap and landlock" in row.note
+        assert "sandbox.extra_read_paths" in row.note and "GOMODCACHE" in row.note
+        assert row.unconfirmed == (
+            "firejail and macOS sandbox-exec runs were not measured"
+        )
 
     def test_the_register_carries_the_license_read_at_the_pinned_commit(self):
         citation = CapslockScanner.operational_facets.provenance.upstream_license

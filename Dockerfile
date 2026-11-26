@@ -789,10 +789,12 @@ RUN polaris version
 
 #
 # Capslock (alpha scanner) is NOT in the image, and its module is not in the list
-# above: Capslock publishes no release binaries, and it loads the scanned module's
-# packages by running the go command, while this image carries no Go toolchain. A
-# user installs it with `go install github.com/google/capslock/cmd/capslock@v0.3.4`,
-# the version the plugin is read against (CAPSLOCK_VERSION in capslock_scanner.py).
+# above: Capslock publishes no release binaries, so its installer builds it with the
+# Go toolchain, and it loads the scanned module's packages by running the go
+# command, while this image carries no Go toolchain. Where Go is installed, ASH's
+# dependency installer builds the pinned version, the same build as
+# `go install github.com/google/capslock/cmd/capslock@v0.3.4`
+# (CAPSLOCK_VERSION in capslock_install.py).
 #
 
 #

@@ -3,14 +3,12 @@
 
 """CapslockScanner: invocation, output conversion, severity and failure handling.
 
-The JSON documents below are written by hand from what Capslock v0.3.4 prints,
-read from its source (proto/capability.proto rendered by protojson, and
-analyzer/analyzer.go and analyzer/util.go for which fields are set: packageDir
-is the import path, packageName the short name, and a path step's site is the
-call into that step with the file's base name). No Capslock binary was run to
-produce them, so they pin this plugin's reading of the tool's source, not
-captured output. The subprocess is replaced by a fake, so the tests run on every
-platform.
+The JSON documents below are written by hand in the shape Capslock v0.3.4 prints
+(packageDir is the import path, packageName the short name, and a path step's
+site is the call into that step with the file's base name), to reach edge cases
+one at a time. The real captured runs, and the conversion over them, are in
+test_capslock_install_and_captured.py. The subprocess is replaced by a fake, so
+the tests run on every platform.
 """
 
 from __future__ import annotations
@@ -530,6 +528,33 @@ class TestDependencyCheck:
             == "go install github.com/google/capslock/cmd/capslock@v0.3.4"
         )
 
-    def test_no_install_commands_are_declared(self, tree, tmp_path):
-        # Capslock has no release assets; the user installs it with go.
-        assert not _scanner(tree, tmp_path).custom_install_commands
+    def test_every_platform_declares_the_go_install_build(
+        self, tree, tmp_path, monkeypatch
+    ):
+        # Capslock has no release assets: ash dependencies install builds the pinned
+        # module with go (capslock_install.py), on every pair Go and ASH both name.
+        monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
+        table = _scanner(tree, tmp_path).custom_install_commands
+        pairs = {(p, a) for p, arches in table.items() for a in arches}
+        assert pairs == {
+            (p, a) for p in ("linux", "darwin", "windows") for a in ("amd64", "arm64")
+        }
+        for arches in table.values():
+            for commands in arches.values():
+                (command,) = commands
+                assert command.shell is False
+                assert "install_capslock" in " ".join(command.args)
+                assert command.args[-1] == str((tmp_path / "bin").absolute())
+
+    def test_the_missing_tool_warning_names_both_install_routes(
+        self, tree, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(cs, "find_executable", lambda cmd: None)
+        warned: List[str] = []
+        monkeypatch.setattr(
+            cs.ASH_LOGGER, "warning", lambda text, *a: warned.append(text)
+        )
+        assert _scanner(tree, tmp_path).validate_plugin_dependencies() is False
+        (text,) = warned
+        assert "ash dependencies install --tool capslock" in text
+        assert cs.INSTALL_COMMAND in text

@@ -8,10 +8,12 @@ by running the go command, which the ASH image does not carry. So it has no
 ``THIRD_PARTY_LICENSES`` entry (an entry is a claim the image bundles the tool), no
 place in the image's alpha module list, no ``--licenses-only`` slot and no version
 check in the image: the same class credsweeper, secretlint and dependency-check are
-in. What the plugin pins is the module version it is read against, the install
-command it prints, the module digest the Go checksum database records for that
-version, and the license read at the version's commit. These tests pin that state
-so a later edit flips it deliberately rather than by drift.
+in. Like theirs, its install path is the plugin's own: ``ash dependencies install``
+builds the pinned module with go (``capslock_install.py``), outside the shared
+provisioning registry. What the plugin pins is the module version it is read
+against and builds, the install command, the module digest the Go checksum database
+records for that version, and the license read at the version's commit. These tests
+pin that state so a later edit flips it deliberately rather than by drift.
 """
 
 from __future__ import annotations
@@ -27,6 +29,9 @@ from automated_security_helper.base.plugin_provisioning import (
 )
 from automated_security_helper.plugin_modules.ash_capslock_plugins import (
     capslock_scanner as cs,
+)
+from automated_security_helper.plugin_modules.ash_capslock_plugins.capslock_install import (
+    capslock_install_commands,
 )
 from automated_security_helper.plugin_modules.ash_capslock_plugins.capslock_scanner import (
     CapslockScanner,
@@ -64,9 +69,15 @@ def test_the_register_carries_the_license_read_at_the_pin():
         assert pinned in citation
 
 
-def test_ash_provisions_nothing_for_capslock():
+def test_the_install_is_the_plugins_own_not_the_shared_registry(tmp_path, monkeypatch):
+    # The shared registry pins release assets; Capslock has none, so its pin and
+    # its go install build live in the plugin module.
     assert "capslock" not in PROVISIONING
     assert provisioning_for("capslock").tool_pins == ()
+    monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
+    table = capslock_install_commands()
+    assert table["linux"]["amd64"]
+    assert "install_capslock" in " ".join(table["linux"]["amd64"][0].args)
 
 
 def test_the_image_does_not_claim_to_bundle_capslock():

@@ -16,9 +16,9 @@
           "name": "os.ReadFile",
           "package": "os",
           "site": {
-            "column": "9",
+            "column": "20",
             "filename": "load.go",
-            "line": "30"
+            "line": "8"
           }
         }
       ]
@@ -39,9 +39,32 @@
           "name": "net/http.ListenAndServe",
           "package": "net/http",
           "site": {
-            "column": "5",
+            "column": "28",
             "filename": "serve.go",
-            "line": "12"
+            "line": "8"
+          }
+        }
+      ]
+    },
+    {
+      "capability": "CAPABILITY_READ_SYSTEM_STATE",
+      "capabilityName": "READ_SYSTEM_STATE",
+      "capabilityType": "CAPABILITY_TYPE_DIRECT",
+      "depPath": "example.com/app.Mode os.Getenv",
+      "packageDir": "example.com/app",
+      "packageName": "app",
+      "path": [
+        {
+          "name": "example.com/app.Mode",
+          "package": "example.com/app"
+        },
+        {
+          "name": "os.Getenv",
+          "package": "os",
+          "site": {
+            "column": "18",
+            "filename": "app.go",
+            "line": "8"
           }
         }
       ]
@@ -50,13 +73,36 @@
       "capability": "CAPABILITY_UNSAFE_POINTER",
       "capabilityName": "UNSAFE_POINTER",
       "capabilityType": "CAPABILITY_TYPE_DIRECT",
-      "depPath": "example.com/app/util.Cast",
+      "depPath": "example.com/app/util.FirstByte",
       "packageDir": "example.com/app/util",
       "packageName": "util",
       "path": [
         {
-          "name": "example.com/app/util.Cast",
+          "name": "example.com/app/util.FirstByte",
           "package": "example.com/app/util"
+        }
+      ]
+    },
+    {
+      "capability": "CAPABILITY_EXEC",
+      "capabilityName": "EXEC",
+      "capabilityType": "CAPABILITY_TYPE_DIRECT",
+      "depPath": "example.com/app/internal/exe.Start os/exec.Command",
+      "packageDir": "example.com/app/internal/exe",
+      "packageName": "exe",
+      "path": [
+        {
+          "name": "example.com/app/internal/exe.Start",
+          "package": "example.com/app/internal/exe"
+        },
+        {
+          "name": "os/exec.Command",
+          "package": "os/exec",
+          "site": {
+            "column": "21",
+            "filename": "start.go",
+            "line": "8"
+          }
         }
       ]
     },
@@ -76,26 +122,38 @@
           "name": "example.com/app/internal/exe.Start",
           "package": "example.com/app/internal/exe",
           "site": {
-            "column": "2",
+            "column": "18",
             "filename": "run.go",
-            "line": "7"
+            "line": "8"
           }
         },
         {
           "name": "os/exec.Command",
           "package": "os/exec",
           "site": {
-            "column": "9",
+            "column": "21",
             "filename": "start.go",
-            "line": "11"
+            "line": "8"
           }
         }
       ]
     }
   ],
-  "moduleInfo": [
+  "packageInfo": [
     {
       "path": "example.com/app"
+    },
+    {
+      "path": "example.com/app/internal/exe"
+    },
+    {
+      "path": "example.com/app/server"
+    },
+    {
+      "path": "example.com/app/store"
+    },
+    {
+      "path": "example.com/app/util"
     }
   ]
 }

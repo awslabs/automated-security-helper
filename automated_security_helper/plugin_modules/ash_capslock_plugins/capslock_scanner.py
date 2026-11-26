@@ -14,21 +14,27 @@ Version and install
 -------------------
 Capslock publishes no release binaries. Its module is tagged, and this plugin is
 read against ``v0.3.4`` (``CAPSLOCK_VERSION``), the latest tag on 2026-11-26, at
-commit ``29ad626`` (``CAPSLOCK_COMMIT``). The user installs it with
-``go install github.com/google/capslock/cmd/capslock@v0.3.4`` (``INSTALL_COMMAND``);
-v0.3.4's ``go.mod`` needs Go 1.26.0 or later to build it. ASH installs and
-redistributes nothing, and a missing binary skips the scanner with that command
-in the log.
+commit ``29ad626`` (``CAPSLOCK_COMMIT``). ``ash dependencies install --tool capslock``
+builds that version from source with the Go toolchain on ``PATH`` (Go 1.26.0 or
+later, which v0.3.4's ``go.mod`` needs) and places the executable in ASH's bin
+directory; ``capslock_install.py`` says what it checks: the module digest before the
+build, the dependencies through the module's own ``go.sum``, and the executable's
+embedded build information after it. The same build by hand is ``go install
+github.com/google/capslock/cmd/capslock@v0.3.4`` (``INSTALL_COMMAND``). ASH
+redistributes nothing, and a missing binary skips the scanner with both routes in
+the log.
 
-The version caveat: ASH does not read which Capslock a user installed. A later
-tag (what ``@latest`` resolves to once one exists) runs as is, and a change in
-its flags or its JSON makes the scan fail with the tool's status or a report the
-plugin cannot read, rather than return a different set of findings quietly.
-``capslock -version`` prints the installed version.
+The version caveat: a Capslock found on ``PATH`` is used as is, and ASH does not
+read which version it is. A later tag (what ``@latest`` resolves to once one exists)
+runs as is, and a change in its flags or its JSON makes the scan fail with the
+tool's status or a report the plugin cannot read, rather than return a different set
+of findings quietly. ``capslock -version`` prints the installed version.
 
 The module pin, checked on 2026-11-26: the Go checksum database's digest of the
 v0.3.4 module zip is ``CAPSLOCK_MODULE_SUM``, and the source at the tag's commit,
-hashed with the module-zip file rules, gives the same digest.
+hashed with the module-zip file rules, gives the same digest. A build on
+2026-11-26 (Go 1.26.11, linux/amd64, ``GOPROXY=direct``) had the go command report
+the same digest before it built.
 
 Scan flow
 ---------
@@ -76,8 +82,12 @@ the call into that step, with the file's base name only (``analyzer/util.go``
 step, a call inside the reporting function's own file, in the directory of the
 reporting package: its import path (``packageDir``) under the module path the
 module's ``go.mod`` declares. An entry with no such site, or whose package is not
-under the module path, is located at the module's ``go.mod``. Later steps are
-never used: they are calls in other packages, the standard library's included.
+under the module path, is located at the module's ``go.mod``. Two shapes have no
+site on the second step, both in the captured corpus: a one-step path (the function
+is itself the capability, as with ``unsafe.Pointer``), and a function that reaches
+the capability through a function value it creates (its closure is the second step,
+reached by no call of its own). Later steps are never used: they are calls in other
+functions, often in other packages, the standard library's included.
 
 Severity
 --------
@@ -97,8 +107,37 @@ scan.
 Offline
 -------
 The analysis is local. Loading the Go packages needs their modules in the module
-cache or a ``vendor`` directory; the strict sandbox has no network, so a module
-that is not cached makes Capslock exit 2 and the scan fails with that status.
+cache or a ``vendor`` directory. The cache has to hold the module's ``.info`` record
+as well as its source, because Capslock loads module information: ``go mod
+download`` writes it (``go mod tidy`` with ``GOPROXY=direct`` did not, measured on
+Go 1.26.11, and the run then exited 2 under ``GOPROXY=off``). A module that is not
+cached makes Capslock exit 2 offline, and the scan fails with that status.
+
+Sandbox
+-------
+The strict default (no network, the baseline environment) plus one grant: Capslock
+runs the ``go`` command, so the spawn is declared to start ``go`` as well
+(``sandbox.scope.also_runs``), and the sandbox mounts the directory of the ``go`` on
+``PATH`` and its install prefix (GOROOT) read-only, through the breadth rules that
+govern the tool's own directory. Measured on 2026-11-26 (Linux 6.12, bubblewrap 0.12.0
+and Landlock, Go 1.26.11 installed under the home directory, Capslock v0.3.4):
+
+- without the grant every run exited 2 under both backends: the ``go`` binary's own
+  directory is mounted as a ``PATH`` entry, but not the GOROOT around it, so bwrap
+  reported "cannot find GOROOT directory" and under Landlock ``go list`` could not
+  read GOROOT's sources;
+- with it, the standard-library module of the captured corpus completed under both
+  backends with the same six results as an unsandboxed run. The go command's build
+  cache is written in the sandbox's private home and discarded with it;
+- the module cache is not granted, because its location comes from the environment
+  and such grants wait for the sandbox's grant gates: the corpus module with a cached
+  dependency exited 2 under both backends (the go command tried to download it). The
+  operator grants it from a config outside every checkout, with the cache directory
+  in ``sandbox.extra_read_paths`` and ``GOMODCACHE=<that directory>`` in
+  ``sandbox.environment``; with that, the same module completed under both backends.
+  A ``vendor`` directory needs no grant.
+
+firejail and macOS's sandbox-exec were not measured.
 """
 
 from __future__ import annotations
@@ -119,7 +158,7 @@ from typing import (
     Tuple,
 )
 
-from pydantic import AnyUrl, Field
+from pydantic import AnyUrl, Field, model_validator
 
 from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -136,6 +175,12 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
+from automated_security_helper.plugin_modules.ash_capslock_plugins.capslock_install import (
+    CAPSLOCK_MODULE_SUM,
+    CAPSLOCK_VERSION,
+    INSTALL_COMMAND,
+    capslock_install_commands,
+)
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     Run,
@@ -148,21 +193,16 @@ from automated_security_helper.utils.output_excerpt import tool_output_excerpt
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import read_bytes_at_most
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.utils.sandbox.scope import also_runs
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.suppression_matcher import ignore_path_matches
-
-#: The tagged module version this plugin is read against; see "Version and install".
-CAPSLOCK_VERSION = "v0.3.4"
 
 #: The commit the ``v0.3.4`` tag points to.
 CAPSLOCK_COMMIT = "29ad6261d58bd594c4f353f8c3a0014b08c779b8"  # pragma: allowlist secret
 
-#: The Go checksum database's digest of the ``v0.3.4`` module zip.
-CAPSLOCK_MODULE_SUM = (
-    "h1:eS3/PLl++R96+Ub8b7uIDgCWzQh8CsY1CzVQbnt+Vhs="  # pragma: allowlist secret
-)
-
-#: SHA256 of the repository's LICENSE file at ``CAPSLOCK_COMMIT``.
+#: SHA256 of the repository's LICENSE file at ``CAPSLOCK_COMMIT``, which is also the
+#: LICENSE file in the module zip ``CAPSLOCK_MODULE_SUM`` pins (read again from the
+#: verified module on 2026-11-26: the same digest).
 CAPSLOCK_LICENSE_SHA256 = "83d0dc0dba8549e6678aafaaf0ce4f3b2a1c6a4239b46a1a8ad16d2a68381031"  # pragma: allowlist secret
 
 #: The upstream license, as the register records it: read from the LICENSE file
@@ -170,13 +210,8 @@ CAPSLOCK_LICENSE_SHA256 = "83d0dc0dba8549e6678aafaaf0ce4f3b2a1c6a4239b46a1a8ad16
 LICENSE_CITATION = (
     "BSD-3-Clause (source: the LICENSE file of github.com/google/capslock at "
     f"{CAPSLOCK_VERSION}, commit {CAPSLOCK_COMMIT[:7]}, sha256 "
-    f"{CAPSLOCK_LICENSE_SHA256}, read 2026-11-26; ASH installs and "
-    "redistributes nothing)"
-)
-
-#: The install command a user runs; Capslock has no release assets.
-INSTALL_COMMAND = (
-    f"go install github.com/google/capslock/cmd/capslock@{CAPSLOCK_VERSION}"
+    f"{CAPSLOCK_LICENSE_SHA256}, read 2026-11-26; ASH builds the pinned module "
+    "with go install at install time and redistributes nothing)"
 )
 
 #: Directories never searched for a ``go.mod``.
@@ -212,13 +247,8 @@ CAPSLOCK_SEVERITY = "INFO"
 #: SARIF level that agrees with ``CAPSLOCK_SEVERITY``.
 CAPSLOCK_LEVEL = "none"
 
-#: Why every cell the tool's own output would settle is UNCONFIRMED.
-_NO_CAPTURE = (
-    "no report from a real Capslock run has been read: the fields are read from "
-    "proto/capability.proto and analyzer/analyzer.go at v0.3.4, and the fixtures "
-    "in tests/test_data/scanners/capslock/schema_derived are written from them; a "
-    "captured -output=json run settles the cell"
-)
+#: The tool name and URL every report carries.
+_DRIVER = {"name": "Capslock", "informationUri": "https://github.com/google/capslock"}
 
 
 def capability_name(raw: Any) -> str:
@@ -449,6 +479,19 @@ def convert_capslock_output(
     return results
 
 
+def capslock_sarif_document(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The SARIF document a scan returns for *results*, before the invocation is added.
+
+    One run with the Capslock driver; the committed corpus SARIF in
+    ``tests/test_data/scanners/capslock/captured`` is this document for the captured
+    reports, so a test can regenerate it.
+    """
+    return {
+        "version": "2.1.0",
+        "runs": [{"tool": {"driver": dict(_DRIVER)}, "results": list(results)}],
+    }
+
+
 class CapslockScannerConfigOptions(ScannerOptionsBase):
     """Capslock has no options of its own; the base options (timeout, ...) apply."""
 
@@ -471,46 +514,47 @@ class CapslockScanner(ScannerPluginBase[CapslockScannerConfig]):
     # 0 is the only status of a completed run; 2 is any error (see docstring).
     success_exit_codes: ClassVar[Set[int]] = {0}
     # The strict default: no network, baseline environment only. Module download
-    # for uncached dependencies is therefore unavailable; see "Offline".
+    # for uncached dependencies is therefore unavailable; see "Offline". The go
+    # command's own grant is the also_runs block around the spawn in scan(), not a
+    # declaration here; see "Sandbox".
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
 
-    #: The facets register row (base/scanner_facets.py). Declaration only. No
-    #: Capslock binary has been run for this plugin: the module cannot be fetched
-    #: and built on the hosts that validated it, so every cell the tool's own
-    #: output would settle is UNCONFIRMED, with the field the adapter reads named
-    #: in its reason. The cells that cannot exist are N/A, from the report's
-    #: schema (proto/capability.proto at v0.3.4).
+    #: The facets register row (base/scanner_facets.py). Declaration only. Native
+    #: fields name Capslock's own JSON (-output=json at v0.3.4); the corpus is the
+    #: captured runs in tests/test_data/scanners/capslock/captured/ and the SARIF the
+    #: converter writes from them (a regeneration test keeps the two in step).
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
-            state=FacetState.UNCONFIRMED,
-            reason=_NO_CAPTURE + " (candidate field: capabilityInfo[].capabilityName, "
-            "written as the ruleId CAPSLOCK-<NAME>)",
+            state=FacetState.MAPPED,
+            native_field='capabilityInfo[] "capabilityName" (FILES, NETWORK, EXEC, '
+            "...), written as the ruleId CAPSLOCK-<NAME>",
         ),
         severity=FacetDecl(
-            state=FacetState.UNCONFIRMED,
-            reason=_NO_CAPTURE + " (no native severity: the adapter writes INFO for "
-            "every capability, SARIF level none)",
+            state=FacetState.MAPPED,
+            native_field="(none in Capslock's JSON) the constant INFO the adapter "
+            'writes as properties "issue_severity", with SARIF level none',
         ),
         file_path=FacetDecl(
-            state=FacetState.UNCONFIRMED,
-            reason=_NO_CAPTURE + " (candidate field: capabilityInfo[].path[1].site."
-            "filename, a base name, joined to the directory of packageDir under the "
-            "module path; go.mod when there is no such site)",
+            state=FacetState.MAPPED,
+            native_field='capabilityInfo[] "path"[1] "site" "filename" (a base '
+            'name), joined to the directory of "packageDir" under the module path '
+            "the go.mod declares; the module's go.mod when the second step has no "
+            "site (a one-step path, or a closure the function creates)",
         ),
         line_range=FacetDecl(
-            state=FacetState.UNCONFIRMED,
-            reason=_NO_CAPTURE + " (candidate field: capabilityInfo[].path[1].site."
-            "line, a start line only)",
+            state=FacetState.MAPPED,
+            native_field='capabilityInfo[] "path"[1] "site" "line" (a string); a '
+            "start line only",
         ),
         column=FacetDecl(
-            state=FacetState.UNCONFIRMED,
-            reason=_NO_CAPTURE + " (candidate field: capabilityInfo[].path[1].site."
-            "column)",
+            state=FacetState.MAPPED,
+            native_field='capabilityInfo[] "path"[1] "site" "column" (a string): the '
+            "column of the call's opening parenthesis",
         ),
         message=FacetDecl(
-            state=FacetState.UNCONFIRMED,
-            reason=_NO_CAPTURE + " (candidate fields: capabilityInfo[] packageDir, "
-            "capabilityName, capabilityType and depPath, assembled into one sentence)",
+            state=FacetState.MAPPED,
+            native_field='capabilityInfo[] "packageDir", "capabilityName", '
+            '"capabilityType" and "depPath", assembled into one sentence',
         ),
         resource_id=FacetDecl(
             state=FacetState.NA,
@@ -523,22 +567,23 @@ class CapslockScanner(ScannerPluginBase[CapslockScannerConfig]):
             "site, not a deployable resource",
         ),
         package_name=FacetDecl(
-            state=FacetState.UNCONFIRMED,
-            reason=_NO_CAPTURE + " (candidate field: capabilityInfo[].packageName, "
-            "the reporting package's short name; the adapter keeps the import path "
-            "in the result property capslock_package, which the flat row does not "
-            "read as a package name)",
+            state=FacetState.NA,
+            reason='capabilityInfo[] "packageName" is the short name of the '
+            "scanned tree's own Go package, a location (the adapter writes its "
+            "import path into the file path and capslock_package), not a dependency "
+            "package",
         ),
         package_version=FacetDecl(
             state=FacetState.NA,
             reason="a capabilityInfo entry carries no version; the report's "
-            "moduleInfo versions are not tied to an entry",
+            "moduleInfo list (dependency modules and their versions, present in the "
+            "captured dependency run) is not tied to an entry",
         ),
         package_path=FacetDecl(
-            state=FacetState.UNCONFIRMED,
-            reason=_NO_CAPTURE + " (candidate field: capabilityInfo[].packageDir, "
-            "the reporting package's import path, which the adapter uses for the "
-            "location and capslock_package, not for a package path)",
+            state=FacetState.NA,
+            reason='capabilityInfo[] "packageDir" is the import path of the scanned '
+            "tree's own Go package, which the adapter uses for the location and "
+            "capslock_package; it names no dependency package",
         ),
         taxonomy_cve=FacetDecl(
             state=FacetState.NA,
@@ -571,15 +616,15 @@ class CapslockScanner(ScannerPluginBase[CapslockScannerConfig]):
             reason="the report schema has no reference links",
         ),
         tags=FacetDecl(
-            state=FacetState.UNCONFIRMED,
-            reason=_NO_CAPTURE + " (no native tags: the adapter writes the result "
-            'property "tags" as capability, go)',
+            state=FacetState.MAPPED,
+            native_field="(none in Capslock's JSON) the constant tags capability and "
+            'go the adapter writes as properties "tags"',
         ),
         extras=FacetDecl(
-            state=FacetState.UNCONFIRMED,
-            reason=_NO_CAPTURE + " (candidate fields: result properties "
-            '"capslock_capability", "capslock_package" and "capslock_type", from '
-            "capabilityName, packageDir and capabilityType)",
+            state=FacetState.MAPPED,
+            native_field='result properties "capslock_capability", "capslock_package" '
+            'and "capslock_type", from "capabilityName", "packageDir" and '
+            '"capabilityType"',
         ),
     )
 
@@ -631,9 +676,11 @@ class CapslockScanner(ScannerPluginBase[CapslockScannerConfig]):
             runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
-                note="Capslock publishes no release assets; the user installs the "
-                "pinned module with go install (INSTALL_COMMAND), so ASH provisions "
-                "nothing",
+                note="Capslock publishes no release assets; the plugin's own "
+                "installer (capslock_install.py) builds the pinned module with the "
+                "Go toolchain on PATH, on linux, darwin and windows, amd64 and "
+                "arm64, not from the shared tool_downloads table, so the register "
+                "lists none",
             ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.CONSTANT,
@@ -670,11 +717,15 @@ class CapslockScanner(ScannerPluginBase[CapslockScannerConfig]):
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.MANIFEST,),
                 note="a go.mod per module, with its dependencies in the module "
-                "cache or a vendor directory, and a Go toolchain on PATH",
-                unconfirmed="no run inside ASH's strict sandbox has been measured: "
-                "go list reads GOROOT and the module cache and writes its build "
-                "cache, and whether the baseline environment allows all three is "
-                "not known",
+                "cache (written by go mod download) or a vendor directory, and a Go "
+                "toolchain on PATH. Measured under --sandbox bwrap and landlock "
+                "(2026-11-26): GOROOT is readable through the go grant and the build "
+                "cache is written in the private home, so a standard-library or "
+                "vendored module completes; the module cache is readable only when "
+                "the operator lists it in sandbox.extra_read_paths with GOMODCACHE "
+                "in sandbox.environment, and a module whose dependencies are only "
+                "there exits 2 without that grant",
+                unconfirmed="firejail and macOS sandbox-exec runs were not measured",
             ),
         )
     )
@@ -692,6 +743,16 @@ class CapslockScanner(ScannerPluginBase[CapslockScannerConfig]):
             extra_args=[],
         )
         super().model_post_init(context)
+
+    @model_validator(mode="after")
+    def setup_custom_install_commands(self) -> "CapslockScanner":
+        """Build the pinned module with go install (``capslock_install.py``).
+
+        The table is module-local: ``utils/tool_downloads.py`` has no Capslock entry,
+        because Capslock has no release asset to download. It never raises.
+        """
+        self.custom_install_commands.update(capslock_install_commands())
+        return self
 
     def _execute_scan(
         self, target: Any, target_type: Any, global_ignore_paths: Any
@@ -805,15 +866,20 @@ class CapslockScanner(ScannerPluginBase[CapslockScannerConfig]):
             report = self._empty_report()
             merged: List[Dict[str, Any]] = []
             for module_dir in modules:
-                response = self._run_subprocess(
-                    command=argv,
-                    results_dir=results_dir,
-                    cwd=module_dir,
-                    stdout_preference="return",
-                    stderr_preference="both",
-                    env=self._subprocess_env(),
-                    timeout=timeout,
-                )
+                # Capslock runs the go command to load the packages, so a sandboxed
+                # spawn grants go's directory and GOROOT as it grants capslock's own
+                # (see "Sandbox" in the module docstring). Outside a sandbox the
+                # grant changes nothing.
+                with also_runs("go"):
+                    response = self._run_subprocess(
+                        command=argv,
+                        results_dir=results_dir,
+                        cwd=module_dir,
+                        stdout_preference="return",
+                        stderr_preference="both",
+                        env=self._subprocess_env(),
+                        timeout=timeout,
+                    )
                 response = response if isinstance(response, dict) else {}
                 if response.get("timed_out"):
                     self._post_scan(target=target, target_type=target_type)
@@ -852,22 +918,7 @@ class CapslockScanner(ScannerPluginBase[CapslockScannerConfig]):
                     ) from bad
             self._post_scan(target=target, target_type=target_type)
 
-            report = SarifReport.model_validate(
-                {
-                    "version": "2.1.0",
-                    "runs": [
-                        {
-                            "tool": {
-                                "driver": {
-                                    "name": "Capslock",
-                                    "informationUri": "https://github.com/google/capslock",
-                                }
-                            },
-                            "results": merged,
-                        }
-                    ],
-                }
-            )
+            report = SarifReport.model_validate(capslock_sarif_document(merged))
             self._inject_invocation(report, argv, target)
             return report
         except ScannerError:
@@ -899,9 +950,11 @@ class CapslockScanner(ScannerPluginBase[CapslockScannerConfig]):
         found = find_executable(self.command or "capslock")
         if not found:
             ASH_LOGGER.warning(
-                "capslock executable not found in PATH. ASH does not install it "
-                f"(Capslock publishes no releases); run `{INSTALL_COMMAND}` and "
-                "make sure the Go bin directory is on PATH."
+                "capslock executable not found in the ASH bin directory or on PATH. "
+                "`ash dependencies install --tool capslock` builds the pinned "
+                f"{CAPSLOCK_VERSION} with the Go toolchain on PATH (Go 1.26 or "
+                f"later); or run `{INSTALL_COMMAND}` and put the Go bin directory "
+                "on PATH."
             )
         return found is not None
 
@@ -920,6 +973,7 @@ __all__ = [
     "INSTALL_COMMAND",
     "LICENSE_CITATION",
     "capability_name",
+    "capslock_sarif_document",
     "convert_capslock_output",
     "find_go_modules",
     "package_directory",
