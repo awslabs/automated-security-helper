@@ -25,6 +25,7 @@ from typing import Any, Iterable, List, Sequence
 
 import polars as pl
 
+from automated_security_helper.utils.frame_ops import ordered_counts, stable_top
 from automated_security_helper.utils.frame_text import ranks, unwire, wire
 
 
@@ -82,11 +83,7 @@ def flag_total(frame: pl.DataFrame, flag: str) -> int:
 
 def active_level_counts(frame: pl.DataFrame) -> List[tuple[str, int]]:
     """``(level, count)`` for the unsuppressed rows, levels in first-seen order."""
-    counted = (
-        frame.filter(~pl.col("is_suppressed"))
-        .group_by("level", maintain_order=True)
-        .len()
-    )
+    counted = ordered_counts(frame.filter(~pl.col("is_suppressed")), "level")
     return [(level, int(count)) for level, count in counted.iter_rows()]
 
 
@@ -99,16 +96,10 @@ def top_locations(locations: Iterable[str], limit: int | None) -> List[tuple[str
     """
     if limit is not None and limit <= 0:
         return []
-    ranked = (
-        pl.DataFrame(
-            {"location": pl.Series([wire(item) for item in locations], dtype=pl.String)}
-        )
-        .group_by("location", maintain_order=True)
-        .len()
-        .sort("len", descending=True, maintain_order=True)
+    found = pl.DataFrame(
+        {"location": pl.Series([wire(item) for item in locations], dtype=pl.String)}
     )
-    if limit is not None:
-        ranked = ranked.head(limit)
+    ranked = stable_top(ordered_counts(found, "location"), "n", limit, descending=True)
     return [(unwire(location), int(count)) for location, count in ranked.iter_rows()]
 
 

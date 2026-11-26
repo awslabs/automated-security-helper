@@ -88,6 +88,10 @@ LOCATION_CASES = {
         BMP_ABOVE,
     ],
     "surrogate inside a path": [f"src/{LONE_SURROGATE}.py", "src/ok.py"] * 2,
+    # Large enough that an unstable sort has room to reorder equal counts.
+    "thousands of distinct locations tie": [f"f{i}.py" for i in range(5000)],
+    "thousands tie on two counts": [f"g{i % 3000}.py" for i in range(3000)]
+    + [f"g{i}.py" for i in range(0, 3000, 2)],
 }
 
 LIMITS = [None, 0, -1, 1, 2, 3, 6, 7, 8, 10**6]
