@@ -1476,7 +1476,11 @@ def load_config_file(
     document is filled from them before the model is built. ``filled_out``, when
     given, is extended with each of them that was read, at the place the fill
     read it (``environment_record.fill_environment_references``), for the record
-    of the configuration (``load_config_file_for_run``).
+    of the configuration (``load_config_file_for_run``). Each file of the chain
+    is filled on its own, and what the fill read in it is recorded on the
+    returned document (``ResolvedConfigDocument.filled_references``), by the
+    path ``documents`` names the file by: the client rules take a leaf holding
+    such a value as the operator's own.
 
     Raises:
         ASHConfigSourceError: The chain does not resolve. The message reads
@@ -1524,10 +1528,21 @@ def load_config_file(
         )
 
         data = fill_environment_references(data, fill, placed=filled_out)
-        document.documents = {
-            path: fill_environment_references(text, fill)
-            for path, text in document.documents.items()
-        }
+        # What the fill read in each file, at the place the file holds it and
+        # stamped with the file by the key ``documents`` names it with: the
+        # client rules take a leaf there as the operator's own reference.
+        filled_documents: Dict[Path, Any] = {}
+        filled_references: Dict[Path, Tuple[Any, ...]] = {}
+        for path, text in document.documents.items():
+            placed: List[Any] = []
+            filled_documents[path] = fill_environment_references(
+                text, fill, placed=placed
+            )
+            filled_references[path] = tuple(
+                reference.read_in(path) for reference in placed
+            )
+        document.documents = filled_documents
+        document.filled_references = filled_references
     if overlay is not None and isinstance(data, dict):
         # A document that is not a mapping is left as it is, so its validation
         # error is still raised rather than replaced by the overlay's content.
@@ -2122,9 +2137,11 @@ def resolve_config(
                     permit_base=permit_base,
                 ).environment_references
             )
-    # The selected chain's per-file documents and names, for the client rules.
+    # The selected chain's per-file documents and names, and what the fill read
+    # in each, for the client rules.
     client_documents: Dict[Path, Any] = {}
     client_names: Dict[Path, Tuple[Path, ...]] = {}
+    client_filled: Dict[Path, Tuple[Any, ...]] = {}
     # What the repository's files write for the options only the operator sets
     # is left out as the chain is read, before the model validates it
     # (config/operator_only_options.py). A file inside ANY checkout is the
@@ -2185,6 +2202,7 @@ def resolve_config(
         anchor_paths=None if untrusted_config else operators_files,
         documents_out=client_documents,
         names_out=client_names,
+        filled_references_out=client_filled,
         expect=expect,
     )
     # The ASH_CONFIG slice of the files read: the one load's own chain, or
@@ -2402,6 +2420,7 @@ def resolve_config(
         all_delivered=untrusted_config,
         client_overrides=client_overrides,
         names=client_names,
+        filled=client_filled,
     )
 
     # Which tool paths in the configuration the operator named, recorded on the
@@ -5044,6 +5063,7 @@ def _resolve_config(
     anchor_paths: Optional[AnchorPaths] = None,
     documents_out: Optional[Dict[Path, Any]] = None,
     names_out: Optional[Dict[Path, Tuple[Path, ...]]] = None,
+    filled_references_out: Optional[Dict[Path, Tuple[Any, ...]]] = None,
     expect: Optional[FileIdentity] = None,
 ) -> AshConfig:
     """resolve_config without the sandbox confinement.
@@ -5073,7 +5093,9 @@ def _resolve_config(
     (``config/operator_paths.py``); it rides into the selected chain's load.
     ``documents_out`` and ``names_out``
     receive the selected chain's per-file documents and the paths each file
-    was reached by, for the client config rules.
+    was reached by, and ``filled_references_out`` the references the fill read
+    in each (``ResolvedConfigDocument.filled_references``), for the client
+    config rules.
     """
 
     def overlaid_fallback(
@@ -5420,6 +5442,8 @@ def _resolve_config(
                 documents_out.update(document.documents)
             if names_out is not None:
                 names_out.update(document.names)
+            if filled_references_out is not None:
+                filled_references_out.update(document.filled_references)
             config._loaded_from = config_path
             if named is not None:
                 named.append(config_path)

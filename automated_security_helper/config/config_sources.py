@@ -3016,6 +3016,19 @@ class ResolvedConfigDocument:
     reference_places: Dict[Tuple[Any, ...], List[Tuple[Any, ...]]] = field(
         default_factory=dict
     )
+    #: What a load that filled the files of ``documents`` from the operator's
+    #: profile read in each (``load_config_file``'s ``fill``: the copy of a
+    #: profile a client patched holds each value the profile read from the
+    #: environment as its reference text), by the path ``documents`` names the
+    #: file by. Each reference is at the place the document holds it, and stamped
+    #: with that file (``EnvironmentReference.read_in``), so the document is the
+    #: one that holds the operator's value there. A file the fill read nothing
+    #: in has an empty entry; a load that filled nothing records none. The
+    #: client rules take a leaf holding such a value as the operator's own
+    #: (``runtime_patch.config_document_denials``).
+    filled_references: Dict[Path, Tuple[EnvironmentReference, ...]] = field(
+        default_factory=dict
+    )
 
     def shown_path(self, path: Path) -> str:
         """How a message names ``path``, a file of ``chain``: as
