@@ -1,0 +1,192 @@
+{
+	"$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+	"version": "2.1.0",
+	"runs": [
+		{
+			"tool": {
+				"driver": {
+					"name": "KICS",
+					"version": "2.1.20",
+					"fullName": "Keeping Infrastructure as Code Secure",
+					"informationUri": "https://www.kics.io/",
+					"rules": []
+				}
+			},
+			"results": [],
+			"taxonomies": [
+				{
+					"guid": "58cdcc6f-fe41-4724-bfb3-131a93df4c3f",
+					"name": "Categories",
+					"fullDescription": {
+						"text": "This taxonomy contains the types an issue can assume"
+					},
+					"shortDescription": {
+						"text": "Vulnerabilities categories"
+					},
+					"taxa": [
+						{
+							"name": "Undefined Category",
+							"id": "CAT000",
+							"shortDescription": {
+								"text": "Category is not defined"
+							},
+							"fullDescription": {
+								"text": "Category is not defined"
+							}
+						},
+						{
+							"name": "Bill Of Materials",
+							"id": "CAT015",
+							"shortDescription": {
+								"text": "List of resources provisioned"
+							},
+							"fullDescription": {
+								"text": "List of resources provisioned"
+							}
+						},
+						{
+							"name": "Backup",
+							"id": "CAT003",
+							"shortDescription": {
+								"text": "Survivability and Recovery"
+							},
+							"fullDescription": {
+								"text": "Survivability and Recovery"
+							}
+						},
+						{
+							"name": "Secret Management",
+							"id": "CAT012",
+							"shortDescription": {
+								"text": "Secret and Key management"
+							},
+							"fullDescription": {
+								"text": "Secret and Key management"
+							}
+						},
+						{
+							"name": "Supply-Chain",
+							"id": "CAT013",
+							"shortDescription": {
+								"text": "Dependency version management"
+							},
+							"fullDescription": {
+								"text": "Dependency version management"
+							}
+						},
+						{
+							"name": "Access Control",
+							"id": "CAT001",
+							"shortDescription": {
+								"text": "Service permission and identity management"
+							},
+							"fullDescription": {
+								"text": "Service permission and identity management"
+							}
+						},
+						{
+							"name": "Availability",
+							"id": "CAT002",
+							"shortDescription": {
+								"text": "Reliability and Scalability"
+							},
+							"fullDescription": {
+								"text": "Reliability and Scalability"
+							}
+						},
+						{
+							"name": "Best Practices",
+							"id": "CAT004",
+							"shortDescription": {
+								"text": "Metadata management"
+							},
+							"fullDescription": {
+								"text": "Metadata management"
+							}
+						},
+						{
+							"name": "Encryption",
+							"id": "CAT006",
+							"shortDescription": {
+								"text": "Data Security and Encryption configuration"
+							},
+							"fullDescription": {
+								"text": "Data Security and Encryption configuration"
+							}
+						},
+						{
+							"name": "Observability",
+							"id": "CAT010",
+							"shortDescription": {
+								"text": "Logging and Monitoring"
+							},
+							"fullDescription": {
+								"text": "Logging and Monitoring"
+							}
+						},
+						{
+							"name": "Build Process",
+							"id": "CAT005",
+							"shortDescription": {
+								"text": "Insecure configurations when building/deploying"
+							},
+							"fullDescription": {
+								"text": "Insecure configurations when building/deploying"
+							}
+						},
+						{
+							"name": "Insecure Configurations",
+							"id": "CAT007",
+							"shortDescription": {
+								"text": "Configurations which expose the application unnecessarily"
+							},
+							"fullDescription": {
+								"text": "Configurations which expose the application unnecessarily"
+							}
+						},
+						{
+							"name": "Insecure Defaults",
+							"id": "CAT008",
+							"shortDescription": {
+								"text": "Configurations that are insecure by default"
+							},
+							"fullDescription": {
+								"text": "Configurations that are insecure by default"
+							}
+						},
+						{
+							"name": "Resource Management",
+							"id": "CAT011",
+							"shortDescription": {
+								"text": "Resource and privilege limit configuration"
+							},
+							"fullDescription": {
+								"text": "Resource and privilege limit configuration"
+							}
+						},
+						{
+							"name": "Networking and Firewall",
+							"id": "CAT009",
+							"shortDescription": {
+								"text": "Network port exposure and firewall configuration"
+							},
+							"fullDescription": {
+								"text": "Network port exposure and firewall configuration"
+							}
+						},
+						{
+							"name": "Structure and Semantics",
+							"id": "CAT014",
+							"shortDescription": {
+								"text": "Malformed document structure or inadequate semantics"
+							},
+							"fullDescription": {
+								"text": "Malformed document structure or inadequate semantics"
+							}
+						}
+					]
+				}
+			]
+		}
+	]
+}

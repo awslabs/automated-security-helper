@@ -314,3 +314,7 @@ $RECYCLE.BIN/
 # whose core_pattern is a bare "core". core.[0-9]* rather than core.*, which would
 # also hide a new core.py or core.json.
 core.[0-9]*
+
+# Scanner build-out lanes keep their draft PR-body notes here; the notes are
+# working scratch written on developer hosts and never belong in the tree.
+.scanner-pr-body/

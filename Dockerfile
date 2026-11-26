@@ -604,6 +604,20 @@ ARG BETTERLEAKS_VERSION="v1.10.1"
 RUN with-retry 'install-pinned-tool betterleaks -b /usr/local/bin'
 RUN betterleaks --version
 
+# gosec, the alpha Go SAST scanner's tool, from its pinned release asset (an
+# archive, like gitleaks). Apache-2.0; its entry in THIRD_PARTY_LICENSES installs
+# the archive's LICENSE.txt under ${ASH_THIRD_PARTY_DIR}/gosec.
+ARG GOSEC_VERSION="v2.30.0"
+RUN with-retry 'install-pinned-tool gosec -b /usr/local/bin'
+RUN gosec --version
+
+# kingfisher, the alpha secret scanner from MongoDB, from its pinned release asset.
+# Apache-2.0; its entry installs the repository LICENSE at the pinned commit plus
+# the archive's NOTICE files under ${ASH_THIRD_PARTY_DIR}/kingfisher.
+ARG KINGFISHER_VERSION="v2.19.1"
+RUN with-retry 'install-pinned-tool kingfisher -b /usr/local/bin'
+RUN kingfisher --version
+
 # cfn-guard, a builtin scanner, and the AWS Guard Rules Registry it evaluates
 # templates against. The binary comes from its pinned release asset like the tools
 # above. The rules archive is pinned the same way (RULES_BUNDLES in
@@ -713,7 +727,7 @@ ENV _ASH_EXEC_MODE="local"
 # (GuardDog's uv tool among them) are installed and pinned too, and the image carries
 # them; a scan in the image still loads a module only when it is listed. trivy-repo,
 # snyk and ferret are not in the list: their tools come another way.
-ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
+ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_ggshield_plugins,automated_security_helper.plugin_modules.ash_gosec_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins,automated_security_helper.plugin_modules.ash_kingfisher_plugins,automated_security_helper.plugin_modules.ash_polaris_plugins"
 # The pre-rename name of the build argument, honored until ASH 3.9.0: a value given
 # for it, an explicitly empty one included, wins over ASH_ALPHA_PLUGIN_MODULES below.
 # The default is a sentinel because an empty-string default cannot tell "not given"
@@ -739,7 +753,7 @@ ENV PATH="${ASH_BIN_PATH}:$PATH"
 # The Python tools' license files, read from each installed wheel's dist-info and,
 # for semgrep, whose wheel carries none, fetched from its repository at the pinned
 # commit and checked against their SHA256.
-RUN with-retry 'install-pinned-tool --licenses-only bandit cfn-lint checkov guarddog semgrep zizmor'
+RUN with-retry 'install-pinned-tool --licenses-only bandit cfn-lint checkov ggshield guarddog polaris semgrep zizmor'
 
 # zizmor (builtin scanner) is installed by the line above through `uv tool install`
 # within ZIZMOR_DEFAULT_VERSION_CONSTRAINT; this fails the build if it was not.
@@ -753,6 +767,25 @@ RUN zizmor --version
 # of the first scan that enables the scanner.
 #
 RUN guarddog --version
+
+#
+# ggshield (alpha scanner). Installed by `ash dependencies install` above through
+# uv, pinned by --uv-tool-pins to its license entry's version (1.56.1). Checked
+# here so a failed install fails the build instead of the first scan that enables
+# the scanner. A version query takes no API key. CredSweeper is NOT in the image:
+# its 1.19.7 wheel depends on pyjks, whose twofish 0.3.0 dependency is an
+# sdist-only C extension, and this image carries no compiler (measured: the
+# install fails at `error: [Errno 2] No such file or directory: 'gcc'`).
+#
+RUN ggshield --version
+
+#
+# Polaris (alpha scanner). Installed by `ash dependencies install` above through
+# its module-local pinned installer (polaris_install.py: version, per-platform
+# assets, archive and executable digests). `polaris --version` is an unknown
+# flag; `polaris version` is the version query.
+#
+RUN polaris version
 
 #
 # Every bundled third-party tool has its license files, they match their pins, and
@@ -874,7 +907,7 @@ ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 # Python tools are installed again here and would otherwise float. The same alpha
 # modules are loaded for it; an ARG does not reach a stage built FROM another, so it
 # is declared again (a unit test keeps the two equal).
-ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
+ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_ggshield_plugins,automated_security_helper.plugin_modules.ash_gosec_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins,automated_security_helper.plugin_modules.ash_kingfisher_plugins,automated_security_helper.plugin_modules.ash_polaris_plugins"
 # The pre-rename name of the build argument, honored until ASH 3.9.0: a value given
 # for it, an explicitly empty one included, wins over ASH_ALPHA_PLUGIN_MODULES below.
 # The default is a sentinel because an empty-string default cannot tell "not given"

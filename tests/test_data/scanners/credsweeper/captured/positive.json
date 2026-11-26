@@ -1,0 +1,23 @@
+[
+  {
+    "confidence": "moderate",
+    "line_data_list": [
+      {
+        "entropy": 3.6645,
+        "info": "",
+        "line": "c546bdae79126d8c8c86588eaa76705f0d26247b40dcad7aaa9f217394439d03",
+        "line_num": 2,
+        "path": "./app.py",
+        "value": "e2b8877fc7a8fbed7398cdc1ecc01cf0dfc0a2a68e8fef8d5aabd2746508837d",
+        "value_end": 26,
+        "value_start": 12,
+        "variable": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+        "variable_end": 8,
+        "variable_start": 0
+      }
+    ],
+    "ml_probability": 0.9999878406524658,
+    "rule": "Password",
+    "severity": "high"
+  }
+]

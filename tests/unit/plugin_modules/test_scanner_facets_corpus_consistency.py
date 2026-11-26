@@ -199,17 +199,40 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
         "cfn_nag", sarif=("captured/cfn_nag-0.8.10-*.sarif",), prep="cfn-nag"
     ),
     "checkov": CorpusSpec("checkov", sarif=("captured/*.sarif",), prep="checkov"),
+    "credsweeper": CorpusSpec(
+        "credsweeper",
+        missing="the committed captures are CredSweeper's native JSON "
+        "(captured/*.json); a prep through the scanner's converter is still "
+        "to author",
+    ),
+    # The committed captured/template-shaped.sarif is written to the adapter's
+    # shape, not captured from a dependency-check run, so it is not evidence of
+    # the tool (the snyk-code row's reasoning).
+    "dependency-check": CorpusSpec(
+        "dependency-check",
+        missing="no SARIF from a real dependency-check run is committed; "
+        "commit a capture under dependency-check/captured/ (the "
+        "template-shaped file beside it is authored to the adapter)",
+    ),
     "detect-secrets": CorpusSpec("detect_secrets", prep="detect-secrets"),
     "ferret-scan": CorpusSpec(
         "ferret-scan", sarif=("captured/*.sarif",), prep="ferret-scan"
     ),
+    "ggshield": CorpusSpec("ggshield", sarif=("captured/*.sarif",)),
     "gitleaks": CorpusSpec("gitleaks", sarif=("gitleaks-*.sarif",), prep="gitleaks"),
+    "gosec": CorpusSpec("gosec", sarif=("captured/*.sarif",)),
     "grype": CorpusSpec("grype", sarif=("captured/*.sarif",), prep="grype"),
     "guarddog": CorpusSpec("guarddog", prep="guarddog"),
     "hadolint": CorpusSpec("hadolint", sarif=("captured/*.sarif",)),
+    "kics": CorpusSpec("kics", sarif=("captured/*.sarif",)),
+    "kingfisher": CorpusSpec("kingfisher", sarif=("captured/*.sarif",)),
     "mcp-config": CorpusSpec("mcp_config", sarif=("captured/*.sarif",)),
     "npm-audit": CorpusSpec("npmaudit", prep="npm-audit"),
     "opengrep": CorpusSpec("opengrep", sarif=("captured/*.sarif",)),
+    # The committed SARIF is the converter's output for a REAL captured Polaris
+    # v10.2.6 run (captured/positive.json); a regeneration test keeps it honest.
+    "polaris": CorpusSpec("polaris", sarif=("captured/*.sarif",)),
+    "secretlint": CorpusSpec("secretlint", sarif=("captured/*.sarif",)),
     "semgrep": CorpusSpec("semgrep", sarif=("captured/*.sarif",)),
     # No corpus until a licensed `snyk code test --sarif` run is committed under
     # captured/: the authored file beside it is written to match the adapter, so
@@ -740,7 +763,7 @@ def test_the_gate_carries_no_waiver_but_the_register() -> None:
 def test_the_registry_and_the_corpus_table_agree() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
     names = {_name(cls) for cls in SCANNER_CLASSES}
-    assert len(SCANNER_CLASSES) == 23, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == 30, sorted(c.__name__ for c in SCANNER_CLASSES)
     assert names == set(CORPORA) == set(SCANNER_TOOL_TYPES), (
         f"registry {sorted(names)} / corpus table {sorted(CORPORA)}: a scanner "
         "needs a CORPORA row (a corpus, or None with the fixture to author)"

@@ -446,7 +446,13 @@ def test_a_mapped_resource_id_is_written_and_its_example_is_in_the_fixture(
 #: Empty since cfn-lint, cfn-nag, trivy and trivy-repo moved to MAPPED (their
 #: native-field example is read from the same fixtures by the must-attach rows
 #: above); the machinery stays for the next cell declared DROPPED.
-_DROPPED_FIXTURES: dict[str, tuple[str, str | None, str]] = {}
+_DROPPED_FIXTURES: dict[str, tuple[str, str | None, str]] = {
+    "KicsScanner": (
+        "kics/captured/positive.json",
+        "search_key",
+        "aws_s3_bucket[b].acl=public-read",
+    ),
+}
 
 
 def _values_under_key(node: Any, key: str) -> Iterator[Any]:

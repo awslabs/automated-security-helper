@@ -7,13 +7,21 @@ This section covers the alpha plugins for ASH: the opt-in scanner packages (`ash
 ### Security Scanners
 
 - **[Betterleaks Plugin](betterleaks-plugin.md)** (`ash_betterleaks_plugins`) - Secret detection with Betterleaks, the successor to gitleaks written by its author
+- **[CredSweeper Plugin](credsweeper-plugin.md)** (`ash_credsweeper_plugins`) - Credential detection with Samsung's CredSweeper
+- **[Dependency-Check Plugin](dependency_check-plugin.md)** (`ash_dependency_check_plugins`) - Dependency vulnerability analysis with OWASP Dependency-Check
 - **[Ferret Scan Plugin](ferret-scan-plugin.md)** - Integrates Ferret Scan for comprehensive sensitive data detection (credit cards, passports, SSNs, API keys, secrets, and more)
+- **[ggshield Plugin](ggshield-plugin.md)** (`ash_ggshield_plugins`) - Secret detection with GitGuardian's ggshield
+- **[gosec Plugin](gosec-plugin.md)** (`ash_gosec_plugins`) - Go source security analysis with gosec
 - **[GuardDog Plugin](guarddog-plugin.md)** (`ash_guarddog_plugins`) - Malicious-package heuristics for PyPI, npm, Go, GitHub Actions, RubyGems and crates packages (pending licensing review)
 - **[hadolint Plugin](hadolint-plugin.md)** (`ash_hadolint_plugins`) - Lints Dockerfiles and Containerfiles with hadolint and its ShellCheck integration (pending licensing review)
+- **[KICS Plugin](kics-plugin.md)** (`ash_kics_plugins`) - Infrastructure-as-code misconfiguration scanning with Checkmarx KICS
+- **[Kingfisher Plugin](kingfisher-plugin.md)** (`ash_kingfisher_plugins`) - Secret detection with MongoDB's Kingfisher
+- **[Polaris Plugin](polaris-plugin.md)** (`ash_polaris_plugins`) - Kubernetes manifest best-practice and security checks with Fairwinds Polaris
+- **[Secretlint Plugin](secretlint-plugin.md)** (`ash_secretlint_plugins`) - Secret detection with Secretlint
 - **[Snyk Code Plugin](snyk-plugin.md)** - Integrates Snyk Code for static application security testing (SAST) of source code vulnerabilities
 - **[Trivy Plugin](trivy-plugin.md)** - Integrates Aquasec's Trivy for vulnerability, misconfiguration, secret, and license scanning
 
-These six ship inside ASH. Each takes part in a scan only when that scan names its
+These fourteen ship inside ASH. Each takes part in a scan only when that scan names its
 plugin module in `ash_plugin_modules` or `--ash-plugin-modules`, as its page shows.
 The MCP `list_scanners` tool reports them either way; listing one does not add it to
 any scan.
