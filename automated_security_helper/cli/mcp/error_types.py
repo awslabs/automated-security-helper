@@ -137,6 +137,11 @@ class McpErrorType(str, Enum):
     # A client branches on these, so they are stable; the message is for a person.
     CLONE_URL_NOT_PERMITTED = "clone_url_not_permitted"
     CLONE_HOST_NOT_PERMITTED = "clone_host_not_permitted"
+    #: ``error_type`` of set_source_image's refusal of a reference whose
+    #: registry the operator did not list (``ASH_MCP_IMAGE_ALLOWED_REGISTRIES``):
+    #: the clone-host rule's image twin, since a scan of the ref makes the
+    #: server's own tools reach that registry with the server's credentials.
+    IMAGE_REGISTRY_NOT_PERMITTED = "image_registry_not_permitted"
     CLONE_REF_NOT_PERMITTED = "clone_ref_not_permitted"
     INVALID_CLONE_DEPTH = "invalid_clone_depth"
     GIT_CLONE_FAILED = "git_clone_failed"
