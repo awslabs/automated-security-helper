@@ -77,6 +77,18 @@ class TestConfigInit:
         assert gitignore_path.exists()
         assert "ash_output" in gitignore_path.read_text()
 
+    def test_init_at_the_canonical_root_creates_gitignore(self, tmp_path):
+        """The canonical ``.ash.yaml`` at the root also gets ``.ash/.gitignore``."""
+        config_path = tmp_path / ".ash.yaml"
+        result = runner.invoke(
+            config_app,
+            ["init", "--config", str(config_path)],
+        )
+        assert result.exit_code == 0
+        gitignore_path = tmp_path / ".ash" / ".gitignore"
+        assert gitignore_path.exists()
+        assert "ash_output" in gitignore_path.read_text()
+
 
 class TestConfigGet:
     """Tests for the config get command."""

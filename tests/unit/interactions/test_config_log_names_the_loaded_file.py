@@ -78,6 +78,8 @@ def test_a_discovered_config_is_named_once_it_has_loaded(tmp_path, scan):
 
     assert result.exit_code == 0, result.output
     assert record and all(".ash.yaml" in line for line in record), record
+    # The canonical file at the scan root, not a legacy .ash/.ash.yaml.
+    assert not any("/.ash/.ash.yaml" in line for line in record), record
 
 
 def test_a_named_config_is_named_once_it_has_loaded(tmp_path, scan):

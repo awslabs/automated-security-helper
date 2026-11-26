@@ -353,8 +353,9 @@ def test_the_suppression_config_is_found_from_the_scanned_directory(
     tmp_path, monkeypatch
 ):
     scanned = tmp_path / "project"
-    # The canonical config file sits at the root of the scanned directory.
-    config = scanned / ".ash.yaml"
+    # A name discovery reads but the no-config fallback never produces (that
+    # is .ash.yaml), so only a found file can give this answer.
+    config = scanned / ".ash.yml"
     config.parent.mkdir(parents=True)
     config.write_text("project_name: p\n", encoding="utf-8")
     elsewhere = tmp_path / "elsewhere"

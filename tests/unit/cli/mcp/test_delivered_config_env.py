@@ -307,15 +307,18 @@ def test_a_delivered_toml_config_is_refused_naming_the_key(_server):
     _assert_carries_no_probe(raw)
 
 
-def test_a_delivered_base_using_env_is_refused(_server):
-    """Legacy location: this test's subject is the deprecated .ash/.ash.yaml path.
-
-    The base sits beside the config in ``.ash/``, so the directory has to exist.
-    """
+@pytest.mark.parametrize(
+    "config_name,base_name",
+    [(".ash.yaml", "base.yaml"), (".ash/.ash.yaml", ".ash/base.yaml")],
+    ids=["canonical", "legacy-location"],
+)
+def test_a_delivered_base_using_env_is_refused(_server, config_name, base_name):
+    """The base sits beside the config, at the scan root or, for the deprecated
+    ``.ash/.ash.yaml`` location, inside ``.ash/``; both are refused."""
     source = _upload(
         {
-            ".ash/.ash.yaml": "extends: base.yaml\nfail_on_findings: false\n",
-            ".ash/base.yaml": TAGGED,
+            config_name: "extends: base.yaml\nfail_on_findings: false\n",
+            base_name: TAGGED,
         }
     )
 

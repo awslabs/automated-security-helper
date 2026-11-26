@@ -50,7 +50,7 @@ if os.name == "nt":
 
 #: An ignore path naming the file that is not UTF-8, in the YAML and JSON that read
 #: its escape as the surrogate, and a suppression whose reason holds one. The JSON
-#: form has no canonical location, so it stays at the legacy ``.ash/.ash.json``.
+#: form is the root ``.ash.json``, the JSON name discovery reads at the scan root.
 _REPO_CONFIGS: Dict[str, bytes] = {
     ".ash.yaml": (
         "global_settings:\n"
@@ -62,7 +62,7 @@ _REPO_CONFIGS: Dict[str, bytes] = {
         "      rule_id: 'SECRET-*'\n"
         '      reason: "caf\\udce9"\n'
     ).encode("utf-8"),
-    ".ash/.ash.json": (
+    ".ash.json": (
         '{"global_settings": {'
         '"ignore_paths": [{"path": "secr\\udce9t.py", "reason": "not scanned"}], '
         '"suppressions": [{"path": "other.py", "rule_id": "SECRET-*", '
@@ -74,7 +74,7 @@ _REPO_CONFIGS: Dict[str, bytes] = {
 #: nowhere else in a scan's output, so a refusal that quotes it shows.
 _PROJECT_NAMES: Dict[str, bytes] = {
     ".ash.yaml": 'project_name: "zq\\udce9xv"\n'.encode("utf-8"),
-    ".ash/.ash.json": '{"project_name": "zq\\udce9xv"}'.encode("utf-8"),
+    ".ash.json": '{"project_name": "zq\\udce9xv"}'.encode("utf-8"),
 }
 
 

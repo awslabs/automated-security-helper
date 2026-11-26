@@ -45,6 +45,13 @@ BROKEN = [
     pytest.param(".ash.json", '{"project_name": [' + f'"{CANARY}"' + "}", id="json"),
     pytest.param(".ashrc.toml", f'project_name = ["{CANARY}"\n', id="toml"),
     pytest.param("ashrc.yaml", b"project_name: \xff\xfe\n", id="not-utf8"),
+    # The deprecated location inside .ash/ is still discovered, so a broken file
+    # there is refused the same way.
+    pytest.param(
+        ".ash/.ash.yaml",
+        f"project_name: *{CANARY}\n",
+        id="legacy-location-yaml-alias",
+    ),
 ]
 
 

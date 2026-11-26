@@ -341,7 +341,7 @@ def test_a_base_the_tree_extends_does_not_choose_it_either(tmp_path, site):
     )
     _write(
         tmp_path / "repo" / ".ash.yaml",
-        {"project_name": "scanned", "extends": "../shared/base.yaml"},
+        {"project_name": "scanned", "extends": "shared/base.yaml"},
     )
 
     result = _scan(tmp_path, site)

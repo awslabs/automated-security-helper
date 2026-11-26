@@ -19,9 +19,14 @@ add a file, put the reason in the table; the table is the review point.
 
 What this checks
 ----------------
-* Every quoted spelling of ``.ash/.ash.yaml`` or ``.ash/ash.yaml`` (a string
-  literal, or a ``/ ".ash" / ".ash.yaml"`` path join) in a file under ``tests/``
-  belongs to a file in ``LEGACY_SUBJECT``.
+* Every quoted spelling of ``.ash/.ash.yaml``, ``.ash/ash.yaml`` or their ``.yml``
+  and ``.json`` forms in a file under ``tests/`` belongs to a file in
+  ``LEGACY_SUBJECT``. A spelling is a string literal that ends in the legacy path
+  (with any prefix, an f-string and a ``Path("...")`` argument included), or a
+  join of ``".ash"`` and the name with ``/`` or a comma, ``joinpath`` included.
+  A path built through a variable (``ash_dir = root / ".ash"; ash_dir / "ash.yaml"``)
+  cannot be seen by a text scan; tests of that shape say "Legacy location" in their
+  docstring when the legacy path is the subject.
 * Every ``LEGACY_SUBJECT`` entry still has such a spelling, so a file that was
   migrated does not stay on the list.
 * The scanner flags a planted fixture (must-flag) and passes the canonical
@@ -38,9 +43,14 @@ pytestmark = pytest.mark.unit
 TESTS = Path(__file__).resolve().parents[2]
 REPO = TESTS.parent
 
+_NAME = r"(?:\.ash|ash)\.(?:ya?ml|json)"
 LEGACY_SPELLING = re.compile(
-    r"""["']\.ash/(?:\.ash|ash)\.ya?ml["']"""
-    r"""|["']\.ash["']\s*/\s*["'](?:\.ash|ash)\.ya?ml["']"""
+    # A string literal that ends in the legacy path, whatever precedes it: a
+    # prefix such as "repo/", an f-string, a Path("/x/.ash/.ash.yaml") argument.
+    rf"""["'][^"'\n]*\.ash/{_NAME}["']"""
+    # A path join of the two parts: "x" / ".ash" / "ash.yaml", (".ash", "ash.yaml"),
+    # or .joinpath(".ash", ".ash.yaml").
+    rf"""|["']\.ash["']\s*[/,]\s*["']{_NAME}["']"""
 )
 
 #: Files whose fixtures may name a legacy location, and why.
@@ -70,6 +80,8 @@ LEGACY_SUBJECT = {
     "unit/core/test_repo_config_cannot_widen_sandbox.py": "symlink and .ash/ confinement cases of the legacy path",
     "unit/deploy/test_codecommit_gate_config_trust.py": "a pull request that still carries the deprecated location",
     "unit/docs/test_page_claims.py": "a config-validate case whose subject is the .ash directory",
+    "unit/cli/mcp/test_scan_directory_names_a_discovered_config.py": "a broken file at the deprecated location is refused like the rest",
+    "unit/interactions/test_config_log_names_the_loaded_file.py": "asserts the log names the canonical file and not the legacy path",
     "unit/interactions/test_container_config_reaches_the_scan.py": "an extends chain confined by the .ash/ directory",
     "unit/interactions/test_container_mount_containment.py": "a config in .ash/ may reach its parent",
     "unit/interactions/test_scan_config_load_failures.py": "the discovery matrix lists the legacy location beside the canonical ones",
@@ -104,6 +116,7 @@ def test_a_fixture_at_the_legacy_location_belongs_to_a_test_about_it() -> None:
 
 def test_no_script_writes_a_config_at_a_legacy_location() -> None:
     """The verification scripts write fixtures too; they write the canonical file."""
+    assert (REPO / "scripts").is_dir()
     found = _files_with_legacy_spelling(REPO / "scripts", Path(__file__).resolve())
     assert found == set(), (
         f"scripts that write a legacy config location: {sorted(found)}"
@@ -128,12 +141,24 @@ def test_the_scanner_flags_a_planted_fixture_and_passes_the_canonical_one(
         'path = root / ".ash" / ".ash.yaml"\n'
     )
     (tmp_path / "test_planted_no_dot.py").write_text("p = '.ash/ash.yml'\n")
+    (tmp_path / "test_planted_prefixed.py").write_text(
+        'a = "repo/.ash/.ash.yaml"\nb = Path("/zz/.ash/.ash.yaml")\n'
+        'c = f"/{key}/.ash/ash.yaml"\n'
+    )
+    (tmp_path / "test_planted_args.py").write_text(
+        'a = Path(".ash", ".ash.yaml")\nb = root.joinpath(".ash", "ash.yaml")\n'
+    )
+    (tmp_path / "test_planted_json.py").write_text('p = ".ash/.ash.json"\n')
     (tmp_path / "test_canonical.py").write_text(
-        'path = root / ".ash.yaml"\nname = "ash.yaml"\n'
+        'path = root / ".ash.yaml"\nname = "ash.yaml"\nj = root / ".ash.json"\n'
+        'prose = "see `.ash/.ash.yaml` for the old name"\n'
     )
     found = _files_with_legacy_spelling(tmp_path, tmp_path / "none.py")
     assert found == {
         "test_planted_string.py",
         "test_planted_join.py",
         "test_planted_no_dot.py",
+        "test_planted_prefixed.py",
+        "test_planted_args.py",
+        "test_planted_json.py",
     }

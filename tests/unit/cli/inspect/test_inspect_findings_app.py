@@ -146,7 +146,7 @@ class TestAppInitialization:
     def test_default_config_path(self, sample_findings, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         default = FindingsExplorerApp(sample_findings)
-        # A new config gets the name discovery treats as current, not .ash.yaml.
+        # A new config gets the canonical name, .ash.yaml.
         assert default.config_path == tmp_path / ASH_DEFAULT_CONFIG_FILE_NAME
 
     def test_suppress_dialog_uses_config_path(
@@ -1173,7 +1173,9 @@ class TestFindingsCommand:
 
         report_path = tmp_path / "report.json"
         report_path.write_text("{}")
-        config_path = tmp_path / ".ash.yaml"
+        # A name discovery reads but the no-config fallback never produces
+        # (that is .ash.yaml), so the path below can only come from discovery.
+        config_path = tmp_path / ".ash.yml"
         config_path.write_text("project_name: test")
         mock_model_cls.load_model.return_value = MagicMock()
         mock_extract.return_value = [{"rule_id": "TEST"}]

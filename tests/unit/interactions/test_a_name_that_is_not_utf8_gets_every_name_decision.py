@@ -155,8 +155,8 @@ def _repo_json(tmp_path: Path) -> Case:
     }
     # json.dumps would escape the backslash; the file holds the escape itself.
     text = json.dumps(document).replace("secr\\\\udce9t.py", "secr\\udce9t.py")
-    # The JSON form has no canonical location, so it stays at the legacy path.
-    return Case(files={".ash/.ash.json": text.encode("utf-8")}, args=[], control=ABSENT)
+    # The JSON form is the root .ash.json, the JSON name discovery reads at the root.
+    return Case(files={".ash.json": text.encode("utf-8")}, args=[], control=ABSENT)
 
 
 def _inline(tmp_path: Path) -> Case:

@@ -248,7 +248,7 @@ def test_a_file_named_so_keeps_the_results_file_and_both_files_findings(tmp_path
     assert _rules_for(findings, _ODD_RECORDED) == plain_rules, findings
 
 
-# The JSON form has no canonical location, so it stays at the legacy .ash/.ash.json.
+# The JSON form is the root .ash.json, the JSON name discovery reads at the root.
 _CONFIG_SHAPES = {
     "yaml-ignore-path": (
         b".ash.yaml",
@@ -258,7 +258,7 @@ _CONFIG_SHAPES = {
         ),
     ),
     "json-ignore-path": (
-        b".ash/.ash.json",
+        b".ash.json",
         (
             b'{"global_settings": {"ignore_paths": '
             b'[{"path": "secr\\udce9t.py", "reason": "x"}]}}\n'
