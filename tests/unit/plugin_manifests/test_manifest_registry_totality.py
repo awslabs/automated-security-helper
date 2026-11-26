@@ -40,6 +40,7 @@ from automated_security_helper.plugin_manifests import (
     scanner_manifests,
 )
 from automated_security_helper.plugin_modules import ash_builtin
+from tests.utils.scanner_enumeration import SHIPPED_SCANNER_COUNT
 
 pytestmark = pytest.mark.unit
 
@@ -97,8 +98,10 @@ def _resolve(ref: str) -> typing.Any:
 def test_the_enumeration_holds_every_shipped_scanner_and_manifest() -> None:
     """Planted controls: a shrunken universe fails here, not silently."""
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
-    assert len(SCANNER_CLASSES) == 23, sorted(c.__name__ for c in SCANNER_CLASSES)
-    assert len(MANIFESTS) == 23, sorted(m.name for m in MANIFESTS)
+    assert len(SCANNER_CLASSES) == SHIPPED_SCANNER_COUNT, sorted(
+        c.__name__ for c in SCANNER_CLASSES
+    )
+    assert len(MANIFESTS) == SHIPPED_SCANNER_COUNT, sorted(m.name for m in MANIFESTS)
     names = {m.name for m in MANIFESTS}
     assert {"cdk-nag", "semgrep", "opengrep", "trivy-repo", "snyk-code"} <= names
 

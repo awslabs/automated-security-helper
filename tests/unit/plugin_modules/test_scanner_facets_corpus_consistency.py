@@ -90,7 +90,7 @@ from automated_security_helper.models.flat_vulnerability import FlatVulnerabilit
 from automated_security_helper.schemas.sarif_schema_model import Result, SarifReport
 from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
 from automated_security_helper.utils.scanner_tool_types import _class_config_name
-from tests.utils.scanner_enumeration import load_scanner_universe
+from tests.utils.scanner_enumeration import SHIPPED_SCANNER_COUNT, load_scanner_universe
 
 pytestmark = pytest.mark.unit
 
@@ -785,7 +785,9 @@ def test_the_gate_carries_no_waiver_but_the_register() -> None:
 def test_the_registry_and_the_corpus_table_agree() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
     names = {_name(cls) for cls in SCANNER_CLASSES}
-    assert len(SCANNER_CLASSES) == 31, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == SHIPPED_SCANNER_COUNT, sorted(
+        c.__name__ for c in SCANNER_CLASSES
+    )
     assert names == set(CORPORA) == set(SCANNER_TOOL_TYPES), (
         f"registry {sorted(names)} / corpus table {sorted(CORPORA)}: a scanner "
         "needs a CORPORA row (a corpus, or None with the fixture to author)"

@@ -21,6 +21,15 @@ from typing import Any
 from automated_security_helper import plugin_modules
 from automated_security_helper.plugin_modules import ash_builtin
 
+#: How many scanners the in-repo plugin packages register, written out rather
+#: than derived from them. It is the planted control each register gate checks
+#: its enumeration against, so a walk that silently loses a plugin package fails
+#: instead of passing over a smaller universe. One number for every gate: while
+#: each gate kept its own copy, admissions bumped some copies and not others, and
+#: a gate whose copy was left behind failed at the tip. Admitting or removing a
+#: scanner changes this number and nothing else here.
+SHIPPED_SCANNER_COUNT = 32
+
 
 def registered_scanner_classes() -> list[type]:
     """Every scanner class the in-repo plugin packages register.

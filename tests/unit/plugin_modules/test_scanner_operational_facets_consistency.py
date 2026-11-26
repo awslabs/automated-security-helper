@@ -17,7 +17,9 @@ The sweep is pure construction and static reads: scanner instances are built
 with a mock context (no tool is run, no network is touched) and the fixtures
 are parsed, never scanned.
 
-Planted controls guard the enumerations: a count of 32, the exact set of
+Planted controls guard the enumerations: the shipped-scanner count every
+register gate shares (``SHIPPED_SCANNER_COUNT`` in
+tests/utils/scanner_enumeration.py), the exact set of
 scanner names against ``SCANNER_TOOL_TYPES``, and a classifier control for
 the output-format reader, because a sweep over a silently shrunken or
 mis-parsed universe would pass vacuously.
@@ -43,7 +45,7 @@ from automated_security_helper.core.enums import OfflineStrategy, ScannerToolTyp
 from automated_security_helper.utils import content_databases as cdb
 from automated_security_helper.utils import tool_downloads
 from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
-from tests.utils.scanner_enumeration import load_scanner_universe
+from tests.utils.scanner_enumeration import SHIPPED_SCANNER_COUNT, load_scanner_universe
 
 pytestmark = pytest.mark.unit
 
@@ -85,9 +87,11 @@ def _instances(_context) -> dict[type, ScannerPluginBase]:
 # ---------------------------------------------------------------------------
 
 
-def test_the_universe_is_the_thirty_two_shipped_scanners() -> None:
+def test_the_universe_is_every_shipped_scanner() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
-    assert len(SCANNER_CLASSES) == 32, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == SHIPPED_SCANNER_COUNT, sorted(
+        c.__name__ for c in SCANNER_CLASSES
+    )
     names = [_ops(cls).scanner_name for cls in SCANNER_CLASSES]
     assert len(set(names)) == len(names), f"duplicate scanner_name in {names}"
     assert set(names) == set(SCANNER_TOOL_TYPES), (

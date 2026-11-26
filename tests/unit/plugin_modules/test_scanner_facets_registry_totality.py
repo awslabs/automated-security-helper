@@ -41,7 +41,7 @@ from automated_security_helper.base.scanner_operational_facets import (
     ScannerOperationalFacets,
 )
 from automated_security_helper.core.enums import OfflineStrategy
-from tests.utils.scanner_enumeration import load_scanner_universe
+from tests.utils.scanner_enumeration import SHIPPED_SCANNER_COUNT, load_scanner_universe
 
 pytestmark = pytest.mark.unit
 
@@ -131,6 +131,8 @@ def test_no_registered_scanner_rests_on_the_unknown_offline_strategy(
     )
 
 
-def test_the_enumeration_holds_all_thirty_two_shipped_scanners() -> None:
+def test_the_enumeration_holds_every_shipped_scanner() -> None:
     """The planted-control count: a shrunken universe fails here, not silently."""
-    assert len(SCANNER_CLASSES) == 32, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == SHIPPED_SCANNER_COUNT, sorted(
+        c.__name__ for c in SCANNER_CLASSES
+    )

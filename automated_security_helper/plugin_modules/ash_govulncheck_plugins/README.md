@@ -30,7 +30,7 @@ It needs a Go toolchain on the machine, which ASH does not install: govulncheck 
 ash dependencies install --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_govulncheck_plugins]" --tool govulncheck
 ```
 
-Any `govulncheck` already on `PATH` is also used. Windows is not covered by the install command, and the ASH container image does not carry govulncheck, because it carries no Go toolchain.
+Any `govulncheck` already on `PATH` is also used. The install command covers Linux, macOS and Windows (x86_64 and arm64): ASH sets `GOBIN` in the environment it starts `go` with, so no shell is involved. The ASH container image does not carry govulncheck, because it carries no Go toolchain.
 
 ## Configuration
 

@@ -94,7 +94,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shlex
 import time
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
@@ -120,6 +119,9 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
+from automated_security_helper.plugin_modules.ash_govulncheck_plugins.govulncheck_install import (
+    install_command_args,
+)
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     Level,
@@ -165,6 +167,15 @@ MAX_MODULES = 200
 
 #: The clock the scan's time budget is measured on; a seam for tests.
 _now = time.monotonic
+
+#: Every platform and architecture the install command is declared for: the ones Go
+#: runs on in ASH's vocabulary. The command is an argv with no shell
+#: (govulncheck_install.py), so it is the same on each of them.
+INSTALL_PLATFORMS: Tuple[Tuple[str, str], ...] = tuple(
+    (target_platform, arch)
+    for target_platform in ("linux", "darwin", "windows")
+    for arch in ("amd64", "arm64")
+)
 
 #: Why a host without the Go toolchain cannot run the scan (see the docstring).
 GO_TOOLCHAIN_MISSING = (
@@ -381,8 +392,8 @@ class GovulncheckScanner(ScannerPluginBase[GovulncheckScannerConfig]):
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="ASH downloads no binary; the install command runs `go install` "
-                "of the pinned module version and needs a Go toolchain on linux or "
-                "darwin",
+                "of the pinned module version with no shell, on linux, darwin and "
+                "windows, and needs a Go toolchain there",
             ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.NATIVE,
@@ -465,7 +476,9 @@ class GovulncheckScanner(ScannerPluginBase[GovulncheckScannerConfig]):
         Needs a Go toolchain, which ASH does not install. Without one the scanner
         declares no command and is reported as having no install path here, so
         ``ash dependencies install`` does not fail for every other plugin.
-        Windows is not declared: the command sets GOBIN through the shell.
+        The command is an argv with no shell: ``govulncheck_install.py`` sets
+        ``GOBIN`` in the environment it starts ``go`` with, so the same command is
+        declared for every platform Go runs on (``INSTALL_PLATFORMS``).
         """
         declaring = install_story_is_declared()
         if not declaring and find_executable("go") is None:
@@ -477,20 +490,16 @@ class GovulncheckScanner(ScannerPluginBase[GovulncheckScannerConfig]):
             refusing_install_command(NO_BIN_DIRECTORY)
             if bin_dir is None
             else CustomCommand(
-                args=[
-                    f"GOBIN={shlex.quote(str(bin_dir))}",
-                    "go",
-                    "install",
-                    f"{GOVULNCHECK_PACKAGE}@{GOVULNCHECK_VERSION}",
-                ],
-                shell=True,
+                args=install_command_args(
+                    str(bin_dir), f"{GOVULNCHECK_PACKAGE}@{GOVULNCHECK_VERSION}"
+                ),
+                shell=False,
             )
         )
-        for target_platform in ("linux", "darwin"):
-            for arch in ("amd64", "arm64"):
-                self.custom_install_commands.setdefault(target_platform, {})[arch] = [
-                    command
-                ]
+        for target_platform, arch in INSTALL_PLATFORMS:
+            self.custom_install_commands.setdefault(target_platform, {})[arch] = [
+                command
+            ]
         return self
 
     def _execute_scan(
@@ -825,6 +834,7 @@ __all__ = [
     "GOVULNCHECK_LEVEL_MAP",
     "GOVULNCHECK_VERSION",
     "GO_TOOLCHAIN_MISSING",
+    "INSTALL_PLATFORMS",
     "GovulncheckScanner",
     "GovulncheckScannerConfig",
     "GovulncheckScannerConfigOptions",

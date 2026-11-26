@@ -15,12 +15,17 @@ govulncheck installed.
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pytest
 
-from automated_security_helper.base.plugin_base import declaring_install_story
+from automated_security_helper.base.plugin_base import (
+    CustomCommand,
+    declaring_install_story,
+)
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
@@ -28,6 +33,9 @@ from automated_security_helper.core.enums import OfflineStrategy
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.plugin_modules import ash_govulncheck_plugins as pkg
+from automated_security_helper.plugin_modules.ash_govulncheck_plugins import (
+    govulncheck_install as gi,
+)
 from automated_security_helper.plugin_modules.ash_govulncheck_plugins import (
     govulncheck_scanner as gs,
 )
@@ -417,21 +425,43 @@ class TestGoToolchain:
 
 
 class TestInstall:
-    def test_install_commands_cover_every_declared_platform(self, tmp_path):
-        with declaring_install_story():
-            scanner = _scanner(tmp_path, tmp_path)
-        for platform, arch in [
-            ("linux", "amd64"),
-            ("linux", "arm64"),
+    def test_the_install_is_declared_for_every_platform_go_runs_on(self):
+        # Written out here, not read from the code: Windows included.
+        assert sorted(gs.INSTALL_PLATFORMS) == [
             ("darwin", "amd64"),
             ("darwin", "arm64"),
-        ]:
+            ("linux", "amd64"),
+            ("linux", "arm64"),
+            ("windows", "amd64"),
+            ("windows", "arm64"),
+        ]
+
+    def test_every_platform_gets_the_same_argv_with_no_shell(self, tmp_path):
+        """An argv, not a shell line, so nothing in it needs a POSIX shell."""
+        with declaring_install_story():
+            scanner = _scanner(tmp_path, tmp_path)
+        declared = set()
+        for platform, arch in gs.INSTALL_PLATFORMS:
             commands = scanner.get_installation_commands(platform, arch)
-            assert commands, f"no install command for {platform}/{arch}"
-            words = list(commands[0])
-            assert "go" in words and "install" in words
-            assert f"{gs.GOVULNCHECK_PACKAGE}@{gs.GOVULNCHECK_VERSION}" in words
-        assert scanner.get_installation_commands("windows", "amd64") == []
+            assert len(commands) == 1, f"{platform}/{arch}: {commands}"
+            (command,) = commands
+            assert isinstance(command, CustomCommand)
+            assert command.shell is False, f"{platform}/{arch} runs through a shell"
+            words = list(command)
+            assert words[:3] == [sys.executable, "-c", gi.INSTALL_SCRIPT]
+            assert words[-1] == f"{gs.GOVULNCHECK_PACKAGE}@{gs.GOVULNCHECK_VERSION}"
+            assert not any(word.startswith("GOBIN=") for word in words), words
+            declared.add(tuple(words))
+        assert len(declared) == 1, "the platforms were given different commands"
+
+    def test_the_command_installs_into_ash_s_bin_directory(
+        self, tmp_path, on_path, monkeypatch
+    ):
+        bin_dir = tmp_path / "ash-bin"
+        monkeypatch.setenv("ASH_BIN_PATH", str(bin_dir))
+        scanner = _scanner(tmp_path, tmp_path)
+        (command,) = scanner.get_installation_commands("windows", "amd64")
+        assert list(command)[3] == os.path.abspath(str(bin_dir))
 
     def test_without_go_no_install_command_is_declared(self, tmp_path, monkeypatch):
         monkeypatch.setattr(gs, "find_executable", lambda cmd: None)
