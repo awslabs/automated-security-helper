@@ -29,6 +29,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scann
 from automated_security_helper.utils.sandbox.policy import (
     SandboxUnavailable,
     build_scanner_policy,
+    safe_directories_for,
 )
 from tests.utils.tool_guard import stub_tool_probes
 
@@ -212,6 +213,72 @@ def test_the_walk_logs_the_git_entry_it_refuses_to_trust(
     refusals = [m for m in messages if "safe_directories_for: not naming" in m]
     assert refusals, messages
     assert any(".git" in m for m in refusals)
+
+
+def _owners_as_windows_reports_them(monkeypatch, *other_owner):
+    """``os.lstat`` and ``os.geteuid`` as CPython has them on Windows.
+
+    Windows has no uid: ``os.geteuid`` does not exist there and every ``st_uid``
+    reads 0. A path in ``other_owner``, given as the walk reads it (the real
+    path), reads 1 instead, a second owner.
+    """
+    others = set(other_owner)
+
+    def lstat(candidate, *args, **kwargs):
+        real = _REAL_LSTAT(candidate, *args, **kwargs)
+        fields = list(real)[:10]
+        fields[4] = 1 if os.fspath(candidate) in others else 0
+        return os.stat_result(tuple(fields))
+
+    monkeypatch.setattr(os, "lstat", lstat)
+    monkeypatch.delattr(os, "geteuid", raising=False)
+
+
+@pytest.mark.parametrize(
+    ("other_owner", "names_the_top"),
+    [
+        pytest.param("nobody", True, id="every-owner-reads-0"),
+        pytest.param("target", True, id="the-target-reads-another-owner"),
+        pytest.param("git", False, id="the-git-entry-reads-another-owner"),
+    ],
+)
+def test_the_walk_answers_where_there_is_no_effective_uid(
+    only_staged_checkouts, monkeypatch, other_owner, names_the_top
+):
+    """The walk answers on Windows, where ``os.geteuid`` does not exist.
+
+    It called ``os.geteuid()`` to accept a ``.git`` the running user owns, and on a
+    Windows runner that raised before opengrep started, so the scan ended
+    incomplete with opengrep in ERROR. There the running user's owner id is the 0
+    every file reports: a ``.git`` that reads 0 is accepted whoever owns the
+    target, and one that reads another owner is still refused, log line and all.
+    """
+    repo, sub = _checkout(only_staged_checkouts)
+    real_sub = os.path.realpath(sub)
+    real_repo = os.path.realpath(repo)
+    reads_another_owner = {
+        "nobody": (),
+        "target": (real_sub,),
+        "git": (os.path.join(real_repo, ".git"),),
+    }[other_owner]
+    _owners_as_windows_reports_them(monkeypatch, *reads_another_owner)
+
+    named = safe_directories_for(sub)
+
+    assert named == ([real_sub, real_repo] if names_the_top else [real_sub])
+
+
+def test_the_direct_spawn_names_the_checkout_where_there_is_no_effective_uid(
+    test_plugin_context, monkeypatch, only_staged_checkouts
+):
+    """The spawn a Windows runner takes, with no ``os.geteuid`` to call."""
+    repo, sub = _checkout(only_staged_checkouts)
+    monkeypatch.delattr(os, "geteuid", raising=False)
+    scanner = _scanner(test_plugin_context)
+
+    env = _direct_env(scanner, sub)
+
+    assert _named(env) == [os.path.realpath(sub), os.path.realpath(repo)]
 
 
 def test_a_filesystem_root_parent_is_refused_on_both_spawn_paths(

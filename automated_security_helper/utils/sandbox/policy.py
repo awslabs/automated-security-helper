@@ -225,6 +225,18 @@ def _usable_safe_directory(entry: object) -> bool:
     return Path(entry).parent != Path(entry)  # not a filesystem root
 
 
+def _effective_uid() -> int:
+    """The owner id ``os.lstat`` reports for a file of the user running ASH.
+
+    The effective uid where the platform has one. Windows has none: ``os.geteuid``
+    does not exist there and CPython reports ``st_uid`` as 0 for every file, so 0
+    is the owner a file of the running user reports and the owner test in
+    ``safe_directories_for`` compares like with like on every platform.
+    """
+    geteuid = getattr(os, "geteuid", None)
+    return geteuid() if geteuid is not None else 0
+
+
 def safe_directories_for(target: Path) -> List[str]:
     """The directories git may trust for a scan of ``target``, validated.
 
@@ -232,7 +244,7 @@ def safe_directories_for(target: Path) -> List[str]:
     the first parent holding a ``.git`` (a directory, or the file a linked work tree
     and a submodule have). The top is named only when that ``.git`` entry belongs to
     the user who owns ``target`` or to the effective uid (``os.lstat``, so a link
-    is not followed) and the
+    is not followed; ``_effective_uid``, which also answers on Windows) and the
     parent is a directory ``_usable_safe_directory`` admits, which a filesystem root
     never is. A ``.git`` that fails either test ends the walk: git takes the first
     ``.git`` it meets as the top, so a parent above it is not the checkout's. No
@@ -254,7 +266,7 @@ def safe_directories_for(target: Path) -> List[str]:
             continue
         try:
             git_owner: int | None = os.lstat(git).st_uid
-            same_owner = git_owner in (owner, os.geteuid())
+            same_owner = git_owner in (owner, _effective_uid())
         except OSError:
             git_owner = None
             same_owner = False
@@ -271,7 +283,7 @@ def safe_directories_for(target: Path) -> List[str]:
                 str(git),
                 git_owner,
                 owner,
-                os.geteuid(),
+                _effective_uid(),
             )
         break
     return named
