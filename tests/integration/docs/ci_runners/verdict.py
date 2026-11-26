@@ -8,7 +8,7 @@ install step breaks. So a run is judged on two things that must agree: the runne
 own result (act's ``jobResult`` per job and matrix run, the exit code of the others, the
 BUILD phase's state for the CodeBuild agent), and ASH's verdict line,
 ``ERROR (2) Exiting due to <n> actionable findings found in ASH scan`` (``... across the
-merged shards`` for ``ash merge``). A run without that line is VERDICT_MISSING.
+merged shards`` for ``ash results merge``). A run without that line is VERDICT_MISSING.
 
 Logs are read as the runners write them: act's ``--json`` lines (the output text is
 each entry's ``msg``), and plain logs with ANSI color codes, carriage returns and a

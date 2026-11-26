@@ -1324,8 +1324,8 @@ def scan_verdict_problems(prepared: Prepared, log: str) -> list[str]:
 
     gitlab-ci-local prints each output line of a job as ``<job> > <line>``, so each
     verdict is attributed to its job: every job whose script runs ``ash scan``,
-    ``ash merge`` or ``ash`` with options gives exactly one, and no other job, nor a
-    line outside every job, gives one. Jenkinsfile Runner, the CodeBuild agent and
+    ``ash results merge`` or ``ash`` with options gives exactly one, and no other job,
+    nor a line outside every job, gives one. Jenkinsfile Runner, the CodeBuild agent and
     ``circleci local execute`` each run one build or job per launch, and their logs
     do not tell its steps apart; each page's block scans once in it, so the log holds
     exactly one verdict.
