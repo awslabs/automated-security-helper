@@ -40,6 +40,14 @@ def workspace(tmp_path, monkeypatch):
     # the developer's own MCP workspace, and a "nothing was created" check looks
     # where the call would have created it.
     monkeypatch.setattr(sd, "resolve_workspace_root", lambda: tmp_path)
+    # The reference rows are about the delivery, not the registry gate, which
+    # admits nothing by default; TestTheRegistryAllowlist clears this again.
+    # The :5000 entry is its own registry under the host[:port] matching, for
+    # the row proving a port-carrying reference still delivers.
+    monkeypatch.setenv(
+        "ASH_MCP_IMAGE_ALLOWED_REGISTRIES",
+        "registry.example.com,registry.example.com:5000",
+    )
     yield tmp_path
     sd.clear_source(_SESSION, workspace_root=tmp_path)
 
@@ -75,8 +83,23 @@ class TestSetSourceImage:
         stored = sd.get_session_image_locator(_SESSION)
         assert stored is not None
         assert stored.ref == IMAGE_REF
-        # Nothing was fetched: the session has no workspace on disk at all.
+        # Nothing was fetched: the session directory exists -- the TTL sweep
+        # finds sessions through their workspace directories, so a ref-only
+        # session must have one to be collectable -- but holds no image bytes.
+        session_dir = workspace / _SESSION
+        assert session_dir.is_dir()
+        assert not any(session_dir.rglob("*.tar"))
+
+    def test_a_ref_only_session_is_visible_to_the_ttl_sweep(self, workspace):
+        # Before this, set_source_image wrote nothing to disk while the
+        # registry counted the locator as a binding: the session could never
+        # be collected, and past the registry's cap every new session ran an
+        # eviction pass that freed nothing.
+        sd.set_source_image(IMAGE_REF, session_id=_SESSION)
+        assert (workspace / _SESSION).is_dir()
+        assert sd.remove_session_workspace(_SESSION, workspace_root=workspace)
         assert not (workspace / _SESSION).exists()
+        assert sd.get_session_image_locator(_SESSION) is None
 
     def test_an_empty_ref_names_nothing(self, workspace):
         with pytest.raises(ValueError, match="names no reference"):
@@ -93,6 +116,116 @@ class TestSetSourceImage:
     def test_an_inner_space_is_no_reference(self, workspace):
         with pytest.raises(ValueError, match="whitespace"):
             sd.set_source_image("repo tag", session_id=_SESSION)
+
+    def test_non_ascii_is_no_reference(self, workspace):
+        # C1 controls and bidi overrides reach log lines and tool argv; no OCI
+        # reference grammar allows any non-ASCII text. U+202E is the
+        # right-to-left override, spelled as an escape so no literal control
+        # character sits in this file.
+        with pytest.raises(ValueError, match="non-ASCII"):
+            sd.set_source_image("repo:tag" + chr(0x202E), session_id=_SESSION)
+
+    def test_a_scheme_and_path_is_no_reference(self, workspace):
+        # dir:/etc, oci-archive:/root/x.tar: handed schemeless to a tool, the
+        # text reads as a LOCAL PATH, so a remote client could name server
+        # files with it. No port and no tag starts with "/".
+        with pytest.raises(ValueError, match="scheme-and-path"):
+            sd.set_source_image("dir:/etc", session_id=_SESSION)
+
+    def test_a_tool_source_scheme_is_no_reference(self, workspace):
+        # docker-archive:x.tar parses as repo "docker-archive" tag "x.tar",
+        # which stereoscope reads as an archive at a server-relative path.
+        with pytest.raises(ValueError, match="source scheme"):
+            sd.set_source_image("docker-archive:x.tar", session_id=_SESSION)
+
+    def test_a_port_and_a_tag_still_read_as_references(self, workspace):
+        # The refusals above must not eat real references: a registry with a
+        # port, and a plain tag whose repository is no scheme word.
+        locator = sd.set_source_image(
+            "registry.example.com:5000/team/app:1.2.3", session_id=_SESSION
+        )
+        assert locator.ref == "registry.example.com:5000/team/app:1.2.3"
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param("/etc", id="absolute-path"),
+            pytest.param("/root/.ssh", id="absolute-home-path"),
+            pytest.param("./src", id="dot-relative"),
+            pytest.param("../escape", id="dot-dot-relative"),
+            pytest.param("team/../etc", id="inner-dot-dot"),
+            pytest.param("app/", id="trailing-slash"),
+        ],
+    )
+    def test_a_path_shaped_ref_is_no_reference(self, workspace, monkeypatch, value):
+        # Read schemeless by grype and syft (a declared remote daemon), a path
+        # is a directory source: an MCP client could have the server catalog
+        # its own files. The registry reading of "/etc" is docker.io, so a
+        # server that lists Hub must still refuse it -- on the grammar, not the
+        # allowlist.
+        monkeypatch.setenv(
+            "ASH_MCP_IMAGE_ALLOWED_REGISTRIES", "registry.example.com docker.io"
+        )
+        with pytest.raises(ValueError, match="not an image reference") as refused:
+            sd.set_source_image(value, session_id=_SESSION)
+        assert not isinstance(refused.value, sd.ImageRegistryRefused)
+        assert sd.get_session_image_locator(_SESSION) is None
+
+
+class TestTheRegistryAllowlist:
+    """set_source_image reaches only registries the operator listed.
+
+    A scan of a delivered ref makes the SERVER's own tools reach that
+    registry -- any host the ref can spell, internal addresses included --
+    with the server's network, daemon store and registry credentials: the
+    reach ``ASH_MCP_GIT_ALLOWED_HOSTS`` closes for the git channel, closed
+    here the same way. Empty (the default) admits nothing; the archive
+    upload needs no registry and is not gated.
+    """
+
+    def test_an_empty_list_admits_no_reference(self, workspace, monkeypatch):
+        monkeypatch.delenv("ASH_MCP_IMAGE_ALLOWED_REGISTRIES", raising=False)
+        with pytest.raises(sd.ImageRegistryRefused, match="not in"):
+            sd.set_source_image(IMAGE_REF, session_id=_SESSION)
+        assert sd.get_session_image_locator(_SESSION) is None
+
+    def test_a_listed_registry_is_admitted_with_ports_normalized(
+        self, workspace, monkeypatch
+    ):
+        monkeypatch.setenv(
+            "ASH_MCP_IMAGE_ALLOWED_REGISTRIES",
+            "other.example.com, registry.example.com:443",
+        )
+        locator = sd.set_source_image(IMAGE_REF, session_id=_SESSION)
+        assert locator.ref == IMAGE_REF
+
+    def test_a_bare_hub_reference_needs_docker_io_listed(self, workspace, monkeypatch):
+        monkeypatch.setenv("ASH_MCP_IMAGE_ALLOWED_REGISTRIES", "registry.example.com")
+        with pytest.raises(sd.ImageRegistryRefused, match="docker.io"):
+            sd.set_source_image("alpine:3.20", session_id=_SESSION)
+        monkeypatch.setenv("ASH_MCP_IMAGE_ALLOWED_REGISTRIES", "docker.io")
+        assert sd.set_source_image("alpine:3.20", session_id=_SESSION).ref == (
+            "alpine:3.20"
+        )
+
+    def test_the_refusals_error_type_is_its_own(self, workspace, monkeypatch):
+        # A client branches on error_type, so the gate's refusal is not the
+        # generic ValueError answer.
+        from automated_security_helper.cli.mcp_tools import mcp_set_source_image
+
+        monkeypatch.delenv("ASH_MCP_IMAGE_ALLOWED_REGISTRIES", raising=False)
+        answer = mcp_set_source_image(IMAGE_REF, session_id=_SESSION)
+        assert answer["success"] is False
+        assert answer["error_type"] == "image_registry_not_permitted"
+
+    def test_the_registry_of_a_ref_is_the_distribution_reading(self, workspace):
+        assert sd.image_ref_registry("alpine:3.20") == "docker.io"
+        assert sd.image_ref_registry("team/app:1") == "docker.io"
+        assert sd.image_ref_registry("localhost/app:1") == "localhost"
+        assert sd.image_ref_registry("reg.example.com:5000/app") == (
+            "reg.example.com:5000"
+        )
+        assert sd.image_ref_registry("Reg.Example.com:443/app") == "reg.example.com"
 
 
 class TestOneSubjectPerSession:
@@ -199,3 +332,63 @@ class TestImageArchiveFinalize:
         assert locator.oci_archive == delivered
         # The replaced archive is scratch and was removed.
         assert not (workspace / _SESSION / "image" / "up-one.tar").exists()
+
+
+class TestTheArchiveCleanupStaysInItsDirectory:
+    def test_a_binding_outside_the_session_image_dir_deletes_nothing(
+        self, workspace, tmp_path
+    ):
+        # The locator registry is a module global: a binding whose archive
+        # path an operator owns must never have that directory emptied by the
+        # next delivery. The cleanup rebuilds the expected <session>/image
+        # path and acts only there; anything else is dropped, not deleted.
+        from automated_security_helper.core.asset import ImageLocator
+
+        operator_dir = tmp_path / "operator-owned"
+        operator_dir.mkdir()
+        archive = operator_dir / "their-image.tar"
+        archive.write_bytes(b"x")
+        bystander = operator_dir / "unrelated-notes.txt"
+        bystander.write_text("not ASH's to delete")
+        sd._set_session_image_locator(_SESSION, ImageLocator(oci_archive=archive))
+
+        sd._set_session_source_dir(_SESSION, workspace / _SESSION / "source")
+
+        assert archive.exists()
+        assert bystander.exists()
+        assert sd.get_session_image_locator(_SESSION) is None
+
+    def test_a_staged_archive_is_still_cleaned(self, workspace):
+        payload = _tar_bytes()
+        sha = _upload(payload, "up-contained", workspace)
+        sd.set_source_image_archive_finalize(
+            upload_id="up-contained",
+            expected_sha256=sha,
+            workspace_root=workspace,
+            session_id=_SESSION,
+        )
+        staged = workspace / _SESSION / "image" / "up-contained.tar"
+        assert staged.exists()
+        sd._set_session_source_dir(_SESSION, workspace / _SESSION / "source")
+        assert not staged.exists()
+
+
+class TestTheCapNamesWhatTheClientSent:
+    def test_an_oversize_image_archive_upload_names_an_image_archive(
+        self, workspace, monkeypatch
+    ):
+        monkeypatch.setattr(sd, "_MAX_ZIP_BYTES", 8)
+        with pytest.raises(ValueError, match="max image archive size"):
+            _upload(_tar_bytes(), "up-oversize", workspace)
+
+    def test_the_zip_channels_own_cap_still_names_a_zip(self, workspace, monkeypatch):
+        monkeypatch.setattr(sd, "_MAX_ZIP_BYTES", 8)
+        with pytest.raises(ValueError, match="max zip size"):
+            sd.set_source_zip_chunk(
+                upload_id="up-zip-oversize",
+                sequence=0,
+                data_b64=base64.b64encode(b"0123456789abcdef").decode("ascii"),
+                last=True,
+                workspace_root=workspace,
+                session_id=_SESSION,
+            )
