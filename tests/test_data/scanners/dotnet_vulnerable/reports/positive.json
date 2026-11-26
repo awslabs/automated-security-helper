@@ -1,0 +1,102 @@
+{
+  "parameters": "--vulnerable --include-transitive",
+  "projects": [
+    {
+      "frameworks": [
+        {
+          "framework": "net6.0",
+          "topLevelPackages": [
+            {
+              "id": "Newtonsoft.Json",
+              "requestedVersion": "9.0.1",
+              "resolvedVersion": "9.0.1",
+              "vulnerabilities": [
+                {
+                  "advisoryurl": "https://github.com/advisories/GHSA-5crp-9r3c-p9vr",
+                  "severity": "High"
+                }
+              ]
+            },
+            {
+              "id": "Example.Critical",
+              "requestedVersion": "1.0.0",
+              "resolvedVersion": "1.0.0",
+              "vulnerabilities": [
+                {
+                  "advisoryurl": "https://github.com/advisories/GHSA-aaaa-bbbb-cccc",
+                  "severity": "Critical"
+                }
+              ]
+            }
+          ],
+          "transitivePackages": [
+            {
+              "id": "Example.Transitive",
+              "resolvedVersion": "2.1.0",
+              "vulnerabilities": [
+                {
+                  "advisoryurl": "https://github.com/advisories/GHSA-dddd-eeee-ffff",
+                  "severity": "Moderate"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "framework": "net8.0",
+          "topLevelPackages": [
+            {
+              "id": "Newtonsoft.Json",
+              "requestedVersion": "9.0.1",
+              "resolvedVersion": "9.0.1",
+              "vulnerabilities": [
+                {
+                  "advisoryurl": "https://github.com/advisories/GHSA-5crp-9r3c-p9vr",
+                  "severity": "High"
+                }
+              ]
+            },
+            {
+              "id": "Example.Low",
+              "requestedVersion": "3.0.0",
+              "resolvedVersion": "3.0.0",
+              "vulnerabilities": [
+                {
+                  "advisoryurl": "https://github.com/advisories/GHSA-gggg-hhhh-iiii",
+                  "severity": "Low"
+                }
+              ]
+            },
+            {
+              "id": "Example.Unrated",
+              "requestedVersion": "4.0.0",
+              "resolvedVersion": "4.0.0",
+              "vulnerabilities": [
+                {
+                  "advisoryurl": "https://example.org/advisory/4",
+                  "severity": ""
+                }
+              ]
+            },
+            {
+              "id": "Example.Future",
+              "requestedVersion": "5.0.0",
+              "resolvedVersion": "5.0.0",
+              "vulnerabilities": [
+                {
+                  "advisoryurl": "https://github.com/advisories/GHSA-jjjj-kkkk-llll",
+                  "severity": "Catastrophic"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "path": "/work/src/App/App.csproj"
+    }
+  ],
+  "sources": [
+    "https://api.nuget.org/v3/index.json"
+  ],
+  "version": 1
+}

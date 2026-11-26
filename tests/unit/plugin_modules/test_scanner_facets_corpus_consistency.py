@@ -215,6 +215,10 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
         "template-shaped file beside it is authored to the adapter)",
     ),
     "detect-secrets": CorpusSpec("detect_secrets", prep="detect-secrets"),
+    # The committed SARIF is the scanner's output for a REAL captured .NET SDK
+    # 10.0.404 run (captured/positive.json); a regeneration test keeps it honest.
+    # The hand-built reports/ beside it is not read here.
+    "dotnet-vulnerable": CorpusSpec("dotnet_vulnerable", sarif=("captured/*.sarif",)),
     "ferret-scan": CorpusSpec(
         "ferret-scan", sarif=("captured/*.sarif",), prep="ferret-scan"
     ),
@@ -763,7 +767,7 @@ def test_the_gate_carries_no_waiver_but_the_register() -> None:
 def test_the_registry_and_the_corpus_table_agree() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
     names = {_name(cls) for cls in SCANNER_CLASSES}
-    assert len(SCANNER_CLASSES) == 30, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == 32, sorted(c.__name__ for c in SCANNER_CLASSES)
     assert names == set(CORPORA) == set(SCANNER_TOOL_TYPES), (
         f"registry {sorted(names)} / corpus table {sorted(CORPORA)}: a scanner "
         "needs a CORPORA row (a corpus, or None with the fixture to author)"

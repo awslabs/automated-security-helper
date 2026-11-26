@@ -1,0 +1,112 @@
+{
+  "parameters": "--vulnerable --include-transitive",
+  "projects": [
+    {
+      "frameworks": [
+        {
+          "framework": "net10.0",
+          "topLevelPackages": [
+            {
+              "id": "Newtonsoft.Json",
+              "requestedVersion": "12.0.1",
+              "resolvedVersion": "12.0.1",
+              "vulnerabilities": [
+                {
+                  "advisoryurl": "https://github.com/advisories/GHSA-5crp-9r3c-p9vr",
+                  "severity": "High"
+                }
+              ]
+            },
+            {
+              "id": "System.Text.Encodings.Web",
+              "requestedVersion": "4.5.0",
+              "resolvedVersion": "4.5.0",
+              "vulnerabilities": [
+                {
+                  "advisoryurl": "https://github.com/advisories/GHSA-ghhp-997w-qr28",
+                  "severity": "Critical"
+                }
+              ]
+            }
+          ],
+          "transitivePackages": [
+            {
+              "id": "Microsoft.Extensions.Caching.Memory",
+              "resolvedVersion": "8.0.0",
+              "vulnerabilities": [
+                {
+                  "advisoryurl": "https://github.com/advisories/GHSA-qj66-m88j-hmgj",
+                  "severity": "High"
+                }
+              ]
+            },
+            {
+              "id": "Npgsql",
+              "resolvedVersion": "8.0.0",
+              "vulnerabilities": [
+                {
+                  "advisoryurl": "https://github.com/advisories/GHSA-x9vc-6hfv-hg8c",
+                  "severity": "High"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "framework": "net8.0",
+          "topLevelPackages": [
+            {
+              "id": "Newtonsoft.Json",
+              "requestedVersion": "12.0.1",
+              "resolvedVersion": "12.0.1",
+              "vulnerabilities": [
+                {
+                  "advisoryurl": "https://github.com/advisories/GHSA-5crp-9r3c-p9vr",
+                  "severity": "High"
+                }
+              ]
+            },
+            {
+              "id": "System.Text.Encodings.Web",
+              "requestedVersion": "4.5.0",
+              "resolvedVersion": "4.5.0",
+              "vulnerabilities": [
+                {
+                  "advisoryurl": "https://github.com/advisories/GHSA-ghhp-997w-qr28",
+                  "severity": "Critical"
+                }
+              ]
+            }
+          ],
+          "transitivePackages": [
+            {
+              "id": "Microsoft.Extensions.Caching.Memory",
+              "resolvedVersion": "8.0.0",
+              "vulnerabilities": [
+                {
+                  "advisoryurl": "https://github.com/advisories/GHSA-qj66-m88j-hmgj",
+                  "severity": "High"
+                }
+              ]
+            },
+            {
+              "id": "Npgsql",
+              "resolvedVersion": "8.0.0",
+              "vulnerabilities": [
+                {
+                  "advisoryurl": "https://github.com/advisories/GHSA-x9vc-6hfv-hg8c",
+                  "severity": "High"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "path": "/tmp/dotnet_vulnerable-capture/pos/App.csproj"
+    }
+  ],
+  "sources": [
+    "https://api.nuget.org/v3/index.json"
+  ],
+  "version": 1
+}

@@ -1,0 +1,12 @@
+{
+  "parameters": "--vulnerable --include-transitive",
+  "projects": [
+    {
+      "path": "/tmp/dotnet_vulnerable-capture/neg/App.csproj"
+    }
+  ],
+  "sources": [
+    "https://api.nuget.org/v3/index.json"
+  ],
+  "version": 1
+}

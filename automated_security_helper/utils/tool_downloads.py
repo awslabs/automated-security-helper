@@ -1330,6 +1330,11 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     # 'gcc'`). The scanner installs on user machines with a toolchain; its register
     # carries the license read (MIT, the 1.19.7 wheel's licenses/LICENSE).
     #
+    # dotnet-vulnerable (alpha scanner) has NO entry either: its tool is `dotnet list
+    # package`, which is built into the .NET SDK the user installs, so ASH downloads
+    # and bundles nothing of it and the image carries no .NET SDK. Its register
+    # carries the license read (MIT, LICENSE.txt in the SDK 10.0.404 archive).
+    #
     # The alpha ggshield scanner's uv tool. The wheel's dist-info carries
     # licenses/LICENSE (MIT), the file whose sha256 the scanner's register cites.
     "ggshield": ThirdPartyLicense(

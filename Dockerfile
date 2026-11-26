@@ -727,6 +727,8 @@ ENV _ASH_EXEC_MODE="local"
 # (GuardDog's uv tool among them) are installed and pinned too, and the image carries
 # them; a scan in the image still loads a module only when it is listed. trivy-repo,
 # snyk and ferret are not in the list: their tools come another way.
+# dotnet-vulnerable is not in it either: its tool is `dotnet list package`, built into
+# the .NET SDK, and the image carries no .NET SDK.
 ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_ggshield_plugins,automated_security_helper.plugin_modules.ash_gosec_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins,automated_security_helper.plugin_modules.ash_kingfisher_plugins,automated_security_helper.plugin_modules.ash_polaris_plugins"
 # The pre-rename name of the build argument, honored until ASH 3.9.0: a value given
 # for it, an explicitly empty one included, wins over ASH_ALPHA_PLUGIN_MODULES below.

@@ -162,6 +162,17 @@ MANIFESTS = (
         owned=(f"{_DOCS}/dependency_check-plugin.md", f"{_FIXTURES}/dependency-check"),
     ),
     _alpha(
+        "dotnet-vulnerable",
+        "ash_dotnet_vulnerable_plugins",
+        "dotnet_vulnerable_scanner",
+        "DotnetVulnerableScanner",
+        "DotnetVulnerableScannerConfigOptions",
+        owned=(
+            f"{_DOCS}/dotnet_vulnerable-plugin.md",
+            f"{_FIXTURES}/dotnet_vulnerable",
+        ),
+    ),
+    _alpha(
         "ferret-scan",
         "ash_ferret_plugins",
         "ferret_scanner",
