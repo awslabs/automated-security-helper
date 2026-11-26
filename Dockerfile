@@ -788,6 +788,14 @@ RUN ggshield --version
 RUN polaris version
 
 #
+# Capslock (alpha scanner) is NOT in the image, and its module is not in the list
+# above: Capslock publishes no release binaries, and it loads the scanned module's
+# packages by running the go command, while this image carries no Go toolchain. A
+# user installs it with `go install github.com/google/capslock/cmd/capslock@v0.3.4`,
+# the version the plugin is read against (CAPSLOCK_VERSION in capslock_scanner.py).
+#
+
+#
 # Every bundled third-party tool has its license files, they match their pins, and
 # they describe the release actually on PATH (each tool's --version is checked).
 # After `ash dependencies install`, which is what puts opengrep in place. Writes

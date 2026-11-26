@@ -1,0 +1,101 @@
+{
+  "capabilityInfo": [
+    {
+      "capability": "CAPABILITY_FILES",
+      "capabilityName": "FILES",
+      "capabilityType": "CAPABILITY_TYPE_DIRECT",
+      "depPath": "example.com/app/store.Load os.ReadFile",
+      "packageDir": "example.com/app/store",
+      "packageName": "store",
+      "path": [
+        {
+          "name": "example.com/app/store.Load",
+          "package": "example.com/app/store"
+        },
+        {
+          "name": "os.ReadFile",
+          "package": "os",
+          "site": {
+            "column": "9",
+            "filename": "load.go",
+            "line": "30"
+          }
+        }
+      ]
+    },
+    {
+      "capability": "CAPABILITY_NETWORK",
+      "capabilityName": "NETWORK",
+      "capabilityType": "CAPABILITY_TYPE_DIRECT",
+      "depPath": "example.com/app/server.Serve net/http.ListenAndServe",
+      "packageDir": "example.com/app/server",
+      "packageName": "server",
+      "path": [
+        {
+          "name": "example.com/app/server.Serve",
+          "package": "example.com/app/server"
+        },
+        {
+          "name": "net/http.ListenAndServe",
+          "package": "net/http",
+          "site": {
+            "column": "5",
+            "filename": "serve.go",
+            "line": "12"
+          }
+        }
+      ]
+    },
+    {
+      "capability": "CAPABILITY_UNSAFE_POINTER",
+      "capabilityName": "UNSAFE_POINTER",
+      "capabilityType": "CAPABILITY_TYPE_DIRECT",
+      "depPath": "example.com/app/util.Cast",
+      "packageDir": "example.com/app/util",
+      "packageName": "util",
+      "path": [
+        {
+          "name": "example.com/app/util.Cast",
+          "package": "example.com/app/util"
+        }
+      ]
+    },
+    {
+      "capability": "CAPABILITY_EXEC",
+      "capabilityName": "EXEC",
+      "capabilityType": "CAPABILITY_TYPE_TRANSITIVE",
+      "depPath": "example.com/app/util.Run example.com/app/internal/exe.Start os/exec.Command",
+      "packageDir": "example.com/app/util",
+      "packageName": "util",
+      "path": [
+        {
+          "name": "example.com/app/util.Run",
+          "package": "example.com/app/util"
+        },
+        {
+          "name": "example.com/app/internal/exe.Start",
+          "package": "example.com/app/internal/exe",
+          "site": {
+            "column": "2",
+            "filename": "run.go",
+            "line": "7"
+          }
+        },
+        {
+          "name": "os/exec.Command",
+          "package": "os/exec",
+          "site": {
+            "column": "9",
+            "filename": "start.go",
+            "line": "11"
+          }
+        }
+      ]
+    }
+  ],
+  "moduleInfo": [
+    {
+      "path": "example.com/app"
+    }
+  ]
+}

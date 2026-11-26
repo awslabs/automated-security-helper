@@ -146,6 +146,14 @@ MANIFESTS = (
         owned=(f"{_DOCS}/betterleaks-plugin.md", f"{_FIXTURES}/betterleaks"),
     ),
     _alpha(
+        "capslock",
+        "ash_capslock_plugins",
+        "capslock_scanner",
+        "CapslockScanner",
+        "CapslockScannerConfigOptions",
+        owned=(f"{_DOCS}/capslock-plugin.md", f"{_FIXTURES}/capslock"),
+    ),
+    _alpha(
         "credsweeper",
         "ash_credsweeper_plugins",
         "credsweeper_scanner",

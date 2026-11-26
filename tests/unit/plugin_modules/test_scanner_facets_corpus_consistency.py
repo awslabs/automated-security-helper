@@ -188,6 +188,17 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
     "betterleaks": CorpusSpec(
         "betterleaks", sarif=("captured/*.sarif",), prep="betterleaks"
     ),
+    # No corpus until a real Capslock report is committed under captured/: the
+    # documents in schema_derived/ are written from the tool's source, not run, so
+    # they are not read as evidence of the tool and the register's capslock cells
+    # are UNCONFIRMED (the snyk-code row's reasoning).
+    "capslock": CorpusSpec(
+        "capslock",
+        missing="no report from a real Capslock run is committed; commit "
+        "`capslock -packages=./... -output=json -force_local_module` output "
+        "under capslock/captured/ (the documents in capslock/schema_derived are "
+        "written from the tool's source, not run)",
+    ),
     "cdk-nag": CorpusSpec("cdk", prep="cdk-nag"),
     "cfn-guard": CorpusSpec(
         "cfn_lint_guard", sarif=("captured/cfn-guard-*.sarif",), prep="cfn-guard"
@@ -763,7 +774,7 @@ def test_the_gate_carries_no_waiver_but_the_register() -> None:
 def test_the_registry_and_the_corpus_table_agree() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
     names = {_name(cls) for cls in SCANNER_CLASSES}
-    assert len(SCANNER_CLASSES) == 30, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == 32, sorted(c.__name__ for c in SCANNER_CLASSES)
     assert names == set(CORPORA) == set(SCANNER_TOOL_TYPES), (
         f"registry {sorted(names)} / corpus table {sorted(CORPORA)}: a scanner "
         "needs a CORPORA row (a corpus, or None with the fixture to author)"
