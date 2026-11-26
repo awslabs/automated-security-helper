@@ -2180,6 +2180,10 @@ def _suppression_scanner_identity(result, run, scanner_name):
     return run.tool.driver.name if run.tool and run.tool.driver else "unknown"
 
 
+#: The roots whose broken ``.ash.lock`` was already warned about in this process.
+_BROKEN_LOCK_WARNED: set = set()
+
+
 def _symbol_resolver_for(
     source_dir: Any, suppressions: Iterable[Any]
 ) -> SymbolResolver | None:
@@ -2195,8 +2199,19 @@ def _symbol_resolver_for(
     try:
         lock = AshLock.load(source_dir)
     except AshLockError as e:
-        ASH_LOGGER.warning(f"Symbol suppressions do not apply: {e}.", extra=NO_MARKUP)
-        lock = AshLock(source_dir=Path(source_dir))
+        # Warned once per process and root: this factory runs once per
+        # suppression pass (each scanner's, then the merged one), and the
+        # resolver carries the error so its per-file notices do not claim the
+        # files "have no entry" in a lock that exists and is broken.
+        noticed = ("broken-lock", str(source_dir))
+        if noticed not in _BROKEN_LOCK_WARNED:
+            _BROKEN_LOCK_WARNED.add(noticed)
+            ASH_LOGGER.warning(
+                f"Symbol suppressions do not apply: {e}.", extra=NO_MARKUP
+            )
+        return SymbolResolver(
+            source_dir, lock=AshLock(source_dir=Path(source_dir)), lock_error=str(e)
+        )
     return SymbolResolver(source_dir, lock=lock)
 
 
