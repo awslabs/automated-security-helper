@@ -883,6 +883,9 @@ runs:
         ACTIONS_RUNTIME_TOKEN: ${{ steps.cache-creds.outputs.ACTIONS_RUNTIME_TOKEN }}
         ACTIONS_CACHE_URL: ${{ steps.cache-creds.outputs.ACTIONS_CACHE_URL }}
         ACTIONS_RESULTS_URL: ${{ steps.cache-creds.outputs.ACTIONS_RESULTS_URL }}
+        # The installed CLI runs on the host here (`ashx results report`), as in the
+        # other plugin-error steps, so it gets the tool-download cache they get.
+        ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
       run: |
         echo "Checking for plugin execution errors..."
         # Still printed, because it is what a human reads when this step fails.

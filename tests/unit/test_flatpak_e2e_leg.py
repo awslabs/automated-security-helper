@@ -28,6 +28,7 @@ from typing import Any, Dict, List
 import pytest
 import yaml
 
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from tests.utils.posix_bash import bash_path, run_bash, write_lf
 
 pytestmark = pytest.mark.unit
@@ -84,17 +85,15 @@ def _step(number: str) -> str:
 def test_the_sandbox_control_asserts_its_exit_code_message_and_report_paths() -> None:
     step = _step("7")
     # A refused --source-dir exits with ASH's usage-error code, and step 7 requires
-    # exactly that code: 0, 1, 2 and a crash all fail it.
-    constants = (
-        REPO_ROOT / "automated_security_helper" / "core" / "constants.py"
-    ).read_text(encoding="utf-8")
-    usage = re.search(r"^ASH_EXIT_USAGE_ERROR = (\d+)$", constants, re.MULTILINE)
-    assert usage, "ASH_EXIT_USAGE_ERROR is no longer a plain integer constant"
-    assert f'if [ "$NEG_RC" -ne {usage.group(1)} ]; then' in step, (
+    # exactly that code: 0, 1, 2 and a crash all fail it. The code is the value every
+    # command exits through, ASH_EXIT_USAGE_ERROR (core/constants.py, which takes it
+    # from the AshExitCode member), read as the CLI reads it rather than from the text.
+    usage = str(int(ASH_EXIT_USAGE_ERROR))
+    assert f'if [ "$NEG_RC" -ne {usage} ]; then' in step, (
         "step 7 does not require the exit code ASH gives a refused --source-dir"
     )
     assert "NEG_RC=$?" in step
-    assert "not " + usage.group(1) + " (usage refusal)" in step
+    assert "not " + usage + " (usage refusal)" in step
     # The refusal ASH prints for a missing --source-dir, naming this fixture's path.
     assert 'grep -qF "Source directory does not exist: $FIX_UNREACHABLE"' in step
     # `ashx scan` refuses a missing --source-dir through source_dir_refusal.
