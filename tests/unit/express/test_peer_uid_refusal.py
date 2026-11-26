@@ -13,6 +13,7 @@ on any OS the unit tier runs on, Windows included (which is also why nothing
 here calls ``os.getuid``: the uids are explicit).
 """
 
+import os
 import socket
 import struct
 import sys
@@ -137,3 +138,14 @@ class TestPeerIsThisUser:
         equality, so only the daemon's own uid is served."""
         sock = _FakeSock(answer=_ucred(1, 0, 0))
         assert runtime.peer_is_this_user(sock, uid=1000) is False
+
+    def test_without_getuid_no_peer_passes_root_included(
+        self, linux_branch, monkeypatch
+    ):
+        """Where os.getuid is missing, the daemon's own uid reads as -1, which
+        no kernel uid equals, so the default comparison fails closed. With 0 as
+        the stand-in, a root peer passed as this user."""
+        monkeypatch.delattr(os, "getuid", raising=False)
+        for peer in (0, 1000, 2**32 - 1):
+            sock = _FakeSock(answer=_ucred(1, peer, 0))
+            assert runtime.peer_is_this_user(sock) is False, peer

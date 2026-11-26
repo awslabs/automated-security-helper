@@ -21,6 +21,7 @@ nav:
       - Suppress findings: how-to/suppress-findings.md
       - Read scan results: how-to/read-results.md
       - Export reports: how-to/export-reports.md
+      - Track findings over time: how-to/track-findings-over-time.md
       - Deduplicate findings: how-to/deduplicate-findings.md
       - Enable the scanner sandbox: docs/scanner-sandbox.md
       - Run in a container: how-to/run-in-a-container.md

@@ -451,12 +451,12 @@ class ExpressDaemon:
                 # `ash express start` names this cause instead of a mismatch,
                 # and an autostart backs off while the marker is fresh instead
                 # of paying the whole warm-import cost to retire the same way
-                # on every scan.
+                # on every scan. The write is best effort by its own contract
+                # (mark_retired_for_threads swallows the OSError a touch can
+                # raise), and it lands beside the bound path, so no runtime
+                # directory check runs here that could refuse.
                 if self._path is not None:
-                    try:
-                        runtime.mark_retired_for_threads(self._path)
-                    except Exception as exc:  # noqa: BLE001 - best effort
-                        _log(f"could not record the retirement marker: {exc}")
+                    runtime.mark_retired_for_threads(self._path)
                 return
             while True:
                 for key, _ in self.selector.select(timeout=1.0):
@@ -1159,13 +1159,19 @@ class ExpressDaemon:
             _log(f"scan pid {pid} exited {code}")
 
     def _status(self) -> dict[str, Any]:
+        # The path this daemon bound, as run() and _shutdown() use (see bind()):
+        # socket_path() re-checks the runtime directory, which can refuse, and
+        # re-reads os.environ, which a warm import may have changed. Either
+        # would name another socket than the one the status request reached,
+        # or drop a healthy daemon's status connection.
+        path = self._path if self._path is not None else runtime.socket_path()
         return {
             "ok": True,
             "pid": os.getpid(),
             "version": self.version,
             "fingerprint": self.fingerprint,
             "protocol": runtime.PROTOCOL_VERSION,
-            "socket": os.fspath(runtime.socket_path()),
+            "socket": os.fspath(path),
             "started_at": self.started_at,
             "active_scans": len(self.children),
             "scans_served": self.scans_served,
