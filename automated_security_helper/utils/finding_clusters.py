@@ -235,12 +235,12 @@ def _key_groups(
             ).alias("copies")
         )
     )
-    whole = (
+    whole_query = (
         sized.filter(~pl.col("copies"))
         .group_by(group, maintain_order=True)
         .agg(pl.col("i"))
     )
-    lanes = (
+    lanes_query = (
         sized.filter(pl.col("copies") & pl.col("version").is_not_null())
         .group_by([*group, "version"], maintain_order=True)
         .agg(
@@ -250,7 +250,7 @@ def _key_groups(
         )
         .filter((pl.col("rows") == pl.col("scanners")) & (pl.col("rows") >= 2))
     )
-    whole, lanes = pl.collect_all([whole, lanes])
+    whole, lanes = pl.collect_all([whole_query, lanes_query])
     return [
         (finding_class, members)
         for part in (whole, lanes)
