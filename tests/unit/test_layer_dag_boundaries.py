@@ -112,7 +112,10 @@ KNOWN_VIOLATIONS: Dict[Tuple[str, str], int] = {
     # 70 -> 75: the sdist lock harvester (core.constants, core.exceptions), the MCP
     # config scanner (core.enums), cdk-nag (core.exceptions) and trivy
     # (core.container_engine) read core types the way the other plugins do.
-    ("plugin_modules", "core"): 81,
+    # 81 -> 80: v4 retires the semgrep scanner (opengrep serves its rulesets, and
+    # `semgrep` resolves to opengrep as an alias), and semgrep_scanner.py's
+    # core.enums import left with the file.
+    ("plugin_modules", "core"): 80,
     ("plugin_modules", "interactions"): 2,
     ("plugin_modules", "workspace"): 1,
     ("schemas", "config"): 2,

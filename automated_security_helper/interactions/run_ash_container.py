@@ -60,7 +60,6 @@ from automated_security_helper.core.enums import (
     ExecutionStrategy,
     ExportFormat,
 )
-from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.core.cancellation import (
     CancelEvent,
     ScanCancelled,
@@ -77,6 +76,7 @@ from automated_security_helper.interactions.container_leftovers import (
     remove_leftovers,
 )
 from automated_security_helper.utils import subprocess_utils
+from automated_security_helper.utils.cli_name import CANONICAL_CLI_NAME
 from automated_security_helper.utils.console import (
     COMMAND_READING_RUNNERS,
     CommandSafeStream,

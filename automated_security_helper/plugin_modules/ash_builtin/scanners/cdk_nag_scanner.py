@@ -19,7 +19,7 @@ from pydantic import (
 from automated_security_helper.utils.redacted_model import RedactedSection
 from yaml import YAMLError
 
-from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
+from automated_security_helper.utils.cli_name import CANONICAL_CLI_NAME
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType

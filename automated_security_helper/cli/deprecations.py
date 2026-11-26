@@ -18,6 +18,11 @@ apart.
 import sys
 from typing import Iterable, Optional, TextIO
 
+# The canonical command's name is defined below the CLI, in utils/cli_name.py,
+# because the engine and the plugins name the command too and may not import
+# cli. It is imported here for the alias table, and so every caller that reads
+# it from this module keeps working.
+from automated_security_helper.utils.cli_name import CANONICAL_CLI_NAME
 from automated_security_helper.utils.terminal_text import shown_not_obeyed
 
 # Deprecated spelling -> the canonical spelling that replaces it.
@@ -65,10 +70,6 @@ def warn_deprecated_option_spellings(
                 file=out,
             )
 
-
-#: The console script v4 installs as the canonical command. Everything that
-#: names the command in a message reads it from here, so a rename is one edit.
-CANONICAL_CLI_NAME = "ashx"
 
 # Deprecated console-script name -> the command that replaces it. ``ash`` was the
 # v3 name and keeps working through v4 so existing scripts and CI jobs do not
