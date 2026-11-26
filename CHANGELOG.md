@@ -281,6 +281,9 @@
   documented to reach the project approvals API that checkov's GitLab check reads.
   Name a framework in `frameworks`, with or without `all`, to run it. In an offline
   scan their settings are not fetched.
+- Listed `GIT_CONFIG_*` environment entries are refused for scanners that need
+  git `safe.directory` (opengrep); remove the entry from the environment list to
+  run such a scanner.
 
 ## v3.8.0 (2026-11-12)
 
