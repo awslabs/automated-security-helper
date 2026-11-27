@@ -1230,8 +1230,8 @@ def test_the_real_uv_loads_no_env_file_the_tree_names(isolated_uv, monkeypatch):
 
     The planted tool's console script writes ``$PLANTED_MARKER``, which the scanned
     tree's ``.env`` sets. The control starts uv by hand with the same environment
-    and no ``--no-env-file``, and the marker appears; so the flag is accepted by
-    this uv and is what keeps the file out.
+    and no ``--no-env-file``, and the marker appears. The runner's run must start
+    the tool, which prints its version, and leave the marker unwritten.
     """
     sub = _plant(isolated_uv, "user")
     marker = isolated_uv / "from-the-tree-env"
@@ -1251,10 +1251,58 @@ def test_the_real_uv_loads_no_env_file_the_tree_names(isolated_uv, monkeypatch):
     assert marker.exists(), "the control did not load the planted env file"
     marker.unlink()
 
-    UVToolRunner(uv_executable=UV).run_tool(
-        PLANTED, cwd=sub, results_dir=isolated_uv / "results"
+    result = UVToolRunner(uv_executable=UV).run_tool(
+        PLANTED,
+        cwd=sub,
+        results_dir=isolated_uv / "results",
+        stdout_preference="return",
+        stderr_preference="return",
     )
+    assert result.returncode == 0, result.stderr
+    assert "planted 9.9.9" in result.stdout, result.stdout
     assert not marker.exists(), "uv tool run loaded the tree's env file"
+
+
+@needs_uv
+@pytest.mark.integration
+def test_the_real_uv_reads_no_env_file_on_a_runners_run(isolated_uv, monkeypatch):
+    """The runner's ``--no-env-file`` keeps out an env file the filter passes on.
+
+    An env file named by an absolute path outside every directory the run is
+    judged against stays in the environment the runner gives uv, so only the flag
+    keeps uv from loading it. The control starts uv by hand with the same
+    environment and no flag, and the marker appears.
+    """
+    sub = _plant(isolated_uv, "user")
+    marker = isolated_uv / "from-an-env-file"
+    env_file = isolated_uv / "operator" / "tool.env"
+    env_file.parent.mkdir()
+    env_file.write_text(f"PLANTED_MARKER={marker}\n")
+    monkeypatch.delenv("PLANTED_MARKER", raising=False)
+    monkeypatch.setenv("UV_ENV_FILE", str(env_file))
+    monkeypatch.chdir(sub)
+
+    control = subprocess.run(  # nosec B603
+        [UV, "tool", "run", "--offline", "--from", PLANTED, PLANTED],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=sub,
+    )
+    assert control.returncode == 0, control.stderr
+    assert marker.exists(), "the control did not load the env file"
+    marker.unlink()
+
+    result = UVToolRunner(uv_executable=UV).run_tool(
+        PLANTED,
+        cwd=sub,
+        results_dir=isolated_uv / "results",
+        stdout_preference="return",
+        stderr_preference="return",
+    )
+    assert result.returncode == 0, result.stderr
+    assert "planted 9.9.9" in result.stdout, result.stdout
+    assert not marker.exists(), "uv tool run loaded the env file"
 
 
 @pytest.mark.unit
@@ -1715,6 +1763,13 @@ def test_each_path_in_a_uv_value_is_judged_as_uv_reads_the_value(shape, tmp_path
     assert _judged(operators, (src,)) == operators
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows takes a .. away before it follows a link, in os.path.realpath and "
+        "in the paths uv opens, so there the value names the file outside the tree"
+    ),
+)
 @pytest.mark.unit
 def test_a_uv_path_whose_dot_dot_passes_through_a_link_is_judged_by_where_it_leads(
     tmp_path,
@@ -1746,3 +1801,82 @@ def test_the_scanned_tree_is_a_root_for_a_caller_that_names_none(tmp_path):
     assert left.get("UV_INDEX_URL") == "https://mirror.invalid/simple", left
     # Control: outside the scan the same call has no tree to judge against.
     assert _judged(supplied, ()) == supplied
+
+
+#: The variables that take only a path. uv reads such a value as a path even when
+#: it is spelled as a URL (uv 0.13.5: ``UV_CONFIG_FILE=https://...`` fails with
+#: "failed to open file `https://...`", ``UV_PROJECT=https://...`` with "Project
+#: directory `https://...` does not exist", and ``UV_ENV_FILE=file:///x`` is kept
+#: as the path ``file:///x``), so the spelling is a relative path, read against
+#: the directory uv starts in.
+_PATH_ONLY_VARIABLES = [
+    "UV_CONFIG_FILE",
+    "UV_ENV_FILE",
+    "UV_PROJECT",
+    "UV_WORKING_DIR",
+    "UV_PYTHON_CACHE_DIR",
+    "UV_CREDENTIALS_DIR",
+]
+
+
+@pytest.mark.parametrize("spelling", ["https", "file-url"])
+@pytest.mark.parametrize("name", _PATH_ONLY_VARIABLES)
+@pytest.mark.unit
+def test_a_url_spelling_of_a_variable_that_takes_only_a_path_is_a_relative_path(
+    name, spelling, tmp_path
+):
+    src = tmp_path / "src"
+    src.mkdir()
+    out = tmp_path / "operator"
+    value = (
+        "https://config.invalid/uv" if spelling == "https" else (out / "uv").as_uri()
+    )
+    assert name not in _judged({name: value}, (src,)), value
+    # Controls: the same variable naming a path outside the tree stays, and a
+    # variable that takes a URL still reads one.
+    operators = {name: str(out / "uv")}
+    assert _judged(operators, (src,)) == operators
+    urls = {"UV_INDEX_URL": "https://mirror.invalid/simple"}
+    assert _judged(urls, (src,)) == urls
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        pytest.param(["uv", "tool", "install", "bandit"], id="uv"),
+        pytest.param(
+            [sys.executable, "-m", "uv", "tool", "install", "bandit"], id="python-m-uv"
+        ),
+    ],
+)
+@pytest.mark.unit
+def test_ash_dependencies_install_drops_a_uv_path_inside_the_source_tree(
+    spelling, tree, tmp_path, monkeypatch
+):
+    # ``ash dependencies install`` treats its working directory as the source tree
+    # and starts each plugin's declared ``uv tool install`` through run_command.
+    from automated_security_helper.cli import dependencies
+
+    started = []
+
+    def run_cmd(args, **kwargs):
+        started.append(kwargs.get("env"))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(subprocess_utils, "run_command", run_cmd)
+    monkeypatch.setattr(uv_tool_runner, "find_uv_or_none", lambda: "/opt/uv")
+    monkeypatch.chdir(tree)
+    monkeypatch.setenv("UV_CONFIG_FILE", str(tree / "uv.toml"))
+    monkeypatch.setenv("UV_FIND_LINKS", str(tree / "wheels"))
+    operator = str(tmp_path / "operator" / "constraints.txt")
+    monkeypatch.setenv("UV_CONSTRAINT", operator)
+    monkeypatch.setenv("UV_INDEX_URL", "https://mirror.invalid/simple")
+    assert dependencies.run_command(list(spelling)) == 0
+    [env] = started
+    child = _effective(env)
+    # The tree fixture names its .env by a relative path, too.
+    for name in ("UV_CONFIG_FILE", "UV_FIND_LINKS", "UV_ENV_FILE"):
+        assert name not in child, name
+    # Controls: the operator's own values reach uv.
+    assert child.get("UV_CONSTRAINT") == operator
+    assert child.get("UV_INDEX_URL") == "https://mirror.invalid/simple"
