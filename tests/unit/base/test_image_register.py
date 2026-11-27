@@ -298,11 +298,14 @@ def test_each_engine_step_is_installed_and_checked_in_exactly_its_stages() -> No
 def test_an_engine_step_note_is_a_run_of_dockerfile_comments() -> None:
     ir = _ir()
     lines = _DOCKERFILE.splitlines()
+    noted = [step for step in ir.ENGINE_IMAGE_STEPS if step.dockerfile_note]
 
-    for step in ir.ENGINE_IMAGE_STEPS:
-        if step.dockerfile_note:
-            assert all(line.startswith("#") for line in step.dockerfile_note)
-            assert _comment_run(lines, step.dockerfile_note), step.tool
+    # The denominator: a loop over no step passes whatever the Dockerfile says, and a
+    # note dropped from the register would leave this test green with nothing checked.
+    assert [step.tool for step in noted] == ["crane"]
+    for step in noted:
+        assert all(line.startswith("#") for line in step.dockerfile_note)
+        assert _comment_run(lines, step.dockerfile_note), step.tool
 
 
 # ---------------------------------------------------------------------------
