@@ -40,9 +40,10 @@
 # tests/unit/schemas/test_sarif_enum_defaults.py walks every model in this module
 # and fails on any enum-member default, so a regeneration is caught here.
 #
-# Also deliberate: SarifReport, Run, Result, Invocation and PropertyBag, the
-# models validated on their own, set hide_input_in_errors=True, so a refused
-# value (scanned code, or a secret it holds) is not quoted in the error's text.
+# Also deliberate: SarifReport, Run, Result, Invocation, Notification,
+# PhysicalLocation2 and PropertyBag, the models validated on their own, set
+# hide_input_in_errors=True, so a refused value (scanned code, or a secret it
+# holds) is not quoted in the error's text.
 # tests/unit/models/test_validation_errors_hide_input.py fails for a model
 # validated on its own that does not.
 #
@@ -1490,6 +1491,8 @@ class PhysicalLocation1(RecordModel):
 class PhysicalLocation2(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
+        # DELIBERATE DEVIATION: see the module comment.
+        hide_input_in_errors=True,
     )
 
     address: Optional[Address] = Field(None, description="The address of the location.")
@@ -1836,6 +1839,8 @@ class Exception(RecordModel):
 class Notification(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
+        # DELIBERATE DEVIATION: see the module comment.
+        hide_input_in_errors=True,
     )
 
     locations: Optional[List[Location]] = Field(

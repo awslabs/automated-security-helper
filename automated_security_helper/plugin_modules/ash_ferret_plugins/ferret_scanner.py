@@ -104,6 +104,7 @@ from automated_security_helper.utils.subprocess_utils import (
     spawn_run,
 )
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.undecodable_text import text_of_undecodable
 
 # Path to the default ferret-scan config bundled with this plugin
 DEFAULT_FERRET_CONFIG = Path(__file__).parent / "ferret-config.yaml"
@@ -590,6 +591,22 @@ def is_version_compatible(version: str, min_version: str, max_version: str) -> b
     )
 
 
+def _percent_encoded_path(path: str) -> str:
+    """*path* percent-encoded for the join with a base URI, whatever bytes it holds.
+
+    The report is read tolerantly, so a byte that is not UTF-8 reaches this step as
+    the lone surrogate ``surrogateescape`` makes of it, and ``quote`` refuses to
+    encode that. It is encoded as the byte it was, which is how ASH reads a
+    ``file://`` URI back (``unquote(..., errors="surrogateescape")``). A lone
+    surrogate that is no escaped byte is encoded in its record form, the six
+    characters of its escape, so the one file's URI is odd and the report is kept.
+    """
+    try:
+        return quote(path, safe="/", errors="surrogateescape")
+    except UnicodeEncodeError:
+        return quote(text_of_undecodable(path), safe="/")
+
+
 def _resolve_sarif_uri_base_ids(sarif: Any) -> None:
     """Rewrite base-relative artifact URIs in ferret-scan SARIF to absolute ones, in place.
 
@@ -650,7 +667,7 @@ def _resolve_sarif_uri_base_ids(sarif: Any) -> None:
                 continue
             if not base_uri.endswith("/"):
                 base_uri += "/"
-            artifact["uri"] = urljoin(base_uri, quote(uri, safe="/"))
+            artifact["uri"] = urljoin(base_uri, _percent_encoded_path(uri))
             del artifact["uriBaseId"]
 
         if not unresolved:

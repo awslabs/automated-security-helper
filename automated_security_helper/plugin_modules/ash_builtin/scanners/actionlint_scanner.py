@@ -1097,9 +1097,20 @@ def build_sarif(
             and isinstance(filepath, str)
             and filepath
         ):
+            # Names the fields, not their values: the error holds the finding's
+            # message and the workflow's own text.
+            unreadable = [
+                name
+                for name, readable in (
+                    ("kind", isinstance(kind, str) and bool(kind)),
+                    ("message", isinstance(message, str)),
+                    ("filepath", isinstance(filepath, str) and bool(filepath)),
+                )
+                if not readable
+            ]
             raise ScannerError(
                 f"actionlint error #{index} is missing kind, message or filepath: "
-                f"{error!r}"
+                f"no text for {', '.join(unreadable)}"
             )
         if kind not in KIND_SEVERITY and kind not in kinds_seen:
             ASH_LOGGER.warning(
@@ -1151,8 +1162,9 @@ def build_sarif(
         # actionlint writes, so it is noted.
         number = _line_number(line)
         if number is None:
+            # The kind of value, never the value: it is whatever the tool wrote.
             raise ScannerError(
-                f"actionlint error #{index} has no integer line: {line!r}"
+                f"actionlint error #{index} has no integer line ({type(line).__name__})"
             )
         if record is not None:
             if isinstance(line, str):

@@ -547,6 +547,64 @@ def test_malformed_output_raises(payload, exit_code, match):
         build_sarif(payload, exit_code)
 
 
+_WHATEVER_THE_TOOL_WROTE = "ASH-REFUSAL-QUOTES-NONE-OF-THIS"
+
+
+@pytest.mark.parametrize(
+    ("error", "match"),
+    [
+        (
+            {
+                "kind": "id",
+                "message": _WHATEVER_THE_TOOL_WROTE,
+                "filepath": "a",
+                "line": _WHATEVER_THE_TOOL_WROTE,
+            },
+            r"no integer line \(str\)",
+        ),
+        (
+            {
+                "kind": "id",
+                "message": _WHATEVER_THE_TOOL_WROTE,
+                "filepath": "a",
+                "line": [_WHATEVER_THE_TOOL_WROTE],
+            },
+            r"no integer line \(list\)",
+        ),
+        (
+            {
+                "kind": "id",
+                "message": _WHATEVER_THE_TOOL_WROTE,
+                "snippet": _WHATEVER_THE_TOOL_WROTE,
+                "line": 1,
+            },
+            "missing kind, message or filepath: no text for filepath",
+        ),
+        (
+            {
+                "kind": ["id"],
+                "message": _WHATEVER_THE_TOOL_WROTE,
+                "filepath": ["a"],
+                "line": 1,
+            },
+            "missing kind, message or filepath: no text for kind, filepath",
+        ),
+    ],
+    ids=["line-word", "line-list", "filepath-missing", "kind-and-filepath-lists"],
+)
+@pytest.mark.unit
+def test_a_refusal_names_the_part_that_is_unreadable_and_quotes_none_of_it(
+    error, match
+):
+    """The refusal tells which part of which error could not be read. The error holds
+    the finding's message and the workflow's own text, and a refusal that quotes it
+    puts scanned text into the scan's log and results."""
+    with pytest.raises(ScannerError, match=match) as caught:
+        build_sarif({"errors": [error]}, 1)
+
+    assert _WHATEVER_THE_TOOL_WROTE not in str(caught.value)
+
+
 @pytest.mark.parametrize("line", [-1, -7], ids=["minus-one", "minus-seven"])
 @pytest.mark.unit
 def test_a_negative_line_keeps_its_finding_without_a_region_and_says_so(line):
