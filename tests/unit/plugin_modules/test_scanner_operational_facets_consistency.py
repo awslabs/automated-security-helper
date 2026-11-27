@@ -1121,6 +1121,32 @@ def test_the_dockerfile_readers_have_positive_and_negative_controls() -> None:
     assert not _LICENSING.search("# Some gems ship files mode 777 (lightly, which")
 
 
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "GPLv3",
+        "gplv3",
+        "GPLV3",
+        "AGPL-3.0",
+        "agpl-3.0",
+        "Agpl-3.0",
+        "LGPL-2.1",
+        "lgpl-2.1",
+        "Lgpl-2.1",
+    ],
+)
+def test_the_licensing_filter_catches_each_spelling_of_a_gpl_family_license(
+    spelling: str,
+) -> None:
+    assert _LICENSING.search(f"# It is {spelling}, so")
+    assert _LICENSING.search(f"# {spelling} only.")
+
+
+def test_the_licensing_filter_leaves_gpl_letters_inside_another_word_alone() -> None:
+    assert not _LICENSING.search("# gplot draws the graph.")
+    assert not _LICENSING.search("# The xagpl cache is private.")
+
+
 @pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
 def test_an_image_note_is_a_verbatim_run_of_dockerfile_comments(cls) -> None:
     note = _ops(cls).image.dockerfile_note
@@ -1156,22 +1182,63 @@ def test_a_scanner_whose_dockerfile_comment_is_about_licensing_carries_no_note(
     assert _ops(_class_named(name)).image.dockerfile_note == ()
 
 
-@pytest.mark.parametrize(
-    "name",
-    [n for n, route in sorted(_IMAGE_ROUTES.items()) if route == "release_asset"],
-)
+#: The note each release-asset scanner's row carries, written out. A scanner whose
+#: Dockerfile comment is about licensing, or that has none, carries no note.
+_RELEASE_ASSET_NOTES: dict[str, tuple[str, ...]] = {
+    "actionlint": (
+        "# actionlint backs the builtin actionlint scanner. Same pinned-asset path as syft and",
+        "# grype.",
+    ),
+    "betterleaks": (),
+    "cfn-guard": (
+        "# cfn-guard, a builtin scanner, and the AWS Guard Rules Registry it evaluates",
+        "# templates against. The binary comes from its pinned release asset like the tools",
+        "# above. The rules archive is pinned the same way (RULES_BUNDLES in",
+        "# utils/tool_downloads.py) and installed here as root, mode 0755/0644, so the scan",
+        "# user cannot rewrite the rules a later scan trusts. `ash dependencies install`",
+        "# below finds the bundle already in place, its rule files matching the contents",
+        "# pinned beside the archive digest, and leaves it alone.",
+        "# Under /usr/share rather than /deps, whose cache directories stay writable for the",
+        "# scanners: the bundle and every directory above it are root's and writable by no one",
+        "# else, which `--assert-root-only` checks here and again in the final stage.",
+    ),
+    "gitleaks": (
+        "# gitleaks backs the builtin gitleaks scanner, which runs beside detect-secrets.",
+    ),
+    "grype": (),
+    "hadolint": (),
+    "syft": (),
+    "trivy": (),
+}
+
+
+def test_the_written_out_notes_name_every_release_asset_scanner() -> None:
+    assert sorted(_RELEASE_ASSET_NOTES) == [
+        name
+        for name, route in sorted(_IMAGE_ROUTES.items())
+        if route == "release_asset"
+    ]
+
+
+@pytest.mark.parametrize("name", sorted(_RELEASE_ASSET_NOTES))
 def test_a_release_asset_note_is_the_comment_above_its_version_argument(
     name: str,
 ) -> None:
     """The note is what the Dockerfile says directly above the scanner's version
-    argument, unless that comment is about licensing, when it is nothing."""
+    argument, unless that comment is about licensing or there is none, when it is
+    nothing. The notes are written out above, so the filter that keeps licensing
+    words out of a note is not also what decides which note is expected."""
     image = _ops(_class_named(name)).image
     block = comment_block_above(
         _DOCKERFILE_LINES, f"ARG {image.tool.upper().replace('-', '_')}_VERSION="
     )
-    expected = () if any(_LICENSING.search(line) for line in block) else tuple(block)
+    expected = _RELEASE_ASSET_NOTES[name]
 
     assert image.dockerfile_note == expected, name
+    if expected:
+        assert tuple(block) == expected, name
+    else:
+        assert not block or any(_LICENSING.search(line) for line in block), name
     assert image.version_check == (image.tool, "--version"), name
 
 
