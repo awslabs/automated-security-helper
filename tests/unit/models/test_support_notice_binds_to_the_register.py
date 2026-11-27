@@ -3,14 +3,15 @@
 Why this exists
 ---------------
 ``SupportNotice`` spells the vocabularies it is written in (level, behavior, the kind
-and group of an upgrade path, the moment a notice was raised) as text types of its
-own. It cannot take them from ``base/support_register.py``: the register builds and
-checks every declaration it holds when it is imported, and a results file has to
-load without that, because ``ash report`` and ``ash merge`` read notices and never
-evaluate a row. So the two are held equal here. A member added to or taken out of
-one of the register's enums, and not mirrored in the model, fails the first group
-of tests; a row the register declares that the model could not hold fails the
-second.
+and group of an upgrade path, the moment a notice was raised, and the names of the
+facts it records) as text types of its own. It cannot take them from
+``base/support_register.py``: the register builds and checks every declaration it
+holds when it is imported, and a results file has to load without that, because
+``ash report`` and ``ash merge`` read notices and never evaluate a row. So the two are
+held equal here. A member added to or taken out of one of the register's enums, or a
+fact added to or taken out of its ``FIELDS``, and not mirrored in the model, fails the
+first group of tests; a row the register declares that the model could not hold fails
+the second.
 
 The register's ``Notify.MATRIX`` and ``SupportLevel.SUPPORTED`` are the two members a
 notice never has: a matrix-only row is shown in the matrices and on the docs page and
@@ -21,9 +22,10 @@ import enum
 from typing import get_args
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from automated_security_helper.base.support_register import (
+    FIELDS,
     REGISTER,
     Behavior,
     Notify,
@@ -60,6 +62,26 @@ def _drift(words: set[str], enum_type: type[enum.Enum], never: set[str]) -> dict
 
 
 NO_DRIFT = {"missing": set(), "extra": set()}
+
+
+def _fact_names(model: type) -> set[str]:
+    """The fact names a model's ``facts`` accepts, read from the key type of the field.
+
+    A field typed ``Dict[str, str]`` has no names to read, so a model that took any
+    name for a fact reads as accepting none of the register's, and the comparison
+    below says so.
+    """
+    key_type, _value_type = get_args(model.model_fields["facts"].annotation)
+    return set(get_args(key_type))
+
+
+def _name_drift(names: set[str], declared: tuple[str, ...]) -> dict:
+    """What differs between the names a model accepts and the register's facts.
+
+    ``missing`` is what the register declares and the model refuses, ``extra`` what the
+    model takes and the register does not know. Both are empty when the two agree.
+    """
+    return {"missing": set(declared) - names, "extra": names - set(declared)}
 
 
 class TestTheVocabulariesAreTheRegistersEnums:
@@ -116,6 +138,38 @@ class TestTheVocabulariesAreTheRegistersEnums:
             "missing": set(),
             "extra": {"unsupported"},
         }
+
+
+class TestTheFactNamesAreTheRegistersFields:
+    def test_the_names_a_notice_accepts_are_the_registers_fields(self):
+        assert _name_drift(_fact_names(SupportNotice), FIELDS) == NO_DRIFT
+
+    def test_the_comparison_flags_a_name_the_model_lacks_and_one_it_adds(self):
+        """Must-flag: the same comparison of a model that holds exactly the register's
+        names, against a register with one more fact and against one with one fewer,
+        is not empty. Without this a comparison that compared nothing would pass."""
+        names = set(FIELDS)
+
+        assert _name_drift(names, (*FIELDS, "kernel_lockdown")) == {
+            "missing": {"kernel_lockdown"},
+            "extra": set(),
+        }
+        assert _name_drift(names, FIELDS[1:]) == {
+            "missing": set(),
+            "extra": {FIELDS[0]},
+        }
+
+    def test_a_model_that_takes_any_name_reads_as_accepting_none_of_them(self):
+        """Must-flag: the field as it was before the names were closed, a dict of text
+        to text, is not read as agreeing with the register."""
+
+        class AnyName(BaseModel):
+            facts: dict[str, str] = {}
+
+        names = _fact_names(AnyName)
+
+        assert names == set()
+        assert _name_drift(names, FIELDS) != NO_DRIFT
 
 
 def _rows_that_raise_a_notice():
