@@ -2051,8 +2051,11 @@ def _extend_scanner(tmp_path, monkeypatch, how: str, extend_text: str):
 @pytest.mark.parametrize("how", ["config_file", "env_path", "env_toml", "chain"])
 @pytest.mark.unit
 def test_a_relative_extend_path_is_refused(tmp_path, monkeypatch, how):
+    """Matched on the refusal's own words: every refusal of the check names
+    ``[extend]``, so a match on "extend" alone would pass a refusal for another
+    reason."""
     scanner = _extend_scanner(tmp_path, monkeypatch, how, _RELATIVE_EXTEND)
-    with pytest.raises(ScannerError, match="extend"):
+    with pytest.raises(ScannerError, match=_RELATIVE_REFUSAL):
         scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
 
 
@@ -2177,28 +2180,64 @@ def _marked(tmp_path, how: str) -> str:
     )
 
 
-@pytest.mark.parametrize("extend", ["relative", "absolute"])
+#: What the ``[extend]`` of the texts the mark tests save holds.
+_EXTEND_SHAPES = ["relative", "absolute", "empty", "none"]
+
+
+def _extend_text(tmp_path, extend: str) -> str:
+    """The config text for ``extend``: a relative path, an absolute one to the
+    operator's ``common.toml``, an empty one, or no ``[extend]`` at all."""
+    if extend == "relative":
+        return _RELATIVE_EXTEND
+    if extend == "absolute":
+        return f"[extend]\npath = '{(tmp_path / 'op' / 'common.toml').as_posix()}'\n"
+    if extend == "empty":
+        return "[extend]\npath = ''\n"
+    return "title = 'operator'\n"
+
+
+@pytest.mark.parametrize("extend", _EXTEND_SHAPES)
 @pytest.mark.parametrize("how", ["config_file", "env_path", "env_toml", "chain"])
 @pytest.mark.unit
 def test_a_config_behind_a_byte_order_mark_is_refused_for_the_mark(
     tmp_path, monkeypatch, how, extend
 ):
-    """gitleaks cannot read a config that starts with a UTF-8 byte order mark: its
-    TOML reader stops at the first byte ("invalid character at start of key") and it
-    exits 1. So ASH refuses the config before gitleaks runs, naming it, whatever its
-    extend path says. The same configs without the mark are the controls above: the
-    relative one is refused for its path and the absolute one is passed."""
-    common = tmp_path / "op" / "common.toml"
-    text = (
-        _RELATIVE_EXTEND
-        if extend == "relative"
-        else f"[extend]\npath = '{common.as_posix()}'\n"
+    """gitleaks 8.30.1 cannot read a config that starts with a UTF-8 byte order
+    mark. Given such a file with ``--config``, through ASH and on its own, it stops
+    at the mark ("toml: invalid character at start of key") and exits 1, and it
+    reads the same text without the mark. ASH gives gitleaks every config that way,
+    the text of ``GITLEAKS_CONFIG_TOML`` included; a file a config extends, which
+    gitleaks opens itself, is refused the same way. So ASH refuses the config
+    before gitleaks runs, naming it, whatever its ``[extend]`` holds: a relative
+    path, an absolute or an empty one, or none, so the refusal does not wait for an
+    extend path. The same texts without the mark are the controls: the relative one
+    is refused for its path and the others are passed."""
+    scanner = _with_byte_order_mark(
+        tmp_path, monkeypatch, how, _extend_text(tmp_path, extend)
     )
-    scanner = _with_byte_order_mark(tmp_path, monkeypatch, how, text)
-    common.write_text(_TREE_COMMON)
+    (tmp_path / "op" / "common.toml").write_text(_TREE_COMMON)
     with pytest.raises(ScannerError, match=_MARK_REFUSAL) as refused:
         scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
     assert _marked(tmp_path, how) in str(refused.value)
+
+
+@pytest.mark.parametrize("extend", ["empty", "none"])
+@pytest.mark.parametrize("how", ["config_file", "env_path", "env_toml", "chain"])
+@pytest.mark.unit
+def test_a_config_with_no_extend_path_is_passed_as_config(
+    tmp_path, monkeypatch, how, extend
+):
+    """The control for the marked configs with an empty extend path or none: the
+    same text without the mark is passed, as the absolute one is."""
+    text = _extend_text(tmp_path, extend)
+    scanner = _with_config_text(tmp_path, monkeypatch, how, text)
+    source = scanner.context.source_dir
+    passed = _passed_config(scanner._build_arguments(source, tmp_path / "o.sarif"))
+    if how == "env_toml":
+        assert _ashs_own(passed, source)
+        assert passed.read_text() == text
+    else:
+        assert passed.resolve() == (tmp_path / "op" / "gitleaks.toml").resolve()
 
 
 @pytest.mark.parametrize("how", ["config_file", "env_path", "env_toml", "chain"])
@@ -2220,6 +2259,56 @@ def test_a_byte_order_mark_inside_an_extend_path_is_part_of_the_path(
         ScannerError, match=re.escape(f"{value!r}, which is not an absolute path")
     ):
         scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+
+
+@pytest.mark.parametrize("tool", ["GitLeaks", "betterleaks", "another-tool"])
+@pytest.mark.unit
+def test_the_mark_is_refused_for_whatever_tool_reads_the_config(tool):
+    """The refusal is made for the tool named, not for a list of names: no scanner
+    passes these spellings, and each is refused all the same."""
+    words = f"starts with a UTF-8 byte order mark, which {tool} cannot read"
+    with pytest.raises(ScannerError, match=re.escape(words)):
+        tool_config_trust.refuse_relative_extend_path(
+            tool, "TOOL_CONFIG_TOML", text=_BYTE_ORDER_MARK + "title = 'operator'\n"
+        )
+
+
+@pytest.mark.unit
+def test_a_config_the_tool_does_not_read_is_checked_past_the_mark():
+    """A config another one takes precedence over is never opened by the tool, so
+    the mark cannot stop it, and the config is not refused for it. The rest of the
+    config is still checked: a relative extend path behind the mark is refused."""
+    with pytest.raises(ScannerError, match=_RELATIVE_REFUSAL):
+        tool_config_trust.refuse_relative_extend_path(
+            "gitleaks",
+            "GITLEAKS_CONFIG_TOML",
+            text=_BYTE_ORDER_MARK + _RELATIVE_EXTEND,
+            read_by_tool=False,
+        )
+    tool_config_trust.refuse_relative_extend_path(
+        "gitleaks",
+        "GITLEAKS_CONFIG_TOML",
+        text=_BYTE_ORDER_MARK + "title = 'operator'\n",
+        read_by_tool=False,
+    )
+
+
+@pytest.mark.parametrize("read_by_tool", [True, False])
+@pytest.mark.unit
+def test_a_file_a_config_extends_is_read_as_the_config_is(tmp_path, read_by_tool):
+    """The tool opens the file a config extends only when it reads the config. A
+    mark at the start of that file is refused when it does, naming the file, and
+    skipped when it does not, where the relative extend path behind it is refused."""
+    extended = tmp_path / "mid.toml"
+    extended.write_bytes((_BYTE_ORDER_MARK + _RELATIVE_EXTEND).encode("utf-8"))
+    text = f"[extend]\npath = '{extended.as_posix()}'\n"
+    words = _MARK_REFUSAL if read_by_tool else _RELATIVE_REFUSAL
+    with pytest.raises(ScannerError, match=words) as refused:
+        tool_config_trust.refuse_relative_extend_path(
+            "gitleaks", "GITLEAKS_CONFIG_TOML", text=text, read_by_tool=read_by_tool
+        )
+    named = repr(str(extended)) if read_by_tool else f"{extended.as_posix()} sets"
+    assert named in str(refused.value)
 
 
 #: Values under ``extend`` that ASH cannot read the way gitleaks does, with the
