@@ -103,6 +103,57 @@ def test_a_row_read_from_an_additional_report_is_a_finding_of_kind_fail():
     assert (row.result_kind, row.is_finding) == ("fail", True)
 
 
+LEVEL_WARNING = {"level": "warning"}
+LEVEL_NONE_HIGH = {"level": "none", "properties": {"issue_severity": "HIGH"}}
+
+
+@pytest.mark.parametrize("kind", STATES_NO_FINDING)
+@pytest.mark.parametrize(
+    "reports", [LEVEL_WARNING, LEVEL_NONE_HIGH], ids=["level-warning", "severity-high"]
+)
+def test_a_row_whose_result_reports_a_problem_is_a_finding(kind, reports):
+    """A result that contradicts its kind is a finding: the row says so, read from
+    the whole result and not from the kind alone."""
+    result = {**_result("R-PAIR", kind), **reports}
+    model = _model(_result("B602"), result)
+
+    flat = model.to_flat_vulnerabilities()
+
+    assert [row.is_finding for row in flat] == [True, True]
+
+
+@pytest.mark.parametrize("kind", STATES_NO_FINDING)
+def test_a_copied_row_keeps_its_verdict(kind):
+    result = {**_result("R-PAIR", kind), **LEVEL_WARNING}
+    (row,) = _model(result).to_flat_vulnerabilities()
+
+    assert row.is_finding is True
+    assert row.model_copy().is_finding is True
+
+
+@pytest.mark.parametrize("kind", STATES_NO_FINDING)
+@pytest.mark.parametrize(
+    "severity, states_a_finding", [("HIGH", True), ("INFO", False)]
+)
+def test_a_row_built_without_a_result_reads_its_kind_and_severity(
+    kind, severity, states_a_finding
+):
+    """A row with no result behind it (a stand-in, one read back from a dump) knows
+    only its kind and graded severity: such a kind at INFO states no finding, and
+    one graded above INFO reports a problem."""
+    row = FlatVulnerability(
+        id="x",
+        title="t",
+        description="d",
+        severity=severity,
+        scanner="bandit",
+        scanner_type="SAST",
+        result_kind=kind,
+    )
+
+    assert row.is_finding is states_a_finding
+
+
 def test_the_kind_is_the_last_field_so_the_csv_column_follows_every_older_one():
     assert list(FlatVulnerability.model_fields)[-2:] == [
         "correlation_id",

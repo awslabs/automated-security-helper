@@ -68,6 +68,29 @@ def _note() -> dict:
     }
 
 
+KINDS = ("pass", "notApplicable", "informational")
+
+
+def _pair(kind: str) -> dict:
+    """A result that contradicts its kind: *kind* at level warning. It reports a
+    problem, so it is a finding."""
+    return {
+        "ruleId": "R-PAIR",
+        "kind": kind,
+        "level": "warning",
+        "message": {"text": "reports a problem despite its kind"},
+        "properties": {"scanner_name": "bandit", "tags": ["bandit"]},
+        "locations": [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": "src.py"},
+                    "region": {"startLine": 30},
+                }
+            }
+        ],
+    }
+
+
 def _results(*results: dict) -> AshAggregatedResults:
     model = AshAggregatedResults()
     model.sarif = SarifReport.model_validate(
@@ -118,7 +141,27 @@ def test_a_scan_that_loses_the_note_has_nothing_absent():
     assert compare_findings(before, after).absent_after == []
 
 
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_diff_sees_such_a_pair_as_new(kind):
+    """A result that reports a problem despite its kind is a finding, so a scan
+    that gains it has a new finding."""
+    before = unique_findings(_results(_bandit()), "Baseline")
+    after = unique_findings(_results(_bandit(), _pair(kind)), "Current")
+
+    assert [row.rule_id for row in compare_findings(before, after).new] == ["R-PAIR"]
+
+
 # --- baseline -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_baseline_removes_such_a_pair_it_names(kind):
+    current = _results(_bandit(), _pair(kind))
+
+    outcome = apply_baseline(current, _baseline(_bandit(), _pair(kind)))
+
+    assert current.sarif.runs[0].results == []
+    assert outcome.matched == 2
 
 
 def test_a_baseline_removes_the_old_finding_and_keeps_the_note():
@@ -139,6 +182,15 @@ def test_a_history_row_names_the_kind_of_its_result():
     rows = [_finding_row(row) for row in flat]
 
     assert [row.get("result_kind") for row in rows] == ["fail", "informational"]
+
+
+def test_a_history_row_records_whether_its_result_states_a_finding():
+    flat = _results(_bandit(), _note(), _pair("pass")).to_flat_vulnerabilities()
+
+    rows = [_finding_row(row) for row in flat]
+
+    assert [row["is_finding"] for row in rows] == [True, False, True]
+    assert all(_valid_row(row) for row in rows)
 
 
 def test_a_history_row_with_a_kind_that_is_not_text_is_refused():
@@ -176,3 +228,42 @@ def test_the_trend_leaves_out_the_rows_that_state_no_finding_and_keeps_old_rows(
     rows = _rows(run)
 
     assert [(row.id, row.index) for row in rows] == [("a", 0), ("c", 2)]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_trend_counts_such_a_pair(kind):
+    """A history row written from a result that reports a problem despite its kind
+    says it is a finding, and the trend counts it."""
+    (flat,) = _results(_pair(kind)).to_flat_vulnerabilities()
+    record = _finding_row(flat)
+    run = TrendRun("run-1", "file", {"findings": [record]})
+
+    assert [row.id for row in _rows(run)] == [record["id"]]
+
+
+def test_a_trend_row_without_the_key_falls_back_to_its_kind_and_severity():
+    """Guard: a record from before the key, whose kind states no finding and whose
+    severity is INFO, is not counted."""
+    run = TrendRun(
+        "run-1",
+        "file",
+        {
+            "findings": [
+                {
+                    "id": "n",
+                    "scanner": "bandit",
+                    "result_kind": "informational",
+                    "severity": "INFO",
+                }
+            ]
+        },
+    )
+
+    assert _rows(run) == []
+
+
+def test_a_trend_row_with_neither_key_is_counted():
+    """Guard: a record from before the kind was written counts every row."""
+    run = TrendRun("run-1", "file", {"findings": [{"id": "c", "scanner": "bandit"}]})
+
+    assert [row.id for row in _rows(run)] == ["c"]

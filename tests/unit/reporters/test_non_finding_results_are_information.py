@@ -296,3 +296,72 @@ def test_the_text_report_lists_the_note_after_the_overview_and_not_in_it(
     assert "B602" in overview
     assert cut not in overview
     assert cut in text[information_at:]
+
+
+# --- a result that contradicts its kind ----------------------------------------
+
+
+def _single_model(
+    kind: str, level: str, *, threshold: str, scanner: str | None = None
+) -> AshAggregatedResults:
+    """One result of *kind* at *level*, under *threshold*, and nothing else."""
+    result = {
+        "ruleId": "R-ONE",
+        "kind": kind,
+        "level": level,
+        "message": {"text": "the one result"},
+        "locations": [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": "src/app.py"},
+                    "region": {"startLine": 3},
+                }
+            }
+        ],
+    }
+    if scanner:
+        result["properties"] = {"scanner_name": scanner}
+    model = AshAggregatedResults()
+    model.ash_config = get_default_config()
+    without_scanner_thresholds(model)
+    model.ash_config.global_settings.severity_threshold = threshold
+    model.sarif = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [{"tool": {"driver": {"name": "bandit"}}, "results": [result]}],
+        }
+    )
+    if scanner:
+        model.additional_reports[scanner] = {
+            "source": {"scanner_name": scanner, "status": "PASSED", "duration": 1.0}
+        }
+    return model
+
+
+@pytest.mark.parametrize("kind", ["pass", "notApplicable", "informational"])
+def test_a_result_whose_level_reports_a_problem_is_a_card_and_not_information(
+    test_plugin_context, kind
+):
+    """A result that contradicts its kind is a finding: at MEDIUM the page holds a
+    card for it, the information rows leave it out and the actionable count is 1."""
+    model = _single_model(kind, "warning", threshold="MEDIUM")
+    emitter = ReportContentEmitter(model, human_presentation=True)
+
+    document = HtmlReporter(context=test_plugin_context).report(model)
+
+    assert document.count('<article class="finding-card"') == 1
+    assert emitter.get_information_overview() == []
+    assert emitter.actionable_finding_count() == 1
+
+
+@pytest.mark.parametrize("kind", ["pass", "notApplicable", "informational"])
+def test_a_scanner_named_note_is_counted_in_no_scanner_row_total(kind):
+    """Guard: a result that states no finding and names its scanner is in no
+    figure of that scanner's row, so the summary's info and actionable figures
+    stay 0 at ALL."""
+    model = _single_model(kind, "none", threshold="ALL", scanner="bandit")
+
+    summary = ReportContentEmitter(model, human_presentation=True).get_scan_summary()
+
+    assert summary["actionable"] == 0
+    assert summary["counts"]["info"] == 0

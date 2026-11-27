@@ -92,8 +92,15 @@ def test_the_suppressed_total_of_the_summary_leaves_the_note_out():
 
 
 def _model_with_a_scanner_row() -> AshAggregatedResults:
-    """The same two suppressed results, and a row for the scanner that reported them."""
+    """The same two suppressed results, a third that states a finding despite its
+    kind (informational at level warning), and a row for the scanner that reported
+    them."""
     model = _model()
+    model.sarif.runs[0].results.append(
+        type(model.sarif.runs[0].results[0]).model_validate(
+            _suppressed("R-PAIR", kind="informational", level="warning")
+        )
+    )
     model.ash_config = AshConfig.model_validate(
         {
             "project_name": "non-finding-kinds",
@@ -107,17 +114,20 @@ def _model_with_a_scanner_row() -> AshAggregatedResults:
 
 
 def _assert_the_suppressed_counts_agree(model: AshAggregatedResults) -> None:
-    """Every place that reads the scanner's suppressed count reads one, and not two."""
+    """Every place that reads the scanner's suppressed count reads one, and not two.
+
+    The two suppressed results that state a finding count; the note does not.
+    """
     row = model.scanner_results["bandit"]
-    assert model.metadata.summary_stats.suppressed == 1
-    assert (row.suppressed_finding_count, row.severity_counts.suppressed) == (1, 1)
+    assert model.metadata.summary_stats.suppressed == 2
+    assert (row.suppressed_finding_count, row.severity_counts.suppressed) == (2, 2)
     assert metrics_consistency_discrepancies(model) == []
     bandit = next(
         metrics
         for metrics in get_unified_scanner_metrics(model)
         if metrics.scanner_name == "bandit"
     )
-    assert bandit.suppressed == 1
+    assert bandit.suppressed == 2
 
 
 def test_the_suppressed_counts_agree_when_the_metrics_pass_runs_first():
