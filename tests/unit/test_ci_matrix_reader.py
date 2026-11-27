@@ -10,6 +10,7 @@ as true, or as a known runner.
 
 from __future__ import annotations
 
+import ast
 import copy
 import importlib.util
 import sys
@@ -24,6 +25,15 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 MODULE = REPO_ROOT / "scripts" / "_ci_matrix.py"
+
+
+def _workflow_files(directory: Path) -> list[Path]:
+    """The workflow files directly under ``directory``: GitHub reads both extensions."""
+    found = [*directory.glob("*.yml"), *directory.glob("*.yaml")]
+    return sorted(path for path in found if path.is_file())
+
+
+WORKFLOW_FILES = _workflow_files(WORKFLOWS)
 
 
 def _load() -> Any:
@@ -373,6 +383,41 @@ class TestExpansion:
         with pytest.raises(ci.UnsupportedMatrix, match="not a mapping"):
             ci.cells({"strategy": {"matrix": ["a"]}})
 
+    def test_an_exclude_key_that_names_no_axis_is_refused_and_not_ignored(self):
+        """GitHub rejects the workflow. An entry that matched nothing would leave the leg
+        count looking right for a typo in a key."""
+        matrix = {"os": ["a", "b"], "python-version": ["1"]}
+        typo = _job({**matrix, "exclude": [{"python_version": "1"}]})
+        with pytest.raises(ci.UnsupportedMatrix, match="'python_version'") as caught:
+            ci.cells(typo)
+        assert "the axes are os, python-version" in str(caught.value)
+        with pytest.raises(ci.UnsupportedMatrix, match="'python_version'"):
+            ci.axis_cells(typo["strategy"]["matrix"])
+        # The key is judged with the entry's other keys, not only when it is the first.
+        second = _job({**matrix, "exclude": [{"os": "a", "python_version": "1"}]})
+        with pytest.raises(ci.UnsupportedMatrix, match="'python_version'"):
+            ci.cells(second)
+
+    @pytest.mark.parametrize("event", ["push", "pull_request"])
+    def test_an_exclude_key_that_names_no_axis_is_refused_on_every_event(self, event):
+        """An entry with a void value matches nothing, and GitHub reads its key anyway."""
+        job = _job({"os": ["a", "b"], "exclude": [{"oss": _overlay("a")}]})
+        with pytest.raises(ci.UnsupportedMatrix, match="'oss'"):
+            ci.cells(job, event)
+
+    def test_a_key_only_an_include_adds_is_not_an_axis_to_exclude_on(self):
+        matrix = {
+            "os": ["a"],
+            "include": [{"os": "a", "extra": 1}],
+            "exclude": [{"extra": 1}],
+        }
+        with pytest.raises(ci.UnsupportedMatrix, match="'extra'"):
+            ci.cells(_job(matrix))
+
+    def test_an_exclude_in_a_matrix_with_no_axis_is_refused(self):
+        with pytest.raises(ci.UnsupportedMatrix, match="'os'"):
+            ci.axis_cells({"include": [{"os": "a"}], "exclude": [{"os": "a"}]})
+
     def test_matrix_values_name_what_the_matrix_names_whether_or_not_a_leg_runs_it(
         self,
     ):
@@ -585,6 +630,43 @@ def _planted(job_lines: str, header: str = "on: push\n") -> dict[str, Any]:
     return ci.parse_workflow(f"{header}jobs:\n  j:\n{job_lines}")
 
 
+CALLEE_USES = "./.github/workflows/callee.yml"
+
+#: A reusable workflow whose one job runs on the runner label its caller gives it.
+CALLEE = """\
+on:
+  workflow_call:
+    inputs:
+      runner:
+        type: string
+        default: ubuntu-latest
+      note:
+        type: string
+        default: plain text
+jobs:
+  work:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - run: echo hi
+"""
+
+
+def _caller(with_text: str = "") -> dict[str, Any]:
+    """A workflow whose job ``call`` calls CALLEE, with the ``with:`` block it is given."""
+    return ci.parse_workflow(
+        f"on: push\njobs:\n  call:\n    uses: {CALLEE_USES}\n{with_text}"
+    )
+
+
+def _called(workflow: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The reusable workflows of this repository that ``workflow`` calls, by ``uses:``."""
+    return {
+        job["uses"]: ci.load_workflow(REPO_ROOT / job["uses"])
+        for job in workflow["jobs"].values()
+        if str(job.get("uses", "")).startswith("./")
+    }
+
+
 class TestRunnerLabels:
     def test_the_table_holds_the_rows_the_runner_reference_gives(self):
         found = {
@@ -742,25 +824,336 @@ class TestRunnerLabels:
             ci.runs_on(by_axis, {})
 
     @pytest.mark.parametrize(
-        "path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda path: path.name
+        "cell, label",
+        [
+            ({"os": "ubuntu-latest", "method": "Finch"}, "ubuntu-24.04"),
+            ({"os": "ubuntu-latest", "method": "FINCH"}, "ubuntu-24.04"),
+            ({"os": "Ubuntu-Latest", "method": "finch"}, "ubuntu-24.04"),
+            # The controls: another method, and another image, are not overridden.
+            ({"os": "ubuntu-latest", "method": "pip"}, "ubuntu-latest"),
+            ({"os": "macos-15", "method": "Finch"}, "macos-15"),
+        ],
     )
+    def test_the_override_compares_strings_the_way_github_does(self, cell, label):
+        """GitHub's == ignores case, so a leg whose method or image differs from the
+        override's text only in case is still overridden."""
+        job = _job(**{"runs-on": FINCH_OVERRIDE})
+        assert ci.runs_on(job, cell) == label
+
+    def test_a_matrix_key_the_matrix_does_not_define_is_refused(self):
+        """Without this a typo in the key names no label, and the empty set passes."""
+        lines = (
+            "    runs-on: ${{ matrix.runner }}\n"
+            "    strategy:\n"
+            "      matrix:\n"
+            "        os: [ubuntu-latest]\n"
+        )
+        workflow = _planted(lines)
+        with pytest.raises(ci.CiMatrixError, match=r"matrix\.runner"):
+            ci.check_runner_labels(workflow)
+        with pytest.raises(ci.CiMatrixError, match=r"matrix\.runner"):
+            ci.runs_on_labels(workflow["jobs"]["j"])
+
+    def test_a_runs_on_that_reads_a_matrix_the_job_does_not_have_is_refused(self):
+        with pytest.raises(ci.CiMatrixError, match=r"matrix\.os"):
+            ci.check_runner_labels(_planted("    runs-on: ${{ matrix.os }}\n"))
+
+    def test_a_leg_with_no_value_for_the_key_runs_on_nothing_and_is_refused(self):
+        lines = (
+            "    runs-on: ${{ matrix.runner }}\n"
+            "    strategy:\n"
+            "      matrix:\n"
+            "        os: [a, b]\n"
+            "        include:\n"
+            "          - os: c\n"
+            "            runner: ubuntu-latest\n"
+        )
+        with pytest.raises(ci.CiMatrixError, match="no value for it") as caught:
+            ci.check_runner_labels(_planted(lines))
+        assert "'os': 'a'" in str(caught.value)
+
+    def test_a_leg_that_lacks_the_key_on_a_pull_request_only_is_refused(self):
+        """The overlay drops the leg an include merged into, so on a pull request that
+        include is a leg of its own, and it has no runner."""
+        lines = (
+            "    runs-on: ${{ matrix.runner }}\n"
+            "    strategy:\n"
+            "      matrix:\n"
+            "        os: [a, b]\n"
+            "        runner: [ubuntu-latest]\n"
+            "        exclude:\n"
+            f"          - os: {_overlay('a')}\n"
+            "        include:\n"
+            "          - os: a\n"
+            "            extra: 1\n"
+        )
+        job = _planted(lines)["jobs"]["j"]
+        assert all("runner" in leg for leg in ci.cells(job, "push"))
+        with pytest.raises(ci.CiMatrixError, match="on pull_request") as caught:
+            ci.check_runner_labels(_planted(lines))
+        assert "'extra': 1" in str(caught.value)
+
+    def test_the_override_needs_the_axis_it_compares_and_an_os_in_every_leg(self):
+        head = f"    runs-on: {FINCH_OVERRIDE}\n    strategy:\n      matrix:\n"
+        no_os = _planted(head + "        method: [finch, pip]\n")
+        with pytest.raises(ci.CiMatrixError, match=r"matrix\.os"):
+            ci.check_runner_labels(no_os)
+        no_axis = _planted(head + "        os: [ubuntu-latest]\n")
+        with pytest.raises(ci.CiMatrixError, match=r"matrix\.method"):
+            ci.check_runner_labels(no_axis)
+        lines = head + (
+            "        os: [ubuntu-latest]\n"
+            "        method: [finch]\n"
+            "        include:\n"
+            "          - method: pip\n"
+        )
+        with pytest.raises(ci.CiMatrixError, match="no value for it"):
+            ci.check_runner_labels(_planted(lines))
+
+    def test_an_axis_only_some_legs_carry_is_not_refused(self):
+        """The override compares matrix.method, and a leg with no method is not a finch
+        leg: it falls through to its os. The scan-validation job is built this way."""
+        lines = (
+            f"    runs-on: {FINCH_OVERRIDE}\n"
+            "    strategy:\n"
+            "      matrix:\n"
+            "        include:\n"
+            "          - { os: ubuntu-latest, method: finch }\n"
+            "          - { os: macos-15 }\n"
+        )
+        assert ci.check_runner_labels(_planted(lines)) == {
+            "ubuntu-latest",
+            "ubuntu-24.04",
+            "macos-15",
+        }
+
+    @pytest.mark.parametrize("path", WORKFLOW_FILES, ids=lambda path: path.name)
     def test_every_label_a_workflow_names_is_in_the_table(self, path):
-        labels = ci.check_runner_labels(ci.load_workflow(path))
+        workflow = ci.load_workflow(path)
+        labels = ci.check_runner_labels(workflow, called=_called(workflow))
         assert labels <= set(ci.RUNNER_LABELS)
 
     def test_the_workflows_were_actually_read(self):
         """The denominator for the test above: it read many workflows and many labels."""
-        paths = sorted(WORKFLOWS.glob("*.yml"))
-        assert len(paths) >= 20, paths
+        assert len(WORKFLOW_FILES) >= 20, WORKFLOW_FILES
         seen: set[str] = set()
-        for path in paths:
-            seen |= ci.check_runner_labels(ci.load_workflow(path))
+        for path in WORKFLOW_FILES:
+            workflow = ci.load_workflow(path)
+            seen |= ci.check_runner_labels(workflow, called=_called(workflow))
         assert {
             "ubuntu-latest",
             "ubuntu-24.04-arm",
             "macos-15",
             "windows-latest",
         } <= seen
+
+    def test_a_workflow_file_with_the_yaml_extension_is_listed_and_checked(
+        self, tmp_path
+    ):
+        """GitHub runs a .yaml workflow as it runs a .yml one, so the listing has to name
+        it, and the check has to refuse what it names."""
+        text = "on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n"
+        odd = text.replace("ubuntu-latest", "plan9")
+        (tmp_path / "ok.yml").write_text(text, encoding="utf-8")
+        (tmp_path / "odd.yaml").write_text(odd, encoding="utf-8")
+        (tmp_path / "notes.txt").write_text(text, encoding="utf-8")
+        (tmp_path / "ok.yml.bak").write_text(text, encoding="utf-8")
+        (tmp_path / "nested.yml").mkdir()
+        found = _workflow_files(tmp_path)
+        assert [path.name for path in found] == ["ok.yml", "odd.yaml"]
+        assert ci.check_runner_labels(ci.load_workflow(found[0])) == {"ubuntu-latest"}
+        with pytest.raises(ci.UnknownRunnerLabel, match="plan9"):
+            ci.check_runner_labels(ci.load_workflow(found[1]))
+
+
+class TestACallToAReusableWorkflow:
+    """What a caller passes in ``with:`` reaches the ``runs-on`` of the workflow it calls,
+    so it is held to the same table as a runs-on written in the workflow itself."""
+
+    def test_a_label_the_caller_passes_is_checked_against_the_table(self):
+        called = {CALLEE_USES: ci.parse_workflow(CALLEE)}
+        ok = _caller("    with:\n      runner: ubuntu-24.04-arm\n")
+        assert ci.check_runner_labels(ok, called=called) == {"ubuntu-24.04-arm"}
+        bad = _caller("    with:\n      runner: windows-2019\n")
+        with pytest.raises(
+            ci.UnknownRunnerLabel, match=r"call \(with runner\): windows-2019"
+        ):
+            ci.check_runner_labels(bad, called=called)
+
+    def test_an_input_that_does_not_feed_a_runs_on_is_not_read_as_a_label(self):
+        called = {CALLEE_USES: ci.parse_workflow(CALLEE)}
+        caller = _caller("    with:\n      note: plan9\n      runner: ubuntu-latest\n")
+        assert ci.check_runner_labels(caller, called=called) == {"ubuntu-latest"}
+
+    def test_an_input_the_caller_leaves_out_names_no_label_here(self):
+        """The called workflow's own default is read when that workflow is checked."""
+        called = {CALLEE_USES: ci.parse_workflow(CALLEE)}
+        caller = _caller("    with:\n      note: plan9\n")
+        assert ci.check_runner_labels(caller, called=called) == set()
+        assert ci.check_runner_labels(ci.parse_workflow(CALLEE)) == {"ubuntu-latest"}
+
+    def test_an_input_with_no_default_is_read_from_the_caller(self):
+        required = CALLEE.replace(
+            "        default: ubuntu-latest\n", "        required: true\n"
+        )
+        assert "required: true" in required
+        called = {CALLEE_USES: ci.parse_workflow(required)}
+        ok = _caller("    with:\n      runner: macos-15\n")
+        assert ci.check_runner_labels(ok, called=called) == {"macos-15"}
+        bad = _caller("    with:\n      runner: plan9\n")
+        with pytest.raises(ci.UnknownRunnerLabel, match="plan9"):
+            ci.check_runner_labels(bad, called=called)
+
+    @pytest.mark.parametrize(
+        "with_text, shape",
+        [
+            (
+                "    with:\n      runner: ${{ matrix.runner }}\n",
+                "a runner input given as an expression",
+            ),
+            ("    with:\n      runner: 3\n", "a runner input that is not a string"),
+            (
+                "    with:\n      runner: [a, b]\n",
+                "a runner input that is not a string",
+            ),
+            ("    with:\n      - runner\n", "a with: that is not a mapping"),
+        ],
+    )
+    def test_a_value_it_cannot_read_is_refused_by_name(self, with_text, shape):
+        called = {CALLEE_USES: ci.parse_workflow(CALLEE)}
+        with pytest.raises(ci.UnsupportedExpression) as caught:
+            ci.check_runner_labels(_caller(with_text), called=called)
+        assert caught.value.shape == shape
+
+    def test_a_call_whose_workflow_was_not_given_is_refused_when_it_passes_inputs(self):
+        shape = "a call that passes inputs to a reusable workflow that was not given"
+        caller = _caller("    with:\n      runner: ubuntu-latest\n")
+        other = {"./.github/workflows/other.yml": ci.parse_workflow(CALLEE)}
+        for kwargs in ({}, {"called": {}}, {"called": other}):
+            with pytest.raises(ci.UnsupportedExpression) as caught:
+                ci.check_runner_labels(caller, **kwargs)
+            assert caught.value.shape == shape
+            assert CALLEE_USES in str(caught.value)
+
+    def test_a_call_that_passes_no_input_has_nothing_to_look_up(self):
+        assert ci.check_runner_labels(_caller()) == set()
+        assert ci.check_runner_labels(_caller("    with: {}\n")) == set()
+
+    def test_the_called_workflows_runs_on_is_read_with_the_same_refusals(self):
+        callee = CALLEE.replace("${{ inputs.runner }}", "${{ inputs.runner || 'x' }}")
+        called = {CALLEE_USES: ci.parse_workflow(callee)}
+        caller = _caller("    with:\n      runner: ubuntu-latest\n")
+        with pytest.raises(ci.UnsupportedExpression) as caught:
+            ci.check_runner_labels(caller, called=called)
+        assert caught.value.shape == "runs-on expression"
+
+    def test_the_real_calls_are_read_and_a_wrong_label_in_one_is_refused(self):
+        workflow = ci.load_workflow(WORKFLOWS / "ash-repo-scan.yml")
+        called = _called(workflow)
+        assert called, "ash-repo-scan.yml calls reusable workflows"
+        labels = ci.check_runner_labels(workflow, called=called)
+        passing = [
+            job_id
+            for job_id, job in workflow["jobs"].items()
+            if "runner" in (job.get("with") or {})
+        ]
+        assert passing, "a job of ash-repo-scan.yml passes a runner to a called workflow"
+        for job_id in passing:
+            assert workflow["jobs"][job_id]["with"]["runner"] in labels
+            planted = copy.deepcopy(workflow)
+            planted["jobs"][job_id]["with"]["runner"] = "windows-2019"
+            with pytest.raises(
+                ci.UnknownRunnerLabel, match=rf"{job_id} \(with runner\): windows-2019"
+            ):
+                ci.check_runner_labels(planted, called=called)
+
+
+CONSUMERS = [
+    "tests/unit/test_unified_ci_job_counts.py",
+    "tests/unit/test_ci_matrix_agreement.py",
+    "tests/unit/test_oci_runner_ci_coverage.py",
+    "tests/unit/docs/test_page_claims.py",
+]
+
+
+class TestTheByPathLoader:
+    """tests/utils/ci_matrix_loader.py is the one place a test loads the reader."""
+
+    def test_a_module_that_fails_to_load_is_not_left_in_sys_modules(self, tmp_path):
+        from tests.utils.ci_matrix_loader import load_by_path
+
+        broken = tmp_path / "broken.py"
+        broken.write_text("READY = True\nraise RuntimeError('boom')\n", "utf-8")
+        name = "_ash_ci_matrix_loader_probe_broken"
+        try:
+            with pytest.raises(RuntimeError, match="boom"):
+                load_by_path(name, broken)
+            assert name not in sys.modules
+            # Asked again it fails again, and does not hand out a half-built module.
+            with pytest.raises(RuntimeError, match="boom"):
+                load_by_path(name, broken)
+        finally:
+            sys.modules.pop(name, None)
+
+    def test_a_module_that_loads_is_registered_and_loaded_once(self, tmp_path):
+        from tests.utils.ci_matrix_loader import load_by_path
+
+        good = tmp_path / "good.py"
+        good.write_text("LOADS = []\nLOADS.append(1)\n", encoding="utf-8")
+        name = "_ash_ci_matrix_loader_probe_good"
+        try:
+            first = load_by_path(name, good)
+            assert sys.modules[name] is first
+            assert load_by_path(name, good) is first
+            assert first.LOADS == [1]
+        finally:
+            sys.modules.pop(name, None)
+
+    def test_a_module_that_defines_a_dataclass_loads(self, tmp_path):
+        """The module is registered before it runs: a frozen dataclass reads its own
+        module's namespace to resolve its annotations, as the reader's do."""
+        from tests.utils.ci_matrix_loader import load_by_path
+
+        text = (
+            "from __future__ import annotations\n"
+            "from dataclasses import dataclass\n"
+            "\n"
+            "@dataclass(frozen=True)\n"
+            "class Row:\n"
+            "    label: str\n"
+        )
+        source = tmp_path / "rows.py"
+        source.write_text(text, encoding="utf-8")
+        name = "_ash_ci_matrix_loader_probe_rows"
+        try:
+            assert load_by_path(name, source).Row("x").label == "x"
+        finally:
+            sys.modules.pop(name, None)
+
+    def test_the_reader_is_loaded_once_under_the_name_the_test_modules_share(self):
+        from tests.utils.ci_matrix_loader import load_ci_matrix
+
+        reader = load_ci_matrix()
+        assert load_ci_matrix() is reader
+        assert sys.modules["_ash_ci_matrix"] is reader
+        assert reader.__file__ is not None
+        assert Path(reader.__file__).resolve() == MODULE
+        assert reader.cells({"runs-on": "ubuntu-latest"}) == [{}]
+
+    @pytest.mark.parametrize("relative", CONSUMERS)
+    def test_a_test_module_that_reads_the_reader_loads_it_through_the_helper(
+        self, relative
+    ):
+        text = (REPO_ROOT / relative).read_text(encoding="utf-8")
+        assert "from tests.utils.ci_matrix_loader import load_ci_matrix" in text
+        own_loaders = [
+            ast.unparse(node)
+            for node in ast.walk(ast.parse(text))
+            if isinstance(node, ast.Call)
+            and getattr(node.func, "attr", "") == "spec_from_file_location"
+            and "_ci_matrix.py" in ast.unparse(node)
+        ]
+        assert not own_loaders, own_loaders
 
 
 VALIDATOR = "./.github/actions/validate-"
