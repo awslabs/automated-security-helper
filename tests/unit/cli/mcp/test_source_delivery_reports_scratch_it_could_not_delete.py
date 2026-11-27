@@ -622,7 +622,8 @@ class TestAGitDeliveryThatCannotDeleteScratch:
         _a_delivered_tree(tmp_path)
 
         def git_that_cannot_start(cmd, *, env, grows_in=None):
-            (Path(cmd[-1]) / "partial.txt").write_text("partial\n")
+            if "clone" in cmd:
+                (Path(cmd[-1]) / "partial.txt").write_text("partial\n")
             raise OSError(errno.ENOEXEC, "exec format error")
 
         monkeypatch.setattr(sd, "_run_git", git_that_cannot_start)
