@@ -3609,7 +3609,20 @@ def _module_tree() -> ast.Module:
     return ast.parse(Path(host_facts.__file__).read_text(encoding="utf-8"))
 
 
+def _is_type_checking_test(test: ast.expr) -> bool:
+    return (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING") or (
+        isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+    )
+
+
 def _module_scope_imports(tree: ast.Module) -> set[str]:
+    """The top-level names of the modules that importing the module loads.
+
+    Every statement that runs at import counts, whatever block it is in: the body, the
+    handlers, the else and the finally blocks of a try (the star form included), loops
+    and their else blocks, with blocks, match cases and class bodies. What a function
+    holds runs when it is called, and what a ``TYPE_CHECKING`` test guards does not run.
+    """
     names: set[str] = set()
 
     def visit(body: list[ast.stmt]) -> None:
@@ -3618,16 +3631,17 @@ def _module_scope_imports(tree: ast.Module) -> set[str]:
                 names.update(alias.name.split(".")[0] for alias in node.names)
             elif isinstance(node, ast.ImportFrom):
                 names.add((node.module or "").split(".")[0])
-            elif isinstance(node, ast.If):
-                test = node.test
-                guarded = (
-                    isinstance(test, ast.Name) and test.id == "TYPE_CHECKING"
-                ) or (isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING")
-                if not guarded:
-                    visit(node.body)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            elif isinstance(node, ast.If) and _is_type_checking_test(node.test):
                 visit(node.orelse)
-            elif isinstance(node, (ast.Try, ast.With)):
-                visit(node.body)
+            else:
+                for block in ("body", "orelse", "finalbody"):
+                    visit(getattr(node, block, []))
+                for handler in getattr(node, "handlers", []):
+                    visit(handler.body)
+                for case in getattr(node, "cases", []):
+                    visit(case.body)
 
     visit(tree.body)
     return names

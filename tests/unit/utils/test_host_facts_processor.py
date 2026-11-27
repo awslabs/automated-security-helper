@@ -225,7 +225,9 @@ def test_the_level_is_decided_by_the_flags_the_host_reports(given, level, missin
 
 
 def test_flags_a_platform_cannot_report_at_all_do_not_stop_full():
-    # Windows has no constant for six of the flags: they are not in the mapping.
+    # A Windows host before 24H2 reports seven flags: it has no constant for POPCNT,
+    # FMA, BMI1, LZCNT, PCLMULQDQ or MOVBE, and none for BMI2 before Windows 11 24H2.
+    # What it cannot report is not in the mapping.
     windows_like = dict.fromkeys(
         ("sse3", "cmpxchg16b", "ssse3", "sse4.1", "sse4.2", "avx", "avx2"), True
     )
@@ -1266,23 +1268,31 @@ def test_the_locked_runtimes_flags_equal_the_declared_set_and_are_all_named():
 
 
 def test_polars_still_selects_a_runtime_the_way_the_reader_mirrors():
-    polars = _installed("polars")
-    assert polars is not None, "polars is not installed in this lane"
-    text = polars.locate_file("polars/_plr.py").read_text(encoding="utf-8")
-    assert anchors_missing(text, PLR_ANCHORS) == []
-    check = polars.locate_file("polars/_cpu_check.py").read_text(encoding="utf-8")
-    assert anchors_missing(check, CPU_CHECK_ANCHORS) == []
+    for name, anchors in POLARS_ANCHORS.items():
+        assert anchors_missing(_polars_text(name), anchors) == [], name
 
 
 #: Lines of polars' ``_plr.py`` the reader's runtime choice follows, and the lines of
 #: ``_cpu_check.py`` its flag parsing follows. A polars that rewrites any of them has
 #: changed the layout the reader assumes, and the lock bump that brings it fails here.
+#: A block of lines is one anchor where the order of its lines is the point.
 PLR_ANCHORS = (
     "default_prefer = [rt_compat, rt_64, rt_32]",
     'pkgs = {"compat": rt_compat, "64": rt_64, "32": rt_32}',
     '_force = os.environ.get("POLARS_FORCE_PKG")',
     '_prefer = os.environ.get("POLARS_PREFER_PKG")',
-    "preference.insert(0, pkgs[_prefer])",
+    # A variable set to an empty string counts as set, and a forced runtime is the one
+    # that is tried, with no other before it.
+    ("if _force is not None:\n        try:\n            pkgs[_force]()"),
+    (
+        "if _prefer is not None:\n"
+        "            try:\n"
+        "                preference.insert(0, pkgs[_prefer])"
+    ),
+    # Without a forced runtime the others are tried in order, and none loading is an
+    # ImportError.
+    ("for pkg in preference:\n            try:\n                pkg()"),
+    'msg = "could not find Polars\' Rust module"',
     'if hasattr(builtins, "__POLARS_PLR"):',
     "from _polars_runtime_compat import BUILD_FEATURE_FLAGS",
     "from _polars_runtime_64 import BUILD_FEATURE_FLAGS",
@@ -1294,22 +1304,35 @@ CPU_CHECK_ANCHORS = (
     'if f and f != "ctr-static"',
     'if not expected_cpu_flags or os.environ.get("POLARS_SKIP_CPU_CHECK"):',
 )
+POLARS_ANCHORS = {
+    "polars/_plr.py": PLR_ANCHORS,
+    "polars/_cpu_check.py": CPU_CHECK_ANCHORS,
+}
 
 
 def anchors_missing(text: str, anchors: tuple[str, ...]) -> list[str]:
     return [anchor for anchor in anchors if anchor not in text]
 
 
-def test_each_anchor_turns_the_check_red_when_its_line_changes():
+def _polars_text(name: str) -> str:
     polars = _installed("polars")
-    assert polars is not None
-    text = polars.locate_file("polars/_plr.py").read_text(encoding="utf-8")
-    assert anchors_missing(text, PLR_ANCHORS) == []
-    for anchor in PLR_ANCHORS:
-        # Every occurrence changes: polars repeats some lines (the version check).
-        changed = text.replace(anchor, anchor.replace(" ", "  ", 1))
+    assert polars is not None, "polars is not installed in this lane"
+    return polars.locate_file(name).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("name", sorted(POLARS_ANCHORS))
+def test_each_anchor_turns_the_check_red_when_its_line_changes(name):
+    anchors = POLARS_ANCHORS[name]
+    text = _polars_text(name)
+    assert anchors_missing(text, anchors) == []
+    for anchor in anchors:
+        # Every occurrence changes: polars repeats some lines (the version check). A
+        # character put in the middle of the anchor breaks it wherever it stands, and
+        # no other anchor overlaps it.
+        middle = len(anchor) // 2
+        changed = text.replace(anchor, anchor[:middle] + "~" + anchor[middle:])
         assert changed != text, f"the control found no {anchor!r} to change"
-        assert anchors_missing(changed, PLR_ANCHORS) == [anchor]
+        assert anchors_missing(changed, anchors) == [anchor]
 
 
 #: Changes to the way polars chooses a runtime that the reader's mirror of it has to
@@ -1347,9 +1370,7 @@ PLR_CHANGES = [
 def test_a_polars_that_chooses_its_runtime_another_way_fails_the_anchors(
     line, changed_line
 ):
-    polars = _installed("polars")
-    assert polars is not None
-    text = polars.locate_file("polars/_plr.py").read_text(encoding="utf-8")
+    text = _polars_text("polars/_plr.py")
     assert anchors_missing(text, PLR_ANCHORS) == []
     assert line in text, f"the control found no {line!r} to change"
     changed = text.replace(line, changed_line)
@@ -1534,7 +1555,17 @@ def test_the_locked_runtimes_flags_are_compared_as_a_set(
 def test_an_installed_optional_runtime_matches_its_declared_set(distribution, token):
     installed = _installed(distribution)
     assert installed is not None
+    if not _on_x86_64():
+        # polars sets target-feature flags only for its x86-64 builds: an optional
+        # runtime on an arm64 host declares none, and the reader answers n/a there
+        # without reading its file. A polars that starts to set flags for arm64 is
+        # drift and fails here.
+        assert host_facts.read_runtime_flags(installed) == ()
+        return
     assert runtime_drift(installed, token) == []
+    assert host_facts.runtime_flags_match(
+        token, host_facts.read_runtime_flags(installed)
+    )
 
 
 # The optional runtimes on planted lanes. The default lane installs neither, so the test

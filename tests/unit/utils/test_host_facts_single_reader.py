@@ -1,26 +1,34 @@
-"""Only ``utils/host_facts.py`` reads the processor and translation facts it owns.
+"""Only ``utils/host_facts.py`` reads the processor, translation and WSL facts it owns.
 
 ``usable_home`` is the one place ASH decides whether there is a home directory, and a
 test holds every other module to it. The host-facts module is held the same way for the
-four reads that decide the processor and translation facts, so that a second reader
+reads that decide the processor, translation and WSL facts, so that a second reader
 cannot drift from the first (two tokens for one fact, one with the Windows build gate and
 one without) and so that a notice cannot be raised on a reading the support register
 never saw:
 
 * ``sysctlbyname("sysctl.proc_translated")``, which says whether macOS runs the process
-  translated;
-* ``/proc/cpuinfo``, the flags of the processor;
+  translated, and the three ``machdep.cpu`` feature strings its processor level is read
+  from;
+* ``/proc/cpuinfo``, the flags of the processor, and ``/proc/sys/kernel/osrelease``, the
+  kernel release that says whether the host is WSL;
 * ``IsProcessorFeaturePresent``, the Windows feature constants;
 * ``IsWow64Process2``, the Windows machine types that say whether x64 runs on arm64.
+
+The list is the reader's own: a test derives from the reader's syntax tree every name it
+asks the host for, and holds that set to the list below, so a read added to the reader
+that the list lacks turns it red.
 
 The guard reads each module's syntax tree, as the other one-reader guards of this suite
 do, not its text. A string constant that holds a token is a read (``open("/proc/cpuinfo")``,
 ``b"sysctl.proc_translated"``, a command line that names the file), and so is an attribute
 or a name of that spelling (``kernel32.IsWow64Process2``), an import of it, and a
-``getattr`` of it by a constant. A docstring or a comment that only names a token is not a
-read: a text grep failed on the module docs that say where a fact comes from. The other
-sysctl read in the package (``kern.bootsessionuuid`` in the container-leftovers sweep) is
-a different fact and stays where it is.
+``getattr`` of it by a constant. A name built from pieces is a read too, by the last piece
+(``Path("/proc") / "cpuinfo"``): a constant that is only that piece is flagged. A
+docstring or a comment that only names a token is not a read: a text grep failed on the
+module docs that say where a fact comes from. The other sysctl read in the package
+(``kern.bootsessionuuid`` in the container-leftovers sweep) is a different fact and stays
+where it is.
 """
 
 from __future__ import annotations
@@ -40,11 +48,31 @@ PACKAGE_ROOT = Path(inspect.getfile(automated_security_helper)).resolve().parent
 READER = Path(inspect.getfile(host_facts)).resolve()
 
 #: Spelled as strings: a path or a sysctl name.
-STRING_TOKENS = ("sysctl.proc_translated", "/proc/cpuinfo")
+STRING_TOKENS = (
+    "sysctl.proc_translated",
+    "machdep.cpu.features",
+    "machdep.cpu.leaf7_features",
+    "machdep.cpu.extfeatures",
+    "/proc/cpuinfo",
+    "/proc/sys/kernel/osrelease",
+)
 #: Spelled as names: a function of the Windows API, read as an attribute, a name, an
 #: import or a string given to ``getattr``.
 NAME_TOKENS = ("IsProcessorFeaturePresent", "IsWow64Process2")
 ALL_TOKENS = STRING_TOKENS + NAME_TOKENS
+#: A string token built from pieces ends in a piece that is a whole constant of its own
+#: (``"cpuinfo"`` in ``Path("/proc") / "cpuinfo"``). Each piece here appears in no other
+#: module of the package, so a constant equal to it is a read of the token it belongs to.
+#: A piece that is an ordinary word (``features``) is left out.
+PIECES = (
+    "cpuinfo",
+    "osrelease",
+    "proc_translated",
+    "leaf7_features",
+    "extfeatures",
+    "machdep",
+    "machdep.cpu",
+)
 
 
 def _docstring_constants(tree: ast.AST) -> set[int]:
@@ -65,7 +93,7 @@ def _docstring_constants(tree: ast.AST) -> set[int]:
 
 
 def reads_of_the_owned_facts(source: str) -> list[tuple[str, int]]:
-    """``(token, line)`` for each place ``source`` reads one of the four facts."""
+    """``(token or piece, line)`` for each place ``source`` reads an owned fact."""
     tree = ast.parse(source)
     docstrings = _docstring_constants(tree)
     hits: list[tuple[str, int]] = []
@@ -78,6 +106,7 @@ def reads_of_the_owned_facts(source: str) -> list[tuple[str, int]]:
                 hits.extend(
                     (token, node.lineno) for token in ALL_TOKENS if token in value
                 )
+                hits.extend((piece, node.lineno) for piece in PIECES if value == piece)
         elif isinstance(node, ast.Attribute) and node.attr in NAME_TOKENS:
             hits.append((node.attr, node.lineno))
         elif isinstance(node, ast.Name) and node.id in NAME_TOKENS:
