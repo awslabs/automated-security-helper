@@ -116,7 +116,6 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import IgnorePathWithReason
-from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -185,6 +184,9 @@ _LEVEL_BY_SEVERITY: Dict[str, Level] = {
     "MEDIUM": Level.warning,
     "LOW": Level.note,
 }
+
+# Keep below the rule tables: line-based suppressions pin the RULE_ENV_SECRET lines.
+from automated_security_helper.models.vocab import TargetType
 
 #: Programs that raise the privilege a command runs with.
 PRIVILEGE_COMMANDS: FrozenSet[str] = frozenset({"sudo", "doas", "su", "pkexec"})
