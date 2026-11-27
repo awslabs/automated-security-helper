@@ -62,9 +62,10 @@ endings stays current. When the bytes changed, the scope's own digest decides:
   TypeScript, whether a line break precedes a token.
 - ``invalidation_scope: symbol``: the digest of the suppressed definition alone:
   every token on its lines, every definition bearing its name, the headers of
-  the definitions it sits in, and the file's prelude (byte order mark, encoding
-  declaration, ``#!`` line, ``from __future__`` imports, leading comments and
-  directives). An edit elsewhere in the file keeps the suppression.
+  the definitions it sits in (and, in JavaScript and TypeScript, the directive
+  run at the top of a function it sits in), and the file's prelude (byte order
+  mark, encoding declaration, ``#!`` line, ``from __future__`` imports, leading
+  comments and directives). An edit elsewhere in the file keeps the suppression.
 
 ``digests.algorithm`` names the canonical form and ``grammar`` the grammar the
 digests were computed under; a changed file whose grammar tables are not the
@@ -813,6 +814,9 @@ class AshLock:
 
         ``.ash.lock`` wins. Only when it does not exist is the legacy
         ``.ash/ash.lock`` read, with a deprecation warning (once per process).
+        The file is read through ``read_bounded``, so a FIFO, a device or a
+        directory at the lock's name is refused at once, where an open that
+        waited for a writer held the command until one came.
 
         Raises:
             AshLockError: the file exists and cannot be used. A broken lock is
@@ -841,9 +845,13 @@ class AshLock:
                     extra=NO_MARKUP,
                 )
         try:
-            raw = path.read_bytes()
+            raw = read_bounded(path)
         except FileNotFoundError:
             return lock
+        except ValueError as e:
+            # Not a regular file, or larger than the bound: what read_bounded
+            # refuses, worded as the reason the lock cannot be read.
+            raise AshLockError(f"{shown} cannot be read: it is {e}") from None
         except OSError as e:
             raise AshLockError(f"{shown} cannot be read: {e}") from None
         try:
@@ -961,7 +969,8 @@ class AshLock:
         scope it already records is current; then it is re-snapshotted from
         this read, which re-approves nothing, since every digest it rewrites
         equals the one it replaces. A file whose recorded scopes are not all
-        current is refused (``AshLockError``) naming the refresh: only a
+        current is refused (``AshLockError``) naming the refresh, or for a
+        symbol the file no longer defines the drop that clears it: only a
         deliberate review re-binds them.
 
         A scope the entry already records is not added again, a rule id that
@@ -1009,11 +1018,19 @@ class AshLock:
                 state = check_scope(entry, recorded, locked)
                 if state.state != "ok":
                     why = f": {state.reason}" if state.reason else ""
+                    if state.state == "gone":
+                        # A plain refresh of a gone symbol exits 1 and changes
+                        # nothing, so the way out is the drop, in its order.
+                        next_step = gone_symbol_advice(key)
+                    else:
+                        next_step = (
+                            f"review them, then run `{REFRESH_COMMAND} "
+                            f"{shlex.quote(key)}` before adding another"
+                        )
                     raise AshLockError(
                         f"{key} changed since its suppressions were reviewed "
                         f"({recorded.describe_with_kind()} is {state.state}{why}); "
-                        f"review them, then run `{REFRESH_COMMAND} "
-                        f"{shlex.quote(key)}` before adding another"
+                        f"{next_step}"
                     )
             current = list(entry.scopes)
         recorded = _find(current, scope.rule_id, scope.symbol)
@@ -1629,6 +1646,26 @@ def refuse_unlocked_symbol_suppressions(
         )
 
 
+def gone_symbol_advice(key: str) -> str:
+    """The steps that clear a scope whose symbol the file no longer defines, in
+    the order that works.
+
+    ``add`` refuses a file while any recorded scope of it is out of date, so the
+    old name's record is dropped before a renamed symbol is added; a plain
+    refresh of a gone symbol exits 1 and changes nothing. The drop is a refresh,
+    so it records the file's other suppressions again from the code as it
+    stands, which is why the change is reviewed first. The suppression in the
+    config is the user's to rename or remove: the drop leaves it, and a scan
+    refuses a config entry the lock does not record.
+    """
+    return (
+        "rename or remove the suppression in the config, review the file's "
+        f"change, then run `{REFRESH_COMMAND} --drop-missing {shlex.quote(key)}`, "
+        "which records the file's other suppressions again from the code as it "
+        "stands, and record a renamed symbol with `ash suppress add`"
+    )
+
+
 def stale_notice(
     key: str,
     entry: LockEntry,
@@ -1684,9 +1721,7 @@ def stale_notice(
         return (
             f"Stale suppression: {key} no longer defines {symbol}, so the "
             f"symbol-scoped suppressions bound to it do not apply. Suppressions: "
-            f"{described}. Rename the suppression's symbol and record it with "
-            f"`ash suppress add`, or remove it, then run "
-            f"`{REFRESH_COMMAND} --drop-missing {quoted}`."
+            f"{described}. To fix this, {gone_symbol_advice(key)}."
         )
     if state == "unverifiable":
         return (

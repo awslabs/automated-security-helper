@@ -38,9 +38,13 @@ A symbol-scoped suppression covers a finding whose lines lie inside one of the
 symbol's spans, and a span is whole lines. So a symbol's digest covers every
 token on the lines its spans cover (the line window), every definition that
 bears the name, the headers of its enclosing definitions (decorators, name,
-parameters, bases, modifiers) and the prelude. It does not cover imports other
-than ``from __future__``, module constants, class attributes, other
-definitions, callers, or the control flow around the definition.
+parameters, bases, modifiers) and the prelude. A comment between a decorator
+and its definition does not end the decorators. In JavaScript and TypeScript
+the headers of an enclosing function also include the leading run of
+directives at the top of its body (``"use strict"``), comments skipped. The
+digest does not cover imports other than ``from __future__``, module
+constants, class attributes, other definitions, callers, or the control flow
+around the definition.
 
 This module is the standard library only. It never imports tree-sitter: it is
 handed parse trees and ``Language`` objects by ``utils/symbol_spans.py``, which
@@ -55,7 +59,7 @@ import json
 import struct
 import tokenize
 from dataclasses import dataclass
-from typing import Any, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Collection, Iterable, List, Optional, Sequence, Tuple
 
 #: The id of the canonical form: the record format, ``LAYOUT``, the prelude and
 #: the policy tables together. Recorded in every tree entry and part of every
@@ -471,16 +475,70 @@ def _children_except(parent: Any, keep_out: Optional[Any]) -> List[Tuple[Any, st
     ]
 
 
+def leading_decorators(node: Any, leading_types: Collection[str]) -> List[Any]:
+    """The siblings before ``node`` whose type is one of ``leading_types``, in
+    source order.
+
+    tree-sitter-typescript places a member's decorators beside it in the class
+    body, and a comment between a decorator and the member is a sibling there
+    too. A comment neither ends the walk back nor is returned, so it cannot hide
+    a decorator above it; any other sibling ends the walk.
+    """
+    if not leading_types:
+        return []
+    found: List[Any] = []
+    sibling = node.prev_named_sibling
+    while sibling is not None:
+        if sibling.type in leading_types:
+            found.append(sibling)
+        elif sibling.type != "comment":
+            break
+        sibling = sibling.prev_named_sibling
+    found.reverse()
+    return found
+
+
+def _body_directives(
+    definition: Any, path: Optional[Any], policy: Any
+) -> List[Tuple[Any, str]]:
+    """The directive statements at the top of ``definition``'s body, as header
+    records, when ``path``, the child of ``definition`` on the way to the target,
+    is that body.
+
+    Only for a grammar whose prologue is ``ecmascript``: a Python docstring is
+    not a directive. Comments are skipped and the run ends at the first other
+    statement, so a ``"use strict"`` after a comment counts and one after code
+    does not.
+    """
+    if policy.prologue != "ecmascript" or path is None:
+        return []
+    body = definition.child_by_field_name("body")
+    if not (body is not None and body.start_byte == path.start_byte and body == path):
+        return []
+    run: List[Tuple[Any, str]] = []
+    for node, field_name in _child_fields(body):
+        if not node.is_named or node.type == "comment":
+            continue
+        if not _is_directive(node):
+            break
+        run.append((node, field_name))
+    return run
+
+
 def header(enclosing: Any, target: Any, policy: Any) -> List[Tuple[Any, str]]:
     """The nodes of an enclosing definition's header, each streamed on its own.
 
-    Its decorators the grammar places beside it; for each span wrapper from
-    the outermost down, the wrapper's children other than the one on the path
-    to the definition (Python decorators, ``export``, ``default``); the
-    definition's children other than the one on the path to ``target`` (name,
-    parameters, bases, heritage, modifiers, return type); and for an assigned
-    definition entered through its function value, that value's children other
-    than the one on the path (an arrow function's parameters and ``=>``).
+    Its decorators the grammar places beside it, which a comment between a
+    decorator and the definition does not end (``leading_decorators``); for
+    each span wrapper from the outermost down, the wrapper's children other
+    than the one on the path to the definition (Python decorators, ``export``,
+    ``default``); the definition's children other than the one on the path to
+    ``target`` (name, parameters, bases, heritage, modifiers, return type) and,
+    in JavaScript and TypeScript, the directive run at the top of its body when
+    the body holds ``target``; and for an assigned definition entered through
+    its function value, that value's children other than the one on the path
+    (an arrow function's parameters and ``=>``) and the directive run of its
+    body.
     """
     nodes: List[Tuple[Any, str]] = []
     wrappers = []
@@ -488,12 +546,7 @@ def header(enclosing: Any, target: Any, policy: Any) -> List[Tuple[Any, str]]:
     while top.parent is not None and top.parent.type in policy.span_wrappers:
         wrappers.append(top.parent)
         top = top.parent
-    leading = []
-    sibling = top.prev_named_sibling
-    while sibling is not None and sibling.type in policy.leading_siblings:
-        leading.append(sibling)
-        sibling = sibling.prev_named_sibling
-    for decorator in reversed(leading):
+    for decorator in leading_decorators(top, policy.leading_siblings):
         nodes.append((decorator, _field_in_parent(decorator)))
     inner = enclosing
     chain = [enclosing, *wrappers]
@@ -502,6 +555,7 @@ def header(enclosing: Any, target: Any, policy: Any) -> List[Tuple[Any, str]]:
         nodes.extend(_children_except(wrapper, below))
     path = _path_child(inner, target)
     nodes.extend(_children_except(inner, path))
+    nodes.extend(_body_directives(inner, path, policy))
     assigned = policy.assigned_definitions.get(inner.type)
     if assigned is not None and path is not None:
         value = inner.child_by_field_name(assigned[1])
@@ -511,7 +565,9 @@ def header(enclosing: Any, target: Any, policy: Any) -> List[Tuple[Any, str]]:
             and value.start_byte == path.start_byte
             and value == path
         ):
-            nodes.extend(_children_except(value, _path_child(value, target)))
+            value_path = _path_child(value, target)
+            nodes.extend(_children_except(value, value_path))
+            nodes.extend(_body_directives(value, value_path, policy))
     return nodes
 
 
@@ -531,7 +587,10 @@ def symbol_digest(
     definitions and every token on its span's lines, plus the prelude.
     """
     found = sorted(occurrences, key=lambda o: (o.start.start_byte, o.node.start_byte))
-    if not found or name.startswith("\x00"):
+    # chr(0) is symbol_spans._UNSPELLABLE ("\x00"): a segment no symbol can spell
+    # starts with it, and a qualified name joins its segments with ".", so a name
+    # holding it in any segment is never digested.
+    if not found or chr(0) in name:
         return None
     walker = _Walker(source, policy)
     _preimage_head(walker, policy, fingerprint, b"symbol")

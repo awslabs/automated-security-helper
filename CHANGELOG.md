@@ -294,8 +294,10 @@
   same file later. Each scope has an invalidation scope: `file`, the default, stops the
   suppression applying when the code of the file changes, and `symbol` only when the
   code of the suppressed definition does (its lines, every definition bearing its name,
-  the headers of the definitions it sits in, and the top of the file, such as a Python
-  encoding declaration or `from __future__` imports). Layout does not count: spaces,
+  the headers of the definitions it sits in, the directives at the top of a JavaScript
+  or TypeScript function it sits in, and the top of the file, such as a Python
+  encoding declaration or `from __future__` imports). A comment between a decorator
+  and its definition does not hide the decorator. Layout does not count: spaces,
   tabs and line breaks between tokens, and line endings, so a re-indented file and a
   checkout that converts line endings keep their suppressions. Comments, the spelling of
   literals and every other token count, and in JavaScript and TypeScript so does a line
@@ -311,12 +313,13 @@
   the scan looks it up, so a path through a symlink is locked, verified and checked
   under the real file. A whole-lock refresh is the explicit `refresh --all`, and
   `refresh --drop-missing` removes the entry of a locked file that no longer exists and
-  the symbol-scoped suppressions of a definition the file no longer has. A locked file
-  that is still there but cannot be hashed (unreadable, not a regular file, over 64 MiB,
-  or a link out of the source directory) keeps its entry, and `refresh` and `verify`
-  report it as such. A symbol suppression whose file is gone is advised to be removed
-  from the config, not added again. Line-range suppressions are unchanged. This
-  repository's own symbol suppressions are locked in the same change.
+  the lock's record of a definition the file no longer has; the suppression in the
+  config is the user's to rename or remove, or the next scan refuses the config. A
+  locked file that is still there but cannot be hashed (unreadable, not a regular
+  file, over 64 MiB, or a link out of the source directory) keeps its entry, and
+  `refresh` and `verify` report it as such. A symbol suppression whose file is gone is
+  advised to be removed from the config, not added again. Line-range suppressions are
+  unchanged. This repository's own symbol suppressions are locked in the same change.
   A version 1 lock, written by main-branch builds before syntax-tree digests (a SHA-256
   of each file's bytes), is still read with that meaning, any byte change counting, and
   `ash suppress migrate` converts its entries whose files are unchanged. A build from

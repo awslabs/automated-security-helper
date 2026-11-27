@@ -172,7 +172,8 @@ class SymbolGrammar:
     member inside ``class_body``, not as the member's child (Python's decorator is
     a ``decorated_definition`` parent, Java's annotation a ``modifiers`` child, and
     plain JavaScript's a field of the method), so a span that started at the
-    member left its decorator line out.
+    member left its decorator line out. A comment between such a decorator and
+    the definition does not end the run.
     """
     lock_id: str = ""
     """The grammar's name in a ``.ash.lock`` entry: ``python``, ``javascript``,
@@ -506,12 +507,11 @@ def _definitions(
             ):
                 start = start.parent
             # A decorator the grammar places beside the definition, not inside it
-            # (leading_siblings), begins the definition's own lines.
-            while (
-                start.prev_named_sibling is not None
-                and start.prev_named_sibling.type in grammar.leading_siblings
-            ):
-                start = start.prev_named_sibling
+            # (leading_siblings), begins the definition's own lines, and a comment
+            # between the two does not end the run.
+            decorators = ast_digest.leading_decorators(start, grammar.leading_siblings)
+            if decorators:
+                start = decorators[0]
             yield ".".join(scope), node, start, enclosing
             enclosing = (*enclosing, node)
         for child in reversed(node.children):

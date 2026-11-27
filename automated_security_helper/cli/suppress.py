@@ -31,6 +31,7 @@ from automated_security_helper.utils.ash_lock import (
     LockScope,
     add_command_for,
     file_is_gone,
+    gone_symbol_advice,
     recorded_scope,
     resolved_lock_key,
     scope_is_recorded,
@@ -156,14 +157,25 @@ def _configured_kind(config_path: Path) -> Optional[str]:
     writes to, or None when it does not set one.
 
     Read from that one file, as ``verify`` reads it: an ``extends`` base is not
-    read. Only ``add`` reads it, for a scope it records; the lock alone decides
-    at scan time, so a config edit cannot widen a reviewed binding.
+    read, and an ``!ENV`` reference arrives as written, which is refused. Only
+    ``add`` reads it, for a scope it records and only when
+    ``--invalidation-scope`` is not given; the lock alone decides at scan time,
+    so a config edit cannot widen a reviewed binding.
     """
+    from automated_security_helper.config.ash_config import ENV_REFERENCE_PATTERN
+
     settings = _global_settings_in(config_path)
     if _CONFIG_KIND_KEY not in settings:
         return None
     value = settings[_CONFIG_KIND_KEY]
     allowed = [kind.value for kind in InvalidationScope]
+    if isinstance(value, str) and ENV_REFERENCE_PATTERN.match(value):
+        _fail(
+            f"global_settings.{_CONFIG_KIND_KEY} in {config_path.as_posix()} is "
+            f"the environment reference `{value}`, and `ash suppress add` reads "
+            "the config as written and resolves no environment variable. Pass "
+            f"--invalidation-scope, or write {' or '.join(allowed)} there"
+        )
     if not isinstance(value, str) or value not in allowed:
         _fail(
             f"global_settings.{_CONFIG_KIND_KEY} in {config_path.as_posix()} is "
@@ -302,14 +314,16 @@ def add(
     recorded = (
         recorded_scope(existing, rule_id, symbol) if existing is not None else None
     )
-    configured = _configured_kind(config_path)
     note = None
     if invalidation_scope is not None:
+        # The config's default is read only when the option is absent, so a
+        # default this command cannot read does not refuse an explicit kind.
         kind: Optional[str] = invalidation_scope.value
     elif recorded is not None:
         # The recorded kind stands: a config default never rewrites a binding.
         kind = None
         kept = recorded.invalidation_scope or InvalidationScope.FILE.value
+        configured = _configured_kind(config_path)
         if configured is not None and configured != kept:
             note = (
                 f"{recorded.describe()} keeps its recorded invalidation scope "
@@ -318,7 +332,7 @@ def add(
                 f"--symbol {shlex.quote(symbol)} {shlex.quote(key)}`."
             )
     else:
-        kind = configured or InvalidationScope.FILE.value
+        kind = _configured_kind(config_path) or InvalidationScope.FILE.value
     try:
         # In memory first: a file whose entry is out of date is refused before
         # the config is touched.
@@ -407,8 +421,9 @@ def refresh(
         typer.Option(
             "--drop-missing",
             help="Remove the entry of a named file that no longer exists, and "
-            "the symbol-scoped suppressions of a symbol the file no longer "
-            "defines, instead of leaving them and exiting 1.",
+            "the lock's record of a symbol the file no longer defines, instead "
+            "of leaving them and exiting 1. The config's suppression is not "
+            "removed: rename or remove it, or the next scan refuses the config.",
         ),
     ] = False,
     invalidation_scope: Annotated[
@@ -439,9 +454,9 @@ def refresh(
     still hold. It re-records every suppression of each named file from the
     code as it stands, and prints each file it re-recorded. A locked file that
     no longer exists is reported and left as it was (exit code 1), unless
-    --drop-missing removes its dead entry, and so is a symbol-scoped
-    suppression whose symbol the file no longer defines. A file that changed
-    and cannot be parsed is left as it was (exit code 1).
+    --drop-missing removes its dead entry, and so is the lock's record of a
+    symbol the file no longer defines. A file that changed and cannot be parsed
+    is left as it was (exit code 1).
 
     --invalidation-scope converts suppressions between 'file' and 'symbol'
     scope; recording a new kind is a review too. A version 1 entry is
@@ -456,7 +471,9 @@ def refresh(
     root = _root(source_dir)
     lock = _load_lock(root)
     if paths:
-        keys = [_key_for(root, p) for p in paths]
+        # Two spellings of one file are one key, and a second pass over a key
+        # whose first pass dropped scopes or the whole entry fails.
+        keys = list(dict.fromkeys(_key_for(root, p) for p in paths))
         unknown = [k for k in keys if k not in lock.entries]
         if unknown:
             _fail(
@@ -540,9 +557,8 @@ def refresh(
                 echo(
                     shown_on_one_line(
                         f"gone:      {key} symbol {name} ({described}); the file no "
-                        "longer defines it, so the entry is left as it was: rename "
-                        "the suppression's symbol and record it with `ash suppress "
-                        "add`, or remove it, then refresh with --drop-missing"
+                        "longer defines it, so the entry is left as it was: "
+                        f"{gone_symbol_advice(key)}"
                     )
                 )
             continue
@@ -633,9 +649,8 @@ def _problem_line(root: Path, problem) -> str:
     where = f"{key} symbol {problem.symbol}" if problem.symbol else key
     if problem.state == "gone":
         return (
-            f"gone: {where} ({scopes}); the file no longer defines it: rename the "
-            "suppression's symbol and record it with `ash suppress add`, or remove "
-            f"it, then run `{REFRESH_COMMAND} --drop-missing {quoted}`"
+            f"gone: {where} ({scopes}); the file no longer defines it: "
+            f"{gone_symbol_advice(key)}"
         )
     if problem.state == "unverifiable":
         return f"unverifiable: {where} ({scopes}); {problem.reason}"
