@@ -176,6 +176,25 @@ def scan_entry(monkeypatch) -> list[dict]:
     return seen
 
 
+@pytest.fixture
+def extractions(monkeypatch) -> list[tuple[Path, bool]]:
+    """What the extraction is handed each time the command reaches it: the directory it
+    is to extract into, and whether that directory was there. The extraction is the
+    real one, only watched. A command that has no ``--archive`` never reaches it, and
+    its list stays empty."""
+    from automated_security_helper.utils import source_archive
+
+    reached: list[tuple[Path, bool]] = []
+    real = source_archive.extract_source_archive
+
+    def _watch(archive, destination):
+        reached.append((Path(destination), Path(destination).is_dir()))
+        return real(archive, destination)
+
+    monkeypatch.setattr(source_archive, "extract_source_archive", _watch)
+    return reached
+
+
 # --------------------------------------------------------------------------- #
 # What the scan is handed
 # --------------------------------------------------------------------------- #
@@ -351,13 +370,21 @@ def test_the_temporary_tree_is_gone_after_the_engine_fails(engine, scratch, tmp_
     assert list(scratch.iterdir()) == []
 
 
-def test_the_temporary_tree_is_gone_after_a_refused_archive(engine, scratch, tmp_path):
+def test_the_temporary_tree_is_gone_after_a_refused_archive(
+    engine, scratch, tmp_path, extractions
+):
     refused = tmp_path / "not-a-zip.zip"
     refused.write_text("not a zip\n", encoding="utf-8")
 
     result = _invoke(["scan", "fs", "--archive", str(refused)])
 
     assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+    # A command that has no such option exits with the same code and extracts nothing.
+    assert "No such option" not in result.output, result.output
+    ((tree, was_there),) = extractions
+    assert was_there, "the archive was refused with its temporary tree made"
+    assert tree.parent == scratch
+    assert not tree.exists()
     assert engine.calls == []
     assert list(scratch.iterdir()) == []
 
@@ -402,12 +429,29 @@ def test_a_refused_archive_prints_the_rules_own_message_with_the_usage_error_cod
 
 
 def test_an_archive_that_is_not_there_is_refused_not_a_traceback(
-    engine, scratch, tmp_path
+    engine, scratch, tmp_path, monkeypatch
 ):
-    result = _invoke(["scan", "fs", "--archive", str(tmp_path / "gone.zip")])
+    from automated_security_helper.utils.source_archive import (
+        SourceArchiveRefusal,
+        SourceArchiveRefused,
+        extract_source_archive,
+    )
+
+    # Named by a relative path, so the refusal's text is the same wherever the
+    # temporary directory is, and holds no separator a platform writes its own way.
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SourceArchiveRefused) as expected:
+        extract_source_archive(Path("gone.zip"), tmp_path / "probe-destination")
+    assert expected.value.kind is SourceArchiveRefusal.UNREADABLE_ARCHIVE
+
+    result = _invoke(["scan", "fs", "--archive", "gone.zip"])
 
     assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
-    assert "--archive" in result.output
+    # A command that has no such option exits with the same code, and its refusal names
+    # --archive too ("No such option: --archive"), so the rule's own text decides.
+    assert "No such option" not in result.output, result.output
+    refusal = _one_line(f"--archive: {expected.value}")
+    assert refusal in _one_line(result.output), result.output
     assert result.exception is None or isinstance(result.exception, SystemExit)
     assert engine.calls == []
     assert list(scratch.iterdir()) == []

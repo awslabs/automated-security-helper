@@ -793,7 +793,11 @@ def test_the_subject_help_names_the_file_and_the_options_of_a_workspace_scan():
     result = _invoke(["scan", "workspace", "--help"])
 
     assert result.exit_code == 0, result.output
-    assert "Usage: ash scan workspace [OPTIONS] FILE" in result.output
+    # On the usage line typer writes a required argument's name in braces and an
+    # optional one's in brackets (`ash diff [OPTIONS] {before} {after}`, `ash scan fs
+    # [OPTIONS] [PATH]`). FILE has to be given, so it reads `{FILE}` there and `FILE`
+    # in the table of arguments below it.
+    assert "Usage: ash scan workspace [OPTIONS] {FILE}" in result.output
     for option in ("--dry-run", "--allow-missing-projects", "--mode", "--output-dir"):
         assert option in result.output, option
     text = _one_line(result.output)
