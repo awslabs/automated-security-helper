@@ -150,6 +150,10 @@ from urllib.parse import quote, unquote
 
 from automated_security_helper.core.committed_output import WORKSPACE_SPOOL_DIR_NAME
 from automated_security_helper.core.enums import MinSeverity, ScannerStatus
+from automated_security_helper.base.report_identity import (
+    WORKSPACE_REPORT_DESCRIPTION,
+    WORKSPACE_REPORT_METADATA_DESCRIPTION,
+)
 from automated_security_helper.core.exceptions import WorkspacePatternError
 from automated_security_helper.models.asharp_model import new_report_id
 from automated_security_helper.models.core import merged_honoring
@@ -1801,9 +1805,7 @@ class WorkspaceAggregator:
             or Path(self.plan.workspace_root).name
             or "ash-workspace",
             "tool_version": get_ash_version(),
-            "description": (
-                "Automated Security Helper workspace-mode aggregated report"
-            ),
+            "description": WORKSPACE_REPORT_METADATA_DESCRIPTION,
         }
         ignore_file_exclusions = workspace_ignore_file_exclusions(payload.projects)
         if ignore_file_exclusions is not None:
@@ -1813,11 +1815,7 @@ class WorkspaceAggregator:
 
         header: Dict[str, Any] = {
             "name": f"ASH Workspace Scan: {project_name or Path(self.plan.workspace_root).name}",
-            "description": (
-                "Automated Security Helper - aggregated workspace report. One "
-                "SARIF run per project; see the 'workspace' block for "
-                "attribution and per-project verdicts."
-            ),
+            "description": WORKSPACE_REPORT_DESCRIPTION,
             "metadata": metadata,
             "workspace": payload.model_dump(mode="json"),
             "scanner_results": self._scanner_results_payload(),

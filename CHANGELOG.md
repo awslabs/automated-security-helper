@@ -114,6 +114,16 @@
 
 ### Maintenance
 
+- Internal change, no output change: the names and descriptions ASH writes to
+  identify itself in its reports (the SARIF driver name, the GitHub code-scanning,
+  GitLab SAST, OCSF and ASFF product names, the aggregated report's default name
+  and description, and the workspace report's descriptions) are now defined once in
+  `automated_security_helper/base/report_identity.py`, and nine modules (the
+  report models, the reporters, the occurrence helper and the workspace
+  aggregation) import them. A unit test fails if a whole-string copy of the SARIF
+  or GitHub code-scanning driver name, the GitLab analyzer name, or the aggregated
+  or workspace report descriptions appears in any other module of the package. It
+  does not cover the organization and vendor fields or the tool URLs.
 - Removed the four stale `.ash.yaml` suppressions for GHSA-g3hv-75wg-m249 /
   CVE-2026-118764 (minimatch globparts amplification): they pinned the minimatch
   10.2.5 copy bundled inside aws-cdk-lib 2.273.0, and the aws-cdk-lib 2.278.0 bump

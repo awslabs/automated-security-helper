@@ -77,6 +77,7 @@ from pydantic import Field
 from typing_extensions import Annotated
 
 from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.base.report_identity import GHAS_DRIVER_NAME
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
@@ -677,7 +678,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             out_run: Dict[str, Any] = {
                 "tool": {
                     "driver": {
-                        "name": "ASH - Automated Security Helper",
+                        "name": GHAS_DRIVER_NAME,
                         "organization": "Amazon Web Services",
                         "version": get_ash_version(),
                         "informationUri": "https://github.com/awslabs/automated-security-helper",
@@ -1448,7 +1449,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                     {
                         "tool": {
                             "driver": {
-                                "name": "ASH - Automated Security Helper",
+                                "name": GHAS_DRIVER_NAME,
                                 "organization": "Amazon Web Services",
                                 "version": get_ash_version(),
                                 "informationUri": "https://github.com/awslabs/automated-security-helper",

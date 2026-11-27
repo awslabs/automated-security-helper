@@ -22,6 +22,12 @@ from pydantic import (
 
 from automated_security_helper.base.forward_refs import OnceOnlyResolver
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
+from automated_security_helper.base.report_identity import (
+    AGGREGATED_REPORT_DESCRIPTION,
+    AGGREGATED_REPORT_NAME,
+    AGGREGATED_REPORT_POST_PROCESSOR_DESCRIPTION,
+    SARIF_DRIVER_NAME,
+)
 from automated_security_helper.core.enums import (
     ExportFormat,
     ScannerStatus,
@@ -1147,9 +1153,9 @@ class AshAggregatedResults(RecordModel):
         hide_input_in_errors=True,
     )
 
-    name: str = Field(default="ASH Scan Report", description="Name of the report")
+    name: str = Field(default=AGGREGATED_REPORT_NAME, description="Name of the report")
     description: str = Field(
-        default="Automated Security Helper - Aggregated Report",
+        default=AGGREGATED_REPORT_DESCRIPTION,
         description="The description of the generated report.",
     )
 
@@ -1166,7 +1172,7 @@ class AshAggregatedResults(RecordModel):
             project_name="ASH",
             # tool_name="ASH",
             tool_version=get_ash_version(),
-            description="Automated Security Helper Aggregated Report Post-processor",
+            description=AGGREGATED_REPORT_POST_PROCESSOR_DESCRIPTION,
             summary_stats=SummaryStats(),
         )
     )
@@ -1185,7 +1191,7 @@ class AshAggregatedResults(RecordModel):
             Run(
                 tool=Tool(
                     driver=ToolComponent(
-                        name="AWS Labs - Automated Security Helper",
+                        name=SARIF_DRIVER_NAME,
                         fullName="awslabs/automated-security-helper",
                         version=get_ash_version(),
                         organization="Amazon Web Services",
