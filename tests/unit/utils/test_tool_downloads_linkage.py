@@ -20,6 +20,9 @@ where the names do not exist and the rows fail one by one.
 from __future__ import annotations
 
 import ast
+import json
+import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -264,3 +267,145 @@ def test_the_download_table_still_imports_only_what_the_installer_stages() -> No
     source = _MODULE.read_text(encoding="utf-8")
 
     assert _imports_beyond_the_standard_library(source) == []
+
+
+# ---------------------------------------------------------------------------
+# The three files the build stages, loaded with nothing installed
+# ---------------------------------------------------------------------------
+
+_ROOT = Path(__file__).resolve().parents[3]
+_PACKAGE = _ROOT / "automated_security_helper"
+_INSTALLER = _PACKAGE / "assets" / "install-pinned-tool.py"
+
+#: ``COPY <source> /ash-pins/<destination>``, the Dockerfile's staging of the files the
+#: installer loads. A commented line is not one.
+_STAGING = re.compile(r"^COPY\s+(\S+)\s+/ash-pins/(\S+)\s*$", flags=re.MULTILINE)
+
+#: What the installer loads, as paths under the directory the image stages them in.
+_STAGED = (
+    "base/plugin_provisioning.py",
+    "core/exceptions.py",
+    "utils/tool_downloads.py",
+)
+
+#: The installer's own loading of the staged files, started the way the build starts
+#: it: isolated and with no site directory, so only the standard library and the
+#: staged files can be imported.
+_LOAD_STAGED = """
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+spec = importlib.util.spec_from_file_location("_installer_probe", sys.argv[1])
+installer = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = installer
+spec.loader.exec_module(installer)
+pins = installer.load_pins(Path(sys.argv[2]))
+print(json.dumps({"file": pins.__file__, "tools": sorted(pins.TOOL_VERSIONS)}))
+"""
+
+
+def _stage_the_files(root: Path, appended: dict[str, str] | None = None) -> Path:
+    """Copy the staged files to *root* at the paths the image gives them, each with
+    its entry of *appended* added at the end."""
+    for relative in _STAGED:
+        source = _PACKAGE.joinpath(*relative.split("/")).read_text(encoding="utf-8")
+        target = root.joinpath(*relative.split("/"))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        text = source + (appended or {}).get(relative, "")
+        target.write_text(text, encoding="utf-8")
+    return root
+
+
+def _load_staged(root: Path) -> subprocess.CompletedProcess[str]:
+    argv = [sys.executable, "-I", "-S", "-B", "-c", _LOAD_STAGED]
+    return subprocess.run(
+        [*argv, str(_INSTALLER), str(root)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+
+
+def test_the_staging_reader_has_a_positive_and_a_negative_control() -> None:
+    planted = (
+        "COPY automated_security_helper/a/b.py /ash-pins/a/b.py\n"
+        "# COPY automated_security_helper/c/d.py /ash-pins/c/d.py\n"
+        "COPY automated_security_helper/e/f.py /elsewhere/e/f.py\n"
+        "RUN true\n"
+    )
+
+    expected = [("automated_security_helper/a/b.py", "a/b.py")]
+
+    assert _STAGING.findall(planted) == expected
+
+
+def test_the_dockerfile_stages_the_files_the_installer_loads() -> None:
+    staged = _STAGING.findall((_ROOT / "Dockerfile").read_text(encoding="utf-8"))
+
+    assert sorted({destination for _, destination in staged}) == list(_STAGED)
+    assert {source for source, _ in staged} == {
+        f"automated_security_helper/{destination}" for destination in _STAGED
+    }
+
+
+def test_the_staged_files_load_with_nothing_installed(tmp_path: Path) -> None:
+    """The installer runs before the wheel does, so the three files it loads can
+    import the standard library and each other, and nothing else."""
+    root = _stage_the_files(tmp_path / "ash-pins")
+
+    result = _load_staged(root)
+
+    assert result.returncode == 0, result.stderr[-2000:]
+    probe = json.loads(result.stdout.strip().splitlines()[-1])
+    assert Path(probe["file"]) == root / "utils" / "tool_downloads.py"
+    assert probe["tools"] == sorted(td.TOOL_VERSIONS)
+
+
+#: Each case: the staged file, the line appended to it, and the module the load cannot
+#: find. A package module is one the installer does not stage, and a library is one the
+#: build's interpreter has not installed yet.
+_PLANTED_IMPORTS = {
+    "a package module in the exceptions": (
+        "core/exceptions.py",
+        "\nimport automated_security_helper.core.enums  # planted\n",
+        "automated_security_helper.core.enums",
+    ),
+    "a package module in the provisioning register": (
+        "base/plugin_provisioning.py",
+        "\nfrom automated_security_helper.core.enums import X  # planted\n",
+        "automated_security_helper.core.enums",
+    ),
+    "a package module in the download table": (
+        "utils/tool_downloads.py",
+        "\nfrom automated_security_helper.core.enums import X  # planted\n",
+        "automated_security_helper.core.enums",
+    ),
+    "a third-party library in the exceptions": (
+        "core/exceptions.py",
+        "\nimport pytest  # planted\n",
+        "pytest",
+    ),
+    "a third-party library in the download table": (
+        "utils/tool_downloads.py",
+        "\nimport pytest  # planted\n",
+        "pytest",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_PLANTED_IMPORTS))
+def test_a_planted_import_in_a_staged_file_fails_the_load(
+    case: str, tmp_path: Path
+) -> None:
+    """The pass above is the check working only if the same probe refuses each of
+    these, so each is planted into a copy of the file that loads cleanly."""
+    relative, appended, missing = _PLANTED_IMPORTS[case]
+    root = _stage_the_files(tmp_path / "ash-pins", {relative: appended})
+
+    result = _load_staged(root)
+
+    assert result.returncode != 0, result.stdout
+    assert f"No module named '{missing}'" in result.stderr, result.stderr[-2000:]
