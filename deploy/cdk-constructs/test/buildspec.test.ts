@@ -235,10 +235,14 @@ describe('the env-driven merge loop matches the literal merge command', () => {
     const options =
       '--results "out/shard-0" --results "out/shard-1" ' +
       '--results "out/shard-2" --output-dir ".ash/ash_output" --min-severity low';
-    expect(literal).toBe(
-      'if ash results merge --help 2>/dev/null | grep "results merge" >/dev/null; ' +
+    // The probe comes first and the exit status is the chosen branch's own, so the
+    // command ends with the two spellings and nothing after them.
+    expect(literal).toMatch(/^ash_probe_status=0; /);
+    expect(literal).toContain(
+      ' && if [ "$ash_spelling" = current ]; ' +
         `then ash results merge ${options}; else ash merge ${options}; fi`,
     );
+    expect(literal.endsWith('; fi')).toBe(true);
 
     const loop = mergeLoopCommands().join('\n');
     const loopOptions =
@@ -246,6 +250,8 @@ describe('the env-driven merge loop matches the literal merge command', () => {
     expect(loop).toContain('--results "$shard_dir"');
     expect(loop).toContain(`then ash results merge ${loopOptions}; `);
     expect(loop).toContain(`else ash merge ${loopOptions}; fi`);
+    // The loop builds "$@" before the probe, and the probe leaves it alone.
+    expect(loop).toContain('done; ash_probe_status=0; ');
   });
 
   test('mergeCommands refuses an empty results list', () => {

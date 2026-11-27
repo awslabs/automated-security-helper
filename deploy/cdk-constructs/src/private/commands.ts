@@ -275,7 +275,7 @@ export function ashInvocation(install: InstallOptions): string {
 }
 
 /**
- * The shell test that is true when the installed ASH has the command `words`.
+ * A command ASH 3.9 added, and what an ASH older than 3.9 says when asked for it.
  *
  * ASH 3.9 names the scan's subject, `ash scan fs PATH`, and groups the commands
  * that read saved results under `ash results`. The old spellings still work there
@@ -283,27 +283,111 @@ export function ashInvocation(install: InstallOptions): string {
  * only the old ones, and the ref these commands install can be one: the default
  * names the release this package came from until the release commit moves it, and
  * a caller may pin any ref. So the command asks the ASH it is about to run.
- *
- * Only an ASH that has the command prints its name in the command's help, so the
- * help is searched for it rather than the exit status read. An older ASH shows the
- * subject-less scan's help for `ash scan fs --help`, since its help option is read
- * before the extra argument is refused, and has no `results` command at all. The
- * whole help is read (no `grep -q`), so ASH never writes into a closed pipe, which
- * under pipefail would fail the test for an ASH that has the command.
  */
-function hasCommand(ash: string, words: string[]): string {
-  const name = words.join(' ');
-  return `${ash} ${name} --help 2>/dev/null | grep "${name}" >/dev/null`;
+interface NewCommand {
+  /** The command's words after `ash`, as its own help names it. */
+  readonly words: string[];
+  /** The word an older ASH refuses: `fs` for `scan fs`, `results` for `results merge`. */
+  readonly refused: string;
+  /** What the command is for, in the line the probe prints: `scanning`, `merging`. */
+  readonly doing: string;
+}
+
+const SCAN_FS: NewCommand = { words: ['scan', 'fs'], refused: 'fs', doing: 'scanning' };
+const RESULTS_MERGE: NewCommand = {
+  words: ['results', 'merge'],
+  refused: 'results',
+  doing: 'merging',
+};
+
+/**
+ * The shell variables the probe answers through. Lower case on purpose: the
+ * generated buildspecs declare every `$ASH_` variable they read, and these are the
+ * probe's own, not settings.
+ */
+const PROBE_STATUS = 'ash_probe_status';
+const PROBE_HELP = 'ash_probe_help';
+const SPELLING = 'ash_spelling';
+
+/**
+ * The shell text that asks the installed ASH whether it has `command`, and leaves
+ * the answer in `$ash_spelling`: `current` for an ASH that has it, `older` for one
+ * that does not. For an ASH that gives no answer it prints why and ends with
+ * `false`, so a caller that chains the next command with `&&` never runs it.
+ *
+ * Only an answer settles it, and the answer is read from the probe's exit status
+ * and its output together:
+ *
+ * - exit 0 with a help that names the command: the ASH has it;
+ * - exit 0 with a help that does not: an older ASH shows the subject-less scan's
+ *   help for `ash scan fs --help`, since its help option is read before the extra
+ *   argument is refused;
+ * - a non-zero exit with the usage error an older ASH gives for the refused word
+ *   (`Got unexpected extra argument (fs)`, `No such command 'results'`): it does not.
+ *
+ * Any other failure (a crash, an import error, an out-of-memory kill, a `uvx` that
+ * could not fetch ASH) says nothing about the ASH's commands. Reading it as an
+ * older ASH would run the older spelling on an ASH that has the new one, so the
+ * step fails instead, with the end of the probe's output, and nothing runs.
+ *
+ * The probe's output is captured whole and matched with `case`, with no pipe, so an
+ * ASH that prints thousands of lines never writes into a closed pipe, which under
+ * pipefail would read as a failed probe for an ASH that has the command. The
+ * choice and its reason go to stderr on every run.
+ */
+function askAsh(ash: string, command: NewCommand): string {
+  const name = command.words.join(' ');
+  const asked = `ash ${name} --help`;
+  const status = `$${PROBE_STATUS}`;
+  const help = `$${PROBE_HELP}`;
+  const say = (message: string): string => `echo "ash: ${message}" >&2`;
+  const answer = (spelling: string, message: string): string =>
+    `${SPELLING}=${spelling}; ${say(message)};;`;
+  return [
+    `${PROBE_STATUS}=0;`,
+    `${PROBE_HELP}="$(${ash} ${name} --help 2>&1)" || ${PROBE_STATUS}=$?;`,
+    `case "${status}:${help}" in`,
+    `0:*"${name}"*)`,
+    answer('current', `${command.doing} with 'ash ${name}': its help names '${name}'`),
+    '0:*)',
+    answer(
+      'older',
+      `${command.doing} with the older spelling: the help of '${asked}' does not name ` +
+        `'${name}', as an ASH older than 3.9 answers`,
+    ),
+    `*:*"unexpected extra argument"*"${command.refused}"*|*:*"No such command"*"${command.refused}"*)`,
+    answer(
+      'older',
+      `${command.doing} with the older spelling: this ASH refused the word ` +
+        `'${command.refused}', as an ASH older than 3.9 does`,
+    ),
+    '*)',
+    say(
+      `could not tell whether this ASH has 'ash ${name}': '${asked}' exited ${status} ` +
+        `without saying it refused '${command.refused}', so no spelling is chosen by guess. ` +
+        'The end of its output:',
+    ) + ';',
+    `printf '%s\\n' "${help}" | tail -n 20 >&2;`,
+    'false;;',
+    'esac',
+  ].join(' ');
 }
 
 /**
  * One command line for each ASH: the new spelling when the installed ASH has it,
- * the old one otherwise. The exit status of the `if` is that of the branch that
- * ran, so the verdict is the scan's or the merge's own.
+ * the old one when it does not, and neither when it cannot be asked. The exit
+ * status of the `if` is that of the branch that ran, so the verdict is the scan's
+ * or the merge's own; when the probe gives no answer it is the probe's `false`.
  */
-function onEitherAsh(ash: string, probe: string[], current: string[], older: string[]): string {
+function onEitherAsh(
+  ash: string,
+  command: NewCommand,
+  current: string[],
+  older: string[],
+): string {
   return (
-    `if ${hasCommand(ash, probe)}; then ${[ash, ...current].join(' ')}; ` +
+    `${askAsh(ash, command)} && ` +
+    `if [ "$${SPELLING}" = current ]; then ${[ash, ...current].join(' ')}; ` +
     `else ${[ash, ...older].join(' ')}; fi`
   );
 }
@@ -399,7 +483,7 @@ function directoryScanCommand(
   const after = [...options, ...extra.rest];
   return onEitherAsh(
     ash,
-    ['scan', 'fs'],
+    SCAN_FS,
     ['scan', 'fs', directory, ...after],
     ['scan', SOURCE_DIR_OPTION, directory, ...after],
   );
@@ -481,7 +565,7 @@ export function shardScanCommands(
  * previous merged report.
  *
  * The merge is `ash results merge` on an ASH that has the `results` group (3.9 and
- * later) and `ash merge` on one that does not; see `hasCommand`.
+ * later) and `ash merge` on one that does not; see `askAsh`.
  *
  * This command's exit code is the pipeline's verdict, which is also why
  * `--min-severity` is passed here and nowhere else: the severity floor has to
@@ -515,7 +599,7 @@ export function mergeCommands(
  * environment variable at build time and so builds its options in the shell.
  */
 export function resultsMergeCommand(ash: string, options: string[]): string {
-  return onEitherAsh(ash, ['results', 'merge'], ['results', 'merge', ...options], [
+  return onEitherAsh(ash, RESULTS_MERGE, ['results', 'merge', ...options], [
     'merge',
     ...options,
   ]);

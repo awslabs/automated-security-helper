@@ -85,7 +85,10 @@ function header(purpose: string[]): string[] {
     'Each ASH command first asks the installed ASH whether it has the ASH 3.9',
     'spelling (`ash scan fs DIR`, `ash results merge`) and runs the older one',
     '(`ash scan --source-dir DIR`, `ash merge`) when it does not, so an older',
-    'ASH_VERSION keeps working.',
+    'ASH_VERSION keeps working. Only an answer picks the older spelling: a help',
+    'that does not name the command, or a usage error that refuses its first',
+    'word. A probe that fails any other way stops the step with the end of its',
+    'output instead of being read as an older ASH.',
   ];
 }
 
