@@ -12,8 +12,9 @@ function Invoke-ASH {
     an image name or ASH_BASE_IMAGE_OVERRIDE that starts with '-' or holds a character
     other than A-Z, a-z, 0-9 and . _ : / @ -, an -AshArgs it cannot read, a
     workspace scan (the `workspace` subject of `scan`, or --workspace or
-    --workspace-config among ASH's arguments: Invoke-ASH scans one directory), no OCI
-    runner, an OCI_RUNNER environment variable that is a relative path
+    --workspace-config among ASH's arguments: Invoke-ASH scans one directory), a
+    --archive among the arguments of `scan` (Invoke-ASH has no Python to extract an
+    archive), no OCI runner, an OCI_RUNNER environment variable that is a relative path
     (the same path given as -OCIRunner is used as written), a GITHUB_ACTIONS, TF_BUILD or
     TEAMCITY_VERSION that holds a newline while OCI_RUNNER_WRAPPER is set, and a malformed
     ASH_BASE_OCI_LAYOUT. The exceptions are
@@ -124,7 +125,10 @@ function Invoke-ASH {
     `report` can come first. A workspace scan is refused with exit 3, before anything
     is built, whether it is asked for with `scan workspace` or with `--workspace` or
     `--workspace-config`: Invoke-ASH mounts the one directory it scans. Run `ash scan
-    workspace <file> --mode container` for a workspace scan.
+    workspace <file> --mode container` for a workspace scan. A `--archive` among the
+    arguments of `scan` is refused the same way: the Python CLI checks and extracts a
+    zip of source code, and Invoke-ASH runs without it. Run `ash scan fs --archive
+    <file>`, with `--mode container` to scan the extracted directory in the container.
 
     The first argument that names an ash subcommand is the subcommand, unless it is
     the value of an ash option that takes one (`--phases report` names no
@@ -750,6 +754,13 @@ function Invoke-ASH {
         # sandbox pass, as ./ash runs its passes, so an explicit --sandbox other than
         # off is refused with 5 wherever it stands next to a --workspace.
         $workspaceRefusal = "Invoke-ASH scans one directory and cannot run a workspace scan: it mounts the one directory it scans, and the scan inside could not be told which workspace config the repository wrote. Run ash scan workspace <file> --mode container instead."
+        # The refusal of `scan fs --archive <file>`, thrown where the subject of `scan`
+        # is found below. The archive is checked against its size, name and link rules
+        # and extracted on the host by the Python CLI, and Invoke-ASH runs without it,
+        # so the scan inside would be handed a host path that means nothing there.
+        # `ash scan fs --archive <file> --mode container` extracts the archive and
+        # scans the extracted directory in the container.
+        $archiveRefusal = "Invoke-ASH runs without Python, so it cannot check or extract a source archive. Run ash scan fs --archive <file> instead, with --mode container to scan the extracted directory in the container."
         foreach ($argWord in $ashArgWords) {
             if ($argWord -cin @('--workspace', '--workspace-config') -or $argWord -clike '--workspace=*' -or $argWord -clike '--workspace-config=*') {
                 $global:LASTEXITCODE = $refusalExitCode
@@ -945,6 +956,10 @@ function Invoke-ASH {
                 if ($skipValue) {
                     $skipValue = $false
                     continue
+                }
+                if ($word -ceq '--archive' -or $word -clike '--archive=*') {
+                    $global:LASTEXITCODE = $refusalExitCode
+                    throw $archiveRefusal
                 }
                 if ($word -cin $ashRootValueOptions -or $word -cin $ashScanValueOptions) {
                     $skipValue = $true

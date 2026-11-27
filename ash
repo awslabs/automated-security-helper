@@ -80,6 +80,16 @@ refuse_workspace_scan() {
   refuse "./ash scans one directory and cannot run a workspace scan: it mounts the one directory it scans, and the scan inside could not be told which workspace config the repository wrote. Run ash scan workspace <file> --mode container instead."
 }
 
+# The refusal for `./ash scan fs --archive <file>`. The archive is checked against its
+# size, name and link rules and extracted on the host by the Python CLI, and this
+# script has no Python to do either, so it would hand the scan inside a host path that
+# means nothing there. `ash scan fs --archive <file> --mode container` extracts the
+# archive and scans the extracted directory in the container. Invoke-ASH refuses the
+# same input in the same words.
+refuse_scan_archive() {
+  refuse "./ash runs without Python, so it cannot check or extract a source archive. Run ash scan fs --archive <file> instead, with --mode container to scan the extracted directory in the container."
+}
+
 # Whether $1 is a path with a directory part that names no place by itself: it is read
 # against the working directory, usually the repository being scanned. A bare command
 # name (docker) is looked up on PATH, and a path that starts with / names its place.
@@ -466,17 +476,20 @@ ASH_ROOT_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modul
 # with its index in SUBCOMMAND_AT (-1 and "" when none is named), not counting
 # the value of a root option, which can be a command's name (`--phases
 # inspect`, `--config config`). Walks the words the refusals checked and the
-# scan is given. When that subcommand is scan, the subject after it
-# (ASH_SCAN_SUBJECTS) is in SUBJECT, with its index in SUBJECT_AT (-1 and "" when
-# the first word after scan's options is no subject). This reads the same words
-# again, as ASH_ARG_WORDS split them, so a scan named inside one quoted argument
-# (`./ash "scan workspace f"`) has its subject found as one named word by word is;
-# SCAN_SUBJECT is the one the argument loop read as it went.
+# scan is given. When that subcommand is scan, the words after it are read once
+# more: the subject (ASH_SCAN_SUBJECTS) is in SUBJECT, with its index in SUBJECT_AT,
+# and the first --archive option is at ARCHIVE_AT (each "" or -1 when there is none).
+# These are read from ASH_ARG_WORDS, as the argument loop's words were split, so a
+# scan named inside one quoted argument (`./ash "scan workspace f"`) is read as it is
+# when its words are given one by one. SCAN_SUBJECT is the subject the argument loop
+# read as it went.
 detect_subcommand() {
   SUBCOMMAND=""
   SUBCOMMAND_AT=-1
   SUBJECT=""
   SUBJECT_AT=-1
+  ARCHIVE_AT=-1
+  SUBJECT_WORD_SEEN="NO"
   SKIP_VALUE="NO"
   for ((ASH_WORD_AT = 0; ASH_WORD_AT < ${#ASH_ARG_WORDS[@]}; ASH_WORD_AT++)); do
     ASH_WORD="${ASH_ARG_WORDS[ASH_WORD_AT]}"
@@ -512,7 +525,8 @@ detect_subcommand() {
   fi
   # The subject is the first word after scan that is not an option or an option's
   # value, as the CLI reads it. Options that only a subject takes a value for
-  # (ASH_SCAN_VALUE_OPTIONS) are skipped with their value too.
+  # (ASH_SCAN_VALUE_OPTIONS) are skipped with their value too, and the walk goes on
+  # to the end for the options that follow the subject.
   SKIP_VALUE="NO"
   for ((ASH_WORD_AT = SUBCOMMAND_AT + 1; ASH_WORD_AT < ${#ASH_ARG_WORDS[@]}; ASH_WORD_AT++)); do
     ASH_WORD="${ASH_ARG_WORDS[ASH_WORD_AT]}"
@@ -520,7 +534,14 @@ detect_subcommand() {
       SKIP_VALUE="NO"
       continue
     fi
-    if [[ " ${ASH_ROOT_VALUE_OPTIONS} ${ASH_SCAN_VALUE_OPTIONS} " == *" ${ASH_WORD} "* ]]; then
+    if [[ "${ASH_WORD}" = "--archive" || "${ASH_WORD}" == --archive=* ]]; then
+      if ((ARCHIVE_AT < 0)); then
+        ARCHIVE_AT=${ASH_WORD_AT}
+      fi
+      if [[ "${ASH_WORD}" = "--archive" ]]; then
+        SKIP_VALUE="YES"
+      fi
+    elif [[ " ${ASH_ROOT_VALUE_OPTIONS} ${ASH_SCAN_VALUE_OPTIONS} " == *" ${ASH_WORD} "* ]]; then
       SKIP_VALUE="YES"
     elif [[ "${ASH_WORD}" == -[!-]?* ]]; then
       for ((ASH_AT = 1; ASH_AT < ${#ASH_WORD}; ASH_AT++)); do
@@ -531,12 +552,12 @@ detect_subcommand() {
           break
         fi
       done
-    elif [[ "${ASH_WORD}" != -* ]]; then
+    elif [[ "${ASH_WORD}" != -* && "${SUBJECT_WORD_SEEN}" = "NO" ]]; then
+      SUBJECT_WORD_SEEN="YES"
       if [[ " ${ASH_SCAN_SUBJECTS} " == *" ${ASH_WORD} "* ]]; then
         SUBJECT="${ASH_WORD}"
         SUBJECT_AT=${ASH_WORD_AT}
       fi
-      break
     fi
   done
 }
@@ -1443,6 +1464,11 @@ for ASH_WORD in "${ASH_ARG_WORDS[@]}"; do
       ;;
   esac
 done
+# `scan fs --archive <file>` is refused after the workspace passes, so an input that is
+# both is refused as the workspace scan it also is.
+if ((ARCHIVE_AT >= 0)); then
+  refuse_scan_archive
+fi
 
 # An image name that starts with '-' reaches the runner as an option of its own, however
 # it is quoted, so it is refused before anything is created or run. Beyond that, an

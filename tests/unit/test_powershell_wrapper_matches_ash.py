@@ -812,6 +812,10 @@ _WORKSPACE_MESSAGE = "cannotrunaworkspacescan"
 #: Where every refusal of a workspace scan points, with its whitespace removed as the
 #: texts are compared: the command of the Python CLI, which mounts the workspace.
 _WORKSPACE_POINTER = "ashscanworkspace<file>--modecontainer"
+#: What the refusal of a source archive says, and where it points: Invoke-ASH runs
+#: without the Python CLI that checks and extracts the zip.
+_ARCHIVE_MESSAGE = "cannotcheckorextractasourcearchive"
+_ARCHIVE_POINTER = "ashscanfs--archive<file>instead"
 
 _INVOKE_ASH_SITES = {
     "ash-args-tokenizer": (
@@ -1179,6 +1183,64 @@ _INVOKE_ASH_SITES = {
         {},
         REFUSAL_EXIT,
         _WORKSPACE_POINTER,
+    ),
+    # `scan fs --archive <file>` is refused with the same code, wherever the option
+    # stands among the words, pointing at the Python CLI that extracts the zip.
+    "archive": (
+        f"{_INVOKE} -AshArgs 'scan fs --archive src.zip'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _ARCHIVE_MESSAGE,
+    ),
+    "archive-attached": (
+        f"{_INVOKE} -AshArgs 'scan fs --archive=src.zip'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _ARCHIVE_MESSAGE,
+    ),
+    "archive-after-another-option": (
+        f"{_INVOKE} -AshArgs 'scan fs --scanners bandit --archive src.zip'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _ARCHIVE_MESSAGE,
+    ),
+    "archive-before-the-subject": (
+        f"{_INVOKE} -AshArgs 'scan --archive src.zip fs'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _ARCHIVE_MESSAGE,
+    ),
+    "archive-with-no-subject": (
+        f"{_INVOKE} -AshArgs 'scan --archive src.zip'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _ARCHIVE_MESSAGE,
+    ),
+    "archive-after-the-parameters": (
+        f"{_INVOKE} scan fs --archive src.zip",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _ARCHIVE_MESSAGE,
+    ),
+    "archive-quoted": (
+        f"{_INVOKE} -AshArgs \"scan fs '--archive' src.zip\"",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _ARCHIVE_MESSAGE,
+    ),
+    "archive-points-at-the-python-cli": (
+        f"{_INVOKE} -AshArgs 'scan fs --archive src.zip'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _ARCHIVE_POINTER,
     ),
     "no-runner": (_NO_RUNNER, {}, {}, REFUSAL_EXIT, _NO_RUNNER_MESSAGE),
     "base-oci-layout": (
@@ -2017,6 +2079,7 @@ _INTERPOLATED_AS_IS = {
     "$markerRefusal",  # the CI marker newline refusal, built from a fixed variable name
     "$outputHint",  # '' or the fixed hint naming -OutputDir, chosen by the helper
     "$workspaceRefusal",  # the workspace-scan refusal: one fixed sentence, no caller value
+    "$archiveRefusal",  # the source-archive refusal: one fixed sentence, no caller value
 }
 
 

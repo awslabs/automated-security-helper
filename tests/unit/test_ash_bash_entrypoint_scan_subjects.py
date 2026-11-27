@@ -399,6 +399,71 @@ def test_a_sandbox_beside_a_workspace_scan_is_still_the_usage_error(
     assert WORKSPACE_REFUSAL not in result.stderr, result.stderr
 
 
+#: What a refusal of --archive says: its first words, and where it points.
+ARCHIVE_REFUSAL = (
+    "./ash runs without Python, so it cannot check or extract a source archive"
+)
+ARCHIVE_POINTER = "ash scan fs --archive <file>"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "words",
+    [
+        pytest.param(["scan", "fs", "--archive", "src.zip"], id="separate"),
+        pytest.param(["scan", "fs", "--archive=src.zip"], id="attached"),
+        pytest.param(
+            ["scan", "fs", "--scanners", "bandit", "--archive", "src.zip"],
+            id="after-another-option",
+        ),
+        pytest.param(["scan", "--archive", "src.zip", "fs"], id="before-the-subject"),
+        pytest.param(["scan", "--archive", "src.zip"], id="with-no-subject"),
+        pytest.param(["scan fs --archive src.zip"], id="one-quoted-argument"),
+        pytest.param(["scan fs --archive=src.zip"], id="one-quoted-argument-attached"),
+    ],
+)
+def test_a_source_archive_is_refused_with_a_pointer_and_nothing_runs(
+    runner, tmp_path, words
+):
+    """The archive is checked and extracted by the Python CLI, which this script does
+    not run: exit 3 before anything is built or run, naming the command that does."""
+    result = _ash(runner, tmp_path, *words)
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert ARCHIVE_REFUSAL in result.stderr, result.stderr
+    assert ARCHIVE_POINTER in result.stderr, result.stderr
+    assert "FAKE-RUNNER-INVOKED-WITH" not in result.stdout, result.stdout
+
+
+@pytest.mark.integration
+def test_the_value_of_another_option_spelled_like_archive_is_not_the_option(
+    runner, tmp_path
+):
+    """The word after a value option is its value, whatever it spells: here
+    ``--archive`` is the value of --output-formats, which the CLI inside refuses as a
+    format, not an archive for this script to refuse."""
+    source = tmp_path / "project"
+    source.mkdir()
+
+    result = _ash(
+        runner, tmp_path, "scan", "fs", str(source), "--output-formats", "--archive"
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert ARCHIVE_REFUSAL not in result.stderr, result.stderr
+    assert _inner_argv(_run_argv(result))[-2:] == ["--output-formats", "--archive"]
+
+
+@pytest.mark.integration
+def test_a_sandbox_beside_a_source_archive_is_still_the_usage_error(runner, tmp_path):
+    result = _ash(
+        runner, tmp_path, "scan", "fs", "--archive", "src.zip", "--sandbox", "bwrap"
+    )
+
+    assert result.returncode == 5, result.stdout + result.stderr
+    assert ARCHIVE_REFUSAL not in result.stderr, result.stderr
+
+
 @pytest.mark.unit
 def test_the_entrypoint_runs_the_subjects_that_scan_a_directory_and_refuses_the_rest():
     """``fs`` takes the PATH argument ./ash mounts. Any other subject names something
