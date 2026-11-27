@@ -11,9 +11,10 @@ x86_64, Windows x86_64 and arm64) and each Python minor version in
 ``requires-python``, it runs ``uv pip compile --no-build`` over a set of requirements
 and keeps the outcome of that cell:
 
-    ok           resolves, with the versions the first resolving platform got
-    backtracked  resolves, but a package settled on an older version than on that
-                 platform, which is what uv does when the newest release has no wheel
+    ok           resolves, with no package older than the newest any platform got
+    backtracked  resolves, but a package settled on an older version than the newest
+                 any platform got, which is what uv does when the newest release has
+                 no wheel there
     fail         does not resolve
 
 The sets are ``core`` (``[project] dependencies``), ``core+<extra>`` for each extra in
@@ -640,32 +641,137 @@ def _resolve(
 # ---------------------------------------------------------------------------
 
 
-def _moved(
-    reference: Mapping[str, tuple[str, ...]], pins: Mapping[str, tuple[str, ...]]
+#: A version as PEP 440 spells it, which is how uv prints one. The standard library has
+#: no parser for it, so this reads what is needed to order two versions.
+_VERSION = re.compile(
+    r"""
+    v?
+    (?:(?P<epoch>[0-9]+)!)?
+    (?P<release>[0-9]+(?:\.[0-9]+)*)
+    (?:[-_.]?(?P<pre_l>alpha|a|beta|b|preview|pre|c|rc)[-_.]?(?P<pre_n>[0-9]+)?)?
+    (?:-(?P<post_n1>[0-9]+)|[-_.]?(?P<post_l>post|rev|r)[-_.]?(?P<post_n2>[0-9]+)?)?
+    (?:[-_.]?(?P<dev_l>dev)[-_.]?(?P<dev_n>[0-9]+)?)?
+    (?:\+(?P<local>[a-z0-9]+(?:[-_.][a-z0-9]+)*))?
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+_PRE_ORDER = {
+    "a": 0,
+    "alpha": 0,
+    "b": 1,
+    "beta": 1,
+    "c": 2,
+    "rc": 2,
+    "pre": 2,
+    "preview": 2,
+}
+
+
+def _local_part(part: str) -> tuple[int, int, str]:
+    # A number in a local label is newer than a word (PEP 440, local versions).
+    return (1, int(part), "") if part.isdigit() else (0, 0, part)
+
+
+def _version_key(name: str, version: str) -> tuple[Any, ...]:
+    """What orders *version* the way PEP 440 orders versions, for a package *name*.
+
+    Raises ResolverError for a version it cannot read: uv's answer is not one this
+    script can compare, so nothing may be recorded from it.
+    """
+    match = _VERSION.fullmatch(version)
+    if match is None:
+        raise ResolverError(
+            f"cannot order the versions of {name} that uv resolved: {version!r} is "
+            "not a version PEP 440 describes"
+        )
+    release = [int(part) for part in match["release"].split(".")]
+    while release and release[-1] == 0:
+        release.pop()
+    pre = None
+    if match["pre_l"]:
+        pre = (_PRE_ORDER[match["pre_l"].lower()], int(match["pre_n"] or 0))
+    post = None
+    if match["post_n1"] is not None or match["post_l"]:
+        post = int(match["post_n1"] or match["post_n2"] or 0)
+    dev = int(match["dev_n"] or 0) if match["dev_l"] else None
+    # A development release of a final release comes before its pre-releases, and a
+    # final or post release comes after every one of them.
+    if pre is None and post is None and dev is not None:
+        pre_key: tuple[int, ...] = (-1,)
+    elif pre is None:
+        pre_key = (1,)
+    else:
+        pre_key = (0, *pre)
+    local = match["local"]
+    if local is None:
+        local_key: tuple[Any, ...] = (-1,)
+    else:
+        parts = re.split(r"[-_.]", local.lower())
+        local_key = (0, tuple(_local_part(part) for part in parts))
+    return (
+        int(match["epoch"] or 0),
+        tuple(release),
+        pre_key,
+        (-1,) if post is None else (0, post),
+        (1,) if dev is None else (0, dev),
+        local_key,
+    )
+
+
+def _newest(outcomes: Sequence[Resolution]) -> dict[str, str]:
+    """The newest version of each package that the platforms disagree on.
+
+    A package every platform that resolved pinned to the same version is left out, so
+    it is never ordered: only a disagreement needs two versions read, and a version
+    this script cannot read costs a run only when platforms disagree about it.
+    """
+    found: dict[str, set[str]] = {}
+    for outcome in outcomes:
+        if outcome.ok:
+            for name, versions in outcome.pins.items():
+                found.setdefault(name, set()).update(versions)
+    newest = {}
+    for name, versions in found.items():
+        if len(versions) > 1:
+            # Sorted, so two spellings of one version always leave the same one.
+            keyed = {_version_key(name, v): v for v in sorted(versions)}
+            newest[name] = keyed[max(keyed)]
+    return newest
+
+
+def _older(name: str, versions: Sequence[str], newest: str) -> bool:
+    """Whether every version a platform pinned for *name* is older than *newest*."""
+    top = max(_version_key(name, version) for version in versions)
+    return top < _version_key(name, newest)
+
+
+def _behind(
+    newest: Mapping[str, str], pins: Mapping[str, tuple[str, ...]]
 ) -> list[str]:
-    moved = [
-        f"{name} {', '.join(reference[name])} -> {', '.join(pins[name])}"
-        for name in sorted(reference.keys() & pins.keys())
-        if reference[name] != pins[name]
+    """What this platform pinned that is older than the newest any platform pinned."""
+    behind = [
+        f"{name} {newest[name]} -> {', '.join(pins[name])}"
+        for name in sorted(newest.keys() & pins.keys())
+        if _older(name, pins[name], newest[name])
     ]
-    return moved if len(moved) <= 5 else [*moved[:5], f"and {len(moved) - 5} more"]
+    return behind if len(behind) <= 5 else [*behind[:5], f"and {len(behind) - 5} more"]
 
 
 def _cells(outcomes: Sequence[Resolution]) -> list[str]:
     """The cell of each platform's resolution, for one set and one Python version.
 
-    The reference is the first platform that resolved. A platform whose pins differ
-    from it backtracked: uv settled on an older version because the newest had no wheel
-    there.
+    A platform backtracked when a package settled on an older version than the newest
+    any platform resolved: uv does that when the newest release has no wheel there. The
+    platform held back is the one labelled, whichever platform comes first.
     """
-    reference = next((o.pins for o in outcomes if o.ok), None)
+    newest = _newest(outcomes)
     cells = []
     for outcome in outcomes:
         if not outcome.ok:
             cells.append(render_cell(FAIL, ", ".join(outcome.blockers)))
             continue
-        moved = _moved(reference, outcome.pins) if reference is not None else []
-        cells.append(render_cell(BACKTRACKED, "; ".join(moved)) if moved else OK)
+        behind = _behind(newest, outcome.pins)
+        cells.append(render_cell(BACKTRACKED, "; ".join(behind)) if behind else OK)
     return cells
 
 
