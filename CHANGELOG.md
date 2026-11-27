@@ -257,7 +257,12 @@
   On every platform, a file link that checkov's terraform parser reads because a
   local module source names its directory (a `.tf`, `.hcl`, `terraform.tfvars`,
   `terraform.tfvars.json`, `*.auto.tfvars` or `*.auto.tfvars.json` file) now
-  stops the scan, since checkov applies no `--skip-path` value there. Also on
+  stops the scan, since checkov applies no `--skip-path` value there. ASH judges
+  every path checkov might take to such a directory (as written, through links,
+  and as the operating system resolves an absolute source), so a source that
+  reaches its directory through a link that leaves the scanned tree stops the scan
+  too, as does a target with a `.tf` or `.hcl` file larger than ASH reads (4 MiB)
+  to look for module sources. Also on
   Windows, `scanners.checkov.options.skip_path` values are now checked against
   checkov's terraform module finder without ASH's values before them, so a value
   such as `tests/*`, which stopped the scan before, now reaches checkov there, and

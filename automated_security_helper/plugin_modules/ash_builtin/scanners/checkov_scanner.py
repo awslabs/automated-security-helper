@@ -5,6 +5,9 @@ import os
 import json
 import re
 import shutil
+import stat
+import unicodedata
+from collections import deque
 from pathlib import Path
 from typing import (
     Annotated,
@@ -17,6 +20,7 @@ from typing import (
     List,
     Literal,
     Mapping,
+    NamedTuple,
     Optional,
     Sequence,
     Tuple,
@@ -468,7 +472,7 @@ def _known_directories_checkov_skips(env: Mapping[str, str]) -> FrozenSet[str]:
     lines 63-75; with any value its joined expression matches every path), which
     ``_links_leaving_tree`` accounts for. Its terraform parser loads the directory a
     local module source names with none of the values, whatever this returns
-    (``_module_load_link``).
+    (``_module_load_finding``).
     """
     try:
         listed = _environment_value(env, "CKV_IGNORED_DIRECTORIES")
@@ -481,18 +485,60 @@ def _known_directories_checkov_skips(env: Mapping[str, str]) -> FrozenSet[str]:
 
 #: What checkov's terraform parser reads in the directory a local module source
 #: names, by file name and by suffix: ``terraform.tfvars.json`` and
-#: ``terraform.tfvars``, ``*.auto.tfvars`` and ``*.auto.tfvars.json``, then every
-#: ``*.tf`` and ``*.hcl`` file, each followed through a link to a file
+#: ``terraform.tfvars``, ``*.auto.tfvars`` and ``*.auto.tfvars.json``, and the
+#: ``*.tf`` and ``*.hcl`` files, each followed through a link to a file
 #: (``checkov/terraform/tf_parser.py`` lines 569-604, checkov 3.4.7). That load
 #: passes the directory no ``excluded_paths``, so no ``--skip-path`` value applies
-#: to it (``_module_load_link``).
+#: to it (``_module_load_finding``). checkov's name rules do drop an entry whose
+#: name starts with a dot, unless ``CKV_IGNORE_HIDDEN_DIRECTORIES`` is turned off
+#: (``tf_parser.py`` lines 149-150, ``checkov/common/runners/base_runner.py`` lines
+#: 48 and 231). ASH applies no such rule, so it counts a link named
+#: ``.x.auto.tfvars`` as read, which errs toward refusing.
 _MODULE_LOAD_FILE_NAMES = frozenset({"terraform.tfvars", "terraform.tfvars.json"})
 _MODULE_LOAD_FILE_SUFFIXES = (".tf", ".hcl", ".auto.tfvars", ".auto.tfvars.json")
+
+#: The suffixes of the files ASH reads to look for module sources: checkov parses
+#: module blocks in these and in no other file (``tf_parser.py`` line 580).
+_MODULE_SOURCE_SUFFIXES = (".tf", ".hcl")
 
 #: A ``source = "<value>"`` attribute in Terraform text: ``source`` at a word
 #: boundary, spaces or tabs around the ``=``, and a double-quoted value on the one
 #: line. It does not tell a module block from any other block.
 _MODULE_SOURCE_ATTRIBUTE = re.compile(r'\bsource[ \t]*=[ \t]*"([^"\n]*)"')
+
+#: What starts a ``source`` value that checkov's local-path loader may take as a path:
+#: ``./``, ``../`` and ``/``, and on Windows a backslash form or a drive letter
+#: (``checkov/terraform/module_loading/loaders/local_path_loader.py`` lines 31-37).
+#: ASH judges the backslash and drive forms on every platform: where one names
+#: nothing that exists, it drops out when ``_ModuleLoadWalk`` looks for the
+#: directory.
+_MODULE_SOURCE_PREFIXES = ("./", "../", "/", ".\\", "..\\", "\\")
+_MODULE_SOURCE_DRIVE = re.compile(r"[a-zA-Z]:[\\/]")
+
+#: The most bytes ``_module_load_finding`` reads from one ``.tf`` or ``.hcl`` file.
+#: ASH reads these files in its own process, before checkov starts, so the read has
+#: to be bounded. A larger file refuses the target: ASH cannot tell what a source it
+#: did not read would have checkov load.
+_MODULE_SOURCE_READ_LIMIT = 4 * 1024 * 1024
+
+#: The most module directories ``_module_load_finding`` looks at in one scan: the
+#: directories that local module sources name, each counted once however it is
+#: spelled. Past it the target is refused, because the walk was cut short and ASH
+#: cannot tell what is left.
+_MODULE_WALK_DIRECTORY_LIMIT = 2048
+
+#: The most bytes ``_module_load_finding`` reads in all, from every file it looks at
+#: in one scan. Past it the target is refused, as for
+#: ``_MODULE_WALK_DIRECTORY_LIMIT``.
+_MODULE_WALK_BYTE_LIMIT = 256 * 1024 * 1024
+
+#: The most readings ``_module_load_finding`` judges in one scan: the distinct paths
+#: checkov might take the local module sources in the tree to name, each counted once
+#: however many files spell it (``_module_source_readings``). Past it the target is
+#: refused, as for ``_MODULE_WALK_DIRECTORY_LIMIT``. The bytes bound does not cover
+#: this: a tree of distinct sources costs ASH time and memory in proportion to their
+#: number.
+_MODULE_WALK_READING_LIMIT = 100_000
 
 
 def _module_load_reads(name: str) -> bool:
@@ -503,47 +549,395 @@ def _module_load_reads(name: str) -> bool:
 
 
 def _is_local_module_source(value: str) -> bool:
-    """Whether checkov's local-path module loader takes ``value`` as a module source:
-    ``.``, or a path that starts with ``./``, ``../`` or ``/``
-    (``checkov/terraform/module_loading/loaders/local_path_loader.py`` line 31)."""
-    return value == "." or value.startswith(("./", "../", "/"))
+    """Whether ``value`` is a ``source`` that checkov may load as a local path.
+
+    One that starts with ``./``, ``../`` or ``/``, which its local-path loader takes
+    (``checkov/terraform/module_loading/loaders/local_path_loader.py`` line 31), or
+    one that starts with a backslash form or a drive letter, which the loader takes on
+    Windows (lines 34-37). ASH judges those forms on every platform
+    (``_MODULE_SOURCE_PREFIXES``, ``_MODULE_SOURCE_DRIVE``). ``.`` and ``./`` are not
+    local sources: checkov never loads either one (``checkov/terraform/tf_parser.py``
+    lines 643-645, ``is_valid_source``).
+    """
+    if value in (".", "./"):
+        return False
+    if value.startswith(_MODULE_SOURCE_PREFIXES):
+        return True
+    return _MODULE_SOURCE_DRIVE.match(value) is not None
 
 
-def _is_same_directory(path: str, other: str) -> bool:
-    """Whether ``path`` and ``other`` are one directory, by device and inode, links
-    followed; False when either cannot be read."""
+def _folded(path: str) -> str:
+    """``path`` through ``os.path.normcase``, Unicode normalization form C
+    (``unicodedata.normalize``) and ``str.casefold``, in that order, so two spellings
+    of one directory compare equal when they differ only in case or in the composed
+    and decomposed forms of a character. A volume that ignores case (the default on
+    macOS) names one directory with either spelling, and macOS names one with either
+    Unicode form too."""
+    return unicodedata.normalize("NFC", os.path.normcase(path)).casefold()
+
+
+def _within_ignoring_case(path: str, root: str) -> bool:
+    """Whether ``path`` is ``root`` or below it as text, with case and Unicode form
+    folded (``_folded``); both absolute.
+
+    A path that differs from ``root`` only in case, or in the form of a character,
+    counts as inside. On a volume that ignores case or treats the forms as one that
+    is the same directory, and ``posixpath.normcase`` folds nothing, so ``_within``
+    on the spelled paths misses it. On a volume that tells them apart it names
+    another directory, and counting it as inside only has ASH judge one reading more.
+    This compares text and nothing else: where the operating system takes a reading
+    is judged by identity (``_ModuleLoadWalk._inside``).
+    """
+    return _within(_folded(path), _folded(root))
+
+
+def _inode_identity(path: str | Path) -> Optional[Tuple[int, int]]:
+    """The device and inode of ``path``, links followed, or None when it cannot be
+    read or its file system reports no inode numbers (an ``st_ino`` of 0, which would
+    match every file on that volume)."""
     try:
-        return os.path.samefile(path, other)
+        status = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    if not status.st_ino:
+        return None
+    return status.st_dev, status.st_ino
+
+
+def _is_link(path: str) -> bool:
+    """Whether ``path`` is a link: a symbolic link, or a junction where Python can tell
+    one (``os.path.isjunction``, 3.12 and later). A path whose last component is
+    ``..`` is not."""
+    isjunction = getattr(os.path, "isjunction", None)
+    return os.path.islink(path) or (isjunction is not None and isjunction(path))
+
+
+def _spelled_below(path: str, root: str) -> Optional[Tuple[str, ...]]:
+    """The components of ``path`` after those of ``root``, as ``path`` spells them
+    (``..`` kept), or None when ``path`` does not start with the components of ``root``.
+
+    ``pathlib`` drops a ``.`` and a repeated separator and keeps a ``..``, so this
+    reads the spelling, not where the operating system takes it. Components are
+    compared through ``os.path.normcase``.
+    """
+    head, base = Path(path).parts, Path(root).parts
+    if len(head) < len(base):
+        return None
+    if any(os.path.normcase(a) != os.path.normcase(b) for a, b in zip(head, base)):
+        return None
+    return head[len(base) :]
+
+
+def _module_source_readings(
+    directory: str, real_directory: str, value: str
+) -> List[str]:
+    """Every path checkov might take the module source ``value`` to name, for a file
+    in ``directory``, in order and without repeats.
+
+    ``directory`` is the directory as spelled where the file was found, and
+    ``real_directory`` is what the operating system resolves it to
+    (``os.path.realpath``). From each of the two there are two readings. As text,
+    ``os.path.normpath`` of the join: checkov joins a source that starts with ``./``
+    or ``../`` to the directory of the path it loaded the file by, through any link,
+    and normalizes the result as text (``checkov/terraform/tf_parser.py`` lines
+    546-549). As spelled, the join alone: its ``..`` is left for the operating
+    system, which resolves a link before a ``..`` that follows it, as checkov's
+    local-path loader leaves an absolute source that starts with the directory it is
+    loading (``local_path_loader.py`` lines 43-44). An absolute ``value`` does not
+    depend on the directory: its text form and the value itself. A backslash is left
+    as written: the path functions read it as a separator where it is one (Windows),
+    and elsewhere it is part of a name, so a form that uses one names nothing that
+    exists.
+    """
+    readings: dict[str, None] = {}
+    for base in (directory, real_directory):
+        joined = os.path.join(base, value)
+        readings[os.path.normpath(joined)] = None
+        readings[joined] = None
+    if os.path.isabs(value):
+        readings[os.path.normpath(value)] = None
+        readings[value] = None
+    return list(readings)
+
+
+def _read_for_module_sources(path: str) -> Optional[bytes]:
+    """The first ``_MODULE_SOURCE_READ_LIMIT + 1`` bytes of the file at ``path``, or
+    None when it is not a regular file or cannot be read.
+
+    ``os.stat`` follows links, so a link to a regular file is read, and a FIFO, a
+    device or a link to one is never opened (opening a FIFO blocks). One byte more
+    than the limit is read, so a caller can tell a file at the limit from one past it,
+    and a file that grew after it was listed is caught the same way.
+    """
+    try:
+        if not stat.S_ISREG(os.stat(path).st_mode):
+            return None
+        with open(path, "rb") as handle:
+            return handle.read(_MODULE_SOURCE_READ_LIMIT + 1)
     except OSError:
+        return None
+
+
+class _ModuleLoadFinding(NamedTuple):
+    """What ``_module_load_finding`` found that makes ASH refuse the target.
+
+    ``kind`` says what ``subject`` is. ``"link"``: a link that leaves the scanned tree
+    and sits in a directory a module source names, as a path below the scanned
+    directory when it can be spelled so and as an absolute path otherwise.
+    ``"source"``: a module source, as written, that reaches a directory outside the
+    tree through a link. ``"large"``: a ``.tf`` or ``.hcl`` file larger than ASH
+    reads. ``"cut"``: the bound the walk passed (readings, directories or bytes), with
+    its figure. ``where`` is the file that holds the source, for the first two kinds,
+    and empty for the others.
+    """
+
+    kind: str
+    subject: str
+    where: str = ""
+
+
+class _ModuleLoadWalk:
+    """A bounded walk over the directories checkov's terraform parser would load for
+    the local module sources in a scanned tree, for ``_module_load_finding``.
+
+    It starts from the ``.tf`` and ``.hcl`` files of the tree. In each file it reads
+    every ``source = "<value>"`` that checkov may load as a local path and works out
+    the paths checkov might take it to name (``_module_source_readings``). Each such
+    path that names an existing directory is judged (``_judge``), and a directory that
+    passes is looked at in turn: its own ``.tf`` and ``.hcl`` files are read with the
+    directory spelled as the source spelled it, so a ``..`` in one of their sources is
+    joined to that spelling as checkov joins it. At most
+    ``_MODULE_WALK_READING_LIMIT`` readings are judged,
+    ``_MODULE_WALK_DIRECTORY_LIMIT`` directories looked at and
+    ``_MODULE_WALK_BYTE_LIMIT`` bytes read. One walk serves one ``run``.
+    """
+
+    def __init__(self, root: str, links: Iterable[str]) -> None:
+        self._root = root
+        self._real_root = os.path.realpath(root)
+        # The scanned directory as spelled and as the operating system resolves it.
+        self._roots = (self._root, self._real_root)
+        # Its device and inode, which tell whether a directory is inside it. None
+        # where the file system reports no inode numbers: the text of the real paths
+        # tells then.
+        self._identity = _inode_identity(root)
+        # The links that leave the tree, below the scanned directory: not read.
+        self._leaving = frozenset(links)
+        # The readings judged, by their spelling (at most _MODULE_WALK_READING_LIMIT
+        # of them, so the set is bounded), and the directories looked at, by their
+        # text form and where the operating system takes them, so a directory that
+        # many sources spell alike or differently counts once.
+        self._judged: set[str] = set()
+        self._seen: set[Tuple[str, str]] = set()
+        # The directories whose files are read or waiting to be read, by spelling.
+        self._read: set[str] = set()
+        # What is waiting: a directory and the (name, shown) pairs of its files.
+        self._pending: deque[Tuple[str, List[Tuple[str, str]]]] = deque()
+        self._directories = 0
+        self._bytes = 0
+
+    def run(self, all_files: Iterable[str]) -> Optional[_ModuleLoadFinding]:
+        """The first finding, or None, for the tree whose walk found ``all_files``
+        (paths below the scanned directory, ``/`` separators).
+
+        The ``.tf`` and ``.hcl`` files go first, in path order and grouped by the
+        directory they were found in, each directory spelled as the walk found it. A
+        file that is a link leaving the tree is left out: ASH reads nothing outside
+        the tree. The directories that sources name follow, in the order they were
+        found.
+        """
+        files = sorted(
+            name for name in all_files if name.endswith(_MODULE_SOURCE_SUFFIXES)
+        )
+        by_directory: dict[str, List[Tuple[str, str]]] = {}
+        for relative in files:
+            if relative in self._leaving:
+                continue
+            candidate = os.path.join(self._root, relative)
+            directory = os.path.normpath(os.path.dirname(candidate))
+            by_directory.setdefault(directory, []).append(
+                (os.path.basename(candidate), relative)
+            )
+        self._read.update(by_directory)
+        self._pending.extend(by_directory.items())
+        while self._pending:
+            directory, names = self._pending.popleft()
+            found = self._look(directory, names)
+            if found is not None:
+                return found
+        return None
+
+    def _look(
+        self, directory: str, files: Sequence[Tuple[str, str]]
+    ) -> Optional[_ModuleLoadFinding]:
+        """Read ``files``, the ``(name, shown)`` pairs of ``directory``, and judge the
+        local sources in them; the first finding, or None. ``shown`` is how a refusal
+        names the file.
+
+        A file larger than ``_MODULE_SOURCE_READ_LIMIT`` makes a ``"large"`` finding,
+        and one that takes the bytes read past ``_MODULE_WALK_BYTE_LIMIT`` a ``"cut"``.
+        """
+        real_directory = os.path.realpath(directory)
+        for name, shown in files:
+            data = _read_for_module_sources(os.path.join(directory, name))
+            if data is None:
+                continue
+            if len(data) > _MODULE_SOURCE_READ_LIMIT:
+                return _ModuleLoadFinding("large", shown)
+            self._bytes += len(data)
+            if self._bytes > _MODULE_WALK_BYTE_LIMIT:
+                return _ModuleLoadFinding("cut", f"{_MODULE_WALK_BYTE_LIMIT:,} bytes")
+            text = data.decode("utf-8", errors="replace")
+            for match in _MODULE_SOURCE_ATTRIBUTE.finditer(text):
+                value = match.group(1)
+                if not _is_local_module_source(value):
+                    continue
+                readings = _module_source_readings(directory, real_directory, value)
+                for reading in readings:
+                    found = self._judge(reading, value, shown)
+                    if found is not None:
+                        return found
+        return None
+
+    def _judge(
+        self, reading: str, value: str, where: str
+    ) -> Optional[_ModuleLoadFinding]:
+        """Judge ``reading``, one path checkov might take the source ``value``, in the
+        file shown as ``where``, to name; the finding it makes, or None.
+
+        A reading that names no existing directory (``os.path.isdir``, which lets the
+        operating system resolve links and case) is left alone. One that does is judged
+        by where the operating system takes it, its real path, and by what its text
+        says (``os.path.normpath``).
+
+        When the real path is the scanned directory or below it, by identity
+        (``_inside``), the reading is looked at whatever its text says, a text that
+        climbs out of the tree and comes back through a link included: the directory
+        is counted once, by its text form and its real path however many sources spell
+        it, and the first entry in it, by name, that is a link leaving the tree with a
+        name the module load reads (``_module_load_reads``) makes a ``"link"``
+        finding. Otherwise its files are queued, under the spelling the reading has,
+        unless the files of a directory spelled so are already read or waiting.
+
+        When the real path is outside and the text is inside the scanned directory
+        (``_text_inside``), the source reaches a directory outside the tree through a
+        link: a ``"source"`` finding. When both are outside the finding is the same if a
+        component of the reading below the scanned directory is a link
+        (``_passes_a_link``), and the reading is left alone if none is: a source that
+        names a directory outside the tree as text, with no link in the way, is another
+        rule's.
+
+        More than ``_MODULE_WALK_READING_LIMIT`` readings, or
+        ``_MODULE_WALK_DIRECTORY_LIMIT`` directories, make a ``"cut"`` finding.
+        """
+        if reading in self._judged:
+            return None
+        if len(self._judged) >= _MODULE_WALK_READING_LIMIT:
+            return _ModuleLoadFinding("cut", f"{_MODULE_WALK_READING_LIMIT:,} readings")
+        self._judged.add(reading)
+        if not os.path.isdir(reading):
+            return None
+        text = os.path.normpath(reading)
+        real = os.path.realpath(reading)
+        if (text, real) in self._seen:
+            return None
+        if not self._inside(real):
+            if self._text_inside(text) or self._passes_a_link(reading):
+                return _ModuleLoadFinding("source", value, where)
+            return None
+        self._seen.add((text, real))
+        if self._directories >= _MODULE_WALK_DIRECTORY_LIMIT:
+            return _ModuleLoadFinding(
+                "cut", f"{_MODULE_WALK_DIRECTORY_LIMIT:,} directories"
+            )
+        self._directories += 1
+        try:
+            with os.scandir(reading) as entries:
+                listed = sorted(entries, key=lambda entry: entry.name)
+        except OSError:
+            return None
+        files: List[Tuple[str, str]] = []
+        for entry in listed:
+            if not _module_load_reads(entry.name):
+                continue
+            shown = self._shown(os.path.join(real, entry.name))
+            if self._leaves(entry):
+                return _ModuleLoadFinding("link", shown, where)
+            if entry.name.endswith(_MODULE_SOURCE_SUFFIXES):
+                files.append((entry.name, shown))
+        if reading not in self._read:
+            self._read.add(reading)
+            self._pending.append((reading, files))
+        return None
+
+    def _text_inside(self, text: str) -> bool:
+        """Whether ``text``, a normalized path, is the scanned directory or below it as
+        text, in either spelling of the directory and with case and Unicode form
+        folded (``_within_ignoring_case``)."""
+        return any(_within_ignoring_case(text, root) for root in self._roots)
+
+    def _passes_a_link(self, reading: str) -> bool:
+        """Whether a component of ``reading`` below the scanned directory is a link.
+
+        ``reading`` is taken as spelled, ``..`` and all, and read from the scanned
+        directory in whichever of its two spellings it starts with. Each prefix from
+        the first component after the directory up to ``reading`` is tested
+        (``_is_link``). The scanned directory itself and the path above it are not:
+        they are the operator's. A reading that does not start with the scanned
+        directory has nothing to test.
+        """
+        for root in self._roots:
+            below = _spelled_below(reading, root)
+            if below is None:
+                continue
+            prefix = root
+            for part in below:
+                prefix = os.path.join(prefix, part)
+                if _is_link(prefix):
+                    return True
         return False
 
+    def _inside(self, real: str) -> bool:
+        """Whether the directory ``real``, a real path, is the scanned directory or
+        below it.
 
-def _module_load_links_by_directory(
-    root: str, links: Iterable[str]
-) -> dict[str, List[str]]:
-    """The links in ``links`` whose name the module load reads
-    (``_module_load_reads``), by the real path of the directory that holds each, in
-    ``links`` order. ``links`` are paths below ``root`` with ``/`` separators, as
-    ``file_links_leaving_tree`` returns them. A directory's key is its real path
-    through ``os.path.normcase``, as ``_module_load_link`` spells it."""
-    by_directory: dict[str, List[str]] = {}
-    real_of: dict[str, str] = {}
-    for link in links:
-        if not _module_load_reads(link.rsplit("/", 1)[-1]):
-            continue
-        parent = os.path.dirname(os.path.join(root, link))
-        if parent not in real_of:
-            real_of[parent] = os.path.normcase(os.path.realpath(parent))
-        by_directory.setdefault(real_of[parent], []).append(link)
-    return by_directory
+        By identity: the device and inode of the scanned directory against those of
+        ``real`` and each of its parents. That sees what a comparison of names misses: a
+        spelling that differs in case on a case-insensitive volume, and a second mount
+        of the tree. Where the file system reports no inode numbers, by the text of the
+        two real paths.
+        """
+        if self._identity is None:
+            return _within(os.path.normcase(real), os.path.normcase(self._real_root))
+        path = Path(real)
+        return any(
+            _inode_identity(each) == self._identity for each in (path, *path.parents)
+        )
+
+    def _leaves(self, entry: "os.DirEntry[str]") -> bool:
+        """Whether ``entry`` is a link whose target, every link resolved, is not
+        strictly below the scanned directory (``resolves_inside``). A dangling link is
+        judged by where it points, and a link counts whatever it points at: what is
+        there when checkov runs may not be what is there now."""
+        try:
+            return entry.is_symlink() and not resolves_inside(entry.path, self._root)
+        except OSError:
+            return False
+
+    def _shown(self, path: str) -> str:
+        """``path`` as a refusal names it: below the scanned directory, in either of
+        its spellings, with ``/`` separators, when it can be spelled so, and as an
+        absolute path otherwise."""
+        for root in self._roots:
+            if _within(os.path.normcase(path), os.path.normcase(root)):
+                return Path(os.path.relpath(path, root)).as_posix()
+        return Path(path).as_posix()
 
 
-def _module_load_link(
-    target: Path, links: List[str], all_files: List[str]
-) -> Optional[Tuple[str, str]]:
-    """The first link, or module source, through which checkov's terraform parser
-    would read a file outside ``target`` whatever ``--skip-path`` says, as
-    ``(link or source, file)``, or None.
+def _module_load_finding(
+    target: Path, links: Iterable[str], all_files: Iterable[str]
+) -> Optional[_ModuleLoadFinding]:
+    """The first thing in the module load that makes ASH refuse ``target``, or None.
 
     checkov loads the directory a local module source names with
     ``_internal_dir_load`` and no ``excluded_paths`` (``checkov/terraform/tf_parser.py``
@@ -553,25 +947,32 @@ def _module_load_link(
     platform a link of that name that leaves the tree and sits directly in such a
     directory is read, and the ``--skip-path`` value ``_link_skip_patterns`` gives
     it, or the rule that leaves a link under a directory checkov skips out of the
-    list (``_links_leaving_tree``), does not stop it. A source that reaches its
-    directory through a link to a directory that leaves the tree is read the same
-    way, whatever the files in it are called.
+    list (``_links_leaving_tree``), does not stop it. The files in a directory that
+    a source reaches through a link that leaves the tree are read the same way,
+    whatever they are called.
 
-    Every ``.tf`` and ``.hcl`` file of the walk that is a regular file and not a link
-    that leaves the tree (one of ``links``) is read as UTF-8 text
-    (``errors="replace"``; a file that cannot be read is skipped), in path order. A
-    link that stays inside the tree is read: checkov reads it, what it points at is
-    inside the tree, and its sources are joined to the link's own directory, as
-    checkov joins them. Each ``source = "<value>"`` in it whose value
-    is ``.`` or starts with ``./``, ``../`` or ``/`` names a directory: the value
-    joined to the file's directory, an absolute value as it is, normalized as text
-    (``os.path.normpath``). Blocks are not told apart, so a ``source`` in any block
-    counts, which errs toward refusing. That directory is skipped when it is not
-    ``target`` or below it as text, or is not a directory. Otherwise, when its real
-    path is not ``target`` or below it, the source reaches it through a link and
-    ``(value, file)`` is returned. Otherwise the first link in ``links`` that sits
-    directly in a directory with the same real path and has a name the module load
-    reads is returned as ``(link, file)``.
+    ASH judges the union of every path checkov might take a source to name, and
+    refuses when any of them reaches such a link or leaves the tree: over-approximating
+    fails closed. ``_ModuleLoadWalk`` has the rule. In short: each ``.tf`` and
+    ``.hcl`` file of the walk that is a regular file and not a link that leaves the
+    tree is read as UTF-8 text (``errors="replace"``), and each
+    ``source = "<value>"`` in it that checkov may load as a local path
+    (``_is_local_module_source``) is joined to the directory of the file as
+    spelled and as the operating system resolves it, as text and as spelled
+    (``_module_source_readings``). A path that names an existing directory is judged
+    by where the operating system takes it. Inside the scanned directory, whatever its
+    text says (a path that climbs out of the tree and comes back through a link
+    included), it is looked at for links, and a directory that passes is walked in
+    turn, with its sources joined to the spelling its source gave it, so a ``..`` after
+    a link is joined as checkov joins it. Outside it, the path is refused when its text
+    is inside the scanned directory, or when a component of it below the scanned
+    directory is a link (``_ModuleLoadWalk._judge``). A link counts when it is in the
+    directory, has a name the module load reads (``_module_load_reads``) and leaves the
+    tree (``resolves_inside``). The walk is bounded
+    (``_MODULE_SOURCE_READ_LIMIT``, ``_MODULE_WALK_READING_LIMIT``,
+    ``_MODULE_WALK_DIRECTORY_LIMIT``, ``_MODULE_WALK_BYTE_LIMIT``): a file larger than
+    ASH reads, and a walk that passes a bound, are findings too, since ASH cannot tell
+    what it did not look at.
 
     Args:
         target: The scanned directory, absolute.
@@ -583,75 +984,66 @@ def _module_load_link(
             (``file_links_leaving_tree``'s ``all_files`` argument), in the same form.
 
     Returns:
-        ``(link, file)`` or ``(source, file)``, with ``file`` the file that holds
-        the source, in the form of ``all_files``; a link never starts with ``./``,
-        ``../`` or ``/``, and a source always does or is ``.``, so the two tell
-        apart. None when no source reaches such a link.
+        A ``_ModuleLoadFinding``, or None when nothing the walk reaches makes the scan
+        unsafe. For a link or a source, ``where`` is the file that holds the source:
+        in the form of ``all_files`` for a file of the tree, and below the scanned
+        directory by its real path for one in a directory that a source named.
 
-    Limits. A module source that leaves ``target`` as text (``../`` past its root)
-    and no link in it is not refused. A value spelled with interpolation is not
-    resolved. A file that is a link leaving the tree is not read, so its sources are
-    not looked at: ASH reads nothing outside the tree. Only ``.tf`` and ``.hcl``
-    files are read, and only for a double-quoted ``source`` on one line. A ``..``
-    after a link to a directory is judged as normalized text, not as the operating
-    system resolves it.
+    Limits. A source whose every reading names a directory outside the scanned
+    directory, as text and as the operating system resolves it, with no link in the
+    way (a link as a component of the reading below the scanned directory), is not
+    judged: ``../`` past the root of the tree, or an absolute path elsewhere, is
+    another rule's. A value spelled with interpolation, or split across lines, is not
+    read: only a double-quoted ``source`` on one line is. Blocks are not told apart,
+    so a ``source`` in any block counts, and files checkov never parses (under the
+    operator's ``skip_path``, in a dot-named directory, under ``node_modules`` on
+    POSIX) are read too, which errs toward refusing. A file that is a link leaving the
+    tree is not read, so its sources are not looked at: ASH reads nothing outside the
+    tree. Names are folded for case and for Unicode form C only (``_folded``): a name
+    that a file system treats as another by any other rule is not seen as the same.
+    The test for a link in the way (``_spelled_below``) compares a reading with the
+    two spellings of the scanned directory through ``os.path.normcase`` alone, so a
+    reading that spells it in another case or Unicode form has nothing to test.
     """
-    root = os.path.abspath(os.fspath(target))
-    root_cased = os.path.normcase(root)
-    judged: set[str] = set()
-    held: Optional[dict[str, List[str]]] = None
-    leaving = set(links)
-    files = sorted(name for name in all_files if name.endswith((".tf", ".hcl")))
-    for relative in files:
-        candidate = os.path.join(root, relative)
-        if relative in leaving or not os.path.isfile(candidate):
-            continue
-        try:
-            text = Path(candidate).read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        directory = os.path.dirname(candidate)
-        for match in _MODULE_SOURCE_ATTRIBUTE.finditer(text):
-            source = match.group(1)
-            if not _is_local_module_source(source):
-                continue
-            module_directory = os.path.normpath(os.path.join(directory, source))
-            if module_directory in judged:
-                continue
-            judged.add(module_directory)
-            if not _within(os.path.normcase(module_directory), root_cased):
-                continue
-            if not os.path.isdir(module_directory):
-                continue
-            if not (
-                resolves_inside(module_directory, root)
-                or _is_same_directory(module_directory, root)
-            ):
-                return source, relative
-            if held is None:
-                held = _module_load_links_by_directory(root, links)
-            readable = held.get(os.path.normcase(os.path.realpath(module_directory)))
-            if readable:
-                return readable[0], relative
-    return None
+    return _ModuleLoadWalk(os.path.abspath(os.fspath(target)), links).run(all_files)
 
 
-def _module_load_refusal(
-    target: Path, subject: str, where: str, *, links: Collection[str]
-) -> str:
-    """The refusal for a ``_module_load_link`` result: ``subject`` is a link when it
-    is one of ``links`` and a module source otherwise, in ``where``, the file that
-    holds the source."""
-    named = f"Not running checkov on {Path(target).as_posix()}: {subject!r}: "
+def _module_load_refusal(target: Path, finding: _ModuleLoadFinding) -> str:
+    """The refusal for a ``_module_load_finding``, by its kind.
+
+    A link or a module source is named with the file that holds the source and the
+    reason checkov would read what it reaches whatever ``--skip-path`` says. A file
+    larger than ASH reads, or a walk cut short, says that ASH cannot tell whether
+    checkov's terraform parser would read a link that leaves the scanned tree.
+    """
+    named = f"Not running checkov on {Path(target).as_posix()}: "
+    if finding.kind == "cut":
+        return (
+            f"{named}ASH's walk over the directories that local module sources "
+            f"name was cut short at {finding.subject}, so ASH cannot tell whether "
+            "checkov's terraform parser would read a link that leaves the scanned "
+            "tree."
+        )
+    if finding.kind == "large":
+        return (
+            f"{named}{finding.subject!r}: larger than ASH reads to look for module "
+            f"sources ({_MODULE_SOURCE_READ_LIMIT:,} bytes), so ASH cannot tell "
+            "whether a module source in it makes checkov's terraform parser read a "
+            "link that leaves the scanned tree."
+        )
     loads = (
         "checkov's terraform parser loads the directory a module source names "
-        f"({where!r}) with none of its --skip-path values, so checkov would read "
+        f"({finding.where!r}) with none of its --skip-path values, so checkov would "
+        "read "
     )
-    if subject in links:
-        return f"{named}{REASON_LINK_LEAVES_TREE}, and {loads}the file it points at."
+    if finding.kind == "link":
+        return (
+            f"{named}{finding.subject!r}: {REASON_LINK_LEAVES_TREE}, and {loads}"
+            "the file it points at."
+        )
     return (
-        f"{named}this module source reaches a directory that leaves the scanned "
-        f"tree through a link, and {loads}the files in it."
+        f"{named}{finding.subject!r}: this module source reaches a directory that "
+        f"leaves the scanned tree through a link, and {loads}the files in it."
     )
 
 
@@ -2299,13 +2691,13 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # checkov's terraform parser loads the directory a local module source names
         # with none of the --skip-path values, on every platform. So a link in that
         # directory, or a source that reaches it through a link to a directory,
-        # would have checkov read a file outside the tree whatever is left out below
-        # (_module_load_link).
-        module_read = _module_load_link(target, all_links, all_files)
-        if module_read is not None:
-            raise ScannerError(
-                _module_load_refusal(target, *module_read, links=all_links)
-            )
+        # would have checkov read a file outside the tree whatever is left out below.
+        # ASH judges every path checkov might take to such a directory, and refuses a
+        # target whose files or directories it cannot finish looking at
+        # (_module_load_finding).
+        module_finding = _module_load_finding(target, all_links, all_files)
+        if module_finding is not None:
+            raise ScannerError(_module_load_refusal(target, module_finding))
         # What is left out of the links to files that leave the tree. On POSIX the
         # known-directory values skip those directories whole, in every walk, so a
         # link under one gets no value of its own. On Windows no such value is sent
@@ -2517,7 +2909,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         ``.tf`` file in every directory when checkov is given no ``--skip-path``
         value (``module_finder.py`` lines 63-75; with any value its joined
         expression matches every path), and they do not reach the module load
-        (``_module_load_link``). ``_known_directories_checkov_skips`` has the rule.
+        (``_module_load_finding``). ``_known_directories_checkov_skips`` has the rule.
         ``_execute_scan`` tells ``_links_checkov_would_read`` whether any are sent.
         """
         if os.sep != "/":
@@ -2598,7 +2990,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         gets a value of its own or refuses the target (``_link_skip_patterns``), so
         in the walks named here checkov reads no file a link points at outside the
         tree. The load of a directory a local module source names is not one of
-        them: a link there is read whatever this returns (``_module_load_link``).
+        them: a link there is read whatever this returns (``_module_load_finding``).
         """
         if links is None:
             links = file_links_leaving_tree(target)
@@ -2627,7 +3019,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         is the list ``file_links_leaving_tree`` found, when the caller already
         walked the tree; without it the walk runs here. A link in a directory a
         local module source names is read whatever this returns
-        (``_module_load_link``).
+        (``_module_load_finding``).
         """
         if known_sent:
             return self._links_leaving_tree(
