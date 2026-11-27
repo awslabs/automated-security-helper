@@ -150,7 +150,10 @@ def test_the_scan_subjects_and_their_value_options_are_the_real_ones():
     } - root_value_options
     assert set(_ps1_list("ashScanSubjects")) == set(subjects)
     assert set(_ps1_list("ashScanValueOptions")) == subject_value_options
-    assert subject_value_options == {"--cli-json-input"}
+    # Held to literals as well, so a subject that left the CLI cannot take its row
+    # with it: workspace is a subject, and --archive is fs's own value option.
+    assert set(subjects) == {"fs", "workspace"}
+    assert subject_value_options == {"--archive", "--cli-json-input"}
 
 
 def test_the_completer_offers_what_the_wrapper_parses():
@@ -164,7 +167,13 @@ def test_the_completer_offers_what_the_wrapper_parses():
         assert f"'{name}'" in block, name
     for subject in root.commands["scan"].commands:
         assert f"'{subject}'" in block, subject
+    # The subjects are offered after `scan` and nothing else is: the words the
+    # completer offers there are the CLI's subjects, workspace among them.
+    assert "$subjects = @('fs', 'workspace')" in block
+    # The options that take a value are left to the shell: the word after one is a
+    # value, not an option or a subject.
     assert "'--cli-json-input'" in block
+    assert "'--archive'" in block
     assert (
         "Register-ArgumentCompleter -CommandName Invoke-ASH -ParameterName 'AshArgs'"
         in block

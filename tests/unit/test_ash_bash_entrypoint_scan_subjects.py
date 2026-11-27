@@ -9,6 +9,10 @@ host path means nothing inside the container, where the scan is given
 ASH_SOURCE_DIR=/src. ``--source-dir`` still names the directory, with one deprecation
 line on stderr.
 
+``ash scan workspace <file>`` names no directory: the entrypoint mounts one, so it
+refuses the subject, and the older ``--workspace`` and ``--workspace-config`` spellings
+with it, with exit 3 and a pointer to ``ash scan workspace <file> --mode container``.
+
 A fake OCI runner stands in for docker, as in test_ash_bash_entrypoint_subcommand_args.py,
 and prints the argv it was given. The completion rows run the function the entrypoint
 prints, in bash, with no CLI and no Python.
@@ -253,6 +257,171 @@ def test_a_workspace_value_is_not_read_as_a_second_directory(runner, tmp_path):
     assert result.returncode == 3, result.stdout + result.stderr
 
 
+#: What a refusal of a workspace scan says: its first words, and where it points.
+WORKSPACE_REFUSAL = "./ash scans one directory and cannot run a workspace scan"
+WORKSPACE_POINTER = "ash scan workspace <file> --mode container"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "words",
+    [
+        pytest.param(
+            ["scan", "workspace", "team.code-workspace"], id="the-subject-and-its-file"
+        ),
+        pytest.param(["scan", "workspace"], id="the-subject-alone"),
+        pytest.param(
+            ["scan", "--scanners", "bandit", "workspace", "team.code-workspace"],
+            id="an-option-before-the-subject",
+        ),
+        pytest.param(
+            [
+                "scan",
+                "workspace",
+                "team.code-workspace",
+                "--workspace-config",
+                "policy.yaml",
+                "--allow-missing-projects",
+            ],
+            id="the-options-of-a-workspace-scan",
+        ),
+        pytest.param(
+            ["scan", "workspace", "team.code-workspace", "extra"],
+            id="a-word-after-the-file",
+        ),
+        pytest.param(
+            ["scan", "workspace", "--source-dir", "elsewhere", "team.code-workspace"],
+            id="a-source-dir-beside-the-file",
+        ),
+        # One quoted argument is split into words after the loop, and the subject is
+        # found in them as well.
+        pytest.param(["scan workspace team.code-workspace"], id="one-quoted-argument"),
+        pytest.param(
+            ["scan --scanners bandit workspace team.code-workspace"],
+            id="one-quoted-argument-with-an-option-before-the-subject",
+        ),
+    ],
+)
+def test_a_workspace_scan_is_refused_with_a_pointer_and_nothing_runs(
+    runner, tmp_path, words
+):
+    """The entrypoint mounts one directory, so a workspace file is not one it can
+    scan: exit 3 before anything is built or run, naming the command that does, and
+    no deprecation line for a --source-dir the refusal makes moot."""
+    result = _ash(runner, tmp_path, *words)
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert WORKSPACE_REFUSAL in result.stderr, result.stderr
+    assert WORKSPACE_POINTER in result.stderr, result.stderr
+    assert "Deprecated" not in result.stderr, result.stderr
+    assert "FAKE-RUNNER-INVOKED-WITH" not in result.stdout, result.stdout
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("quoted", [False, True], ids=["words", "one-quoted-argument"])
+def test_an_option_value_named_like_the_workspace_subject_is_not_the_subject(
+    runner, tmp_path, quoted
+):
+    """The word after a value option is its value, whatever it spells, in the words as
+    given and in the words of one quoted argument: here ``workspace`` is the value of
+    --output-formats and the subject is ``fs``, so the scan runs."""
+    source = tmp_path / "project"
+    source.mkdir()
+    words = ["scan", "--output-formats", "workspace", "fs", str(source)]
+
+    result = _ash(runner, tmp_path, *([" ".join(words)] if quoted else words))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert WORKSPACE_REFUSAL not in result.stderr, result.stderr
+    inner = _inner_argv(_run_argv(result))
+    assert inner[:2] == ["ash", "scan"], inner
+    assert "--output-formats" in inner, inner
+    if not quoted:
+        assert inner == [
+            "ash",
+            "scan",
+            "--sandbox",
+            "off",
+            "--output-formats",
+            "workspace",
+            "fs",
+        ]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "words",
+    [
+        pytest.param(["--workspace", "team.code-workspace"], id="workspace"),
+        pytest.param(["--workspace=team.code-workspace"], id="workspace-attached"),
+        pytest.param(["scan", "--workspace", "auto"], id="workspace-after-scan"),
+        pytest.param(["--workspace-config", "policy.yaml"], id="workspace-config"),
+        pytest.param(["scan", "--workspace-config=policy.yaml"], id="config-attached"),
+    ],
+)
+def test_the_older_workspace_spellings_get_the_same_refusal_and_pointer(
+    runner, tmp_path, words
+):
+    result = _ash(runner, tmp_path, *words)
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert WORKSPACE_REFUSAL in result.stderr, result.stderr
+    assert WORKSPACE_POINTER in result.stderr, result.stderr
+    assert "--source-dir /src" not in result.stderr, (
+        "the refusal no longer explains itself with the old inner call"
+    )
+    assert "FAKE-RUNNER-INVOKED-WITH" not in result.stdout, result.stdout
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "words",
+    [
+        pytest.param(
+            ["scan", "workspace", "team.code-workspace", "--sandbox", "bwrap"],
+            id="separate",
+        ),
+        pytest.param(
+            ["scan workspace team.code-workspace --sandbox bwrap"],
+            id="one-quoted-argument",
+        ),
+    ],
+)
+def test_a_sandbox_beside_a_workspace_scan_is_still_the_usage_error(
+    runner, tmp_path, words
+):
+    """The sandbox refusal is ASH's own usage error, 5, and runs first, as it does
+    beside --workspace."""
+    result = _ash(runner, tmp_path, *words)
+
+    assert result.returncode == 5, result.stdout + result.stderr
+    assert "--sandbox bwrap cannot be used" in result.stderr, result.stderr
+    assert WORKSPACE_REFUSAL not in result.stderr, result.stderr
+
+
+@pytest.mark.unit
+def test_the_entrypoint_runs_the_subjects_that_scan_a_directory_and_refuses_the_rest():
+    """``fs`` takes the PATH argument ./ash mounts. Any other subject names something
+    else, which ./ash cannot mount, so it is refused by name above; a subject the CLI
+    gains fails here until the entrypoint decides which of the two it is."""
+    import typer.main
+
+    from automated_security_helper.cli.main import app
+
+    subjects = typer.main.get_command(app).commands["scan"].commands
+    scans_a_directory = {
+        name
+        for name, command in subjects.items()
+        if any(
+            param.param_type_name == "argument" and param.name == "path"
+            for param in command.params
+        )
+    }
+
+    assert scans_a_directory == {"fs"}
+    assert set(subjects) - scans_a_directory == {"workspace"}
+
+
 @pytest.mark.integration
 def test_no_color_reaches_the_command_under_results(runner, tmp_path):
     run_argv = _run_argv(_ash(runner, tmp_path, "--no-color", "results", "report"))
@@ -374,7 +543,20 @@ def test_completion_does_not_offer_the_install_completion_option(tmp_path):
 
 @pytest.mark.integration
 def test_completion_offers_the_subjects_after_scan(tmp_path):
-    assert _completions(tmp_path, ["ash", "scan", ""], 2) == ["fs"]
+    assert _completions(tmp_path, ["ash", "scan", ""], 2) == ["fs", "workspace"]
+
+
+@pytest.mark.integration
+def test_completion_finishes_a_partial_subject(tmp_path):
+    assert _completions(tmp_path, ["ash", "scan", "w"], 2) == ["workspace"]
+    assert _completions(tmp_path, ["ash", "scan", "f"], 2) == ["fs"]
+
+
+@pytest.mark.integration
+def test_completion_leaves_the_value_of_archive_to_the_shell(tmp_path):
+    # --archive takes a file: the function offers nothing after it, so the shell's own
+    # file completion (complete -o default) names the zip.
+    assert _completions(tmp_path, ["ash", "scan", "fs", "--archive", ""], 4) == []
 
 
 @pytest.mark.integration
@@ -398,7 +580,8 @@ def test_completion_leaves_a_value_alone(tmp_path):
 
 @pytest.mark.integration
 def test_completion_skips_an_option_value_when_finding_the_subject(tmp_path):
-    # `--mode scan` names no subject: scan is the value, and fs is still offered.
+    # `--mode scan` names no subject: scan is the value, and the subjects are still
+    # offered.
     offered = _completions(tmp_path, ["ash", "scan", "--mode", "local", ""], 4)
 
-    assert offered == ["fs"]
+    assert offered == ["fs", "workspace"]

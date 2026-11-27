@@ -809,6 +809,9 @@ _EMPTY_VALUE_PARAMETERS = (
     "OfflineSemgrepRulesets",
 )
 _WORKSPACE_MESSAGE = "cannotrunaworkspacescan"
+#: Where every refusal of a workspace scan points, with its whitespace removed as the
+#: texts are compared: the command of the Python CLI, which mounts the workspace.
+_WORKSPACE_POINTER = "ashscanworkspace<file>--modecontainer"
 
 _INVOKE_ASH_SITES = {
     "ash-args-tokenizer": (
@@ -1110,6 +1113,72 @@ _INVOKE_ASH_SITES = {
         {},
         REFUSAL_EXIT,
         _WORKSPACE_MESSAGE,
+    ),
+    # The `workspace` subject of `scan` is refused with the same message and code,
+    # wherever it stands among the words, and every refusal of a workspace scan, the
+    # older spellings included, points at the Python CLI's own command.
+    "workspace-subject": (
+        f"{_INVOKE} -AshArgs 'scan workspace w.code-workspace'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _WORKSPACE_MESSAGE,
+    ),
+    "workspace-subject-alone": (
+        f"{_INVOKE} -AshArgs 'scan workspace'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _WORKSPACE_MESSAGE,
+    ),
+    "workspace-subject-after-an-option": (
+        f"{_INVOKE} -AshArgs 'scan --scanners bandit workspace w.code-workspace'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _WORKSPACE_MESSAGE,
+    ),
+    "workspace-subject-after-a-short-option": (
+        f"{_INVOKE} -AshArgs 'scan -o out workspace w.code-workspace'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _WORKSPACE_MESSAGE,
+    ),
+    "workspace-subject-after-the-parameters": (
+        f"{_INVOKE} scan workspace w.code-workspace",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _WORKSPACE_MESSAGE,
+    ),
+    "workspace-subject-quoted": (
+        f"{_INVOKE} -AshArgs \"scan 'workspace' w.code-workspace\"",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _WORKSPACE_MESSAGE,
+    ),
+    "workspace-subject-points-at-the-python-cli": (
+        f"{_INVOKE} -AshArgs 'scan workspace w.code-workspace'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _WORKSPACE_POINTER,
+    ),
+    "workspace-option-points-at-the-python-cli": (
+        f"{_INVOKE} -AshArgs '--workspace w.code-workspace'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _WORKSPACE_POINTER,
+    ),
+    "workspace-config-points-at-the-python-cli": (
+        f"{_INVOKE} -AshArgs '--workspace-config=c.yaml'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _WORKSPACE_POINTER,
     ),
     "no-runner": (_NO_RUNNER, {}, {}, REFUSAL_EXIT, _NO_RUNNER_MESSAGE),
     "base-oci-layout": (
@@ -1947,6 +2016,7 @@ _INTERPOLATED_AS_IS = {
     "$ociRunnerSource",  # 'OCI_RUNNER' or 'ASH_OCI_RUNNER', the variable the value came from
     "$markerRefusal",  # the CI marker newline refusal, built from a fixed variable name
     "$outputHint",  # '' or the fixed hint naming -OutputDir, chosen by the helper
+    "$workspaceRefusal",  # the workspace-scan refusal: one fixed sentence, no caller value
 }
 
 
@@ -2106,6 +2176,38 @@ def test_tab_completion_offers_the_build_targets(tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout.strip().splitlines()[-1]) == ["ci", "non-root"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("typed", "offered"),
+    [
+        pytest.param("scan ", ["scan fs", "scan workspace"], id="every-subject"),
+        pytest.param("scan f", ["scan fs"], id="a-partial-fs"),
+        pytest.param("scan w", ["scan workspace"], id="a-partial-workspace"),
+        pytest.param(
+            "scan --mode local ",
+            ["scan --mode local fs", "scan --mode local workspace"],
+            id="past-the-value-of-an-option",
+        ),
+        pytest.param("scan fs --archive ", [], id="the-file-of-archive-is-the-shells"),
+        pytest.param("scan workspace ", [], id="nothing-after-a-subject"),
+    ],
+)
+def test_the_completer_offers_every_scan_subject_after_scan(tmp_path, typed, offered):
+    """The generated completer, called as PowerShell calls it for -AshArgs with the
+    text typed so far: each subject after ``scan``, ``workspace`` with ``fs``, the
+    words already typed kept in front, and nothing where the next word is a file or
+    the scan's subject is already named."""
+    result, _ = _run_script(
+        tmp_path,
+        f"$c = @(& $ashArgumentCompleter 'Invoke-ASH' 'AshArgs' '{typed}' $null @{{}})\n"
+        "Write-Output (ConvertTo-Json -Compress -InputObject "
+        "@($c | ForEach-Object { $_.CompletionText }))\n"
+        "exit 0\n",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.strip().splitlines()[-1]) == offered
 
 
 @pytest.mark.unit

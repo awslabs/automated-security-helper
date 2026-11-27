@@ -11,8 +11,9 @@ function Invoke-ASH {
     -OutputDir that is reached through a link, a -BuildTarget other than ci or non-root,
     an image name or ASH_BASE_IMAGE_OVERRIDE that starts with '-' or holds a character
     other than A-Z, a-z, 0-9 and . _ : / @ -, an -AshArgs it cannot read, a
-    --workspace or --workspace-config among ASH's arguments (Invoke-ASH scans one
-    directory), no OCI runner, an OCI_RUNNER environment variable that is a relative path
+    workspace scan (the `workspace` subject of `scan`, or --workspace or
+    --workspace-config among ASH's arguments: Invoke-ASH scans one directory), no OCI
+    runner, an OCI_RUNNER environment variable that is a relative path
     (the same path given as -OCIRunner is used as written), a GITHUB_ACTIONS, TF_BUILD or
     TEAMCITY_VERSION that holds a newline while OCI_RUNNER_WRAPPER is set, and a malformed
     ASH_BASE_OCI_LAYOUT. The exceptions are
@@ -120,10 +121,10 @@ function Invoke-ASH {
     `--quiet`, and `-c` or `--no-color` passes `--no-color`. Every other argument is
     passed through unchanged. ASH's source and output directories reach the
     container as `ASH_SOURCE_DIR` and `ASH_OUTPUT_DIR`, so a subcommand such as
-    `report` can come first. That is also why `--workspace` and `--workspace-config`
-    are refused with exit 3, before anything is built: the scan inside refuses a
-    workspace next to a source directory. Run `ash --mode container --workspace
-    <file>` for a workspace scan.
+    `report` can come first. A workspace scan is refused with exit 3, before anything
+    is built, whether it is asked for with `scan workspace` or with `--workspace` or
+    `--workspace-config`: Invoke-ASH mounts the one directory it scans. Run `ash scan
+    workspace <file> --mode container` for a workspace scan.
 
     The first argument that names an ash subcommand is the subcommand, unless it is
     the value of an ash option that takes one (`--phases report` names no
@@ -740,17 +741,19 @@ function Invoke-ASH {
         }
 
         # A workspace scan is refused over the same words, with exit 3, before anything
-        # is built or mounted. Invoke-ASH scans one directory: the scan inside the
-        # container is given ASH_SOURCE_DIR=/src, which counts as --source-dir and is
-        # refused next to --workspace (exit 4, after the image was built), and
-        # --workspace-config applies only to a workspace scan. `ash --mode container
-        # --workspace <file>` mounts the workspace itself. This pass runs after the
+        # is built or mounted. Invoke-ASH scans one directory: it mounts the directory
+        # it scans, and the scan inside could not be told which workspace config the
+        # repository wrote. This is the refusal of the --workspace and --workspace-config
+        # options, the older spellings of a workspace scan, and, where the subject of
+        # `scan` is found below, of the `workspace` subject itself; `ash scan workspace
+        # <file> --mode container` mounts the workspace. This pass runs after the
         # sandbox pass, as ./ash runs its passes, so an explicit --sandbox other than
         # off is refused with 5 wherever it stands next to a --workspace.
+        $workspaceRefusal = "Invoke-ASH scans one directory and cannot run a workspace scan: it mounts the one directory it scans, and the scan inside could not be told which workspace config the repository wrote. Run ash scan workspace <file> --mode container instead."
         foreach ($argWord in $ashArgWords) {
             if ($argWord -cin @('--workspace', '--workspace-config') -or $argWord -clike '--workspace=*' -or $argWord -clike '--workspace-config=*') {
                 $global:LASTEXITCODE = $refusalExitCode
-                throw "Invoke-ASH scans one directory and cannot run a workspace scan: the scan inside the container is given --source-dir /src, which it refuses next to --workspace, and it could not be told which workspace config the repository wrote. Run ash --mode container --workspace <file> instead."
+                throw $workspaceRefusal
             }
         }
 
@@ -856,7 +859,7 @@ function Invoke-ASH {
         # tests/unit/test_sandbox_refused_by_every_container_entrypoint.py checks these
         # lists against ./ash's and the real commands and options.
         # BEGIN generated: ps1-subcommands (scripts/generate_wrapper_tables.py)
-        $ashSubcommands = @('scan', 'build-image', 'report', 'diff', 'trend', 'merge', 'results', 'mcp', 'get-genai-guide', 'container', 'config', 'dependencies', 'inspect', 'plugin', 'suppress', 'express')
+        $ashSubcommands = @('scan', 'build-image', 'report', 'merge', 'results', 'mcp', 'get-genai-guide', 'container', 'config', 'dependencies', 'inspect', 'plugin', 'suppress', 'express')
         $ashTakesSandbox = @('scan')
         # END generated: ps1-subcommands
         # The groups whose command word decides which options apply (`results report`,
@@ -864,15 +867,15 @@ function Invoke-ASH {
         # as group:command=name. The command is the word right after the group.
         # BEGIN generated: ps1-option-groups (scripts/generate_wrapper_tables.py)
         $ashOptionGroups = @('results', 'container')
-        $ashGroupLeafTakers = @('results:report=report', 'results:diff=diff', 'results:trend=trend', 'results:merge=merge', 'results:inspect=inspect', 'container:build=container')
+        $ashGroupLeafTakers = @('results:report=report', 'results:merge=merge', 'results:inspect=inspect', 'container:build=container')
         # END generated: ps1-option-groups
         # The subjects `scan` takes. Invoke-ASH names the directory to scan with
         # -SourceDir, mounted for the scan inside, so a directory written after the
         # subject (`scan fs ./src`) would be read inside the container, where the host
         # path means nothing: it is refused below.
         # BEGIN generated: ps1-scan-subjects (scripts/generate_wrapper_tables.py)
-        $ashScanSubjects = @('fs')
-        $ashScanValueOptions = @('--cli-json-input')
+        $ashScanSubjects = @('fs', 'workspace')
+        $ashScanValueOptions = @('--archive', '--cli-json-input')
         # END generated: ps1-scan-subjects
         # The root ash options that take a value, ASH_ROOT_VALUE_OPTIONS in ./ash. A value
         # can be a subcommand's name (`--phases report`, `--source-dir report`), so the
@@ -965,6 +968,13 @@ function Invoke-ASH {
                 if ($scanSubject -eq '') {
                     if ($word -cin $ashScanSubjects) {
                         $scanSubject = $word
+                        # The workspace subject names a file, not the directory mounted
+                        # here, so it is refused, whatever follows it, as the options
+                        # of that scan are above.
+                        if ($scanSubject -ceq 'workspace') {
+                            $global:LASTEXITCODE = $refusalExitCode
+                            throw $workspaceRefusal
+                        }
                         continue
                     }
                     break
@@ -2509,10 +2519,10 @@ Register-ArgumentCompleter -CommandName Invoke-ASH -ParameterName 'BuildTarget' 
 # BEGIN generated: ps1-completion (scripts/generate_wrapper_tables.py)
 $ashArgumentCompleter = {
     param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameter)
-    $subcommands = @('scan', 'build-image', 'report', 'diff', 'trend', 'merge', 'results', 'mcp', 'get-genai-guide', 'container', 'config', 'dependencies', 'inspect', 'plugin', 'suppress', 'express')
-    $subjects = @('fs')
-    $options = @('--add-scanners', '--all-enabled-plugins', '--all-enabled-scanners', '--allow-in-tree-tools', '--allow-missing-projects', '--allow-stale-content-db', '--annotate-duplicates', '--ash-config-from-host', '--ash-plugin-modules', '--ash-revision-to-install', '--base-ref', '--baseline', '--build', '--build-target', '--changed-files-only', '--cleanup', '--cli-json-input', '--color', '--compact-report', '--config', '--config-file-from-another-checkout', '--config-file-from-scanned-repository', '--config-from-scanned-repository', '--config-overrides', '--container-gid', '--container-uid', '--custom-build-arg', '--custom-containerfile', '--debug', '--dry-run', '--exclude-scanners', '--express', '--fail-on-findings', '--fail-on-incomplete-scanners', '--fold-duplicates', '--force', '--format', '--formats', '--full', '--generate-cli-skeleton', '--git-depth', '--git-ref', '--honor-ignore-files', '--ignore-suppressions', '--image', '--image-archive', '--image-layout', '--inspect', '--log-level', '--min-severity', '--mode', '--no-allow-stale-content-db', '--no-build', '--no-cleanup', '--no-color', '--no-express', '--no-fail-on-findings', '--no-fail-on-incomplete-scanners', '--no-honor-ignore-files', '--no-ignore-suppressions', '--no-inspect', '--no-offline', '--no-progress', '--no-quiet', '--no-run', '--no-show-summary', '--no-simple', '--no-use-existing', '--oci', '--oci-runner', '--offline', '--offline-semgrep-rulesets', '--only-scanners', '--output-dir', '--output-format', '--output-formats', '--phases', '--progress', '--python-based-plugins-only', '--python-based-scanners-only', '--python-only', '--quiet', '--require-scanner-selection', '--run', '--runner', '--sandbox', '--scanners', '--shard-count', '--shard-index', '--show-completion', '--show-summary', '--simple', '--source-dir', '--source-git', '--staged', '--strategy', '--use-existing', '--verbose', '--version', '--workspace', '--workspace-config')
-    $valueOptions = @('--add-scanners', '--ash-config-from-host', '--ash-plugin-modules', '--ash-revision-to-install', '--base-ref', '--baseline', '--build-target', '--config', '--config-file-from-another-checkout', '--config-file-from-scanned-repository', '--config-overrides', '--container-gid', '--container-uid', '--custom-build-arg', '--custom-containerfile', '--exclude-scanners', '--format', '--formats', '--git-depth', '--git-ref', '--image', '--image-archive', '--image-layout', '--log-level', '--min-severity', '--mode', '--oci', '--oci-runner', '--offline-semgrep-rulesets', '--only-scanners', '--output-dir', '--output-format', '--output-formats', '--phases', '--require-scanner-selection', '--runner', '--sandbox', '--scanners', '--shard-count', '--shard-index', '--source-dir', '--source-git', '--strategy', '--workspace', '--workspace-config', '-c', '-f', '-g', '-o', '-u', '--cli-json-input')
+    $subcommands = @('scan', 'build-image', 'report', 'merge', 'results', 'mcp', 'get-genai-guide', 'container', 'config', 'dependencies', 'inspect', 'plugin', 'suppress', 'express')
+    $subjects = @('fs', 'workspace')
+    $options = @('--add-scanners', '--all-enabled-plugins', '--all-enabled-scanners', '--allow-in-tree-tools', '--allow-missing-projects', '--allow-stale-content-db', '--annotate-duplicates', '--archive', '--ash-config-from-host', '--ash-plugin-modules', '--ash-revision-to-install', '--base-ref', '--baseline', '--build', '--build-target', '--changed-files-only', '--cleanup', '--cli-json-input', '--color', '--compact-report', '--config', '--config-file-from-another-checkout', '--config-file-from-scanned-repository', '--config-from-scanned-repository', '--config-overrides', '--container-gid', '--container-uid', '--custom-build-arg', '--custom-containerfile', '--debug', '--dry-run', '--exclude-scanners', '--express', '--fail-on-findings', '--fail-on-incomplete-scanners', '--fold-duplicates', '--force', '--format', '--formats', '--full', '--generate-cli-skeleton', '--git-depth', '--git-ref', '--honor-ignore-files', '--ignore-suppressions', '--image', '--image-archive', '--image-layout', '--inspect', '--log-level', '--min-severity', '--mode', '--no-allow-stale-content-db', '--no-build', '--no-cleanup', '--no-color', '--no-express', '--no-fail-on-findings', '--no-fail-on-incomplete-scanners', '--no-honor-ignore-files', '--no-ignore-suppressions', '--no-inspect', '--no-offline', '--no-progress', '--no-quiet', '--no-run', '--no-show-summary', '--no-simple', '--no-use-existing', '--oci', '--oci-runner', '--offline', '--offline-semgrep-rulesets', '--only-scanners', '--output-dir', '--output-format', '--output-formats', '--phases', '--progress', '--python-based-plugins-only', '--python-based-scanners-only', '--python-only', '--quiet', '--require-scanner-selection', '--run', '--runner', '--sandbox', '--scanners', '--shard-count', '--shard-index', '--show-completion', '--show-summary', '--simple', '--source-dir', '--source-git', '--staged', '--strategy', '--use-existing', '--verbose', '--version', '--workspace', '--workspace-config')
+    $valueOptions = @('--add-scanners', '--ash-config-from-host', '--ash-plugin-modules', '--ash-revision-to-install', '--base-ref', '--baseline', '--build-target', '--config', '--config-file-from-another-checkout', '--config-file-from-scanned-repository', '--config-overrides', '--container-gid', '--container-uid', '--custom-build-arg', '--custom-containerfile', '--exclude-scanners', '--format', '--formats', '--git-depth', '--git-ref', '--image', '--image-archive', '--image-layout', '--log-level', '--min-severity', '--mode', '--oci', '--oci-runner', '--offline-semgrep-rulesets', '--only-scanners', '--output-dir', '--output-format', '--output-formats', '--phases', '--require-scanner-selection', '--runner', '--sandbox', '--scanners', '--shard-count', '--shard-index', '--source-dir', '--source-git', '--strategy', '--workspace', '--workspace-config', '-c', '-f', '-g', '-o', '-u', '--archive', '--cli-json-input')
     if ($parameterName -eq 'AshArgs') {
         # -AshArgs is one string: complete its last word and keep the rest.
         $line = "$wordToComplete".Trim([char]39, [char]34)

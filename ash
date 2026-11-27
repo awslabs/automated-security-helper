@@ -70,6 +70,16 @@ refuse_usage() {
   exit "${USAGE_ERROR_EXIT}"
 }
 
+# The refusal for a workspace scan, whether it is asked for with the `workspace`
+# subject (`./ash scan workspace <file>`) or with the --workspace and
+# --workspace-config options, its older spellings. This script mounts the one
+# directory it scans, so the scan inside could not be told which workspace config the
+# repository wrote; `ash scan workspace <file> --mode container` mounts the workspace
+# itself. Invoke-ASH refuses the same input in the same words.
+refuse_workspace_scan() {
+  refuse "./ash scans one directory and cannot run a workspace scan: it mounts the one directory it scans, and the scan inside could not be told which workspace config the repository wrote. Run ash scan workspace <file> --mode container instead."
+}
+
 # Whether $1 is a path with a directory part that names no place by itself: it is read
 # against the working directory, usually the repository being scanned. A bare command
 # name (docker) is looked up on PATH, and a path that starts with / names its place.
@@ -361,7 +371,7 @@ require_mountable() {
 # tests/unit/test_sandbox_refused_by_every_container_entrypoint.py checks both
 # lists against the real commands and options.
 # BEGIN generated: sh-subcommands (scripts/generate_wrapper_tables.py)
-ASH_SUBCOMMANDS="scan build-image report diff trend merge results mcp get-genai-guide container config dependencies inspect plugin suppress express"
+ASH_SUBCOMMANDS="scan build-image report merge results mcp get-genai-guide container config dependencies inspect plugin suppress express"
 # END generated: sh-subcommands
 # The groups whose command word decides which options apply (`results report`,
 # `container build`), and the table name each command takes its options under, as
@@ -369,7 +379,7 @@ ASH_SUBCOMMANDS="scan build-image report diff trend merge results mcp get-genai-
 # it.
 # BEGIN generated: sh-option-groups (scripts/generate_wrapper_tables.py)
 ASH_OPTION_GROUPS="results container"
-ASH_GROUP_LEAF_TAKERS="results:report=report results:diff=diff results:trend=trend results:merge=merge results:inspect=inspect container:build=container"
+ASH_GROUP_LEAF_TAKERS="results:report=report results:merge=merge results:inspect=inspect container:build=container"
 # END generated: sh-option-groups
 # The subjects `scan` takes (`./ash scan fs [PATH]`). The first word after scan that
 # is not an option or an option's value names one, and the word after that is the
@@ -377,9 +387,9 @@ ASH_GROUP_LEAF_TAKERS="results:report=report results:diff=diff results:trend=tre
 # subject takes a value for that the root does not, so the word after one is not
 # the directory; ASH_ROOT_OPTIONS is every long option, for the completion function.
 # BEGIN generated: sh-scan-subjects (scripts/generate_wrapper_tables.py)
-ASH_SCAN_SUBJECTS="fs"
-ASH_SCAN_VALUE_OPTIONS="--cli-json-input"
-ASH_ROOT_OPTIONS="--add-scanners --all-enabled-plugins --all-enabled-scanners --allow-in-tree-tools --allow-missing-projects --allow-stale-content-db --annotate-duplicates --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build --build-target --changed-files-only --cleanup --cli-json-input --color --compact-report --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --debug --dry-run --exclude-scanners --express --fail-on-findings --fail-on-incomplete-scanners --fold-duplicates --force --format --formats --full --generate-cli-skeleton --git-depth --git-ref --honor-ignore-files --ignore-suppressions --image --image-archive --image-layout --inspect --log-level --min-severity --mode --no-allow-stale-content-db --no-build --no-cleanup --no-color --no-express --no-fail-on-findings --no-fail-on-incomplete-scanners --no-honor-ignore-files --no-ignore-suppressions --no-inspect --no-offline --no-progress --no-quiet --no-run --no-show-summary --no-simple --no-use-existing --oci --oci-runner --offline --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --progress --python-based-plugins-only --python-based-scanners-only --python-only --quiet --require-scanner-selection --run --runner --sandbox --scanners --shard-count --shard-index --show-completion --show-summary --simple --source-dir --source-git --staged --strategy --use-existing --verbose --version --workspace --workspace-config"
+ASH_SCAN_SUBJECTS="fs workspace"
+ASH_SCAN_VALUE_OPTIONS="--archive --cli-json-input"
+ASH_ROOT_OPTIONS="--add-scanners --all-enabled-plugins --all-enabled-scanners --allow-in-tree-tools --allow-missing-projects --allow-stale-content-db --annotate-duplicates --archive --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build --build-target --changed-files-only --cleanup --cli-json-input --color --compact-report --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --debug --dry-run --exclude-scanners --express --fail-on-findings --fail-on-incomplete-scanners --fold-duplicates --force --format --formats --full --generate-cli-skeleton --git-depth --git-ref --honor-ignore-files --ignore-suppressions --image --image-archive --image-layout --inspect --log-level --min-severity --mode --no-allow-stale-content-db --no-build --no-cleanup --no-color --no-express --no-fail-on-findings --no-fail-on-incomplete-scanners --no-honor-ignore-files --no-ignore-suppressions --no-inspect --no-offline --no-progress --no-quiet --no-run --no-show-summary --no-simple --no-use-existing --oci --oci-runner --offline --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --progress --python-based-plugins-only --python-based-scanners-only --python-only --quiet --require-scanner-selection --run --runner --sandbox --scanners --shard-count --shard-index --show-completion --show-summary --simple --source-dir --source-git --staged --strategy --use-existing --verbose --version --workspace --workspace-config"
 # END generated: sh-scan-subjects
 # The bash completion function `./ash --show-completion` prints, for hosts with no
 # Python to run the CLI's own completion.
@@ -456,10 +466,17 @@ ASH_ROOT_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modul
 # with its index in SUBCOMMAND_AT (-1 and "" when none is named), not counting
 # the value of a root option, which can be a command's name (`--phases
 # inspect`, `--config config`). Walks the words the refusals checked and the
-# scan is given.
+# scan is given. When that subcommand is scan, the subject after it
+# (ASH_SCAN_SUBJECTS) is in SUBJECT, with its index in SUBJECT_AT (-1 and "" when
+# the first word after scan's options is no subject). This reads the same words
+# again, as ASH_ARG_WORDS split them, so a scan named inside one quoted argument
+# (`./ash "scan workspace f"`) has its subject found as one named word by word is;
+# SCAN_SUBJECT is the one the argument loop read as it went.
 detect_subcommand() {
   SUBCOMMAND=""
   SUBCOMMAND_AT=-1
+  SUBJECT=""
+  SUBJECT_AT=-1
   SKIP_VALUE="NO"
   for ((ASH_WORD_AT = 0; ASH_WORD_AT < ${#ASH_ARG_WORDS[@]}; ASH_WORD_AT++)); do
     ASH_WORD="${ASH_ARG_WORDS[ASH_WORD_AT]}"
@@ -488,6 +505,38 @@ detect_subcommand() {
           break
         fi
       done
+    fi
+  done
+  if [[ "${SUBCOMMAND}" != "scan" ]]; then
+    return 0
+  fi
+  # The subject is the first word after scan that is not an option or an option's
+  # value, as the CLI reads it. Options that only a subject takes a value for
+  # (ASH_SCAN_VALUE_OPTIONS) are skipped with their value too.
+  SKIP_VALUE="NO"
+  for ((ASH_WORD_AT = SUBCOMMAND_AT + 1; ASH_WORD_AT < ${#ASH_ARG_WORDS[@]}; ASH_WORD_AT++)); do
+    ASH_WORD="${ASH_ARG_WORDS[ASH_WORD_AT]}"
+    if [[ "${SKIP_VALUE}" = "YES" ]]; then
+      SKIP_VALUE="NO"
+      continue
+    fi
+    if [[ " ${ASH_ROOT_VALUE_OPTIONS} ${ASH_SCAN_VALUE_OPTIONS} " == *" ${ASH_WORD} "* ]]; then
+      SKIP_VALUE="YES"
+    elif [[ "${ASH_WORD}" == -[!-]?* ]]; then
+      for ((ASH_AT = 1; ASH_AT < ${#ASH_WORD}; ASH_AT++)); do
+        if [[ " ${ASH_ROOT_VALUE_OPTIONS} ${ASH_SCAN_VALUE_OPTIONS} " == *" -${ASH_WORD:ASH_AT:1} "* ]]; then
+          if ((ASH_AT + 1 == ${#ASH_WORD})); then
+            SKIP_VALUE="YES"
+          fi
+          break
+        fi
+      done
+    elif [[ "${ASH_WORD}" != -* ]]; then
+      if [[ " ${ASH_SCAN_SUBJECTS} " == *" ${ASH_WORD} "* ]]; then
+        SUBJECT="${ASH_WORD}"
+        SUBJECT_AT=${ASH_WORD_AT}
+      fi
+      break
     fi
   done
 }
@@ -1088,6 +1137,11 @@ forward_word() {
       if [[ " ${ASH_SCAN_SUBJECTS} " == *" $1 "* ]]; then
         SCAN_SUBJECT="$1"
       fi
+    elif [[ "${SCAN_SUBJECT}" = "workspace" ]]; then
+      # The word after workspace is the workspace file, not a directory to mount, and
+      # a scan of one is refused below whatever follows, so no later word is read as
+      # a second directory or as a --source-dir to name once.
+      :
     else
       if [[ "${SOURCE_DIR_GIVEN}" = "YES" ]]; then
         refuse_usage "Name the directory once: as the PATH argument of scan ${SCAN_SUBJECT} or with --source-dir, not both."
@@ -1347,11 +1401,12 @@ done
 # refusal has passed it; the scan is given these exact words.
 #
 # A workspace scan is refused over the same words, with exit 3, before anything is
-# built or mounted. ./ash scans one directory: the scan inside the container is given
-# ASH_SOURCE_DIR=/src, which counts as --source-dir and is refused next to
-# --workspace (exit 4, after the image was built), and --workspace-config applies
-# only to a workspace scan. `ash --mode container --workspace <file>` mounts the
-# workspace itself.
+# built or mounted. ./ash scans one directory: it mounts the directory it scans, and
+# could not tell the scan inside which workspace config the repository wrote. That
+# covers the `workspace` subject, as the argument loop read it (SCAN_SUBJECT) and as
+# the split words name it (SUBJECT, which also finds it inside one quoted argument),
+# and the --workspace and --workspace-config options, its older spellings. `ash scan
+# workspace <file> --mode container` mounts the workspace itself.
 #
 # The sandbox pass runs over every word before the workspace pass, so an explicit
 # --sandbox other than off is refused as the usage error it is, with 5, wherever it
@@ -1361,8 +1416,9 @@ done
 #
 # --source-dir is deprecated on `scan <subject>` only. Without a subject the scan inside
 # prints its own one line for the subject-less form, which names the same replacement,
-# so printing this one too would give two lines for one command.
-if [[ "${SOURCE_DIR_GIVEN}" = "YES" && "${SCAN_SUBJECT}" != "" ]]; then
+# so printing this one too would give two lines for one command. A workspace scan is
+# refused, so no line names a replacement for it.
+if [[ "${SOURCE_DIR_GIVEN}" = "YES" && "${SCAN_SUBJECT}" != "" && "${SCAN_SUBJECT}" != "workspace" ]]; then
   echo "Deprecated: --source-dir is deprecated and will be removed in ASH v4.0. Give the directory as the argument: ./ash scan ${SCAN_SUBJECT} <path>" >&2
 fi
 read -r -d '' -a ASH_ARG_WORDS <<< "${ASH_ARGS}"
@@ -1376,10 +1432,14 @@ for ((ASH_WORD_AT = 0; ASH_WORD_AT < ${#ASH_ARG_WORDS[@]}; ASH_WORD_AT++)); do
       ;;
   esac
 done
+detect_subcommand
+if [[ "${SCAN_SUBJECT}" = "workspace" || "${SUBJECT}" = "workspace" ]]; then
+  refuse_workspace_scan
+fi
 for ASH_WORD in "${ASH_ARG_WORDS[@]}"; do
   case "${ASH_WORD}" in
     --workspace | --workspace=* | --workspace-config | --workspace-config=*)
-      refuse "./ash scans one directory and cannot run a workspace scan: the scan inside the container is given --source-dir /src, which it refuses next to --workspace, and it could not be told which workspace config the repository wrote. Run ash --mode container --workspace <file> instead."
+      refuse_workspace_scan
       ;;
   esac
 done

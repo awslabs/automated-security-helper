@@ -877,15 +877,22 @@ def test_a_source_path_is_passed_as_a_value_and_not_run(
 @pytest.mark.integration
 @pytest.mark.parametrize(
     "flag",
-    ["--workspace /src/ash.code-workspace", "--workspace=/src/ash.code-workspace"],
-    ids=["separate", "joined"],
+    [
+        "--workspace /src/ash.code-workspace",
+        "--workspace=/src/ash.code-workspace",
+        "scan workspace ash.code-workspace",
+        "scan --scanners bandit workspace ash.code-workspace",
+    ],
+    ids=["separate", "joined", "the-subject", "the-subject-after-an-option"],
 )
 def test_a_workspace_scan_is_refused(flag, pwsh, recording_docker, tmp_path):
-    """Invoke-ASH scans one directory and hands the scan inside ``--source-dir
-    /src``, which that scan refuses next to ``--workspace``, so it cannot run a
-    workspace scan or mark a workspace's -Config. A --workspace passed through is
-    refused with exit 3 before anything is built or mounted; the case that matters is
-    a config in the checkout but outside the workspace."""
+    """Invoke-ASH scans one directory: it mounts that directory and runs the scan
+    inside against it as /src, so it cannot run a workspace scan or mark a
+    workspace's -Config. A --workspace passed through, or the ``workspace`` subject of
+    ``scan``, is refused with exit 3 before anything is built or mounted, and the
+    refusal points at ``ash scan workspace <file> --mode container``, which mounts the
+    workspace; the case that matters is a config in the checkout but outside the
+    workspace."""
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
     (repo / "ws" / "proj").mkdir(parents=True)
@@ -902,7 +909,11 @@ def test_a_workspace_scan_is_refused(flag, pwsh, recording_docker, tmp_path):
 
     assert result.returncode == 3, result.stdout + result.stderr
     assert not (tmp_path / "docker-args.txt").exists()
-    assert "ash --mode container --workspace" in " ".join(result.stderr.split())
+    stderr = " ".join(result.stderr.split())
+    assert "ash scan workspace <file> --mode container" in stderr, result.stderr
+    assert "--source-dir /src" not in stderr, (
+        "the refusal no longer explains itself with the old inner call"
+    )
 
 
 def _self_recording_runner(directory: Path, log: Path) -> Path:
