@@ -1106,6 +1106,186 @@ def test_an_op_on_an_option_bandit_does_not_declare_under_bandit_applies(
     assert "'patch' entry 0 in" not in text, text
 
 
+# A patch's add or replace under the retired name, in a chain that wrote the
+# section under that name, lands on bandit's section, so its value is written
+# there without passing the fold the file's own section passed. The value is
+# held to the fold's rules instead: the section's name and the options bandit
+# does not declare are dropped from it, with one warning that names bandit and
+# no key the file wrote, and a write of either alone writes nothing. Each
+# retired-name row was refused while the value was written as it stood.
+
+_PATCH_DROP_PREFIX = "A patch operation under a retired scanner name writes "
+
+
+def _patch_drop_lines(caplog):
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith(_PATCH_DROP_PREFIX)
+    ]
+
+
+def _patched_file(tmp_path, section, *ops, chain="one-file"):
+    """A file that writes confidence_level: high under *section* and applies
+    *ops* in its own patch; with *chain* "base-and-child", that file is a base
+    and a child that extends it applies *ops* instead."""
+    written = {"scanners": {section: {"options": {"confidence_level": "high"}}}}
+    if chain == "one-file":
+        return _write(tmp_path / "patched.yaml", {**written, "patch": list(ops)})
+    _write(tmp_path / "base.yaml", written)
+    return _write(tmp_path / "child.yaml", {"extends": "base.yaml", "patch": list(ops)})
+
+
+def _loaded(path, caplog):
+    """The loader's document for *path*, the patch-drop warnings it logged,
+    and the configuration the model makes of the document."""
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.config_sources import (
+        resolve_config_document,
+    )
+
+    with caplog.at_level(logging.INFO, logger="ash"):
+        document = resolve_config_document(path)
+    lines = _patch_drop_lines(caplog)
+    return document, lines, AshConfig.model_validate(document.data)
+
+
+@pytest.mark.parametrize("chain", ["one-file", "base-and-child"])
+@pytest.mark.parametrize("section", ["oldname", "bandit"], ids=_SECTION_IDS)
+def test_an_add_of_an_option_bandit_does_not_declare_under_the_retired_name_drops_it(
+    retired_oldname, tmp_path, monkeypatch, caplog, section, chain
+):
+    """The patch adds retired_only_knob, an option bandit's options do not
+    declare, under *section*, in the file that writes the section or in a
+    child of it. Under the retired name the pointer lands on bandit's section
+    and the fold's rule drops the option: the load succeeds, bandit keeps the
+    file's confidence_level, the option is not there, and one warning names
+    bandit and the drop and no key the file wrote. The canonical-control row
+    adds it under bandit, where no fold drops it: the load is refused for an
+    option bandit does not declare."""
+    from automated_security_helper.config.resolve_config import ConfigFileRefused
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    path = _patched_file(
+        tmp_path,
+        section,
+        {
+            "op": "add",
+            "path": f"/scanners/{section}/options/retired_only_knob",
+            "value": 1,
+        },
+        chain=chain,
+    )
+
+    if section == "bandit":
+        with pytest.raises(ConfigFileRefused) as refused:
+            _load(monkeypatch, path)
+        text = " ".join(str(refused.value).split())
+        assert "Unknown key 'retired_only_knob'" in text, text
+        return
+
+    document, lines, config = _loaded(path, caplog)
+
+    options = document.data["scanners"]["bandit"]["options"]
+    assert options == {"confidence_level": "high"}, options
+    assert config.scanners.bandit.options.confidence_level == "high"
+    assert not hasattr(config.scanners.bandit.options, "retired_only_knob")
+    assert len(lines) == 1, lines
+    assert "bandit" in lines[0] and "dropped" in lines[0], lines
+    assert "retired_only_knob" not in lines[0], lines
+
+
+@pytest.mark.parametrize("op", ["add", "replace"])
+def test_a_patched_section_under_the_retired_name_drops_name_and_undeclared_options(
+    retired_oldname, tmp_path, monkeypatch, caplog, op
+):
+    """The patch adds or replaces the whole section under oldname, the
+    section the file wrote under that name, with a value that holds
+    name: oldname, enabled: false, confidence_level: low and
+    retired_only_knob. The pointer lands on bandit's section, which the value
+    replaces, and the fold's rules drop the name and the option bandit does
+    not declare: the load succeeds with bandit's own name, enabled false and
+    confidence_level low, the option is not there, and one warning names the
+    drop."""
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    path = _patched_file(
+        tmp_path,
+        "oldname",
+        {
+            "op": op,
+            "path": "/scanners/oldname",
+            "value": {
+                "name": "oldname",
+                "enabled": False,
+                "options": {"confidence_level": "low", "retired_only_knob": 1},
+            },
+        },
+    )
+
+    document, lines, config = _loaded(path, caplog)
+
+    section = document.data["scanners"]["bandit"]
+    assert section == {"enabled": False, "options": {"confidence_level": "low"}}
+    assert config.scanners.bandit.name == "bandit"
+    assert config.scanners.bandit.enabled is False
+    assert config.scanners.bandit.options.confidence_level == "low"
+    assert not hasattr(config.scanners.bandit.options, "retired_only_knob")
+    assert len(lines) == 1 and "dropped" in lines[0], lines
+
+
+@pytest.mark.parametrize("op", ["add", "replace"])
+def test_patched_options_under_the_retired_name_drop_undeclared_keys(
+    retired_oldname, tmp_path, monkeypatch, caplog, op
+):
+    """The patch adds or replaces oldname's options with confidence_level: low
+    and retired_only_knob. The pointer lands on bandit's options, and the
+    fold's rule drops the option bandit does not declare: the load succeeds
+    with confidence_level low, the option is not there, and one warning names
+    the drop."""
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    path = _patched_file(
+        tmp_path,
+        "oldname",
+        {
+            "op": op,
+            "path": "/scanners/oldname/options",
+            "value": {"confidence_level": "low", "retired_only_knob": 1},
+        },
+    )
+
+    document, lines, config = _loaded(path, caplog)
+
+    options = document.data["scanners"]["bandit"]["options"]
+    assert options == {"confidence_level": "low"}, options
+    assert config.scanners.bandit.options.confidence_level == "low"
+    assert not hasattr(config.scanners.bandit.options, "retired_only_knob")
+    assert len(lines) == 1 and "dropped" in lines[0], lines
+
+
+@pytest.mark.parametrize("op", ["add", "replace"])
+def test_a_patched_section_name_under_the_retired_name_writes_nothing(
+    retired_oldname, tmp_path, monkeypatch, caplog, op
+):
+    """The patch adds or replaces oldname's name. The fold drops a section's
+    name under a retired name, so the operation writes nothing: the load
+    succeeds with bandit's own name and the file's options, and no warning
+    names a drop. Written as it stood, the add set bandit's name to oldname,
+    which bandit refuses, and the replace found no name in bandit's section."""
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    path = _patched_file(
+        tmp_path,
+        "oldname",
+        {"op": op, "path": "/scanners/oldname/name", "value": "oldname"},
+    )
+
+    document, lines, config = _loaded(path, caplog)
+
+    section = document.data["scanners"]["bandit"]
+    assert section == {"options": {"confidence_level": "high"}}, section
+    assert config.scanners.bandit.name == "bandit"
+    assert lines == [], lines
+
+
 # A value read from the environment in a section a ``patch`` adds under the
 # retired name. The loader folds the added section onto bandit's once the patch
 # has applied and moves the reference with its value, so the results file's

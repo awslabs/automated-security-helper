@@ -96,7 +96,11 @@ message says the option was dropped. A pointer that spells the retired name
 reaches the serving plugin's section only where a file of the chain wrote
 that section under a retired name; where the files wrote only the current
 name, the pointer stays the retired name's own key, as for any key the
-document does not hold.
+document does not hold. An ``add`` or ``replace`` such a pointer carries to
+the serving plugin's section writes only what the fold keeps of its value:
+the section's ``name`` and an option the serving plugin does not declare
+are dropped from it, with the fold's warning, and an operation that writes
+only one of them writes nothing (``_through_the_retired_fold``).
 
 ``move`` and ``copy`` are refused, as in ``runtime_patch.py``; #289 asks for
 ``add``, ``remove`` and ``replace``, and ``test`` is allowed because it reads
@@ -3714,7 +3718,10 @@ def _normalize_pointer(
     ``patch`` applies, so the document holds such a section only under the
     serving plugin's key, and a patch naming it in the retired spelling
     reaches it, inside the section or as a whole, as the serving plugin's
-    name does. ``folds`` is the loader's record of those folds in the
+    name does, and an ``add`` or ``replace`` it carries there writes only
+    what the fold keeps of its value (_through_the_retired_fold, which
+    _patch_step and the reference replay apply). ``folds`` is the loader's
+    record of those folds in the
     patching file's chain (``_resolve``): by the serving plugin's key, what
     each fold dropped. The redirect lands only on a serving key the record
     holds: where the chain wrote the section only under the current name,
@@ -3895,11 +3902,138 @@ class _Patched:
     #: pointer the ownership fold resolved, and an op the document dropped to
     #: the unconfined view records None: a replay then lands each one where
     #: this walk landed it instead of re-normalizing against keys the
-    #: operator never wrote.
+    #: operator never wrote. An op the retired-name fold lays nothing of
+    #: (_through_the_retired_fold) records None too, with ownership on or off.
     rewritten: Dict[int, _Rewritten]
 
 
 _AS_WRITTEN = object()
+
+
+def _through_the_retired_fold(
+    op: Dict[str, Any],
+    normalized: Dict[str, Any],
+    folds: Optional[Dict[str, Set[str]]] = None,
+    *,
+    log: bool = False,
+    key_of: Optional[Callable[[Any], Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """``normalized``, the operation ``op`` at the pointer _normalize_pointer
+    resolved, with the value of an ``add`` or ``replace`` that the pointer
+    redirected from a retired scanner name onto the serving plugin's section
+    held to the fold's rules; None when the fold lays nothing of it. Any
+    other operation is answered as it is.
+
+    The loader folds a section written under a retired name onto the serving
+    plugin's as it reads the file (``ash_config.fold_scanner_name_aliases``):
+    it drops the section's ``name`` and every option the serving plugin does
+    not declare, with a warning, and lays nothing of a section that is not a
+    mapping. A pointer in the retired spelling lands on the serving plugin's
+    section once a file of the chain wrote it under that name, so the value
+    an operation carries there would skip that fold. It is held to the same
+    rules instead: a section value loses its ``name`` and its undeclared
+    options (a None section is an empty one), a section value that is not a
+    mapping writes nothing, an ``options`` value loses its undeclared keys,
+    and a write of the section's ``name`` writes nothing, as does an ``add``
+    of an option the serving plugin does not declare. A ``remove``,
+    ``replace`` or ``test`` of such an option is left as it is: the fold
+    dropped the option as its file was read, so the operation finds nothing
+    there, and its refusal says why (_dropped_option_clause).
+
+    ``folds``, when given (the loader's record of the chain's folds),
+    receives the options dropped here under the serving plugin's key, as the
+    fold records its own, and ``log`` prints the fold's warning. The warning
+    names the serving plugin, a name from the alias table, and how many
+    options were dropped, never a key a file wrote. ``key_of`` maps a
+    mapping key to the key it stands for: the reference replay
+    (_placed_through_patch) passes its key tokens' keys, so a token beside a
+    kept key is kept with it and a token beside a dropped key goes with it.
+    """
+    if normalized.get("op") not in ("add", "replace") or "value" not in normalized:
+        return normalized
+    typed, landed = op.get("path"), normalized.get("path")
+    if not (
+        isinstance(typed, str)
+        and isinstance(landed, str)
+        and typed.startswith("/")
+        and landed.startswith("/")
+    ):
+        return normalized
+    typed_parts = [_unescape(part) for part in typed[1:].split("/")]
+    landed_parts = [_unescape(part) for part in landed[1:].split("/")]
+    if (
+        len(typed_parts) < 2
+        or len(landed_parts) != len(typed_parts)
+        or landed_parts[0] != PluginKind.SCANNER.section
+        or typed_parts[1] == landed_parts[1]
+    ):
+        return normalized
+    serving = canonical_scanner_name(typed_parts[1])
+    if serving in (None, "", typed_parts[1]) or (
+        canonical_scanner_name(landed_parts[1]) != landed_parts[1]
+    ):
+        # Not the redirect: the typed name is no retired one, or it landed on
+        # a key the document holds in a retired spelling, which the loader
+        # folds once the patch has applied.
+        return normalized
+
+    from automated_security_helper.config.ash_config import (
+        ScannerConfigSegment,
+        _declared_option_names,
+    )
+
+    declared = _declared_option_names(ScannerConfigSegment, serving)
+
+    def name(key: Any) -> Any:
+        return key if key_of is None else key_of(key)
+
+    def dropped(names: Set[Any]) -> None:
+        if folds is not None:
+            folds.setdefault(serving, set()).update(names)
+        if log:
+            count = len(names)
+            ASH_LOGGER.warning(
+                f"A patch operation under a retired scanner name writes {count} "
+                f"option{'' if count == 1 else 's'} the {serving} plugin does not "
+                f"declare; {'it was' if count == 1 else 'they were'} dropped"
+            )
+
+    def kept(options: Any) -> Any:
+        if declared is None or not isinstance(options, dict):
+            return options
+        gone = {key for key in options if name(key) not in declared}
+        if not gone:
+            return options
+        dropped({name(key) for key in gone})
+        return {key: item for key, item in options.items() if key not in gone}
+
+    rest = landed_parts[2:]
+    value = normalized["value"]
+    if not rest:
+        if value is None:
+            value = {}
+        if not isinstance(value, dict):
+            if log:
+                ASH_LOGGER.warning(
+                    "A patch operation under a retired scanner name writes a "
+                    "section that is not a mapping; nothing of it can be applied "
+                    f"to scanners.{serving}"
+                )
+            return None
+        section = {key: item for key, item in value.items() if name(key) != "name"}
+        if "options" in section:
+            section["options"] = kept(section["options"])
+        return dict(normalized, value=section)
+    if rest[0] == "name":
+        return None
+    if rest[0] != "options":
+        return normalized
+    if len(rest) == 1:
+        return dict(normalized, value=kept(value))
+    if normalized["op"] == "add" and declared is not None and rest[1] not in declared:
+        dropped({rest[1]})
+        return None
+    return normalized
 
 
 def _patch_step(
@@ -3941,8 +4075,24 @@ def _patch_step(
     nothing, so the reference replay, which skips tests, has nothing to
     reapply for it. ``folds`` is the chain's record of its retired-name folds,
     which the same fold reads (_normalize_pointer).
+
+    An ``add`` or ``replace`` whose pointer the fold redirected from a
+    retired scanner name onto the serving plugin's section is held to the
+    fold's rules before it applies (_through_the_retired_fold): its value
+    loses what the fold drops, and an operation the fold lays nothing of is
+    applied to neither view and reported as None, which the reference replay
+    skips. The loader's walk passes ``folds`` and warns of a drop; the
+    restrict-only walk over a delivered file holds no record and stays
+    silent, so the drop is warned of once, by the load.
     """
-    normalized = dict(op, path=_normalize_pointer(document, op["path"], owned, folds))
+    normalized = _through_the_retired_fold(
+        op,
+        dict(op, path=_normalize_pointer(document, op["path"], owned, folds)),
+        folds,
+        log=folds is not None,
+    )
+    if normalized is None:
+        return document, unconfined, None
     taken = (
         _AS_WRITTEN
         if owned is None or op["op"] == "test"
@@ -3954,7 +4104,11 @@ def _patch_step(
             None,
             taken,
         )
-    whole = dict(op, path=_normalize_pointer(unconfined, op["path"], owned, folds))
+    whole = _through_the_retired_fold(
+        op, dict(op, path=_normalize_pointer(unconfined, op["path"], owned, folds))
+    )
+    if whole is None:
+        return document, unconfined, None
     if op["op"] == "test":
         jsonpatch.apply_patch(unconfined, [whole], in_place=False)
         return document, unconfined, _AS_WRITTEN
