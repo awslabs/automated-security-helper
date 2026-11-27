@@ -22,9 +22,11 @@ What it holds
   in a recording (home directories, user and host names) and name each hit by its
   kind, never by its value. A token that a color change or a cursor movement splits,
   or that a line wrap splits with only line breaks, box-drawing borders and spaces
-  between its halves, is found in the text with those taken out (``flatten_text``). A
-  cell that wraps inside a row of several columns is not rejoined, so the recorder has
-  to work at a width where no table wraps.
+  between its halves, is found in the text with those taken out (``flatten_text``).
+  Anything else between the halves keeps it from being found: a cell that wraps beside
+  another column, a log line that wraps beside a right-hand column, an ASCII table
+  border, a zero-width space. So the recorder has to work at a width where nothing
+  wraps beside other text.
 * the run record: dataclasses for what a recording run observed, and
   ``canonical_json``, the one JSON form the record is written in.
 
@@ -1287,8 +1289,8 @@ class ForbiddenHit:
     #: removed, which finds a token that color changes split; ``flat`` is the text with
     #: every escape sequence, control character, line break and box-drawing character
     #: removed, which finds a token that a cursor movement or a line wrap split, unless
-    #: other text lies between the halves, as in a cell that wrapped inside a row of
-    #: several columns or in a table drawn with ASCII bars (see ``flatten_text``).
+    #: something else lies between the halves (``flatten_text`` lists the shapes it
+    #: rejoins and the ones it does not).
     view: str
 
     def __str__(self) -> str:
@@ -1316,19 +1318,24 @@ def flatten_text(text: str) -> str:
     Every escape sequence (not only SGR), every control character (the carriage
     return and line feed of a wrap among them) and every box-drawing character
     (U+2500 to U+257F, the borders of a table) is removed, with the spaces beside a
-    removed control or box-drawing character. So a token whose halves nothing else
-    parts reads as the token again: a path that a cursor movement or a color change
-    cut, a path that wraps onto the next line, and a path that wraps inside a table
-    with box-drawing borders or none, in a table of one column or in the last filled
-    cell of a row of several.
+    removed control or box-drawing character. Nothing else is removed or moved, and
+    the text is read in stream order, so a token is read as the token again only when
+    nothing but those characters lies between its halves.
 
-    Other text between the halves is kept, and then the token is not found. A cell
-    that wraps inside a row of several columns is not rejoined when other cells have
-    text after it on its first line or before the rest of it on the next line. A table
-    drawn with ASCII bars (``|``) is not rejoined either, since only box-drawing
-    characters are removed. A recording therefore has to be made at a width where no
-    table wraps; this view is no substitute for that. It can also join words that
-    were apart, which only makes a scan that looks for a token stricter.
+    It rejoins a path that a cursor movement, a title, a link or a color change cut, a
+    path that wraps onto the next line, and a path that wraps inside a table with
+    box-drawing borders or none, when the table has one column or the wrapped cell is
+    the last one filled on its row.
+
+    It does not rejoin a path with anything else between its halves: a cell that
+    wraps with another column to its right, in the first column or a middle one, since
+    the text of that column lies between the halves; a log line wrapped beside a
+    right-hand column, for the same reason; a table drawn with ASCII bars (``|``), even
+    of one column, since those bars are kept; and a token with a zero-width space or
+    another invisible format character inside it. A recording therefore has to be made
+    at a width where nothing wraps beside other text; this view is no substitute for
+    that. It can also join words that were apart, which only makes a scan that looks
+    for a token stricter.
     """
     kept: list[str] = []
     in_gap = False
@@ -1377,9 +1384,9 @@ def scan_text(
 
     The text is read as recorded, again with its color sequences removed and again
     flattened, so a path that color changes, a cursor movement or a line wrap split
-    into pieces is still found. The flat view does not rejoin every wrapped table (see
-    ``flatten_text`` for the ones it does). A view that equals an earlier one is not
-    read twice.
+    into pieces is still found. The flat view does not rejoin every wrapped path:
+    ``flatten_text`` lists the shapes it does and the ones it does not. A view that
+    equals an earlier one is not read twice.
     """
     return _scan(text, [(token, token.pattern()) for token in tokens], where)
 
