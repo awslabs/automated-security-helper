@@ -375,7 +375,7 @@ class TestReview:
         lock = _bound(
             root, _scope("B602", "risky", "file"), _scope("B603", "other", "file")
         )
-        outcome = lock.review(KEY, invalidation_scope="symbol", symbol="risky")
+        outcome = lock.review(KEY, symbol="risky", invalidation_scope="symbol")
         assert outcome.state == "converted"
         kinds = {s.symbol: s.invalidation_scope for s in lock.entries[KEY].scopes}
         assert kinds == {"risky": "symbol", "other": "file"}
