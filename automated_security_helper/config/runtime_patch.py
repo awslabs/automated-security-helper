@@ -71,6 +71,7 @@ from automated_security_helper.config.ash_config import (
 )
 from automated_security_helper.config.environment_record import (
     ENVIRONMENT_VALUE_SHOWN,
+    UNKNOWN_INDEX,
     EnvironmentReference,
     _bare,
     with_environment_values_shown,
@@ -1517,6 +1518,16 @@ def apply_runtime_patch(
     violation raises `RuntimePatchDeniedError` and aborts the entire patch. An op
     that only turns an off-host reporter off is not applied, with a warning
     (``_turns_an_off_host_reporter_off``).
+
+    The base's references follow the ops (``_ReferencesThroughPatch``): a value
+    an op writes over is the client's text from then on, and a ``test`` op reads
+    the configuration as its files wrote it, so it answers whether the client
+    wrote a reference and never whether it guessed a value. That holds for a set
+    member the base read from the environment too (its rewrite is at the
+    unknown index, and follows the set's container): an op that writes at or
+    above the container drops the rewrite, and an op that moves or copies from
+    there, or shifts a list above it, is refused
+    (``SET_READ_FROM_THE_ENVIRONMENT_REFUSAL``).
     """
     # First: every other rule names the op's path, and an override's ops name
     # the profile's own keys.
@@ -1715,6 +1726,27 @@ class _ReferencesThroughPatch:
     is compared: a default, or any other string equal to a value, is not one of
     the profile's values.
 
+    A set member the base read from the environment has a rewrite at the
+    unknown index (``environment_record.UNKNOWN_INDEX``): a set has no
+    positions, so the rewrite has no dump path and no token, and the record
+    writes its reference over every entry of the container that equals the
+    value (``record_of_config``), a client's own entry included. Such a rewrite
+    is followed by its container's dump path (the rewrite's path without the
+    unknown index) in both trackers. An op that writes at or above the
+    container (an add, a replace or a remove there or above it, or a move's or
+    a copy's target) drops the rewrite, and ``references_in`` leaves its
+    reference out: the container holds the client's text from then on, so a
+    test op reads the client's entry as it is written whatever it equals. An op
+    that moves or copies from at or above the container, or adds or removes an
+    entry of a list on the path above it, is refused (``refuse_a_write_over``):
+    a member moved to another place would carry its mark where no rewrite
+    names it, and a shifted list would leave the container at an index the rule
+    no longer names. Every answer is the same whatever a client's entry equals.
+    A rewrite at the unknown index of a list (an entry a ``patch`` appended, at
+    a position the file could not name) is not followed this way: a client can
+    add entries to that list, so it keeps no place and stays whatever an op
+    writes.
+
     ``items`` are the rewrites to follow where they are not the base's own
     (``references_in`` follows the configuration's references this way), and
     ``strict`` False drops a value that moved where its reference did not follow
@@ -1738,8 +1770,34 @@ class _ReferencesThroughPatch:
         self._strict = strict
         #: None when the base has no references to follow.
         self.rewrites: List[Any] | None = rewrites or None
-        # Each rewrite's path in the dump's keys, which an op's pointer names.
-        self._where = [dumped_path(base, dumped, rewrite.path) for rewrite in rewrites]
+        # A rewrite at the unknown index names a set's members, or the entries of
+        # a list at an unknown position (``record_of_config``). Only the first is
+        # followed by its container: nothing can be written below a set, so an op
+        # that writes the container leaves no client entry for the rewrite to
+        # apply to. A client can add entries to a list, so a rewrite at the
+        # unknown index of a list keeps no place, and stays whatever an op writes.
+        containers: Dict[int, Tuple[Any, ...]] = {}
+        for ident, rewrite in enumerate(rewrites):
+            if (
+                rewrite.kind == "value"
+                and rewrite.path
+                and rewrite.path[-1] is UNKNOWN_INDEX
+            ):
+                at = dumped_path(base, dumped, rewrite.path[:-1])
+                if at and isinstance(_node_at(dumped, at), (set, frozenset)):
+                    containers[ident] = at
+        #: The positions in the base's list of the rewrites of a set's members
+        #: (``record_of_config`` applies each to every entry of its container
+        #: that is the value): they carry no token.
+        self._members = set(containers)
+        # Each rewrite's path in the dump's keys, which an op's pointer names:
+        # the set's, for a member's rewrite (None where the dump has no place).
+        self._where = [
+            containers[ident]
+            if ident in containers
+            else dumped_path(base, dumped, rewrite.path)
+            for ident, rewrite in enumerate(rewrites)
+        ]
         # Each rewrite's position in the base's list, kept as rewrites drop.
         self._ids = list(range(len(rewrites)))
         self._shadow: Any = copy.deepcopy(dumped) if rewrites else None
@@ -1752,7 +1810,7 @@ class _ReferencesThroughPatch:
         self._typed: List[Tuple[str, ...]] = []
         self._lost = False
         for ident, (rewrite, at) in enumerate(zip(rewrites, self._where)):
-            if at is None:
+            if at is None or ident in self._members:
                 continue
             if rewrite.kind == "value" and at:
                 container = _node_at(self._shadow, at[:-1])
@@ -1782,23 +1840,119 @@ class _ReferencesThroughPatch:
         removed whole), is refused outright; a move's source is such a path too.
         Only the strict tracker refuses: the lenient one follows the
         configuration's own references, which the strict one already guards.
+
+        It also refuses, for a set member the base read from the environment
+        (a rewrite at the unknown index), an op that moves or copies from at or
+        above the set's container, and an op that adds or removes an entry of a
+        list on the path above the container
+        (``SET_READ_FROM_THE_ENVIRONMENT_REFUSAL``). Decided from the ops'
+        paths and the rewrites the earlier ops left, never from a value, so the
+        answer is the same whatever a client's entry equals.
         """
-        if not self._strict or not self._typed:
+        if not self._strict or op.get("op") not in DOCUMENT_CHANGING_OPS:
+            return
+        if self._typed:
+            pointers = [op.get("path", "")]
+            if op.get("op") == "move":
+                pointers.append(op.get("from", ""))
+            for pointer in pointers:
+                if not isinstance(pointer, str):
+                    continue
+                segments = _path_segments(pointer)
+                for at in self._typed:
+                    if list(at[: len(segments)]) == segments:
+                        raise RuntimePatchDeniedError(
+                            op, TYPED_VALUE_READ_FROM_THE_ENVIRONMENT_REFUSAL
+                        )
+        self._refuse_a_set_moved_or_shifted(op)
+
+    def _containers(self) -> List[Tuple[Any, ...]]:
+        """The dump path of the container of each set member's rewrite that
+        stands now, in the dump's keys and list indices."""
+        return [
+            at
+            for ident, at in zip(self._ids, self._where)
+            if ident in self._members and at
+        ]
+
+    def _refuse_a_set_moved_or_shifted(self, op: Dict[str, Any]) -> None:
+        """Refuse ``op`` when it takes the set a member's rewrite names to
+        another place, or moves it to another list index.
+
+        A set member has no position, so its rewrite follows the container
+        (``_containers``), and only where the container stays. A move or copy
+        whose ``from`` is the container or a place above it (the mapping or
+        list that holds it) would put a member, with the loader's mark, where
+        no rewrite names it. An add or remove at an index of a list on the path
+        above the container moves it to another index, as
+        ``_refuse_a_key_read_from_the_environment`` reads for a mapping that
+        holds a key. An append (the ``-`` index) moves nothing.
+        """
+        containers = self._containers()
+        if not containers:
+            return
+        name = op.get("op")
+        pointer = op.get("path", "")
+        source = op.get("from", "")
+        if name in ("move", "copy") and isinstance(source, str):
+            taken = _path_segments(source)
+            for at in containers:
+                if [str(part) for part in at[: len(taken)]] == taken:
+                    raise RuntimePatchDeniedError(
+                        None, SET_READ_FROM_THE_ENVIRONMENT_REFUSAL
+                    )
+        shifting = [pointer] if name in ("add", "remove", "copy") else []
+        if name == "move":
+            shifting = [pointer, source]
+        for shifted in shifting:
+            if not isinstance(shifted, str):
+                continue
+            segments = _path_segments(shifted)
+            if not segments or not _LIST_INDEX.fullmatch(segments[-1]):
+                continue
+            depth = len(segments) - 1
+            for at in containers:
+                if (
+                    depth < len(at)
+                    and isinstance(at[depth], int)
+                    and [str(part) for part in at[:depth]] == segments[:depth]
+                ):
+                    raise RuntimePatchDeniedError(
+                        None, SET_READ_FROM_THE_ENVIRONMENT_REFUSAL
+                    )
+
+    def _drop_what_an_op_writes_over(self, op: Dict[str, Any]) -> None:
+        """Drop the rewrite of each set member whose container ``op`` writes at
+        or above: an add, a replace or a remove at the container or at a place
+        above it, or a move's or a copy's target there. The container then
+        holds the client's text, and a rewrite kept would write its reference
+        over a client's entry that equals the value, for a test op and in the
+        session copy. A test op writes nothing."""
+        if self.rewrites is None or not self._members:
             return
         if op.get("op") not in DOCUMENT_CHANGING_OPS:
             return
-        pointers = [op.get("path", "")]
-        if op.get("op") == "move":
-            pointers.append(op.get("from", ""))
-        for pointer in pointers:
-            if not isinstance(pointer, str):
-                continue
-            segments = _path_segments(pointer)
-            for at in self._typed:
-                if list(at[: len(segments)]) == segments:
-                    raise RuntimePatchDeniedError(
-                        op, TYPED_VALUE_READ_FROM_THE_ENVIRONMENT_REFUSAL
-                    )
+        pointer = op.get("path", "")
+        if not isinstance(pointer, str):
+            return
+        segments = _path_segments(pointer)
+        written = {
+            ident
+            for ident, at in zip(self._ids, self._where)
+            if ident in self._members
+            and at
+            and [str(part) for part in at[: len(segments)]] == segments
+        }
+        if not written:
+            return
+        kept = [
+            (rewrite, at, ident)
+            for rewrite, at, ident in zip(self.rewrites, self._where, self._ids)
+            if ident not in written
+        ]
+        self.rewrites = [rewrite for rewrite, _, _ in kept]
+        self._where = [at for _, at, _ in kept]
+        self._ids = [ident for _, _, ident in kept]
 
     def track(self, op: Dict[str, Any]) -> None:
         """Apply ``op``, which applied to the configuration, to the copy with
@@ -1890,6 +2044,7 @@ class _ReferencesThroughPatch:
         return tuple(followed)
 
     def follow(self, op: Dict[str, Any], document: Any) -> None:
+        self._drop_what_an_op_writes_over(op)
         if self.rewrites is None or op.get("op") not in INSERT_OR_DELETE_OPS:
             return
         segments = _path_segments(op.get("path", ""))
@@ -1965,6 +2120,17 @@ LIST_SHIFT_ABOVE_A_KEY_READ_FROM_THE_ENVIRONMENT_REFUSAL = (
     "the path adds or removes an entry of a list that holds a mapping with a "
     "key the profile read from the environment, which would move that mapping "
     "to another index; such a list cannot be patched at an index"
+)
+
+#: The refusal of an op that moves or copies from a set holding a value the
+#: profile read from the environment, or from what holds one, and of an op that
+#: adds or removes an entry of a list above one. A member carries its mark to
+#: the place it is moved to, where no reference names it, and a shifted list
+#: leaves the set at an index nothing follows. It names no value or location.
+SET_READ_FROM_THE_ENVIRONMENT_REFUSAL = (
+    "the path moves or copies a set that holds a value the profile read from "
+    "the environment, or what holds it, or adds or removes an entry of a list "
+    "above one; such a set cannot be followed through a patch there"
 )
 
 #: The refusal of every op on a profile that reads a key from the environment

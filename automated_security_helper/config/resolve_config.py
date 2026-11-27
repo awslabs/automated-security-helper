@@ -137,6 +137,7 @@ from automated_security_helper.utils.path_stat import (
 )
 from automated_security_helper.config.environment_record import (
     ENVIRONMENT_VALUE_SHOWN,
+    UNKNOWN_INDEX,
     WrittenKeyMapping,
     mappings_with_written_reference_keys,
 )
@@ -1217,6 +1218,17 @@ def load_config_file_for_run(
     The lines built from the config once it has loaded, a loaded plugin's option
     refusal and get_plugin_config's debug line, are redacted with them.
 
+    Every set member a file read from the environment is described at the end
+    (``_take_destination_references`` with ``sets``): the loader's own pairing
+    walks mappings and lists, so the member has no reference of its own
+    otherwise. Each one gets a reference, a displayed reference and a rewrite at
+    the unknown index, and its value joins ``_environment_values``, so a
+    registered profile's session copy, the base of a client's patch and a
+    scan's redaction values hold the reference and not the value. A later
+    confinement that puts the trusted base's value where a set sat drops those
+    entries at the places it writes (``_take_destination_references``,
+    ``_take_confined_references``).
+
     Not load_config_file itself, so not AshConfig.from_file: a private attribute
     is part of a model's equality, and a config from from_file equals the same
     config built in memory. For resolve_config's file, and get_default_config's.
@@ -1310,6 +1322,14 @@ def load_config_file_for_run(
     drop_plugin_module_references_past_the_list(
         config, replaced=config._plugin_modules_replaced
     )
+    # The loader's own record (``document.environment_references``) pairs
+    # mappings and lists, so a set member any file of the chain read from the
+    # environment has no reference, no displayed reference and no rewrite yet.
+    # Described here, once the other records are in place, for every caller of
+    # this function: the profiles a session copy is written from, the base a
+    # client's patch applies to, and the values a failure's text is redacted
+    # with all read this configuration and nothing else.
+    _take_destination_references(config, {}, sets=True)
     return document, config
 
 
@@ -2572,8 +2592,9 @@ def resolve_config(
             # The chain is wholly the operator's own, so the confinement
             # steps below are skipped and the trusted-base build never walks
             # this chain. The junk pass above already ran over both chains.
-            # A set member the load read from the environment still has no
-            # reference or rewrite of its own, so it is described here.
+            # The load described each set member it read from the environment
+            # (load_config_file_for_run), so this adds nothing for those; it
+            # covers a configuration that was loaded another way.
             _take_destination_references(config, {}, sets=True)
             record_provenance(config, in_tree=[])
             return config
@@ -2641,9 +2662,10 @@ def resolve_config(
             if warn_pending:
                 warn_fail_closed()
             # The ASH_CONFIG chain is wholly the operator's own: the junk
-            # pass above ran over it, and nothing below confines it. A set
-            # member the load read from the environment still has no
-            # reference or rewrite of its own, so it is described here.
+            # pass above ran over it, and nothing below confines it. The load
+            # described each set member it read from the environment
+            # (load_config_file_for_run), so this adds nothing for those; it
+            # covers a configuration that was loaded another way.
             _take_destination_references(config, {}, sets=True)
             record_provenance(config, in_tree=[])
             return config
@@ -3245,13 +3267,25 @@ def _take_confined_references(
     confinement copies are described by their own marks, in the step that ends
     this one.
 
+    At the sandbox settings and the settled options every reference and
+    rewrite of ``config``'s own is dropped whatever its origin, and the
+    comparison reads a list index and the unknown index alike, so an entry at
+    the unknown index (a set member the load described, made from a mark and
+    naming no file) goes with the rest. The trusted base's own entries there are
+    taken, a set member's among them: the trusted base is loaded through
+    ``load_config_file_for_run`` too, which describes its set members.
+
     The destination options of the built-in off-host reporters
     (``reporter_trust.REPORTER_DESTINATION_OPTIONS``: ``aws_region``,
     ``findings_scope``, ``bucket_name`` and the rest), and every set member of
     the configuration, are handled by ``_take_destination_references``, which
     this function calls last with the built-in confinement's own set of
-    loaded reporters (``reporter_trust.built_in_loaded_reporters``). Its
-    ``sets`` walk is the one a load with no file inside the tree runs as well.
+    loaded reporters (``reporter_trust.built_in_loaded_reporters``). It drops,
+    at those options, every entry at the unknown index the load described and
+    describes what each option holds now. Its ``sets`` walk is the one
+    ``load_config_file_for_run`` runs at the end of every load, so on this path
+    the walk runs twice; the second run adds nothing for a member the first
+    described.
     """
     from automated_security_helper.config import reporter_trust
     from automated_security_helper.config.config_validator import dumped_path
@@ -3471,6 +3505,16 @@ def _take_destination_references(
       ``reporter_trust._spellings`` matches an option. The reference is
       dropped from both lists (``_environment_references`` and
       ``_displayed_environment_references``).
+    - At those same places (a destination place, and any place under a whole
+      section), every reference whose path ends in the unknown index is
+      dropped too, whatever file read it and whether or not a file of
+      *repository_files* did. Such an entry is made from a mark (a set member
+      has no position) and names no file. A set the load described there
+      (``load_config_file_for_run``) was replaced with the trusted base's, and
+      its entry left in place would apply to an entry of the trusted base's set
+      that only equals it: the record would answer whether an operator's
+      literal equals a value a file of the repository read. The mark walk below
+      then describes what the place holds now.
     - Each marked string, mapping key and set member under such an option or
       section that no displayed reference describes at its place gets a
       reference made from its own mark
@@ -3484,19 +3528,24 @@ def _take_destination_references(
       and frozenset members only (``sets_only``), whichever option holds them:
       the loader's own walk (``environment_record.environment_references``)
       pairs mappings and lists, so a set member any file read has no reference.
+      ``load_config_file_for_run`` makes this call for every configuration it
+      loads, so a member has its entries before any confinement runs.
 
     The record (``_written_references``) follows: a rewrite of ``config``'s own
     at such a place is dropped when a reference dropped above matches it (same
-    place, written and resolved) and no kept reference does, and each marked
-    value found above with no rewrite at its place gets one made from its
-    mark, a set member's at the unknown index (``record_of_config`` applies it
-    to the members that are the value). The mark-made rewrites come before the
-    kept ones, so a whole match is applied before a kept rewrite that matches
-    only part of a string. The value of every mark-made reference joins the
-    configuration's values to redact (``_environment_values``), once each.
+    place, written and resolved) and no kept reference does, a rewrite at the
+    unknown index at such a place is dropped whatever its origin, and each
+    marked value found above with no rewrite at its place gets one made from
+    its mark, a set member's at the unknown index (``record_of_config`` applies
+    it to the members that are the value). The mark-made rewrites come before
+    the kept ones, so a whole match is applied before a kept rewrite that
+    matches only part of a string. The value of every mark-made reference joins
+    the configuration's values to redact (``_environment_values``), once each.
 
-    Running it again for the same sections changes nothing: a value already
-    described has its reference at its place.
+    Running it again for the same sections changes nothing in what the lists
+    hold: a value already described has its reference, displayed reference and
+    rewrite at its place, so the mark walk adds none, and a set member at a
+    destination place is dropped and described again from the same mark.
     """
     from automated_security_helper.config import reporter_trust
     from automated_security_helper.config.config_validator import _rewrite_for
@@ -3569,9 +3618,25 @@ def _take_destination_references(
         read_as = plugin_key_lookup_names(where[1])
         return any(read_as & plugin_key_lookup_names(key) for key in whole_keys)
 
+    def mark_made_at_a_destination(path: Tuple[Any, ...]) -> bool:
+        # A path that ends in the unknown index, at a place the confinement
+        # writes. Only a mark makes such an entry (a set member has no
+        # position), and it names no file: whichever load made it, the member it
+        # described is not there once the place holds the trusted base's value.
+        return (
+            bool(path)
+            and path[-1] is UNKNOWN_INDEX
+            and (bool(destination_keys(path)) or in_whole_section(path))
+        )
+
     def destination_dropped(reference: Any) -> bool:
-        # One of config's own that a file of the repository wrote at a place
-        # the reporter confinement writes: it names nothing config holds.
+        # One of config's own that describes a value the reporter confinement
+        # replaced: one made from a mark at such a place, whatever file read it,
+        # and one a file of the repository wrote at such a place, whatever it
+        # resolved to. Left in, a rewrite at the unknown index there would apply
+        # to an entry of the trusted base's value that only equals it.
+        if mark_made_at_a_destination(getattr(reference, "path", ())):
+            return True
         if not repository or not in_repository(reference):
             return False
         where = written_place(reference)
@@ -3616,8 +3681,10 @@ def _take_destination_references(
             )
     if sets:
         # A set member of any other option: the loader's own record has no
-        # reference for one, so the whole dump is walked for them once, after
-        # the values above are described.
+        # reference for one, so the whole dump is walked for them, after the
+        # values above are described. The load makes this walk too
+        # (load_config_file_for_run), so a member it described is among
+        # ``shown`` and is not described a second time.
         marked_values += references_to_marked_values(
             config_dump, (), (*shown, *marked_values), sets_only=True
         )
@@ -3670,7 +3737,15 @@ def _take_destination_references(
     own = list(config._written_references or [])
     if not own and not marked_values:
         return
-    written = [rewrite for rewrite in own if not left_out_where_replaced(rewrite)]
+    # A rewrite at the unknown index at such a place goes whatever its origin,
+    # as its reference does: the place is described again from what it holds
+    # now, below.
+    written = [
+        rewrite
+        for rewrite in own
+        if not mark_made_at_a_destination(rewrite.path)
+        and not left_out_where_replaced(rewrite)
+    ]
     # Each marked value no rewrite is at the place of gets one made from its
     # mark. A set member's is at the unknown index: the record applies it to
     # the members that are the value (config_validator.record_of_config).

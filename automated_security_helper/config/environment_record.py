@@ -1014,7 +1014,8 @@ def record_environment_references(
     A file's own record holds no reference for a set member (the loader pairs
     mappings and lists only); ``references_to_marked_values`` makes one for each
     member the loader marked, under the built-in reporters' destination options
-    and, with ``sets_only``, in the whole dump of a configuration.
+    and, with ``sets_only``, in the whole dump of a configuration, which
+    ``resolve_config.load_config_file_for_run`` walks at the end of every load.
 
     With ``mark`` (a view; not ``whole_only``), a string, a mapping key or a set member that still
     carries the loader's mark after the walk (``EnvResolvedScalar``: no
@@ -1059,6 +1060,12 @@ def references_to_marked_values(
     whole dump of a configuration (``at`` empty). The loader's own record pairs
     mappings and lists only (``environment_references``), so a set member any
     file read has no reference of its own, whichever option holds it.
+    ``resolve_config.load_config_file_for_run`` makes this walk, through
+    ``resolve_config._take_destination_references``, at the end of every load,
+    and the confinement steps make it again after they have run: a member the
+    first walk described is one of ``described`` the second time, at the same
+    place (the unknown index ends its path, and a set member has no other), so
+    the second walk makes no reference for it.
 
     Each reference is shaped as ``environment_references`` shapes the one the
     loader makes for the same text at that place: ``written`` is the text the

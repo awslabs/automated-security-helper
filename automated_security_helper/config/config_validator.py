@@ -3248,10 +3248,14 @@ def record_of_config(
     walked too, with or without rewrites. That reads a python-mode dump only: a
     JSON-mode dump (a results file, ``ash config get``) holds every string as a
     plain ``str`` and a set as a list, so there only a rewrite describes a value.
-    That is why the load gives every value it copies from another place, and
-    every set member it read, a rewrite
-    (``resolve_config._take_destination_references``).
-    A value neither a rewrite nor a mark describes is a literal the file wrote.
+    That is why every set member a load read gets a rewrite at the unknown
+    index when the load ends (``resolve_config.load_config_file_for_run``, by
+    ``resolve_config._take_destination_references`` with ``sets``), and why
+    the confinement gives every value it copies from another place one
+    (``resolve_config._take_confined_references``,
+    ``reporter_trust.confine_declared_reporter_destinations``, by the same
+    function). A value neither a rewrite nor a mark describes is a literal the
+    file wrote.
     """
     rewrites = list(getattr(config, "_written_references", None) or [])
     if not isinstance(dumped, dict):
