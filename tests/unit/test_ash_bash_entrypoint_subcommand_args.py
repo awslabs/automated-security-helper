@@ -465,22 +465,30 @@ def test_stdin_is_kept_open_for_the_subcommands_that_read_it():
     reads_stdin = set(
         re.search(r"ASH_READS_STDIN=\"([^\"]*)\"", script).group(1).split()
     )
+    groups = set(re.search(r"ASH_OPTION_GROUPS=\"([^\"]*)\"", script).group(1).split())
     # The flag is read in both spellings, by the CLI's own name for it.
     assert f"{CLI_JSON_INPUT_FLAG})" in script
     assert f"{CLI_JSON_INPUT_FLAG}=-)" in script
 
     root = typer.main.get_command(app)
-    owned = {
-        name: _callback_modules(command) for name, command in root.commands.items()
-    }
-    assert all(owned.values()), "every subcommand's callback resolves to a source file"
+    # A command under a group of ASH_OPTION_GROUPS is listed as group:command, so
+    # `results report` does not keep stdin open because `results inspect` does.
+    owned = {}
+    for name, command in root.commands.items():
+        if name in groups:
+            for leaf, sub in command.commands.items():
+                owned[f"{name}:{leaf}"] = (sub, _callback_modules(sub))
+        else:
+            owned[name] = (command, _callback_modules(command))
+    assert all(modules for _, modules in owned.values()), (
+        "every command's callback resolves to a source file"
+    )
     derived = {
-        name
-        for name, command in root.commands.items()
+        item
+        for item, (command, modules) in owned.items()
         if _defaults_its_transport_to_stdio(command)
         or any(
-            STDIN_READER.search(path.read_text(encoding="utf-8"))
-            for path in owned[name]
+            STDIN_READER.search(path.read_text(encoding="utf-8")) for path in modules
         )
     }
     assert reads_stdin == derived
@@ -492,5 +500,5 @@ def test_stdin_is_kept_open_for_the_subcommands_that_read_it():
         if STDIN_READER.search(path.read_text(encoding="utf-8"))
     }
     assert reading, "the CLI's stdin readers are found at all"
-    listed = set().union(*(owned[name] for name in reads_stdin))
+    listed = set().union(*(owned[item][1] for item in reads_stdin))
     assert reading - listed == {cli_dir / "json_input.py"}, sorted(reading - listed)

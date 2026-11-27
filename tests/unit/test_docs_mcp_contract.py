@@ -7,8 +7,9 @@ WHY THIS EXISTS
 ---------------
 The MCP pages tell a client which ``error_type`` a refusal carries and show what a
 tool returns, and the only statement of either was the prose. Renaming the
-``output_dir_not_permitted`` literal in ``run_ash_scan``, or a key of its response,
-passed every check and every generator's ``--check``. Now
+``output_dir_not_permitted`` value ``run_ash_scan`` returns (a ``McpErrorType``
+member), or a key of its response, passed every check and every generator's
+``--check``. Now
 ``scripts/_mcp_contract.py`` reads the tools' return statements,
 ``scripts/generate_mcp_tool_reference.py`` lists each tool's error types from it,
 and ``check_mcp_contract`` in ``scripts/docs_checks.py`` compares the pages'
@@ -141,11 +142,13 @@ def _check(package: Path, files=None, root: Path = REPO_ROOT):
 # Planted defects in the real server, against the real pages
 # ---------------------------------------------------------------------------
 
-#: run_ash_scan's refusal of a symlinked .ash/ash_output, under a new error_type.
+#: run_ash_scan's refusal of a symlinked .ash/ash_output, under a new error_type. The
+#: tool returns McpErrorType.OUTPUT_DIR_NOT_PERMITTED.value, so the wire spelling is
+#: written once, in the enum, and the contract reader follows the member into it.
 RENAMED_REFUSAL_ERROR_TYPE = {
-    "cli/mcp_server.py": (
-        '"error_type": "output_dir_not_permitted",',
-        '"error_type": "output_dir_refused",',
+    "cli/mcp/error_types.py": (
+        'OUTPUT_DIR_NOT_PERMITTED = "output_dir_not_permitted"',
+        'OUTPUT_DIR_NOT_PERMITTED = "output_dir_refused"',
     )
 }
 #: A key of run_ash_scan's success response, under a new name.
@@ -444,6 +447,54 @@ def test_mcp_contract_check_can_fail(tmp_path: Path):
         for m in messages
     ), messages
     assert any("the example has no keys" in m for m in messages), messages
+
+
+@pytest.mark.unit
+def test_a_library_class_a_tool_only_catches_is_not_an_error_type(tmp_path: Path):
+    """A tool that catches ``zipfile.BadZipFile`` and answers without an
+    ``error_type`` returns no ``BadZipFile``; naming the class in an ``except``
+    clause did not make it one a page may claim. The class name a generic handler
+    returns for a builtin (``OSError``) or an exception the package defines
+    (``PackageError``) is still accepted."""
+    package = _plant_server(
+        tmp_path / "code",
+        """
+        import zipfile
+
+        mcp = object()
+
+
+        class PackageError(RuntimeError):
+            pass
+
+
+        @mcp.tool()
+        def finalize(path):
+            try:
+                return {"success": True}
+            except zipfile.BadZipFile as e:
+                return {"success": False, "error": str(e)}
+            except Exception as e:
+                return {"success": False, "error_type": type(e).__name__}
+        """,
+    )
+    page = _page(
+        tmp_path / "docs",
+        """
+        A bad archive returns `error_type` `BadZipFile`.
+
+        A failure on disk returns `error_type` `OSError`, and a refusal of the
+        package returns `error_type` `PackageError`.
+        """,
+    )
+    messages = _findings_naming(
+        _check(package, [page], tmp_path / "docs"), "BadZipFile"
+    )
+    assert len(messages) == 1, messages
+    assert ":1: [mcp-error-type] `BadZipFile` is named as an error" in messages[0]
+    rest = _check(package, [page], tmp_path / "docs")
+    assert _findings_naming(rest, "OSError") == []
+    assert _findings_naming(rest, "PackageError") == []
 
 
 @pytest.mark.unit

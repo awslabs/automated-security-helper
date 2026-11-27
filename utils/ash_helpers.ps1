@@ -742,9 +742,9 @@ function Invoke-ASH {
             # error view: Cc is C0, DEL and C1, so CSI (U+009B) as well as ESC.
             $shownMode = Format-AshShownValue $sandboxMode
             if (@($sandboxModes | Where-Object { [string]::Equals($sandboxMode, $_, [System.StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) {
-                throw "--sandbox $shownMode cannot be used with ASH in a container: the scanners run unsandboxed inside the container. Run 'ash scan --mode local --sandbox $shownMode' to sandbox each scanner, or drop --sandbox."
+                throw "--sandbox $shownMode cannot be used with ASH in a container: the scanners run unsandboxed inside the container. Run 'ash scan fs --mode local --sandbox $shownMode' to sandbox each scanner, or drop --sandbox."
             }
-            throw "--sandbox '$shownMode' cannot be used with ASH in a container: it is not a sandbox mode, and off is the only one a container takes, since the scanners run unsandboxed inside it. To sandbox each scanner, run 'ash scan --mode local --sandbox <mode>' with one of $($sandboxModes -join ', ')."
+            throw "--sandbox '$shownMode' cannot be used with ASH in a container: it is not a sandbox mode, and off is the only one a container takes, since the scanners run unsandboxed inside it. To sandbox each scanner, run 'ash scan fs --mode local --sandbox <mode>' with one of $($sandboxModes -join ', ')."
         }
 
         # A workspace scan is refused over the same words, with exit 3, before anything
@@ -1737,7 +1737,7 @@ function Invoke-ASH {
                 $envConfigFlat = $envConfigText.Replace("`r", ' ').Replace("`n", ' ')
                 if ([regex]::IsMatch($envConfigFlat, '(^|[\s{,])["'']?extends["'']?\s*[:=]') -or [regex]::IsMatch($envConfigText, '"[^"\r\n]*\\[^"\r\n]*"[ \t]*:')) {
                     $global:LASTEXITCODE = $refusalExitCode
-                    throw "The ASH_CONFIG file '$(Format-AshShownValue $envConfigGiven)' is outside the source directory and has an extends entry. Invoke-ASH mounts such a config on its own, without the files it extends. Run ash --mode container, which mounts the chain, or put the config inside the source directory."
+                    throw "The ASH_CONFIG file '$(Format-AshShownValue $envConfigGiven)' is outside the source directory and has an extends entry. Invoke-ASH mounts such a config on its own, without the files it extends. Run ash scan fs --mode container, which mounts the chain, or put the config inside the source directory."
                 }
                 $envConfigInner = '/ash-env-config/' + [System.IO.Path]::GetFileName($envConfigReal)
                 $runArgs.Add('--mount')

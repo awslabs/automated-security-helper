@@ -141,67 +141,67 @@ Run `ash scan fs . --mode container` or `ash scan fs . --mode <mode>`, and `ash 
 VALUE_DEFECTS = [
     (
         "choice",
-        f"{FENCE}bash\nash --mode containr\n{FENCE}\n",
+        f"{FENCE}bash\nash scan fs . --mode containr\n{FENCE}\n",
         "--mode takes precommit, container, local, or nix, not 'containr'",
         2,
     ),
     (
         "choice after =",
-        f"{FENCE}bash\nash scan --log-level=LOUD\n{FENCE}\n",
+        f"{FENCE}bash\nash scan fs . --log-level=LOUD\n{FENCE}\n",
         "--log-level takes",
         2,
     ),
     (
         "choice hint",
-        f"{FENCE}bash\nash --mode containr\n{FENCE}\n",
+        f"{FENCE}bash\nash scan fs . --mode containr\n{FENCE}\n",
         "did you mean 'container'?",
         2,
     ),
     (
         "case-sensitive choice",
-        f"{FENCE}bash\nash --log-level debug\n{FENCE}\n",
+        f"{FENCE}bash\nash scan fs . --log-level debug\n{FENCE}\n",
         "not 'debug'",
         2,
     ),
     (
         "repeated choice",
-        f"{FENCE}bash\nash --phases scan --phases reprot\n{FENCE}\n",
+        f"{FENCE}bash\nash scan fs . --phases scan --phases reprot\n{FENCE}\n",
         "not 'reprot'",
         2,
     ),
     (
         "output format",
-        f"{FENCE}bash\nash --output-formats sarf\n{FENCE}\n",
+        f"{FENCE}bash\nash scan fs . --output-formats sarf\n{FENCE}\n",
         "'sarf' is not an output format",
         2,
     ),
     (
         "output format alias in a list",
-        f"{FENCE}bash\nash scan -f sarif,htm\n{FENCE}\n",
+        f"{FENCE}bash\nash scan fs . -f sarif,htm\n{FENCE}\n",
         "'htm' is not an output format",
         2,
     ),
     (
         "merge output format",
-        f"{FENCE}bash\nash merge --results a --output-formats sarf\n{FENCE}\n",
+        f"{FENCE}bash\nash results merge --results a --output-formats sarf\n{FENCE}\n",
         "'sarf' is not an output format",
         2,
     ),
     (
         "scanner",
-        f"{FENCE}bash\nash --scanners not-a-scanner\n{FENCE}\n",
+        f"{FENCE}bash\nash scan fs . --only-scanners not-a-scanner\n{FENCE}\n",
         "ASH has no scanner named 'not-a-scanner'",
         2,
     ),
     (
         "scanner in a list",
-        f"{FENCE}bash\nash scan --exclude-scanners {SCANNER},not-a-scanner\n{FENCE}\n",
+        f"{FENCE}bash\nash scan fs . --exclude-scanners {SCANNER},not-a-scanner\n{FENCE}\n",
         "ASH has no scanner named 'not-a-scanner'",
         2,
     ),
     (
         "reporter",
-        f"{FENCE}bash\nash report --format not-a-reporter\n{FENCE}\n",
+        f"{FENCE}bash\nash results report --format not-a-reporter\n{FENCE}\n",
         "ASH has no reporter named 'not-a-reporter'",
         2,
     ),
@@ -219,7 +219,7 @@ VALUE_DEFECTS = [
     ),
     (
         "a misspelled built-in next to a plugin module",
-        f"{FENCE}bash\nash scan --ash-plugin-modules acme_plugins --scanners {SCANNER}x\n{FENCE}\n",
+        f"{FENCE}bash\nash scan fs . --ash-plugin-modules acme_plugins --only-scanners {SCANNER}x\n{FENCE}\n",
         f"ASH has no scanner named '{SCANNER}x'",
         2,
     ),
@@ -231,13 +231,13 @@ VALUE_DEFECTS = [
     ),
     (
         "illustrative block",
-        f'<!-- doctest: illustrative reason="needs Docker" -->\n{FENCE}bash\nash --mode containr\n{FENCE}\n',
+        f'<!-- doctest: illustrative reason="needs Docker" -->\n{FENCE}bash\nash scan fs . --mode containr\n{FENCE}\n',
         "not 'containr'",
         3,
     ),
     (
         "run block that expects a different failure",
-        f"<!-- doctest: run expect-exit=1 -->\n{FENCE}bash\nash --mode containr\n{FENCE}\n",
+        f"<!-- doctest: run expect-exit=1 -->\n{FENCE}bash\nash scan fs . --mode containr\n{FENCE}\n",
         "not 'containr'",
         3,
     ),
@@ -308,7 +308,14 @@ def test_the_registries_match_the_inventories_the_reference_checks_read():
 def test_output_formats_are_the_export_formats():
     from automated_security_helper.core.enums import ExportFormat
 
-    for command in (("ash",), ("ash", "scan"), ("ash", "merge")):
+    for command in (
+        ("ash",),
+        ("ash", "scan"),
+        ("ash", "scan", "fs"),
+        ("ash", "scan", "workspace"),
+        ("ash", "merge"),
+        ("ash", "results", "merge"),
+    ):
         values = dc.option_value_set(command, "--output-formats")
         assert values is not None, command
         assert values.names == frozenset(f.value for f in ExportFormat)

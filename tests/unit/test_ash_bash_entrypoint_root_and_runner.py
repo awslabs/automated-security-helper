@@ -573,6 +573,7 @@ def test_an_outside_config_with_an_extends_entry_in_another_spelling_is_refused(
 
     assert result.returncode == 3, result.stdout + result.stderr
     assert "has an extends entry" in result.stderr, result.stderr
+    assert "Run ash scan fs --mode container, which mounts" in result.stderr
     assert calls == []
 
 

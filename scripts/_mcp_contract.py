@@ -3247,44 +3247,26 @@ def enum_values(package_dir: Path, class_name: str) -> set[str]:
 
 
 def exception_class_names(package_dir: Path) -> set[str]:
-    """The builtin exceptions, every exception class the package defines, and
-    every other class an ``except`` clause in the package names.
+    """The builtin exceptions and every exception class the package defines.
 
     A class is an exception when one of its bases is, by name: a builtin exception
-    or another exception class of the package. A class from another library
-    (``zipfile.BadZipFile``) is one the package names in an ``except`` clause: the
-    tool that lets it out returns its name as ``type(e).__name__``. This is a
-    superset of what any one tool lets out, as the rest of the class-name rule is.
-    An imported alias is not the class's name, and a name that is not CapWords
-    (a constant holding a tuple of classes) is not a class's.
+    or another exception class of the package. A class of another library is not
+    one, although a tool may catch it: ``except zipfile.BadZipFile`` answers
+    without an ``error_type``, and naming every class an ``except`` clause holds
+    admitted ``BadZipFile`` as one a tool returns, which none does. A library class
+    that a generic handler lets out as ``type(e).__name__`` is a superset of what
+    any one tool returns and is not listed here, so a page that names one is
+    reported rather than passed.
     """
     bases: dict[str, set[str]] = {}
-    caught: set[str] = set()
     for module in Source(package_dir).all_modules():
-        aliases = {
-            alias.asname
-            for node in ast.walk(module.tree)
-            if isinstance(node, (ast.Import, ast.ImportFrom))
-            for alias in node.names
-            if alias.asname
-        }
         for node in ast.walk(module.tree):
             if isinstance(node, ast.ClassDef):
                 bases.setdefault(node.name, set()).update(
                     b.attr if isinstance(b, ast.Attribute) else getattr(b, "id", "")
                     for b in node.bases
                 )
-            elif isinstance(node, ast.ExceptHandler) and node.type is not None:
-                named = (
-                    node.type.elts if isinstance(node.type, ast.Tuple) else [node.type]
-                )
-                for expr in named:
-                    if isinstance(expr, ast.Attribute):
-                        caught.add(expr.attr)
-                    elif isinstance(expr, ast.Name) and expr.id not in aliases:
-                        caught.add(expr.id)
     found = set(BUILTIN_EXCEPTIONS)
-    found |= {n for n in caught if n[:1].isupper() and not n.isupper()}
     changed = True
     while changed:
         changed = False

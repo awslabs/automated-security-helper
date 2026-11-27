@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -28,7 +29,13 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FENCE = "```"
 #: The options whose values are names ASH keeps a registry of, as the table lists them.
-REGISTRY_OPTION_NAMES = ("--scanners", "--exclude-scanners", "--output-formats")
+REGISTRY_OPTION_NAMES = (
+    "--scanners",
+    "--exclude-scanners",
+    "--only-scanners",
+    "--add-scanners",
+    "--output-formats",
+)
 #: What each subject takes where its command line names the thing to scan.
 TARGETS = {"fs": ".", "workspace": "w.code-workspace"}
 
@@ -65,9 +72,14 @@ def _first_names(command) -> set[str]:
 
 
 def _findings(tmp_path: Path, line: str) -> list[str]:
-    """What the CLI check says about one ``ash`` line in a bash block of a page."""
-    root = tmp_path / "repo"
-    (root / "docs").mkdir(parents=True)
+    """What the CLI check says about one ``ash`` line in a bash block of a page.
+
+    Each call builds a repository of its own under ``tmp_path``, so a test that asks
+    about several lines reads only the page for the line it is asking about, with no
+    page left over from an earlier call.
+    """
+    root = Path(tempfile.mkdtemp(prefix="repo-", dir=tmp_path))
+    (root / "docs").mkdir()
     (root / dc.PRE_COMMIT_HOOKS).write_text(
         (REPO_ROOT / dc.PRE_COMMIT_HOOKS).read_text(encoding="utf-8"),
         encoding="utf-8",
@@ -123,6 +135,16 @@ def test_a_subject_holds_its_values_to_the_registry_the_group_does(option):
             "'sarf' is not an output format",
             id="an-output-format",
         ),
+        pytest.param(
+            "--only-scanners not-a-scanner",
+            "ASH has no scanner named 'not-a-scanner'",
+            id="an-only-scanner",
+        ),
+        pytest.param(
+            "--add-scanners bandit,not-a-scanner",
+            "ASH has no scanner named 'not-a-scanner'",
+            id="an-added-scanner-in-a-list",
+        ),
     ],
 )
 def test_a_name_the_registry_does_not_have_is_reported_under_every_subject(
@@ -140,5 +162,50 @@ def test_names_the_registry_has_pass_under_every_subject(tmp_path, subject):
         f"ash scan {subject} {TARGETS[subject]} --scanners bandit "
         "--exclude-scanners bandit --output-formats sarif,junitxml",
     )
-
     assert findings == []
+
+    findings = _findings(
+        tmp_path,
+        f"ash scan {subject} {TARGETS[subject]} --only-scanners bandit,detect-secrets",
+    )
+    assert findings == []
+
+    findings = _findings(
+        tmp_path, f"ash scan {subject} {TARGETS[subject]} --add-scanners bandit"
+    )
+    assert findings == []
+
+
+@pytest.mark.parametrize(
+    ("line", "reported"),
+    [
+        pytest.param(
+            "ash results report --format not-a-reporter",
+            "ASH has no reporter named 'not-a-reporter'",
+            id="results-report-format",
+        ),
+        pytest.param(
+            "ash results merge --results a --output-formats sarf",
+            "'sarf' is not an output format",
+            id="results-merge-output-formats",
+        ),
+    ],
+)
+def test_a_name_the_registry_does_not_have_is_reported_under_results(
+    tmp_path, line, reported
+):
+    """``results report`` and ``results merge`` run the functions ``report`` and
+    ``merge`` run, so their values are held to the same registries."""
+    findings = _findings(tmp_path, line)
+
+    assert any(reported in finding for finding in findings), findings
+
+
+def test_names_the_registry_has_pass_under_results(tmp_path):
+    assert _findings(tmp_path, "ash results report --format sarif") == []
+    assert (
+        _findings(
+            tmp_path, "ash results merge --results a --output-formats sarif,junitxml"
+        )
+        == []
+    )

@@ -2112,7 +2112,12 @@ def test_hidden_options_are_marked() -> None:
 
 @pytest.mark.integration
 def test_a_hidden_option_in_ash_changes_the_cli_page(tmp_path: Path) -> None:
-    """In ASH itself: hidden=True on `ash scan --progress` fails --check."""
+    """In ASH itself: hidden=True on `ash scan fs --progress` fails --check.
+
+    `ash scan` is a group with no options of its own, so the option is documented
+    under each subject, and the row that carries the planted change is the one of
+    `ash scan fs`, the subject a scan with none named runs.
+    """
     import importlib.util
     import shutil
 
@@ -2158,7 +2163,7 @@ def test_a_hidden_option_in_ash_changes_the_cli_page(tmp_path: Path) -> None:
     assert checked.returncode == 1, checked.stderr
     added = [ln for ln in checked.stderr.splitlines() if ln.startswith("+")]
     assert any(
-        'id="scan--progress"' in ln and "This option is hidden from `--help`" in ln
+        'id="scan-fs--progress"' in ln and "This option is hidden from `--help`" in ln
         for ln in added
     ), checked.stderr
 

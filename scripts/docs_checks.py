@@ -2260,8 +2260,18 @@ REGISTRY_OPTIONS = {
     (("ash", "scan", "workspace"), "--scanners"): "scanner",
     (("ash", "scan", "workspace"), "--exclude-scanners"): "scanner",
     (("ash", "scan", "workspace"), "--output-formats"): "output format",
+    (("ash",), "--only-scanners"): "scanner",
+    (("ash",), "--add-scanners"): "scanner",
+    (("ash", "scan"), "--only-scanners"): "scanner",
+    (("ash", "scan"), "--add-scanners"): "scanner",
+    (("ash", "scan", "fs"), "--only-scanners"): "scanner",
+    (("ash", "scan", "fs"), "--add-scanners"): "scanner",
+    (("ash", "scan", "workspace"), "--only-scanners"): "scanner",
+    (("ash", "scan", "workspace"), "--add-scanners"): "scanner",
     (("ash", "merge"), "--output-formats"): "output format",
+    (("ash", "results", "merge"), "--output-formats"): "output format",
     (("ash", "report"), "--format"): "reporter",
+    (("ash", "results", "report"), "--format"): "reporter",
     (("ash", "dependencies", "install"), "--tool"): "tool",
 }
 PLUGIN_KINDS = ("converter", "scanner", "reporter")

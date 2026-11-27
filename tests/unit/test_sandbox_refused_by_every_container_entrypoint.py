@@ -54,6 +54,7 @@ from typing import Dict, List, NamedTuple, Optional, Tuple
 import pytest
 
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+from automated_security_helper.core.enums import SandboxMode
 from tests.unit.test_base_image_override_reaches_every_build_entrypoint import (
     _REQUIRES_BASH,
 )
@@ -321,7 +322,7 @@ class TestTheBashEntrypoint:
 
         assert proc.returncode == 5, proc.stdout + proc.stderr
         assert REFUSAL in proc.stderr, proc.stderr
-        assert "--mode local" in proc.stderr, proc.stderr
+        assert "ash scan fs --mode local --sandbox" in proc.stderr, proc.stderr
         assert calls == [], calls
         assert not (tmp_path / "out").exists()
 
@@ -496,17 +497,18 @@ class TestTheBashEntrypoint:
         resolved = resolve_config(source_dir=repository, config_overrides=overrides)
         without_the_flag = resolve_config(source_dir=repository, config_overrides=[])
 
-        assert str(resolved.sandbox.mode) == "off", overrides
-        assert str(without_the_flag.sandbox.mode) == "landlock"
+        # The member's value, the spelling the mode is written and dumped with:
+        # str() of a SandboxMode reads SandboxMode.off, so it is not compared.
+        assert SandboxMode(resolved.sandbox.mode).value == "off", overrides
+        assert SandboxMode(without_the_flag.sandbox.mode).value == "landlock"
 
     def test_a_double_dash_after_the_command_leaves_the_sandbox_off(self, tmp_path):
         """--sandbox off goes right after the command, ahead of the caller's words.
 
-        Appended after them, it came after `scan --`, where it was one of scan's
-        extra arguments and no option at all, so the configured mode stayed on.
-        ash scan takes no extra arguments, so with a word after the `--` the scan
-        refuses it as a usage error and nothing runs; the words still reach it as
-        typed.
+        Appended after them, it came after `scan --`, where it was a positional word
+        and no option at all, so the configured mode stayed on. With no subject
+        named, ash scan refuses a word after the `--` as one that is not a scan
+        subject, a usage error, and nothing runs; the words still reach it as typed.
         """
         bare = tmp_path / "bare"
         proc, _ = _run_ash(
@@ -547,7 +549,7 @@ class TestTheBashEntrypoint:
         assert inner[inner.index("--") :] == ["--", "extra"], inner
         code, output, overrides = _parse_inner(inner, extra)
         assert code == ASH_EXIT_USAGE_ERROR, (code, output, overrides)
-        assert "unexpected extra argument(s) (extra)" in " ".join(output.split())
+        assert "'extra' is not a scan subject" in " ".join(output.split())
         assert overrides is None, overrides
 
     def test_a_trailing_option_cannot_take_sandbox_off_as_its_value(self, tmp_path):
@@ -998,7 +1000,7 @@ class TestThePowerShellEntrypoint:
         assert result.how == "threw", (result.how, result.code)
         assert result.code == "5", result.code
         assert REFUSAL in result.message, result.message
-        assert "--mode local" in result.message, result.message
+        assert "ash scan fs --mode local --sandbox" in result.message, result.message
         assert result.calls == [], result.calls
         assert not (tmp_path / "out").exists()
 
@@ -1170,9 +1172,10 @@ class TestThePowerShellEntrypoint:
     def test_a_double_dash_after_the_command_leaves_the_sandbox_off(
         self, pwsh, tmp_path
     ):
-        # Quoted: a bare -- is PowerShell's own end-of-parameters marker. ash scan
-        # takes no extra arguments, so with a word after the `--` it refuses it as a
-        # usage error and nothing runs; the words still reach it as typed.
+        # Quoted: a bare -- is PowerShell's own end-of-parameters marker. With no
+        # subject named, ash scan refuses a word after the `--` as one that is not a
+        # scan subject, a usage error, and nothing runs; the words still reach it as
+        # typed.
         bare = tmp_path / "bare"
         bare.mkdir()
         result = _invoke_ash(
@@ -1207,7 +1210,7 @@ class TestThePowerShellEntrypoint:
         assert inner[inner.index("--") :] == ["--", "extra"], inner
         code, output, overrides = _parse_inner(inner, extra)
         assert code == ASH_EXIT_USAGE_ERROR, (code, output, overrides)
-        assert "unexpected extra argument(s) (extra)" in " ".join(output.split())
+        assert "'extra' is not a scan subject" in " ".join(output.split())
         assert overrides is None, overrides
 
     def test_a_trailing_option_cannot_take_sandbox_off_as_its_value(
@@ -1386,7 +1389,7 @@ class TestThePowerShellEntrypoint:
         assert result.code == "3", result.code
         message = " ".join(result.message.split())
         assert "is outside the source directory and has an extends entry" in message
-        assert "Run ash --mode container, which mounts the chain" in message
+        assert "Run ash scan fs --mode container, which mounts the chain" in message
         assert result.calls == [], result.calls
 
     def _refused_before_any_call(self, result, fragment):
@@ -2384,12 +2387,12 @@ class TestTheWrappersListsAreTheClis:
         """ASH_DASH_O_IS_THE_SUBCOMMANDS names the commands after which ./ash forwards
         -o as the command's own option instead of taking it as its runner: every
         command that defines a -o of its own (on itself or a command under it) that
-        is not the CLI's alias of --oci-runner. scan's -o is that alias, so -o after
-        scan stays the runner, as it does with no command and after a command that
-        defines no -o at all (the containerized CLI would refuse it there). Derived
-        from the click commands, as the other lists are, so a command that gains a
-        non-runner -o fails here until the list names it, instead of having its -o
-        eaten as the runner."""
+        is not the CLI's alias of --oci-runner. scan's -o is that alias on each of its
+        subjects, so -o after scan stays the runner, as it does with no command and
+        after a command that defines no -o at all (the containerized CLI would refuse
+        it there). Derived from the click commands, as the other lists are, so a
+        command that gains a non-runner -o fails here until the list names it,
+        instead of having its -o eaten as the runner."""
         root = self._root()
         dash_o_is_the_commands = {
             name
@@ -2403,7 +2406,12 @@ class TestTheWrappersListsAreTheClis:
         assert (
             self._bash_list("ASH_DASH_O_IS_THE_SUBCOMMANDS") == dash_o_is_the_commands
         )
-        # The runner's side of the rule: scan's own -o is the runtime alias.
+        # The runner's side of the rule: the -o of each scan subject is the runtime
+        # alias. Every subject takes the engine's options, so there is one alias for
+        # each subject the group names. The subjects are read from the group's own
+        # table, so a subject it gains is counted without an edit here.
+        from automated_security_helper.cli.scan_group import SUBJECTS
+
         scan_dash_o = [
             option
             for option in self._options_under(root.commands["scan"])
@@ -2411,7 +2419,7 @@ class TestTheWrappersListsAreTheClis:
         ]
         assert [
             set(option.opts) >= {"-o", "--oci-runner"} for option in scan_dash_o
-        ] == [True], scan_dash_o
+        ] == [True] * len(SUBJECTS), scan_dash_o
 
 
 @pytest.mark.unit
