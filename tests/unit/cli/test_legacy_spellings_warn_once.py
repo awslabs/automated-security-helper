@@ -344,8 +344,9 @@ def test_a_legacy_spelling_that_prints_keeps_the_nouns_stdout(name, tmp_path, is
 def test_the_skeleton_of_scan_without_a_subject_is_the_fs_one_plus_the_workspace_keys():
     """The one stdout an old spelling does not share with its noun. ``ash scan`` with
     no subject still takes the workspace options, as it always did, and ``fs`` does
-    not, so its skeleton lists the four keys of those options as well. Everything else
-    is the same, and neither prints a line: a skeleton only lists what a command takes."""
+    not, so its skeleton lists the four keys of those options as well. ``fs`` alone
+    takes ``--archive``, so only its skeleton lists that key. Everything else is the
+    same, and neither prints a line: a skeleton only lists what a command takes."""
     legacy = _invoke(["scan", "--generate-cli-skeleton"])
     noun = _invoke(["scan", "fs", "--generate-cli-skeleton"])
 
@@ -357,8 +358,11 @@ def test_the_skeleton_of_scan_without_a_subject_is_the_fs_one_plus_the_workspace
         "allow_missing_projects",
         "dry_run",
     }
-    assert set(noun_keys) <= set(legacy_keys)
-    assert {key: legacy_keys[key] for key in noun_keys} == noun_keys
+    assert set(noun_keys) - set(legacy_keys) == {"archive"}
+    shared = set(noun_keys) & set(legacy_keys)
+    assert {key: legacy_keys[key] for key in shared} == {
+        key: noun_keys[key] for key in shared
+    }
     assert '"path"' in noun.stdout
     assert _deprecation_lines(legacy.stderr) == [], legacy.stderr
     assert _deprecation_lines(noun.stderr) == [], noun.stderr
