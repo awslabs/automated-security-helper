@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import copy
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -411,6 +412,40 @@ class TestExpansion:
         with pytest.raises(ci.UnsupportedMatrix, match="'os'"):
             ci.axis_cells({"include": [{"os": "a"}], "exclude": [{"os": "a"}]})
 
+    @pytest.mark.parametrize(
+        "excludes",
+        [[{}], [{}, {"os": "a"}], [{"os": "a"}, {}]],
+        ids=["alone", "first", "last"],
+    )
+    def test_an_empty_exclude_entry_is_refused_wherever_it_stands(self, excludes):
+        """An entry with no key names no axis. Asking whether every key of an entry
+        matches a leg holds for every leg when there is no key, so reading the entry
+        as a match drops all of them and the job's count reads zero, with no error."""
+        matrix = {"os": ["a", "b"], "python-version": ["1"]}
+        job = _job({**matrix, "exclude": excludes})
+        with pytest.raises(ci.UnsupportedMatrix, match="empty") as caught:
+            ci.cells(job)
+        assert "the axes are os, python-version" in str(caught.value)
+        with pytest.raises(ci.UnsupportedMatrix, match="empty"):
+            ci.axis_cells(job["strategy"]["matrix"])
+
+    @pytest.mark.parametrize("event", ["push", "pull_request"])
+    def test_an_empty_exclude_entry_is_refused_on_every_event(self, event):
+        job = _job({"os": ["a", "b"], "exclude": [{}]})
+        with pytest.raises(ci.UnsupportedMatrix, match="empty"):
+            ci.cells(job, event)
+
+    def test_an_empty_exclude_entry_is_refused_in_a_matrix_with_no_axis(self):
+        with pytest.raises(ci.UnsupportedMatrix, match="the axes are none"):
+            ci.axis_cells({"include": [{"os": "a"}], "exclude": [{}]})
+
+    def test_an_exclude_with_no_entry_is_not_an_empty_entry(self):
+        """The control: no exclude, and an exclude of no entries, drop nothing."""
+        matrix = {"os": ["a", "b"]}
+        legs = [{"os": "a"}, {"os": "b"}]
+        assert ci.cells(_job(matrix)) == legs
+        assert ci.cells(_job({**matrix, "exclude": []})) == legs
+
     def test_matrix_values_name_what_the_matrix_names_whether_or_not_a_leg_runs_it(
         self,
     ):
@@ -642,6 +677,13 @@ jobs:
     steps:
       - run: echo hi
 """
+
+
+#: The same workflow with the runner a required input and no default, so every caller
+#: has to name it.
+CALLEE_REQUIRING_A_RUNNER = CALLEE.replace(
+    "        default: ubuntu-latest\n", "        required: true\n"
+)
 
 
 def _caller(with_text: str = "") -> dict[str, Any]:
@@ -1001,16 +1043,50 @@ class TestACallToAReusableWorkflow:
         assert ci.check_runner_labels(ci.parse_workflow(CALLEE)) == {"ubuntu-latest"}
 
     def test_an_input_with_no_default_is_read_from_the_caller(self):
-        required = CALLEE.replace(
-            "        default: ubuntu-latest\n", "        required: true\n"
-        )
-        assert "required: true" in required
-        called = {CALLEE_USES: ci.parse_workflow(required)}
+        assert "required: true" in CALLEE_REQUIRING_A_RUNNER
+        called = {CALLEE_USES: ci.parse_workflow(CALLEE_REQUIRING_A_RUNNER)}
         ok = _caller("    with:\n      runner: macos-15\n")
         assert ci.check_runner_labels(ok, called=called) == {"macos-15"}
         bad = _caller("    with:\n      runner: plan9\n")
         with pytest.raises(ci.UnknownRunnerLabel, match="plan9"):
             ci.check_runner_labels(bad, called=called)
+
+    def test_a_required_input_is_checked_at_each_call_and_not_in_the_callee(self):
+        """Every caller has to pass a required input, and the check of each call reads
+        what it passes. Read on its own, the called workflow names no label from it
+        and is not refused for having no default."""
+        called = {CALLEE_USES: ci.parse_workflow(CALLEE_REQUIRING_A_RUNNER)}
+        callee = called[CALLEE_USES]
+        assert ci.check_runner_labels(callee) == set()
+        assert ci.runs_on_labels(callee["jobs"]["work"], callee) == set()
+        # The calls carry the check: a known label passes and an unknown one is named.
+        ok = _caller("    with:\n      runner: macos-15\n")
+        assert ci.check_runner_labels(ok, called=called) == {"macos-15"}
+        bad = _caller("    with:\n      runner: plan9\n")
+        with pytest.raises(ci.UnknownRunnerLabel, match="plan9"):
+            ci.check_runner_labels(bad, called=called)
+
+    @pytest.mark.parametrize(
+        "declared",
+        ["        required: false\n", ""],
+        ids=["not_required", "no_required_key"],
+    )
+    def test_an_input_a_caller_may_leave_out_is_still_read_for_its_default(
+        self, declared
+    ):
+        """GitHub gives a string input that is left out the value "", so the runs-on
+        would be empty, and no call passes a label for the check to read. Only an
+        input that every caller has to pass is the caller's."""
+        optional = CALLEE.replace("        default: ubuntu-latest\n", declared)
+        assert "required: true" not in optional
+        with pytest.raises(ci.UnsupportedExpression, match="no string default"):
+            ci.check_runner_labels(ci.parse_workflow(optional))
+
+    def test_runs_on_names_no_label_for_an_input_only_the_caller_gives(self):
+        """runs_on names the label of one leg, and the callee holds none for it."""
+        callee = ci.parse_workflow(CALLEE_REQUIRING_A_RUNNER)
+        with pytest.raises(ci.UnsupportedExpression, match="no string default"):
+            ci.runs_on(callee["jobs"]["work"], {}, callee)
 
     @pytest.mark.parametrize(
         "with_text, shape",
@@ -1083,6 +1159,143 @@ CONSUMERS = [
     "tests/unit/docs/test_page_claims.py",
 ]
 
+#: The one place a test loads the reader, and this file, which holds the loaders the
+#: scan below is tried on. Neither is read for a loader of its own.
+LOADER_HELPER = "tests/utils/ci_matrix_loader.py"
+THIS_FILE = Path(__file__).resolve().relative_to(REPO_ROOT).as_posix()
+
+#: The test modules that load the reader with a loader of their own today. A new one
+#: fails the scan below, and each leaves this set when it moves to load_ci_matrix(). A
+#: module named here that no longer has a loader of its own fails the scan too, so the
+#: set only shrinks.
+OWN_LOADERS = {
+    "tests/integration/docs/ci_runners/reports.py",
+    "tests/unit/test_pre_commit_hooks_manifest.py",
+    "tests/unit/test_unit_test_shards.py",
+}
+
+
+def _own_loader_lines(source: bytes | str, filename: str) -> list[int]:
+    """The lines where a test module loads the reader with its own loader: the calls
+    of ``spec_from_file_location`` that name the reader's file. ``filename`` names the
+    module in a SyntaxError."""
+    tree = ast.parse(source, filename=filename)
+    return sorted(
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "attr", "") == "spec_from_file_location"
+        and "_ci_matrix.py" in ast.unparse(node)
+    )
+
+
+def _own_loaders(root: Path, modules: Iterable[Path]) -> dict[str, list[int]]:
+    """The consumers among ``modules`` that load the reader with their own loader, by
+    path below ``root``, each with the lines of its loader calls."""
+    found: dict[str, list[int]] = {}
+    for path in modules:
+        name = path.relative_to(root).as_posix()
+        if name not in CONSUMERS:
+            continue
+        lines = _own_loader_lines(path.read_bytes(), name)
+        if lines:
+            found[name] = lines
+    return found
+
+
+def _test_modules() -> list[Path]:
+    """Every ``tests/**/*.py`` file of the checkout, in path order.
+
+    Walked with the repository's own walker, which leaves the tests' scratch tree out
+    before it descends: ``rglob`` over tests/ races the directories other workers make
+    there (tests/unit/test_repo_walkers_skip_scratch.py). It asks git nothing, so the
+    scan runs in the unit tier, on a tree that is not a checkout too.
+    """
+    from tests.utils.helpers import iter_repo_files
+
+    walked = iter_repo_files(
+        REPO_ROOT / "tests", skip_dirs=frozenset({"__pycache__", "node_modules"})
+    )
+    return sorted(path for path in walked if path.suffix == ".py" and path.is_file())
+
+
+def _plant(root: Path, sources: dict[str, str]) -> list[Path]:
+    """Write each module of ``sources`` below ``root``, at the path it is keyed by."""
+    paths: list[Path] = []
+    for name, source in sources.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+        paths.append(path)
+    return paths
+
+
+#: Test modules that load the reader with a loader of their own, by the shape of it.
+#: They are parsed and never run, so ROOT and where name nothing.
+PLANTED_LOADERS = {
+    "path_in_the_call": (
+        "import importlib.util\n"
+        "spec = importlib.util.spec_from_file_location(\n"
+        "    'reader', ROOT / 'scripts' / '_ci_matrix.py'\n"
+        ")\n"
+    ),
+    "module_name_in_the_call": (
+        "import importlib.util\n"
+        "spec = importlib.util.spec_from_file_location('_ash_ci_matrix', where)\n"
+    ),
+    "path_and_name_in_constants": (
+        "import importlib.util\n"
+        "READER = ROOT / 'scripts' / '_ci_matrix.py'\n"
+        "def load():\n"
+        "    name = '_ash_ci_matrix'\n"
+        "    return importlib.util.spec_from_file_location(name, READER)\n"
+    ),
+    "the_function_imported_bare": (
+        "from importlib.util import spec_from_file_location\n"
+        "spec = spec_from_file_location('_ash_ci_matrix', where)\n"
+    ),
+    "inside_a_class": (
+        "import importlib.util\n"
+        "class Loader:\n"
+        "    def load(self):\n"
+        "        return importlib.util.spec_from_file_location(\n"
+        "            'x', 'scripts/_ci_matrix.py'\n"
+        "        )\n"
+    ),
+}
+
+#: Test modules that do not load the reader by themselves: one that loads another
+#: script, one that uses the helper, and two that only name the reader in prose.
+PLANTED_FINE = {
+    "loads_another_script": (
+        "import importlib.util\n"
+        "spec = importlib.util.spec_from_file_location('other', where)\n"
+    ),
+    "uses_the_helper": (
+        '"""Reads scripts/_ci_matrix.py through the helper."""\n'
+        "from tests.utils.ci_matrix_loader import load_ci_matrix\n"
+        "ci = load_ci_matrix()\n"
+    ),
+    "names_the_reader_in_a_docstring_and_a_comment": (
+        '"""Compares scripts/_ci_matrix.py (_ash_ci_matrix) with other.py."""\n'
+        "import importlib.util\n"
+        "# scripts/_ci_matrix.py is loaded by the helper, not here.\n"
+        "spec = importlib.util.spec_from_file_location('other', where)\n"
+    ),
+    "names_the_reader_in_a_function_docstring": (
+        "import importlib.util\n"
+        "def load():\n"
+        "    '''Loads scripts/_ci_matrix.py.'''\n"
+        "    return importlib.util.spec_from_file_location('other', where)\n"
+    ),
+}
+
+
+@pytest.fixture(scope="module")
+def checkout_loaders() -> dict[str, list[int]]:
+    """The test modules of this checkout that load the reader with their own loader."""
+    return _own_loaders(REPO_ROOT, _test_modules())
+
 
 class TestTheByPathLoader:
     """tests/utils/ci_matrix_loader.py is the one place a test loads the reader."""
@@ -1154,14 +1367,82 @@ class TestTheByPathLoader:
     ):
         text = (REPO_ROOT / relative).read_text(encoding="utf-8")
         assert "from tests.utils.ci_matrix_loader import load_ci_matrix" in text
-        own_loaders = [
-            ast.unparse(node)
-            for node in ast.walk(ast.parse(text))
-            if isinstance(node, ast.Call)
-            and getattr(node.func, "attr", "") == "spec_from_file_location"
-            and "_ci_matrix.py" in ast.unparse(node)
-        ]
-        assert not own_loaders, own_loaders
+        assert not _own_loader_lines(text, relative)
+
+    @pytest.mark.parametrize(
+        "source", list(PLANTED_LOADERS.values()), ids=list(PLANTED_LOADERS)
+    )
+    def test_a_loader_of_the_reader_is_found_whatever_its_shape(self, source):
+        assert _own_loader_lines(source, "planted.py"), source
+
+    @pytest.mark.parametrize(
+        "source", list(PLANTED_FINE.values()), ids=list(PLANTED_FINE)
+    )
+    def test_a_module_that_does_not_load_the_reader_by_itself_is_not_found(
+        self, source
+    ):
+        assert _own_loader_lines(source, "planted.py") == []
+
+    def test_the_scan_finds_a_loader_in_any_directory_and_skips_the_exempt_files(
+        self, tmp_path
+    ):
+        own = PLANTED_LOADERS["path_in_the_call"]
+        paths = _plant(
+            tmp_path,
+            {
+                "tests/unit/test_new.py": own,
+                "tests/integration/deeper/still/test_nested.py": own,
+                "tests/unit/test_fine.py": PLANTED_FINE["uses_the_helper"],
+                LOADER_HELPER: own,
+                THIS_FILE: own,
+            },
+        )
+        assert _own_loaders(tmp_path, paths) == {
+            "tests/unit/test_new.py": [2],
+            "tests/integration/deeper/still/test_nested.py": [2],
+        }
+
+    def test_a_module_that_is_not_python_is_skipped_unless_it_names_both(
+        self, tmp_path
+    ):
+        """A fixture that is not Python does not matter to the scan until its text
+        names a loader and the reader. Then it cannot be said to hold no loader, and
+        the scan stops and names it."""
+        quiet = _plant(tmp_path, {"tests/data/not_python.py": "def (:\n"})
+        assert _own_loaders(tmp_path, quiet) == {}
+        text = "spec_from_file_location('_ash_ci_matrix', where\n"
+        broken = _plant(tmp_path, {"tests/test_broken.py": text})
+        with pytest.raises(SyntaxError, match=r"tests/test_broken\.py"):
+            _own_loaders(tmp_path, broken)
+
+    def test_the_scan_reads_the_test_modules_of_the_checkout(self):
+        """The denominator: a walk that found none would find no loader."""
+        modules = {path.relative_to(REPO_ROOT).as_posix() for path in _test_modules()}
+        assert len(modules) > 1000, len(modules)
+        assert {THIS_FILE, LOADER_HELPER} <= modules
+        assert OWN_LOADERS <= modules
+
+    def test_no_test_module_loads_the_reader_with_a_loader_of_its_own(
+        self, checkout_loaders
+    ):
+        new = {
+            name: lines
+            for name, lines in checkout_loaders.items()
+            if name not in OWN_LOADERS
+        }
+        assert not new, (
+            f"{new} load scripts/_ci_matrix.py with a loader of their own: use "
+            "load_ci_matrix() from tests/utils/ci_matrix_loader.py"
+        )
+
+    def test_a_module_named_as_having_a_loader_of_its_own_still_has_one(
+        self, checkout_loaders
+    ):
+        gone = sorted(OWN_LOADERS - set(checkout_loaders))
+        assert not gone, (
+            f"{gone} no longer load the reader with a loader of their own: take "
+            "them out of OWN_LOADERS"
+        )
 
 
 VALIDATOR = "./.github/actions/validate-"
