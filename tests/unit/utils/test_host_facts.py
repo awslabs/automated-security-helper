@@ -1425,6 +1425,167 @@ def test_the_executable_is_read_for_a_bounded_head_once_per_reader(tmp_path):
     assert asked == [("/opt/python/bin/python3", 4096)]
 
 
+# A loader's name can lie past the first read. The standalone Pythons that uv installs
+# hold it about 115 KB into the file, long after the program headers that point at it,
+# so one more read reaches it, up to a limit.
+
+PLANTED_PATH = "/opt/python/bin/python3"
+MUSL_LOADER = "/lib/ld-musl-x86_64.so.1"
+GLIBC_LOADER = "/lib64/ld-linux-x86-64.so.2"
+
+
+def elf_with_loader_far_in(offset: int, interpreter: str) -> bytes:
+    """A 64-bit little-endian ELF whose loader's name starts at file ``offset``.
+
+    The one program header is the loader's, in the table at the start of the file as in
+    every executable; the bytes between the table and the name are zeros, and the file
+    ends with the name.
+    """
+    entry, table = 56, 64
+    name = interpreter.encode("ascii") + b"\x00"
+    ident = bytes([0x7F, 0x45, 0x4C, 0x46, 2, 1, 1]) + bytes(9)
+    header = struct.pack(
+        "<HHIQQQIHHHHHH", 2, 62, 1, 0, table, 0, 0, 64, entry, 1, 0, 0, 0
+    )
+    loader = struct.pack(
+        "<IIQQQQQQ", 3, 4, offset, offset, offset, len(name), len(name), 1
+    )
+    start = ident + header + loader
+    return start + bytes(offset - len(start)) + name
+
+
+#: (id, loader, libc): the two families of loader, each named far into the file.
+FAR_LOADERS = [
+    ("musl", MUSL_LOADER, "musl"),
+    ("glibc", GLIBC_LOADER, "glibc"),
+]
+
+#: (id, where the name starts for a name of ``size`` bytes): names that the first read
+#: of 4096 bytes does not hold whole. The last one ends exactly at the limit of the
+#: second read, 1 MiB.
+FAR_PLACES = [
+    ("straddling-the-first-read", lambda size: 4096 - 5),
+    ("just-past-the-first-read", lambda size: 4096),
+    ("where-a-standalone-build-has-it", lambda size: 114_800),
+    ("ending-at-the-limit", lambda size: (1 << 20) - size),
+]
+
+#: (id, head): a loader whose name ends past the limit of the second read. Both heads
+#: are as long as the first read, so that a short file is not what stops a second one.
+BEYOND_THE_LIMIT = [
+    (
+        "ending-one-byte-past-the-limit",
+        elf_with_loader_far_in((1 << 20) - len(MUSL_LOADER), MUSL_LOADER),
+    ),
+    (
+        "starting-in-a-far-off-corner",
+        patched(_WHOLE_ELF, 128, 1 << 40, 8) + bytes(4096),
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("interpreter", "expected"),
+    [pytest.param(*case[1:], id=case[0]) for case in FAR_LOADERS],
+)
+@pytest.mark.parametrize(
+    "place", [pytest.param(case[1], id=case[0]) for case in FAR_PLACES]
+)
+def test_a_loader_name_past_the_first_read_is_reached_with_one_more_read(
+    tmp_path, place, interpreter, expected
+):
+    size = len(interpreter) + 1
+    offset = place(size)
+    asked: list[tuple[str, int]] = []
+    head = elf_with_loader_far_in(offset, interpreter)
+    reading = read(with_executable(linux_host(tmp_path), head, asked=asked))
+    assert reading.libc == expected
+    assert reading.failed == ()
+    assert asked == [(PLANTED_PATH, 4096), (PLANTED_PATH, offset + size)]
+
+
+@pytest.mark.parametrize(
+    "head", [pytest.param(case[1], id=case[0]) for case in BEYOND_THE_LIMIT]
+)
+def test_a_loader_name_that_ends_past_the_limit_is_not_looked_for(tmp_path, head):
+    asked: list[tuple[str, int]] = []
+    reading = read(with_executable(linux_host(tmp_path), head, asked=asked))
+    assert reading.libc == UNKNOWN
+    assert reading.failed == ()
+    assert asked == [(PLANTED_PATH, 4096)]
+
+
+def test_a_loader_name_past_the_end_of_the_file_reads_unknown(tmp_path):
+    size = len(MUSL_LOADER) + 1
+    whole = elf_with_loader_far_in(114_800, MUSL_LOADER)
+    asked: list[tuple[str, int]] = []
+    reading = read(with_executable(linux_host(tmp_path), whole[:5000], asked=asked))
+    assert reading.libc == UNKNOWN
+    assert reading.failed == ()
+    assert asked == [(PLANTED_PATH, 4096), (PLANTED_PATH, 114_800 + size)]
+
+
+def test_a_file_that_the_first_read_holds_whole_is_not_read_again(tmp_path):
+    asked: list[tuple[str, int]] = []
+    cut = _WHOLE_ELF[:-8]
+    reading = read(with_executable(linux_host(tmp_path), cut, asked=asked))
+    assert reading.libc == UNKNOWN
+    assert asked == [(PLANTED_PATH, 4096)]
+
+
+def test_a_loader_name_far_in_is_read_twice_in_all_by_a_reader(tmp_path):
+    asked: list[tuple[str, int]] = []
+    head = elf_with_loader_far_in(114_800, MUSL_LOADER)
+    reader = HostFactsReader(with_executable(linux_host(tmp_path), head, asked=asked))
+    first = reader.read(express_supported=lambda: True)
+    second = reader.read(express_supported=lambda: True)
+    assert first.libc == second.libc == "musl"
+    assert asked == [
+        (PLANTED_PATH, 4096),
+        (PLANTED_PATH, 114_800 + len(MUSL_LOADER) + 1),
+    ]
+
+
+def test_a_failing_second_read_reads_unknown_and_is_a_failure(tmp_path):
+    head = elf_with_loader_far_in(114_800, MUSL_LOADER)
+
+    def read_head(path: str, limit: int) -> bytes:
+        if limit > 4096:
+            raise RuntimeError("planted failure")
+        return head[:limit]
+
+    sources = dataclasses.replace(
+        with_executable(linux_host(tmp_path), head), read_head=read_head
+    )
+    reading = read(sources)
+    assert reading.libc == UNKNOWN
+    assert ("libc", "RuntimeError") in reading.failed
+
+
+@pytest.mark.parametrize(
+    ("interpreter", "expected"),
+    [pytest.param(*case[1:], id=case[0]) for case in FAR_LOADERS],
+)
+def test_a_loader_name_far_into_a_file_is_read_with_no_child_process(
+    tmp_path, monkeypatch, child_processes, interpreter, expected
+):
+    content = elf_with_loader_far_in(114_800, interpreter)
+    assert libc_beside(tmp_path, monkeypatch, content) == expected
+    assert child_processes == []
+
+
+def test_the_loader_segment_is_where_the_interp_header_puts_it():
+    size = len(MUSL_LOADER) + 1
+    far = elf_with_loader_far_in(114_800, MUSL_LOADER)
+    assert host_facts._elf_loader_segment(_WHOLE_ELF) == (176, size)
+    # The headers are inside the first read, the name they point at is not.
+    assert host_facts._elf_loader_segment(far[:4096]) == (114_800, size)
+    assert host_facts._elf_interpreter(far[:4096]) is None
+    assert host_facts._elf_interpreter(far) == MUSL_LOADER
+    assert host_facts._elf_loader_segment(planted_elf(None)) is None
+    assert host_facts._elf_loader_segment(b"") is None
+
+
 @pytest.mark.parametrize("source", ["executable", "read_head"])
 def test_a_failing_executable_source_reads_unknown_and_is_a_failure(tmp_path, source):
     sources = with_executable(linux_host(tmp_path), planted_elf(None))
