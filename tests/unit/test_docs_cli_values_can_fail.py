@@ -308,7 +308,14 @@ def test_the_registries_match_the_inventories_the_reference_checks_read():
 def test_output_formats_are_the_export_formats():
     from automated_security_helper.core.enums import ExportFormat
 
-    for command in (("ash",), ("ash", "scan"), ("ash", "merge")):
+    for command in (
+        ("ash",),
+        ("ash", "scan"),
+        ("ash", "scan", "fs"),
+        ("ash", "scan", "workspace"),
+        ("ash", "merge"),
+        ("ash", "results", "merge"),
+    ):
         values = dc.option_value_set(command, "--output-formats")
         assert values is not None, command
         assert values.names == frozenset(f.value for f in ExportFormat)
