@@ -41,6 +41,7 @@ from automated_security_helper.core.exceptions import (
     ASHRespelledOverrideError,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.override_key import split_override_key
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
@@ -145,7 +146,7 @@ def _detect_secrets_overrides(config_overrides: Optional[Sequence[str]]) -> List
     wanted = folded_section_name("detect_secrets")
     selected: List[str] = []
     for override in config_overrides or []:
-        key = override.partition("=")[0].removesuffix("+").strip()
+        key = split_override_key(override)[0].strip()
         parts = [part.strip() for part in key.split(".")]
         if parts[0] != "scanners":
             continue

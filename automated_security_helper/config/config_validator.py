@@ -89,6 +89,7 @@ from automated_security_helper.utils.numeric_text import (
     number_bounded_form,
     purely_numeric,
 )
+from automated_security_helper.utils.override_key import REMOVE, split_override_key
 from automated_security_helper.utils.path_matching import directory_spelling
 from automated_security_helper.utils.redacted_model import value_tuple
 from automated_security_helper.utils.unknown_keys import (
@@ -4666,7 +4667,13 @@ class ConfigValidator:
             decision: Optional[bool] = None
             for override in config_overrides or []:
                 key_path, _, text = override.partition("=")
-                parts = key_path.removesuffix("+").strip().split(".")
+                key, op = split_override_key(key_path)
+                if op == REMOVE:
+                    # A removal neither writes the file's value nor replaces the
+                    # section above it, so it does not decide whether the
+                    # file's value stands.
+                    continue
+                parts = key.strip().split(".")
                 if not parts or len(parts) > len(segments):
                     continue
                 if any(
@@ -4862,11 +4869,12 @@ class ConfigValidator:
     @staticmethod
     def _override_keys(config_overrides: Optional[Sequence[str]]) -> FrozenSet[str]:
         """The dotted key of each ``--config-overrides`` entry, as written
-        (``+`` for an append dropped, '-' read as '_'), for the checks that
-        ask whether an override supplies a field."""
+        (the ``+`` of an append and the ``-`` of a removal dropped, any other
+        '-' read as '_'), for the checks that ask whether an override supplies a
+        field."""
         keys = set()
         for override in config_overrides or ():
-            key = str(override).partition("=")[0].removesuffix("+").strip()
+            key = split_override_key(override)[0].strip()
             if key:
                 keys.add(key.replace("-", "_"))
         return frozenset(keys)

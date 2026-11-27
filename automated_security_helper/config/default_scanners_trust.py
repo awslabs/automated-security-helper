@@ -17,13 +17,14 @@ from automated_security_helper.config.untrusted_source import (
     UntrustedSource,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.override_key import split_override_key
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
 
 
 def _is_selection_override(override: str) -> bool:
-    key = override.partition("=")[0].removesuffix("+").strip().split(".")[0]
+    key = split_override_key(override)[0].strip().split(".")[0]
     return key.replace("-", "_") == DEFAULT_SCANNERS_FIELD
 
 

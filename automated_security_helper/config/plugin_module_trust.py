@@ -121,6 +121,7 @@ from automated_security_helper.config.untrusted_source import (
 )
 from automated_security_helper.utils.import_caches import invalidate_import_caches
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.override_key import split_override_key
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:
@@ -798,7 +799,7 @@ def confine_plugin_modules(
     module_overrides = [
         override
         for override in config_overrides or []
-        if override.partition("=")[0].removesuffix("+").strip().replace("-", "_")
+        if split_override_key(override)[0].strip().replace("-", "_")
         == "ash_plugin_modules"
     ]
     if module_overrides:
@@ -1461,38 +1462,29 @@ def _remapped_module_reference_lists(
     return moved_lists
 
 
-def drop_plugin_module_references_past_the_list(
-    config: "AshConfig", *, replaced: bool = False
-) -> None:
+def drop_plugin_module_references_past_the_list(config: "AshConfig") -> None:
     """Drop the ``ash_plugin_modules`` references that name an entry the list lacks.
 
     A load records its references and record rewrites from the config file's
     own document, but ``--config-overrides`` are applied to the model before
     they are attached (and again when a loaded model is overridden a second
-    time), so an override that replaces the list with a shorter one leaves a
-    reference at an index past its end. The entry that reference described
-    was replaced by the override, so it names nothing, and the record is
-    built from the model's current list: dropping it discloses nothing, and
+    time). What each override did to a list is reconciled with them first
+    (``config.list_references``): a replacing override drops every reference
+    of the list it landed on, and a removal moves each kept entry's reference
+    to its new index and drops a removed entry's. After that no reference of
+    the list is past its end; this drop is the guard that keeps that true. A
+    reference it drops names an entry the list no longer has, and the record
+    is built from the model's current list: dropping it discloses nothing, and
     the run-wide redaction set keeps the value either way.
-
-    ``replaced`` says a replacing override landed on the list. Then NO
-    reference of the list describes the entry now at its index, whatever the
-    new length: one kept at an index the new list still has would show the
-    operator's literal as ``<value>``, mark it environment-read in
-    ``ash config get`` and the MCP ``get_config``, and keep a record rewrite
-    that can later replace an equal text with a reference it never was. Every
-    ``ash_plugin_modules`` reference is dropped; the run-wide redaction set
-    keeps the value either way.
 
     The movers (``reindex_plugin_module_references``) refuse a reference past
     the entries they are told about, because for a caller that passed the
     wrong list neither mending is safe. This is where the invariant they rely
     on is made true for the callers that pass the right one: after a load, no
-    reference is past the list. Without ``replaced`` (a load with no
-    replacing override, or an appending one) a reference at an index inside
-    the list is the file's own and stays.
+    reference is past the list. A reference at an index inside the list is the
+    file's own, or was moved there by a removal, and stays.
     """
-    entries = 0 if replaced else len(getattr(config, "ash_plugin_modules", None) or [])
+    entries = len(getattr(config, "ash_plugin_modules", None) or [])
     for attribute in (
         "_environment_references",
         "_displayed_environment_references",

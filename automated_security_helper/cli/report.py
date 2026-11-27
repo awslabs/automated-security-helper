@@ -1208,6 +1208,7 @@ def report_command(
     # default as set, does not make every default count, and every spelling
     # the override parser accepts counts as written: an object value at the
     # section or at its parent, a hyphen for an underscore, a trailing "+".
+    # A "-=" removal, like an append to a list, writes nothing.
     # No second resolution is made.
     recorded_dedup = getattr(
         getattr(getattr(model, "ash_config", None), "global_settings", None),

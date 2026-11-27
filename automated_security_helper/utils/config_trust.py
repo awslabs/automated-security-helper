@@ -47,8 +47,8 @@ or delivered by an MCP client), and the operator's values are those of the trust
 base plus ``--config-overrides``. A value is the operator's when the config was
 built from no repository-written file, or when resolving the trusted base plus the
 overrides gives the same value. ("In the tree" below means repository-written.) Comparing resolutions, not override key names,
-makes ``key+=``, the dashed scanner spelling and a whole-section override count the
-same as ``key=value``.
+makes ``key+=``, ``key-=``, the dashed scanner spelling and a whole-section override
+count the same as ``key=value``.
 
 Overrides an MCP client supplied (``resolve_config(client_overrides=True)``) are not
 the operator's, as they are not for ``config/path_trust.OperatorPaths``: they are
@@ -81,6 +81,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
 from automated_security_helper.models.vocab import PluginKind
+from automated_security_helper.utils.override_key import split_override_key
 
 PathLike = Union[str, "os.PathLike[str]"]
 
@@ -190,9 +191,9 @@ class _ResolvedSection:
 
 
 def _override_key(override: Any) -> str:
-    """The dotted key a ``--config-overrides`` entry writes to, ``key=value`` and
-    ``key+=value`` alike."""
-    return str(override).partition("=")[0].removesuffix("+").strip()
+    """The dotted key a ``--config-overrides`` entry writes to, ``key=value``,
+    ``key+=value`` and ``key-=value`` alike."""
+    return split_override_key(override)[0].strip()
 
 
 def _key_parts(key: str) -> Tuple[str, ...]:

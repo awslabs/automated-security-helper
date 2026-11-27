@@ -100,6 +100,12 @@ import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
+from automated_security_helper.utils.override_key import (
+    APPEND,
+    REMOVE,
+    split_override_key,
+)
+
 #: Scanner options whose value names a file or directory the scanner's tool
 #: reads, or is a list of such paths (cfn-guard's ``rules_paths``), by scanner.
 #: actionlint's ``shellcheck`` and ``pyflakes`` are not here: a bare name there
@@ -535,10 +541,13 @@ def anchor_override_paths(
         if not separator or not key_path.strip():
             rewritten.append(override)
             continue
-        append = key_path.endswith("+")
-        segments = key_path.removesuffix("+").strip().split(".")
+        key, op = split_override_key(key_path)
+        # A removal names entries of a list, as an append does, so a scalar it
+        # names is anchored as an entry: ``k+=v`` then ``k-=v`` name one entry.
+        entry = op in (APPEND, REMOVE)
+        segments = key.strip().split(".")
         value = _parse_config_value(raw)
-        if append and not isinstance(value, list):
+        if entry and not isinstance(value, list):
             anchored = _anchored_at([*segments, "-"], value, base)
         else:
             anchored = _anchored_at(segments, value, base)
