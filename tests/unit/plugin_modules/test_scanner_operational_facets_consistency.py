@@ -721,7 +721,9 @@ _IMAGE_ROUTES = {
 }
 
 #: Words that mark a comment as being about licensing.
-_LICENSING = re.compile(r"licen[sc]|copyleft|\bgpl\b|\bmit\b|spdx|\bnotices?\b", re.I)
+_LICENSING = re.compile(
+    r"licen[sc]|copyleft|\bgpl\b|\bmit\b|spdx|\bnotices?\b", re.IGNORECASE
+)
 
 
 def _ir():

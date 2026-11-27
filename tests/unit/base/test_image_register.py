@@ -213,7 +213,9 @@ def test_only_the_stage_that_names_the_pins_directory_inline_is_marked() -> None
 
 def test_the_family_suite_is_the_suite_of_the_base_image() -> None:
     ir = _ir()
-    base = re.search(r"^ARG BASE_IMAGE=\S+-slim-(\w+)$", _DOCKERFILE, flags=re.M)
+    base = re.search(
+        r"^ARG BASE_IMAGE=\S+-slim-(\w+)$", _DOCKERFILE, flags=re.MULTILINE
+    )
     debian_release = {"bookworm": "12", "trixie": "13"}
 
     (family,) = ir.OS_FAMILIES
@@ -233,10 +235,8 @@ def test_each_engine_step_is_installed_and_checked_in_exactly_its_stages() -> No
         for name, body in stages.items():
             if name in step.stages:
                 assert install in body, (step.tool, name)
-                assert re.search(rf"^{re.escape(check)}\s*$", body, flags=re.M), (
-                    step.tool,
-                    name,
-                )
+                pattern = rf"^{re.escape(check)}\s*$"
+                assert re.search(pattern, body, flags=re.MULTILINE), (step.tool, name)
             else:
                 assert f"install-pinned-tool {step.tool} " not in body, (
                     step.tool,
@@ -411,8 +411,10 @@ _REFUSED = {
     ),
     "a package with a phase that is neither kind": (
         lambda ir: _also("packages", _package(phase="later")),
-        "system package 'extra' has the phase 'later'; a phase is 'runtime' or "
-        "'build:<step>'",
+        (
+            "system package 'extra' has the phase 'later'; a phase is 'runtime' or "
+            "'build:<step>'"
+        ),
     ),
     "a package built by an unknown step": (
         lambda ir: _also("packages", _package(phase="build:missing")),
