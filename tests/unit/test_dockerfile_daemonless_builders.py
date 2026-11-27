@@ -47,6 +47,12 @@ Known limitations
 * The probes read text: each instruction with its continuation lines joined and its
   comment lines dropped. A form reached through an ``ARG`` is not seen; ``FROM
   ${BASE_IMAGE}`` hides the platform and the operating system of the base image.
+* A Windows base image is told by its name: ``--platform=windows``, a reference that
+  starts with ``mcr.microsoft.com/windows`` or ``mcr.microsoft.com/dotnet/framework/``,
+  or a tag that holds ``nanoserver`` or ``servercore``. A mirror that keeps the
+  repository path and gives the image a bare release tag, such as
+  ``registry.example.com/windows/servercore:ltsc2022``, is not seen, and neither is a
+  reference by digest alone.
 * ``ADD`` tells an archive by its content and this check tells it by its name.
 * An ``ADD`` written as a JSON array of strings is read as one, and its last string is
   the destination. Text that does not decode as an array of strings is read as the
