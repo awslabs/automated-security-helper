@@ -52,6 +52,7 @@ from typing import Any, Literal, TYPE_CHECKING
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.base.report_identity import OCSF_PRODUCT_NAME
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
@@ -1449,7 +1450,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
 
         # Create base OCSF product metadata
         product = Product(
-            name="Automated Security Helper",
+            name=OCSF_PRODUCT_NAME,
             vendor_name="Amazon Web Services",
             version=get_ash_version(),
         )
@@ -1833,7 +1834,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 "error": error_message,
                 "metadata": {
                     "product": {
-                        "name": "Automated Security Helper",
+                        "name": OCSF_PRODUCT_NAME,
                         "vendor_name": "Amazon Web Services",
                         "version": get_ash_version(),
                     },
