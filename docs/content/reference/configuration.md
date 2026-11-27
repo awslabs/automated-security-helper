@@ -211,7 +211,7 @@ A key not listed here is an error when the configuration is loaded.
 
 ### <a id="section-global_settings-history"></a>`global_settings.history`
 
-Run history: a compact record of each completed scan, for `ash trend`.
+Run history: a compact record of each completed scan, for `ash results trend`.
 
 A key not listed here is an error when the configuration is loaded.
 

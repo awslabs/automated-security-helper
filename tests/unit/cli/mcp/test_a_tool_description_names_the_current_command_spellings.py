@@ -25,6 +25,7 @@ from typing import Any, Dict, Iterator, List
 import pytest
 
 from automated_security_helper.cli.mcp_server import mcp
+from automated_security_helper.utils.source_archive import SourceArchiveRefusal
 
 pytestmark = pytest.mark.unit
 
@@ -163,3 +164,84 @@ def test_the_workspace_tools_name_the_workspace_subject() -> None:
 )
 def test_the_zip_finalize_description_names_what_it_refuses(named: str) -> None:
     assert named in _tool_descriptions()["set_source_zip_finalize"]
+
+
+#: The words the description of ``set_source_zip_finalize`` gives each class of refusal.
+#: A client builds its zip from that text, so a class it does not name is a refusal the
+#: client meets only by sending the upload. "sizes the members claim" has no kind of its
+#: own: a member whose data is not the size it declares is refused as ``not-a-zip``.
+ZIP_REFUSAL_PHRASES = {
+    "names": [
+        "backslash",
+        "absolute path",
+        "empty component",
+        "a NUL",
+        "Windows cannot hold",
+        "Unicode path field",
+    ],
+    "links": ["symlink"],
+    "shared paths": ["extract to one path", "holds as a file"],
+    "the archive's structure": [
+        "one zip from its first byte to its last",
+        "bytes before, between or after the members",
+        "cannot read",
+    ],
+    "encryption": ["encrypted member"],
+    "compression method": ["any method but stored and deflate"],
+    "sizes the members claim": ["not the size it declares"],
+    "limits": ["100 MiB", "500 MiB", "50000 entries"],
+}
+
+#: The class of each refusal the finalize makes (``SourceArchiveRefusal``, the rules
+#: ``ash scan fs --archive`` applies too).
+ZIP_REFUSAL_CLASS = {
+    SourceArchiveRefusal.ARCHIVE_TOO_LARGE: "limits",
+    SourceArchiveRefusal.TOO_MANY_MEMBERS: "limits",
+    SourceArchiveRefusal.EXTRACTED_TOO_LARGE: "limits",
+    SourceArchiveRefusal.EMPTY_NAME: "names",
+    SourceArchiveRefusal.BACKSLASH_IN_NAME: "names",
+    SourceArchiveRefusal.ABSOLUTE_PATH: "names",
+    SourceArchiveRefusal.PATH_TRAVERSAL: "names",
+    SourceArchiveRefusal.DOT_COMPONENT: "names",
+    SourceArchiveRefusal.EMPTY_COMPONENT: "names",
+    SourceArchiveRefusal.NUL_IN_NAME: "names",
+    SourceArchiveRefusal.RESERVED_NAME: "names",
+    SourceArchiveRefusal.UNICODE_PATH_MISMATCH: "names",
+    SourceArchiveRefusal.PATH_COLLISION: "shared paths",
+    SourceArchiveRefusal.SYMLINK_MEMBER: "links",
+    SourceArchiveRefusal.NOT_A_ZIP: "the archive's structure",
+    SourceArchiveRefusal.ENCRYPTED_MEMBER: "encryption",
+    SourceArchiveRefusal.UNSUPPORTED_COMPRESSION: "compression method",
+    SourceArchiveRefusal.UNREADABLE_MEMBER: "the archive's structure",
+}
+
+#: The two refusals only ``ash scan fs --archive`` makes, because it opens the file
+#: itself (the comment on ``SourceArchiveRefusal``): a path that is not a regular file
+#: and an archive file it cannot read. The finalize reads the zip it assembled.
+ZIP_REFUSALS_OF_THE_ARCHIVE_OPTION = frozenset(
+    {SourceArchiveRefusal.NOT_A_FILE, SourceArchiveRefusal.UNREADABLE_ARCHIVE}
+)
+
+
+@pytest.mark.parametrize(
+    ("refusal_class", "phrase"),
+    [
+        pytest.param(refusal_class, phrase, id=f"{refusal_class}: {phrase}")
+        for refusal_class, phrases in ZIP_REFUSAL_PHRASES.items()
+        for phrase in phrases
+    ],
+)
+def test_the_zip_finalize_description_has_a_phrase_for_each_refusal_class(
+    refusal_class: str, phrase: str
+) -> None:
+    assert phrase in _tool_descriptions()["set_source_zip_finalize"], refusal_class
+
+
+def test_every_zip_refusal_belongs_to_a_class_with_a_phrase() -> None:
+    """A refusal added to the archive rules fails here until it is given a class, and
+    a class is a row above, so the description has to name it."""
+    assert set(ZIP_REFUSAL_CLASS) | ZIP_REFUSALS_OF_THE_ARCHIVE_OPTION == set(
+        SourceArchiveRefusal
+    )
+    assert not set(ZIP_REFUSAL_CLASS) & ZIP_REFUSALS_OF_THE_ARCHIVE_OPTION
+    assert set(ZIP_REFUSAL_CLASS.values()) <= set(ZIP_REFUSAL_PHRASES)

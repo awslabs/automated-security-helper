@@ -2971,18 +2971,27 @@ async def set_source_zip_finalize(
 ) -> Dict[str, Any]:
     """Verify an uploaded zip and extract it as this session's scan target.
 
-    The assembled zip must hash to expected_sha256. Entries with absolute paths,
-    '..' components, a NUL in the name, or symlinks are refused before anything
-    is extracted, and so is a zip with an encrypted member. On a Windows or macOS
-    server, two members whose names differ only in letter case or Unicode
-    normalization are refused too: ASH reads them as one path.
-    A zip the server cannot read is refused as well: one that uses a zip version
-    or compression method the server does not support, or has a damaged member.
-    The archive is capped at 100 MiB on the wire, 500 MiB extracted, and 50000
-    entries. After this returns, call run_ash_scan() with no source_dir. Refused
-    while a scan of this session runs (error_type source_delivery_busy); chunks
-    of other uploads may be sent meanwhile. If this call is cancelled, the extraction
-    finishes or fails server-side and the session reads busy until then.
+    The assembled zip must hash to expected_sha256. A refused zip replaces
+    nothing: the previous tree stays delivered, and the zip of the refused upload
+    is removed, so the upload has to be sent again. A zip is refused for any of
+    these: a member name that is not a plain relative path (an empty name, a
+    backslash, an absolute path, a '..' or '.' or empty component, a NUL, or on a
+    Windows server a name Windows cannot hold); a Unicode path field that names
+    another file than the member's own name; a symlink, wherever it points; two
+    members that extract to one path, or a member under a path another member
+    holds as a file (on a Windows or macOS server, names that differ only in
+    letter case or Unicode normalization are one path: ASH reads them as one); an
+    encrypted member; a member compressed with any method but stored and
+    deflate; a member whose data is not the size it declares; a file that is not
+    one zip from its first byte to its last (bytes before, between or after the
+    members, or a local header or end record that does not match the central
+    directory); a zip the server cannot read, such as one that uses a zip version
+    the server does not support, or has a damaged member; and a zip over the
+    limits of 100 MiB on the wire, 500 MiB extracted and 50000 entries. After this
+    returns, call run_ash_scan() with no source_dir. Refused while a scan of this
+    session runs (error_type source_delivery_busy); chunks of other uploads may be
+    sent meanwhile. If this call is cancelled, the extraction finishes or fails
+    server-side and the session reads busy until then.
 
     Args:
         upload_id: The identifier used for the preceding chunk calls.
@@ -2999,8 +3008,10 @@ async def set_source_zip_finalize(
         run_ash_scan() with no source_dir answers delivered_source_missing. A
         failure on disk while the archive is read or extracted (no space, no
         permission, a file that vanished) returns the class name of the
-        exception as error_type; only an upload that never received its last
-        chunk returns error with no error_type.
+        exception as error_type. A checksum mismatch, an upload that never
+        received its last chunk and a refused zip return error with no
+        error_type: error says what was found, and names the member at fault
+        where there is one.
     """
     try:
         session_id = resolve_caller_session_id(ctx)
