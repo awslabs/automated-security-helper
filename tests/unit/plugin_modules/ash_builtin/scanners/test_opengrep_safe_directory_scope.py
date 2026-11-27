@@ -4,15 +4,16 @@
 """Which directories opengrep's child is told git may trust, and who decides.
 
 The scanned directory is named. A parent is named only when it is the top of the
-checkout the directory sits in; the top, its ``.git`` entry, what a ``.git`` link points
-at and the git directory a ``.git`` file names each belong to the user who owns the
-scanned directory or to the effective uid; and it is a directory a ``safe.directory``
-entry may name (never a filesystem root). A scan of the checkout's top itself is held to
-the same test, and the top is left out when it fails. git's own ownership check reads
-these entries, so a top, ``.git`` or git directory that a third user owns is never
-named. One list, computed from the scan target, reaches the unsandboxed child and the
-sandboxed one; no environment variable carries it, so an inherited value cannot choose
-entries.
+checkout the directory sits in; the top, its ``.git`` entry, what a ``.git`` link
+resolves to and the git directory a ``.git`` file names each belong to the user who
+owns the scanned directory or to the effective uid; and it is a directory a
+``safe.directory`` entry may name (never a filesystem root). Where the platform has
+user ids, a scan of the checkout's top itself is held to the same test, and the top is
+left out when it fails. git's own ownership check reads the top, the ``.git`` and the
+git directory, and git reads the repository through a ``.git`` link, so a top,
+``.git``, link target or git directory that a third user owns is never named. One
+list, computed from the scan target, reaches the unsandboxed child and the sandboxed
+one; no environment variable carries it, so an inherited value cannot choose entries.
 
 Of git's configuration variables the sandboxed child gets the
 ``GIT_CONFIG_COUNT``/``KEY_<n>``/``VALUE_<n>`` block ASH writes, and only what can take

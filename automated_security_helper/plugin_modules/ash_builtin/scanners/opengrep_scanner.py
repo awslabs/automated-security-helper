@@ -617,9 +617,9 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         opengrep 2.0.0 lists files with ``git ls-files`` itself and exits 2 when git
         refuses the directory ("Could not get files from git ls-files"), which it
         does for a mount another user owns (the container scans). 1.33.1 tolerated
-        that. The entry reaches only this child, through ``GIT_CONFIG_*``, and names
-        the real path of the scanned directory, never ``*``; ASH's own git calls
-        and every other process keep the ownership check.
+        that. The entries reach only this child, through ``GIT_CONFIG_*``, and name
+        real paths, never ``*``; ASH's own git calls and every other process keep
+        the ownership check.
 
         Git compares ``safe.directory`` with the top of the work tree, so a scan
         pointed at a subdirectory of a checkout names the checkout's top level as
@@ -630,7 +630,8 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         at the top itself names it only on the same test. Outside a checkout only
         the scanned directory is named. Where the platform has no user ids
         (Windows) no owner can be compared, so a top above the scanned directory is
-        not named and git's own ownership check decides it.
+        not named and git's own ownership check decides it, and a scan pointed at
+        the top names it without the test.
 
         A sandboxed spawn reads the same list from the policy, which computes it
         from the scan target with the same function, and rebuilds the entries

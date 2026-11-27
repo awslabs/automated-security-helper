@@ -395,7 +395,7 @@
   `CKV_GITHUB_CONF_DIR_NAME` or `CKV_BITBUCKET_CONF_DIR_NAME` is used as set.
 - The `safe.directory` entries ASH gives opengrep's git name the directory it scans
   and, when that directory sits in a checkout, the checkout's top, and no other
-  directory. The top is named only when it, its `.git`, what a `.git` link points at
+  directory. The top is named only when it, its `.git`, what a `.git` link resolves to
   and, for a `.git` file, the git directory that file names each belong to the
   scanned directory's owner or to the effective uid, and a scan of the top itself
   names it only then. A top the test leaves out is logged as a warning that says
@@ -403,7 +403,8 @@
   refuses it, opengrep cannot list the files there and fails; to have the top named,
   give it and its `.git` to the user running ASH or to the scanned directory's
   owner. Where the platform has no user ids (Windows), a top above the scanned
-  directory is never named, and git's own ownership check decides. With the sandbox
+  directory is never named, a scan of the top names it without the test, and git's
+  own ownership check decides. With the sandbox
   on, a `GIT_CONFIG_*` entry in `sandbox.environment` that could add git
   configuration is refused for opengrep, which is then reported MISSING with the
   entry named: `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_VALUE_<n>`,

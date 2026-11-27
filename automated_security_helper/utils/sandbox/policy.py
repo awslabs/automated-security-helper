@@ -100,9 +100,10 @@ class SandboxRequirements:
             should trust from the scan target (``safe_directories_for``: the target,
             and the top of its checkout when the top, its ``.git``, what a ``.git``
             link resolves to and, for a ``.git`` file, the git directory it names
-            each belong to the target's owner or to the effective uid; a target that
-            is itself the top is named only then), and ``filter_env`` turns them into
-            ``GIT_CONFIG_*`` entries for that child alone. Of the other
+            each belong to the target's owner or to the effective uid; where the
+            platform has user ids, a target that is itself the top is named only
+            then), and ``filter_env`` turns them into ``GIT_CONFIG_*`` entries for
+            that child alone. Of the other
             ``GIT_CONFIG_*`` variables only those that can take configuration away
             pass (``GIT_CONFIG_NOSYSTEM``, and ``GIT_CONFIG_GLOBAL`` or
             ``GIT_CONFIG_SYSTEM`` set to the null device), so ASH adds no

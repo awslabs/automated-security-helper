@@ -389,6 +389,13 @@ _ALLOWED_SIZED_READS = {
         "_shebang_interpreter",
     ): "shebang line of a script, parsed for the interpreter it names; not tool output",
     (
+        "utils/sandbox/policy.py",
+        "_gitdir_named_by",
+    ): "a checkout's .git file, read as git reads it: on a regular-file descriptor "
+    "opened without blocking, at the size it reports, refused over "
+    "_GITFILE_MAX_BYTES; parsed for the git directory its gitdir: line names, of "
+    "which only the resolved path is logged; not tool output",
+    (
         "utils/sandbox/fs_guard.py",
         "read_bytes_at_most",
     ): "the bounded-read primitive's own chunk loop",
