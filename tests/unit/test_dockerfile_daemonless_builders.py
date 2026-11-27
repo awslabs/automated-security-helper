@@ -497,6 +497,12 @@ POSITIVE: dict[str, list[tuple[str, str]]] = {
     "Windows container base": [
         ("stage", "FROM mcr.microsoft.com/windows/servercore:ltsc2022 AS planted"),
         ("stage", "FROM --platform=windows/amd64 ${BASE_IMAGE} AS planted"),
+        ("stage", "FROM mcr.microsoft.com/dotnet/framework/sdk:4.8"),
+        ("stage", "FROM mcr.microsoft.com/powershell:lts-nanoserver-ltsc2022"),
+        ("stage", "FROM mcr.microsoft.com/dotnet/runtime:8.0-nanoserver-ltsc2022"),
+        ("stage", "FROM mcr.microsoft.com/dotnet/sdk:8.0-windowsservercore-ltsc2022"),
+        ("stage", "FROM mcr.microsoft.com/dotnet/sdk:8.0-servercore-ltsc2022"),
+        ("stage", "FROM mcr.microsoft.com/powershell:LTS-NanoServer-ltsc2022"),
     ],
 }
 
@@ -550,6 +556,12 @@ NEGATIVE = {
     "a global ARG with no platform argument": "ARG BASE=python:3.12\nFROM ${BASE}",
     "a Linux image from the registry that also holds Windows ones": (
         "FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/runtime:8.0 AS x"
+    ),
+    "a Linux tag of a dotnet image": (
+        "FROM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS x"
+    ),
+    "a Linux tag of an image that also has Windows tags": (
+        "FROM mcr.microsoft.com/powershell:lts-ubuntu-22.04 AS x"
     ),
 }
 
