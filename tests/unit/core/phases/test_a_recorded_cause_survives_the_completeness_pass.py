@@ -33,7 +33,10 @@ from automated_security_helper.core.unified_metrics import (
     populate_metrics_from_unified_source,
     recorded_error_reason,
 )
-from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.asharp_model import (
+    AshAggregatedResults,
+    ScannerTargetStatusInfo,
+)
 from automated_security_helper.models.scan_results_container import (
     ScanResultsContainer,
 )
@@ -131,6 +134,27 @@ class TestARecordedCauseSurvivesThePass:
             [_error_container("bandit", "source", recorded)],
             ["bandit"],
         )
+
+        assert recorded_error_reason(results, "bandit") == recorded
+
+    def test_a_results_file_written_with_the_guess_in_front_of_a_cause_reads_the_cause(
+        self, tmp_path
+    ):
+        """What ``ash report`` reads back from a file an earlier run wrote."""
+        recorded = CAUSES[0]
+        results = AshAggregatedResults()
+        results = ScanResultProcessor(
+            plugin_context=_context(tmp_path)
+        ).process_container(_error_container("bandit", "source", recorded), results)
+        results.scanner_results = {
+            "bandit": ScannerTargetStatusInfo(
+                status=ScannerStatus.ERROR,
+                dependencies_satisfied=True,
+                excluded=False,
+                error_reason_code=ReasonCode.QUEUED_NOT_COMPLETED,
+                error_reason=DEFAULT_SENTENCES[ReasonCode.QUEUED_NOT_COMPLETED],
+            )
+        }
 
         assert recorded_error_reason(results, "bandit") == recorded
 

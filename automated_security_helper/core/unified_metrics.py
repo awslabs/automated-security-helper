@@ -554,19 +554,30 @@ def recorded_error_reason(
     which is where the executor records the reason of a scanner it ran. Both
     parts come from the same row or report.
 
+    A row's ``queued_not_completed`` is the exception to "the row first". The scan
+    phase's completeness pass files it for a scanner that left no row, and the
+    pass runs after the executor has recorded why a scanner that did run ended in
+    ERROR (a timeout, a refused exit code, a result that could not be graded). Its
+    sentence, "it was queued for execution but did not complete", is a guess about
+    a scanner nothing was recorded for; where a per-target report holds a recorded
+    pair, that pair is the cause and wins. The row's guess stands only when no
+    report records one. This is done here and not in the pass because the pass
+    lives in ``models``, which does not read the reports, and because a results
+    file written with the guess in front of a cause is read back right here too.
+
     Not read for a scanner that is not ERROR: a PASSED or FAILED scanner can carry
     an error beside its findings (a target that was lost, with findings on the
     rest), and its status says what its reason would only contradict.
     """
-    found = _reason_pair((asharp_model.scanner_results or {}).get(scanner_name))
-    if found is not None:
-        return found
+    from_row = _reason_pair((asharp_model.scanner_results or {}).get(scanner_name))
+    if from_row is not None and from_row[0] != ReasonCode.QUEUED_NOT_COMPLETED:
+        return from_row
     reports = own_target_reports(asharp_model, scanner_name)
     for key in sorted(reports, key=_report_order):
         found = _reason_pair(reports[key])
         if found is not None:
             return found
-    return None
+    return from_row
 
 
 def _records_a_status(asharp_model: AshAggregatedResults, scanner_name: str) -> bool:
