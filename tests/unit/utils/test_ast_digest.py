@@ -330,20 +330,26 @@ class TestDomains:
 class TestErrors:
     def test_a_parse_error_names_its_line(self):
         require_symbols_extra()
-        broken = b"x = 1\ny = (\n"
-        with pytest.raises(DigestUnavailable, match="syntax error at line"):
+        # The one error is the stray ")" on line 2, after a whole statement on
+        # line 1, so any ERROR or MISSING node the parser's recovery makes starts
+        # on line 2. An unclosed "(" at the end of the file is not that plain: a
+        # MISSING ")" can sit at the end of the input, on the line after the last.
+        broken = b"x = 1\ny = 2)\n"
+        at_line_2 = r"syntax error at line 2$"
+        with pytest.raises(DigestUnavailable, match=at_line_2):
             symbol_spans.analyze(broken, "a.py").file_digest()
-        with pytest.raises(symbol_spans.SymbolParseError, match="line"):
+        with pytest.raises(symbol_spans.SymbolParseError, match=at_line_2):
             symbol_spans.index_symbols(
                 broken, symbol_spans.GRAMMARS_BY_EXTENSION[".py"]
             )
-        assert len(_digest(b"x = 1\ny = ()\n")) == 64
+        assert len(_digest(b"x = 1\ny = 2\n")) == 64
 
     def test_a_file_with_no_grammar_says_which_extension(self):
         analysis = symbol_spans.analyze(b"x: 1\n", "a.yaml")
         with pytest.raises(DigestUnavailable) as caught:
             analysis.file_digest()
         assert str(caught.value) == symbol_spans._unsupported_reason("a.yaml")
+        assert ".yaml" in str(caught.value)
 
 
 class _StubLanguage:
@@ -438,7 +444,9 @@ class TestPolicy:
         require_symbols_extra()
         java = symbol_spans.GRAMMARS_BY_EXTENSION[".java"]
         broken = dataclasses.replace(java, verbatim=java.verbatim | {"comment"})
-        with pytest.raises(DigestUnavailable, match="comment"):
+        # The type named whole: the Java grammar's line_comment and block_comment
+        # are other types, and a message naming one of them does not match.
+        with pytest.raises(DigestUnavailable, match="no node type comment, which"):
             ast_digest.validate_policy(symbol_spans._load_language(java), broken)
 
     def test_the_tables_are_the_ones_the_algorithm_id_names(self):

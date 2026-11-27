@@ -320,6 +320,19 @@ class TestRoundTrip:
         assert "dropped:   src/app.py" in dropped.output
         assert "src/app.py" not in _lock(repo)["files"]
 
+    def test_one_file_named_twice_is_dropped_once(self, repo):
+        # Two spellings of one file are one key. refresh took a key per
+        # spelling, so the second found the entry the first had dropped and
+        # ended in a KeyError, with the lock never written.
+        assert _add(repo).exit_code == 0
+        (repo / "src" / "app.py").unlink()
+        result = _run("refresh", "--drop-missing", "src/app.py", "./src/app.py")
+        assert result.crash is None, repr(result.crash)
+        assert result.exit_code == 0, result.output
+        dropped = [s for s in result.output.splitlines() if s.startswith("dropped:")]
+        assert len(dropped) == 1, result.output
+        assert "src/app.py" not in _lock(repo)["files"]
+
     @pytest.mark.parametrize(
         "make_unhashable",
         [
@@ -477,6 +490,13 @@ def _kinds(repo) -> dict:
         s["symbol"]: s["invalidation_scope"]
         for s in _lock(repo)["files"]["src/app.py"]["scopes"]
     }
+
+
+def _gone_line(output: str) -> str:
+    """The one line of ``output`` that reports a gone symbol."""
+    lines = [line for line in output.splitlines() if line.startswith("gone:")]
+    assert len(lines) == 1, output
+    return lines[0]
 
 
 def _version_1_lock(repo, scopes=(("B602", "risky"),)) -> bytes:
@@ -648,6 +668,78 @@ class TestInvalidationScope:
         unlocked = _run("verify")
         assert unlocked.exit_code == 1 and "unlocked: src/app.py" in unlocked.output
 
+    def test_a_gone_symbol_is_told_to_drop_its_entry_before_the_add(self, repo):
+        # add checks every recorded scope first, so the renamed symbol is
+        # refused while the old name's scope reads gone: the drop comes first,
+        # and it records the file's other suppressions again.
+        assert (
+            _add(
+                repo, "risky", "B602", "src/app.py", "--invalidation-scope", "symbol"
+            ).exit_code
+            == 0
+        )
+        _edit(repo, "def risky():", "def renamed():")
+        for result in (_run("refresh", "src/app.py"), _run("verify")):
+            assert result.exit_code == 1, result.output
+            line = _gone_line(result.output)
+            assert "--drop-missing" in line and "ash suppress add" in line, line
+            assert line.index("--drop-missing") < line.index("ash suppress add"), line
+            assert "records the file's other suppressions again" in line, line
+        refused = _add(
+            repo, "renamed", "B602", "src/app.py", "--invalidation-scope", "symbol"
+        )
+        assert refused.exit_code == 1, refused.output
+        assert "--drop-missing" in refused.output
+
+    def test_the_advised_order_records_a_renamed_symbol(self, repo):
+        assert (
+            _add(
+                repo, "risky", "B602", "src/app.py", "--invalidation-scope", "symbol"
+            ).exit_code
+            == 0
+        )
+        _edit(repo, "def risky():", "def renamed():")
+        # The order the gone line gives: rename the suppression in the config,
+        # drop the old name's record, then add the new name.
+        (repo / ".ash.yaml").write_text(
+            CONFIG
+            + "    - rule_id: B602\n      path: src/app.py\n      symbol: renamed\n"
+            "      reason: It is constant.\n",
+            encoding="utf-8",
+        )
+        dropped = _run("refresh", "--drop-missing", "src/app.py")
+        assert dropped.exit_code == 0, dropped.output
+        added = _add(
+            repo, "renamed", "B602", "src/app.py", "--invalidation-scope", "symbol"
+        )
+        assert added.exit_code == 0, added.output
+        assert _kinds(repo) == {"renamed": "symbol"}
+
+    def test_a_file_named_twice_with_a_symbol_is_reviewed_once(self, repo):
+        # The second review of the one key found no scope for the symbol the
+        # first had dropped and was refused, so the lock was never written.
+        assert (
+            _add(
+                repo, "risky", "B602", "src/app.py", "--invalidation-scope", "symbol"
+            ).exit_code
+            == 0
+        )
+        assert _add(repo, symbol="other").exit_code == 0
+        _edit(repo, "def risky():", "def renamed():")
+        result = _run(
+            "refresh",
+            "--drop-missing",
+            "--symbol",
+            "risky",
+            "--invalidation-scope",
+            "symbol",
+            "src/app.py",
+            "./src/app.py",
+        )
+        assert result.crash is None, repr(result.crash)
+        assert result.exit_code == 0, result.output
+        assert _kinds(repo) == {"other": "file"}
+
     def test_a_rename_under_file_scope_is_a_refresh(self, repo):
         assert _add(repo).exit_code == 0
         _edit(repo, "def risky():", "def renamed():")
@@ -783,3 +875,29 @@ class TestConfigDefault:
             .exit_code
             == 0
         )
+
+    def test_an_explicit_kind_is_not_refused_for_a_bad_default(self, repo):
+        # The config's default is read only when --invalidation-scope is absent.
+        self._config(repo, "bogus")
+        result = _add(
+            repo, "risky", "B602", "src/app.py", "--invalidation-scope", "file"
+        )
+        assert result.exit_code == 0, result.output
+        assert _kinds(repo) == {"risky": "file"}
+
+    def test_an_env_tagged_default_is_refused_naming_the_reference(self, repo):
+        self._config(repo, "!ENV ${ASH_SCOPE}")
+        refused = _add(repo)
+        assert refused.exit_code == 1, refused.output
+        # Without the repository's path, which holds the test's own name.
+        text = refused.output.replace(repo.resolve().as_posix(), "<repo>")
+        assert "${ASH_SCOPE}" in text
+        assert "environment" in text
+
+    def test_an_explicit_kind_is_not_refused_for_an_env_tagged_default(self, repo):
+        self._config(repo, "!ENV ${ASH_SCOPE}")
+        result = _add(
+            repo, "risky", "B602", "src/app.py", "--invalidation-scope", "symbol"
+        )
+        assert result.exit_code == 0, result.output
+        assert _kinds(repo) == {"risky": "symbol"}

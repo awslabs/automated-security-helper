@@ -11,7 +11,8 @@ touch without changing what the definition means:
 - every token on the span's lines (the line window), so in
   ``const a = () => 1, b = () => evil();`` an edit to ``b`` invalidates ``a``;
 - every definition bearing the name (overloads, a redefinition);
-- the headers of the definitions it sits in (bases, decorators, parameters);
+- the headers of the definitions it sits in (bases, decorators, parameters,
+  and the directive prologue at the top of an enclosing function's body);
 - the file's prelude (byte order mark, encoding declaration, ``#!``,
   ``from __future__``, the directive prologue).
 
@@ -50,6 +51,12 @@ def _same(first: bytes, second: bytes, symbol: str, name: str = "a.py") -> bool:
     other = _digest(second, symbol, name)
     assert one is not None and other is not None, (one, other)
     return one == other
+
+
+# A member's decorator, a comment line, then the member. tree-sitter-typescript
+# puts a member's decorator beside it in the class body, so there the comment is
+# a sibling between the two; plain JavaScript makes the decorator the method's own.
+COMMENTED_MEMBER = b"class W {\n  @log()\n  // a note\n  render() { return 1; }\n}\n"
 
 
 class TestLineWindow:
@@ -111,6 +118,43 @@ class TestLineWindow:
             "a.ts",
         )
 
+    @pytest.mark.parametrize("name", ["a.ts", "a.tsx"])
+    @pytest.mark.parametrize(
+        "old, new",
+        [(b"@log()", b"@trace()"), (b"  @log()\n", b"")],
+        ids=["swapped", "removed"],
+    )
+    def test_a_comment_after_the_decorator_keeps_it_the_members(self, name, old, new):
+        assert old in COMMENTED_MEMBER
+        changed = COMMENTED_MEMBER.replace(old, new)
+        assert not _same(COMMENTED_MEMBER, changed, "W.render", name)
+
+    @pytest.mark.parametrize(
+        "source, old, new, symbol, name",
+        [
+            pytest.param(
+                b"class A:\n    @cached\n    # a note\n    def m(self): return 1\n",
+                b"@cached",
+                b"@other",
+                "A.m",
+                "a.py",
+                id="python",
+            ),
+            pytest.param(
+                COMMENTED_MEMBER,
+                b"@log()",
+                b"@trace()",
+                "W.render",
+                "a.js",
+                id="javascript",
+            ),
+        ],
+    )
+    def test_python_and_javascript_keep_a_decorator_behind_a_comment(
+        self, source, old, new, symbol, name
+    ):
+        assert not _same(source, source.replace(old, new), symbol, name)
+
 
 class TestOccurrences:
     def test_a_second_definition_of_the_name_changes_it(self):
@@ -147,6 +191,15 @@ class TestHeaders:
         assert not _same(source, decorated, "A.m.inner")
         assert not _same(source, decorated, "A.m")
 
+    @pytest.mark.parametrize("name", ["a.ts", "a.tsx"])
+    def test_a_comment_after_an_enclosing_members_decorator_keeps_it(self, name):
+        source = (
+            b"class W {\n  @log()\n  // a note\n  render() {\n"
+            b"    function inner() { return 1; }\n    return inner;\n  }\n}\n"
+        )
+        changed = source.replace(b"@log()", b"@trace()")
+        assert not _same(source, changed, "W.render.inner", name)
+
     def test_an_outer_functions_parameters_change_the_inner_one(self):
         source = (
             b"def outer(p):\n    def inner():\n        return 1\n    return inner\n"
@@ -164,6 +217,54 @@ class TestHeaders:
         assert not _same(klass, klass.replace(b"B", b"C"), "A.m", "a.java")
         record = b"record R(int x) {\n  void m() { }\n}\n"
         assert not _same(record, record.replace(b"int x", b"long x"), "R.m", "a.java")
+
+    def test_a_directive_in_an_enclosing_body_changes_the_nested_symbol(self):
+        source = b'function outer() {\n  "use strict";\n  function inner() { return 1; }\n}\n'
+        assert not _same(
+            source,
+            source.replace(b'"use strict";', b'"use asm";'),
+            "outer.inner",
+            "a.js",
+        )
+
+    @pytest.mark.parametrize(
+        "source, symbol",
+        [
+            pytest.param(
+                b'const outer = () => {\n  "use strict";\n  function inner() { return 1; }\n  return inner;\n};\n',
+                "outer.inner",
+                id="arrow-function",
+            ),
+            pytest.param(
+                b'class C {\n  m() {\n    "use strict";\n    function inner() { return 1; }\n    return inner;\n  }\n}\n',
+                "C.m.inner",
+                id="method",
+            ),
+            pytest.param(
+                b'function outer() {\n  // a note\n  "use strict";\n  function inner() { return 1; }\n}\n',
+                "outer.inner",
+                id="after-a-comment",
+            ),
+        ],
+    )
+    def test_the_directive_prologue_of_an_enclosing_body_changes_the_nested_symbol(
+        self, source, symbol
+    ):
+        changed = source.replace(b'"use strict";', b'"use asm";')
+        assert changed != source
+        assert not _same(source, changed, symbol, "a.js")
+
+    def test_a_comment_in_an_enclosing_body_does_not_change_the_nested_symbol(self):
+        source = (
+            b"function outer() {\n  // a note\n  function inner() { return 1; }\n}\n"
+        )
+        changed = source.replace(b"// a note", b"// another note")
+        assert _same(source, changed, "outer.inner", "a.js")
+
+    def test_a_python_docstring_in_an_enclosing_body_does_not_change_it(self):
+        source = b'def outer():\n    "doc"\n    def inner():\n        return 1\n    return inner\n'
+        changed = source.replace(b'"doc"', b'"another doc"')
+        assert _same(source, changed, "outer.inner")
 
 
 LIMITS = b"""\
@@ -214,15 +315,6 @@ class TestWhatItDoesNotCover:
     def test_an_edit_inside_it_is_seen(self, old, new, symbol):
         assert not _same(LIMITS, LIMITS.replace(old, new), symbol)
 
-    def test_a_directive_in_an_enclosing_body_is_not_covered(self):
-        source = b'function outer() {\n  "use strict";\n  function inner() { return 1; }\n}\n'
-        assert _same(
-            source,
-            source.replace(b'"use strict";', b'"use asm";'),
-            "outer.inner",
-            "a.js",
-        )
-
 
 class TestPrelude:
     SOURCE = b"x = 1\n\n\ndef f():\n    return 1\n"
@@ -261,6 +353,25 @@ class TestComments:
     def test_a_whitespace_edit_inside_does_not(self):
         assert _same(self.SOURCE, b"def f( ):\n\treturn  1\n", "f")
 
+    # Spaces in JSX text are text the element renders, not layout between tokens.
+    @pytest.mark.parametrize(
+        "first, second",
+        [
+            pytest.param(
+                b"export const A = () => <div>hi {x}</div>;\n",
+                b"export const A = () => <div>hi{x}</div>;\n",
+                id="a-space-before-an-expression",
+            ),
+            pytest.param(
+                b"export const A = () => <p>a  b</p>;\n",
+                b"export const A = () => <p>a b</p>;\n",
+                id="two-spaces-in-the-text",
+            ),
+        ],
+    )
+    def test_whitespace_in_jsx_text_changes_it(self, first, second):
+        assert not _same(first, second, "A", "a.tsx")
+
 
 class TestNesting:
     SOURCE = b"class Outer:\n    class Inner:\n        def m(self):\n            return 1\n\n    def other(self):\n        return 2\n"
@@ -283,6 +394,42 @@ class TestNames:
         assert _digest(source, "f") is not None
 
     def test_a_name_no_symbol_can_spell_is_never_digested(self):
-        source = b"class A:\n    pass\n"
-        assert _digest(source, "\x00A") is None
-        assert _digest(source, "A") is not None
+        # Definitions whose names fail SYMBOL_PATTERN, at the top of a file and
+        # under the spellable A: a name holding a middle dot (U+00B7), which
+        # JavaScript and Python identifiers allow and the pattern's word class
+        # does not, and class methods named by a string and by a number. chr()
+        # builds the dot, which keeps this file ASCII.
+        dotted = ("a" + chr(0xB7) + "b").encode("utf-8")
+        javascript = (
+            b"class A {\n  'x-y'() { return 1; }\n  1() { return 2; }\n}\nfunction "
+            + dotted
+            + b"() { return 3; }\n"
+        )
+        python = (
+            b"class A:\n    def "
+            + dotted
+            + b"(self):\n        return 1\n\n\ndef "
+            + dotted
+            + b"():\n    return 2\n"
+        )
+        unspellable = symbol_spans._UNSPELLABLE
+        found = []
+        for source, name in ((javascript, "a.js"), (python, "a.py")):
+            analysis = symbol_spans.analyze(source, name)
+            assert analysis.spans is not None, (name, analysis.reason)
+            # The control, a name that can be spelled. This first symbol_digest
+            # call also fills the analysis's occurrence table.
+            assert analysis.symbol_digest("A") is not None, name
+            # The occurrence table is private, with no accessor, and it is what
+            # symbol_digest looks a name up in: a name read from it is a
+            # definition, so a None for it comes from the guard, not "not found".
+            found += [
+                (analysis, qualified)
+                for qualified in analysis._occurrences or {}
+                if unspellable in qualified
+            ]
+        names = [qualified for _, qualified in found]
+        assert any(n.startswith(unspellable) for n in names), names
+        assert any(not n.startswith(unspellable) for n in names), names
+        digested = [q for a, q in found if a.symbol_digest(q) is not None]
+        assert digested == []

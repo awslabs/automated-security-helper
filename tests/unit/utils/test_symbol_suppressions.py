@@ -954,16 +954,6 @@ class TestApplyToSarif:
         root = tmp_path / "src_root"
         _write(root, "src/app.py", PYTHON_SOURCE)
         _write(root, "other/untouched.py", PYTHON_SOURCE)
-        parsed = []
-        real = symbol_spans._parse
-
-        def counting(source, grammar):
-            parsed.append(grammar.language)
-            return real(source, grammar)
-
-        # The one parse function: the lock binds of _context below and both
-        # passes share one analysis of the file's bytes.
-        monkeypatch.setattr(symbol_spans, "_parse", counting)
         lines = [
             _line(PYTHON_SOURCE, "MARK module_function body"),
             _line(PYTHON_SOURCE, "MARK Outer.Inner.method body"),
@@ -971,11 +961,31 @@ class TestApplyToSarif:
         ]
         supp = _suppression(symbol="module_function")
         context = _context(root, tmp_path / "out", [supp])
+        parsed = []
+        real = symbol_spans._parse
+
+        def counting(source, grammar):
+            parsed.append(grammar.language)
+            return real(source, grammar)
+
+        # A scan runs in another process from the one that bound the lock, so it
+        # starts with no analysis of the file: the cache is emptied after the
+        # binds of _context, and the one parse counted from here is the scan's
+        # own, which both passes share.
+        symbol_spans.clear_symbol_cache()
+        monkeypatch.setattr(symbol_spans, "_parse", counting)
         # Twice, as a scan does: once per scanner's SARIF, once for the aggregate.
         for _ in range(2):
-            apply_suppressions_to_sarif(_sarif("src/app.py", lines), context)
+            report = apply_suppressions_to_sarif(_sarif("src/app.py", lines), context)
+            in_symbol, nested, conditional = report.runs[0].results
+            assert in_symbol.suppressions and len(in_symbol.suppressions) == 1
+            assert not nested.suppressions
+            assert not conditional.suppressions
             # Findings the entry's path does not match never cause a parse.
-            apply_suppressions_to_sarif(_sarif("other/untouched.py", lines), context)
+            other = apply_suppressions_to_sarif(
+                _sarif("other/untouched.py", lines), context
+            )
+            assert not any(r.suppressions for r in other.runs[0].results)
         assert parsed == ["Python"]
 
     def test_config_without_symbols_never_builds_a_resolver(

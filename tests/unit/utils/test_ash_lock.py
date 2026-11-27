@@ -463,6 +463,18 @@ class TestRefusalWithoutALockEntry:
         assert "ash suppress refresh src/app.py" in stale
         assert "--drop-missing" not in stale
 
+    def test_a_gone_symbol_is_advised_the_drop_before_the_add(self, tmp_path):
+        # `ash suppress add` of the renamed symbol is refused while the old
+        # name's scope reads gone, so the notice names the drop first.
+        from automated_security_helper.utils.ash_lock import stale_notice
+
+        root = _tree(tmp_path)
+        entry = _lock(root, LockScope("B602", "risky", "symbol")).entries["src/app.py"]
+        gone = stale_notice("src/app.py", entry, "gone", symbol="risky")
+        assert "no longer defines risky" in gone
+        assert "--drop-missing" in gone and "ash suppress add" in gone, gone
+        assert gone.index("--drop-missing") < gone.index("ash suppress add"), gone
+
     def test_a_damaged_lock_is_refused_not_read_as_empty(self, tmp_path):
         root = _tree(tmp_path)
         lock_path = root / LOCK_RELATIVE_PATH
