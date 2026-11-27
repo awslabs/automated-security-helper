@@ -1683,6 +1683,11 @@ def reporter_section(config: Optional["AshConfig"], reporter_class: type) -> Any
     section comes from the operator's configuration instead, whole: its
     ``enabled`` and every option. Where the repository's file set it differently,
     one warning says so, naming the remedy.
+
+    For such a reporter, a list of the section a ``+=`` override started from its
+    appended items, in a section no plugin ASH ships reads, holds no default: one
+    warning in each run names its key
+    (``resolve_config.warn_of_appends_an_off_host_reporter_runs_with``).
     """
     from automated_security_helper.base.plugin_config import plugin_config_key
 
@@ -1690,8 +1695,14 @@ def reporter_section(config: Optional["AshConfig"], reporter_class: type) -> Any
     section = _reporter_section_of(config, key)
     if config is None or getattr(reporter_class, "sends_off_host", False) is not True:
         return section
+    # Imported here: resolve_config imports this module.
+    from automated_security_helper.config.resolve_config import (
+        warn_of_appends_an_off_host_reporter_runs_with,
+    )
+
     operator = getattr(config, "_operator_reporters", None)
     if operator is None:
+        warn_of_appends_an_off_host_reporter_runs_with(config, None, key, section)
         return section
     operator_section = _reporter_section_of(operator, key)
     if (
@@ -1721,4 +1732,7 @@ def reporter_section(config: Optional["AshConfig"], reporter_class: type) -> Any
             ),
             extra=NO_MARKUP,
         )
+    warn_of_appends_an_off_host_reporter_runs_with(
+        config, operator, key, operator_section
+    )
     return operator_section

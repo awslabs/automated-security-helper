@@ -727,7 +727,9 @@ class TestAppendOntoAnUntypedPluginOption:
     configuration names the key in one warning for each run
     (``warn_unread_appends``). The same overrides are applied again to other
     bases (the trusted views, the replays, the MCP gate), which can lack a key the
-    real document holds, and those applications never warn.
+    real document holds, and those applications never warn. A reporter that sends
+    findings off the host runs with such a view's section, and building it names
+    the key.
 
     An append is not refused for having no default to add to. A respelling of a
     section the file wrote is refused, since the append would land in a section
@@ -1213,8 +1215,10 @@ class TestAppendOntoAnUntypedPluginOption:
         (``_with_reporter_overrides``, ``_with_scanner_overrides``), which holds no
         such section, so the replayed list starts from the appended items, and the
         replay used to log that no plugin reads the section and advise ``=[...]``
-        for a list the scan had extended. Only the control key, which the file did
-        not write, is named, once.
+        for a list the scan had extended. A reporter that sends findings off the
+        host runs with the replayed list, and building it names the key (the
+        off-host reporter tests of this class); no reporter is built here. Only the
+        control key, which the file did not write, is named, once.
 
         ``resolve_config`` returns before the trusted replays when its chain holds
         no file inside the scanned tree, so the file is the repository's, in a
