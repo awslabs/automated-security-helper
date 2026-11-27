@@ -649,8 +649,12 @@ refuses such a config too, with exit code 3. The refusal covers the file a clien
 
 `get_config` never returns a value that a config read from the environment, since the server's
 environment is not the client's. The resolved config shows such a value as `<from ${VAR}>`, and
-with `raw` the reference appears as the file wrote it. For how a scan's results record such a
-value, see [Read values from the environment](configure.md#environment).
+with `raw` the reference appears as the file wrote it. A reference that resolves to blank text
+has no value, and the resolved config shows `null` there. That text is the variable's value when
+the variable is set, even to blank text, and its default otherwise, with any text the file wrote
+after the reference. So the answer can tell that the text is blank, but never shows what a
+variable holds. For how a scan's results record such a value, see
+[Read values from the environment](configure.md#environment).
 
 Suppressions and ignore paths in a delivered config are applied, and marked as coming from the
 client:

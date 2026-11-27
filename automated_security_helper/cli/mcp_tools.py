@@ -5172,16 +5172,21 @@ def mcp_get_config(
         shown as a scan of that checkout applies them, ignored:
         ``<operator only; ignored from this file: VALUE>``. VALUE shows every
         literal the client's file wrote exactly as written. A value the file
-        wrote as a reference is the server's, so VALUE is never that value: it
-        is ``<from ${VAR}>``, built from the variable's name alone, whether or
-        not the variable is set. A reference that resolves to nothing (its
-        variable unset and its default empty, blank or ``None``, or its
-        variable set to blank text, with no text after the reference) leaves
-        the option no value and so no reference to show: VALUE is ``null``
-        then, and ``<from ${VAR}>`` once the variable holds text, so for such
-        a reference the answer says whether the variable holds text, never
-        what it holds. Nothing in the answer depends on whether a literal
-        equals, or contains, a value the server read. The one
+        wrote as a reference is the server's, so VALUE is never that value:
+        while the reference resolves to text, it is ``<from ${VAR}>``, built
+        from the variable's name alone, whether the text came from the
+        variable or from its default. A reference resolves to nothing when the
+        text it resolves to (the variable's value when the variable is set,
+        even to blank text, and its default otherwise, ``None`` read as empty),
+        together with any text the file wrote after it, is blank: the option
+        then has no value and no reference to show, and VALUE is ``null`` (a
+        mapping key that resolves to nothing is shown as ``null`` too). So
+        VALUE tells whether that text is blank, never what it is: with an
+        empty, blank or ``None`` default, whether the variable holds text; with
+        any other default, whether the variable is set to blank text. A
+        reference with no default fails the load while its variable is unset.
+        Nothing in the answer depends on whether a literal equals, or
+        contains, a value the server read. The one
         condition is where a value came from: a place a file of the chain that
         is not the client's (the operator's, or a base outside every checkout)
         also writes is shown as ``<withheld>`` whatever it holds. A refused path returns ``success`` False with ``error_type``
@@ -5550,9 +5555,9 @@ def _answer_get_config(
         # place, so it never runs over a marker. The markers are built from the
         # record (settings), never from the dump: a literal the client's file
         # wrote is shown as written, a value it wrote as a reference is shown by
-        # the reference (one that resolves to nothing as null: it leaves no
-        # value), and a place a file that is not the client's also writes is
-        # withheld.
+        # the reference (one that resolved to nothing as null: the record holds
+        # None there), and a place a file that is not the client's also writes
+        # is withheld.
         return mark_operator_only_options(
             shown_config(base, base.model_dump()),
             settings,
@@ -5923,13 +5928,14 @@ def _answer_get_config(
         # An option the chain read from the environment is marked by the
         # reference it was written as, never by its value: the loader's mark on
         # the record's value (``EnvResolvedScalar.variable``) names the
-        # variable, so both routes show the same ``<from ${VAR}>`` whether or
-        # not the variable is set, and the option stays marked: the client
-        # reads that the file set an option a scan ignores. A reference that
-        # resolves to nothing leaves the record no value and no mark, and is
-        # shown as null (_marker_value). Every literal the client's file wrote
-        # is shown as written, whatever it equals or
-        # contains: nothing in the answer depends on a value the server read.
+        # variable, so both routes show the same ``<from ${VAR}>`` whether the
+        # text came from the variable or from its default, and the option stays
+        # marked: the client reads that the file set an option a scan ignores.
+        # A reference that resolved to nothing leaves None in the record, which
+        # carries no loader mark, so it is shown as null (_marker_value gives
+        # the rule). Every literal the client's file wrote is shown as written,
+        # whatever it equals or contains: how a literal is shown never depends
+        # on a value the server read.
         # A place a chain file that is not the client's also writes, or that
         # the client's file wrote beside such a file, is withheld whatever its
         # value is (RepositorySettings.withheld).

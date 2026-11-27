@@ -8,17 +8,19 @@ get_config shows the operator-only options a file in a git checkout sets
 detect-secrets ``max_worker_output_mib``) as ``<operator only; ignored from this
 file: VALUE>``, because a scan of that checkout ignores them. VALUE shows every
 literal the client's file wrote exactly as written. A value the file wrote as a
-reference (``${VAR}``, ``${VAR:default}``, with or without text after it) is
-shown as ``<from ${VAR}>`` whether or not the variable is set, from the
-variable's name the loader's own mark carries, so the answer does not depend on
-what the server's environment holds: a literal that equals or contains a value
-the server read is shown as written, the same as one that does not, and a guess
-gets the same answer as a miss. The one exception is a reference that resolves
-to nothing: with its variable unset and its default empty, blank or ``None``,
-or with its variable set to blank text, the loader gives the option no value
-and no mark, so it is shown as ``null``, and as ``<from ${VAR}>`` once the
-variable holds text. The answer then says whether the variable holds text,
-never what it holds.
+reference (``${VAR}``, ``${VAR:default}``, with or without text after it) that
+resolves to text is shown as ``<from ${VAR}>``, from the variable's name the
+loader's own mark carries, whether the text came from the variable or from its
+default: a literal that equals or contains a value the server read is shown as
+written, the same as one that does not, and a guess gets the same answer as a
+miss. A reference resolves to nothing when the text it resolves to (the
+variable's value when the variable is set, even to blank text, its default
+otherwise) and any text after it are blank. The loader then gives the option no
+value and no mark, so the marker shows ``null``, for a key as for a value: it
+tells whether that text is blank, never what it is. With an empty, blank or
+``None`` default that is whether the variable holds text; with any other
+default, whether the variable is set to blank text. A reference with no default
+fails the load while its variable is unset.
 
 The one condition is where a value came from. A place that a file of the chain
 that is not the client's (the operator's own file, or a base outside every
@@ -37,10 +39,11 @@ from the data.
 More cells pin what the marker is made of. A value the operator's own file read
 from the environment is never replaced inside a marker written at the place its
 reference sits, because the display walk runs on the dump before the markers go
-in. A reference with a default is shown by its reference, the variable set or
-not. A reference that resolves to nothing is shown as null until its variable
-holds text, and one with no default still fails the load while its variable is
-unset.
+in. A reference with a non-blank default is shown by its reference whether its
+variable is unset or holds text, and as null while the variable is set to blank
+text. A reference that resolves to nothing is shown as null, a key as well as a
+value, while text after the reference keeps it from resolving to nothing. A
+reference with no default still fails the load while its variable is unset.
 """
 
 import contextlib
@@ -615,14 +618,24 @@ _BOTH_ROUTES = pytest.mark.parametrize(
         ),
         pytest.param("${ASH_TEST_BLANK_SCOPE}", "", id="set-to-empty-text"),
         pytest.param("${ASH_TEST_BLANK_SCOPE}", "   ", id="set-to-blanks"),
+        # A variable set to blank text is read before any default, so a
+        # reference with a non-blank default resolves to nothing as well.
+        pytest.param(
+            "${ASH_TEST_BLANK_SCOPE:a-default}", "", id="default-set-to-empty-text"
+        ),
+        pytest.param(
+            "${ASH_TEST_BLANK_SCOPE:a-default}", "   ", id="default-set-to-blanks"
+        ),
     ],
 )
 def test_a_reference_that_resolves_to_nothing_is_shown_as_null(
     tmp_path, monkeypatch, answer, written, held
 ):
-    """A reference that resolves to nothing gives the option no value: the
-    loader returns None for it (``resolve_env_references``), which carries no
-    mark and no variable name, so the marker shows ``null`` on both routes."""
+    """A reference resolves to nothing when the text it resolves to, with any
+    text after it, is blank: the default with the variable unset, or the
+    variable's own blank text when it is set, whatever the default. The loader
+    returns None for it (``resolve_env_references``), which carries no mark
+    and no variable name, so the marker shows ``null`` on both routes."""
     if held is None:
         monkeypatch.delenv(_BLANK_VAR, raising=False)
     else:
@@ -641,6 +654,7 @@ def test_a_reference_that_resolves_to_nothing_is_shown_as_null(
         pytest.param("${ASH_TEST_BLANK_SCOPE:}", id="empty-default"),
         pytest.param("${ASH_TEST_BLANK_SCOPE:None}", id="none-default"),
         pytest.param('!ENV "${ASH_TEST_BLANK_SCOPE:   }"', id="blank-default"),
+        pytest.param("${ASH_TEST_BLANK_SCOPE:a-default}", id="non-blank-default"),
         pytest.param("${ASH_TEST_BLANK_SCOPE}", id="no-default"),
     ],
 )
@@ -675,6 +689,68 @@ def test_a_reference_with_no_default_still_fails_the_load_while_its_variable_is_
     assert result.get("success") is False, result
     assert result.get("error_category") == "invalid_format", result
     assert _BLANK_VAR in json.dumps(result, default=str), result
+
+
+@_BOTH_ROUTES
+@pytest.mark.parametrize(
+    "written, held",
+    [
+        pytest.param("${ASH_TEST_BLANK_SCOPE:}-tail", None, id="empty-default-unset"),
+        pytest.param("${ASH_TEST_BLANK_SCOPE}-tail", "", id="set-to-empty-text"),
+    ],
+)
+def test_a_reference_with_text_after_it_does_not_resolve_to_nothing(
+    tmp_path, monkeypatch, answer, written, held
+):
+    """Text the file wrote after the reference is part of what it resolves to,
+    so with the reference's own text blank it still resolves to ``-tail``: the
+    loader marks it, and the marker shows ``<from ${ASH_TEST_BLANK_SCOPE}>``,
+    without the tail, as for any other reference that resolves to text."""
+    if held is None:
+        monkeypatch.delenv(_BLANK_VAR, raising=False)
+    else:
+        monkeypatch.setenv(_BLANK_VAR, held)
+    body = _section(f"findings_scope: {written}\n")
+
+    result = answer(tmp_path, monkeypatch, body)
+
+    assert _scope(result) == _IGNORED + _BLANK_REFERENCE + ">", result
+
+
+@_BOTH_ROUTES
+@pytest.mark.parametrize(
+    "key, held, shown",
+    [
+        pytest.param(
+            "${ASH_TEST_BLANK_SCOPE:}", None, "null", id="key-resolving-to-nothing"
+        ),
+        pytest.param("~", None, "null", id="null-key-the-file-wrote"),
+        pytest.param(
+            "${ASH_TEST_BLANK_SCOPE:}",
+            _SERVER_TEXT,
+            _BLANK_REFERENCE,
+            id="key-holding-text",
+        ),
+    ],
+)
+def test_a_key_that_resolves_to_nothing_is_shown_as_null(
+    tmp_path, monkeypatch, answer, key, held, shown
+):
+    """A mapping key gets the reading a value gets. One that resolves to
+    nothing is None, which carries no mark, so the marker shows it as
+    ``null``, as JSON spells a None key and as a None value is shown, and a
+    null key the file wrote reads the same. Once the variable holds text, the
+    key is shown by its reference, and the text is nowhere in the answer."""
+    if held is None:
+        monkeypatch.delenv(_BLANK_VAR, raising=False)
+    else:
+        monkeypatch.setenv(_BLANK_VAR, held)
+    body = _section(f"findings_scope:\n  {key}: literal-entry\n")
+
+    result = answer(tmp_path, monkeypatch, body)
+
+    expected = _IGNORED + json.dumps({shown: "literal-entry"}) + ">"
+    assert not _wrong(result, _scope(result), expected, _SERVER_TEXT), result
 
 
 def test_aws_region_read_from_the_environment_is_left_out_and_not_marked(

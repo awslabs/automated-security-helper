@@ -1327,31 +1327,37 @@ def _marker_value(value: Any) -> str:
     1. A leaf (or key) the loader marked as written by reference
        (``EnvResolvedScalar``) with a variable name is shown as that reference,
        ``<from ${VAR}>``, built from the variable's name alone. Whether the
-       variable was set, and so whether the loader's own ``shown`` text holds
-       the reference or the default, makes no difference: ``${VAR}``,
-       ``${VAR:default}`` and either with text after the reference are all
-       ``<from ${VAR}>``. The text a file wrote after the reference is not
-       shown (the default case cannot be split into default and tail), so two
-       keys of one mapping that differ only after the reference become one key
-       in the shown mapping, the later one kept.
+       text came from the variable or from its default, and so whether the
+       loader's own ``shown`` text holds the reference or the default, makes
+       no difference: ``${VAR}``, ``${VAR:default}`` and either with text after
+       the reference are all ``<from ${VAR}>`` while they resolve to text. The
+       text a file wrote after the reference is not shown (the default case
+       cannot be split into default and tail), so two keys of one mapping that
+       differ only after the reference become one key in the shown mapping,
+       the later one kept.
     2. A leaf or key that is such a mark with no variable name cannot be shown
        as a reference, so the whole of *value* is ``WITHHELD_PLACEHOLDER``,
        the entries beside it included.
-    3. Any other leaf is the file's own text, shown as written as JSON on one
+    3. A leaf or key the loader left as ``None`` is shown as ``null``, the
+       spelling JSON gives it: a reference that resolved to nothing (below),
+       or a null the file wrote.
+    4. Any other leaf is the file's own text, shown as written as JSON on one
        line. A date, time or bytes a YAML or TOML file writes is not JSON and
        is shown as text (``default=str``) instead of raising out of the
-       marking. What it equals or contains is never read: nothing in the
-       answer depends on a value the server read, so a guess at one gets the
-       answer a miss gets.
+       marking. What it equals or contains is never read: how a literal is
+       shown never depends on a value the server read, so a guess at one gets
+       the answer a miss gets.
 
-    A reference that resolves to nothing carries no mark and is not shown
-    under 1. With its variable unset and its default empty, blank or
-    ``None``, or with its variable set to blank text, and no text after the
-    reference, the loader gives the place no value (``None``; see
-    ``resolve_env_references``), shown here as ``null``. Once the variable
-    holds text, the same reference is shown as ``<from ${VAR}>``. For such a
-    reference the marker says whether the variable holds text, never what it
-    holds.
+    A reference resolves to nothing when the text it resolves to (the
+    variable's value when the variable is set, even to blank text, and its
+    default otherwise, ``None`` read as empty), together with any text the
+    file wrote after it, is blank. The loader then gives the place ``None``
+    (``resolve_env_references``), which carries no mark, so it is shown under
+    3, while the same reference is shown under 1 whenever it resolves to
+    text. So the marker tells whether that text is blank, never what it is:
+    with an empty, blank or ``None`` default, whether the variable holds
+    text; with any other default, whether the variable is set to blank text.
+    A reference with no default does not load while its variable is unset.
 
     A set or frozenset is shown as a JSON list of its members, in the order
     of their shown text, so one set always has one marker.
@@ -1389,6 +1395,12 @@ def _marker_value(value: Any) -> str:
         marker = reference_of(name)
         if marker is not None:
             return marker
+        if name is None:
+            # Rule 3: a key the loader left as None (a reference that resolved
+            # to nothing, or a null the file wrote) is shown as a None leaf is,
+            # in the spelling json.dumps gives a None key. str(None) would
+            # show Python's spelling instead.
+            return "null"
         return name if isinstance(name, str) else str(name)
 
     def shown_leaves(node: Any) -> Any:
@@ -1439,12 +1451,13 @@ def mark_operator_only_options(
     named is the configuration's own, and is shown as it is. Every option
     *data* holds that *written* does not name is left as it is.
 
-    VALUE is the client's file's own text, shown as ``_marker_value`` shows
+    VALUE is what the client's file wrote, shown as ``_marker_value`` shows
     it: every literal exactly as written, and a leaf or key written as a
-    reference as ``<from ${VAR}>`` (one that resolves to nothing as ``null``,
-    which says whether its variable holds text; see ``_marker_value``).
-    Nothing in the answer depends on whether a literal equals, or contains, a
-    value the server read, so a guess gets the answer a miss gets.
+    reference as ``<from ${VAR}>`` while it resolves to text and as ``null``
+    when it resolves to nothing, which tells whether that text is blank and
+    never what it is (``_marker_value`` gives the rule). Nothing in the answer
+    depends on whether a literal equals, or contains, a value the server read,
+    so a guess gets the answer a miss gets.
 
     One condition decides whether VALUE is shown at all: whether the value
     came from the client's file. A place that ``written.withheld`` names (one
