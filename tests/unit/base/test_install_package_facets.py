@@ -285,6 +285,50 @@ def test_two_rows_overlap_when_one_host_can_match_both():
     assert not anywhere.overlaps(_row("dnf"))
 
 
+def _on_ids(ids, *versions):
+    """The ``hosts`` of a row declared for several ids at once."""
+    return (ipf.HostMatch(ids=tuple(ids), versions=versions),)
+
+
+def test_two_rows_overlap_when_the_second_of_several_ids_agrees():
+    """The rows real per-OS data will carry name several ids and several releases, so
+    an overlap check that looked only at the first id of a match would pass the
+    single-id rows above and miss these."""
+    rhel_or_rocky_9 = _row("dnf", hosts=_on_ids(("rhel", "rocky"), "9"))
+    rocky_9_6 = _row("dnf", hosts=_on("rocky", "9.6"))
+    almalinux_9 = _row("dnf", hosts=_on("almalinux", "9"))
+
+    assert rhel_or_rocky_9.overlaps(rocky_9_6) and rocky_9_6.overlaps(rhel_or_rocky_9)
+    # The control: no id of the first row is almalinux, whatever the releases say.
+    assert not rhel_or_rocky_9.overlaps(almalinux_9)
+    assert not almalinux_9.overlaps(rhel_or_rocky_9)
+
+
+def test_two_rows_overlap_when_the_second_of_several_host_matches_agrees():
+    debian_13 = _on("debian", "13")
+    ubuntu_24 = _on("ubuntu", "24.04")
+    debian_13_or_ubuntu = _row("apt", hosts=debian_13 + ubuntu_24)
+    ubuntu = _row("apt", hosts=ubuntu_24)
+    fedora = _row("apt", hosts=_on("fedora", "43"))
+
+    assert debian_13_or_ubuntu.overlaps(ubuntu) and ubuntu.overlaps(debian_13_or_ubuntu)
+    # The control: neither host match of the first row is Fedora 43.
+    assert not debian_13_or_ubuntu.overlaps(fedora)
+    assert not fedora.overlaps(debian_13_or_ubuntu)
+
+
+def test_two_rows_overlap_when_the_second_of_several_versions_agrees():
+    twelve_or_thirteen = _row("apt", hosts=_on("debian", "12", "13"))
+    thirteen_one = _row("apt", hosts=_on("debian", "13.1"))
+    eleven = _row("apt", hosts=_on("debian", "11"))
+
+    assert twelve_or_thirteen.overlaps(thirteen_one)
+    assert thirteen_one.overlaps(twelve_or_thirteen)
+    # The control: neither release of the first row is 11.
+    assert not twelve_or_thirteen.overlaps(eleven)
+    assert not eleven.overlaps(twelve_or_thirteen)
+
+
 def test_a_fallback_row_and_the_host_rows_of_one_ecosystem_may_stand_together():
     """The shape row_for documents: rows for the hosts they were read on and one row
     with no hosts for every other host. The shipped-register rule must let it ship."""
