@@ -1318,7 +1318,7 @@ class HostFactsReader:
                 ("pipx", self._pipx_directories),
             ):
                 for directory in directories(platform, flavor):
-                    parts = self._below(directory, normal, flavor)
+                    parts = self._below(directory, prefix, normal, flavor)
                     if parts is not None and self._is_channel_path(channel, parts):
                         return channel
         editable, installer = self._remember(("ash_record",), self._read_ash_record)
@@ -1331,16 +1331,29 @@ class HostFactsReader:
         return bool(parts)
 
     def _below(
-        self, directory: str, normal: str, flavor: Any
+        self, directory: str, prefix: str, normal: str, flavor: Any
     ) -> Optional[tuple[str, ...]]:
-        """The parts of ``normal`` under ``directory``, or None when it is not under it."""
+        """The parts of the prefix under ``directory``, or None when it is not under it.
+
+        ``normal`` is the prefix as written, normalized. The directory is compared with
+        its links followed, and so is the prefix when it is not under the directory as
+        written: an environment is made at the spelling of the directory it is made in,
+        so a home reached through a link (or a Windows junction) puts the link's
+        spelling in ``sys.prefix``.
+        """
         if not flavor.isabs(directory):
             return None
         base = flavor.normcase(flavor.normpath(self._sources.realpath(directory)))
         separator = flavor.sep
-        if base.endswith(separator) or not normal.startswith(base + separator):
+        if base.endswith(separator):
             return None
-        return tuple(part for part in normal[len(base) + 1 :].split(separator) if part)
+        under = base + separator
+        spelled = normal
+        if not spelled.startswith(under):
+            spelled = flavor.normcase(flavor.normpath(self._src("realpath", prefix)))
+            if not spelled.startswith(under):
+                return None
+        return tuple(part for part in spelled[len(under) :].split(separator) if part)
 
     def _uv_tool_directories(self, platform: str, flavor: Any) -> Iterator[str]:
         explicit = self._sources.getenv("UV_TOOL_DIR")
