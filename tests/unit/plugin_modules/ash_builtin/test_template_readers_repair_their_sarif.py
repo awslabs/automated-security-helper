@@ -578,6 +578,32 @@ def test_control_cfn_lint_with_the_model_alone_the_batch_is_lost(tmp_path):
     assert sorted(scanner.unevaluated_targets) == ["a.yaml", "b.yaml"]
 
 
+def test_control_cfn_lint_with_the_model_alone_a_batch_with_a_clean_region_is_kept(
+    tmp_path,
+):
+    """The twin of the control above. The patch is not what empties the report: the
+    same two templates with a region the model reads are kept, so the line-0
+    region is the one thing the control above takes away."""
+    repo = _lint_repo(tmp_path, "a.yaml", "b.yaml")
+    scanner = _lint(repo)
+
+    with patch.object(
+        cfn_lint_scanner,
+        "ingest_sarif",
+        side_effect=lambda raw, record: SarifReport.model_validate(raw),
+    ) as the_model_alone:
+        report = _lint_scan(
+            scanner,
+            _WritesTheBatch(lambda files: _one_result_per_file(files, first_line=3)),
+            repo,
+        )
+
+    the_model_alone.assert_called_once()
+    assert len(report.runs[0].results) == 2
+    assert scanner.targets_failed == 0
+    assert list(scanner.unevaluated_targets) == []
+
+
 # --------------------------------------------------------------------------- #
 # cfn-nag: one SARIF document per template, on stdout
 # --------------------------------------------------------------------------- #
@@ -641,24 +667,47 @@ def test_cfn_nag_keeps_a_templates_findings_when_one_region_is_out_of_spec(
     assert _warnings(report) == [_SENTENCE.format(n=1, parts="part", name="cfn-nag")]
 
 
-def test_cfn_nag_keeps_a_finding_whose_message_holds_a_lone_surrogate_escape(
-    nag, nag_dependencies
+def _a_surrogate_as_a_json_escape(document: dict) -> str:
+    """``json.dumps`` writes the lone surrogate as the six characters ``\\udc80``,
+    as a tool's JSON writer does."""
+    text = json.dumps(document)
+    assert "\\udc80" in text
+    return text
+
+
+def _a_surrogate_as_a_raw_character(document: dict) -> str:
+    """The text a tool's stdout decodes to with ``errors="surrogateescape"`` when it
+    wrote the byte 0x80: the lone surrogate is itself in the string."""
+    text = json.dumps(document, ensure_ascii=False)
+    assert chr(0xDC80) in text
+    return text
+
+
+@pytest.mark.parametrize(
+    "written",
+    [_a_surrogate_as_a_json_escape, _a_surrogate_as_a_raw_character],
+    ids=["json-escape", "raw-character"],
+)
+def test_cfn_nag_keeps_a_finding_whose_message_holds_a_lone_surrogate(
+    nag, nag_dependencies, written
 ):
     """Read as JSON by the model, one such escape anywhere refused the document.
 
-    ``json.dumps`` writes the lone surrogate as the six characters ``\\udc80``, as a
-    tool's JSON writer does.
+    The text is kept in record form (the six characters ``\\udc80``), so the report
+    still serializes to UTF-8, and nothing is repaired: no note, no warning.
     """
     result = _result("F38", 3, "role.yaml")
     result["message"]["text"] = "a name with " + chr(0xDC80) + " in it"
-    text = json.dumps(_document(_NAG_TOOL, result))
-    assert "\\udc80" in text
 
-    report = _nag_scan(nag, text)
+    report = _nag_scan(nag, written(_document(_NAG_TOOL, result)))
 
     assert [r.ruleId for r in report.runs[0].results] == ["F38"]
     assert nag.targets_failed == 0
     assert not nag.unevaluated_targets
+    assert report.runs[0].results[0].message.root.text == "a name with \\udc80 in it"
+    assert report.model_dump_json().encode("utf-8")
+    assert nag.output_ingest_record is None
+    assert _warnings(report) == []
 
 
 def test_cfn_nag_reads_stdout_that_starts_with_a_byte_order_mark(nag, nag_dependencies):
@@ -729,3 +778,21 @@ def test_control_cfn_nag_with_the_model_alone_the_template_is_lost(
     assert report.runs[0].results == []
     assert nag.targets_failed == 1
     assert any("role.yaml" in name for name in nag.unevaluated_targets)
+
+
+def test_control_cfn_nag_with_the_model_alone_a_template_with_a_clean_region_is_kept(
+    nag, nag_dependencies
+):
+    """The twin of the control above: the same template with a region the model
+    reads keeps its finding, so only the line-0 region is lost to the patch."""
+    with patch.object(
+        cfn_nag_scanner,
+        "ingest_sarif",
+        side_effect=lambda raw, record: SarifReport.model_validate(raw),
+    ) as the_model_alone:
+        report = _nag_scan(nag, _document(_NAG_TOOL, _result("F38", 3, "role.yaml")))
+
+    the_model_alone.assert_called_once()
+    assert [r.ruleId for r in report.runs[0].results] == ["F38"]
+    assert nag.targets_failed == 0
+    assert not nag.unevaluated_targets
