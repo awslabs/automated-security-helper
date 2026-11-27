@@ -4799,10 +4799,10 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
       ``remote_client``, ``severity_threshold_restriction``,
       ``keep_previous_results`` and ``trusted_config_path``.
     * NOT FORWARDED on purpose: ``mode`` (rewritten), ``workspace_plan`` (its
-      definition and policy are forwarded as ``--workspace`` and
-      ``--workspace-config``), ``workspace_config_as_named`` (container mode's
-      hand-over spelling; the shell shares this filesystem and gets the
-      resolved path), ``client_overrides`` and ``selection_origin`` (who gave
+      definition is the argument of the ``workspace`` subject and its policy is
+      forwarded as ``--workspace-config``), ``workspace_config_as_named``
+      (container mode's hand-over spelling; the shell shares this filesystem and
+      gets the resolved path), ``client_overrides`` and ``selection_origin`` (who gave
       the options on this side; the inner scan's own are the CLI's), and the
       container-only fields (``build``, ``run``, ``force``, ``oci_runner``,
       ``build_target``, ``container_uid``, ``container_gid``,
@@ -4822,9 +4822,14 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
     if plan is not None:
         # The workspace scan runs inside the shell, as it runs inside the
         # container: the definition and the policy the plan applied are named to
-        # it, on this same filesystem. --source-dir is mutually exclusive with
-        # --workspace; the workspace root is the plan's.
-        argv.extend(["--workspace", str(plan.workspace_file)])
+        # it, on this same filesystem. The definition is the argument of the
+        # `workspace` subject, and the workspace root is the plan's, so no
+        # directory is named. A relative name that starts with a dash is given as
+        # ./name so it is read as a path, not an option.
+        workspace_file = str(plan.workspace_file)
+        if workspace_file.startswith("-"):
+            workspace_file = f"./{workspace_file}"
+        argv.extend(["workspace", workspace_file])
         if plan.workspace_config_source is not None:
             argv.extend(["--workspace-config", str(plan.workspace_config_source)])
         if opts.allow_missing_projects:
@@ -7106,10 +7111,10 @@ def _print_summary(
         _print_text(f"    - Markdown summary: '{out_dir_alias}/reports/ash.summary.md'")
         _print_text(f"    - Text summary: '{out_dir_alias}/reports/ash.summary.txt'")
         print(
-            "  2. Use [magenta]ash report[/magenta] to view a short text summary of the scan in your terminal"
+            "  2. Use [magenta]ash results report[/magenta] to view a short text summary of the scan in your terminal"
         )
         print(
-            "  3. Use [magenta]ash inspect findings[/magenta] to explore the findings interactively"
+            "  3. Use [magenta]ash results inspect findings[/magenta] to explore the findings interactively"
         )
         _print_text(
             f"  4. Review scanner-specific reports and outputs in the '{out_dir_alias}/scanners' directory"

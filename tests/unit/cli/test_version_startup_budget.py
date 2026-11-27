@@ -46,6 +46,9 @@ FORBIDDEN_AT_VERSION_TIME = (
     # workspace resolution (pulls the config model)
     "automated_security_helper.workspace",
     "automated_security_helper.models.workspace",
+    # the source-archive rules `ash scan fs --archive` extracts with: read when an
+    # archive is given, never to print the option
+    "automated_security_helper.utils.source_archive",
     # the lazily-registered subcommand modules themselves
     "automated_security_helper.cli.config",
     "automated_security_helper.cli.dependencies",
@@ -144,9 +147,9 @@ def test_version_module_count_stays_bounded():
 def test_scan_help_imports_no_forbidden_module():
     """`ash scan --help` lists the scan's subjects from the group's own help.
 
-    ``scan`` is a group, and its subject ``fs`` is built from the scan engine's
-    signature; none of that may pull the engine, the config model or the plugins
-    in to print the list.
+    ``scan`` is a group, and its subjects ``fs`` and ``workspace`` are built from the
+    scan engine's signature; none of that may pull the engine, the config model or
+    the plugins in to print the list.
     """
     report = _version_run_report(("scan", "--help"))
     assert report["exit_code"] == 0, report["output"]
@@ -154,7 +157,8 @@ def test_scan_help_imports_no_forbidden_module():
     assert report["present"] == [], (
         "`ash scan --help` imported modules that must stay lazy: "
         f"{report['present']}. Defer the import that pulled them (cli/scan_group.py "
-        "builds `fs` from cli/scan.py's signature and must import nothing heavy)."
+        "builds `fs` and `workspace` from cli/scan.py's signature and must import "
+        "nothing heavy)."
     )
 
 
@@ -162,5 +166,58 @@ def test_scan_help_module_count_stays_bounded():
     report = _version_run_report(("scan", "--help"))
     assert report["module_count"] <= MODULE_COUNT_CEILING, (
         f"`ash scan --help` now loads {report['module_count']} modules "
+        f"(ceiling {MODULE_COUNT_CEILING})."
+    )
+
+
+def test_scan_workspace_help_imports_no_forbidden_module():
+    """`ash scan workspace --help` prints the subject's options from its signature.
+
+    The workspace subject is the one most likely to be given an import of the
+    workspace resolution (``automated_security_helper.workspace`` and its models),
+    which are named above: the file it takes is resolved by the engine when the scan
+    runs, never to print its help.
+    """
+    report = _version_run_report(("scan", "workspace", "--help"))
+    assert report["exit_code"] == 0, report["output"]
+    assert "FILE" in report["output"]
+    assert "--dry-run" in report["output"]
+    assert "Subjects of `ash scan`: fs" in report["output"]
+    assert report["present"] == [], (
+        "`ash scan workspace --help` imported modules that must stay lazy: "
+        f"{report['present']}. Defer the import that pulled them (cli/scan_group.py "
+        "builds `workspace` from cli/scan.py's signature and must import nothing "
+        "heavy)."
+    )
+
+
+def test_scan_workspace_help_module_count_stays_bounded():
+    report = _version_run_report(("scan", "workspace", "--help"))
+    assert report["module_count"] <= MODULE_COUNT_CEILING, (
+        f"`ash scan workspace --help` now loads {report['module_count']} modules "
+        f"(ceiling {MODULE_COUNT_CEILING})."
+    )
+
+
+def test_scan_fs_help_imports_no_forbidden_module():
+    """`ash scan fs --help` lists `--archive` without importing the archive rules.
+
+    The option is declared from the subject's signature; the module that reads the zip
+    is imported when an archive is given, so printing the option must not pay for it.
+    """
+    report = _version_run_report(("scan", "fs", "--help"))
+    assert report["exit_code"] == 0, report["output"]
+    assert "--archive" in report["output"]
+    assert report["present"] == [], (
+        "`ash scan fs --help` imported modules that must stay lazy: "
+        f"{report['present']}. Defer the import that pulled them (cli/scan_group.py "
+        "imports utils/source_archive inside the function that extracts an archive)."
+    )
+
+
+def test_scan_fs_help_module_count_stays_bounded():
+    report = _version_run_report(("scan", "fs", "--help"))
+    assert report["module_count"] <= MODULE_COUNT_CEILING, (
+        f"`ash scan fs --help` now loads {report['module_count']} modules "
         f"(ceiling {MODULE_COUNT_CEILING})."
     )

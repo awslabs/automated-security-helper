@@ -314,7 +314,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             self._plugin_log(
                 "s3 uploads one project's results at a time, and these are a "
                 "workspace's unified results, which each project's own scan "
-                "already uploaded. Run ash report with --output-dir set to a "
+                "already uploaded. Run ash results report with --output-dir set to a "
                 "project's directory under the workspace output.",
                 level=logging.ERROR,
                 append_to_stream="stderr",

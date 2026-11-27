@@ -1609,6 +1609,56 @@ class TestTheInnerArgvIsAcceptedByTheInnerCli:
         assert "--existing-results" in str(refusal.value)
         assert refusal.value.exit_code == 2
 
+    def _parse_workspace(self, argv: List[str]):
+        import typer.main
+
+        from automated_security_helper.cli.scan_group import (
+            run_ash_scan_workspace_cli_command,
+        )
+
+        # The container runs `ash scan workspace /src/<file> ...`: the words after
+        # `scan workspace` are what the `workspace` command parses.
+        words = list(argv)
+        if words[:2] == ["scan", "workspace"]:
+            words = words[2:]
+        app = typer.Typer()
+        app.command()(run_ash_scan_workspace_cli_command)
+        return typer.main.get_command(app).make_context("ash", words)
+
+    def test_a_workspace_invocation_is_read_by_the_workspace_subject(self, tmp_path):
+        """The workspace file is the subject's argument, and every other flag the
+        workspace scan emits is one the subject declares."""
+        argv = self._inner_argv(
+            tmp_path,
+            workspace_relative_file="team/dev.code-workspace",
+            allow_missing_projects=True,
+            quiet=True,
+            progress=False,
+            color=False,
+            debug=True,
+            simple=True,
+            fail_on_findings=False,
+            fail_on_incomplete_scanners=True,
+            phases=[ExecutionPhase.SCAN],
+            scanners=["bandit"],
+            output_formats=[ExportFormat.HTML],
+            config_overrides=["a=1"],
+            strategy=ExecutionStrategy.PARALLEL,
+            ignore_suppressions=True,
+        )
+
+        assert argv[:3] == ["scan", "workspace", "/src/team/dev.code-workspace"]
+        assert "--workspace" not in argv
+        assert "--source-dir" not in argv
+        with self._parse_workspace(argv) as ctx:
+            assert ctx.params["file"] == "/src/team/dev.code-workspace"
+            assert ctx.params["allow_missing_projects"] is True
+            assert ctx.params["output_dir"] == "/out"
+            assert ctx.params["fail_on_findings"] is False
+            assert ctx.params["fail_on_incomplete_scanners"] is True
+            assert ctx.params["ignore_suppressions"] is True
+            assert "source_dir" not in ctx.params
+
 
 # ---------------------------------------------------------------------------
 # _execute_container

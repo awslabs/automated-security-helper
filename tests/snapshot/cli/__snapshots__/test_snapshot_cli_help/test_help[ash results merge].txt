@@ -71,7 +71,7 @@
 │                                                                            report every finding  │
 │                                                                            regardless of         │
 │                                                                            suppression status.   │
-│                                                                            Mirrors 'ash scan     │
+│                                                                            Mirrors 'ash scan fs  │
 │                                                                            --ignore-suppression… │
 │                                                                            so the same tree      │
 │                                                                            gives the same        │

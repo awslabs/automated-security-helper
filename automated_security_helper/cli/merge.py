@@ -2470,7 +2470,7 @@ def _warn_ignore_paths_the_flag_cannot_lift(config: Any) -> None:
     """Name the ignore paths the shards scanned under, which the flag leaves in force.
 
     ``--ignore-suppressions`` promises every finding regardless of suppression
-    status, as ``ash scan --ignore-suppressions`` gives it. An ignore path is not
+    status, as ``ash scan fs --ignore-suppressions`` gives it. An ignore path is not
     a suppression the merge can lift: each shard dropped the results under it from
     its own SARIF before the merge (``apply_suppressions_to_sarif``), and a dropped
     result is not in the merge to bring back, so a sharded run under the flag
@@ -2498,7 +2498,7 @@ def _warn_ignore_paths_the_flag_cannot_lift(config: Any) -> None:
             f"not the {len(ignored)} ignore path(s) they scanned under "
             f"({', '.join(ignored)}): each shard dropped the results under them "
             f"from its own results before the merge, and a dropped result cannot "
-            f"be brought back here, where ash scan --ignore-suppressions keeps "
+            f"be brought back here, where ash scan fs --ignore-suppressions keeps "
             f"them. For every finding, scan without the ignore paths or merge "
             f"shards that recorded none."
         ),
@@ -3242,7 +3242,7 @@ def merge_command(
             "--ignore-suppressions",
             help=(
                 "Ignore all suppression rules and report every finding regardless "
-                "of suppression status. Mirrors 'ash scan --ignore-suppressions', "
+                "of suppression status. Mirrors 'ash scan fs --ignore-suppressions', "
                 "so the same tree gives the same verdict sharded or not."
             ),
         ),

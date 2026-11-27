@@ -7,9 +7,9 @@ Why this file exists
 --------------------
 Container mode has exactly one bind mount. A workspace therefore mounts its
 *root* at ``/src`` and every project is ``/src/<relative-path>``, which means the
-in-container invocation cannot use ``--source-dir`` -- that flag is mutually
-exclusive with ``--workspace``, and the container has to resolve the workspace
-itself to reach the projects below the mount.
+in-container invocation is ``ash scan workspace /src/<file>``, which takes no
+directory (the workspace root is the mount), and the container has to resolve the
+workspace itself to reach the projects below the mount.
 
 That arrangement re-enters a heuristic ASH already carries. ``sarif_utils``
 strips the source directory's basename from a finding URI, because offline
@@ -133,15 +133,21 @@ class TestRunCommandAssembly:
         assert "--source-dir" not in command
         assert "--workspace" not in command
 
-    def test_workspace_mode_passes_the_workspace_flag(self, tmp_path):
+    def test_workspace_mode_passes_the_file_to_the_workspace_subject(self, tmp_path):
         command = _run_command(
             tmp_path, tmp_path / "out", workspace_relative_file="dev.code-workspace"
         )
-        index = command.index("--workspace")
-        assert command[index + 1] == "/src/dev.code-workspace"
+        index = command.index("workspace")
+        assert command[index - 1 : index + 2] == [
+            "scan",
+            "workspace",
+            "/src/dev.code-workspace",
+        ]
+        assert "--workspace" not in command
 
     def test_workspace_mode_omits_source_dir(self, tmp_path):
-        """The two flags are mutually exclusive; passing both exits 2."""
+        """The workspace subject takes no directory, so passing one exits with a
+        usage error; the workspace root is the mount."""
         command = _run_command(
             tmp_path, tmp_path / "out", workspace_relative_file="dev.code-workspace"
         )
@@ -263,7 +269,7 @@ class TestOutsideRootIsRefusedBeforeAnyContainerStarts:
         (root / "api").mkdir(parents=True)
         workspace = self._workspace(root, ["api"])
 
-        self._scan("--workspace", str(workspace), "--mode", "container", "--no-run")
+        self._scan("workspace", str(workspace), "--mode", "container", "--no-run")
 
         assert len(container_calls) == 1
         assert Path(container_calls[0]["source_dir"]).resolve() == root.resolve()
@@ -279,7 +285,7 @@ class TestOutsideRootIsRefusedBeforeAnyContainerStarts:
         workspace = self._workspace(root, ["../outside"])
 
         result = self._scan(
-            "--workspace", str(workspace), "--mode", "container", "--no-run"
+            "workspace", str(workspace), "--mode", "container", "--no-run"
         )
 
         assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
@@ -301,7 +307,7 @@ class TestOutsideRootIsRefusedBeforeAnyContainerStarts:
         workspace = self._workspace(root, [outside.as_posix()])
 
         result = self._scan(
-            "--workspace", str(workspace), "--mode", "container", "--no-run"
+            "workspace", str(workspace), "--mode", "container", "--no-run"
         )
 
         assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
@@ -330,7 +336,7 @@ class TestOutsideRootIsRefusedBeforeAnyContainerStarts:
         workspace = self._workspace(root, ["aliased"])
 
         result = self._scan(
-            "--workspace", str(workspace), "--mode", "container", "--no-run"
+            "workspace", str(workspace), "--mode", "container", "--no-run"
         )
 
         assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
@@ -345,7 +351,7 @@ class TestOutsideRootIsRefusedBeforeAnyContainerStarts:
         (root / "api").mkdir()
 
         result = self._scan(
-            "--workspace", str(workspace), "--mode", "container", "--no-run"
+            "workspace", str(workspace), "--mode", "container", "--no-run"
         )
 
         assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR

@@ -89,6 +89,17 @@ from automated_security_helper.utils.path_containment import (
 from automated_security_helper.utils.git_command import GIT_PROGRAM, git_argv
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.source_archive import (
+    MAX_ARCHIVE_BYTES,
+    MAX_EXTRACTED_BYTES,
+    MAX_MEMBERS,
+    SYMLINK_TARGET_EXCERPT_BYTES,
+    ZipRules,
+    archive_too_large,
+    extract_zip_members,
+    open_zip,
+    validate_member_name,
+)
 from automated_security_helper.utils.subprocess_utils import (
     run_ended_with_the_server,  # noqa: F401 - tests patch it on this module
 )
@@ -97,14 +108,21 @@ _logger = ASH_LOGGER
 
 # ---------------------------------------------------------------------------
 # Hard limits — enforced at finalize time.
+#
+# The source-archive limits (utils/source_archive.py), which `ash scan fs --archive`
+# applies too. They are names of this module as well because the chunk, image and
+# clone bounds below read them here, and the finalize reads them when it runs, so a
+# limit set on this module is the one it applies.
 # ---------------------------------------------------------------------------
 
-_MAX_ZIP_BYTES: int = 100 * 1024 * 1024  # 100 MiB on-disk zip
-_MAX_EXTRACTED_BYTES: int = 500 * 1024 * 1024  # 500 MiB uncompressed
-_MAX_FILES: int = 50_000  # entry count
+_MAX_ZIP_BYTES: int = MAX_ARCHIVE_BYTES  # 100 MiB on-disk zip
+_MAX_EXTRACTED_BYTES: int = MAX_EXTRACTED_BYTES  # 500 MiB uncompressed
+_MAX_FILES: int = MAX_MEMBERS  # entry count
 _MAX_CHUNK_BYTES: int = 1 * 1024 * 1024  # 1 MiB per chunked b64 upload (decoded)
 #: How much of a refused symlink entry's content a refusal quotes as its target.
-_SYMLINK_TARGET_EXCERPT_BYTES: int = 256
+_SYMLINK_TARGET_EXCERPT_BYTES: int = SYMLINK_TARGET_EXCERPT_BYTES
+#: What the symlink refusal calls the archives this delivery reads.
+_DELIVERY_ARCHIVES = "MCP source delivery zips"
 
 # A zip extraction and a git clone build here, and the result is renamed onto
 # "source" only once it has succeeded, so a refused or failed re-delivery cannot
@@ -144,11 +162,6 @@ _REPLACED_DIR_PREFIX = ".source.replaced-"
 # would miss the files that were deleted. A half-deleted tree therefore never carries
 # the replaced name; the next delivery deletes what stayed, and never puts it back.
 _TRASH_DIR_PREFIX = ".source.trash-"
-
-# ZipInfo external_attr bits for a symlink (S_IFLNK == 0xA000) shifted into
-# the high half of external_attr.
-_S_IFLNK_SHIFTED = 0xA000 << 16
-_S_IFMT_SHIFTED = 0xF000 << 16
 
 
 # ---------------------------------------------------------------------------
@@ -2664,45 +2677,29 @@ def _append_zip_chunk(
 # ---------------------------------------------------------------------------
 
 
-def _is_symlink_zipinfo(info: zipfile.ZipInfo) -> bool:
-    """Detect symlink entries via Unix mode bits in ``external_attr``.
-
-    Zip stores Unix file mode in the high half of ``external_attr``. A
-    symlink has S_IFMT == S_IFLNK (0xA000).
-    """
-
-    return (info.external_attr & _S_IFMT_SHIFTED) == _S_IFLNK_SHIFTED
-
-
 def _validate_zip_member(name: str) -> None:
     """Reject path-traversal entries before extracting.
 
     Specifically rejected:
 
     * absolute paths (``/etc/passwd``, ``C:\\…``)
-    * components starting with ``..``
+    * a name that starts with ``../``
     * any component equal to ``..``
+
+    The rules, and the rest of what is refused (an empty name, a backslash, a
+    ``.`` or empty component, a NUL, and on Windows a name Windows cannot hold as
+    spelled), are the source-archive rules
+    (:func:`automated_security_helper.utils.source_archive.validate_member_name`),
+    which ``ash scan fs --archive`` applies too. The finalize calls them through
+    this name, for the name the archive spells and for the name a Unicode path
+    field gives when the field restates that name in other characters, which
+    zipfile from Python 3.12 extracts the member under.
+
+    Raises:
+        SourceArchiveRefused: a ``ValueError`` naming the rule and the name.
     """
 
-    if not name:
-        raise ValueError("zip entry has empty name")
-    if "\\" in name:
-        # The zip format's separator is "/". An entry named with backslashes
-        # passed the checks below as a nested path, since they read a backslash
-        # as a separator, and was then extracted on POSIX as one flat file whose
-        # name holds the backslashes, which a scanner keyed on directories never
-        # sees. Refused rather than rewritten, as every other malformed entry.
-        raise ValueError(f"backslash in zip entry name: {name!r}")
-    # Normalize separators for the pure-text checks below.
-    normalized = name.replace("\\", "/")
-    if os.path.isabs(normalized) or normalized.startswith("/"):
-        raise ValueError(f"absolute path in zip: {name!r}")
-    if normalized.startswith("../") or normalized == ".." or "/../" in normalized:
-        raise ValueError(f"path traversal in zip: {name!r}")
-    parts = [p for p in normalized.split("/") if p not in ("", ".")]
-    for p in parts:
-        if p == "..":
-            raise ValueError(f"path traversal in zip: {name!r}")
+    validate_member_name(name)
 
 
 @_while_no_scan_runs(removes_workspace=False)
@@ -2756,9 +2753,24 @@ def set_source_zip_finalize(
             final chunk. A FileNotFoundError that is not this one is a file that
             vanished while the archive was read or extracted, a failure on disk.
         ValueError: if ``upload_id`` does not name a single path component, or on
-            sha256 mismatch, oversize zip, oversize extraction, too-many-files,
-            or path-traversal/symlink-out-of-tree entries.
+            sha256 mismatch; or a ``SourceArchiveRefused`` for an archive the
+            source-archive rules refuse: oversize zip, oversize extraction,
+            too-many-files, a member name that is empty, absolute, traversing,
+            holds a backslash, a NUL, or a ``.`` or empty component (or, on
+            Windows, a name Windows cannot hold), a Unicode path field, in the
+            central directory or a local header, that names another file, two
+            members extracted to one path or one under a file (names that differ
+            only in case or Unicode normalization are read as one path on Windows
+            and macOS), a symlink member, an encrypted member, or a file that holds
+            anything besides one zip: bytes before, between or after its members
+            (two zips end to end, a tar whose last member is a zip), or a local
+            header or data descriptor that disagrees with the central directory,
+            each refused as not a zip; or an archive zipfile cannot read (a zip
+            version or compression method it does not implement, a method whose
+            module this Python lacks, a member with damaged data), refused in the
+            words ``ash scan fs --archive`` uses. A refused upload is removed.
         zipfile.BadZipFile: if the assembled bytes are not a zip archive. The
+            refusal (kind ``not-a-zip``) is a ``BadZipFile`` as well. The
             checksum matching means the client sent what it meant to send, so
             this is a client-side packaging error rather than corruption.
     """
@@ -2858,7 +2870,7 @@ def _finalize_zip_upload(
         # owed. A zip that stays is refused again by the same call.
         with contextlib.suppress(OSError):
             remove_zip()
-        raise ValueError(f"zip too large: {actual_size} > {_MAX_ZIP_BYTES} bytes")
+        raise archive_too_large(actual_size, _MAX_ZIP_BYTES)
 
     # Verify checksum before opening the archive, from the same handle.
     digest = hashlib.sha256()
@@ -2902,72 +2914,34 @@ def _finalize_zip_upload(
     swapped = False
     replaced: Optional[Path] = None
     try:
-        # Pre-extraction validation pass: walk the namelist and the zipinfo
-        # list, rejecting absolute paths, traversal components, oversize totals,
-        # and symlinks that would resolve outside the session sandbox. An archive
-        # one of them refuses is removed with the refusal (_removing_a_refused_zip):
-        # it held its bytes in incoming/ until the session ended otherwise, and a
-        # client that sends the same finalize again is told the upload is gone.
-        # The archive is read from the handle the checksum read, so the bytes
-        # extracted are the bytes hashed; the handle closes before the removal.
+        # Pre-extraction validation pass, then the extraction into staging: the
+        # source-archive rules (utils/source_archive.py), which judge each member
+        # name as the archive spells it and refuse every symlink, applied with
+        # this module's limits and member check as they are when the finalize
+        # runs. An archive one of them refuses, or that zipfile cannot open or
+        # read (open_zip and extract_zip_members refuse what zipfile raises, as
+        # `ash scan fs --archive` does), is removed with the refusal
+        # (_removing_a_refused_zip): it held its bytes in incoming/ until the
+        # session ended otherwise, and a client that sends the same finalize again
+        # is told the upload is gone. The archive is read from the handle the
+        # checksum read, so the bytes extracted are the bytes hashed; the handle
+        # closes before the removal.
         with (
             _removing_a_refused_zip(remove_zip),
             handle,
-            zipfile.ZipFile(handle) as zf,
+            open_zip(handle) as zf,
         ):
-            infos = zf.infolist()
-            if len(infos) > _MAX_FILES:
-                raise ValueError(f"too many files in zip: {len(infos)} > {_MAX_FILES}")
-
-            total_uncompressed = 0
-            for info in infos:
-                # The name as the archive spells it. On Windows the reader
-                # rewrites a backslash in ``filename`` to ``/`` (ZipInfo keeps
-                # the raw spelling in ``orig_filename``), so an archive judged
-                # by ``filename`` was refused on POSIX and admitted on Windows
-                # as a nested path; one spelling is judged on every platform.
-                _validate_zip_member(info.orig_filename)
-                total_uncompressed += info.file_size
-                if total_uncompressed > _MAX_EXTRACTED_BYTES:
-                    raise ValueError(
-                        f"extracted size exceeds {_MAX_EXTRACTED_BYTES} bytes "
-                        f"(at entry {info.filename!r})"
-                    )
-                if _is_symlink_zipinfo(info):
-                    # Reject ALL symlink entries — not just those whose target
-                    # resolves outside the sandbox. Pre-extraction resolve()
-                    # of a link under (target/info.filename).parent races
-                    # extraction: an earlier zip entry that materializes a
-                    # directory which is itself a symlink (or a leftover-from-
-                    # prior-upload directory that resolves elsewhere) would
-                    # let a later symlink entry pass validation but still
-                    # escape once extractall() runs.
-                    #
-                    # Source tree shipping over MCP does not need symlinks.
-                    # Refusing them outright eliminates the pre/post-write
-                    # divergence, as an earlier review noted.
-                    #
-                    # Only the first bytes of the entry are shown. A link entry's
-                    # content is whatever the archive says it is, up to the
-                    # uncompressed total this loop admits, and the refusal text
-                    # is carried through every per-character pass the error path
-                    # makes on the event loop; the whole of it in the message
-                    # was that many bytes read, held and re-processed for one
-                    # line nobody reads past its first few words.
-                    with zf.open(info) as member:
-                        head = member.read(_SYMLINK_TARGET_EXCERPT_BYTES + 1)
-                    link_target = head[:_SYMLINK_TARGET_EXCERPT_BYTES].decode(
-                        "utf-8", errors="replace"
-                    )
-                    if len(head) > _SYMLINK_TARGET_EXCERPT_BYTES:
-                        link_target += "..."
-                    raise ValueError(
-                        f"symlink {info.filename!r} -> {link_target!r}: "
-                        f"symlinks are not allowed in MCP source delivery zips"
-                    )
-
-            # Validation passed; extract into staging.
-            zf.extractall(staging)
+            extract_zip_members(
+                zf,
+                staging,
+                ZipRules(
+                    max_members=_MAX_FILES,
+                    max_extracted_bytes=_MAX_EXTRACTED_BYTES,
+                    validate_name=_validate_zip_member,
+                    symlink_excerpt_bytes=_SYMLINK_TARGET_EXCERPT_BYTES,
+                    archives=_DELIVERY_ARCHIVES,
+                ),
+            )
 
         # Swap (_swap_into_place). The window in which neither tree is in place is
         # the rename of the staged tree into place (two renames when nothing refuses

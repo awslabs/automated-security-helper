@@ -79,8 +79,8 @@
 │ --non-interactive,--yes  -y                       Accept all changes without prompting. Useful  │
 │                                                   for pre-commit hooks and CI/CD                │
 │ --source-dir                               <str>  The directory a scan would scan, as `ash scan │
-│                                                   --source-dir`: the config is discovered there │
-│                                                   unless --config names one, and a config       │
+│                                                   fs <path>` names it: the config is discovered │
+│                                                   there unless --config names one, and a config │
 │                                                   inside it may only extend files inside it.    │
 │                                                   Defaults to the current directory.            │
 │                                                   [env var: ASH_SOURCE_DIR]                     │

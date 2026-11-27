@@ -809,6 +809,13 @@ _EMPTY_VALUE_PARAMETERS = (
     "OfflineSemgrepRulesets",
 )
 _WORKSPACE_MESSAGE = "cannotrunaworkspacescan"
+#: Where every refusal of a workspace scan points, with its whitespace removed as the
+#: texts are compared: the command of the Python CLI, which mounts the workspace.
+_WORKSPACE_POINTER = "ashscanworkspace<file>--modecontainer"
+#: What the refusal of a source archive says, and where it points: Invoke-ASH runs
+#: without the Python CLI that checks and extracts the zip.
+_ARCHIVE_MESSAGE = "cannotcheckorextractasourcearchive"
+_ARCHIVE_POINTER = "ashscanfs--archive<file>instead"
 
 _INVOKE_ASH_SITES = {
     "ash-args-tokenizer": (
@@ -1110,6 +1117,130 @@ _INVOKE_ASH_SITES = {
         {},
         REFUSAL_EXIT,
         _WORKSPACE_MESSAGE,
+    ),
+    # The `workspace` subject of `scan` is refused with the same message and code,
+    # wherever it stands among the words, and every refusal of a workspace scan, the
+    # older spellings included, points at the Python CLI's own command.
+    "workspace-subject": (
+        f"{_INVOKE} -AshArgs 'scan workspace w.code-workspace'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _WORKSPACE_MESSAGE,
+    ),
+    "workspace-subject-alone": (
+        f"{_INVOKE} -AshArgs 'scan workspace'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _WORKSPACE_MESSAGE,
+    ),
+    "workspace-subject-after-an-option": (
+        f"{_INVOKE} -AshArgs 'scan --scanners bandit workspace w.code-workspace'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _WORKSPACE_MESSAGE,
+    ),
+    "workspace-subject-after-a-short-option": (
+        f"{_INVOKE} -AshArgs 'scan -o out workspace w.code-workspace'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _WORKSPACE_MESSAGE,
+    ),
+    "workspace-subject-after-the-parameters": (
+        f"{_INVOKE} scan workspace w.code-workspace",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _WORKSPACE_MESSAGE,
+    ),
+    "workspace-subject-quoted": (
+        f"{_INVOKE} -AshArgs \"scan 'workspace' w.code-workspace\"",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _WORKSPACE_MESSAGE,
+    ),
+    "workspace-subject-points-at-the-python-cli": (
+        f"{_INVOKE} -AshArgs 'scan workspace w.code-workspace'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _WORKSPACE_POINTER,
+    ),
+    "workspace-option-points-at-the-python-cli": (
+        f"{_INVOKE} -AshArgs '--workspace w.code-workspace'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _WORKSPACE_POINTER,
+    ),
+    "workspace-config-points-at-the-python-cli": (
+        f"{_INVOKE} -AshArgs '--workspace-config=c.yaml'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _WORKSPACE_POINTER,
+    ),
+    # `scan fs --archive <file>` is refused with the same code, wherever the option
+    # stands among the words, pointing at the Python CLI that extracts the zip.
+    "archive": (
+        f"{_INVOKE} -AshArgs 'scan fs --archive src.zip'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _ARCHIVE_MESSAGE,
+    ),
+    "archive-attached": (
+        f"{_INVOKE} -AshArgs 'scan fs --archive=src.zip'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _ARCHIVE_MESSAGE,
+    ),
+    "archive-after-another-option": (
+        f"{_INVOKE} -AshArgs 'scan fs --scanners bandit --archive src.zip'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _ARCHIVE_MESSAGE,
+    ),
+    "archive-before-the-subject": (
+        f"{_INVOKE} -AshArgs 'scan --archive src.zip fs'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _ARCHIVE_MESSAGE,
+    ),
+    "archive-with-no-subject": (
+        f"{_INVOKE} -AshArgs 'scan --archive src.zip'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _ARCHIVE_MESSAGE,
+    ),
+    "archive-after-the-parameters": (
+        f"{_INVOKE} scan fs --archive src.zip",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _ARCHIVE_MESSAGE,
+    ),
+    "archive-quoted": (
+        f"{_INVOKE} -AshArgs \"scan fs '--archive' src.zip\"",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _ARCHIVE_MESSAGE,
+    ),
+    "archive-points-at-the-python-cli": (
+        f"{_INVOKE} -AshArgs 'scan fs --archive src.zip'",
+        {},
+        {},
+        REFUSAL_EXIT,
+        _ARCHIVE_POINTER,
     ),
     "no-runner": (_NO_RUNNER, {}, {}, REFUSAL_EXIT, _NO_RUNNER_MESSAGE),
     "base-oci-layout": (
@@ -1947,6 +2078,8 @@ _INTERPOLATED_AS_IS = {
     "$ociRunnerSource",  # 'OCI_RUNNER' or 'ASH_OCI_RUNNER', the variable the value came from
     "$markerRefusal",  # the CI marker newline refusal, built from a fixed variable name
     "$outputHint",  # '' or the fixed hint naming -OutputDir, chosen by the helper
+    "$workspaceRefusal",  # the workspace-scan refusal: one fixed sentence, no caller value
+    "$archiveRefusal",  # the source-archive refusal: one fixed sentence, no caller value
 }
 
 
@@ -2106,6 +2239,38 @@ def test_tab_completion_offers_the_build_targets(tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout.strip().splitlines()[-1]) == ["ci", "non-root"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("typed", "offered"),
+    [
+        pytest.param("scan ", ["scan fs", "scan workspace"], id="every-subject"),
+        pytest.param("scan f", ["scan fs"], id="a-partial-fs"),
+        pytest.param("scan w", ["scan workspace"], id="a-partial-workspace"),
+        pytest.param(
+            "scan --mode local ",
+            ["scan --mode local fs", "scan --mode local workspace"],
+            id="past-the-value-of-an-option",
+        ),
+        pytest.param("scan fs --archive ", [], id="the-file-of-archive-is-the-shells"),
+        pytest.param("scan workspace ", [], id="nothing-after-a-subject"),
+    ],
+)
+def test_the_completer_offers_every_scan_subject_after_scan(tmp_path, typed, offered):
+    """The generated completer, called as PowerShell calls it for -AshArgs with the
+    text typed so far: each subject after ``scan``, ``workspace`` with ``fs``, the
+    words already typed kept in front, and nothing where the next word is a file or
+    the scan's subject is already named."""
+    result, _ = _run_script(
+        tmp_path,
+        f"$c = @(& $ashArgumentCompleter 'Invoke-ASH' 'AshArgs' '{typed}' $null @{{}})\n"
+        "Write-Output (ConvertTo-Json -Compress -InputObject "
+        "@($c | ForEach-Object { $_.CompletionText }))\n"
+        "exit 0\n",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.strip().splitlines()[-1]) == offered
 
 
 @pytest.mark.unit
@@ -2407,7 +2572,8 @@ def test_config_is_passed_as_config(tmp_path):
 def test_source_and_output_dirs_reach_ash_as_environment_variables(tmp_path):
     # Positional --source-dir/--output-dir came before the caller's words, so a
     # subcommand ended up after options it may not take. scan reads ASH_SOURCE_DIR and
-    # ASH_OUTPUT_DIR; report and merge read ASH_OUTPUT_DIR.
+    # ASH_OUTPUT_DIR, except `scan fs`, which is given /src as its PATH argument;
+    # report and merge read ASH_OUTPUT_DIR.
     result, calls = _invoke(
         tmp_path, "Invoke-ASH -NoBuild -SourceDir src -OutputDir out -AshArgs 'report'"
     )
@@ -2417,6 +2583,186 @@ def test_source_and_output_dirs_reach_ash_as_environment_variables(tmp_path):
     env = _run_env(run)
     assert env.get("ASH_SOURCE_DIR") == "/src", run
     assert env.get("ASH_OUTPUT_DIR") == "/out", run
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("invocation", "expected"),
+    [
+        pytest.param(
+            "-AshArgs 'scan fs'",
+            ["scan", "fs", "/src", *SANDBOX_OFF],
+            id="the-subject-alone",
+        ),
+        pytest.param(
+            "-AshArgs 'scan fs --scanners bandit'",
+            ["scan", "fs", "/src", *SANDBOX_OFF, "--scanners", "bandit"],
+            id="an-option-after-the-subject",
+        ),
+        pytest.param(
+            "-AshArgs 'scan --scanners bandit fs'",
+            ["scan", *SANDBOX_OFF, "--scanners", "bandit", "fs", "/src"],
+            id="an-option-before-the-subject",
+        ),
+        pytest.param(
+            "-Config c.yaml -Scanners bandit -AshArgs 'scan fs'",
+            [
+                "scan",
+                *SANDBOX_OFF,
+                "--config",
+                "c.yaml",
+                "--scanners",
+                "bandit",
+                "fs",
+                "/src",
+            ],
+            id="the-options-the-wrapper-adds-stand-before-the-subject",
+        ),
+        pytest.param(
+            "scan fs",
+            ["scan", "fs", "/src", *SANDBOX_OFF],
+            id="after-the-parameters",
+        ),
+    ],
+)
+def test_scan_fs_is_given_the_mounted_directory_as_its_path_argument(
+    tmp_path, invocation, expected
+):
+    """After the subject wherever it stands, and ahead of the --sandbox off the wrapper
+    adds when the subject follows scan. The scan inside is told nothing by
+    ASH_SOURCE_DIR, which it would answer with a line."""
+    result, calls = _invoke(
+        tmp_path, f"Invoke-ASH -NoBuild -SourceDir src -OutputDir out {invocation}"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    run = _run_call(result, calls)
+    assert _inner_ash_args(run) == expected, run
+    env = _run_env(run)
+    assert "ASH_SOURCE_DIR" not in env, run
+    assert env.get("ASH_OUTPUT_DIR") == "/out", run
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("invocation", "expected"),
+    [
+        pytest.param(
+            "-AshArgs 'scan'", ["scan", *SANDBOX_OFF], id="scan-with-no-subject"
+        ),
+        pytest.param("", [*SANDBOX_OFF], id="no-command-at-all"),
+        pytest.param("-AshArgs 'report'", ["report"], id="report"),
+        pytest.param("-AshArgs 'merge'", ["merge"], id="merge"),
+    ],
+)
+def test_a_form_with_no_scan_subject_is_still_given_the_variable(
+    tmp_path, invocation, expected
+):
+    """Only `scan fs` can be given a PATH argument. The form with no subject refuses
+    one, and the other commands read the directory from the variable."""
+    result, calls = _invoke(
+        tmp_path, f"Invoke-ASH -NoBuild -SourceDir src -OutputDir out {invocation}"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    run = _run_call(result, calls)
+    assert _inner_ash_args(run) == expected, run
+    assert _run_env(run).get("ASH_SOURCE_DIR") == "/src", run
+
+
+_CLONE = "https://example.com/org/repo.git"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("invocation", "expected"),
+    [
+        pytest.param(
+            f"-AshArgs 'scan fs --source-git {_CLONE}'",
+            ["scan", "fs", *SANDBOX_OFF, "--source-git", _CLONE],
+            id="a-clone",
+        ),
+        pytest.param(
+            f"-AshArgs 'scan fs --source-git={_CLONE}'",
+            ["scan", "fs", *SANDBOX_OFF, f"--source-git={_CLONE}"],
+            id="a-clone-with-its-value-attached",
+        ),
+        pytest.param(
+            f"-AshArgs 'scan --source-git {_CLONE} fs'",
+            ["scan", *SANDBOX_OFF, "--source-git", _CLONE, "fs"],
+            id="a-clone-before-the-subject",
+        ),
+        pytest.param(
+            f"-AshArgs '--source-git {_CLONE} scan fs'",
+            ["--source-git", _CLONE, "scan", "fs", *SANDBOX_OFF],
+            id="a-clone-before-scan",
+        ),
+        pytest.param(
+            "-AshArgs 'scan fs --image app:1'",
+            ["scan", "fs", *SANDBOX_OFF, "--image", "app:1"],
+            id="an-image",
+        ),
+        pytest.param(
+            "-AshArgs 'scan fs --image=app:1'",
+            ["scan", "fs", *SANDBOX_OFF, "--image=app:1"],
+            id="an-image-with-its-value-attached",
+        ),
+        pytest.param(
+            "-AshArgs 'scan fs --image-archive image.tar'",
+            ["scan", "fs", *SANDBOX_OFF, "--image-archive", "image.tar"],
+            id="a-saved-image",
+        ),
+        pytest.param(
+            "-AshArgs 'scan fs --image-layout layout'",
+            ["scan", "fs", *SANDBOX_OFF, "--image-layout", "layout"],
+            id="an-image-layout",
+        ),
+        pytest.param(
+            "-AshArgs 'scan fs --cli-json-input scan.json'",
+            ["scan", "fs", *SANDBOX_OFF, "--cli-json-input", "scan.json"],
+            id="a-document-that-can-name-either",
+        ),
+    ],
+)
+def test_a_scan_that_names_another_source_keeps_the_variable_and_gets_no_path(
+    tmp_path, invocation, expected
+):
+    """The CLI inside refuses a PATH beside a clone, and it does not count the variable
+    as the only name of the directory when a clone, an image or a document is named, so
+    it prints no line about it. Such a scan is told its directory by the variable, as it
+    was before the mount became a PATH argument: a clone replaces it, and `/src` is not
+    among the scan's words."""
+    result, calls = _invoke(
+        tmp_path, f"Invoke-ASH -NoBuild -SourceDir src -OutputDir out {invocation}"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    run = _run_call(result, calls)
+    assert _inner_ash_args(run) == expected, run
+    assert "/src" not in _inner_ash_args(run), run
+    assert _run_env(run).get("ASH_SOURCE_DIR") == "/src", run
+
+
+@pytest.mark.integration
+def test_the_value_of_another_option_spelled_like_an_image_option_is_not_that_option(
+    tmp_path,
+):
+    """The word after a value option is its value, whatever it spells: here ``--image``
+    is the value of --output-formats, so the scan is still a scan of the directory and
+    is given it as its PATH argument."""
+    result, calls = _invoke(
+        tmp_path,
+        "Invoke-ASH -NoBuild -SourceDir src -OutputDir out "
+        "-AshArgs 'scan fs --output-formats --image'",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    run = _run_call(result, calls)
+    assert _inner_ash_args(run) == [
+        "scan",
+        "fs",
+        "/src",
+        *SANDBOX_OFF,
+        "--output-formats",
+        "--image",
+    ], run
+    assert "ASH_SOURCE_DIR" not in _run_env(run), run
 
 
 @pytest.mark.integration
@@ -2612,6 +2958,35 @@ def test_an_option_a_subcommand_does_not_take_is_named_in_a_warning(tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "ash report does not take --offline" in result.stdout + result.stderr
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("words", "verb"),
+    [
+        pytest.param("results report", "report", id="report"),
+        pytest.param("results merge", "merge", id="merge"),
+        pytest.param("results inspect", "inspect", id="inspect"),
+        pytest.param("results diff a.json b.json", "diff", id="diff"),
+        pytest.param("results trend a.json b.json", "trend", id="trend"),
+    ],
+)
+def test_a_command_under_results_is_named_in_the_warning_not_the_group(
+    tmp_path, words, verb
+):
+    """The group takes no options, so what Invoke-ASH adds goes after the command and
+    the command decides which apply. The warning names the command. `diff` and `trend`
+    have no top-level spelling, and were named "ash results" for want of a taker."""
+    result, calls = _invoke(
+        tmp_path,
+        "Invoke-ASH -NoBuild -SourceDir src -OutputDir out -Offline "
+        f"-AshArgs '{words}'",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    shown = result.stdout + result.stderr
+    assert f"ash {verb} does not take --offline" in shown, shown
+    assert "ash results does not take" not in shown, shown
+    assert _inner_ash_args(_run_call(result, calls)) == words.split()
 
 
 @pytest.mark.integration

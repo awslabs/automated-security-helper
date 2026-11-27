@@ -480,7 +480,7 @@ def test_a_baseline_filtered_run_is_refused_naming_the_file():
 def test_an_unmerged_shard_is_refused():
     run = results(finding("B101"), second=1)
     run.metadata.shard = {"shard_index": 1, "shard_count": 2}
-    with pytest.raises(TrendRefusal, match="ash merge"):
+    with pytest.raises(TrendRefusal, match="ash results merge"):
         run_from_results(run, "shard.json")
 
 

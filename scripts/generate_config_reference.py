@@ -900,12 +900,19 @@ def workspace_policy_locations() -> tuple[list[str], bool]:
 
 
 def explicit_config_option() -> list[str]:
-    """``--config`` spellings and their environment variable, read from the scan command."""
+    """``--config`` spellings and their environment variable, read from the scan command.
+
+    ``scan`` is a group whose subjects take the scan's options, so they are read
+    from the subject it runs when none is named (``ash scan fs``). The group itself
+    has no ``--config``, and reading it made this return nothing, which dropped
+    the sentence it feeds from the page.
+    """
     import typer.main
 
     from automated_security_helper.cli.main import app
 
-    scan = typer.main.get_command(app).commands["scan"]
+    group = typer.main.get_command(app).commands["scan"]
+    scan = group.commands[group.legacy_default_subject]
     for param in scan.params:
         if "--config" in getattr(param, "opts", []):
             envvar = param.envvar if isinstance(param.envvar, str) else None

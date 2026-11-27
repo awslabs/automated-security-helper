@@ -5025,13 +5025,19 @@ def _assemble_run_command(
     cmd.append(image_name)
     cmd.append("ash")
 
-    # Core ASH path arguments. In workspace mode there is no source directory,
-    # because it is mutually exclusive with --workspace and the workspace root is
-    # already the mount point; a workspace scan has no subject of its own yet, so
-    # it keeps the subject-less form. A directory scan is `scan fs /src`.
+    # Core ASH path arguments. In workspace mode there is no source directory: the
+    # workspace root is already the mount point, and the workspace file is the
+    # argument of the `workspace` subject, `scan workspace /src/<file>`. A directory
+    # scan is `scan fs /src`.
     if workspace_relative_file is not None:
         cmd.extend(
-            ["--workspace", f"/src/{workspace_relative_file}", "--output-dir", "/out"]
+            [
+                "scan",
+                "workspace",
+                f"/src/{workspace_relative_file}",
+                "--output-dir",
+                "/out",
+            ]
         )
         if inner_workspace_config is not None:
             cmd.extend(["--workspace-config", inner_workspace_config])

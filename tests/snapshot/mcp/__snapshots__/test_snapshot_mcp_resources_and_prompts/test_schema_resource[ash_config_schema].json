@@ -1463,7 +1463,7 @@
             }
           ],
           "default": false,
-          "description": "When true, the CSV and flat-JSON reports gain three columns that name each finding's duplicate cluster: `cluster_id`, `duplicate_of` (the primary finding's id, on every non-primary member) and `duplicate_sources` (on the primary: the other members' scanner, rule, id and severity). Rows and counts are unchanged. Off by default because the columns change the CSV header. CLI: `--annotate-duplicates` on `ash scan` and `ash report`.",
+          "description": "When true, the CSV and flat-JSON reports gain three columns that name each finding's duplicate cluster: `cluster_id`, `duplicate_of` (the primary finding's id, on every non-primary member) and `duplicate_sources` (on the primary: the other members' scanner, rule, id and severity). Rows and counts are unchanged. Off by default because the columns change the CSV header. CLI: `--annotate-duplicates` on `ash scan fs` and `ash results report`.",
           "title": "Annotate"
         },
         "fold": {
@@ -1478,7 +1478,7 @@
             }
           ],
           "default": false,
-          "description": "When true, the human-readable reports (HTML, Markdown, text, and the Bedrock summary) show one row per duplicate cluster (the primary finding, with a note naming the other scanners that reported it) in their findings tables, detailed findings, finding cards and hotspots, and add deduplicated counts beside, never in place of, the per-scanner counts. Findings fold when they share a CVE and package, or when overlapping lines share a CWE; line overlaps chain, so two findings can fold through a third that overlaps both. IaC resource clusters are annotated only. Finding ids, SARIF, per-scanner metrics, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. CLI: `--fold-duplicates` on `ash scan` and `ash report`.",
+          "description": "When true, the human-readable reports (HTML, Markdown, text, and the Bedrock summary) show one row per duplicate cluster (the primary finding, with a note naming the other scanners that reported it) in their findings tables, detailed findings, finding cards and hotspots, and add deduplicated counts beside, never in place of, the per-scanner counts. Findings fold when they share a CVE and package, or when overlapping lines share a CWE; line overlaps chain, so two findings can fold through a third that overlaps both. IaC resource clusters are annotated only. Finding ids, SARIF, per-scanner metrics, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. CLI: `--fold-duplicates` on `ash scan fs` and `ash results report`.",
           "title": "Fold"
         }
       },

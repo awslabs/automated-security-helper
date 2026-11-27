@@ -10,6 +10,11 @@ keys and the skeleton are read from the command's own click parameters at parse
 time, so a flag added to a command is accepted from JSON, validated and listed
 in the skeleton without touching this module.
 
+A command can keep parameters out of its skeleton while a document still accepts
+them: it names them in ``skeleton_omits``. The skeleton is the template a document is
+written from, so every key it lists reads as one to fill in, and a deprecated
+parameter is left out so that following the template never reaches it.
+
 Precedence, highest first:
 
 1. a value given on the command line, as a flag or a positional argument;
@@ -49,7 +54,7 @@ import warnings
 from copy import copy as shallow_copy
 from enum import Enum
 from pathlib import Path, PurePath
-from typing import Any
+from typing import Any, ClassVar
 from urllib.request import url2pathname
 
 import typer
@@ -264,9 +269,15 @@ def build_skeleton(command: Any, ctx: Context) -> dict[str, Any]:
     parameter's default as an explicit value overrode the variable with the
     default on every run of the unedited skeleton. The variable keeps its say
     until the key is filled in.
+
+    The command's ``skeleton_omits`` are not listed. A document that names one
+    is still read: the template leaves it out, the parameter is not refused.
     """
+    omitted = getattr(command, "skeleton_omits", frozenset())
     skeleton: dict[str, Any] = {}
     for param in json_input_parameters(command, ctx):
+        if param.name in omitted:
+            continue
         default = param.default
         if callable(default):
             default = default()
@@ -559,7 +570,14 @@ def _validated_values(
     return values
 
 
-def _meta_options() -> list[Parameter]:
+def _meta_options(omitted: frozenset[str] = frozenset()) -> list[Parameter]:
+    """The options this module adds. *omitted* is the command's ``skeleton_omits``."""
+    left_out = (
+        " Deprecated parameters are left out of the template, and a document "
+        "that names one is still read."
+        if omitted
+        else ""
+    )
     return [
         TyperOption(
             param_decls=[CLI_JSON_INPUT_FLAG],
@@ -585,7 +603,7 @@ def _meta_options() -> list[Parameter]:
             help=(
                 f"Print a JSON template for {CLI_JSON_INPUT_FLAG}, listing every "
                 "parameter of this command with its default, or null where it is "
-                "required or an environment variable backs it, and exit."
+                f"required or an environment variable backs it, and exit.{left_out}"
             ),
         ),
     ]
@@ -608,9 +626,14 @@ def _without_environment(param: Parameter) -> Parameter:
 class CliJsonInputCommand(TyperCommand):
     """A Typer command that also takes its parameters from a JSON document."""
 
+    #: Names of parameters the skeleton does not list although a document may still
+    #: set them: the deprecated ones. A subclass names them; ``--help`` still shows each
+    #: parameter, and the keys a refused document is told are valid still include it.
+    skeleton_omits: ClassVar[frozenset[str]] = frozenset()
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.params.extend(_meta_options())
+        self.params.extend(_meta_options(self.skeleton_omits))
 
     def parse_args(self, ctx: Context, args: list[str]) -> list[str]:
         supplied: dict[str, Any] = {}

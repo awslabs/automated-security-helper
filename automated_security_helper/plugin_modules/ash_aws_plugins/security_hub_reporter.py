@@ -770,8 +770,8 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
         notice = (
             "aws-security-hub archives nothing from this run: "
             "archive_resolved_findings is on, but the results record no scanned "
-            f"directory (scan_source). {reason} To archive, scan with `ash --mode "
-            "container`, or run ASH directly, where none of the cases the "
+            f"directory (scan_source). {reason} To archive, scan with `ash scan fs "
+            "--mode container`, or run ASH directly, where none of the cases the "
             "aws-security-hub reporter's documentation lists under "
             '"Findings a scan no longer reports" applies.'
         )
@@ -1206,7 +1206,7 @@ def _workspace_results_message(model: "AshAggregatedResults") -> str:
     return (
         "aws-security-hub imports one project's results at a time, and these are a "
         "workspace's unified results, which record no scan time, configuration or "
-        "changed-files marker of their own. Run ash report with --output-dir set "
+        "changed-files marker of their own. Run ash results report with --output-dir set "
         "to a project's directory under the workspace output, so it reads that "
         f"project's results: {listed}."
     )

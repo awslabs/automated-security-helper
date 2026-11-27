@@ -17,6 +17,7 @@ PowerShell tables against the typer app.
 from __future__ import annotations
 
 import inspect
+import types
 
 import pytest
 
@@ -34,8 +35,6 @@ def test_subcommands():
         "scan",
         "build-image",
         "report",
-        "diff",
-        "trend",
         "merge",
         "results",
         "mcp",
@@ -51,11 +50,68 @@ def test_subcommands():
 
 
 def test_scan_subjects():
-    assert contract().scan_subjects == ("fs",)
+    assert contract().scan_subjects == ("fs", "workspace")
 
 
 def test_scan_subject_value_options_are_the_ones_the_root_does_not_take():
-    assert contract().scan_subject_value_options == ("--cli-json-input",)
+    # --archive is fs's, and --workspace-config, which workspace takes with a value, is
+    # also the root's, so it is not a subject's own.
+    assert contract().scan_subject_value_options == ("--archive", "--cli-json-input")
+
+
+def test_scan_other_source_options_are_the_ones_that_name_a_source_but_the_directory():
+    # A clone, the three image options, and the document that can name any of them. A
+    # scan that carries one is left to ASH_SOURCE_DIR instead of being given a PATH.
+    assert contract().scan_other_source_options == (
+        "--cli-json-input",
+        "--image",
+        "--image-archive",
+        "--image-layout",
+        "--source-git",
+    )
+
+
+def _string_tuples(source: str) -> list[tuple[str, ...]]:
+    """Every tuple of string literals in *source*, in the order they are written."""
+    import ast
+    import textwrap
+
+    return [
+        tuple(element.value for element in node.elts)
+        for node in ast.walk(ast.parse(textwrap.dedent(source)))
+        if isinstance(node, ast.Tuple)
+        and node.elts
+        and all(
+            isinstance(element, ast.Constant) and isinstance(element.value, str)
+            for element in node.elts
+        )
+    ]
+
+
+def test_the_other_source_parameters_are_the_clis_own_list_and_the_document():
+    """The CLI counts ASH_SOURCE_DIR as the only name of the directory unless one of four
+    parameters is given (`from_variable_alone`, a tuple inside the fs command). The
+    wrappers leave exactly those scans to the variable, and the document that can name
+    any of them, so the contract's list is the CLI's list and one more."""
+    from automated_security_helper.cli.scan_group import run_ash_scan_fs_cli_command
+    from automated_security_helper.interactions.wrapper_contract import (
+        SCAN_OTHER_SOURCE_PARAMETERS,
+    )
+
+    # The control: a list that differs is read as the list it is, so an agreement below
+    # is not the extraction finding nothing.
+    assert _string_tuples("for n in ('source_git', 'image', 'x'): pass") == [
+        ("source_git", "image", "x")
+    ]
+    found = [
+        names
+        for names in _string_tuples(inspect.getsource(run_ash_scan_fs_cli_command))
+        if "source_git" in names
+    ]
+
+    assert len(found) == 1, found
+    assert set(found[0]) | {"cli_json_input"} == set(SCAN_OTHER_SOURCE_PARAMETERS)
+    assert "cli_json_input" not in found[0]
 
 
 def test_only_scan_takes_sandbox():
@@ -149,6 +205,79 @@ def test_the_forwarded_option_list_is_in_the_table_order():
 
 def test_the_subcommands_whose_own_dash_o_is_forwarded():
     assert contract().dash_o_subcommands == ("get-genai-guide", "config")
+
+
+def test_every_command_of_a_group_has_a_taker_named_for_its_own_leaf():
+    """`results diff` and `results trend` have no top-level spelling. Left out for want
+    of a same-named top-level command, they took no pair, and the wrapper's warning
+    named the group ("ash results does not take --offline") instead of the command.
+    Each command of the group is keyed by its own leaf, as `results report` is."""
+    spec = contract()
+
+    assert spec.group_leaf_takers == (
+        "results:report=report",
+        "results:diff=diff",
+        "results:trend=trend",
+        "results:merge=merge",
+        "results:inspect=inspect",
+        "container:build=container",
+    )
+    assert spec.option_groups == ("results", "container")
+
+
+def _command(**commands):
+    """A stand-in for a click command, or for a group when given commands."""
+    return types.SimpleNamespace(commands=commands)
+
+
+def test_a_group_has_takers_for_all_its_commands_only_when_one_is_also_top_level():
+    from automated_security_helper.interactions.wrapper_contract import (
+        _group_leaf_takers,
+        _own_leaf_commands,
+    )
+
+    diff = _command()
+    commands = {
+        "report": _command(),
+        # A spelling group: `report` stands at the top level too, `diff` does not.
+        "results": _command(report=_command(), diff=diff),
+        # No command of it is also top-level: left out, and so are its leaves.
+        "config": _command(get=_command(), init=_command()),
+        # Groups the table reads by their own rules.
+        "scan": _command(fs=_command(), workspace=_command()),
+        "container": _command(build=_command(), other=_command()),
+    }
+
+    assert _group_leaf_takers(commands) == (
+        "results:report=report",
+        "results:diff=diff",
+        "container:build=container",
+    )
+    own = _own_leaf_commands(commands)
+    assert list(own) == ["diff"]
+    assert own["diff"] is diff, "the command itself, so its options are the ones read"
+
+
+def test_two_groups_cannot_each_have_a_command_the_tables_would_read_as_one():
+    from automated_security_helper.interactions.wrapper_contract import (
+        _own_leaf_commands,
+    )
+
+    commands = {
+        "report": _command(),
+        "results": _command(report=_command(), diff=_command()),
+        "history": _command(report=_command(), diff=_command()),
+    }
+
+    with pytest.raises(ValueError, match="diff"):
+        _own_leaf_commands(commands)
+    # One command registered under two groups is one command, not a clash.
+    shared = _command()
+    commands["results"] = _command(report=_command(), diff=shared)
+    commands["history"] = _command(report=_command(), diff=shared)
+    own = _own_leaf_commands(commands)
+    assert list(own) == ["diff"]
+    assert own["diff"] is shared
 
 
 def test_runner_order_image_pattern_and_build_targets():

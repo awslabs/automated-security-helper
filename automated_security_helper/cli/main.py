@@ -220,8 +220,6 @@ _LAZY_SUBCOMMANDS: dict[str, tuple[str, str]] = {
     ),
     "container": ("automated_security_helper.cli.container", "container_app"),
     "report": ("automated_security_helper.cli.report", "report_command"),
-    "diff": ("automated_security_helper.cli.diff", "diff_command"),
-    "trend": ("automated_security_helper.cli.trend", "trend_command"),
     "merge": ("automated_security_helper.cli.merge", "merge_command"),
     "results": ("automated_security_helper.cli.results", "results_app"),
     "config": ("automated_security_helper.cli.config", "config_app"),
@@ -240,10 +238,10 @@ _LAZY_SUBCOMMANDS: dict[str, tuple[str, str]] = {
 #: prints one DeprecationWarning on stderr (3.9) and is removed in 4.0. They are
 #: hidden from the root ``--help`` so the listing shows the new tree, but stay in
 #: the command mapping, so the docs generator, the wrapper tables and the help
-#: snapshots still walk them.
-DEPRECATED_RESULTS_SPELLINGS: frozenset[str] = frozenset(
-    {"report", "diff", "trend", "merge", "inspect"}
-)
+#: snapshots still walk them. ``ash results diff`` and ``ash results trend`` are not
+#: here: no release had a top-level ``ash diff`` or ``ash trend``, so they have no
+#: old spelling to keep or to remove.
+DEPRECATED_RESULTS_SPELLINGS: frozenset[str] = frozenset({"report", "merge", "inspect"})
 
 #: Every top-level spelling deprecated in 3.9, mapped to the spelling that replaces
 #: it: the results commands that moved under ``ash results``, and ``ash build-image``,
@@ -260,22 +258,25 @@ MERGE_COMMAND_HELP = """Merges the results of a sharded scan into one unified re
 Pass one --results per shard. The command refuses to merge a set of shards that does not reconstruct exactly one whole scan, and its exit code is the verdict for the union — a shard that owned no failing scanner exits 0, so CI must gate on this command rather than on per-shard success.
 """
 
+#: The container build's help, shared by ``ash container build`` and its deprecated
+#: spelling ``ash build-image``, which puts its deprecation sentence in front of it.
+BUILD_HELP = """Builds the ASH container image, then scans the current directory with it unless --no-run is given.
+
+It takes only the options below. To scan with scan options, run `ash scan fs --mode container`, which builds the image the same way and accepts every scan option.
+"""
+
 #: The keyword arguments the eager ``app.command(...)`` registration passed for
 #: each lazily-built command function; a sub-Typer needs none (its own module
 #: carries its help and settings, as it did under ``app.add_typer``).
 _LAZY_COMMAND_KWARGS: dict[str, dict[str, Any]] = {
     "build-image": {
         "no_args_is_help": False,
-        "help": """Deprecated: use `ash container build`, which takes the same options.
-
-Builds the ASH container image, then scans the current directory with it unless --no-run is given.
-
-It takes only the options below. To scan with scan options, run `ash scan --mode container`, which builds the image the same way and accepts every scan option.
-""",
+        "help": (
+            "Deprecated: use `ash container build`, which takes the same options.\n\n"
+            + BUILD_HELP
+        ),
     },
     "report": {},
-    "diff": {},
-    "trend": {},
     "merge": {"help": MERGE_COMMAND_HELP},
 }
 
@@ -286,8 +287,6 @@ _COMMAND_ORDER: tuple[str, ...] = (
     "scan",
     "build-image",
     "report",
-    "diff",
-    "trend",
     "merge",
     "results",
     "mcp",
@@ -615,8 +614,8 @@ class AshTyperGroup(TyperGroup):
                     f"'ash {name}' does not take {spellings}, given before it (see "
                     f"'ash {name} --help'). Options given before a subcommand are "
                     f"passed to it only when it takes them: drop {them}, give {them} "
-                    f"after a subcommand that takes {them}, or leave out '{name}' to "
-                    f"scan with {them}."
+                    f"after a subcommand that takes {them}, or run 'ash scan fs' with "
+                    f"{them}."
                 )
             for param, target in taken_differently:
                 typed = _typed_spelling(param, before, root_params)

@@ -9,9 +9,11 @@ scan already wrote and run no scan, so they sit under one noun instead of beside
 (``report_command``, ``diff_command``, ``trend_command``, ``merge_command`` and
 ``inspect_app``); no command body lives here.
 
-The old top-level spellings (``ash report`` and the rest) keep working through
-3.9 with a stderr deprecation warning and are removed in 4.0; the warning is
-emitted by ``AshRootTyperGroup`` in :mod:`automated_security_helper.cli.main`.
+``report``, ``merge`` and ``inspect`` had top-level spellings in 3.8 (``ash report``
+and the other two). Those keep working through 3.9 with a stderr deprecation warning
+and are removed in 4.0; the warning is emitted by ``AshRootTyperGroup`` in
+:mod:`automated_security_helper.cli.main`. ``diff`` and ``trend`` are new in 3.9 and
+have no top-level spelling.
 """
 
 import typer

@@ -266,7 +266,7 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
             self._plugin_log(
                 "cloudwatch-logs publishes one project's results at a time, and "
                 "these are a workspace's unified results, which each project's "
-                "own scan already published. Run ash report with --output-dir "
+                "own scan already published. Run ash results report with --output-dir "
                 "set to a project's directory under the workspace output.",
                 level=logging.ERROR,
                 append_to_stream="stderr",

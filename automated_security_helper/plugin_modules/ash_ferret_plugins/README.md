@@ -71,7 +71,7 @@ Use the `--ash-plugin-modules` flag when running ASH:
 
 <!-- doctest: illustrative reason="runs a scan that needs ferret-scan installed on the host" -->
 ```bash
-uv run ash scan --source-dir /path/to/code \
+uv run ash scan fs /path/to/code \
     --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins
 ```
 
@@ -436,19 +436,19 @@ Results are written to:
 <!-- doctest: illustrative reason="runs a scan that needs ferret-scan installed on the host" -->
 ```bash
 # Run ASH with Ferret Scan enabled
-uv run ash --source-dir /path/to/code
+uv run ash scan fs /path/to/code
 
 # Run only Ferret Scan
-uv run ash --source-dir /path/to/code --scanners ferret-scan
+uv run ash scan fs /path/to/code --scanners ferret-scan
 
 # Run with ferret-scan's own debug output
-uv run ash --source-dir /path/to/code --scanners ferret-scan -o ferret_debug=true
+uv run ash scan fs /path/to/code --scanners ferret-scan -o ferret_debug=true
 
 # Run with ferret-scan's own verbose output
-uv run ash --source-dir /path/to/code --scanners ferret-scan -o ferret_verbose=true
+uv run ash scan fs /path/to/code --scanners ferret-scan -o ferret_verbose=true
 
 # Run with a custom config file
-uv run ash --source-dir /path/to/code \
+uv run ash scan fs /path/to/code \
     --scanners ferret-scan \
     --config-overrides "scanners.ferret-scan.options.config_file=/path/to/custom.yaml"
 ```

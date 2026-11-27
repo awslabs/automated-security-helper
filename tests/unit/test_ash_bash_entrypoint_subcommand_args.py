@@ -6,8 +6,9 @@
 `ash` passes options given before a subcommand on to it when it takes them and
 refuses them otherwise, and `report` does not take --source-dir, so the bash
 entrypoint does not put `--source-dir /src --output-dir /out` before a subcommand: it
-passes the mounted paths as ASH_SOURCE_DIR and ASH_OUTPUT_DIR. CI runs
-`./ash report --format text` after every bash-entrypoint scan.
+passes the mounted paths as ASH_SOURCE_DIR and ASH_OUTPUT_DIR. The one exception is
+the source directory of `scan fs`, which is that subject's PATH argument, `/src`.
+CI runs `./ash report --format text` after every bash-entrypoint scan.
 
 A fake OCI runner stands in for docker, as in test_ash_bash_entrypoint_build_failure.py,
 and prints the argv it was given.
@@ -107,6 +108,36 @@ def test_the_mounted_paths_go_in_as_environment_variables(runner, tmp_path):
     assert "ASH_SOURCE_DIR=/src" in run_argv
     assert "ASH_OUTPUT_DIR=/out" in run_argv
     assert _inner_argv(run_argv) == ["ash", *SANDBOX_OFF, "--scanners", "bandit"]
+
+
+@pytest.mark.integration
+def test_scan_fs_is_given_the_source_directory_as_its_path_argument(runner, tmp_path):
+    run_argv = _run_argv(runner, tmp_path, "scan", "fs")
+
+    assert "ASH_SOURCE_DIR=/src" not in run_argv
+    assert "ASH_OUTPUT_DIR=/out" in run_argv
+    assert _inner_argv(run_argv) == ["ash", "scan", "fs", "/src", *SANDBOX_OFF]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param(["scan"], id="scan-with-no-subject"),
+        pytest.param(["report", "--format", "text"], id="report"),
+        pytest.param(["merge"], id="merge"),
+        pytest.param(["config", "get"], id="config"),
+    ],
+)
+def test_a_form_with_no_scan_subject_keeps_the_source_directory_variable(
+    runner, tmp_path, args
+):
+    """Only `scan fs` can be given a PATH argument. The form with no subject refuses
+    one, and the other commands read the directory from the variable."""
+    run_argv = _run_argv(runner, tmp_path, *args)
+
+    assert "ASH_SOURCE_DIR=/src" in run_argv
+    assert "/src" not in _inner_argv(run_argv)
 
 
 @pytest.mark.integration
@@ -330,8 +361,45 @@ def test_every_re_emitted_flag_is_one_the_subcommand_takes():
         param.name for param in root.commands["container"].commands["build"].params
     }
     assert subcommands == set(declared)
-    assert quiet == {name for name, params in declared.items() if "quiet" in params}
-    assert color == {name for name, params in declared.items() if "color" in params}
+    # `results diff` and `results trend` have no top-level spelling, so they are not
+    # subcommands, but a command that takes one of these options is named in them by its
+    # own leaf, as `results report` is named `report`.
+    group_only = {
+        leaf: {param.name for param in command.params}
+        for leaf, command in root.commands["results"].commands.items()
+        if leaf not in root.commands
+    }
+    assert set(group_only) == {"diff", "trend"}
+    takers = {**declared, **group_only}
+    assert quiet == {name for name, params in takers.items() if "quiet" in params}
+    assert color == {name for name, params in takers.items() if "color" in params}
+
+
+@pytest.mark.unit
+def test_every_command_of_a_group_has_a_taker_named_for_its_own_leaf():
+    """The pairs that tell the entrypoint which command's options a command under a
+    group takes (ASH_GROUP_LEAF_TAKERS), checked against the real groups. Every command
+    of `results` has one, `results diff` and `results trend` included: they have no
+    top-level spelling, and a pair keyed on a same-named top-level command left them
+    out, which made a command under the group read as one that takes nothing."""
+    import typer.main
+
+    from automated_security_helper.cli.main import app
+
+    script = ASH_SCRIPT.read_text(encoding="utf-8")
+    pairs = re.search(r"ASH_GROUP_LEAF_TAKERS=\"([^\"]*)\"", script).group(1).split()
+    groups = set(re.search(r"ASH_OPTION_GROUPS=\"([^\"]*)\"", script).group(1).split())
+    root = typer.main.get_command(app)
+    leaves = set(root.commands["results"].commands)
+
+    assert leaves == {"report", "diff", "trend", "merge", "inspect"}
+    assert {pair for pair in pairs if pair.startswith("results:")} == {
+        f"results:{leaf}={leaf}" for leaf in leaves
+    }
+    assert "container:build=container" in pairs
+    assert groups == {"results", "container"}
+    # Every pair is of a group the table names, and no group is named without one.
+    assert {pair.split(":", 1)[0] for pair in pairs} == groups
 
 
 # What marks a module as reading stdin: the console helpers' confirm and prompt

@@ -862,14 +862,14 @@ def _validate_shard_options(
             "--shard-index/--shard-count cannot be combined with --workspace. "
             "Both spread one scan over more compute, but along different axes, and "
             "only sharding is recombinable: it partitions the scanners and stamps "
-            "the partition onto the results so 'ash merge' can prove the shards "
-            "reconstruct exactly one whole scan. Workspace mode's unified results "
-            "file is assembled from the per-project payloads and carries none of "
-            "each project's scan metadata, so a sharded workspace run would write "
-            "results that merge has no provenance to verify coverage from -- and "
-            "an unverifiable partial scan reads as a clean one. Either scan the "
-            "workspace whole on one executor, or give each CI job one project via "
-            "--source-dir and shard that."
+            "the partition onto the results so 'ash results merge' can prove the "
+            "shards reconstruct exactly one whole scan. Workspace mode's unified "
+            "results file is assembled from the per-project payloads and carries "
+            "none of each project's scan metadata, so a sharded workspace run would "
+            "write results that merge has no provenance to verify coverage from -- "
+            "and an unverifiable partial scan reads as a clean one. Either scan the "
+            "workspace whole on one executor, or give each CI job one project with "
+            "`ash scan fs <project>` and shard that."
         )
 
     try:
@@ -1525,7 +1525,7 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--shard-index",
             rich_help_panel="CI and sharding",
-            help="Zero-based index of this shard when one scan is split across several executors. Requires --shard-count. A 3-way split uses indices 0, 1 and 2. Each shard runs a disjoint subset of the scanners and records which ones in its results; recombine them with 'ash merge'.",
+            help="Zero-based index of this shard when one scan is split across several executors. Requires --shard-count. A 3-way split uses indices 0, 1 and 2. Each shard runs a disjoint subset of the scanners and records which ones in its results; recombine them with 'ash results merge'.",
             envvar="ASH_SHARD_INDEX",
         ),
     ] = None,
@@ -1584,7 +1584,7 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--workspace",
             rich_help_panel="Workspace",
-            help="Path to a '.code-workspace' file whose folders are scanned as separate, independently-scoped projects. Pass 'auto' to use the single '*.code-workspace' file in the current directory. Mutually exclusive with --source-dir.",
+            help="Path to a '.code-workspace' file whose folders are scanned as separate, independently-scoped projects. Pass 'auto' to use the single '*.code-workspace' file in the current directory. Mutually exclusive with --source-dir. Deprecated as an option, removed in ASH v4.0: give it as the FILE argument of `ash scan workspace`.",
             envvar="ASH_WORKSPACE",
         ),
     ] = None,
@@ -1794,7 +1794,7 @@ def run_ash_scan_cli_command(
 
     Start with: ash scan fs . --mode container
 
-    Review the result with: ash inspect findings
+    Review the result with: ash results inspect findings
 
     Options are grouped by workflow below. Running ash without a subcommand starts a scan, but that form is deprecated.
     """
@@ -1809,10 +1809,9 @@ def run_ash_scan_cli_command(
         raise typer.Exit
 
     # Bare `ash [options]` and `ash scan [options]` reach here without a subject;
-    # `ash scan fs` sets the subject in ctx.meta first and prints nothing. A
-    # workspace scan has no subject to move to yet, so it is not told to use one.
-    if workspace is None:
-        warn_if_legacy_scan_form(ctx)
+    # `ash scan fs` and `ash scan workspace` set theirs in ctx.meta first and print
+    # nothing. A workspace scan reached without its subject is told which one.
+    warn_if_legacy_scan_form(ctx, workspace)
 
     # envvar= above documents ASH_VERBOSE/ASH_DEBUG in --help, but click would
     # also let the variable set the flag outright, so ASH_DEBUG=true would beat
@@ -1921,10 +1920,14 @@ def run_ash_scan_cli_command(
         if git_ref is not None or git_depth is not None:
             _fail_usage("--git-ref and --git-depth only apply with --source-git.")
     else:
-        source_dir_given = (
-            getattr(ctx.get_parameter_source("source_dir"), "name", None)
-            == "COMMANDLINE"
-        )
+        # A --cli-json-input document is named on this command line, and the
+        # directory its `source_dir` key names reaches click as a default
+        # (DEFAULT_MAP), so it is given here as much as a typed --source-dir is,
+        # and the clone does not replace it without a word. ASH_SOURCE_DIR is
+        # ambient, and the clone takes its place.
+        source_dir_given = getattr(
+            ctx.get_parameter_source("source_dir"), "name", None
+        ) in ("COMMANDLINE", "DEFAULT_MAP")
         for other_flag, other_given in (
             ("--source-dir", source_dir_given),
             ("--image", bool(images)),
@@ -2151,8 +2154,9 @@ def run_ash_scan_cli_command(
             if given
         ]
         _fail_workspace(
-            f"{' and '.join(offending)} only applies in workspace mode; pass "
-            f"'--workspace <file>' or '--workspace auto' as well."
+            f"{' and '.join(offending)} only applies in workspace mode; run "
+            f"`ash scan workspace <file>` (or `ash scan workspace auto`) to scan a "
+            f"workspace."
         )
 
     # Built HERE, above the workspace block, rather than with the other

@@ -534,7 +534,8 @@ _NOT_FORWARDED_ON_PURPOSE = {
     "mode": "rewrite_mode_args appends the local mode",
     "baseline_data": "cached baseline bytes are not used in Nix mode",
     "workspace_plan": (
-        "its definition and policy are forwarded as --workspace and --workspace-config"
+        "its definition is the argument of the workspace subject and its policy is "
+        "forwarded as --workspace-config"
     ),
     "workspace_config_as_named": (
         "container mode's hand-over spelling; the shell shares this filesystem and "
@@ -668,11 +669,76 @@ def test_allow_missing_projects_reaches_the_inner_scan_of_a_workspace(tmp_path):
 
     argv = ras._nix_inner_argv(tolerant)
 
-    assert _after_flag(argv, "--workspace") == ["/ws/ash-workspace.yaml"]
+    assert argv[:3] == ["scan", "workspace", "/ws/ash-workspace.yaml"]
+    assert "--workspace" not in argv, "the definition is the subject's argument"
     assert _after_flag(argv, "--workspace-config") == ["/ws/config.yaml"]
     assert "--allow-missing-projects" in argv
     assert "--source-dir" not in argv, "a workspace scan names no single directory"
     assert "--allow-missing-projects" not in ras._nix_inner_argv(workspace)
+
+
+def test_a_workspace_definition_that_starts_with_a_dash_is_given_as_a_path(tmp_path):
+    plan = SimpleNamespace(
+        workspace_file="-team.code-workspace", workspace_config_source=None
+    )
+    opts = ras.ScanOptions(
+        source_dir=tmp_path / "src", output_dir=tmp_path / "out", mode=RunMode.nix
+    )
+
+    argv = ras._nix_inner_argv(opts.model_copy(update={"workspace_plan": plan}))
+
+    assert argv[:3] == ["scan", "workspace", "./-team.code-workspace"]
+    assert "--workspace-config" not in argv
+
+
+def test_the_workspace_subject_reads_every_option_the_inner_scan_is_given(
+    tmp_path, monkeypatch
+):
+    """The test above spells the command line out; this one hands it to the command
+    that runs inside the shell, so a flag the subject does not take is an error here
+    and not a Nix run that fails inside the shell. The options of a directory scan
+    (the changed-files scope, a shard, saved results) are not given to a workspace
+    scan, so none is set."""
+    import typer
+
+    from automated_security_helper.cli.main import app
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    plan = SimpleNamespace(
+        workspace_file="/ws/dev.code-workspace",
+        workspace_config_source="/ws/policy.yaml",
+    )
+    opts = _every_option_set(tmp_path).model_copy(
+        update={
+            "workspace_plan": plan,
+            "allow_missing_projects": True,
+            "changed_files_only": False,
+            "existing_results": None,
+            "shard_index": None,
+            "shard_count": None,
+        }
+    )
+    argv = ras._nix_inner_argv(opts)
+
+    subject = typer.main.get_command(app).commands["scan"].commands["workspace"]
+    assert argv[:3] == ["scan", "workspace", "/ws/dev.code-workspace"]
+    parsed = subject.make_context("workspace", argv[2:], resilient_parsing=False).params
+
+    def read(name):
+        return _as_the_command_reads_it(parsed[name])
+
+    assert read("file") == "/ws/dev.code-workspace"
+    assert read("workspace_config") == "/ws/policy.yaml"
+    assert read("allow_missing_projects") is True
+    assert read("output_dir") == str(opts.output_dir)
+    assert read("config") == opts.config
+    assert read("config_overrides") == ["a=1", "b=2"]
+    assert read("scanners") == ["bandit", "semgrep"]
+    assert read("exclude_scanners") == ["grype"]
+    assert read("output_formats") == [ExportFormat.SARIF.value]
+    assert read("strategy") == ExecutionStrategy.SEQUENTIAL.value
+    assert read("quiet") is True
+    assert read("fail_on_incomplete_scanners") is True
 
 
 @pytest.fixture

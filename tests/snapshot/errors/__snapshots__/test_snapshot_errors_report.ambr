@@ -17,7 +17,7 @@
     'stderr': '''
       INFO     Loaded 4 converters, 17 scanners, and 16 reporters
       INFO     Found reporter plugin MarkdownReporter
-      No scan results found: none of out/.ash/ash_output/ash_aggregated_results.json, out/ash_output/ash_aggregated_results.json, out/ash_aggregated_results.json exists. Run 'ash scan' first, or point --output-dir at the output directory of a previous scan.
+      No scan results found: none of out/.ash/ash_output/ash_aggregated_results.json, out/ash_output/ash_aggregated_results.json, out/ash_aggregated_results.json exists. Run 'ash scan fs' first, or point --output-dir at the output directory of a previous scan.
   
     ''',
     'stdout': '',

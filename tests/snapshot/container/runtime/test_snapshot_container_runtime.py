@@ -27,14 +27,14 @@ XDG_DATA_HOME and XDG_CONFIG_HOME to the runner's environment
 A scan through the image prints the inner ASH's whole log first, and that log
 carries timings and tool-install chatter that differ on every run. What the user
 reads as the result is what the host prints after the container exits, so for
-``ash --mode container`` the snapshot keeps the host's output from its first line
-after the container: "Container execution failed with code N" or, for status 0,
-the "ASH Scan Completed" banner. The wrappers print the inner ASH directly, so
-for them the snapshot keeps the exit status and the last line printed: the inner
-verdict for ./ash, the status Invoke-ASH returns for the PowerShell one. Only
-bandit is selected: its version is fixed when the image is built, and the
-fixture's two bandit findings are the same on every architecture. grype and
-semgrep read advisory and rule data that changes daily.
+``ash scan fs --mode container`` the snapshot keeps the host's output from its
+first line after the container: "Container execution failed with code N" or, for
+status 0 or 2, which the scan reaches with a verdict, the "ASH Scan Completed"
+banner. The wrappers print the inner ASH directly, so for them the snapshot keeps
+the exit status and the last line printed: the inner verdict for ./ash, the status
+Invoke-ASH returns for the PowerShell one. Only bandit is selected: its version is
+fixed when the image is built, and the fixture's two bandit findings are the same on
+every architecture. grype and semgrep read advisory and rule data that changes daily.
 """
 
 from __future__ import annotations
@@ -71,6 +71,26 @@ RUNNER_PREFIX = [
 _HOST_RESUMES = ("Container execution failed with code", "=== ASH Scan Completed")
 
 BAD_CONFIG = "project_name: bad\nglobal_settings:\n  severity_threshold: NOT_A_LEVEL\n"
+
+#: The container-mode scan the two host-side tests below run, from the image this leg
+#: built. ../test_snapshot_container_runtime_follows_in_process.py runs the arguments
+#: in the default tier and fails if they print a deprecation line.
+CONTAINER_SCAN = [
+    "scan",
+    "fs",
+    "src",
+    "--mode",
+    "container",
+    "--no-build",
+    "--build-target",
+    "ci",
+    "--no-progress",
+    "--output-dir",
+    "out",
+]
+#: The scan of the fixture, by bandit alone (see the module docstring), stated with
+#: ``--only-scanners``: ``--scanners`` prints a deprecation line on the host.
+FIXTURE_SCAN = [*CONTAINER_SCAN, "--only-scanners", "bandit"]
 
 
 def _in_image(*command: str) -> dict:
@@ -144,23 +164,7 @@ def test_build_image_help_in_image(text_snapshot):
 def test_container_scan_of_the_fixture(
     run_cli, snapshot, fixture_repo, project_build_files_in_cwd
 ):
-    result = run_cli(
-        [
-            "scan",
-            "--mode",
-            "container",
-            "--no-build",
-            "--build-target",
-            "ci",
-            "--no-progress",
-            "--source-dir",
-            "src",
-            "--output-dir",
-            "out",
-            "--scanners",
-            "bandit",
-        ]
-    )
+    result = run_cli(FIXTURE_SCAN)
     assert {
         "exit_code": result["exit_code"],
         "host_output_after_container": _host_output_after_container(result["stdout"]),
@@ -176,21 +180,7 @@ def test_an_invalid_config_is_refused_on_the_host_before_the_container_starts(
     # before it builds, runs or mounts anything (_outer_mode_config_refusal). So the
     # host prints the refusal itself and there is no container exit to report.
     (fixture_repo / ".ash.yaml").write_text(BAD_CONFIG, encoding="utf-8")
-    result = run_cli(
-        [
-            "scan",
-            "--mode",
-            "container",
-            "--no-build",
-            "--build-target",
-            "ci",
-            "--no-progress",
-            "--source-dir",
-            "src",
-            "--output-dir",
-            "out",
-        ]
-    )
+    result = run_cli(CONTAINER_SCAN)
     assert result["exit_code"] == 3
     assert "ERROR (3) Invalid configuration" in result["stdout"]
     assert not any(marker in result["stdout"] for marker in _HOST_RESUMES)

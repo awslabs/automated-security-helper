@@ -793,7 +793,7 @@ def _validate_containment(
             problems.append(
                 f"'{folder.path}' names the workspace root itself. A workspace "
                 f"project must be a directory below the root; to scan a single "
-                f"directory use '--source-dir' instead of '--workspace'."
+                f"directory use `ash scan fs <path>` instead of `ash scan workspace`."
             )
             continue
         candidates.append(

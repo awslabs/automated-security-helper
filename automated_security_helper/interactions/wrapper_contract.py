@@ -79,6 +79,22 @@ CONTAINER_MODE_SUBCOMMANDS: tuple[str, ...] = ("scan", "build-image", "container
 #: build` passes `--quiet` on to `build`: such a group takes what that command takes.
 OPTION_ROUTING_GROUPS: dict[str, str] = {"container": "build"}
 
+#: The parameters of the scan's subjects that name where the source is instead of the
+#: directory a wrapper mounts: a clone and the three image options, and the structured
+#: input, whose document can name any of them where a wrapper cannot read it. A wrapper
+#: gives `scan fs` its directory as the PATH argument, and the CLI refuses a PATH beside
+#: a clone, so a scan that carries one of these is left to the variable that told it
+#: its directory before. The first four are the ones the CLI itself leaves out when it
+#: decides that the variable alone names the directory (`from_variable_alone` in
+#: cli/scan_group.py); tests/unit/test_wrapper_contract_spec.py holds them to that list.
+SCAN_OTHER_SOURCE_PARAMETERS: tuple[str, ...] = (
+    "source_git",
+    "image",
+    "image_archive",
+    "image_layout",
+    "cli_json_input",
+)
+
 
 def _options(command: Any) -> set[str]:
     """The options a command declares itself, not those of commands nested under it."""
@@ -118,12 +134,18 @@ class WrapperContract:
     scan_subjects: tuple[str, ...]
     #: The options a subject of ``scan`` takes a value for that the root does not.
     scan_subject_value_options: tuple[str, ...]
+    #: The long options of the scan's subjects that name a source other than the
+    #: directory, or carry a document that can (:data:`SCAN_OTHER_SOURCE_PARAMETERS`),
+    #: sorted. A scan with one is not given the directory as its PATH argument.
+    scan_other_source_options: tuple[str, ...]
     #: Every long option of the root and of the scan's subjects, sorted: what a
     #: shell completion offers after a dash.
     root_options: tuple[str, ...]
     #: The root options that take a value, long spellings then short, sorted.
     root_value_options: tuple[str, ...]
-    #: For each wrapper-forwarded option, the subcommands that declare it, in order.
+    #: For each wrapper-forwarded option, the commands that declare it, in order: the
+    #: subcommands, then the commands of a group that have no top-level spelling
+    #: (``results diff``), by their own names.
     option_subcommands: tuple[tuple[str, tuple[str, ...]], ...]
     #: Subcommands whose own ``-o`` is forwarded instead of read as the runner.
     dash_o_subcommands: tuple[str, ...]
@@ -139,8 +161,9 @@ class WrapperContract:
     #: The runner markers that are passed into the container by name.
     ci_runner_markers: tuple[str, ...]
     #: ``group:leaf=taker`` for each command under a group whose options the wrapper
-    #: places after the leaf (``results:report=report``, ``container:build=container``).
-    #: ``taker`` is the name the option tables list for what the leaf takes.
+    #: places after the leaf (``results:report=report``, ``results:diff=diff``,
+    #: ``container:build=container``). ``taker`` is the name the option tables list for
+    #: what the leaf takes.
     group_leaf_takers: tuple[str, ...]
 
     @property
@@ -188,11 +211,15 @@ def contract() -> WrapperContract:
         for param in subject.params
     ]
 
+    # The commands the wrapper decides the options it adds for: every subcommand, and the
+    # commands of a group that have no top-level spelling (`results diff`), by their own
+    # names, since the group's pairs name each of them as its taker.
+    taker_commands = {**commands, **_own_leaf_commands(commands)}
     forwarded = []
     for option in WRAPPER_FORWARDED_OPTIONS:
         takers = tuple(
             name
-            for name, command in commands.items()
+            for name, command in taker_commands.items()
             if option in options_of(name, command)
         )
         forwarded.append((option, takers))
@@ -213,6 +240,18 @@ def contract() -> WrapperContract:
     subject_value_options = sorted(
         value_options_of(subject_params) - set(value_options)
     )
+    # Options that name the source somewhere other than the directory, and the document
+    # option that can: a scan that has one keeps the variable as the name of its
+    # directory instead of being given a PATH argument.
+    other_source_options = sorted(
+        {
+            spelling
+            for param in subject_params
+            if param.param_type_name == "option"
+            and param.name in SCAN_OTHER_SOURCE_PARAMETERS
+            for spelling in param.opts
+        }
+    )
     all_options = sorted(
         {
             spelling
@@ -230,6 +269,7 @@ def contract() -> WrapperContract:
         subcommands=subcommands,
         scan_subjects=scan_subjects,
         scan_subject_value_options=tuple(subject_value_options),
+        scan_other_source_options=tuple(other_source_options),
         root_options=tuple(all_options),
         sandbox_subcommands=tuple(
             name
@@ -253,25 +293,71 @@ def contract() -> WrapperContract:
     )
 
 
+def _leaves(command: Any) -> dict[str, Any]:
+    """The commands registered under *command*, none for a command that is no group."""
+    return getattr(command, "commands", None) or {}
+
+
+def _is_spelling_group(group: str, command: Any, commands: dict[str, Any]) -> bool:
+    """Whether *group* is a noun that has top-level spellings among its commands.
+
+    ``results`` is one: ``results report``, ``results merge`` and ``results inspect``
+    are also commands of the top level, and ``results diff`` and ``results trend``
+    stand beside them with no top-level spelling. ``scan`` is not (its subjects are
+    never commands of the top level), nor is a group in :data:`OPTION_ROUTING_GROUPS`,
+    which takes what its one command takes, nor a group none of whose commands is also
+    a top-level command (``config``).
+    """
+    return (
+        group != "scan"
+        and group not in OPTION_ROUTING_GROUPS
+        and any(leaf in commands for leaf in _leaves(command))
+    )
+
+
+def _own_leaf_commands(commands: dict[str, Any]) -> dict[str, Any]:
+    """The commands of the groups with top-level spellings that have none themselves.
+
+    ``results diff`` and ``results trend``, by their own names (``diff``, ``trend``):
+    no release had them at the top level, so no top-level command carries what they
+    take, and the option tables list them under their own leaf. A taker is named by its
+    leaf alone, so two different commands of two groups under one leaf would be read as
+    one command: that is a ValueError, not a silent merge.
+    """
+    found: dict[str, Any] = {}
+    for group, command in commands.items():
+        if not _is_spelling_group(group, command, commands):
+            continue
+        for leaf, leaf_command in _leaves(command).items():
+            if leaf in commands:
+                continue
+            if leaf in found and found[leaf] is not leaf_command:
+                raise ValueError(
+                    f"two groups each have a command named {leaf!r} that is not at "
+                    "the top level, and the wrapper tables name a taker by its leaf "
+                    "alone"
+                )
+            found[leaf] = leaf_command
+    return found
+
+
 def _group_leaf_takers(commands: dict[str, Any]) -> tuple[str, ...]:
     """``group:leaf=taker`` for every command under a group that has a taker.
 
     A group in :data:`OPTION_ROUTING_GROUPS` takes what its one command takes, and
-    its table name is the group's own. Any other group's command that is also a
-    top-level command (``results report`` and ``report``) takes what that one does.
-    A group none of whose commands has a taker is left out: the tables give it no
-    options, and the wrapper puts nothing after it.
+    its table name is the group's own. A group with top-level spellings among its
+    commands (``results``) has a taker for each command of its own, named by the
+    command's leaf: ``results report`` takes what ``report`` takes, and ``results
+    diff``, which has no top-level spelling, is listed in the option tables under
+    ``diff`` (:func:`_own_leaf_commands`). A group none of whose commands has a taker
+    is left out: the tables give it no options, and the wrapper puts nothing after it.
     """
     pairs: list[str] = []
     for group, command in commands.items():
-        if group == "scan":
-            continue
-        leaves = getattr(command, "commands", None) or {}
-        found: list[str] = []
-        for leaf in leaves:
-            if OPTION_ROUTING_GROUPS.get(group) == leaf:
-                found.append(f"{group}:{leaf}={group}")
-            elif group not in OPTION_ROUTING_GROUPS and leaf in commands:
-                found.append(f"{group}:{leaf}={leaf}")
-        pairs.extend(found)
+        if group in OPTION_ROUTING_GROUPS:
+            leaf = OPTION_ROUTING_GROUPS[group]
+            if leaf in _leaves(command):
+                pairs.append(f"{group}:{leaf}={group}")
+        elif _is_spelling_group(group, command, commands):
+            pairs.extend(f"{group}:{leaf}={leaf}" for leaf in _leaves(command))
     return tuple(pairs)

@@ -1,7 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ash scan`` is a group of subjects, and ``fs`` is the one that scans a directory.
+"""``ash scan`` is a group of subjects: ``fs`` scans a directory, ``workspace`` the
+projects of a workspace file (tests/unit/cli/test_scan_workspace_subject.py).
 
 What is pinned here:
 
@@ -9,9 +10,12 @@ What is pinned here:
   deprecation line.
 * The three older spellings still run the scan and print ONE line to stderr, never
   stdout, with the exit code unchanged: bare ``ash [options]``, ``ash scan
-  [options]`` with no subject, and ``--source-dir`` on ``fs``.
+  [options]`` with no subject, and ``--source-dir`` on ``fs``. A workspace scan with
+  no subject prints its own line, which the file named above pins.
 * A subject may follow options, as ``ash --output-dir out scan fs .`` hands the
   root's option on in front of it.
+* Two different directories, one as the argument and one with ``--source-dir``,
+  are refused whether each was typed or given by a ``--cli-json-input`` document.
 * ``ash scan --help`` lists the subjects without importing the scan engine.
 
 Every case that reaches the engine passes ``--shard-index 3`` without
@@ -49,6 +53,10 @@ def _deprecation_lines(text: str) -> list[str]:
     return [line for line in text.splitlines() if line.startswith("Deprecated:")]
 
 
+def _one_line(text: str) -> str:
+    return " ".join(text.split())
+
+
 def test_scan_help_still_lists_the_scan_options():
     # Tools read `ash scan --help` for the scan's options (the deploy gates probe it
     # for --fail-on-incomplete-scanners), so a no-subject --help is fs's.
@@ -58,9 +66,15 @@ def test_scan_help_still_lists_the_scan_options():
     assert "Usage: ash scan fs [OPTIONS] [PATH]" in result.output
     assert "--shard-count" in result.output
     assert "--mode" in result.output
+    # The form with no subject still takes the workspace options, so a tool that reads
+    # this help for what `ash scan` accepts finds them.
+    assert "--allow-missing-projects" in result.output
     # The subjects are listed in the epilog: this help is `fs`'s, so the group's own
     # command list is never printed.
     assert "Subjects of `ash scan`: fs" in result.output
+    assert "workspace (scan the projects of a .code-workspace file)" in _one_line(
+        result.output
+    )
 
 
 def test_a_path_key_in_a_json_document_is_accepted_without_a_subject(engine, tmp_path):
@@ -86,17 +100,27 @@ def test_a_dashed_directory_after_a_double_dash_is_suggested_with_one(engine):
 
     assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
     assert "ash scan fs -- -build" in result.output
-    assert "(subjects: fs)" in result.output
+    assert "(subjects: fs, workspace)" in result.output
     assert engine.calls == []
 
 
-def test_fs_help_takes_a_path_argument_and_every_scan_option():
+def test_fs_help_takes_a_path_argument_and_every_option_of_a_directory_scan():
     result = _invoke(["scan", "fs", "--help"])
 
     assert result.exit_code == 0, result.output
     assert "Usage: ash scan fs [OPTIONS] [PATH]" in result.output
     assert "--mode" in result.output
     assert "--shard-index" in result.output
+    # The options of a workspace scan are the workspace subject's, and its help says
+    # where they went.
+    for option in (
+        "--workspace",
+        "--workspace-config",
+        "--allow-missing-projects",
+        "--dry-run",
+    ):
+        assert option not in result.output, option
+    assert "ash scan workspace" in _one_line(result.output)
 
 
 def test_fs_prints_no_deprecation_line():
@@ -190,6 +214,117 @@ def test_the_same_directory_given_twice_is_not_a_conflict():
     assert "Name the directory once" not in result.output
 
 
+#: What the refusal adds when a --cli-json-input document gave one of the two names.
+DOCUMENT_KEYS = (
+    "In a --cli-json-input document they are the keys `path` and `source_dir`"
+)
+
+
+def _document(tmp_path, values: dict) -> str:
+    document = tmp_path / "scan.json"
+    document.write_text(json.dumps(values), encoding="utf-8")
+    return str(document)
+
+
+@pytest.mark.parametrize(
+    ("values", "before", "after"),
+    [
+        pytest.param(
+            {"path": "svc-a", "source_dir": "svc-b"},
+            ["scan", "fs"],
+            [],
+            id="both-keys-of-the-document",
+        ),
+        pytest.param(
+            {"path": "svc-a", "--source-dir": "svc-b"},
+            ["scan", "fs"],
+            [],
+            id="the-path-key-and-the-flag-key",
+        ),
+        pytest.param(
+            {"path": "svc-a", "source_dir": "svc-b"},
+            ["scan"],
+            [],
+            id="both-keys-without-a-subject",
+        ),
+        pytest.param(
+            {"source_dir": "svc-b"},
+            ["scan", "fs", "svc-a"],
+            [],
+            id="a-typed-path-and-the-source_dir-key",
+        ),
+        pytest.param(
+            {"path": "svc-a"},
+            ["scan", "fs"],
+            ["--source-dir", "svc-b"],
+            id="the-path-key-and-a-typed-source-dir",
+        ),
+    ],
+)
+def test_a_json_document_that_names_a_second_directory_is_refused(
+    engine, tmp_path, values, before, after
+):
+    # The document is named on this command line, so a directory it names is given
+    # there as much as a typed one is. Two names that differ are refused wherever each
+    # came from, and neither directory is scanned: only a typed --source-dir used to
+    # be compared, so the document's `source_dir` was dropped without a word.
+    result = _invoke([*before, "--cli-json-input", _document(tmp_path, values), *after])
+
+    assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+    assert "Name the directory once" in result.output
+    assert DOCUMENT_KEYS in result.output, result.output
+    assert engine.calls == []
+
+
+def test_a_typed_path_and_source_dir_are_not_told_about_document_keys(engine):
+    result = _invoke(["scan", "fs", "a", "--source-dir", "b"])
+
+    assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+    assert "Name the directory once" in result.output
+    assert DOCUMENT_KEYS not in result.output
+    assert engine.calls == []
+
+
+def test_a_json_document_that_names_one_directory_twice_is_not_a_conflict(
+    engine, tmp_path
+):
+    document = _document(tmp_path, {"path": "svc", "source_dir": "svc"})
+
+    result = _invoke(["scan", "fs", "--cli-json-input", document])
+
+    assert result.exit_code == 0, result.output
+    assert [call["source_dir"] for call in engine.calls] == ["svc"]
+
+
+def test_a_null_key_in_a_json_document_names_no_directory(engine, tmp_path):
+    # A document reads null as not given, so a `source_dir` key left null beside a
+    # filled-in `path` is one name. The skeleton `--generate-cli-skeleton` prints lists
+    # `path` alone, null (`source_dir` is deprecated, so the template leaves it out),
+    # but a document written from an earlier skeleton still carries `source_dir`, null.
+    skeleton = json.loads(_invoke(["scan", "fs", "--generate-cli-skeleton"]).stdout)
+    assert skeleton["path"] is None and "source_dir" not in skeleton
+    document = _document(tmp_path, {"path": "svc", "source_dir": None})
+
+    result = _invoke(["scan", "fs", "--cli-json-input", document])
+
+    assert result.exit_code == 0, result.output
+    assert [call["source_dir"] for call in engine.calls] == ["svc"]
+
+
+def test_a_json_documents_path_is_not_a_second_name_beside_the_variable(
+    engine, tmp_path, monkeypatch
+):
+    # ASH_SOURCE_DIR is ambient, and the document outranks every variable
+    # (cli/json_input.py), so the document's `path` names the directory.
+    monkeypatch.setenv("ASH_SOURCE_DIR", "/from/env")
+    document = _document(tmp_path, {"path": "given"})
+
+    result = _invoke(["scan", "fs", "--cli-json-input", document])
+
+    assert result.exit_code == 0, result.output
+    assert [call["source_dir"] for call in engine.calls] == ["given"]
+
+
 class _EngineStub:
     """Stands in for the engine behind ``fs``: records what it was handed."""
 
@@ -224,9 +359,10 @@ def test_with_no_path_the_environment_variable_still_names_the_directory(
 
     assert result.exit_code == 0, result.output
     assert [call["source_dir"] for call in engine.calls] == ["/from/env"]
-    assert _deprecation_lines(result.output) == [], (
-        "ASH_SOURCE_DIR is how the container hands the mount to the scan inside"
-    )
+    # The scan still runs on the variable, and it is told once that the variable is
+    # deprecated (tests/unit/cli/test_scan_variables_warn_once.py has every case).
+    (line,) = _deprecation_lines(result.output)
+    assert "ASH_SOURCE_DIR" in line and "ash scan fs <path>" in line, line
 
 
 def test_the_path_beats_the_environment_variable(engine, monkeypatch):
@@ -244,7 +380,9 @@ def test_fs_skeleton_lists_the_path_key():
     assert result.exit_code == 0, result.output
     skeleton = json.loads(result.stdout)
     assert "path" in skeleton
-    assert "source_dir" in skeleton
+    # The directory is named with `path`. The deprecated `source_dir` is still read from
+    # a document, but the template a document is written from does not list it.
+    assert "source_dir" not in skeleton
 
 
 def test_the_subject_less_form_still_reads_a_skeleton():
@@ -261,5 +399,23 @@ def test_every_scan_subject_is_known_to_the_group_and_not_a_non_scan_command():
 
     group = typer.main.get_command(app).commands["scan"]
 
-    assert list(group.commands) == ["fs"]
+    assert list(group.commands) == ["fs", "workspace"]
+    assert list(group.commands) == list(scan_group.SUBJECTS)
     assert not set(group.commands) & set(NON_SCAN_SUBCOMMANDS)
+
+
+def test_the_command_that_runs_the_form_with_no_subject_is_not_a_subject():
+    """It takes every option of the engine, so it is not `fs`; it is kept out of the
+    commands every tool lists the subjects from."""
+    import typer.main
+
+    group = typer.main.get_command(app).commands["scan"]
+    legacy = group.legacy_command()
+
+    assert "legacy" not in group.commands
+    assert legacy is not group.commands["fs"]
+    taken = {param.name for param in legacy.params}
+    assert set(scan_group.WORKSPACE_OPTIONS) <= taken
+    assert set(scan_group.WORKSPACE_OPTIONS).isdisjoint(
+        {param.name for param in group.commands["fs"].params}
+    )

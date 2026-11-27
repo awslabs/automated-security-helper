@@ -72,11 +72,29 @@ def _options(command, name: str = "") -> set[str]:
     return found
 
 
+def _group_only_commands(root) -> dict:
+    """The commands of ``results`` that have no top-level spelling, by their own names.
+
+    ``results diff`` and ``results trend`` are listed in the tables as ``diff`` and
+    ``trend``: a command that takes an option the wrapper adds is named there by its
+    own leaf, as ``results report`` is named ``report``.
+    """
+    return {
+        leaf: command
+        for leaf, command in root.commands["results"].commands.items()
+        if leaf not in root.commands
+    }
+
+
 def test_the_subcommand_table_matches_the_real_commands():
     """The wrapper's lists of subcommands, and of which take each option it adds,
     checked against the real commands so they cannot drift from them."""
     root = typer.main.get_command(app)
     assert set(_ps1_list("ashSubcommands")) == set(root.commands)
+    # Held to a literal, so an empty read of the group cannot pass: the two commands
+    # no release had at the top level.
+    assert set(_group_only_commands(root)) == {"diff", "trend"}
+    takers_of = {**root.commands, **_group_only_commands(root)}
     table = _ps1_table("ashOptionSubcommands")
     for option, takers in sorted(table.items()):
         assert option in _options(root), f"ash itself does not take {option}"
@@ -84,7 +102,7 @@ def test_the_subcommand_table_matches_the_real_commands():
         # options are handed to (AshTyperGroup._options_for_subcommand).
         assert takers == {
             name
-            for name, command in root.commands.items()
+            for name, command in takers_of.items()
             if option
             in _options(
                 command.commands["build"] if name == "container" else command, name
@@ -150,7 +168,36 @@ def test_the_scan_subjects_and_their_value_options_are_the_real_ones():
     } - root_value_options
     assert set(_ps1_list("ashScanSubjects")) == set(subjects)
     assert set(_ps1_list("ashScanValueOptions")) == subject_value_options
-    assert subject_value_options == {"--cli-json-input"}
+    # Held to literals as well, so a subject that left the CLI cannot take its row
+    # with it: workspace is a subject, and --archive is fs's own value option.
+    assert set(subjects) == {"fs", "workspace"}
+    assert subject_value_options == {"--archive", "--cli-json-input"}
+
+
+def test_the_options_that_name_another_source_are_the_real_ones():
+    """A scan that names a clone, an image or a ``--cli-json-input`` document is not
+    given the mounted directory as its PATH argument: the CLI refuses a PATH beside a
+    clone, and it does not count ASH_SOURCE_DIR as the only name of the directory then.
+    The wrapper finds those scans from this list, written out here as well so a
+    rename in the CLI fails this and not only the table."""
+    root = typer.main.get_command(app)
+    subjects = root.commands["scan"].commands
+    declared = {
+        spelling
+        for subject in subjects.values()
+        for param in subject.params
+        if param.param_type_name == "option"
+        for spelling in param.opts
+    }
+    other_source = {
+        "--cli-json-input",
+        "--image",
+        "--image-archive",
+        "--image-layout",
+        "--source-git",
+    }
+    assert set(_ps1_list("ashScanOtherSourceOptions")) == other_source
+    assert other_source <= declared
 
 
 def test_the_completer_offers_what_the_wrapper_parses():
@@ -164,7 +211,13 @@ def test_the_completer_offers_what_the_wrapper_parses():
         assert f"'{name}'" in block, name
     for subject in root.commands["scan"].commands:
         assert f"'{subject}'" in block, subject
+    # The subjects are offered after `scan` and nothing else is: the words the
+    # completer offers there are the CLI's subjects, workspace among them.
+    assert "$subjects = @('fs', 'workspace')" in block
+    # The options that take a value are left to the shell: the word after one is a
+    # value, not an option or a subject.
     assert "'--cli-json-input'" in block
+    assert "'--archive'" in block
     assert (
         "Register-ArgumentCompleter -CommandName Invoke-ASH -ParameterName 'AshArgs'"
         in block
@@ -188,6 +241,16 @@ def test_the_group_tables_are_the_contracts():
     assert set(spec.option_groups) == {"results", "container"}
     assert "container:build=container" in spec.group_leaf_takers
     assert "results:merge=merge" in spec.group_leaf_takers
+    # Every command the group has, read from the real group and not from the
+    # contract, is keyed by its own leaf: `results diff` and `results trend` have no
+    # top-level spelling and are not left out for it, which would have the wrapper
+    # name the group ("ash results does not take --offline") in its warning.
+    root = typer.main.get_command(app)
+    leaves = set(root.commands["results"].commands)
+    assert leaves == {"report", "diff", "trend", "merge", "inspect"}
+    assert {
+        pair for pair in _ps1_list("ashGroupLeafTakers") if pair.startswith("results:")
+    } == {f"results:{leaf}={leaf}" for leaf in leaves}
     text = _text()
     # The loop reads the tables, and names no group of its own.
     assert "$subcommand -cin $ashOptionGroups" in text

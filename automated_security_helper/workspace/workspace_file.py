@@ -450,15 +450,15 @@ def discover_workspace_file(search_dir: PathLike) -> Path:
     if not candidates:
         raise _reject(
             f"No '*{WORKSPACE_FILE_SUFFIX}' file found in "
-            f"'{directory.as_posix()}'. Pass '--workspace <file>' to name one "
-            f"explicitly, or drop '--workspace' to scan a single directory."
+            f"'{directory.as_posix()}'. Name one with `ash scan workspace <file>`, "
+            f"or scan a single directory with `ash scan fs <path>`."
         )
 
     if len(candidates) > 1:
         raise WorkspaceDefinitionError.listing(
             f"Found {len(candidates)} '*{WORKSPACE_FILE_SUFFIX}' files in "
-            f"'{directory.as_posix()}'; '--workspace auto' needs exactly one. "
-            f"Pass '--workspace <file>' to choose:",
+            f"'{directory.as_posix()}'; `ash scan workspace auto` needs exactly "
+            f"one. Name one with `ash scan workspace <file>`:",
             [candidate.as_posix() for candidate in candidates],
         )
 
