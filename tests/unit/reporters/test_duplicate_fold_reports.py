@@ -464,6 +464,28 @@ def test_ash_report_honors_the_recorded_setting_and_the_override(tmp_path):
     assert NOTE in folded
 
 
+@pytest.mark.parametrize(
+    "override",
+    [
+        pytest.param(
+            'global_settings.deduplication={"fold": false}',
+            id="object-value-at-the-section",
+        ),
+        pytest.param(
+            "global_settings.deduplication.fold=false", id="control-the-leaf-key"
+        ),
+    ],
+)
+def test_an_override_that_writes_fold_false_turns_the_recorded_fold_off(
+    tmp_path, override
+):
+    _write(tmp_path, _model(fold=True))
+    # Without the override the recorded setting folds, so the absence below is
+    # the override's doing.
+    assert NOTE in _cli_markdown(tmp_path)
+    assert NOTE not in _cli_markdown(tmp_path, "--config-overrides", override)
+
+
 def test_scan_and_report_declare_the_flag_off_by_default():
     from automated_security_helper.cli.report import report_command
     from automated_security_helper.cli.scan import run_ash_scan_cli_command

@@ -6,7 +6,6 @@ import inspect
 import json
 import logging
 import os
-import platform
 import shutil
 import stat
 import sys
@@ -49,6 +48,7 @@ from automated_security_helper.utils.terminal_text import (
 )
 
 from automated_security_helper.core.asset import Asset, AssetKind, ImageLocator
+from automated_security_helper.utils.image_reference import image_reference_problem
 from automated_security_helper.core.cancellation import raise_if_cancelled
 from automated_security_helper.core.previous_results import (
     HELD_DIR_NAME,
@@ -1057,14 +1057,18 @@ def _refuse_an_inner_file_that_is_not_regular(path: Path, what: str) -> None:
     raise ReportPathRefusedExit(reason)
 
 
-def _discard_history_record(results: Any, output_dir: Path) -> None:
+def discard_history_record(results: Any, output_dir: Path) -> None:
     """Remove the run record of a scan a cancel is taking back. Never raises.
 
     The orchestrator appends the record right after it writes the results file
-    (``_record_history``); the cancel check before the final rewrite lands
-    after that, so a cancelled or restored MCP run kept a record saying it
-    completed. The record's id is the run's own ``report_id``; a results value
-    that carries none names no record, and nothing is removed.
+    (``_record_history``), so a cancel that lands after that left a record
+    saying the run completed, and ``ash trend`` showed the taken-back run as a
+    point. Three paths remove it: the cancel check before this module's final
+    rewrite, ``execute_scan``'s arm for a cancel that escapes the write step
+    after the record (core/orchestrator.py), and the MCP runner's settle, which
+    takes the results back when the cancel landed after the last check here
+    (cli/mcp_tools.py). The record's id is the run's own ``report_id``; a
+    results value that carries none names no record, and nothing is removed.
     """
     try:
         from automated_security_helper.utils.scan_history import discard_run_record
@@ -1079,8 +1083,12 @@ def _discard_history_record(results: Any, output_dir: Path) -> None:
         else:
             return
         discard_run_record(output_dir, report_id)
-    except Exception:  # noqa: BLE001 - the cancel is what the caller must see
-        pass
+    except Exception as exc:  # noqa: BLE001 - the cancel is what the caller must see
+        # At debug, not swallowed without a word: when a cancelled run still
+        # shows in ``ash trend``, this line is the trace of why its record stayed.
+        ASH_LOGGER.debug(
+            f"Could not discard the taken-back run's record in {output_dir}: {exc}"
+        )
 
 
 def _read_back_inner_results(
@@ -5646,13 +5654,9 @@ def _run_local_mode(
             show_progress=final_show_progress,
             simple_mode=opts.simple,
             show_summary=opts.show_summary,
-            color_system=(
-                "windows"
-                if platform.system() == "Windows"
-                else "auto"
-                if opts.color
-                else None
-            ),
+            # "auto" lets Rich read the file the console writes to, on every
+            # platform, as utils/log.py does; None turns color off (--no-color).
+            color_system="auto" if opts.color else None,
             offline=(opts.offline if opts.offline is not None else is_offline_mode()),
             existing_results_path=(
                 Path(opts.existing_results) if opts.existing_results else None
@@ -5805,7 +5809,7 @@ def _run_local_mode(
         try:
             raise_if_cancelled()
         except BaseException:
-            _discard_history_record(results, opts.output_dir)
+            discard_history_record(results, opts.output_dir)
             raise
 
         # This rewrite lands after the REPORT phase, while an MCP client that has seen
@@ -6089,13 +6093,8 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
         verbose=opts.verbose,
         debug=opts.debug,
         simple=opts.simple,
-        color_system=(
-            "windows"
-            if platform.system() == "Windows"
-            else "auto"
-            if opts.color
-            else None
-        ),
+        # Same rule as the single-directory scan: "auto" when color is on, None off.
+        color_system="auto" if opts.color else None,
         max_parallel_projects=workspace_config.resolved_max_parallel_projects(),
         project_timeout=workspace_config.project_timeout,
         allow_missing_projects=opts.allow_missing_projects,
@@ -6897,7 +6896,10 @@ def _gating_actionable_count(
                 results, metric.scanner_name
             )
             for severity in Severity:
-                count = getattr(counts, severity.bucket)
+                # Default 0: a Severity member whose bucket is not a field of
+                # dict_result_counts (a later SUPPRESSED-like member) must
+                # count nothing, not crash exit-code computation.
+                count = getattr(counts, severity.bucket, 0)
                 if count and severity_fails_threshold(
                     severity.value, threshold_for(metric.scanner_name)
                 ):
@@ -7175,6 +7177,8 @@ def _refuse_an_image_scan_scope(
     workspace_plan: "WorkspacePlan | None",
     existing_results: str | None,
     changed_files_only: bool,
+    staged: bool = False,
+    baseline: str | None = None,
     shard_index: int | None = None,
     shard_count: int | None = None,
 ) -> None:
@@ -7182,8 +7186,11 @@ def _refuse_an_image_scan_scope(
 
     Shared by the image OPTIONS (:func:`_image_asset_or_refusal`) and the
     pre-built ``asset`` an infrastructure caller passes: an image scan runs in
-    local mode, single-directory, on a fresh scan, with no git-history scope.
-    Each refusal exits with the usage code (5).
+    local mode, single-directory, on a fresh scan, with no git-history scope,
+    no staged scope and no baseline. The CLI refuses the same combinations
+    first only to word them as the operator typed them (the flag, or the
+    variable that set it); the rules live here, so a library call obeys them
+    too. Each refusal exits with the usage code (5).
     """
     if workspace_plan is not None:
         _printed_refusal(
@@ -7222,6 +7229,21 @@ def _refuse_an_image_scan_scope(
             "scopes a scan by git history: an image has none.",
             one_line=True,
         )
+    if staged:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "an image option cannot be combined with staged, which scopes a "
+            "scan to the git index: an image has none.",
+            one_line=True,
+        )
+    if baseline is not None:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "an image option cannot be combined with a baseline: comparing an "
+            "image scan against a saved one is not supported yet. Run the "
+            "image scan without baseline.",
+            one_line=True,
+        )
 
 
 def _image_asset_or_refusal(
@@ -7234,6 +7256,8 @@ def _image_asset_or_refusal(
     workspace_plan: "WorkspacePlan | None",
     existing_results: str | None,
     changed_files_only: bool,
+    staged: bool = False,
+    baseline: str | None = None,
     shard_index: int | None = None,
     shard_count: int | None = None,
 ) -> Asset | None:
@@ -7283,6 +7307,8 @@ def _image_asset_or_refusal(
         workspace_plan=workspace_plan,
         existing_results=existing_results,
         changed_files_only=changed_files_only,
+        staged=staged,
+        baseline=baseline,
         shard_index=shard_index,
         shard_count=shard_count,
     )
@@ -7291,6 +7317,16 @@ def _image_asset_or_refusal(
             _printed_refusal(
                 ASH_EXIT_USAGE_ERROR,
                 "image names no reference: it is empty or whitespace.",
+                one_line=True,
+            )
+        # The one grammar the CLI and the MCP gate read too: a path or an
+        # option-shaped value reaches the scanner tools as a directory to
+        # catalog or as an option, so it is refused before the scan starts.
+        problem = image_reference_problem(image.strip())
+        if problem is not None:
+            _printed_refusal(
+                ASH_EXIT_USAGE_ERROR,
+                f"image {image.strip()!r} {problem}.",
                 one_line=True,
             )
         return Asset.for_image(ImageLocator(ref=image.strip()))
@@ -7414,7 +7450,8 @@ def run_ash_scan(
     #
     # ``asset`` is the pre-built form for an infrastructure caller (the MCP
     # scan runner), which anchors the scan's output and config discovery in a
-    # directory it owns -- the session workspace -- while the subject is the
+    # directory it owns -- the session's dedicated image-scan directory
+    # (``ensure_session_image_scan_dir``) -- while the subject is the
     # image: for it, source_dir is the deliberate anchor, not a second
     # subject, so the source_dir exclusivity rule binds the OPTIONS only.
     # The mode, workspace and scope rules bind both forms alike.
@@ -7434,8 +7471,23 @@ def run_ash_scan(
                 workspace_plan=workspace_plan,
                 existing_results=existing_results,
                 changed_files_only=changed_files_only,
+                staged=staged,
+                baseline=baseline,
                 shard_index=shard_index,
                 shard_count=shard_count,
+            )
+        else:
+            # Only local single-directory mode reads opts.asset, so any other
+            # shape would silently scan source_dir and ignore the subject the
+            # caller named. A FILESYSTEM asset is also refused until something
+            # consumes its root: today source_dir is the one directory
+            # subject, and accepting a second spelling of it would leave two
+            # sources of truth.
+            _printed_refusal(
+                ASH_EXIT_USAGE_ERROR,
+                "asset: only a container-image asset is accepted here; a "
+                "directory scan names its subject with source_dir.",
+                one_line=True,
             )
     else:
         asset = _image_asset_or_refusal(
@@ -7447,6 +7499,8 @@ def run_ash_scan(
             workspace_plan=workspace_plan,
             existing_results=existing_results,
             changed_files_only=changed_files_only,
+            staged=staged,
+            baseline=baseline,
             shard_index=shard_index,
             shard_count=shard_count,
         )
@@ -7456,22 +7510,27 @@ def run_ash_scan(
         # other phases stand.
         phases = [
             phase
-            for phase in (
-                phases
-                or [ExecutionPhase.CONVERT, ExecutionPhase.SCAN, ExecutionPhase.REPORT]
-            )
+            for phase in (phases or list(DEFAULT_EXECUTION_PHASES))
             if phase != ExecutionPhase.CONVERT
         ]
         if not phases:
-            # An empty list reads as "no phases given" further down, where the
-            # local mode runs convert, scan and report: a request for the
-            # convert phase alone would run the one phase an image never has.
-            _printed_refusal(
-                ASH_EXIT_USAGE_ERROR,
-                "an image scan has no convert phase, and no other phase was "
-                "asked for: nothing is left to run.",
-                one_line=True,
-            )
+            if inspect:
+                # --phases convert --inspect: convert is dropped, but INSPECT
+                # was asked for, so something IS left to run. Spell it, since
+                # an empty list reads as "no phases given" further down and
+                # would run the local-mode defaults, convert included.
+                phases = [ExecutionPhase.INSPECT]
+            else:
+                # An empty list reads as "no phases given" further down, where
+                # the local mode runs the default phases: a request for the
+                # convert phase alone would run the one phase an image never
+                # has.
+                _printed_refusal(
+                    ASH_EXIT_USAGE_ERROR,
+                    "an image scan has no convert phase, and no other phase "
+                    "was asked for: nothing is left to run.",
+                    one_line=True,
+                )
 
     # Resolve cwd-based defaults at call time (not import time).
     _source_dir: Path = (

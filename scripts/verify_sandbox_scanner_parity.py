@@ -15,14 +15,17 @@ twice over the same fixture, once with ``--sandbox off`` and once with the backe
 under test, and for every scanner the status and the exact set of findings (rule,
 file, line, message) must match. It also requires a minimum number of findings from
 the unsandboxed run, so a fixture that stopped producing findings cannot make parity
-pass trivially.
+pass trivially. ``--require-findings`` names scanners that must each report a
+finding of their own, for a scanner whose status cannot tell a file it read from no
+file to read.
 
 The fixture is the snapshot fixture (tests/test_data/snapshot_fixture/repo), plus a
 CloudFormation template for cfn-nag and cdk-nag, a pinned old Python dependency for
 grype, an npm lockfile for npm-audit, the actionlint and zizmor fixture workflows,
-the cfn-lint/cfn-guard insecure template, and the gitleaks fixture's fabricated
+the cfn-lint/cfn-guard insecure template, the gitleaks fixture's fabricated
 tokens (materialized under ``secrets/``, where its ``.gitleaks.toml`` is not the
-root config), so each builtin scanner has something to find. For the hadolint and
+root config), and a Claude Code ``.mcp.json`` for mcp-config, so each builtin
+scanner has something to find. For the hadolint and
 GuardDog alpha scanners it adds GuardDog's fixture packages under
 ``packages/``; hadolint reads the snapshot fixture's Dockerfile.
 ``--ash-plugin-modules`` loads alpha modules in both runs, and
@@ -72,6 +75,17 @@ WORKFLOWS = {
 GUARDDOG_PACKAGES = SCANNER_DATA / "guarddog" / "fixture_repo"
 CFN_LINT_GUARD_TEMPLATE = (
     SCANNER_DATA / "cfn_lint_guard" / "repo" / "templates" / "insecure.yaml"
+)
+#: mcp-config's violating Claude Code fixture. Its sudo command and its unpinned npx
+#: runner are findings under the scanner's defaults.
+MCP_CONFIG = (
+    REPO
+    / "tests"
+    / "test_data"
+    / "mcp_config"
+    / "claude_code"
+    / "violating"
+    / ".mcp.json"
 )
 
 PACKAGE_JSON = {
@@ -150,6 +164,9 @@ def build_fixture(root: Path) -> Path:
     # committed with markers and written out here (tests/utils/gitleaks_fixture.py).
     load_gitleaks_fixture().materialize(source / "secrets")
     shutil.copytree(GUARDDOG_PACKAGES, source / "packages")
+    # mcp-config reads MCP server config files and nothing else, and a tree with
+    # none gives it nothing to report on; see missing_findings.
+    shutil.copy(MCP_CONFIG, source / ".mcp.json")
     return source
 
 
@@ -388,6 +405,28 @@ def compare(
     return rows, problems
 
 
+def missing_findings(
+    label: str, findings: Dict[str, "Counter[Finding]"], names: str
+) -> List[str]:
+    """A problem for each scanner in ``names`` (comma-separated) with no finding.
+
+    A scanner that reads one kind of file completes the same way on a tree that
+    has none as on a tree it read: mcp-config reads MCP server config files and
+    nothing else, and with no such file it is PASSED with nothing scanned. Its
+    status cannot show that it read the fixture, so ``--require`` cannot either.
+    The fixture gives each scanner named here something it reports on, and a
+    finding count above zero is what shows the scanner read it.
+    """
+    problems = []
+    for name in filter(None, (s.strip() for s in names.split(","))):
+        if sum(findings.get(name, Counter()).values()) == 0:
+            problems.append(
+                f"[{label}] scanner {name} reported no findings unsandboxed: it "
+                "read nothing the fixture gives it"
+            )
+    return problems
+
+
 def summary_table(rows: List[dict], sandbox: str) -> str:
     """The per-scanner table, as text; a header alone when no scanner ran."""
     width = max((len(r["scanner"]) for r in rows), default=len("scanner"))
@@ -439,6 +478,13 @@ def main() -> int:
         help="comma-separated scanners that must also have run (not MISSING) "
         "unsandboxed in the offline pair, for a scanner whose offline run is the "
         "case under test",
+    )
+    parser.add_argument(
+        "--require-findings",
+        default="",
+        help="comma-separated scanners that must each report at least one finding "
+        "unsandboxed in every pair, for a scanner whose status cannot tell a file "
+        "it read from no file to read",
     )
     parser.add_argument(
         "--config",
@@ -572,6 +618,9 @@ def run_pair(
                 f"[{label}] required scanner {required} did not run unsandboxed "
                 f"({statuses.get(required)})"
             )
+    # A finding of its own, in every pair: for these scanners a clean status is
+    # also what a run that read nothing reports (see missing_findings).
+    problems += missing_findings(label, findings, args.require_findings)
     return rows, problems
 
 

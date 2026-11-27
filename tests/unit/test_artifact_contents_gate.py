@@ -1179,9 +1179,14 @@ class TestAllowlistsAreWhatTheArtifactContains:
     """The allowlists are claims about the built artifact. Pin the claims."""
 
     def test_assets_allowlist_has_the_measured_member_count(self):
-        """20 members in both the wheel and the sdist, measured, not guessed.
+        """21 members in both the wheel and the sdist, measured, not guessed.
 
-        Now 20. The one added is assets/plugin_provisioning.py, the flat copy of
+        Now 21. The one added is
+        assets/polyfills/checkov_json_array_hook/sitecustomize.py, ASH's own
+        checkov JSON-array hook, shipped by design with the
+        runtime-compatibility work (#1161).
+
+        Was 20. The one added was assets/plugin_provisioning.py, the flat copy of
         base/plugin_provisioning.py that hatch_build.py stages beside
         assets/tool_downloads.py: the pins every plugin declares, which
         tool_downloads derives TOOL_VERSIONS from, so the shipped Dockerfile's
@@ -1206,7 +1211,7 @@ class TestAllowlistsAreWhatTheArtifactContains:
         read a parameter, an Fn::If and an Fn::Sub the same way. It is not a rule
         (cfn-nag runs only the files whose names end in Rule.rb) and it is ASH-authored.
         """
-        assert len(gate.ASSETS_ALLOWLIST) == 20
+        assert len(gate.ASSETS_ALLOWLIST) == 21
 
     @pytest.mark.parametrize("member", sorted(gate.ASSETS_ALLOWLIST))
     def test_every_allowlisted_asset_is_under_the_assets_prefix(self, member):
@@ -1214,7 +1219,9 @@ class TestAllowlistsAreWhatTheArtifactContains:
         assert member.startswith(gate.ASSETS_PREFIX), member
 
     def test_package_subdirectories_has_the_measured_count(self):
-        assert len(gate.PACKAGE_SUBDIRECTORIES) == 13
+        """14 since plugin_manifests, ASH's own subpackage of plugin manifest
+        modules, joined the package root (#1161)."""
+        assert len(gate.PACKAGE_SUBDIRECTORIES) == 14
 
     def test_assets_is_itself_a_pinned_subdirectory(self):
         """Otherwise rule 5b would reject every asset before 5a could speak."""

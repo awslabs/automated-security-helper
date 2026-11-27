@@ -99,8 +99,9 @@ is the run's correlation scope, the scan metadata's project name
 (:data:`CORRELATION_PREFIXES`):
 
 * ``secret/`` (:func:`secret_correlation_key`): the file, the start line and
-  the workspace project, plus ``tree`` for a converted file, each spelled as
-  the identity key spells them. A credential at a line is that credential,
+  the workspace project, plus ``tree`` for a converted file and ``tree`` with
+  the ``image`` component for a finding inside a container image, each spelled
+  as the identity key spells them. A credential at a line is that credential,
   whichever scanner read it. A secret detection with no file or no start line
   carries none, and two secrets on one line share one id (few scanners report
   a column, and those that do disagree on where a secret starts); the
@@ -229,19 +230,33 @@ CONVERTED_PATH_PROPERTY = "converted_path"
 #: source-tree scanner's result at the same place in that file.
 CONVERTED_FROM_PROPERTY = "converted_from"
 
-#: The ``tree`` of a finding inside a container image.
+#: The ``tree`` of a finding inside a container image: TargetType.IMAGE's wire
+#: spelling, which is also the identity component naming WHICH image
+#: (IMAGE_COMPONENT) -- one deliberate word, spelled through the enum so the
+#: vocab drift gate holds them together.
 IMAGE_TREE = TargetType.IMAGE.value
+#: The identity-key component carrying the image's digest (or the submitted
+#: locator) beside ``"tree": IMAGE_TREE``.
+IMAGE_COMPONENT = TargetType.IMAGE.value
 
 #: SARIF result properties carrying an image finding's attribution, written by
 #: the scanner executor on every image-scan result (``utils/image_attribution``)
 #: and read back by the flat extractor: the locator as submitted, the image's
-#: resolved sha256 digest where the scan's own output names one, and the layer
-#: digest where the scanner reports one. The digest, or failing it the
-#: reference, is the key's ``image`` component; the ref and layer digest are
-#: attribution only.
+#: resolved sha256 digest where the scan's own output names one, the layer
+#: digest where the scanner reports one, and the SCOPE -- the one value this
+#: scan's ids key on, the digest the scan start resolved (the ladder, a pinned
+#: reference, a payload's own record) else the locator as submitted. The scope
+#: is the key's ``image`` component: one basis per scan, the same value
+#: ``image_scan_source`` labels the scan with, so the diff gate's basis check
+#: reads the ids' real basis and every scanner's ids in one scan share it (a
+#: digest only a tool's RUN named -- trivy records one, grype never does --
+#: used to key trivy's rows on the digest and grype's on the reference). The
+#: ref, digest and layer digest are attribution; results stamped before the
+#: scope property existed fall back to digest-else-ref.
 IMAGE_REF_PROPERTY = "imageRef"
 IMAGE_DIGEST_PROPERTY = "imageDigest"
 IMAGE_LAYER_DIGEST_PROPERTY = "layerDigest"
+IMAGE_SCOPE_PROPERTY = "imageScope"
 
 _DRIVE = re.compile(r"^[A-Za-z]:/")
 
@@ -466,7 +481,7 @@ def finding_identity(
         base["tree"] = IMAGE_TREE
         # The key is spelled as the tree label on purpose: an id that hashed it
         # is already in reports and must not change.
-        base[IMAGE_TREE] = image
+        base[IMAGE_COMPONENT] = image
     elif converted:
         base["tree"] = TargetType.CONVERTED.value
     if converted_from is not None:
@@ -804,11 +819,14 @@ def secret_correlation_key(
     """Where a secret detection is, without the scanner or the rule that found it.
 
     The file, the start line and the workspace project, plus ``tree`` for a
-    converted file, as the identity key spells them, so that two scanners
-    reporting one secret get equal keys. *default_project* is the project the
-    run's results were written for, folded in as :func:`identity_keys` does.
-    None when the identity names no file or no start line: there is then no
-    place to compare.
+    converted file and ``tree`` with the ``image`` component for a finding
+    inside a container image, as the identity key spells them, so that two
+    scanners reporting one secret get equal keys. The image component matters:
+    without it, two different images' secrets at one in-image path and line
+    produced one correlation id, and the identity contract keys them apart.
+    *default_project* is the project the run's results were written for,
+    folded in as :func:`identity_keys` does. None when the identity names no
+    file or no start line: there is then no place to compare.
 
     The caller decides that the result is a secret detection; the module
     docstring says why no other kind of finding has such a key.
@@ -824,6 +842,8 @@ def secret_correlation_key(
     }
     if identity.base.get("tree") is not None:
         key["tree"] = identity.base["tree"]
+        if identity.base["tree"] == IMAGE_TREE:
+            key[IMAGE_COMPONENT] = identity.base.get(IMAGE_COMPONENT)
     return key
 
 

@@ -13,6 +13,7 @@ stand-in executable placed in X stands for what an install would have written.
 
 from __future__ import annotations
 
+import inspect
 import os
 import re
 import shlex
@@ -27,12 +28,19 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli import dependencies
 from automated_security_helper.cli.dependencies import dependencies_app
-from automated_security_helper.core.constants import is_blank_bin_path
-from automated_security_helper.utils import subprocess_utils, uv_tool_runner
+from automated_security_helper.core.constants import home_bin_path, is_blank_bin_path
+from automated_security_helper.utils import (
+    download_utils,
+    subprocess_utils,
+    uv_tool_runner,
+)
 from tests.utils.env_assertions import environ_value
 from tests.utils.helpers import checkout_env
 
 EXE = ".exe" if sys.platform == "win32" else ""
+
+#: What the install says, once per process, of a relative ASH_BIN_PATH of "rel-bin".
+RELATIVE_VALUE_WARNING = "ASH_BIN_PATH is the relative path 'rel-bin'"
 
 
 def _standin(directory: Path, name: str) -> Path:
@@ -75,6 +83,22 @@ def _install(project: Path, *args: str):
 def _flat(output: str) -> str:
     """The output on one line, without the colors rich adds."""
     return " ".join(re.sub(r"\x1b\[[0-9;]*m", "", output).split())
+
+
+def _went_to_the_default_directory_alone(
+    returncode: int, out: str, project: Path, home: Path
+) -> None:
+    """An install under a relative ASH_BIN_PATH that did what the documented rule says.
+
+    It went to ``~/.ash/bin``, said once that the relative value is not used, printed
+    no export hint (a scan uses ``~/.ash/bin`` for this value too), and made nothing
+    in ``project``, the working directory it ran in.
+    """
+    assert returncode == 0, out
+    assert sorted(path.name for path in project.iterdir()) == [], out
+    assert (home / ".ash" / "bin").is_dir(), out
+    assert out.count(RELATIVE_VALUE_WARNING) == 1, out
+    assert "export ASH_BIN_PATH" not in out, out
 
 
 @pytest.mark.unit
@@ -320,6 +344,39 @@ def test_a_blank_bin_path_option_installs_into_the_default_directory(args, tmp_p
     assert "export ASH_BIN_PATH" not in out, out
 
 
+@pytest.mark.integration
+def test_a_blank_bin_path_ignores_a_relative_ash_bin_path_in_a_new_process(tmp_path):
+    """``ASH_BIN_PATH=rel-bin ash dependencies install --bin-path "$UNSET"``.
+
+    A new process, where the import really does compute a relative constant: the
+    blank option fell back to it, made it absolute against the working directory
+    and created it there, in the repository being scanned. A relative ASH_BIN_PATH
+    is not used anywhere else (a scan warns once and searches ``~/.ash/bin``), so
+    the install takes ``~/.ash/bin`` too.
+
+    Fails at the base on the project directory: ``rel-bin`` is in it.
+    """
+    home, project, result, out = _install_in_a_new_process(
+        tmp_path, "rel-bin", "--bin-path", ""
+    )
+    _went_to_the_default_directory_alone(result.returncode, out, project, home)
+
+
+@pytest.mark.integration
+def test_a_relative_ash_bin_path_alone_uses_the_default_directory_in_a_new_process(
+    tmp_path,
+):
+    """Control for the one above, green at the base: the route that already works.
+
+    The same new process with no ``--bin-path``: click takes ``rel-bin`` from the
+    environment, and the install warns once and uses ``~/.ash/bin``. The same
+    assertions, so they are known to be satisfiable, and the count of one warning
+    is known to be what a child's output shows.
+    """
+    home, project, result, out = _install_in_a_new_process(tmp_path, "rel-bin")
+    _went_to_the_default_directory_alone(result.returncode, out, project, home)
+
+
 @pytest.mark.unit
 def test_an_explicit_dot_bin_path_is_the_working_directory(tmp_path, fresh_lookup):
     """A dot names a directory: it is used as given, unlike "" or " "."""
@@ -382,6 +439,99 @@ def test_a_relative_ash_bin_path_installs_into_the_default_directory(
     assert not (project / "rel-bin").exists()
     # A scan searches ~/.ash/bin for this value too, so there is nothing to export.
     assert "export ASH_BIN_PATH" not in out, out
+
+
+@pytest.mark.unit
+def test_a_blank_bin_path_ignores_a_relative_ash_bin_path(
+    tmp_path, fresh_lookup, monkeypatch
+):
+    """``--bin-path ""`` with ASH_BIN_PATH=rel-bin installs into ``~/.ash/bin``.
+
+    A blank option falls back to the module constant ``ASH_BIN_PATH``, computed once
+    at import, and the constant stays ``Path("rel-bin")`` in a process that started
+    with the variable set to it. The install made it absolute against the working
+    directory and created it there, in the repository being scanned. Like a relative
+    ASH_BIN_PATH read anywhere else, it warns once and uses ``~/.ash/bin``.
+
+    Fails at the base on the project directory: ``rel-bin`` is in it.
+    """
+    monkeypatch.setenv("ASH_BIN_PATH", "rel-bin")
+    # What the import computed in a process that started with the variable set.
+    monkeypatch.setattr(dependencies, "ASH_BIN_PATH", Path("rel-bin"))
+    monkeypatch.setattr(subprocess_utils, "_warned_relative_bin_paths", set())
+    project = tmp_path / "project"
+    result = _install(project, "--bin-path", "")
+    out = _flat(result.output)
+    _went_to_the_default_directory_alone(result.exit_code, out, project, fresh_lookup)
+
+
+@pytest.mark.unit
+def test_a_relative_default_for_the_bin_path_option_is_not_installed_into(
+    tmp_path, fresh_lookup, monkeypatch
+):
+    """The option's default is fixed at import, so it can be relative.
+
+    It is ``str(ASH_BIN_PATH)`` as the module imported it. With no ``--bin-path``
+    and the variable no longer set when the command line is parsed, click passes
+    that default with parameter source DEFAULT, not ENVIRONMENT, so a relative one
+    was read like a typed path and installed into under the working directory.
+    Only a value typed on the command line is read where it was typed.
+
+    The default is the typer option's ``default`` attribute, set here to what an
+    import under ASH_BIN_PATH=rel-bin computed. Fails at the base on the project
+    directory: ``rel-bin`` is in it.
+    """
+    signature = inspect.signature(dependencies.install_dependencies)
+    option = signature.parameters["bin_path"].default
+    monkeypatch.setattr(option, "default", "rel-bin")
+    monkeypatch.delenv("ASH_BIN_PATH", raising=False)
+    monkeypatch.setattr(subprocess_utils, "_warned_relative_bin_paths", set())
+    project = tmp_path / "project"
+    result = _install(project)
+    out = _flat(result.output)
+    _went_to_the_default_directory_alone(result.exit_code, out, project, fresh_lookup)
+
+
+@pytest.mark.unit
+def test_a_relative_ash_bin_path_alone_uses_the_default_directory_once(
+    tmp_path, fresh_lookup, monkeypatch
+):
+    """Control for the two above, green at the base: the route that already works.
+
+    ASH_BIN_PATH=rel-bin and no ``--bin-path``: click takes the value from the
+    environment, and the install warns and uses ``~/.ash/bin``. The same
+    assertions, so they are known to be satisfiable, and the count of one warning
+    is known to be what the output shows.
+    """
+    monkeypatch.setenv("ASH_BIN_PATH", "rel-bin")
+    monkeypatch.setattr(subprocess_utils, "_warned_relative_bin_paths", set())
+    project = tmp_path / "project"
+    result = _install(project)
+    out = _flat(result.output)
+    _went_to_the_default_directory_alone(result.exit_code, out, project, fresh_lookup)
+
+
+@pytest.mark.unit
+def test_a_blank_bin_path_without_a_usable_home_installs_nothing(
+    tmp_path, fresh_lookup, monkeypatch
+):
+    """Control for the blank-option test above, green at the base: no home, nothing.
+
+    With no usable home ``~/.ash/bin`` does not exist, and neither does anywhere to
+    keep install receipts, so the install stops at the no-receipt-store refusal
+    (exit 3, before it reads the bin path) and makes nothing in the project.
+    """
+    monkeypatch.setenv("HOME", "")
+    monkeypatch.setenv("USERPROFILE", "")
+    assert home_bin_path() is None
+    monkeypatch.setenv("ASH_BIN_PATH", "rel-bin")
+    monkeypatch.setattr(dependencies, "ASH_BIN_PATH", Path("rel-bin"))
+    project = tmp_path / "project"
+    result = _install(project, "--bin-path", "")
+    out = _flat(result.output)
+    assert result.exit_code == dependencies.EXIT_INVALID_CONFIG, out
+    assert _flat(download_utils.NO_RECEIPT_STORE) in out, out
+    assert sorted(path.name for path in project.iterdir()) == [], out
 
 
 @pytest.mark.unit

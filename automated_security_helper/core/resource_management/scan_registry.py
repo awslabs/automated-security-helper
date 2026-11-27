@@ -2135,6 +2135,13 @@ class ScanRegistry:
         if error:
             raise error
 
+        # The progress read below runs under the registry lock and groups the
+        # aggregated findings on a frame, which needs polars. Nothing the MCP
+        # server imports at module scope loads it, so the first poll would pay
+        # the import while holding the lock and every other registry call would
+        # wait. Load it here, once per process, before the lock is taken.
+        import polars as pl  # noqa: F401
+
         with self._registry_lock:
             entry = self._visible(scan_id, session_id)
             if entry is None:

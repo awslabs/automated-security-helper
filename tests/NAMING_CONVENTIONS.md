@@ -127,8 +127,11 @@ loads.
 There is no directory default. A test with no tier marker, or with more than one (a
 module-level `integration` and a function-level `unit` count as two), makes collection
 refuse the whole session with a usage error that lists the first offenders, so nothing
-runs until each one has exactly one. The check is in `tests/conftest.py` and is pinned
-by `tests/unit/test_every_test_carries_one_tier_marker.py`. A `unit` test may not also
+runs until each one has exactly one. With xdist workers (`pytest -n`, which `pytest.ini` turns
+on) the run stops with the same list instead, as "Interrupted: ..." with exit status 2,
+because a usage error raised in a worker would not reach the output. The check is in
+`tests/conftest.py` and is pinned by
+`tests/unit/test_every_test_carries_one_tier_marker.py`. A `unit` test may not also
 carry `slow`: the unit job runs without `pytest --run-slow`, so the test would be skipped
 there and run in no tier, and collection refuses it the same way. Mark such a test
 `integration`, which runs with `pytest --run-slow`, or drop `slow`. Other markers

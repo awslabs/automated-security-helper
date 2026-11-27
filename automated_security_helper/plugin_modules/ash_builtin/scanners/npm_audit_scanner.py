@@ -44,8 +44,8 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
 from automated_security_helper.base.uv_tool_mixin import (
-    _tool_name,
     guarded_values_read,
+    tool_name,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
@@ -922,10 +922,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 self._source_manifests(), "source"
             )
             return False
-        if find_executable(_tool_name(self)):
+        if find_executable(tool_name(self)):
             self._probe_npm_version()
             return True
-        needed = self._package_managers_needed() or {_tool_name(self)}
+        needed = self._package_managers_needed() or {tool_name(self)}
         if not any(find_executable(binary) for binary in needed):
             names = ", ".join(sorted(needed))
             self.dependency_unavailable_reason = (
@@ -955,7 +955,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         for manifest in self._source_manifests():
             lock_file = self._lockfile_beside(manifest)
             if lock_file is not None:
-                needed.add(_LOCKFILE_BINARY.get(lock_file.name, _tool_name(self)))
+                needed.add(_LOCKFILE_BINARY.get(lock_file.name, tool_name(self)))
         return needed
 
     def _probe_npm_version(self) -> None:
@@ -984,7 +984,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             probe_dir = None
         try:
             response = self._run_subprocess(
-                command=[_tool_name(self), "--version"],
+                command=[tool_name(self), "--version"],
                 stderr_preference="return",
                 stdout_preference="return",
                 cwd=probe_dir,

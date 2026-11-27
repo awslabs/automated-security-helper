@@ -87,8 +87,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
 )
 from automated_security_helper.base.uv_tool_mixin import (
-    _tool_name,
     guarded_values_read,
+    tool_name,
 )
 from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
@@ -1979,7 +1979,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             )
 
         # Build command
-        args: List[str] = [_tool_name(self)]
+        args: List[str] = [tool_name(self)]
 
         # Add format argument (always SARIF for ASH compatibility)
         if self.args.format_arg and self.args.format_arg_value:

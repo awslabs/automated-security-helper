@@ -269,6 +269,13 @@ def test_only_opengrep_asks_for_the_git_safe_directory():
     assert not getattr(SemgrepScanner.sandbox_requirements, "git_safe_directory", False)
 
 
+@pytest.mark.skipif(
+    not hasattr(os, "geteuid"),
+    reason=(
+        "no user ids here: the checkout's top is not named (pinned by the "
+        "without_user_ids tests in test_opengrep_safe_directory_scope.py)"
+    ),
+)
 def test_a_subdirectory_of_a_checkout_also_names_the_checkout(
     test_plugin_context, monkeypatch, tmp_path
 ):
