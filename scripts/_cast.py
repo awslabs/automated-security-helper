@@ -20,13 +20,13 @@ What it holds
   scene's own budget. Output is shortened to fit and never stretched.
 * the scrub scan: ``scan_text`` and ``scan_cast`` look for tokens that must not appear
   in a recording (home directories, user and host names) and name each hit by its
-  kind, never by its value. A token that a color change or a cursor movement splits,
-  or that a line wrap splits with only line breaks, box-drawing borders and spaces
-  between its halves, is found in the text with those taken out (``flatten_text``).
-  Anything else between the halves keeps it from being found: a cell that wraps beside
-  another column, a log line that wraps beside a right-hand column, an ASCII table
-  border, a zero-width space. So the recorder has to work at a width where nothing
-  wraps beside other text.
+  kind, never by its value. A token that a color change, a cursor movement or an
+  invisible format character splits, or that a line wrap splits with only line breaks,
+  box-drawing borders and spaces between its halves, is found in the text with those
+  taken out (``flatten_text``). Anything else between the halves keeps it from being
+  found: a cell that wraps beside another column, a log line that wraps beside a
+  right-hand column, an ASCII table border. So the recorder has to work at a width
+  where nothing wraps beside other text.
 * the run record: dataclasses for what a recording run observed, and
   ``canonical_json``, the one JSON form the record is written in.
 
@@ -1295,10 +1295,11 @@ class ForbiddenHit:
     where: str
     #: ``raw`` is the text as recorded; ``plain`` is the text with SGR color runs
     #: removed, which finds a token that color changes split; ``flat`` is the text with
-    #: every escape sequence, control character, line break and box-drawing character
-    #: removed, which finds a token that a cursor movement or a line wrap split, unless
-    #: something else lies between the halves (``flatten_text`` lists the shapes it
-    #: rejoins and the ones it does not).
+    #: every escape sequence, control character, line break, box-drawing character and
+    #: invisible format character removed, which finds a token that a cursor movement,
+    #: a line wrap or an invisible character split, unless something else lies between
+    #: the halves (``flatten_text`` lists the shapes it rejoins and the ones it does
+    #: not).
     view: str
 
     def __str__(self) -> str:
@@ -1397,8 +1398,12 @@ def scan_text(
     The text is read as recorded, again with its color sequences removed and again
     flattened, so a path that color changes, a cursor movement or a line wrap split
     into pieces is still found. The flat view does not rejoin every wrapped path:
-    ``flatten_text`` lists the shapes it does and the ones it does not. A view that
-    equals an earlier one is not read twice.
+    ``flatten_text`` lists the shapes it does and the ones it does not. A token for
+    the root of a home directory (``/home/``, ``/Users/``) is a net under those
+    limits, because the first half of a wrapped home path holds the root and the scan
+    reads it as recorded; the net does not help when the wrap falls inside the root,
+    and it flags every other path under that root as well. A view that equals an
+    earlier one is not read twice.
     """
     return _scan(text, [(token, token.pattern()) for token in tokens], where)
 
