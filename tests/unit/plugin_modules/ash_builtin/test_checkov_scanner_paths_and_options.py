@@ -163,7 +163,9 @@ class TestLinkSkipValues:
         (source / "app").mkdir()
         _symlink_or_skip(source / "node_modules" / "pkg" / "link.tf", outside)
         _symlink_or_skip(source / "app" / "link.tf", outside)
-        assert CheckovScanner._links_leaving_tree(source) == ["app/link.tf"]
+        assert CheckovScanner._links_leaving_tree(
+            source, known_directories_skipped=True
+        ) == ["app/link.tf"]
 
     def test_the_filesystem_root_gives_single_slash_values(self, tmp_path):
         scanner = _scanner(tmp_path / "src", tmp_path / "out")
@@ -176,15 +178,10 @@ class TestLinkSkipValues:
         source = tmp_path / "src"
         source.mkdir()
         (source / "main.tf").write_text("", encoding="utf-8")
-        # A "]" before the parenthesis is what leaves it an open group in the
-        # module finder's joined regex, wherever the value sits in the list. A
-        # bare "vendor(" no longer breaks it: the known-directory values, whose
-        # "[.]" supplied that "]" ahead of every operator value, are built per
-        # scan and now come after the operator's.
         scanner = _scanner(
             source,
             tmp_path / "out",
-            skip_path=[IgnorePathWithReason(path="vendor[.](", reason="broken")],
+            skip_path=[IgnorePathWithReason(path="vendor(", reason="broken")],
         )
         with pytest.raises(ScannerError, match="skip_path"):
             scanner._execute_scan(source, "source", [])

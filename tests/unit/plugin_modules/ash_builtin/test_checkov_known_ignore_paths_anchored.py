@@ -20,9 +20,10 @@ for each scan from the scanned directory's path (``_known_directory_skip_values`
 The values hold no ``^``, no group and no alternation. A Windows launch route that
 re-read the command line through cmd.exe split the earlier ``(^|/)`` form at its
 unquoted ``|`` (the Install Method Validation failure), cmd.exe consumes an unquoted
-``^`` as its escape character, and a parenthesis can unbalance the regex checkov's
-terraform module finder joins from the values. ASH sends none of them on Windows,
-where checkov's walked paths are not ``/``-joined.
+``^`` as its escape character, and an escaped parenthesis or bracket changes the
+regex checkov's terraform module finder joins from the values, so a parenthesis or
+bracket in the scanned directory's path is written as a class holding it alone. ASH
+sends none of them on Windows, where checkov's walked paths are not ``/``-joined.
 """
 
 from __future__ import annotations
@@ -33,7 +34,6 @@ import re
 import string
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -41,12 +41,14 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.plugin_modules.ash_builtin.scanners import (
     checkov_scanner,
 )
 from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
     CheckovScanner,
     CheckovScannerConfig,
+    CheckovScannerConfigOptions,
     _known_directory_skip_values,
     _module_finder_compiles,
     _skip_path_root,
@@ -79,18 +81,35 @@ def _values(root: str = ROOT) -> list[str]:
     return _known_directory_skip_values(root)
 
 
-def _scanner(source: Path, output: Path) -> CheckovScanner:
+def _scanner(source: Path, output: Path, **opts) -> CheckovScanner:
     context = PluginContext(
         source_dir=source,
         output_dir=output,
         work_dir=output / "converted",
         config=AshConfig(),
     )
-    return CheckovScanner(context=context, config=CheckovScannerConfig())
+    return CheckovScanner(
+        context=context,
+        config=CheckovScannerConfig(options=CheckovScannerConfigOptions(**opts)),
+    )
 
 
 def _argv_skip_values(argv) -> list[str]:
     return [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "--skip-path"]
+
+
+def _argv_skip_values_in_order(argv) -> list[str]:
+    """Every ``--skip-path`` value in ``argv``, in the order checkov is given them:
+    the two-token form (the values ASH builds for a scan) and the
+    ``--skip-path=<value>`` form (the values of the operator's checkov config file
+    and of ``skip_path``)."""
+    values = []
+    for index, token in enumerate(argv):
+        if token == "--skip-path" and index + 1 < len(argv):
+            values.append(argv[index + 1])
+        elif token.startswith("--skip-path="):
+            values.append(token[len("--skip-path=") :])
+    return values
 
 
 def _source(base: Path, *links: str) -> Path:
@@ -194,7 +213,8 @@ def test_a_root_level_directory_under_an_absolute_target_is_skipped():
 
 
 def test_the_one_uncovered_shape_is_a_relative_root_named_like_a_known_dir():
-    """A RELATIVE walked path is matched by no value, pinned on purpose.
+    """A relative walked path that starts with a known directory's name is matched
+    by no value, pinned on purpose.
 
     Every value starts with the scanned directory's absolute path, so a walked
     path that is relative, such as a scan root directly named ``venv`` scanned by
@@ -271,7 +291,9 @@ def test_the_scanners_own_skip_values_are_the_portable_component_anchors():
     One pair per ``KNOWN_IGNORE_PATHS`` name, in its order: ``<root>/<name>/`` and
     ``<root>/.{0,}/<name>/`` with dots as ``[.]``, the root's own text escaped
     first. The filesystem root is the empty string (``_skip_path_root``), so its
-    values start with a single ``/``, not ``//``.
+    values start with a single ``/``, not ``//``. A root that holds a parenthesis or
+    a bracket has it written as a class holding it alone, as a dot is, and a space
+    is ``re.escape``d: the last two pins are those spellings.
     """
     assert _values("/repo") == [
         "/repo/[.]venv/",
@@ -298,6 +320,22 @@ def test_the_scanners_own_skip_values_are_the_portable_component_anchors():
         "/home/me/my[.]proj/node_modules/",
         "/home/me/my[.]proj/.{0,}/node_modules/",
     ]
+    assert _values("/home/me/proj (v1.2)") == [
+        r"/home/me/proj\ [(]v1[.]2[)]/[.]venv/",
+        r"/home/me/proj\ [(]v1[.]2[)]/.{0,}/[.]venv/",
+        r"/home/me/proj\ [(]v1[.]2[)]/venv/",
+        r"/home/me/proj\ [(]v1[.]2[)]/.{0,}/venv/",
+        r"/home/me/proj\ [(]v1[.]2[)]/node_modules/",
+        r"/home/me/proj\ [(]v1[.]2[)]/.{0,}/node_modules/",
+    ]
+    assert _values("/x/a[b]c") == [
+        r"/x/a[\[]b[\]]c/[.]venv/",
+        r"/x/a[\[]b[\]]c/.{0,}/[.]venv/",
+        r"/x/a[\[]b[\]]c/venv/",
+        r"/x/a[\[]b[\]]c/.{0,}/venv/",
+        r"/x/a[\[]b[\]]c/node_modules/",
+        r"/x/a[\[]b[\]]c/.{0,}/node_modules/",
+    ]
 
 
 @posix_only
@@ -321,6 +359,36 @@ def test_the_known_directory_values_are_built_per_scan_not_at_construction(tmp_p
     scanner = _scanner(source, tmp_path / "out")
     held = [a.key for a in scanner.args.extra_args if a.key.startswith("--skip-path")]
     assert held == []
+
+
+@posix_only
+def test_the_known_values_sit_between_the_files_skip_path_and_the_operators(tmp_path):
+    """The known-directory values stand where the fixed values they replaced stood.
+
+    checkov's terraform module finder joins every ``--skip-path`` value, in the
+    order it is given them, into one regex, and the values before an operator's
+    value decide how it is read there. The fixed values came after the ``skip-path``
+    values of the operator's checkov config file and before the operator's
+    ``skip_path``, so the known values are put in that place too: the file's value
+    first, then the six known values, then the operator's.
+    """
+    source = tmp_path / "src"
+    source.mkdir()
+    config = tmp_path / "conf" / ".checkov.yaml"
+    config.parent.mkdir()
+    config.write_text("skip-path:\n  - from-file/\n", encoding="utf-8")
+    scanner = _scanner(
+        source,
+        tmp_path / "out",
+        config_file=str(config),
+        skip_path=[IgnorePathWithReason(path="from-option/", reason="r")],
+    )
+    argv, _, _ = scanner._execute_scan(source, "source", [])
+    assert _argv_skip_values_in_order(argv) == [
+        "from-file/",
+        *_values(_skip_path_root(source)),
+        "from-option/",
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -349,6 +417,56 @@ _ROOTS = [
     "/a.b.c/d.e",
 ]
 
+#: Roots that hold a parenthesis or a bracket, which ``_skip_path_text`` writes as a
+#: class holding it alone.
+_PARENTHESIS_ROOTS = [
+    "/home/me/proj (v1.2)",
+    "/x/a(b",
+    "/x/a)b",
+    "/x/a]b(c",
+    "/x/a[b(c",
+    "/p/[(]/q",
+]
+
+#: A root with each printable character in it, none left out.
+_PRINTABLE_ROOTS = [f"/a{char}b/c" for char in string.printable]
+
+#: Every root the tests over all roots use. ``dict.fromkeys`` drops the repeats
+#: (``/a|b/c`` is in ``_ROOTS`` and in ``_PRINTABLE_ROOTS``) and keeps the order.
+_ALL_ROOTS = list(dict.fromkeys([*_ROOTS, *_PRINTABLE_ROOTS, *_PARENTHESIS_ROOTS]))
+
+#: The roots without a newline. A newline in a walked path is the case
+#: ``test_a_newline_above_a_known_directory_leaves_it_unmatched`` pins on its own.
+_MATCH_ROOTS = [root for root in _ALL_ROOTS if "\n" not in root]
+
+#: The fixed values ASH sent for KNOWN_IGNORE_PATHS before they were anchored to
+#: the scanned directory, in their order.
+_FIXED_VALUES = ["/[.]venv/", "/venv/", "/node_modules/"]
+
+#: Values the operator's checkov config file can hold before the known values.
+_FILE_VALUES = [[], ["from-file/"], ["tests/*"], ["a]b"], ["[x"]]
+
+#: Operator skip_path values whose fate in the module finder depends on what comes
+#: before them: some compile only inside the character class the joined list
+#: opens, some only outside it.
+_OPERATOR_VALUES = [
+    "tests/*",
+    ".*\\.bak$",
+    "test(s)?/",
+    "vendor(",
+    "a(]b)",
+    "^/repo/(build|dist)/",
+    "(foo|bar)/",
+    "[a-z]+_test\\.tf$",
+    "cdk.out",
+    "dir[0-9]",
+    "x]",
+    "[",
+    "(",
+    ")",
+    "]",
+]
+
 
 def test_the_anchored_values_compile_in_checkovs_module_finder_regex():
     """checkov joins every value into one regex a character at a time."""
@@ -369,7 +487,11 @@ def test_the_values_compile_in_checkovs_module_finder_regex(root):
     ignored directory, an operator value holding a bracket), before and after."""
     values = _values(root)
     assert _module_finder_compiles(values)
-    escaped = _skip_path_text(root)
+    # The other shapes are spelled the way their builders spell them
+    # (``_link_skip_patterns``, ``_ignore_skip_patterns``): ``re.escape`` with each
+    # dot as ``[.]``, not ``_skip_path_text``, which only the known-directory values
+    # use. ``_ROOTS`` holds no parenthesis, so both orders still compile.
+    escaped = re.escape(root).replace("\\.", "[.]")
     others = [
         f"^{escaped}/ash\\-out/",
         f"^{escaped}/x[.]tf$",
@@ -381,12 +503,57 @@ def test_the_values_compile_in_checkovs_module_finder_regex(root):
 
 
 @pytest.mark.filterwarnings("ignore::FutureWarning")
-def test_a_root_holding_any_printable_character_but_a_parenthesis_compiles():
-    for char in string.printable:
-        if char in "()/":
-            continue
-        root = f"/a{char}b/c"
-        assert _module_finder_compiles(_values(root)), repr(char)
+@pytest.mark.parametrize("root", _ALL_ROOTS)
+def test_the_operators_values_compile_behind_the_values_exactly_as_behind_the_fixed_ones(
+    root,
+):
+    """The known-directory values leave checkov's module finder reading the
+    operator's values as the fixed values they replaced did, so the same values
+    compile, and the same ones are refused, as before.
+
+    The values compile alone for every root, a parenthesis or a bracket in it
+    included: each is written as a class holding it alone, which opens no group and
+    leaves no class open wherever the values sit. And behind them (after the
+    ``skip-path`` values of the operator's checkov config file, as ``_execute_scan``
+    puts them) each operator value compiles exactly when it compiled behind the
+    fixed values: both end in a ``[.]`` that leaves the module finder outside a
+    character class. ``tests/*`` and ``vendor(`` are refused behind either, and
+    ``a(]b)`` compiles behind either.
+    """
+    values = _values(root)
+    assert _module_finder_compiles(values), root
+    for file_values in _FILE_VALUES:
+        for value in _OPERATOR_VALUES:
+            behind_known = _module_finder_compiles([*file_values, *values, value])
+            behind_fixed = _module_finder_compiles(
+                [*file_values, *_FIXED_VALUES, value]
+            )
+            assert behind_known == behind_fixed, (
+                f"root {root!r}, file values {file_values!r}, operator value "
+                f"{value!r}: compiles behind the known values: {behind_known}, "
+                f"behind the fixed values: {behind_fixed}"
+            )
+
+
+@pytest.mark.filterwarnings("ignore::FutureWarning")
+@pytest.mark.parametrize("root", _MATCH_ROOTS)
+def test_the_values_match_below_any_root_and_never_above_it(root):
+    """For every root, a parenthesis or a bracket in it included, the values skip a
+    known directory below it, at both depths, and nothing else: not a sibling that
+    only ends like one, not a file of the root, and not a root that sits below a
+    ``venv`` directory.
+
+    A dot, a parenthesis and a bracket of the root are written as a class holding
+    it alone, which matches that character only, so the root's own text is matched
+    literally."""
+    values = _values(root)
+    assert _skipped(values, f"{root}/venv/a.tf")
+    assert _skipped(values, f"{root}/s/node_modules/a.tf")
+    assert _skipped(values, f"{root}/.venv/bin/python")
+    assert not _skipped(values, f"{root}/devenv/a.tf")
+    assert not _skipped(values, f"{root}/main.tf")
+    above = f"/x/venv{root}"
+    assert not _skipped(_values(above), f"{above}/main.tf")
 
 
 @pytest.mark.parametrize("root", ["", "/repo", "/a.b/c-d"])
@@ -402,56 +569,102 @@ def test_the_dot_star_spelling_does_not_compile_which_is_why_the_values_count(ro
 
 
 # ---------------------------------------------------------------------------
-# Where the values are not sent
+# A root holding a parenthesis, links, the operator's values and Windows
 # ---------------------------------------------------------------------------
 
 
 @posix_only
-def test_a_root_holding_a_parenthesis_gets_none_and_a_warning(tmp_path, caplog):
-    source = _source(tmp_path / "proj (1)")
+def test_a_root_holding_a_parenthesis_gets_the_values_and_no_warning(tmp_path, caplog):
+    """A target whose path holds a parenthesis gets the same six values as any
+    other, the parenthesis written as a class holding it alone, in one run in the
+    argument list, and the scan says nothing about leaving the directories out."""
+    source = _source(tmp_path / "proj (v1.2)")
     scanner = _scanner(source, tmp_path / "out")
     with caplog.at_level(logging.WARNING, logger="ash"):
         argv, _, _ = scanner._execute_scan(source, "source", [])
-    root = _skip_path_root(source)
-    assert not set(_values(root)) & set(_argv_skip_values(argv))
+    values = _values(_skip_path_root(source))
+    given = _argv_skip_values(argv)
+    assert values[0] in given, given
+    start = given.index(values[0])
+    assert given[start : start + len(values)] == values, given
+    assert all("[(]" in value and "[)]" in value for value in values), values
     warned = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
-    assert any(
-        root in w and "venv" in w and "node_modules" in w and "will read" in w
-        for w in warned
-    ), warned
-    # Where the path holds none, the same scan sends them and says nothing.
-    plain = _source(tmp_path / "plain")
-    caplog.clear()
-    with caplog.at_level(logging.WARNING, logger="ash"):
-        argv, _, _ = _scanner(plain, tmp_path / "out")._execute_scan(
-            plain, "source", []
-        )
-    assert set(_values(_skip_path_root(plain))) <= set(_argv_skip_values(argv))
-    assert not [r for r in caplog.records if "node_modules" in r.getMessage()]
+    assert not [w for w in warned if "node_modules" in w], warned
 
 
 @posix_only
 @needs_symlinks
-def test_a_link_under_a_known_directory_keeps_its_own_value_for_a_parenthesis_root(
+def test_a_virtualenv_in_a_parenthesis_root_is_scanned_without_values_for_its_links(
     tmp_path,
 ):
-    """Without the values that skip ``venv/`` whole, a link under it that leaves the
-    tree is in the list: it gets a value of its own, or the target is refused when
-    that value breaks checkov's module finder (which depends on the characters of
-    the temporary path above the parenthesis, so it is computed here)."""
-    source = _source(tmp_path / "proj (1)", "venv/link.tf")
-    scanner = _scanner(source, tmp_path / "out")
-    assert CheckovScanner._links_leaving_tree(source) == []
+    """The target the previous commit refused: a ``.venv`` made with the default
+    symlinks holds links to the interpreter, which leave the tree. Its links get no
+    value of their own, since the values skip ``.venv`` and ``venv`` whole, so the
+    scan runs and the module finder is asked to compile none of them."""
+    source = _source(
+        tmp_path / "proj (v1.2)",
+        ".venv/bin/python",
+        ".venv/bin/python3",
+        "venv/link.tf",
+    )
+    # The links are there to be found, and the known directories account for all
+    # of them.
     assert CheckovScanner._links_leaving_tree(
         source, known_directories_skipped=False
-    ) == ["venv/link.tf"]
-    (own_value,) = scanner._link_skip_patterns(source, ["venv/link.tf"])
-    if _module_finder_compiles([own_value]):
-        argv, _, _ = scanner._execute_scan(source, "source", [])
-        assert own_value in _argv_skip_values(argv)
-    else:
-        with pytest.raises(ScannerError, match="venv/link.tf"):
-            scanner._execute_scan(source, "source", [])
+    ) == [".venv/bin/python", ".venv/bin/python3", "venv/link.tf"]
+    assert (
+        CheckovScanner._links_leaving_tree(source, known_directories_skipped=True) == []
+    )
+    scanner = _scanner(source, tmp_path / "out")
+    argv, _, _ = scanner._execute_scan(source, "source", [])
+    given = _argv_skip_values(argv)
+    assert set(_values(_skip_path_root(source))) <= set(given), given
+    link_values = ("python$", "python3$", "link[.]tf$")
+    own = [value for value in given if value.endswith(link_values)]
+    assert not own, own
+
+
+@posix_only
+@needs_symlinks
+def test_a_link_in_a_parenthesis_root_gets_its_own_value_as_before(tmp_path):
+    """The link values keep their spelling, and the known values stand before them
+    as the fixed values did. Behind them a balanced parenthesis in the root
+    compiles, so the link is left out by its own value, and an unbalanced one does
+    not, so the target is refused: the two outcomes the target had before the
+    values were anchored."""
+    source = _source(tmp_path / "proj (v1.2)", "app/shared.tf")
+    scanner = _scanner(source, tmp_path / "out")
+    (own_value,) = scanner._link_skip_patterns(source, ["app/shared.tf"])
+    argv, _, _ = scanner._execute_scan(source, "source", [])
+    assert own_value in _argv_skip_values(argv)
+
+    unbalanced = _source(tmp_path / "a(b", "app/link.tf")
+    refused = _scanner(unbalanced, tmp_path / "out2")
+    with pytest.raises(ScannerError, match="app/link.tf"):
+        refused._execute_scan(unbalanced, "source", [])
+
+
+@posix_only
+def test_an_operator_value_that_fails_behind_the_known_values_refuses_as_before(
+    tmp_path,
+):
+    """``tests/*`` puts a ``*`` right after the ``|`` the module finder joins its
+    characters with, which is "nothing to repeat" once the ``[.]`` of the first
+    ``.venv`` value has closed the character class the joined list opens. It failed
+    behind the fixed values these replaced and fails behind the known values, which
+    leave the same state, so the target is refused naming ``skip_path``, as it was.
+    """
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "main.tf").write_text("", encoding="utf-8")
+    assert not _module_finder_compiles([*_FIXED_VALUES, "tests/*"])
+    scanner = _scanner(
+        source,
+        tmp_path / "out",
+        skip_path=[IgnorePathWithReason(path="tests/*", reason="r")],
+    )
+    with pytest.raises(ScannerError, match="skip_path"):
+        scanner._execute_scan(source, "source", [])
 
 
 @needs_symlinks
@@ -459,7 +672,6 @@ def test_links_under_known_directories_stay_in_the_list_when_not_skipped(tmp_pat
     source = _source(
         tmp_path, "app/link.tf", "node_modules/pkg/link.tf", "sub/venv/link.tf"
     )
-    assert CheckovScanner._links_leaving_tree(source) == ["app/link.tf"]
     assert CheckovScanner._links_leaving_tree(
         source, known_directories_skipped=True
     ) == ["app/link.tf"]
@@ -471,42 +683,9 @@ def test_links_under_known_directories_stay_in_the_list_when_not_skipped(tmp_pat
 @needs_symlinks
 def test_a_link_below_a_newline_named_directory_is_not_taken_for_skipped(tmp_path):
     source = _source(tmp_path, "venv/link.tf", "a\nb/venv/link.tf")
-    assert CheckovScanner._links_leaving_tree(source) == ["a\nb/venv/link.tf"]
-
-
-@posix_only
-@needs_symlinks
-def test_values_that_fail_beside_the_operators_are_left_out_with_a_warning(
-    tmp_path, caplog
-):
-    """The operator's values compile alone, so they are not blamed: the known
-    directory values are left out, a warning says checkov will read the
-    directories, and the link under one is passed on to get a value of its own."""
-    source = _source(tmp_path, "app/link.tf", "venv/link.tf")
-    scanner = _scanner(source, tmp_path / "out")
-    known = set(_values(_skip_path_root(source)))
-
-    def fails_with_the_known_values(values):
-        return not known & set(values)
-
-    with (
-        patch.object(
-            checkov_scanner, "_module_finder_compiles", fails_with_the_known_values
-        ),
-        caplog.at_level(logging.WARNING, logger="ash"),
-    ):
-        argv, _, _ = scanner._execute_scan(source, "source", [])
-
-    given = _argv_skip_values(argv)
-    assert not known & set(given)
-    root = _skip_path_text(source.as_posix())
-    assert f"^{root}/venv/link[.]tf$" in given
-    assert f"^{root}/app/link[.]tf$" in given
-    assert any(
-        "node_modules" in r.getMessage() and "module finder" in r.getMessage()
-        for r in caplog.records
-        if r.levelno == logging.WARNING
-    )
+    assert CheckovScanner._links_leaving_tree(
+        source, known_directories_skipped=True
+    ) == ["a\nb/venv/link.tf"]
 
 
 @posix_only

@@ -244,6 +244,17 @@
   being run from the working directory, which is usually the repository being scanned.
   The same path given as `-OCIRunner` is used as written, as before.
 
+- **checkov scans a project inside a directory named `venv`, `.venv` or
+  `node_modules`.** ASH passed checkov `--skip-path` values for those directories
+  that matched a directory of that name anywhere in a file's absolute path, so for
+  a project inside one, such as a package under a virtualenv's `site-packages`,
+  every file was skipped and checkov reported nothing. The values now start with
+  the scanned directory's path, so they skip those directories below it only. On
+  Windows no such value is sent, and a file link from one of them that points
+  outside the scanned directory now stops the checkov scan of that directory, as
+  such a link anywhere else in it already did. checkov's secrets framework keeps
+  its own unanchored list of these names and still skips such a project.
+
 ### Features
 
 - **Symbol suppressions are bound to their file's content hash in `.ash.lock`.**

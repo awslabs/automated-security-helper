@@ -231,11 +231,37 @@ def _without_unused_vcs_tokens(
     }
 
 
+#: How ``_skip_path_text`` writes the characters checkov's terraform module finder
+#: would read as a group or a character class once it joins the values a character
+#: at a time (``_module_finder_compiles``), and the dot: each as a class that holds
+#: it alone. ``re.search`` reads ``[(]`` as it reads ``\(``.
+_SKIP_PATH_CLASS_SPELLINGS = {
+    ".": "[.]",
+    "(": "[(]",
+    ")": "[)]",
+    "[": "[\\[]",
+    "]": "[\\]]",
+}
+
+
 def _skip_path_text(text: str) -> str:
-    """``text`` as the literal part of a ``--skip-path`` value: ``re.escape``d, with
-    every dot written ``[.]``, not ``\\.``, for the reason ``_link_skip_patterns``
-    gives."""
-    return re.escape(text).replace("\\.", "[.]")
+    """``text`` as the literal part of a ``--skip-path`` value.
+
+    Each character is ``re.escape``d, except a dot, a parenthesis and a bracket,
+    which are written as a class holding that character alone
+    (``_SKIP_PATH_CLASS_SPELLINGS``). The dot for the reason ``_link_skip_patterns``
+    gives. The others because checkov's terraform module finder joins every value
+    into one regex a character at a time (``_module_finder_compiles``): there an
+    escaped parenthesis becomes a group, which a ``]`` earlier in the list can
+    leave unbalanced, and an escaped bracket opens or closes a character class.
+    Written as a class, none of them opens a group or leaves a class open, so a
+    value built from this text compiles wherever it sits in the list.
+    ``re.search`` matches the same paths with either spelling.
+    """
+    return "".join(
+        _SKIP_PATH_CLASS_SPELLINGS.get(character) or re.escape(character)
+        for character in text
+    )
 
 
 def _known_directory_skip_values(root: str) -> List[str]:
@@ -256,20 +282,24 @@ def _known_directory_skip_values(root: str) -> List[str]:
     below the scanned directory, at any depth, and never a component of the
     scanned directory's own path or above it: a target that is itself named
     ``venv``, or sits under a directory named ``venv``, ``.venv`` or
-    ``node_modules``, is scanned. The values this replaced, ``/venv/``,
-    ``/[.]venv/`` and ``/node_modules/``, started at a ``/`` and so matched such
-    an ancestor too: the walked paths of a target below ``/home/me/venv`` all
-    hold ``/venv/``, every entry was removed, checkov read nothing, and ASH
-    reported the target clean. A name is a whole directory name, so ``devenv/``,
-    ``my.venv/``, ``venvx/`` and ``old_node_modules/`` are scanned.
+    ``node_modules``, is scanned. checkov's secrets framework is the exception: it
+    adds its own list of names, ``venv`` and ``node_modules`` among them, to the
+    values and matches them the same unanchored way (``checkov/secrets/utils.py``,
+    ``EXCLUDED_PATHS``), so it still reads no file of such a target. The values
+    this replaced, ``/venv/``, ``/[.]venv/`` and ``/node_modules/``, started at a
+    ``/`` and so matched such an ancestor too: the walked paths of a target below
+    ``/home/me/venv`` all hold ``/venv/``, every entry was removed, checkov read
+    nothing, and ASH reported the target clean. A name is a whole directory name,
+    so ``devenv/``, ``my.venv/``, ``venvx/`` and ``old_node_modules/`` are
+    scanned.
 
     The substring half of checkov's test matches the value's own text. For the
     directly-below value of a name with no dot, under a root ``re.escape`` leaves
     unchanged, that is the same set of paths the regex half matches. For the
     deeper value, for a dotted name (``[.]venv``) and for a root holding a
-    character ``re.escape`` changes (``-``, a space), it matches only a path that
-    holds that text literally, such as a directory named ``[.]venv``; the regex
-    half does the work there.
+    character ``_skip_path_text`` changes (``-``, a space, a dot, a parenthesis,
+    a bracket), it matches only a path that holds that text literally, such as a
+    directory named ``[.]venv``; the regex half does the work there.
 
     ``.{0,}``, not ``.*``: checkov's terraform module finder compiles
     ``'|'.join(f"({excluded_paths})")`` over the values (``module_finder.py``),
@@ -283,15 +313,17 @@ def _known_directory_skip_values(root: str) -> List[str]:
 
     The values hold no ``^``, no group and no alternation. No ``^`` is needed:
     every walked path starts with the root, and a match further along can only be
-    a known directory below it. A parenthesis can leave the module finder's
-    joined regex unbalanced (``_CHECKOV_UNSAFE_SKIP_PATH_CHARS``), so ASH writes
-    none, and a root holding one gets no values at all
-    (``_known_directory_skip_patterns``). A ``|`` or ``^`` ASH wrote would be read
-    by a batch interpreter that re-reads the command line: cmd.exe splits an
-    unquoted value at ``|`` and consumes ``^`` as its escape character, which is
-    how the earlier ``(^|/)[.]venv/`` form failed the Install Method Validation
-    run on Windows. A root can bring one in, and ``re.escape`` keeps it in the
-    value, escaped. No value is sent on Windows at all.
+    a known directory below it. A parenthesis or bracket in the root is written as
+    a class holding it alone (``_skip_path_text``), so the values compile in the
+    module finder's joined regex wherever they sit, and the ``[.]`` of the
+    ``.venv`` values leaves it outside a character class, as the fixed values they
+    replaced did. ``_execute_scan`` puts them where those were, so the operator's
+    values after them compile, or do not, as before. A ``|`` or ``^`` ASH wrote
+    would be read by a batch interpreter that re-reads the command line: cmd.exe
+    splits an unquoted value at ``|`` and consumes ``^`` as its escape character,
+    which is how the earlier ``(^|/)[.]venv/`` form failed the Install Method
+    Validation run on Windows. A root can bring one in, and ``re.escape`` keeps it
+    in the value, escaped. No value is sent on Windows at all.
     """
     anchor = _skip_path_text(root)
     values: List[str] = []
@@ -1467,6 +1499,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     # builds runs, read by an offline scan to say what each one checks
     # (_warn_offline_vcs_frameworks).
     _vcs_frameworks_run: Tuple[str, ...] = PrivateAttr(default=())
+    #: Where ``_execute_scan`` puts the known-directory values in ``args.extra_args``:
+    #: after the ``skip-path`` values of the operator's checkov config file and
+    #: before the operator's ``skip_path`` (set by ``_process_config_options``).
+    _known_directory_skip_at: Optional[int] = PrivateAttr(default=None)
 
     def model_post_init(self, context):
         if self.config is None:
@@ -1852,9 +1888,12 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                     ToolExtraArg(key=f"--skip-path={item}", value=None)
                 )
 
-        # The KNOWN_IGNORE_PATHS directories get no value here: it has to start with
-        # the scanned directory's path, which is not known until the scan.
-        # _execute_scan builds it per scan (_known_directory_skip_patterns).
+        # The KNOWN_IGNORE_PATHS directories get their values at this point of the
+        # command line, where the fixed values used to be, but per scan: each value
+        # starts with the scanned directory's path. _execute_scan puts them here
+        # (_known_directory_skip_patterns), so checkov's module finder reads the
+        # operator's skip_path values below in the state it always did.
+        self._known_directory_skip_at = len(self.args.extra_args)
 
         for item in active_ignore_paths(
             self.config.options.skip_path, where="scanners.checkov.options.skip_path"
@@ -1939,38 +1978,32 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # persists across scan() calls. A new list: the one extra_args holds is
         # put back as it was, unchanged.
         original_extra_args = self.args.extra_args
-        given = _given_skip_paths(original_extra_args)
+        # The known-directory values go where _process_config_options left room for
+        # them: after the skip-path values of the operator's checkov config file
+        # and before the operator's skip_path. checkov's terraform module finder
+        # joins every value into one regex (_module_finder_compiles), and the values
+        # before an operator's value decide how it is read there; these leave it as
+        # the fixed values they replaced did (_known_directory_skip_values).
+        split = min(self._known_directory_skip_at or 0, len(original_extra_args))
+        before, after = original_extra_args[:split], original_extra_args[split:]
         known = self._known_directory_skip_patterns(target)
-        # checkov's terraform module finder compiles one regex over every value
-        # (_module_finder_compiles), and fails the whole terraform scan when it
-        # cannot. The operator's own skip_path values are named as the cause when
-        # they break it: before this the refusal always blamed a link, and ran
-        # even when there was no link. They are compiled alone only when they
-        # fail together with the known-directory values, so a scan whose values
-        # all compile does one compile here.
-        if not _module_finder_compiles([*given, *known]):
-            if known and _module_finder_compiles(given):
-                # The operator's values are fine, so it is the known-directory
-                # values that fail beside them: left out, with a note, rather
-                # than refusing the target.
-                ASH_LOGGER.warning(
-                    "Not excluding the .venv, venv and node_modules directories "
-                    f"below {Path(target).as_posix()} from checkov: with the "
-                    "operator's skip_path values, checkov's terraform module "
-                    "finder cannot compile its regex, so checkov will read the "
-                    "files in them.",
-                    extra=NO_MARKUP,
-                )
-                known = []
-            else:
-                raise ScannerError(
-                    f"Not running checkov on {Path(target).as_posix()}: the "
-                    "scanners.checkov.options.skip_path values, joined as checkov's "
-                    "terraform module finder joins them, do not compile as a regular "
-                    "expression, so checkov's terraform scan would fail. Balance the "
-                    "parentheses and brackets in them."
-                )
-        skips: List[str] = list(known)
+        # In the order checkov is given them, which is the order the module finder
+        # joins them in.
+        given = [*_given_skip_paths(before), *known, *_given_skip_paths(after)]
+        # checkov's terraform module finder fails the whole terraform scan when it
+        # cannot compile its regex. The known-directory values compile wherever they
+        # sit (_skip_path_text), so when the list does not, the operator's own
+        # values are the cause and are named: before this the refusal always blamed
+        # a link, and ran even when there was no link.
+        if not _module_finder_compiles(given):
+            raise ScannerError(
+                f"Not running checkov on {Path(target).as_posix()}: the "
+                "scanners.checkov.options.skip_path values, joined as checkov's "
+                "terraform module finder joins them, do not compile as a regular "
+                "expression, so checkov's terraform scan would fail. Balance the "
+                "parentheses and brackets in them."
+            )
+        skips: List[str] = []
         for value in self._output_dir_skip_patterns(target):
             # An output directory ASH drops findings under anyway: left out of
             # --skip-path, with a note, rather than refusing the target.
@@ -1984,8 +2017,8 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 extra=NO_MARKUP,
             )
         # A link under a known directory needs a value of its own unless this scan
-        # sends the values that skip that directory whole (none on Windows, for a
-        # root holding a parenthesis, or after the compile check above).
+        # sends the values that skip that directory whole, which it does not on
+        # Windows.
         link_paths = self._links_leaving_tree(
             target, known_directories_skipped=bool(known)
         )
@@ -2054,7 +2087,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 extra=NO_MARKUP,
             )
         self.args.extra_args = [
-            *original_extra_args,
+            *before,
+            *(ToolExtraArg(key="--skip-path", value=value) for value in known),
+            *after,
             *skips_offline,
             *(ToolExtraArg(key="--skip-path", value=skip) for skip in skips),
         ]
@@ -2177,19 +2212,14 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
 
     def _known_directory_skip_patterns(self, target: Path) -> List[str]:
         """The ``--skip-path`` values that skip the ``KNOWN_IGNORE_PATHS`` directories
-        below ``target`` (``_known_directory_skip_values``), or none where they
-        cannot be sent.
+        below ``target`` (``_known_directory_skip_values``), or none on Windows.
 
         None on Windows, where checkov's walked paths are not ``/``-joined, as for
         ``_ignore_skip_patterns`` and ``_output_dir_skip_patterns``; checkov's own
         rules still skip directories named ``node_modules`` and, by default,
         dot-named ones on every platform (``CKV_IGNORED_DIRECTORIES`` and
-        ``CKV_IGNORE_HIDDEN_DIRECTORIES``). None for a target whose path holds a
-        character of ``_CHECKOV_UNSAFE_SKIP_PATH_CHARS``, for the reason
-        ``_output_dir_skip_patterns`` gives, with a warning: checkov then reads the
-        ``.venv``, ``venv`` and ``node_modules`` directories below it.
-        ``_execute_scan`` also leaves them out when they fail to compile beside the
-        operator's values, and tells ``_links_leaving_tree`` whether any are sent.
+        ``CKV_IGNORE_HIDDEN_DIRECTORIES``). ``_execute_scan`` tells
+        ``_links_leaving_tree`` whether any are sent.
         """
         if os.sep != "/":
             # checkov joins walked paths with os.sep, so on Windows the values
@@ -2201,18 +2231,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 "if needed."
             )
             return []
-        root = _skip_path_root(target)
-        if _CHECKOV_UNSAFE_SKIP_PATH_CHARS & set(root):
-            ASH_LOGGER.warning(
-                "Not excluding the .venv, venv and node_modules directories below "
-                f"{root} from checkov: the path has characters checkov cannot take "
-                "in --skip-path, so checkov will read the files in them. Add them "
-                "to scanners.checkov.options.skip_path, or scan a directory whose "
-                "path has no parenthesis.",
-                extra=NO_MARKUP,
-            )
-            return []
-        return _known_directory_skip_values(root)
+        return _known_directory_skip_values(_skip_path_root(target))
 
     def _ignore_skip_patterns(
         self, target: Path, global_ignore_paths: List[IgnorePathWithReason] | None
@@ -2246,7 +2265,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
 
     @staticmethod
     def _links_leaving_tree(
-        target: Path, known_directories_skipped: bool = True
+        target: Path, *, known_directories_skipped: bool
     ) -> List[str]:
         """The links to files whose target leaves ``target``, as checkov walks them.
 
@@ -2255,12 +2274,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         whole (``_known_directory_skip_patterns``), so a value per link there only
         lengthened the command line (a ``node_modules`` with thousands of links
         reached the argument-list limit). That holds only for a scan that sends the
-        known-directory values, so the caller says whether this one does: it does
-        not on Windows, for a target whose path holds a parenthesis, or when the
-        values fail to compile beside the operator's. Without them every link is
-        returned and gets a value of its own (``_link_skip_patterns``) or refuses
-        the target, so checkov reads no file a link points at outside the tree.
-        The default is the scan that sends them.
+        known-directory values, which one on Windows does not, so the caller says
+        which it is. Without them every link is returned and gets a value of its own
+        (``_link_skip_patterns``) or refuses the target, so checkov reads no file a
+        link points at outside the tree.
         """
         links = file_links_leaving_tree(target)
         if not known_directories_skipped:
@@ -2316,7 +2333,12 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 the file the link points at.
         """
         if links is None:
-            links = self._links_leaving_tree(target)
+            links = self._links_leaving_tree(
+                target,
+                known_directories_skipped=bool(
+                    self._known_directory_skip_patterns(target)
+                ),
+            )
         if not links:
             return []
         if os.sep != "/":
