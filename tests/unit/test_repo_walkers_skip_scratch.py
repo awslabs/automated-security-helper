@@ -1172,6 +1172,147 @@ class TestIterRepoFilesPrunesTheScratchTree:
         """If it were not, pruning it would be a no-op and this is all theatre."""
         assert ASH_TEST_TEMP_ROOT.resolve().is_relative_to(REPO_ROOT.resolve())
 
+    # pytest's own temp trees: the base directory a run was given with --basetemp, and
+    # PYTEST_DEBUG_TEMPROOT. A run can keep either inside the repository, where every
+    # worker's tmp_path directories are made and deleted while a walk runs.
+
+    @staticmethod
+    def _planted_tree(tmp_path, monkeypatch):
+        """A root holding a basetemp-shaped directory and an ordinary source file.
+
+        Returns ``(root, basetemp, in_basetemp, beside_it)``: the first file is where
+        a worker's ``tmp_path`` would put one, the second is the same file in the tree
+        proper. The scratch root is moved out of the way first. Under a ``--basetemp``
+        inside tests/pytest-temp this tmp_path is itself under the real one, and the
+        scratch prune would empty every walk of it.
+        """
+        monkeypatch.setattr(
+            "tests.utils.helpers.ASH_TEST_TEMP_ROOT", tmp_path / "scratch"
+        )
+        root = tmp_path / "tree"
+        basetemp = root / "other-basetemp"
+        in_basetemp = basetemp / "popen-gw2" / "test_one_0" / "planted_probe.py"
+        beside_it = root / "unit" / "planted_probe.py"
+        for planted in (in_basetemp, beside_it):
+            planted.parent.mkdir(parents=True)
+            planted.write_text("x = 1\n", encoding="utf-8")
+        return root, basetemp, in_basetemp, beside_it
+
+    @staticmethod
+    def _record_basetemp(monkeypatch, value):
+        """Set what the run's root conftest records, whether or not it exists yet.
+
+        ``raising=False`` so that a tree without the attribute fails these cases on
+        what they assert, a file listed that should not be, and not on this setup.
+        """
+        monkeypatch.setattr("tests.utils.helpers.RUN_BASETEMP", value, raising=False)
+
+    def test_a_basetemp_inside_the_root_is_not_entered(self, tmp_path, monkeypatch):
+        """The configured basetemp is left out of a walk that reaches it."""
+        root, basetemp, in_basetemp, _ = self._planted_tree(tmp_path, monkeypatch)
+        self._record_basetemp(monkeypatch, basetemp)
+
+        assert in_basetemp.exists(), "the test did not write the probe"
+        yielded = {p.resolve() for p in iter_repo_files(root)}
+        assert in_basetemp.resolve() not in yielded
+
+    def test_a_file_beside_the_basetemp_is_still_yielded(self, tmp_path, monkeypatch):
+        """The companion: pruning the basetemp must not have emptied the walk."""
+        root, basetemp, _, beside_it = self._planted_tree(tmp_path, monkeypatch)
+        self._record_basetemp(monkeypatch, basetemp)
+
+        yielded = {p.resolve() for p in iter_repo_files(root)}
+        assert beside_it.resolve() in yielded
+
+    def test_pytest_debug_temproot_inside_the_root_is_not_entered(
+        self, tmp_path, monkeypatch
+    ):
+        """Where pytest puts its base directory when it is given no ``--basetemp``."""
+        root, basetemp, in_basetemp, beside_it = self._planted_tree(
+            tmp_path, monkeypatch
+        )
+        self._record_basetemp(monkeypatch, None)
+        monkeypatch.setenv("PYTEST_DEBUG_TEMPROOT", str(basetemp))
+
+        yielded = {p.resolve() for p in iter_repo_files(root)}
+        assert in_basetemp.resolve() not in yielded
+        assert beside_it.resolve() in yielded
+
+    def test_a_root_inside_the_basetemp_is_still_walked(self, tmp_path, monkeypatch):
+        """A walk of a ``tmp_path`` is a walk inside the base temp directory.
+
+        Skipping a root for sitting there would empty every such walk, and an empty
+        walk reads as a clean tree.
+        """
+        _, basetemp, in_basetemp, _ = self._planted_tree(tmp_path, monkeypatch)
+        self._record_basetemp(monkeypatch, basetemp)
+
+        for root in (basetemp, in_basetemp.parent):
+            yielded = {p.resolve() for p in iter_repo_files(root)}
+            assert in_basetemp.resolve() in yielded, root
+
+    def test_prune_scratch_false_does_yield_the_basetemp_files(
+        self, tmp_path, monkeypatch
+    ):
+        """The opt-out sees everything, or the control that uses it proves nothing."""
+        root, basetemp, in_basetemp, _ = self._planted_tree(tmp_path, monkeypatch)
+        self._record_basetemp(monkeypatch, basetemp)
+
+        yielded = {p.resolve() for p in iter_repo_files(root, prune_scratch=False)}
+        assert in_basetemp.resolve() in yielded
+
+    @staticmethod
+    def _config(basetemp, *, worker):
+        """The two things ``run_basetemp_of`` reads from pytest's config."""
+        from types import SimpleNamespace
+
+        config = SimpleNamespace(option=SimpleNamespace(basetemp=basetemp))
+        if worker:
+            # What pytest-xdist sets on a worker's config, and only there.
+            config.workerinput = {"workerid": "gw3"}
+        return config
+
+    def test_a_run_given_a_basetemp_shares_that_one(self, tmp_path):
+        from tests.utils.helpers import run_basetemp_of
+
+        config = self._config(tmp_path / "run", worker=False)
+
+        assert run_basetemp_of(config) == (tmp_path / "run").resolve()
+
+    def test_an_xdist_worker_shares_the_directory_its_own_sits_in(self, tmp_path):
+        """xdist gives a worker ``<basetemp>/popen-gwN``; the others' sit beside it."""
+        from tests.utils.helpers import run_basetemp_of
+
+        config = self._config(tmp_path / "run" / "popen-gw3", worker=True)
+
+        assert run_basetemp_of(config) == (tmp_path / "run").resolve()
+
+    def test_a_run_given_no_basetemp_has_none_to_share(self):
+        from tests.utils.helpers import run_basetemp_of
+
+        assert run_basetemp_of(self._config(None, worker=False)) is None
+
+    def test_the_run_records_its_basetemp_when_pytest_configures(self, monkeypatch):
+        """The root conftest's hook is what fills ``RUN_BASETEMP``.
+
+        Every case above sets the recorded value itself, so none of them would notice
+        the hook no longer recording it, and the prune would quietly do nothing.
+        """
+        from types import SimpleNamespace
+
+        from tests import conftest as root_conftest
+
+        recorded = []
+        monkeypatch.setattr(
+            root_conftest, "record_run_basetemp", recorded.append, raising=False
+        )
+        monkeypatch.setattr(root_conftest.sharding, "configure", lambda config: None)
+        config = SimpleNamespace(addinivalue_line=lambda *args: None)
+
+        root_conftest.pytest_configure(config)
+
+        assert recorded == [config]
+
 
 #: Walkers outside tests/ that tests run against the real checkout. The AST sweep
 #: above reads tests/ only, so it cannot see them.

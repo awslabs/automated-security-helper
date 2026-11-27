@@ -1338,7 +1338,8 @@ class TestPluginManagerSingletonState:
         result in this class meaningless, and it would look identical to a clean
         repository. So the swept set is compared against the same walk with the
         exclusion removed: the only permitted difference is files under the
-        scratch root.
+        scratch root, or under a base temp directory of pytest's that the run keeps
+        inside the repository (a ``--basetemp`` there), which the walk leaves out too.
         """
         root = Path(__file__).resolve().parents[3]
         this_file = Path(__file__).resolve()
@@ -1362,7 +1363,7 @@ class TestPluginManagerSingletonState:
                     continue
                 yield path
 
-        from tests.utils.helpers import get_ash_temp_path
+        from tests.utils.helpers import get_ash_temp_path, pytest_temp_trees_inside
 
         scratch = get_ash_temp_path()
         planted = scratch / "excluded_probe.py"
@@ -1376,12 +1377,16 @@ class TestPluginManagerSingletonState:
                 "the planted scratch file was not excluded, so this test is not "
                 "measuring the exclusion at all"
             )
-            outside_temp_root = {
-                path for path in removed if not path.resolve().is_relative_to(temp_root)
+            excluded_trees = [temp_root, *pytest_temp_trees_inside(root)]
+            outside_the_excluded_trees = {
+                path
+                for path in removed
+                if not any(path.resolve().is_relative_to(t) for t in excluded_trees)
             }
-            assert outside_temp_root == set(), (
-                "the exclusion dropped files outside the tests' scratch root, so "
-                f"the sweep is now blind to real source: {sorted(outside_temp_root)}"
+            assert outside_the_excluded_trees == set(), (
+                "the exclusion dropped files outside the tests' scratch root and "
+                "pytest's own temp trees, so the sweep is now blind to real source: "
+                f"{sorted(outside_the_excluded_trees)}"
             )
             assert swept, "the sweep found no source files at all"
         finally:

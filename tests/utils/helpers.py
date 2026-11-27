@@ -313,6 +313,76 @@ def is_under_test_scratch(path: Path) -> bool:
         return False
 
 
+#: The base temp directory the run shares, resolved: the ``--basetemp`` it was given or,
+#: in an xdist worker, the directory its own ``popen-gwN`` one sits in. None in a process
+#: that cannot tell (the run was given none and this is not a worker); pytest's default
+#: place is then under ``PYTEST_DEBUG_TEMPROOT``, which ``pytest_temp_trees_inside``
+#: reads for itself. ``record_run_basetemp`` sets it, once per process, from the root
+#: conftest's ``pytest_configure``.
+RUN_BASETEMP: Optional[Path] = None
+
+
+def run_basetemp_of(config) -> Optional[Path]:
+    """The base temp directory the run behind ``config`` shares, resolved, or None.
+
+    pytest-xdist gives each worker a basetemp of its own, ``<basetemp>/popen-gwN``, even
+    when the run was given no ``--basetemp``; the other workers' directories are that
+    one's siblings, so the directory they share is its parent. The process that
+    started the workers has the option as it was given, if it was.
+    """
+    given = getattr(config.option, "basetemp", None)
+    if not given:
+        return None
+    basetemp = Path(given).resolve()
+    return basetemp.parent if hasattr(config, "workerinput") else basetemp
+
+
+def record_run_basetemp(config) -> None:
+    """Keep the run's shared base temp directory in ``RUN_BASETEMP``."""
+    global RUN_BASETEMP
+    RUN_BASETEMP = run_basetemp_of(config)
+
+
+def pytest_temp_trees_inside(root: Path) -> list[Path]:
+    """pytest's own temp trees that lie strictly inside ``root``, resolved.
+
+    ``RUN_BASETEMP``, and ``PYTEST_DEBUG_TEMPROOT``, where pytest puts
+    ``pytest-of-<user>/pytest-<n>`` when it is given no ``--basetemp`` (tests/conftest.py
+    sets it to the system's temp directory when the developer has not). Under pytest-xdist
+    every worker's ``tmp_path`` directories are made, filled and deleted in them while a
+    walk of ``root`` runs, as in the scratch tree. They are inside ``root`` only when the
+    run was told to keep them there: CI puts them in the runner's temp directory, and a
+    default run in the system's.
+
+    A tree that is ``root`` or holds it is not listed. Every walk of a ``tmp_path`` is a
+    walk inside the base temp directory, and a root is not skipped for being where pytest
+    put it.
+    """
+    top = root.resolve()
+    trees = []
+    for named in (RUN_BASETEMP, os.environ.get("PYTEST_DEBUG_TEMPROOT")):
+        if not named:
+            continue
+        try:
+            tree = Path(named).resolve()
+        except (OSError, RuntimeError):
+            continue
+        if tree != top and tree.is_relative_to(top):
+            trees.append(tree)
+    return trees
+
+
+def _inside_any(path: Path, trees: list[Path]) -> bool:
+    """Whether ``path``, resolved, is one of ``trees`` or under one."""
+    if not trees:
+        return False
+    try:
+        resolved = path.resolve()
+    except (OSError, RuntimeError):
+        return False
+    return any(resolved.is_relative_to(tree) for tree in trees)
+
+
 def iter_repo_files(
     root: Path,
     *,
@@ -355,16 +425,32 @@ def iter_repo_files(
     silently skipped. A vanishing file anywhere else is a real problem and should
     fail loudly.
 
+    pytest's own temp trees
+    -----------------------
+    The scratch tree is not the only per-run tree a walk can meet. pytest's base temp
+    directory holds every worker's ``tmp_path`` directories, which tests make, fill and
+    delete while a walk runs, and a run that was told to keep it inside ``root`` (a
+    ``--basetemp`` there, recorded in ``RUN_BASETEMP``, or a ``PYTEST_DEBUG_TEMPROOT``
+    there) has it in the walked tree. ``pytest_temp_trees_inside`` finds them, and they
+    are pruned the same way, before ``os.walk`` descends. Only trees *inside* ``root``:
+    a walk of a ``tmp_path`` is a walk inside the base temp directory, and is not pruned
+    for it. A ``PYTEST_DEBUG_TEMPROOT`` that names a directory of source hides that
+    directory from every walk; it is meant to name a temp directory.
+
     ``prune_scratch=False``
     -----------------------
     For the one caller that has to *see* the scratch tree: the control in
     ``test_the_exclusion_removes_nothing_but_the_temp_root``, which compares the
     pruned walk against the unpruned one and would prove nothing if both pruned.
+    Nothing is pruned in this mode, pytest's temp trees included.
     That mode tolerates a vanished directory instead of raising, because a control
     that crashes on the race it is measuring is useless. Do not use it anywhere
     else -- outside that comparison, silence is the failure mode, not the fix.
     """
     scratch = ASH_TEST_TEMP_ROOT.resolve()
+    # pytest's own temp trees inside root, left out like the scratch tree; none when the
+    # caller opted out of pruning, which sees everything.
+    temp_trees = pytest_temp_trees_inside(root) if prune_scratch else []
 
     def _onerror(error: OSError) -> None:
         if not prune_scratch:
@@ -385,6 +471,7 @@ def iter_repo_files(
             for name in dirnames
             if name not in skip_dirs
             and not (prune_scratch and is_under_test_scratch(here / name))
+            and not _inside_any(here / name, temp_trees)
         ]
         if prune_scratch and is_under_test_scratch(here):
             continue
