@@ -44,6 +44,12 @@ _SHARDS_DO_NOT_COMBINE_WITH_A_WORKSPACE = (
     "`--shard-index` or `--shard-count`, and the scan exits 5."
 )
 
+#: scale-large-repos.md (Scan a multi-project workspace, the exit code).
+_A_DIRECTORY_AND_A_WORKSPACE = (
+    "The deprecated `--workspace` option and `--source-dir` together also exit 4; "
+    "`ash scan workspace` takes no `--source-dir`, so it exits 5 instead."
+)
+
 #: exit-codes.md (the usage-error paragraph): where an option typed before a subcommand
 #: goes, and an example of one that is refused.
 _AN_OPTION_BEFORE_A_SUBCOMMAND = (
@@ -209,6 +215,22 @@ def test_a_sharded_workspace_scan_exits_5(tmp_path, scan, refusal):
 
     assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
     assert refusal in _one_line(result.output), result.output
+
+
+def test_a_directory_beside_a_workspace_exits_4_or_5_by_the_spelling(tmp_path):
+    """scale-large-repos.md (Scan a multi-project workspace, the exit code).
+
+    The deprecated ``--workspace`` with ``--source-dir`` is the workspace error, 4. The
+    subject has no ``--source-dir``, so the same pair is a usage error, 5.
+    """
+    assert_on_page(SCALE_LARGE_REPOS, _A_DIRECTORY_AND_A_WORKSPACE)
+    workspace = _workspace(tmp_path)
+
+    deprecated = _invoke(["scan", "--workspace", str(workspace), "--source-dir", "."])
+    subject = _invoke(["scan", "workspace", str(workspace), "--source-dir", "."])
+
+    assert deprecated.exit_code == WorkspaceExitCode.WORKSPACE_ERROR, deprecated.output
+    assert subject.exit_code == ASH_EXIT_USAGE_ERROR, subject.output
 
 
 def test_an_option_before_a_subcommand_goes_to_the_command_it_names(tmp_path):

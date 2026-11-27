@@ -458,9 +458,11 @@ The exit code is the most severe of the projects' results, ranked 3, then 2, the
 Codes 4 and 5 are not part of that ranking: ASH gives them when it refuses the workspace
 before any project runs. Exit code 4 means the workspace itself is wrong: the workspace file
 or policy file cannot be used, a project is missing, or the projects need different plugin
-modules or incompatible scanner versions. Exit code 5 is a usage error, such as an option
-that `ash scan workspace` does not take, or an `--only-scanners` list that names no scanner
-or that `--exclude-scanners` cancels:
+modules or incompatible scanner versions. The deprecated `--workspace` option and
+`--source-dir` together also exit 4; `ash scan workspace` takes no `--source-dir`, so it
+exits 5 instead. Exit code 5 is a usage error, such as an option that `ash scan workspace`
+does not take, or an `--only-scanners` list that names no scanner or that
+`--exclude-scanners` cancels:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
