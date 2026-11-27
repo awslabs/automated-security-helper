@@ -12,8 +12,9 @@ the CLI inside the container does. `-v` after a subcommand is that subcommand's
 directory, not the caller's, so a package planted in a scanned checkout is not what
 runs, and exit with the CLI's own status. The script's own directory is read with CDPATH unset, and the
 container is run with its stdin open only for the commands that read it (`mcp`,
-`inspect findings`, `results inspect findings`, `config lint`, `config wizard`; the
-other commands of those groups read nothing) and for a run given `--cli-json-input -`.
+`inspect findings`, `results inspect findings`, `config wizard`, and `config lint` when
+it is given `--fix` or `--fix-unused` and none of `-y`, `--yes` and `--non-interactive`;
+the other commands of those groups read nothing) and for a run given `--cli-json-input -`.
 
 A fake OCI runner stands in for docker, as in
 test_ash_bash_entrypoint_container_inputs.py, and records each call's argv
@@ -572,10 +573,74 @@ def test_an_mcp_run_over_a_pipe_keeps_stdin_open_and_asks_for_no_terminal(
         pytest.param(["results", "trend"], False, id="results-trend"),
         pytest.param(["results", "merge"], False, id="results-merge"),
         pytest.param(["results"], False, id="results-with-no-command"),
-        # config asks before it changes a file in lint (with --fix) and in wizard, and
-        # nowhere else.
-        pytest.param(["config", "lint"], True, id="config-lint"),
+        # config asks before it changes a file in wizard, and in lint only under --fix
+        # or --fix-unused and not when -y, --yes or --non-interactive spares the
+        # question; nowhere else. A plain lint asks nothing, and it is the form a
+        # `while read` loop over config files runs.
+        pytest.param(["config", "lint"], False, id="config-lint"),
         pytest.param(["config", "lint", "--fix"], True, id="config-lint-fix"),
+        pytest.param(
+            ["config", "lint", "--fix-unused"], True, id="config-lint-fix-unused"
+        ),
+        pytest.param(
+            ["config", "lint", "--fix", "--fix-unused"],
+            True,
+            id="config-lint-fix-and-fix-unused",
+        ),
+        pytest.param(["config", "lint", "--fix", "-y"], False, id="config-lint-fix-y"),
+        pytest.param(
+            ["config", "lint", "--fix", "--yes"], False, id="config-lint-fix-yes"
+        ),
+        pytest.param(
+            ["config", "lint", "--fix", "--non-interactive"],
+            False,
+            id="config-lint-fix-non-interactive",
+        ),
+        pytest.param(
+            ["config", "lint", "--fix-unused", "--non-interactive"],
+            False,
+            id="config-lint-fix-unused-non-interactive",
+        ),
+        # The order of the options does not matter, and -y may be one flag of a cluster.
+        pytest.param(["config", "lint", "-y", "--fix"], False, id="config-lint-y-fix"),
+        pytest.param(
+            ["config", "lint", "--fix", "-vy"], False, id="config-lint-fix-vy-cluster"
+        ),
+        # The word after an option that takes a value is its value, whatever it spells,
+        # as the CLI's parser reads it: --config names a file called --fix, so nothing
+        # asks, and a config file called -y or --yes spares nothing when --fix is a real
+        # flag. The value can follow --config, -o or a cluster that ends in a value
+        # option (-vc), or be attached with `=`.
+        pytest.param(
+            ["config", "lint", "--config", "--fix"],
+            False,
+            id="config-lint-a-config-named-fix",
+        ),
+        pytest.param(
+            ["config", "lint", "--config=--fix"],
+            False,
+            id="config-lint-a-config-named-fix-attached",
+        ),
+        pytest.param(
+            ["config", "lint", "--fix", "--config", "-y"],
+            True,
+            id="config-lint-fix-a-config-named-y",
+        ),
+        pytest.param(
+            ["config", "lint", "--fix", "--config=-y"],
+            True,
+            id="config-lint-fix-a-config-named-y-attached",
+        ),
+        pytest.param(
+            ["config", "lint", "--fix", "-o", "--yes"],
+            True,
+            id="config-lint-fix-an-output-dir-named-yes",
+        ),
+        pytest.param(
+            ["config", "lint", "--fix", "-vc", "-y"],
+            True,
+            id="config-lint-fix-vc-cluster-then-a-config-named-y",
+        ),
         pytest.param(["config", "wizard"], True, id="config-wizard"),
         pytest.param(["config", "get"], False, id="config-get"),
         pytest.param(["config", "init"], False, id="config-init"),
@@ -633,13 +698,17 @@ def test_only_the_subcommands_that_read_stdin_keep_the_containers_stdin_open(
     inside a `while read` loop, or a job script fed to bash on stdin) or /dev/null.
     A scan given -i consumed that input, so the loop ended after one directory and
     the script lost the commands after ./ash. Only the commands that read stdin get
-    -i: mcp, inspect findings, results inspect findings, config lint and config
-    wizard, and any command given `--cli-json-input -`, which reads its parameters
-    from it. The other commands of a group that holds a reader (results report,
-    config get, inspect sarif-fields) read nothing and get none. The list is checked
-    against the CLI's own readers in test_ash_bash_entrypoint_subcommand_args.py. The
-    file's offset is read after the run: the wrapper itself must consume none of it,
-    whichever way it decides."""
+    -i: mcp, inspect findings, results inspect findings, config wizard, config lint
+    when it is given --fix or --fix-unused and none of -y, --yes and
+    --non-interactive (the only runs of it that ask a question), and any command
+    given `--cli-json-input -`, which reads its parameters from it. The other commands
+    of a group that holds a reader (results report, config get, inspect sarif-fields)
+    read nothing and get none, and neither does a plain config lint. The list is
+    checked against the CLI's own readers in
+    test_ash_bash_entrypoint_subcommand_args.py, and the condition on config lint
+    against its options in test_wrapper_contract_spec.py. The file's offset is read
+    after the run: the wrapper itself must consume none of it, whichever way it
+    decides."""
     source, out = _dirs(tmp_path)
     arguments = [
         "--no-build",
@@ -676,6 +745,11 @@ def test_only_the_subcommands_that_read_stdin_keep_the_containers_stdin_open(
             id="results-inspect-at-the-terminal",
         ),
         pytest.param(["results", "report"], False, id="results-report-at-the-terminal"),
+        # config lint asks at the terminal under --fix, and asks nothing without it.
+        pytest.param(["config", "lint"], False, id="config-lint-at-the-terminal"),
+        pytest.param(
+            ["config", "lint", "--fix"], True, id="config-lint-fix-at-the-terminal"
+        ),
     ],
 )
 def test_a_terminal_stdin_does_not_keep_the_containers_stdin_open(

@@ -7,8 +7,9 @@
 Python, so neither can ask the CLI anything at run time. Each carries written-out
 tables of the CLI's own surface: the subcommand names, which root options take a
 value, which subcommands take the options the wrapper adds, which commands read stdin
-(`./ash` only: `Invoke-ASH` never keeps the container's stdin open), the order in which
-OCI runners are looked for, the CI runner markers passed into the container, the image
+and, for a command that reads it in some runs only, which runs (`./ash` only:
+`Invoke-ASH` never keeps the container's stdin open), the order in which OCI runners are
+looked for, the CI runner markers passed into the container, the image
 build targets, the image-name pattern and the refusal and usage-error exit codes.
 Those tables are the part of the two wrappers that drifts when the CLI changes.
 Every field of the contract is rendered into a block of at least one wrapper and read
@@ -27,7 +28,7 @@ to the Python implementation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from typing import Any
 
@@ -82,7 +83,8 @@ OPTION_ROUTING_GROUPS: dict[str, str] = {"container": "build"}
 
 #: The commands that read the caller's stdin, each as the words that name it from the
 #: root down (`config`, `lint`). A wrapper keeps the container's stdin open for a run of
-#: one of these and for a run given `--cli-json-input -`, and for no other run: -i on a
+#: one of these (only the runs STDIN_CONDITIONS names, for a command that has a
+#: condition) and for a run given `--cli-json-input -`, and for no other run: -i on a
 #: command that reads nothing makes the container take the caller's input, so a
 #: `while read` loop that runs `./ash` ended after one line. Every entry is a command,
 #: never a group, because a group holds commands that read and commands that do not:
@@ -104,12 +106,59 @@ STDIN_READING_COMMANDS: tuple[tuple[str, ...], ...] = (
 )
 
 
+@dataclass(frozen=True)
+class StdinCondition:
+    """When a command that reads stdin reads it in some of its runs only.
+
+    A wrapper keeps the container's stdin open for a run of ``command`` when one of the
+    options in ``needs_one_of`` is among the words after the command's own and none of
+    the options in ``unless_any_of`` is. ``value_options`` is not declared: the contract
+    fills it in from the real command, the spellings of its options that take a value.
+    The word after one of them is its value whatever it looks like (``--config --fix``
+    names a config file called ``--fix``), so the wrapper passes over it, as the CLI's
+    parser does, and does not read it as an option of the condition.
+    """
+
+    command: tuple[str, ...]
+    needs_one_of: tuple[str, ...]
+    unless_any_of: tuple[str, ...]
+    value_options: tuple[str, ...] = ()
+
+
+#: The stdin readers that read it in some runs only. `ash config lint` asks "Apply these
+#: fixes?" under `--fix` and "Comment out these unused suppressions?" under `--fix-unused`
+#: before it writes the file, unless it is given `--non-interactive` (also spelled
+#: `--yes` and `-y`). With no fix option it asks nothing, so a lint in CI or in a
+#: `while read` loop over config files must leave the caller's stdin alone. Every option
+#: named here must be a flag of the real command, and the command must not take
+#: `--cli-json-input`, whose document could set the options the condition reads;
+#: `_stdin_conditions` refuses both.
+STDIN_CONDITIONS: tuple[StdinCondition, ...] = (
+    StdinCondition(
+        command=("config", "lint"),
+        needs_one_of=("--fix", "--fix-unused"),
+        unless_any_of=("--non-interactive", "--yes", "-y"),
+    ),
+)
+
+
 def _options(command: Any) -> set[str]:
     found: set[str] = set()
     for param in command.params:
         found.update(getattr(param, "opts", None) or [])
         found.update(getattr(param, "secondary_opts", None) or [])
     return found
+
+
+def _value_options(command: Any) -> list[str]:
+    """The spellings of the command's options that take a value, sorted: the word after
+    one of them is its value, whatever that word looks like."""
+    return sorted(
+        spelling
+        for param in command.params
+        if param.param_type_name == "option" and not param.is_flag and not param.count
+        for spelling in param.opts
+    )
 
 
 def _taken_options(name: str, command: Any) -> set[str]:
@@ -155,6 +204,62 @@ def _stdin_readers(
     return tuple(sorted(declared))
 
 
+def _stdin_conditions(
+    root: Any,
+    readers: tuple[tuple[str, ...], ...],
+    declared: tuple[StdinCondition, ...],
+) -> tuple[StdinCondition, ...]:
+    """The declared conditions, in the order declared, each checked against the real
+    command and given the command's own options that take a value.
+
+    A condition for a command that is not one of the stdin readers, one that names an
+    option the command lacks or one that takes a value (the wrapper reads each name as a
+    flag), one that needs no option at all (it would never keep stdin open), and one on
+    a command that takes ``--cli-json-input`` (its document can set the options the
+    condition reads, which the words do not show) is an error here, so a renamed option
+    stops the generator instead of being rendered into a wrapper that keeps stdin open
+    for the wrong runs."""
+    from automated_security_helper.cli.json_input import CLI_JSON_INPUT_FLAG
+
+    filled = []
+    for condition in declared:
+        shown = f"ash {' '.join(condition.command)}"
+        if condition.command not in readers:
+            raise ValueError(
+                f"STDIN_CONDITIONS gives `{shown}` a condition, but "
+                "STDIN_READING_COMMANDS does not list it as a command that reads stdin"
+            )
+        command = root
+        for word in condition.command:
+            command = command.commands[word]
+        taken = _options(command)
+        if CLI_JSON_INPUT_FLAG in taken:
+            raise ValueError(
+                f"STDIN_CONDITIONS gives `{shown}` a condition, but it takes "
+                f"{CLI_JSON_INPUT_FLAG}, whose document can set the options the "
+                "condition reads, so the words do not say whether it asks"
+            )
+        if not condition.needs_one_of:
+            raise ValueError(
+                f"STDIN_CONDITIONS gives `{shown}` no option that makes it ask "
+                "(needs_one_of is empty), so it would never keep stdin open"
+            )
+        value_options = _value_options(command)
+        for option in (*condition.needs_one_of, *condition.unless_any_of):
+            if option not in taken:
+                raise ValueError(
+                    f"STDIN_CONDITIONS names `{option}` for `{shown}`, which has no "
+                    "such option"
+                )
+            if option in value_options:
+                raise ValueError(
+                    f"STDIN_CONDITIONS names `{option}` for `{shown}`, which takes a "
+                    "value: name a flag"
+                )
+        filled.append(replace(condition, value_options=tuple(value_options)))
+    return tuple(filled)
+
+
 @dataclass(frozen=True)
 class WrapperContract:
     """The tables the wrappers carry, as the CLI and container mode define them."""
@@ -171,6 +276,9 @@ class WrapperContract:
     dash_o_subcommands: tuple[str, ...]
     #: The commands that read the caller's stdin, each as the words that name it, sorted.
     stdin_readers: tuple[tuple[str, ...], ...]
+    #: For the readers that read it in some runs only, the condition, with the real
+    #: command's options that take a value, in the order declared.
+    stdin_conditions: tuple[StdinCondition, ...]
     #: The order OCI runners are looked for when none is named.
     runner_order: tuple[str, ...]
     #: The image stages a wrapper accepts for its build-target parameter.
@@ -213,12 +321,7 @@ def contract() -> WrapperContract:
         )
         forwarded.append((option, takers))
 
-    value_options = sorted(
-        spelling
-        for param in root.params
-        if param.param_type_name == "option" and not param.is_flag and not param.count
-        for spelling in param.opts
-    )
+    stdin_readers = _stdin_readers(root, STDIN_READING_COMMANDS)
 
     return WrapperContract(
         subcommands=subcommands,
@@ -227,14 +330,15 @@ def contract() -> WrapperContract:
             for name, command in commands.items()
             if "--sandbox" in _options(command)
         ),
-        root_value_options=tuple(value_options),
+        root_value_options=tuple(_value_options(root)),
         option_subcommands=tuple(forwarded),
         dash_o_subcommands=tuple(
             name
             for name, command in commands.items()
             if name not in CONTAINER_MODE_SUBCOMMANDS and "-o" in _tree_options(command)
         ),
-        stdin_readers=_stdin_readers(root, STDIN_READING_COMMANDS),
+        stdin_readers=stdin_readers,
+        stdin_conditions=_stdin_conditions(root, stdin_readers, STDIN_CONDITIONS),
         runner_order=tuple(rac._OCI_RUNNER_CANDIDATES),
         build_targets=tuple(sorted(target.value for target in BuildTarget)),
         image_name_pattern=rac._IMAGE_NAME_PATTERN.pattern,

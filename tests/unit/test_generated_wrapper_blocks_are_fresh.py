@@ -101,6 +101,18 @@ def test_every_block_has_its_markers_in_its_file(generator):
         ),
         (
             "ash",
+            "sh-reads-stdin",
+            "config:lint=--fix,--fix-unused/",
+            "config:lint=--fix/",
+        ),
+        (
+            "ash",
+            "sh-reads-stdin",
+            '--source-dir,-c,-o"',
+            '--source-dir,-c"',
+        ),
+        (
+            "ash",
             "sh-runner-order",
             'ASH_RUNNER_ORDER="finch docker nerdctl podman"',
             'ASH_RUNNER_ORDER="docker finch nerdctl podman"',

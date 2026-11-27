@@ -170,7 +170,20 @@ def sh_reads_stdin(contract) -> list[str]:
     # wrapper splits an entry back into words and compares them with the words after
     # the subcommand, so a word of the caller's that holds a ":" cannot spell a command.
     commands = (":".join(words) for words in contract.stdin_readers)
-    return [f'ASH_READS_STDIN="{_sh_words(commands)}"']
+    # One word per command that reads stdin in some runs only, `command=asks/spares/
+    # values`: the options that make it ask, the options that spare the question and the
+    # options of the command that take a value, each list joined with ",". The wrapper
+    # splits each list into words and compares the caller's words with them whole.
+    conditions = (
+        f"{':'.join(condition.command)}="
+        f"{','.join(condition.needs_one_of)}/{','.join(condition.unless_any_of)}/"
+        f"{','.join(condition.value_options)}"
+        for condition in contract.stdin_conditions
+    )
+    return [
+        f'ASH_READS_STDIN="{_sh_words(commands)}"',
+        f'ASH_STDIN_CONDITIONS="{_sh_words(conditions)}"',
+    ]
 
 
 def sh_exit_codes(contract) -> list[str]:

@@ -14,12 +14,14 @@ and prints the argv it was given.
 """
 
 import ast
+import importlib.util
 import inspect
 import os
 import re
 import shutil
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -409,11 +411,25 @@ def _source_file(command) -> Path:
     return Path(inspect.getsourcefile(_callback_function(command))).resolve()
 
 
+def _prompts_through_a_param(command) -> bool:
+    """Whether a command has a parameter that asks for its own value when none is given:
+    `typer.Option(..., prompt=True)`, with or without a confirmation, and click's
+    confirmation and password options, which are built the same way. The parser asks,
+    so no `prompt(` or `confirm(` stands in the command's code for STDIN_READER to
+    find."""
+    return any(
+        getattr(param, "prompt", None) or getattr(param, "confirmation_prompt", None)
+        for param in command.params
+    )
+
+
 def _reads_stdin(command) -> bool:
     """Whether a command, judged by its own code, reads stdin: it defaults --transport
-    to stdio (its client drives it over stdin), or the code its callback acts on
-    prompts, runs the Textual app, or reads the stream."""
+    to stdio (its client drives it over stdin), one of its parameters prompts, or the
+    code its callback acts on prompts, runs the Textual app, or reads the stream."""
     if any(p.name == "transport" and p.default == "stdio" for p in command.params):
+        return True
+    if _prompts_through_a_param(command):
         return True
     text = _text_the_function_acts_on(
         _source_file(command).read_text(encoding="utf-8"),
@@ -448,10 +464,12 @@ def the_cli():
 def test_stdin_is_kept_open_for_the_commands_that_read_it(the_cli):
     """The entrypoint's list of the commands whose container keeps stdin open
     (ASH_READS_STDIN), checked against the CLI so it cannot drift from it. A command
-    reads stdin when its code prompts, runs the Textual app, or defaults its
-    --transport to stdio, and it is judged by its own code: `config lint` and `config
-    wizard` ask before they change a file, and `config get` in the same module does
-    not, so listing the group would keep stdin open for every command of it. The one
+    reads stdin when its code prompts, runs the Textual app, defaults its --transport
+    to stdio or has a parameter that prompts, and it is judged by its own code: `config
+    lint` and `config wizard` ask before they change a file, and `config get` in the
+    same module does not, so listing the group would keep stdin open for every command
+    of it. Which runs of `config lint` ask is the condition on it, checked against its
+    options in test_wrapper_contract_spec.py, not judged here. The one
     reader outside the list is `--cli-json-input -`, which every command takes and the
     entrypoint reads by its flag; every other stdin-reading module under the CLI
     package holds a listed command, so a new reader module fails here until a command
@@ -555,3 +573,52 @@ def test_a_callback_that_is_not_a_top_level_function_is_refused_not_guessed():
     nested = "def outer():\n    def inner():\n        return 1\n    return inner\n"
     with pytest.raises(AssertionError, match="not a function or class at the top"):
         _text_the_function_acts_on(nested, "inner")
+
+
+#: A module of two commands: one with a parameter the parser prompts for, one that
+#: prompts nowhere. Neither holds a prompt in its own code, so only the parameter gives
+#: the first away.
+_PLANTED_CLI = """\
+from typing import Annotated
+
+import typer
+
+app = typer.Typer()
+
+
+@app.command()
+def asks(name: Annotated[str, typer.Option(prompt=True)]):
+    print(name)
+
+
+@app.command()
+def tells(name: Annotated[str, typer.Option()] = "world"):
+    print(name)
+"""
+
+
+@pytest.mark.unit
+def test_a_parameter_that_prompts_makes_its_command_a_stdin_reader(tmp_path):
+    """`typer.Option(prompt=True)` asks from inside the parser, so the command's code
+    holds no `prompt(` for STDIN_READER to find, and a command like that would lose -i
+    and get end of input at its question. The planted module holds one such command and
+    one that prompts nowhere, the control: the first is a reader and the second is not,
+    though the scan of their code finds nothing in either."""
+    import typer.main
+
+    assert not STDIN_READER.search(_PLANTED_CLI)
+    path = tmp_path / "planted_cli_with_a_prompting_parameter.py"
+    path.write_text(_PLANTED_CLI, encoding="utf-8")
+    name = path.stem
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+        commands = typer.main.get_command(module.app).commands
+        assert _prompts_through_a_param(commands["asks"]) is True
+        assert _prompts_through_a_param(commands["tells"]) is False
+        assert _reads_stdin(commands["asks"]) is True
+        assert _reads_stdin(commands["tells"]) is False
+    finally:
+        sys.modules.pop(name, None)
