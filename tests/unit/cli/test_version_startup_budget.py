@@ -14,6 +14,7 @@ not. The check runs in a fresh subprocess so it measures a cold interpreter's
 imports rather than whatever this test session has already loaded.
 """
 
+import importlib.util
 import json
 import subprocess  # nosec B404 - fixed argv, sys.executable, no shell
 import sys
@@ -46,6 +47,8 @@ FORBIDDEN_AT_VERSION_TIME = (
     # workspace resolution (pulls the config model)
     "automated_security_helper.workspace",
     "automated_security_helper.models.workspace",
+    # the support register: it is read when a scan starts, never at import time
+    "automated_security_helper.base.support_register",
     # the lazily-registered subcommand modules themselves
     "automated_security_helper.cli.config",
     "automated_security_helper.cli.dependencies",
@@ -139,3 +142,50 @@ def test_version_module_count_stays_bounded():
         "scope on the startup path; find it with python -X importtime and defer "
         "it. Raise the ceiling only for a measured, wanted dependency."
     )
+
+
+def _unresolved_roots(roots: tuple[str, ...]) -> list[str]:
+    """The first-party roots in ``roots`` that name no module or package of this
+    checkout. A root that resolves to nothing guards nothing: the budget would pass
+    for it whatever the startup path imports."""
+    unresolved = []
+    for root in roots:
+        if root.split(".")[0] != "automated_security_helper":
+            continue
+        try:
+            found = importlib.util.find_spec(root) is not None
+        except ModuleNotFoundError as error:
+            # A parent package of the root is missing. Any other missing module is a
+            # broken environment, which this check must not hide.
+            parent = error.name or ""
+            if not (root == parent or root.startswith(parent + ".")):
+                raise
+            found = False
+        if not found:
+            unresolved.append(root)
+    return unresolved
+
+
+def test_every_first_party_forbidden_root_names_a_module_of_this_checkout():
+    first_party = [
+        root
+        for root in FORBIDDEN_AT_VERSION_TIME
+        if root.startswith("automated_security_helper.")
+    ]
+    assert len(first_party) >= 15, first_party
+    assert _unresolved_roots(FORBIDDEN_AT_VERSION_TIME) == []
+
+
+def test_a_forbidden_root_that_names_no_module_is_found():
+    """The must-fail control for the check above: a module that exists, a module
+    that does not, a module under a package that does not, and a third-party root."""
+    planted = (
+        "automated_security_helper.base.support_register",
+        "automated_security_helper.utils.no_such_module",
+        "automated_security_helper.no_such_package.child",
+        "textual",
+    )
+    assert _unresolved_roots(planted) == [
+        "automated_security_helper.utils.no_such_module",
+        "automated_security_helper.no_such_package.child",
+    ]
