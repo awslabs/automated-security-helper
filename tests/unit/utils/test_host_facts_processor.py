@@ -1213,6 +1213,16 @@ def _installed(name: str) -> Optional[importlib.metadata.Distribution]:
         return None
 
 
+def _on_x86_64() -> bool:
+    """Whether the host these tests run on is one polars builds its runtime for.
+
+    polars sets target-feature flags only for its x86-64 builds, so the runtime wheel
+    of an arm64 host carries an empty ``BUILD_FEATURE_FLAGS`` and the flags file there
+    has no declared set to be compared with.
+    """
+    return platform.machine().lower() in ("x86_64", "amd64")
+
+
 def test_the_environment_is_the_one_the_lock_describes():
     # The drift test below measures the installed files; it says which version they are.
     for name in ("polars", "polars-runtime-32"):
@@ -1227,6 +1237,11 @@ def test_the_environment_is_the_one_the_lock_describes():
 def test_the_locked_runtimes_flags_equal_the_declared_set_and_are_all_named():
     installed = _installed("polars-runtime-32")
     assert installed is not None, "polars-runtime-32 is not installed in this lane"
+    if not _on_x86_64():
+        # The arm64 wheel declares no flags: its file holds an empty string. A polars
+        # that starts to set flags for arm64 is drift, and fails here.
+        assert host_facts.read_runtime_flags(installed) == ()
+        return
     assert runtime_drift(installed, "runtime-32") == []
 
 
@@ -1277,20 +1292,19 @@ def test_each_anchor_turns_the_check_red_when_its_line_changes():
         assert anchors_missing(changed, PLR_ANCHORS) == [anchor]
 
 
-# The controls: a copy of the real file with one flag added, one removed, or unlisted.
+# The controls: a copy of the flags text an x86-64 runtime carries, with one flag added,
+# one removed, or unlisted. The text is the fixed one the 1.44 wheels write, not the
+# installed file: an arm64 host installs a runtime whose file is empty, and the controls
+# have to bite on every host.
 
 
 def test_an_unchanged_copy_of_the_real_file_is_the_must_not_flag_control(tmp_path):
-    installed = _installed("polars-runtime-32")
-    assert installed is not None
-    copy = Site(tmp_path).add_runtime("32", _flags_file_text(installed))
+    copy = Site(tmp_path).add_runtime("32", DEFAULT_FLAGS_TEXT)
     assert runtime_drift(copy, "runtime-32") == []
 
 
 def test_a_copy_with_one_flag_added_turns_the_drift_check_red(tmp_path):
-    installed = _installed("polars-runtime-32")
-    assert installed is not None
-    real = _flags_file_text(installed)
+    real = DEFAULT_FLAGS_TEXT
     changed = real.replace('+movbe"', '+movbe,+avx512f"')
     assert changed != real, "the control found no +movbe to extend"
     problems = runtime_drift(Site(tmp_path).add_runtime("32", changed), "runtime-32")
@@ -1301,9 +1315,7 @@ def test_a_copy_with_one_flag_added_turns_the_drift_check_red(tmp_path):
 
 
 def test_a_copy_with_one_flag_removed_turns_the_drift_check_red(tmp_path):
-    installed = _installed("polars-runtime-32")
-    assert installed is not None
-    real = _flags_file_text(installed)
+    real = DEFAULT_FLAGS_TEXT
     changed = real.replace(",+movbe", "")
     assert changed != real, "the control found no +movbe to remove"
     problems = runtime_drift(Site(tmp_path).add_runtime("32", changed), "runtime-32")
