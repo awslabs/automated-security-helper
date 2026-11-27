@@ -920,6 +920,10 @@ sample line the output lacks, as `'<line>' is not in the output of the block at 
 | shows a command that nothing runs | fence the block as `bash` so the runner executes it, mark it `output` when it is what the block above prints, or write the command in prose |
 | no block on this page shows this command | the block was converted or deleted: delete its line from `scripts/docs_unexecuted_commands_seed.tsv` |
 | malformed seed line, is not the name of a page's seed file, which belongs in, which does not exist | a seed file has a line in the wrong shape, a name that is not its page's, a line for another page, or a line for a page that is gone: fix the file the finding names |
+| looks like a generated-block marker, marker is repeated, has no end marker, has no begin marker, comes before the begin marker, blocks do not nest, is closed at line, holds a carriage return | a pair of generated-block markers is not well formed: write the begin and end marker exactly as [Generated blocks in a hand-written page](#generated-blocks-in-a-hand-written-page) shows, each alone on its line, begin first, one pair for a name, no pair inside another, and with LF line ends |
+| is not registered in scripts/_matrix_destinations.py | the block names the support-matrix generator, and its registry does not list the block: add the entry to `BLOCKS`, or delete the markers |
+| is registered in scripts/_matrix_destinations.py for this file | the registry lists a block the file does not hold: put its markers in the file, or delete the entry |
+| registers blocks for, the list of generated blocks, BLOCKS, cannot be read | fix the file name in the registry, and keep `BLOCKS` a literal tuple of entries that each name a `file` and a `block` |
 
 ### `cli`
 
@@ -932,6 +936,7 @@ sample line the output lacks, as `'<line>' is not in the output of the block at 
 | takes no positional arguments | pass the path with an option such as the source-directory option |
 | is not an option of any ash command | another program's option: put the program in the code span |
 | a plugin's code wrote this row | put the program in the span, or write `ash --config` for ASH's own; the page is generated, so change the text in the plugin's code |
+| The row sits between generated-block markers | a generator wrote this row, the one the message names: put the program in the span, or write `ash --config` for ASH's own, and change the text in that generator, not in the page |
 | placeholder | a run block cannot contain `<placeholder>`; use a real value or mark it `illustrative` |
 | `no __main__` | that module cannot be run with `python -m` |
 | names no action, has no input | a GitHub Actions `uses:` of this repository names a path or input that does not exist |
@@ -1070,3 +1075,137 @@ The implementation of all of this is in
 and
 [`tests/integration/docs/docs_runner.py`](https://github.com/awslabs/automated-security-helper/blob/main/tests/integration/docs/docs_runner.py).
 Page paths the checks depend on are constants at the top of `docs_checks.py`.
+
+## Generated blocks in a hand-written page
+
+A generated reference page is written whole. Some facts the code owns, such as which
+operating systems a scanner runs on or how its tool is installed, also belong in pages
+that people write, such as the README. Those pages hold a generated block: the lines
+between a pair of markers belong to a script, and everything outside the markers stays
+hand-written. The markers are HTML comments, so they do not render:
+
+```text
+<!-- BEGIN generated: support/scanners.readme (scripts/generate_support_matrices.py) -->
+the lines the script writes
+<!-- END generated: support/scanners.readme -->
+```
+
+- Each marker sits alone on its line and starts in the first column. The begin marker
+  names the block and the script, from the repository root, that writes it. The end
+  marker repeats the name. A name is used once in a file, blocks do not nest, and a
+  marker inside a code fence is text.
+- Do not edit the lines between the markers. The script replaces them on its next run,
+  and its check, `generate_support_matrices.py --check`, fails with a diff of the lines
+  that differ. To change the text, change the generator or the code it reads, then run
+  the generator.
+- A page rendered from a `.md.template` file holds the block in the template, and the
+  generator writes the same lines into the template and the page. A block never holds a
+  release-number placeholder, so it stays correct from one release to the next and a
+  release needs no generator run.
+- Every generator reads and writes its blocks through
+  [`scripts/_generated_blocks.py`](https://github.com/awslabs/automated-security-helper/blob/main/scripts/_generated_blocks.py),
+  so all of them refuse the same mistakes. A missing, repeated, misplaced, or misspelled
+  marker is refused with the file and the block named, and a block the generator has no
+  body for is refused when it writes and reported when it checks.
+- Whichever generator fills a block, its cells come from the code or say what is not
+  known, and are never blank. They hold no `ash` command that someone typed, no release
+  number, and no placeholder. A link is relative to the file the block lands in.
+
+### How the docs checks treat a block
+
+The static checks read the lines between the markers as written by the generator, the way
+they read a generated page:
+
+- A finding on one of those lines names the generator, because the text changes there and
+  not in the page. A bare option such as `--config` in a generated row is reported with the
+  script's name: write the program in the span, in the generator.
+- Every page's markers must parse, whichever generator the begin marker names. A pair that
+  does not is a `markers` finding at the line its message names. [What a failure
+  means](#what-a-failure-means) lists each message.
+- A block of the support-matrix generator must also be listed in
+  `scripts/_matrix_destinations.py`, and a listed block must be in its file. Otherwise a
+  block nobody lists would keep its last body for good, and a listed block that is missing
+  would never be written.
+- A scanner name in a generated table is checked like one in any other table. A fenced
+  block inside a generated block is not held to the rule for commands that nothing runs
+  ([The illustrative ratchet](#the-illustrative-ratchet)), as a generated page is not.
+
+### The support matrices
+
+The [support matrix](../reference/support-matrix.md) page is generated by
+[`scripts/generate_support_matrices.py`](https://github.com/awslabs/automated-security-helper/blob/main/scripts/generate_support_matrices.py).
+It holds one table per family, the [scanners](../reference/support-matrix.md#scanners)
+first, and the blocks of the pages people write hold the same rows with the columns each
+page has room for. The generator names no scanner, mode, or channel. It has three parts
+besides itself:
+
+- A collector is a module `scripts/_matrix_<family>.py` that exposes `COLLECTOR`, an
+  object that reads one family from the code and returns typed matrices. The generator
+  finds every such module, so a new family is a new file, and a module with no
+  `COLLECTOR` is refused by name.
+  [`scripts/_matrix_scan.py`](https://github.com/awslabs/automated-security-helper/blob/main/scripts/_matrix_scan.py)
+  reads the scanners from the manifests, the operational register, and each scanner's own
+  platform refusal.
+- The model,
+  [`scripts/_support_model.py`](https://github.com/awslabs/automated-security-helper/blob/main/scripts/_support_model.py),
+  defines a matrix: its columns (a key, a header, the views the column appears in, and
+  where its values come from), its rows, and the members the rows must cover. A matrix
+  whose rows are not exactly its members is refused, so a scanner added to the code cannot
+  be missing from a table.
+- The destinations,
+  [`scripts/_matrix_destinations.py`](https://github.com/awslabs/automated-security-helper/blob/main/scripts/_matrix_destinations.py),
+  are plain literals: `PAGES` lists the pages written whole and `BLOCKS` lists the blocks
+  filled in other pages, each with its file, block name, matrix, and view. The file holds
+  no code, so the docs checks read it without importing anything.
+
+What a cell may say:
+
+- A state cell is one phrase from a closed list, `VOCABULARY` in the model: for example
+  `yes`, `provisioned`, `no asset`, `refused: <reason>`, `off by default`,
+  `package-defined (not declared)`, and `not measured`. A cell outside the list is
+  refused, and so is a column whose header says it holds defaults, because the docs checks
+  would read the table as one of option defaults. Write what the column says, such as
+  Loads on its own.
+- A cell that shows an `ash` command is refused unless the model read the command from
+  the CLI, so a renamed command fails the generator instead of leaving old text behind.
+- A per-OS cell never reads the host. A refusal comes from the scanner's own
+  `unsupported_platform_reason()` called under a patched `platform.system`, so the page
+  has the same bytes whether it is regenerated on Linux, macOS, or Windows. A refusal that
+  reads the platform another way, such as `sys.platform` or `os.name`, would escape that
+  patch. A test reads every override and requires it to read the platform only through
+  `platform.system()`.
+- Each family declares two views of its columns: the README view holds the summary
+  columns, and the docs view holds every column. A family with one view only is refused.
+  A README block holds at most six columns and sixteen rows. The row limit is waived only
+  for a destination declared both `row_cap_exempt` and `collapsed`, and the element that
+  collapses it is written by hand, so the generator cannot check it.
+
+To change the support matrix, run `uv run python scripts/generate_support_matrices.py`.
+It writes the page and every registered block, and prints each file it wrote and how long
+the run took. `generate_support_matrices.py --check` writes nothing, prints a diff for
+each page or block that is stale, and exits 1. The `lint` job runs it as one step beside
+the freshness and wrapper-table steps. `generate_support_matrices.py --self-test` plants
+each defect the generator exists to refuse (a cell outside the list, a family with one
+view, `ash` text nobody read from the CLI, a collector with no `COLLECTOR`, a hand edit
+inside a block, a deleted end marker, a block nobody registered) and requires each to be
+refused. It reads no ASH, so it runs anywhere.
+
+`scripts/verify_docs_freshness.py` runs the same self-test, then holds the committed page
+to a second inventory of the scanners, read from the config models and not from the
+manifests the matrix is built from. A renderer that drops a row fails there even though
+the generator's own check would render the same page. The page is a golden page, so the
+commit that regenerates it carries a `Snapshot-Update:` trailer that says why.
+
+### Adding a scanner or changing its tier
+
+A scanner has a row once its manifest is registered and its class declares the facets the
+registry requires. No list in the generator names a scanner. The pull request that admits
+a scanner runs the generator and commits the page, because the `lint` job's check fails
+until it does, and a pull request that admits several scanners runs it once. Promoting a
+scanner is the one-line tier edit in its manifest, and its row moves to the new group the
+next time the generator runs. A scanner that refuses a platform overrides
+`unsupported_platform_reason` and reads the platform only through `platform.system()`;
+its row then shows the refusal for that operating system without anyone writing it into a
+table. The scanner's name links to its own page when `scanner_page` in
+[`scripts/generate_scanner_reference.py`](https://github.com/awslabs/automated-security-helper/blob/main/scripts/generate_scanner_reference.py)
+finds one.
