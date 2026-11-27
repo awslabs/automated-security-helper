@@ -294,11 +294,10 @@ def derive_scan_flags(source: str | None = None) -> dict[str, list[str]]:
     else [...]` assignment, which `argv` carries as `*directory`, so a handler
     that stops carrying it, stops assigning it as two lists, or assigns it a
     second time is refused rather than derived as if it still named a directory.
-    The changed-files pair is
-    added when ASH_CHANGED_FILES_ONLY is on, and the severity pair when
-    ASH_MIN_SEVERITY is set. Only literal strings are collected; the values
-    beside them are runtime data (a temp directory, a commit id) and are not part
-    of the contract.
+    The changed-files pair is added when ASH_CHANGED_FILES_ONLY is on, and the
+    severity pair when ASH_MIN_SEVERITY is set. Only literal strings are
+    collected; the values beside them are runtime data (a temp directory, a
+    commit id) and are not part of the contract.
     """
     code = source if source is not None else extract_handler_source()
     tree = ast.parse(code)

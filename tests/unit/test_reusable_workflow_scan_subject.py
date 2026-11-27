@@ -39,13 +39,14 @@ would and records every other call:
 * ``no-name`` exits 0 with a help that names neither command;
 * ``broken`` exits non-zero with only an error on stderr, as uvx does when it cannot
   install the source;
+* ``names-it-and-fails`` prints the usage line, which names the command, and exits 1;
 * ``hostile`` exits non-zero and prints lines that would be workflow commands.
 
 1. The scan runs ``ash scan fs .`` on 3.9 and ``ash --source-dir .`` on the releases
    that answer without the subject, with the same options after the directory on
    both, for each value the step's env selects a flag from; its exit status is the
-   step's. On ``broken`` and ``hostile`` the step fails with the probe's last lines
-   and runs no scan.
+   step's. On ``broken``, ``names-it-and-fails`` and ``hostile`` the step fails with
+   the probe's last lines and runs no scan.
 2. A ``--source-dir`` in ``ash-args``, written either way, is the directory on both;
    one that is another option's value is left as that value; one with no word after
    it is passed on, for ASH to refuse; a directory whose name starts with a dash is
@@ -54,7 +55,8 @@ would and records every other call:
    scans that directory and prints no deprecation line.
 4. The report runs ``ash results report`` on 3.9 and ``ash --output-dir ... report``
    on the releases that answer without ``results``, and its exit status is the step's.
-   On ``broken`` and ``hostile`` the step fails and runs no report.
+   On ``broken``, ``names-it-and-fails`` and ``hostile`` the step fails and runs no
+   report.
 5. The probes run with colour off, name the config their step's command names, run
    without ``--reinstall``, do not print the help they read, and do not run at all
    for an ``ash-args`` the step refuses.
@@ -124,7 +126,7 @@ if [ "${last:-}" = "--help" ]; then
       echo "Error: No such command 'results'." >&2; exit 2 ;;
     "no-name:--from ash-source ash scan fs"|"no-name:--from ash-source ash results report")
       echo " Usage: ash [OPTIONS]"; pad; exit 0 ;;
-    "names-and-fails:--from ash-source ash scan fs"|"names-and-fails:--from ash-source ash results report")
+    "names-it-and-fails:--from ash-source ash scan fs"|"names-it-and-fails:--from ash-source ash results report")
       echo " Usage: ash $4 $5 [OPTIONS]"
       echo "Error: it broke after printing its usage" >&2
       exit 1 ;;
@@ -296,7 +298,9 @@ def test_the_scan_names_the_directory_the_way_its_ash_does(
 FAILED_PROBES = [
     pytest.param("broken", "error: Failed to fetch the source", id="cannot-fetch"),
     pytest.param(
-        "names-and-fails", "it broke after printing its usage", id="names-it-and-fails"
+        "names-it-and-fails",
+        "it broke after printing its usage",
+        id="names-it-and-fails",
     ),
 ]
 

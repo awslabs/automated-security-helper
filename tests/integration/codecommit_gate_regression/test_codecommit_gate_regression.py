@@ -310,15 +310,16 @@ def test_a_handler_that_assigns_one_directory_spelling_is_refused():
 
 
 def test_a_handler_that_assigns_directory_again_is_refused():
-    """Planted control. A later plain assignment overrides the first, so the gate would
-    name its path one way whatever its ASH has, while the contract still read the two
-    arms of the assignment it overrides."""
+    """Planted control. A plain assignment between the first one and the argv that
+    carries `*directory` overrides it, so the gate would name its path one way whatever
+    its ASH has, while the contract still read the two arms of the assignment it
+    overrides."""
     import gate_contract
 
     planted = _handler_with(
-        'min_severity = os.environ.get("ASH_MIN_SEVERITY")',
+        'argv = ["ash", "scan", *directory,',
         'directory = ["--source-dir", source_dir]\n'
-        '    min_severity = os.environ.get("ASH_MIN_SEVERITY")',
+        '    argv = ["ash", "scan", *directory,',
     )
 
     with pytest.raises(AssertionError, match="assigns `directory`"):

@@ -388,7 +388,7 @@ describe('a probe that does not answer is not read as an older ASH', () => {
     expect(unexplained).toContain('not a command line this release takes');
   });
 
-  test('the step\'s exit status is not the probe\'s, so ASH\'s own codes stay ASH\'s', () => {
+  test('the step\'s exit status is a plain failure, not the probe\'s own', () => {
     // The probe exits 5 here, ASH's usage-error code, and the step does not pass that
     // on: a probe that did not answer ends the step with status 1, a plain failure.
     // One is also the code the merge gives for an incomplete result, so the status
