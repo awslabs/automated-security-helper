@@ -66,6 +66,15 @@ the config's value is left to the scanner, which holds it to its own checks
 among them, because ``confine_scanner_config_files`` already gives it the trusted
 base's value.
 
+Such a config may turn network fetching off, and never on past the operator's
+value. A scanner the operator sets ``offline: true`` stays offline, whether the
+config leaves the option out or sets it false. guarddog's ``verify`` and syft's
+sdist harvest (``enabled``, and a ``max_sdist_mb`` above the operator's) are on only
+where the operator's config has them on. trivy-repo runs ``misconfig``, whose
+Terraform checks fetch the module sources a ``.tf`` file names, only when the
+operator's ``scanners`` list holds it; a list left with nothing takes the
+operator's.
+
 What is not done here
 ---------------------
 A file an MCP client delivered keeps nothing here: its base is the defaults, so
@@ -123,6 +132,7 @@ from automated_security_helper.config.tool_config_trust import (
     _get,
     _options_mapping,
     _options_of,
+    _plugin_sections,
     _same_option_value,
     _set,
     _spellings_in,
@@ -205,13 +215,14 @@ def keep_operator_floors(
     """Hold a config that is not the operator's to the operator's floors, in place.
 
     A floor is a setting such a config may narrow but not loosen past the
-    operator's value, or past the plugin's default where the operator sets none. A
-    path or program the operator sets (``OPERATOR_SET``) may not be changed at all.
-    The config replaces the operator's config rather than adding to it, so a
-    section or option it leaves out takes the operator's value, and a value it
-    writes that loosens a floor, or changes one of those, is replaced by the
-    operator's. One warning names each value the config wrote and this step
-    replaced; an omission is not the config's choice and is not named.
+    operator's value, or past the plugin's default where the operator sets none;
+    turning network fetching on is one such loosening. A path or program the
+    operator sets (``OPERATOR_SET``) may not be changed at all. The config
+    replaces the operator's config rather than adding to it, so a section or option
+    it leaves out takes the operator's value, and a value it writes that loosens a
+    floor, or changes one of those, is replaced by the operator's. One warning
+    names each value the config wrote and this step replaced; an omission is not the
+    config's choice and is not named.
 
     Args:
         config: The resolved AshConfig, changed in place.
@@ -253,6 +264,7 @@ def keep_operator_floors(
     ignored: List[str] = []
     ignored.extend(_keep_switches_off(config, trusted_config, landings))
     ignored.extend(_keep_option_floors(config, trusted_config, landings))
+    ignored.extend(_keep_offline(config, trusted_config, landings))
     if ignored:
         files = ", ".join(describe_config_path(path) for path in in_tree)
         tail = (
@@ -318,15 +330,22 @@ def _keep_switches_off(
 # ---------------------------------------------------------------------------
 
 #: How a floor narrows. ``TRUE_NARROWS``: the check is on when either side has it
-#: on. ``URL_PREFIXES`` and ``COMMAND_PREFIXES``: a list keeps only the entries
-#: under one of the operator's prefixes, compared the way mcp-config compares them.
-#: ``OPERATOR_SET``: where the operator sets a value, that value stands over any other
-#: the config holds, a default or an empty one included; where the operator sets
-#: none, the config's value is left to the scanner.
+#: on. ``FALSE_NARROWS``: the option is on only when both sides have it on, so a
+#: config may turn it off and never on past the operator's. ``URL_PREFIXES`` and
+#: ``COMMAND_PREFIXES``: a list keeps only the entries under one of the operator's
+#: prefixes, compared the way mcp-config compares them. ``OPERATOR_SET``: where the
+#: operator sets a value, that value stands over any other the config holds, a
+#: default or an empty one included; where the operator sets none, the config's
+#: value is left to the scanner. ``KEPT_OUT``: the values the floor names stay out
+#: of a list when the operator's list lacks them, and a list left with nothing takes
+#: the operator's. ``LOWEST``: the lower of the two numbers.
 TRUE_NARROWS = "true-narrows"
+FALSE_NARROWS = "false-narrows"
 URL_PREFIXES = "url-prefixes"
 COMMAND_PREFIXES = "command-prefixes"
 OPERATOR_SET = "operator-set"
+KEPT_OUT = "kept-out"
+LOWEST = "lowest"
 
 
 class Floor(NamedTuple):
@@ -357,6 +376,15 @@ OPERATOR_FLOORS: Dict[Tuple[str, str], Floor] = {
     ("actionlint", "shellcheck"): Floor(OPERATOR_SET, None, Optional[str]),
     ("actionlint", "pyflakes"): Floor(OPERATOR_SET, None, Optional[str]),
     ("cfn-guard", "rules_paths"): Floor(OPERATOR_SET, [], List[str]),
+    ("guarddog", "verify"): Floor(FALSE_NARROWS, False, bool),
+    ("trivy-repo", "scanners"): Floor(
+        KEPT_OUT,
+        ["vuln", "secret", "misconfig", "license"],
+        List[str],
+        frozenset({"misconfig"}),
+    ),
+    ("syft", "sdist_harvest.enabled"): Floor(FALSE_NARROWS, True, bool),
+    ("syft", "sdist_harvest.max_sdist_mb"): Floor(LOWEST, 100, int),
 }
 
 #: What ``_floored`` answers when the config's value already meets the floor.
@@ -374,56 +402,110 @@ def _keep_option_floors(
     default. A value the config wrote that a floor changes is named. A value either
     side holds that the scanner would refuse is left for the scanner.
     """
+    ignored: List[str] = []
+    extra = getattr(config.scanners, "__pydantic_extra__", None)
+    for (scanner, option), floor in OPERATOR_FLOORS.items():
+        operator = _operator_value(trusted_config, scanner, option.split("."), floor)
+        if operator is not _MISSING:
+            ignored.extend(
+                _hold_floor(config, landings, scanner, option, floor, operator, extra)
+            )
+    return ignored
+
+
+def _hold_floor(
+    config: "AshConfig",
+    landings: Sequence[Landing],
+    scanner: str,
+    option: str,
+    floor: Floor,
+    operator: Any,
+    extra: Any,
+) -> List[str]:
+    """Hold ``option`` of each section the config has for ``scanner`` to the floor.
+
+    ``operator`` is the operator's value. A scanner the config has no section for
+    gets one, in ``extra`` (the config's plugin scanners), when the floor changes
+    the default. Returns the names of the values the config wrote that it changed.
+    """
     from automated_security_helper.config.client_scanner_exclusions import (
         _scanner_sections,
     )
 
+    parts = option.split(".")
+    sections = _scanner_sections(config, scanner)
+    if not sections:
+        new = _floored(floor, operator, copy.deepcopy(floor.default))
+        if new is not _UNCHANGED and isinstance(extra, dict):
+            extra[scanner] = {"options": _nested(parts, copy.deepcopy(new))}
+        return []
+    ignored: List[str] = []
+    for key, section in sections:
+        options = _options_of(section)
+        if options is None:
+            # A section with no options mapping reads as the plugin's defaults;
+            # anything else is no section of options at all.
+            if not (isinstance(section, dict) and section.get("options") is None):
+                continue
+            holder, spelling, raw = None, None, _MISSING
+        else:
+            holder, spelling, raw = _locate(options, parts)
+        path = ("scanners", key, "options", *parts)
+        # A value an override the trusted base could not take set is the
+        # operator's own; there is nothing of the base's to put in its place.
+        if _covered(landings, path):
+            continue
+        current = _typed(floor, raw)
+        if current is _MISSING:
+            continue
+        new = _floored(floor, operator, current)
+        if new is _UNCHANGED:
+            continue
+        wrote = (
+            spelling is not None
+            if isinstance(holder, dict)
+            else _file_wrote(config, path, raw)
+        )
+        if options is None:
+            section["options"] = _nested(parts, copy.deepcopy(new))
+        else:
+            _put(options, parts, new)
+        if wrote:
+            ignored.append(f"scanners.{key}.options.{option}")
+    return ignored
+
+
+#: Every scanner's own ``offline`` switch is a floor of one shape: a config may set
+#: it on, and may not set it off where the operator has it on.
+_OFFLINE = Floor(TRUE_NARROWS, False, bool)
+
+
+def _keep_offline(
+    config: "AshConfig", trusted_config: "AshConfig", landings: Sequence[Landing]
+) -> List[str]:
+    """Keep offline each scanner the operator sets offline; return what was named.
+
+    ``offline`` is an option of every scanner, so no row of ``OPERATOR_FLOORS``
+    names it: each scanner section of the trusted base is read instead. The
+    operator's true is kept where the config leaves the option out and where it sets
+    it false. A config may still set it true where the operator does not.
+    """
     ignored: List[str] = []
     extra = getattr(config.scanners, "__pydantic_extra__", None)
-    for (scanner, option), floor in OPERATOR_FLOORS.items():
-        parts = option.split(".")
-        operator = _operator_value(trusted_config, scanner, parts, floor)
-        if operator is _MISSING:
-            continue
-        sections = _scanner_sections(config, scanner)
-        if not sections:
-            new = _floored(floor, operator, copy.deepcopy(floor.default))
-            if new is not _UNCHANGED and isinstance(extra, dict):
-                extra[scanner] = {"options": _nested(parts, copy.deepcopy(new))}
-            continue
-        for key, section in sections:
-            options = _options_of(section)
-            if options is None:
-                # A section with no options mapping reads as the plugin's defaults;
-                # anything else is no section of options at all.
-                if not (isinstance(section, dict) and section.get("options") is None):
-                    continue
-                holder, spelling, raw = None, None, _MISSING
-            else:
-                holder, spelling, raw = _locate(options, parts)
-            path = ("scanners", key, "options", *parts)
-            # A value an override the trusted base could not take set is the
-            # operator's own; there is nothing of the base's to put in its place.
-            if _covered(landings, path):
-                continue
-            current = _typed(floor, raw)
-            if current is _MISSING:
-                continue
-            new = _floored(floor, operator, current)
-            if new is _UNCHANGED:
-                continue
-            wrote = (
-                spelling is not None
-                if isinstance(holder, dict)
-                else _file_wrote(config, path, raw)
+    for key, section in _plugin_sections(trusted_config.scanners):
+        if _sets_offline(section):
+            ignored.extend(
+                _hold_floor(config, landings, key, "offline", _OFFLINE, True, extra)
             )
-            if options is None:
-                section["options"] = _nested(parts, copy.deepcopy(new))
-            else:
-                _put(options, parts, new)
-            if wrote:
-                ignored.append(f"scanners.{key}.options.{option}")
     return ignored
+
+
+def _sets_offline(section: Any) -> bool:
+    """Whether the operator's section for a scanner sets ``offline`` true."""
+    if isinstance(section, dict):
+        raw = _trusted_option(_options_mapping(section), "offline")
+        return _typed(_OFFLINE, raw) is True
+    return getattr(getattr(section, "options", None), "offline", False) is True
 
 
 def _operator_value(
@@ -512,12 +594,18 @@ def _floored(floor: Floor, operator: Any, current: Any) -> Any:
     """
     if floor.rule == TRUE_NARROWS:
         new: Any = bool(operator) or bool(current)
+    elif floor.rule == FALSE_NARROWS:
+        new = bool(operator) and bool(current)
     elif floor.rule == URL_PREFIXES:
         new = _narrowed(list(current), list(operator), _url_under)
     elif floor.rule == COMMAND_PREFIXES:
         new = _narrowed(list(current), list(operator), _command_under)
     elif floor.rule == OPERATOR_SET:
         new = current if _empty(operator) else copy.deepcopy(operator)
+    elif floor.rule == KEPT_OUT:
+        new = _kept_out(floor.members, list(current), list(operator))
+    elif floor.rule == LOWEST:
+        new = min(operator, current)
     else:
         raise ValueError(f"unknown floor rule {floor.rule!r}")
     return _UNCHANGED if _same_option_value(new, current) else new
@@ -526,6 +614,19 @@ def _floored(floor: Floor, operator: Any, current: Any) -> Any:
 def _empty(value: Any) -> bool:
     """Whether ``value`` is no value: None, empty text or an empty list."""
     return value is None or (isinstance(value, (str, list)) and len(value) == 0)
+
+
+def _kept_out(
+    members: FrozenSet[str], current: List[str], operator: List[str]
+) -> List[str]:
+    """``current`` without the ``members`` the operator's list lacks.
+
+    A list left with nothing takes the operator's: an empty list gives trivy no
+    choice, and it then reads its environment, its config file or its own default.
+    """
+    dropped = {member for member in members if member not in operator}
+    kept = [entry for entry in current if entry not in dropped]
+    return kept or list(operator)
 
 
 def _narrowed(

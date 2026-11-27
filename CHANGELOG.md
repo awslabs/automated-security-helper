@@ -135,6 +135,14 @@
   its own name, and cfn-guard without the operator's rules. A value it writes is
   ignored with a warning. Where the operator sets none, the config's value is left
   to the scanner as before.
+- **A config that is not the operator's may turn network fetching off, never on.**
+  Under a config file inside the scanned tree or a git checkout, or one an MCP client
+  delivered: a scanner the operator sets `offline: true` stays offline; guarddog's
+  `verify` runs only when the operator's config turns it on; trivy-repo's `misconfig`
+  check, whose Terraform checks fetch the module sources a `.tf` file names, runs only
+  when the operator's `scanners` list holds it; and syft's sdist harvest stays off when
+  the operator turns it off, with `max_sdist_mb` never above the operator's. A value it
+  writes that would turn fetching on is ignored with a warning.
 
 ### Maintenance
 
