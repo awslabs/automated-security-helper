@@ -614,8 +614,8 @@ class AshTyperGroup(TyperGroup):
                     f"'ash {name}' does not take {spellings}, given before it (see "
                     f"'ash {name} --help'). Options given before a subcommand are "
                     f"passed to it only when it takes them: drop {them}, give {them} "
-                    f"after a subcommand that takes {them}, or leave out '{name}' to "
-                    f"scan with {them}."
+                    f"after a subcommand that takes {them}, or run 'ash scan fs' with "
+                    f"{them}."
                 )
             for param, target in taken_differently:
                 typed = _typed_spelling(param, before, root_params)

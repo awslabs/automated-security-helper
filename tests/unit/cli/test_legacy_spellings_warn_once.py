@@ -564,6 +564,21 @@ def test_the_shard_index_help_says_to_recombine_the_shards_with_results_merge():
         assert "recombine them with 'ash results merge'" in option.help, option.help
 
 
+def test_an_option_a_command_does_not_take_is_refused_pointing_at_scan_fs():
+    """A scan option given before a command that has no such option is refused. The
+    refusal used to advise leaving the command out, which is the bare root, a form
+    that warns."""
+    from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+
+    result = _invoke(["--scanners", "bandit", "results", "report"])
+
+    text = _one_line(result.output)
+    assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+    assert "'ash results report' does not take --scanners" in text, text
+    assert "or run 'ash scan fs' with it." in text, text
+    assert "leave out" not in text, text
+
+
 def test_the_merge_warning_about_ignore_paths_names_scan_fs(monkeypatch):
     from automated_security_helper.cli import merge
 
