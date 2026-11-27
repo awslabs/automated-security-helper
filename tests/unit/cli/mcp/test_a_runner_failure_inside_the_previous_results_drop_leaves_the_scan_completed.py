@@ -21,7 +21,9 @@ difference the last two cells pin. The registry refuses to close an incomplete s
 with no gap attached, so a close that cannot carry the scan's own gap is made again
 with the gap that names nothing (one ``unknown`` incomplete scanner), not with the
 status alone, and a close that raises in the runner's incomplete-coverage arm reaches
-the failure arm instead of escaping the task.
+the failure arm instead of escaping the task. A close that fails because of its
+severity threshold, not its coverage, keeps the coverage: it is made again without the
+threshold before the gap that names nothing, or the status alone, is used.
 
 Every cell is DISARMED: the scan is a stand-in that writes a results file into
 the cell's own tmp_path, no real scanner or network is involved, and the drop
@@ -48,6 +50,7 @@ from automated_security_helper.core.resource_management.scan_registry import (
     ScanRegistry,
 )
 from automated_security_helper.core.resource_management.scan_tracking import (
+    assess_coverage,
     coverage_has_gap,
 )
 from automated_security_helper.interactions import run_ash_scan as ras
@@ -184,6 +187,40 @@ def _refuse_the_scans_own_gap(monkeypatch: pytest.MonkeyPatch, closes: list) -> 
 
     monkeypatch.setattr(
         ScanRegistry, "finish_scan", a_close_that_cannot_carry_the_scans_gap
+    )
+
+
+#: The threshold the planted judge returns: a string, so every close carries one.
+JUDGED_THRESHOLD = "HIGH"
+
+
+def _a_scan_that_returns_its_results(**kwargs: Any) -> AshAggregatedResults:
+    _write_results(kwargs["output_dir"])
+    return AshAggregatedResults()
+
+
+def _refuse_every_close_that_carries_a_threshold(
+    monkeypatch: pytest.MonkeyPatch, closes: list
+) -> None:
+    """Make every close that carries a severity threshold raise.
+
+    A stand-in for a registry that refuses the threshold rather than the coverage. A
+    close with no threshold reaches the real registry. Every close is recorded in
+    ``closes`` as (status, whether its coverage names ``bandit``, its threshold).
+    """
+    real_finish = ScanRegistry.finish_scan
+
+    def a_close_that_cannot_carry_a_threshold(
+        self: ScanRegistry, scan_id: str, status: MCScanStatus, *args: Any, **kw: Any
+    ) -> bool:
+        threshold = kw.get("severity_threshold")
+        closes.append((status, _names(kw.get("coverage"), "bandit"), threshold))
+        if threshold is not None:
+            raise RuntimeError("a planted failure of the close")
+        return real_finish(self, scan_id, status, *args, **kw)
+
+    monkeypatch.setattr(
+        ScanRegistry, "finish_scan", a_close_that_cannot_carry_a_threshold
     )
 
 
@@ -482,3 +519,92 @@ async def test_an_incomplete_close_that_fails_with_its_gap_is_made_again_with_th
         if scan_id in record.getMessage() and "coverage" in record.getMessage()
     ]
     assert said, [record.getMessage() for record in caplog.records]
+    # The branch's own words: the gap that names nothing is what the record holds.
+    assert any("one unknown scanner" in line for line in said), said
+
+
+@pytest.mark.asyncio
+async def test_an_incomplete_close_that_fails_with_its_threshold_keeps_its_own_gap(
+    tmp_path, monkeypatch, caplog
+):
+    """The registry refuses the judged threshold of a scan that exited for incomplete
+    coverage, not its gap: the runner's close and the close through the mark both
+    carry the threshold and raise. The next close keeps the scan's own gap (bandit)
+    and leaves the threshold out, so a client still reads what was incomplete, and the
+    entry keeps the threshold it was registered with. Fails before the fix: that close
+    carried the gap that names nothing, one unknown scanner, in place of the scan's
+    own."""
+    monkeypatch.setattr(_LAUNCHER, _a_scan_that_exits_incomplete)
+    monkeypatch.setattr(
+        mcp_tools, "_judged_threshold", lambda results: JUDGED_THRESHOLD
+    )
+    closes: list = []
+    _refuse_every_close_that_carries_a_threshold(monkeypatch, closes)
+    project = _project(tmp_path)
+    ctx = _ctx()
+
+    with caplog.at_level(logging.WARNING, logger=ASH_LOGGER.name):
+        begun = await mcp_server.run_ash_scan(ctx, source_dir=str(project))
+        assert begun["success"] is True, begun
+        scan_id = begun["scan_id"]
+        # Raises when a task ended with an exception: the runner's must end cleanly.
+        await drain_clean()
+    entry = scan_registry.get_scan_registry().get_scan(scan_id)
+
+    # The runner's close and the close through the mark carry the threshold; the one
+    # after them carries the scan's own gap and no threshold.
+    assert closes == [
+        (MCScanStatus.INCOMPLETE, True, JUDGED_THRESHOLD),
+        (MCScanStatus.INCOMPLETE, True, JUDGED_THRESHOLD),
+        (MCScanStatus.INCOMPLETE, True, None),
+    ], closes
+    assert entry is not None
+    assert entry.status == MCScanStatus.INCOMPLETE, (entry.status, entry.error_message)
+    assert entry.error_message is None, entry.error_message
+    assert entry.coverage == INCOMPLETE_REASONS.to_payload(), entry.coverage
+    assert entry.severity_threshold != JUDGED_THRESHOLD, entry.severity_threshold
+    said = [
+        record.getMessage()
+        for record in caplog.records
+        if scan_id in record.getMessage()
+    ]
+    assert any(
+        "without its severity threshold, which could not be recorded" in line
+        for line in said
+    ), said
+    assert not any("one unknown scanner" in line for line in said), said
+
+
+@pytest.mark.asyncio
+async def test_a_completed_close_that_fails_with_its_threshold_keeps_its_coverage(
+    tmp_path, monkeypatch
+):
+    """The completed counterpart: the registry refuses the judged threshold of a scan
+    that returned its results. The close after the two that carried the threshold
+    keeps the coverage assessed from the results and leaves the threshold out. Fails
+    before the fix: that close carried the status alone, so the entry had no
+    coverage."""
+    monkeypatch.setattr(_LAUNCHER, _a_scan_that_returns_its_results)
+    monkeypatch.setattr(
+        mcp_tools, "_judged_threshold", lambda results: JUDGED_THRESHOLD
+    )
+    closes: list = []
+    _refuse_every_close_that_carries_a_threshold(monkeypatch, closes)
+    project = _project(tmp_path)
+    ctx = _ctx()
+
+    begun = await mcp_server.run_ash_scan(ctx, source_dir=str(project))
+    assert begun["success"] is True, begun
+    scan_id = begun["scan_id"]
+    await drain_clean()
+    entry = scan_registry.get_scan_registry().get_scan(scan_id)
+
+    assert [threshold for _, _, threshold in closes] == [
+        JUDGED_THRESHOLD,
+        JUDGED_THRESHOLD,
+        None,
+    ], closes
+    assert entry is not None
+    assert entry.status == MCScanStatus.COMPLETED, (entry.status, entry.error_message)
+    assert entry.error_message is None, entry.error_message
+    assert entry.coverage == assess_coverage(AshAggregatedResults())[1], entry.coverage

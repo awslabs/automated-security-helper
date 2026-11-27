@@ -33,6 +33,12 @@ every field of the exit, each field and each row on its own, carries every key o
 payload, stores a row it cannot read as ``unknown``, and falls back to one ``unknown``
 incomplete scanner when nothing it read names a gap.
 
+The judged severity threshold is read on its own, so a threshold that cannot be read
+costs the close only the threshold: the entry keeps the coverage the close worked out,
+a stale content database's full row included. And the history record of a scan taken
+back is discarded under its own guard, so a discard that raises no longer keeps the
+previous results set aside.
+
 The same function is called a second time, from the runner's arms, for a scan whose
 thread did not settle it as one with results: its cancel event was set before the
 thread decided, so the thread put the previous results back and recorded no close.
@@ -68,6 +74,7 @@ from automated_security_helper.core.resource_management.scan_registry import (
     ScanRegistry,
 )
 from automated_security_helper.core.resource_management.scan_tracking import (
+    assess_coverage,
     coverage_has_gap,
 )
 from automated_security_helper.interactions import run_ash_scan as ras
@@ -243,6 +250,31 @@ def _what_the_rows_name(key: str, rows: List[Any]) -> List[Any]:
     raise AssertionError(f"no projection for {key}")
 
 
+#: Exit reasons with a scanner row and a stale content database. The payload's row for
+#: the database is its record's ``to_dict()``; a gap built from the exit's fields alone
+#: once cut it down to the record's name and scanner.
+REASONS_WITH_A_STALE_DATABASE = ras.ScanIncompleteness(
+    scanners=(("bandit", "ERROR"),),
+    observed=(("bandit", "ERROR"),),
+    stale_content_databases=(_a_stale_database(),),
+)
+
+
+def _an_assessed_gap() -> dict:
+    """Assessed coverage that names a gap (checkov) the exit's own reasons do not."""
+    return {
+        **ras.ScanIncompleteness().to_payload(),
+        "incomplete_scanners": [
+            {
+                "scanner": "checkov",
+                "status": "MISSING",
+                "reason": incomplete_scanner_reason("MISSING"),
+                "detail": "MISSING",
+            }
+        ],
+    }
+
+
 class _ReasonsThatCannotBeRead:
     """An exit's reasons whose every field raises when it is read."""
 
@@ -279,11 +311,31 @@ class _ARecordWhoseNameCannotBeRead:
         raise RuntimeError("a planted failure reading the name")
 
 
+class _ARecordWhoseRowCannotBeMade:
+    """A stale content database record whose ``to_dict()`` raises; its name and scanner
+    can be read."""
+
+    name = "trivy-db"
+    scanner = "trivy"
+
+    def to_dict(self) -> Any:
+        raise RuntimeError("a planted failure making the row")
+
+
+class _AnErrorWhoseMessageCannotBeShown(Exception):
+    """An error whose own ``__str__`` raises, so a raw f-string of it raises too."""
+
+    def __str__(self) -> str:
+        raise RuntimeError("a planted failure making the message")
+
+
 #: Exit reasons with one row that cannot be read between rows that can, each with the
 #: payload key the rows are reported under and what the fallback must name there. The
 #: row costs only itself: it is stored as ``unknown`` (an observed status that is not a
 #: pair is skipped, since it names no scanner), and every row around it reads as it
-#: does alone.
+#: does alone. A stale content database is stored as its record's ``to_dict()``, as in
+#: the payload, and as its name and scanner when that row cannot be made (a name that
+#: cannot be read being ``unknown``).
 _AN_UNREADABLE_ROW_AMONG_READABLE_ONES = {
     "unreadable-converter": (
         ras.ScanIncompleteness(
@@ -330,12 +382,14 @@ _AN_UNREADABLE_ROW_AMONG_READABLE_ONES = {
         ras.ScanIncompleteness(
             stale_content_databases=(
                 _a_stale_database(),
+                _ARecordWhoseRowCannotBeMade(),
                 _ARecordWhoseNameCannotBeRead(),
             )
         ),
         "stale_content_databases",
         [
-            {"name": "grype-db", "scanner": "grype"},
+            _a_stale_database().to_dict(),
+            {"name": "trivy-db", "scanner": "trivy"},
             {"name": "unknown", "scanner": "trivy"},
         ],
     ),
@@ -410,10 +464,10 @@ async def test_an_exit_for_incomplete_coverage_whose_payload_cannot_be_built(
 async def test_an_exit_for_incomplete_coverage_whose_severity_threshold_cannot_be_judged(
     tmp_path, monkeypatch
 ):
-    """The judged threshold raises for a scan that exited for incomplete coverage.
-    Working out the close fails as a whole, so the scan is closed as incomplete with
-    the gap named by the exit's own rows and no judged threshold, and the previous
-    results are dropped."""
+    """The judged threshold raises for a scan that exited for incomplete coverage. The
+    threshold is read on its own, so the scan is closed as incomplete with the exit's
+    own payload and no judged threshold (the entry keeps the one it was registered
+    with), and the previous results are dropped."""
     monkeypatch.setattr(mcp_tools, "_judged_threshold", _a_planted_failure)
 
     def a_scan_that_exits_incomplete(*args: Any, **kwargs: Any) -> Any:
@@ -424,7 +478,63 @@ async def test_an_exit_for_incomplete_coverage_whose_severity_threshold_cannot_b
     )
 
     assert entry.status == MCScanStatus.INCOMPLETE, (entry.status, entry.error_message)
-    _assert_the_gap_is_the_exits_rows(entry.coverage)
+    assert entry.coverage == EXIT_REASONS.to_payload(), entry.coverage
+    assert entry.severity_threshold == REGISTERED_THRESHOLD, entry.severity_threshold
+    assert len(drops) == 1 and restores == [], (drops, restores)
+
+
+@pytest.mark.asyncio
+async def test_an_exit_whose_threshold_alone_cannot_be_judged_keeps_every_row_of_its_payload(
+    tmp_path, monkeypatch
+):
+    """Only the judged threshold raises, for a scan that exited for incomplete coverage
+    with a scanner row and a stale content database. The entry keeps the payload the
+    close worked out, every row in full (the database's row is its record's
+    ``to_dict()``), and the threshold it was registered with. Fails before the fix: the
+    whole close fell back to a gap built from the exit's fields, and the database's row
+    was cut down to its name and scanner."""
+    monkeypatch.setattr(mcp_tools, "_judged_threshold", _a_planted_failure)
+
+    def a_scan_that_exits_incomplete(*args: Any, **kwargs: Any) -> Any:
+        raise ras.ScanIncompleteExit(
+            REASONS_WITH_A_STALE_DATABASE, AshAggregatedResults()
+        )
+
+    entry, drops, restores = await _run(
+        tmp_path, monkeypatch, a_scan_that_exits_incomplete
+    )
+
+    assert entry.status == MCScanStatus.INCOMPLETE, (entry.status, entry.error_message)
+    assert entry.coverage == REASONS_WITH_A_STALE_DATABASE.to_payload(), entry.coverage
+    assert entry.severity_threshold == REGISTERED_THRESHOLD, entry.severity_threshold
+    assert len(drops) == 1 and restores == [], (drops, restores)
+
+
+@pytest.mark.asyncio
+async def test_an_exit_whose_threshold_alone_cannot_be_judged_keeps_its_assessed_coverage(
+    tmp_path, monkeypatch
+):
+    """The coverage assessed from the results names a gap (checkov) the exit's own
+    reasons do not, and only the judged threshold raises. The entry keeps the assessed
+    coverage, which is what the close worked out. Fails before the fix: the fallback
+    built the gap from the exit's fields, so it named bandit and dropped the assessed
+    one."""
+    assessed = _an_assessed_gap()
+    monkeypatch.setattr(mcp_tools, "_judged_threshold", _a_planted_failure)
+    monkeypatch.setattr(
+        "automated_security_helper.core.resource_management.scan_tracking.assess_coverage",
+        lambda results: (True, assessed),
+    )
+
+    def a_scan_that_exits_incomplete(*args: Any, **kwargs: Any) -> Any:
+        raise ras.ScanIncompleteExit(EXIT_REASONS, AshAggregatedResults())
+
+    entry, drops, restores = await _run(
+        tmp_path, monkeypatch, a_scan_that_exits_incomplete
+    )
+
+    assert entry.status == MCScanStatus.INCOMPLETE, (entry.status, entry.error_message)
+    assert entry.coverage == assessed, entry.coverage
     assert entry.severity_threshold == REGISTERED_THRESHOLD, entry.severity_threshold
     assert len(drops) == 1 and restores == [], (drops, restores)
 
@@ -433,9 +543,11 @@ async def test_an_exit_for_incomplete_coverage_whose_severity_threshold_cannot_b
 async def test_a_return_whose_severity_threshold_cannot_be_judged(
     tmp_path, monkeypatch
 ):
-    """The judged threshold raises for a scan that returned its results: the scan
-    is closed as completed with no judged threshold, so the entry keeps the one it
-    was registered with, and the previous results are dropped."""
+    """The judged threshold raises for a scan that returned its results: the scan is
+    closed as completed with the coverage assessed from its results and no judged
+    threshold, so the entry keeps the one it was registered with, and the previous
+    results are dropped. Fails before the fix on the coverage: the whole close fell
+    back to the status alone."""
     monkeypatch.setattr(mcp_tools, "_judged_threshold", _a_planted_failure)
 
     def a_scan_that_returns_its_results(*args: Any, **kwargs: Any) -> Any:
@@ -446,6 +558,7 @@ async def test_a_return_whose_severity_threshold_cannot_be_judged(
     )
 
     assert entry.status == MCScanStatus.COMPLETED, (entry.status, entry.error_message)
+    assert entry.coverage == assess_coverage(AshAggregatedResults())[1], entry.coverage
     assert entry.severity_threshold == REGISTERED_THRESHOLD, entry.severity_threshold
     assert len(drops) == 1 and restores == [], (drops, restores)
 
@@ -564,6 +677,38 @@ async def test_a_scan_that_was_not_settled_and_has_nothing_to_describe_is_closed
 
 
 @pytest.mark.asyncio
+async def test_a_history_discard_that_raises_still_puts_the_previous_results_back(
+    tmp_path, monkeypatch
+):
+    """A scan whose thread did not keep its results (its cancel event was set) has its
+    history record discarded and its previous results put back. The record's removal
+    fails with an error whose message cannot be made, so the history helper's own
+    handler, which formats that message, raises out of the helper. The discard is
+    guarded on its own, so the previous results are put back all the same. Fails before
+    the fix: the raise skipped the restore, which shared the discard's ``try``, and the
+    previous results stayed set aside."""
+    from automated_security_helper.utils import scan_history
+
+    def a_removal_that_fails(*args: Any, **kwargs: Any) -> bool:
+        raise _AnErrorWhoseMessageCannotBeShown
+
+    monkeypatch.setattr(scan_history, "discard_run_record", a_removal_that_fails)
+
+    def a_scan_that_returns_its_results(*args: Any, **kwargs: Any) -> Any:
+        return AshAggregatedResults()
+
+    entry, drops, restores = await _run(
+        tmp_path,
+        monkeypatch,
+        a_scan_that_returns_its_results,
+        cancel_during_the_scan=True,
+    )
+
+    assert entry.status == MCScanStatus.COMPLETED, (entry.status, entry.error_message)
+    assert drops == [] and len(restores) == 1, (drops, restores)
+
+
+@pytest.mark.asyncio
 async def test_an_incomplete_close_that_raises_for_a_scan_that_kept_no_results_fails_the_entry(
     tmp_path, monkeypatch
 ):
@@ -663,8 +808,11 @@ def test_an_unreadable_row_in_each_other_list_keeps_the_rows_around_it(case):
     """Each other list the fallback reads holds one row it cannot read between rows it
     can: an incomplete converter that is not a row, a tool that could not be stopped
     given as three words, an unevaluated rule whose text cannot be made, a stale
-    content database record whose name cannot be read, and an observed status that is
-    not a (scanner, status) pair. The row costs only itself: it is stored as
+    content database record whose row cannot be made or whose name cannot be read, and
+    an observed status that is not a (scanner, status) pair. A stale database is stored
+    as its record's ``to_dict()``, as in the payload, and as its name and scanner when
+    that row cannot be made (a name that cannot be read being ``unknown``). The row
+    costs only itself: it is stored as
     ``unknown`` (the status that is not a pair is skipped, and the scanner after it
     still gets its status), and every row around it is kept, in order. Before, the
     fallback read the scanner rows only, all inside one ``try``, so one row it could
