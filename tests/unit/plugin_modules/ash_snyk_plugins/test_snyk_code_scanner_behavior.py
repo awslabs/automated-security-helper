@@ -2273,6 +2273,27 @@ def snyk_run_record(monkeypatch):
     return runs
 
 
+@pytest.fixture
+def staged_copies(monkeypatch):
+    """The copies ``_stage_source`` makes for a source target, in the order made.
+
+    The real method runs. The path of each copy it returns is kept, resolved while
+    the copy exists, so a test can check that snyk is handed the copy and not some
+    other directory.
+    """
+    real_stage = SnykCodeScanner._stage_source
+    copies = []
+
+    def stage_and_record(self, *args, **kwargs):
+        staged = real_stage(self, *args, **kwargs)
+        if staged is not None:
+            copies.append(Path(staged).resolve())
+        return staged
+
+    monkeypatch.setattr(SnykCodeScanner, "_stage_source", stage_and_record)
+    return copies
+
+
 def tested_path(command):
     """The path snyk is told to test, read from its place in the argv.
 
@@ -2626,7 +2647,7 @@ def test_the_directory_snyk_starts_in_is_removed_when_the_scanner_run_ends(
 
 @pytest.mark.unit
 def test_control_snyk_is_still_given_the_staged_copy_and_the_sarif_output(
-    scanner, snyk_on_path, plugin_context, snyk_run_record
+    scanner, snyk_on_path, plugin_context, snyk_run_record, staged_copies
 ):
     source = plugin_context.source_dir
     (source / "app.py").write_text("print('hello')\n", encoding="utf-8")
@@ -2634,20 +2655,22 @@ def test_control_snyk_is_still_given_the_staged_copy_and_the_sarif_output(
     scanner.scan(target=source, target_type="source")
 
     (run,) = snyk_run_record
+    (copy,) = staged_copies
     command = run["command"]
     target = tested_path(command)
     assert target.is_absolute()
-    assert target.resolve() != source.resolve()
+    assert target.resolve() == copy, (target, copy)
+    assert copy != source.resolve()
     assert any(arg.startswith(SARIF_OUTPUT_FLAG) for arg in command)
 
 
 @pytest.mark.unit
 def test_the_tested_path_is_not_mistaken_for_the_value_of_an_option(
-    scanner, snyk_on_path, plugin_context, snyk_run_record
+    scanner, snyk_on_path, plugin_context, snyk_run_record, staged_copies
 ):
     """``--org myorg`` puts a word that does not start with ``-`` ahead of the
     target. The target is the argument before the SARIF flag, whatever comes
-    before it."""
+    before it, and for the source it is the copy snyk is given."""
     from automated_security_helper.models.core import ToolExtraArg
 
     source = plugin_context.source_dir
@@ -2657,11 +2680,13 @@ def test_the_tested_path_is_not_mistaken_for_the_value_of_an_option(
     scanner.scan(target=source, target_type="source")
 
     (run,) = snyk_run_record
+    (copy,) = staged_copies
     command = run["command"]
     assert command[command.index("--org") + 1] == "myorg", command
     target = tested_path(command)
     assert target.is_absolute(), command
-    assert target.resolve() != source.resolve()
+    assert target.resolve() == copy, (target, copy)
+    assert copy != source.resolve()
 
 
 @pytest.mark.unit
