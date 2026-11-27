@@ -68,7 +68,6 @@ from automated_security_helper.utils.directory_refusals import output_dir_unmake
 from automated_security_helper.utils.numeric_text import MIN_REDACTED_LENGTH
 from automated_security_helper.utils.error_text import (
     carry_environment_values,
-    config_environment_values,
     error_text,
     log_unexpected_error,
     os_error_without_named_file,
@@ -5171,13 +5170,15 @@ def mcp_get_config(
         apply, so a file the client delivered shows no grants of its own. The reporter options only the operator may set
         (``config/operator_only_options.py``) that a file in a checkout sets are
         shown as a scan of that checkout applies them, ignored:
-        ``<operator only; ignored from this file: VALUE>``. A value the file
-        read from the environment is the server's, so VALUE is never that
-        value: it is the reference the file wrote, ``<from ${VAR}>``, from a
-        reference of the load at its place or else from the loader's own mark
-        on the scalar it read. Only a literal that equals or contains a value
-        the configuration read is withheld, as a placeholder that says
-        nothing of where the value came from. A refused path returns ``success`` False with ``error_type``
+        ``<operator only; ignored from this file: VALUE>``. VALUE shows every
+        literal the client's file wrote exactly as written. A value the file
+        wrote as a reference is the server's, so VALUE is never that value: it
+        is ``<from ${VAR}>``, built from the variable's name alone, whether or
+        not the variable is set. Nothing in the answer depends on whether a
+        literal equals, or contains, a value the server read. The one
+        condition is where a value came from: a place a file of the chain that
+        is not the client's (the operator's, or a base outside every checkout)
+        also writes is shown as ``<withheld>`` whatever it holds. A refused path returns ``success`` False with ``error_type``
         ``config_input_not_permitted``, and a file a client delivered that
         reads from the environment the same with ``config_env_not_resolved``.
         A resolved config whose ``ash_plugin_modules`` a scan of the answered
@@ -5470,23 +5471,6 @@ def _answer_get_config(
             # OSError: a file ASH_CONFIG names that the server cannot read is
             # a config it cannot load, exit 3, not the generic handler's 1.
             return _config_load_failure(exc, None)
-        # The references the marking below shows written-as-reference values
-        # with are this FIRST read's: they keep each reference at a place the
-        # confinement left out of the answer, which is exactly where a marker
-        # has a value to show. The scan-confined read below rewrites its own
-        # references when an in-tree chain file's places are dropped, so they
-        # no longer carry those places. mark_operator_only_options reads them
-        # only to match the record's written values -- the first read's --
-        # and never touches ash_plugin_modules, whose display is the
-        # answered document's own.
-        marking_references = tuple(getattr(base, "_environment_references", ()) or ())
-        # The values this read recorded go with its references: where no
-        # reference shows a leaf, the loader's mark on the record's value
-        # names the reference the file wrote, and these are what catch a
-        # literal that only equals or contains a value the chain read (it is
-        # withheld with a neutral placeholder). The answered configuration's
-        # own join them below.
-        marking_values = config_environment_values(base)
         if not raw:
             # The answer IS the scan's own resolution: resolve_config's
             # no-file branch reads the ASH_CONFIG chain exactly as a scan of
@@ -5496,9 +5480,7 @@ def _answer_get_config(
             # included, is the one such a scan applies. Splicing single
             # sections out of this read into the read above showed the
             # unconfined read's values everywhere the splice did not reach.
-            # The marking below uses the first read's references (see
-            # marking_references above), not this resolution's. The
-            # operator-only record stays `settings`, which
+            # The operator-only record stays `settings`, which
             # read the same documents (the shared caches above) under the
             # same confine identity (scan_repository_settings, which
             # repository_settings_for_root applies). no_discovery:
@@ -5556,20 +5538,17 @@ def _answer_get_config(
                     ),
                     None,
                 )
-        environment_values = tuple(
-            dict.fromkeys((*marking_values, *config_environment_values(base)))
-        )
         # The display walk runs on the dump first, and the markers are written
         # into what it returns, as on the named-file path below: the walk
         # replaces a reference's value inside any string at the reference's
         # place, so it never runs over a marker. The markers are built from the
-        # record (settings) and from the first read's references and values,
-        # never from the dump.
+        # record (settings), never from the dump: a literal the client's file
+        # wrote is shown as written, a value it wrote as a reference is shown by
+        # the reference, and a place a file that is not the client's also
+        # writes is withheld.
         return mark_operator_only_options(
             shown_config(base, base.model_dump()),
             settings,
-            marking_references,
-            environment_values,
         )
 
     if raw:
@@ -5934,29 +5913,18 @@ def _answer_get_config(
         # chain file is inside the scanned trees here (the guard above), so
         # the resolution confined each checkout file of the chain exactly as
         # the dropped re-read did.
-        # The resolution's references: an option the chain read from the
-        # environment is marked by the reference it was written as, never by
-        # its value. The confinement rewrite (_take_confined_references) drops
-        # the references the chain's files wrote at the places it settled, a
-        # chain file in another checkout included, so none of the file's own
-        # sits at the place of such an option (the trusted base's references
-        # do, which is why the walk above ran first). The marker still shows
-        # the reference the file wrote: the loader's mark on the record's value
-        # (``EnvResolvedScalar.shown``) names it where no reference of the
-        # load sits at the place, so both routes show the same text, and the
-        # option stays marked: the client reads that the file set an option a
-        # scan ignores. A literal that only equals or contains a value the
-        # configuration read, in whatever shape the file wrote it, is withheld
-        # with a placeholder that says nothing of where the value came from;
-        # what tells it from a literal no read touches is the configuration's
-        # own record of what its chain read (config_environment_values, every
-        # read included, the ones at dropped places too).
-        shown = mark_operator_only_options(
-            shown,
-            written,
-            tuple(getattr(resolved, "_environment_references", ()) or ()),
-            config_environment_values(resolved),
-        )
+        # An option the chain read from the environment is marked by the
+        # reference it was written as, never by its value: the loader's mark on
+        # the record's value (``EnvResolvedScalar.variable``) names the
+        # variable, so both routes show the same ``<from ${VAR}>`` whether or
+        # not the variable is set, and the option stays marked: the client
+        # reads that the file set an option a scan ignores. Every literal the
+        # client's file wrote is shown as written, whatever it equals or
+        # contains: nothing in the answer depends on a value the server read.
+        # A place a chain file that is not the client's also writes, or that
+        # the client's file wrote beside such a file, is withheld whatever its
+        # value is (RepositorySettings.withheld).
+        shown = mark_operator_only_options(shown, written)
     return shown
 
 

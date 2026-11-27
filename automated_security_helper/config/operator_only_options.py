@@ -87,7 +87,6 @@ from typing import (
     Any,
     Collection,
     Dict,
-    Iterable,
     List,
     NamedTuple,
     Optional,
@@ -117,14 +116,10 @@ from automated_security_helper.config.sandbox_grants import (
 )
 from automated_security_helper.utils.error_text import config_environment_values
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
-from automated_security_helper.utils.redacted_model import environment_strings
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
-    from automated_security_helper.config.environment_record import (
-        EnvironmentReference,
-    )
 
 DEFAULT_SCANNERS_FIELD = "default_scanners"
 DEFAULT_SCANNERS_KEYS = ("only", "add")
@@ -385,6 +380,20 @@ def _client_delivered(path: Path) -> bool:
     return config_is_client_supplied(path)
 
 
+def _mark_key(
+    kind: str, plugin: str, key: str, option: str
+) -> Tuple[str, str, str, str]:
+    """A place as ``mark_operator_only_options`` keys it: the kind, the plugin,
+    the plugin again for a scanner (the model folds its spellings into one
+    section) or the folded section key for a reporter, and the option."""
+    return (
+        kind,
+        plugin,
+        plugin if kind == "scanners" else folded_section_name(key),
+        option,
+    )
+
+
 def found_place(entry: Tuple[str, str, str, str, Any]) -> str:
     """The place string of a ``RepositorySettings.found`` entry; never its value."""
     kind, _plugin, key, option, _value = entry
@@ -450,14 +459,29 @@ class RepositorySettings:
         self.undecided_places: Set[str] = set()
         #: The places a file with an established location left an option out of.
         self._located_places: Set[str] = set()
+        #: The places (``_mark_key``) a file that is not the client's wrote, in
+        #: any chain file seen so far, whether or not it was confined.
+        self._others_places: Set[Tuple[str, str, str, str]] = set()
+        #: Whether any file that is not the client's has been seen.
+        self._others_seen = False
+        #: The places whose value may not be the client's file's own: those a
+        #: file that is not the client's wrote, and those the client's file
+        #: left out after such a file was seen (``withheld``).
+        self._withheld: Set[Tuple[str, str, str, str]] = set()
         self.document: Any = None
         self.selection_written: Dict[str, Any] = {}
         self.selection_unknown: List[str] = []
 
-    def _membership(self, real: Path, named: Path) -> Tuple[bool, bool]:
+    def _membership(
+        self, real: Path, named: Path, every_file: Optional[bool] = None
+    ) -> Tuple[bool, bool]:
         """Whether the file is the repository's, and whether that rests on a
-        link walk that never finished (the fail-closed answer, undecided)."""
-        if self.every_file:
+        link walk that never finished (the fail-closed answer, undecided).
+
+        *every_file* defaults to this record's own setting; the client's-file
+        judgment (``confine``) passes False, so the two judgments share this
+        one body."""
+        if self.every_file if every_file is None else every_file:
             return True, False
         confined = confined_files([real], self.trees, [named])
         if confined.members:
@@ -483,6 +507,23 @@ class RepositorySettings:
 
     def confine(self, real: Path, named: Path, data: Any) -> Any:
         member, undecided = self._membership(real, named)
+        # The client's file: the repository's by the scan's own membership with
+        # ``every_file`` treated as False. With ``every_file`` every chain file
+        # is confined, a base the operator set aside included, but only the
+        # client's own files are the client's.
+        clients = (
+            member
+            if not self.every_file
+            else self._membership(real, named, every_file=False)[0]
+        )
+        if not clients:
+            # Its operator-only places are read without popping (the file is
+            # confined below only under ``every_file``): the client's file
+            # merges over this document, so its places may hold this file's
+            # value.
+            self._others_seen = True
+            for place in self._operator_only_places(data):
+                self._others_places.add(_mark_key(*place))
         if member:
             self.repository_files.append(real)
             first = len(self.found)
@@ -493,16 +534,34 @@ class RepositorySettings:
             else:
                 self._located_places.update(places)
                 self.undecided_places.difference_update(places)
+            if clients and self._others_seen:
+                # Left out after a file that is not the client's was seen: a
+                # patch of the client's file runs over the merged document, so
+                # a value of the other file may sit at any of these places.
+                self._withheld.update(
+                    _mark_key(kind, plugin, key, option)
+                    for kind, plugin, key, option, _value in self.found[first:]
+                )
+        self._withheld.update(self._others_places)
         self.document = data
         return data
 
-    def _without_operator_only(self, data: Any) -> Any:
-        """A copy of *data* without the operator-only options, each recorded;
-        *data* itself when it has none."""
+    def withheld(self, kind: str, place: Tuple[str, str, str]) -> bool:
+        """Whether the value at *place* (plugin, section, option, as
+        ``written`` keys it) of *kind* may not be the client's file's own: a
+        file of the chain that is not the client's wrote the place, or the
+        client's file wrote it after such a file was seen. The answer rests on
+        the chain's structure only, never on a value."""
+        return (kind, *place) in self._withheld
+
+    @staticmethod
+    def _operator_only_places(data: Any) -> List[Tuple[str, str, str, str]]:
+        """The (kind, plugin, section key, option) of each operator-only
+        option *data*, a document, writes, under any section spelling the
+        configuration reads; none for a document that is not a mapping."""
         if not isinstance(data, dict):
-            return data
-        data = self._without_default_scanners(data)
-        places = [
+            return []
+        return [
             (kind, plugin, key, option)
             for kind, listed, sections_of in _CONFINED_KINDS
             if isinstance(data.get(kind), dict)
@@ -512,6 +571,14 @@ class RepositorySettings:
             for option in names
             if option in section["options"]
         ]
+
+    def _without_operator_only(self, data: Any) -> Any:
+        """A copy of *data* without the operator-only options, each recorded;
+        *data* itself when it has none."""
+        if not isinstance(data, dict):
+            return data
+        data = self._without_default_scanners(data)
+        places = self._operator_only_places(data)
         if not places:
             return data
         stripped = copy.deepcopy(data)
@@ -1234,12 +1301,15 @@ def drop_recorded_operator_only_options(config: "AshConfig") -> "AshConfig":
     return confined
 
 
-#: What the ignored marker shows where a leaf only equals or contains a value
-#: the configuration read, and neither a reference nor the loader's mark shows
-#: it (``_marker_value``). It says nothing of where the value came from, and
-#: nothing of the value: the leaf may be a literal the file wrote, which cannot
-#: be told from the read.
-ENVIRONMENT_PLACEHOLDER = "<withheld: may hold a value read from the environment>"
+#: What the ignored marker shows in place of a value it does not show. It
+#: appears in three cases, and in no other: a mark the loader put on a scalar
+#: it read from the environment that carries no variable name, so no reference
+#: can be written for it (``_marker_value``); a place that a file of the chain
+#: which is not the client's also writes, or that the client's file wrote
+#: beside such a file (``RepositorySettings.withheld``); and a call with no
+#: record of what the chain wrote (``mark_operator_only_options``). It says
+#: nothing of the value or of where it came from.
+WITHHELD_PLACEHOLDER = "<withheld>"
 
 
 def operator_only_marker(shown: str) -> str:
@@ -1249,148 +1319,68 @@ def operator_only_marker(shown: str) -> str:
     return f"<operator only; ignored from this file: {shown}>"
 
 
-def _marker_value(
-    value: Any,
-    kind: str,
-    key: str,
-    option: str,
-    references: Sequence["EnvironmentReference"],
-    needles: Sequence[str] = (),
-) -> str:
-    """How the ignored marker shows *value*, what the chain wrote at
-    ``kind.key.options.option``. Never a value the chain read from the
-    environment: each leaf of *value*, and each mapping key, is shown the first
-    way that applies.
+def _marker_value(value: Any) -> str:
+    """How the ignored marker shows *value*, what the client's file wrote for
+    an operator-only option. Each leaf of *value*, and each mapping key, is
+    shown the first way that applies.
 
-    1. The leaf is shown as the reference the file wrote, ``<from ${VAR}>``,
-       when a reference of *references* (the chain's
-       ``environment_references``) sits at that place, under any spelling of
-       the section, and resolved to the leaf, or else when the loader's own
-       mark on it (``EnvResolvedScalar.from_environment``) carries the text
-       the file wrote (``shown``). The mark makes both routes of get_config
-       show one text: the loader drops the references at the places it
-       settles, which for a file in a checkout other than the scanned one is
-       every place of the options marked here, and the mark still names the
-       reference. A literal a later file wrote over a read value is not that
-       read, and is shown as the literal. A mapping key the file read from the
-       environment (a key reference, recorded at the mapping's place, or the
-       mark on the key) is shown as its reference too.
-    2. Otherwise, if the leaf only equals or contains a value the chain read,
-       the whole of *value* is ``ENVIRONMENT_PLACEHOLDER`` and none of it is
-       shown, the entries beside it included. A leaf holds a read when its text
-       contains one of *needles*, the values and keys the chain read; a
-       scalar that is not a string holds one only when its ``str`` or its JSON
-       equals a needle, because a value interpolated from the environment is a
-       string and carries the loader's mark. A mark with no ``shown`` text
-       falls back to the placeholder as well. The placeholder says nothing of
-       where the value came from: the leaf may be a literal the file wrote that
-       cannot be told from the read, and showing less is the safe side.
-    3. Any other leaf is shown as JSON, on one line. A date, time or bytes a
-       YAML or TOML file writes is not JSON and is shown as text
-       (``default=str``) instead of raising out of the marking.
+    1. A leaf (or key) the loader marked as written by reference
+       (``EnvResolvedScalar``) with a variable name is shown as that reference,
+       ``<from ${VAR}>``, built from the variable's name alone. Whether the
+       variable was set, and so whether the loader's own ``shown`` text holds
+       the reference or the default, makes no difference: ``${VAR}``,
+       ``${VAR:default}`` and either with text after the reference are all
+       ``<from ${VAR}>``. The text a file wrote after the reference is not
+       shown (the default case cannot be split into default and tail), so two
+       keys of one mapping that differ only after the reference become one key
+       in the shown mapping, the later one kept.
+    2. A leaf or key that is such a mark with no variable name cannot be shown
+       as a reference, so the whole of *value* is ``WITHHELD_PLACEHOLDER``,
+       the entries beside it included.
+    3. Any other leaf is the file's own text, shown as written as JSON on one
+       line. A date, time or bytes a YAML or TOML file writes is not JSON and
+       is shown as text (``default=str``) instead of raising out of the
+       marking. What it equals or contains is never read: nothing in the
+       answer depends on a value the server read, so a guess at one gets the
+       answer a miss gets.
 
     A set or frozenset is shown as a JSON list of its members, in the order
     of their shown text, so one set always has one marker.
-
-    *needles* are the values and keys the chain read, already normalized by
-    ``environment_strings`` (each a non-empty string, and a lone string one
-    value, never its characters). ``mark_operator_only_options``, the one
-    caller, normalizes them once for every option it marks. This function does
-    not normalize them again, so a lone string given here would be read as its
-    characters.
     """
     from automated_security_helper.config.environment_record import (
         environment_marker,
     )
+    from automated_security_helper.utils.redacted_model import EnvResolvedScalar
 
-    wanted = (kind, folded_section_name(key), "options", option)
-    reads_the_environment = False
+    unnamed = False
 
-    def at_place(reference: Any, *, within: bool) -> bool:
-        # The option's own place, or (``within``) a place under it: an entry
-        # of a list or a mapping the option holds, which the loader records at
-        # the place the read value landed.
-        path = tuple(reference.path)
-        return (
-            (len(path) == 4 or (within and len(path) > 4))
-            and path[0] == kind
-            and isinstance(path[1], str)
-            and folded_section_name(path[1]) == wanted[1]
-            and path[2:4] == ("options", option)
-        )
-
-    def read_as(text: Any, *, within: bool, key: bool = False) -> Optional[str]:
-        # ``key``: the text is a mapping key, matched against the references
-        # the file read keys from (their path is the mapping's), never against
-        # the ones it read values from, and the other way round.
-        if not isinstance(text, str):
+    def reference_of(leaf: Any) -> Optional[str]:
+        # The reference a scalar the loader read from the environment stands
+        # for; None for any other leaf. A mark with no usable variable name is
+        # noted, and the whole value is then the placeholder.
+        nonlocal unnamed
+        if not isinstance(leaf, EnvResolvedScalar):
             return None
-        for reference in references:
-            if (
-                bool(reference.key) == key
-                and reference.resolved == text
-                and at_place(reference, within=within)
-            ):
-                return environment_marker(reference.written)
-        # No reference of the load sits here, as for a file in a checkout the
-        # session does not scan: the loader's own mark on a scalar it read from
-        # the environment carries the text the file wrote (``shown``), which is
-        # the reference alone.
-        shown = getattr(text, "shown", None)
-        if (
-            getattr(text, "from_environment", False)
-            and isinstance(shown, str)
-            and shown
-        ):
-            return environment_marker(shown)
-        return None
-
-    def holds_a_read(leaf: Any) -> bool:
-        # The loader's own mark on a scalar it read from the environment (a
-        # fallback here: a mark with a ``shown`` text is shown by ``read_as``),
-        # or text that equals or contains a value the chain read. A string
-        # holds one when it contains a needle; any other scalar, only when its
-        # text or its JSON equals one, since a value interpolated from the
-        # environment is a string and carries the mark.
-        if getattr(leaf, "from_environment", False):
-            return True
-        if not needles:
-            return False
-        if isinstance(leaf, str):
-            return any(needle in leaf for needle in needles)
-        return any(
-            needle == str(leaf) or needle == json.dumps(leaf, default=str)
-            for needle in needles
-        )
-
-    def note_a_read(leaf: Any) -> None:
-        nonlocal reads_the_environment
-        if holds_a_read(leaf):
-            reads_the_environment = True
+        variable = getattr(leaf, "variable", None)
+        if isinstance(variable, str) and variable:
+            return environment_marker("${" + variable + "}")
+        unnamed = True
+        return WITHHELD_PLACEHOLDER
 
     if isinstance(value, str):
-        marker = read_as(value, within=False)
+        marker = reference_of(value)
         if marker is not None:
             return marker
-        note_a_read(value)
-        if reads_the_environment:
-            return ENVIRONMENT_PLACEHOLDER
         return shown_on_one_line(json.dumps(value))
 
-    # A list, mapping or set the file wrote holds its read values as leaves:
-    # each leaf a reference at or under this place resolved to is shown as the
-    # reference, never the value. A mapping key is shown the same way, and as
-    # text: ``json.dumps`` applies ``default=`` to values only, so a date or
-    # other non-JSON key a YAML file writes would raise out of the marking. A
-    # leaf or key no reference shows, and that reads the environment, is noted:
-    # the whole value is then the placeholder, whatever else it holds.
+    # A mapping key is shown as text: ``json.dumps`` applies ``default=`` to
+    # values only, so a date or other non-JSON key a YAML file writes would
+    # raise out of the marking.
     def shown_key(name: Any) -> str:
-        text = name if isinstance(name, str) else str(name)
-        marker = read_as(text, within=True, key=True)
+        marker = reference_of(name)
         if marker is not None:
             return marker
-        note_a_read(name)
-        return text
+        return name if isinstance(name, str) else str(name)
 
     def shown_leaves(node: Any) -> Any:
         if isinstance(node, dict):
@@ -1402,15 +1392,12 @@ def _marker_value(
             # its members in the order of their shown text.
             members = [shown_leaves(item) for item in node]
             return sorted(members, key=lambda member: json.dumps(member, default=str))
-        marker = read_as(node, within=True)
-        if marker is not None:
-            return marker
-        note_a_read(node)
-        return node
+        marker = reference_of(node)
+        return node if marker is None else marker
 
     shown = shown_leaves(value)
-    if reads_the_environment:
-        return ENVIRONMENT_PLACEHOLDER
+    if unnamed:
+        return WITHHELD_PLACEHOLDER
     # A date, time or bytes a YAML or TOML file writes is not JSON: it is shown
     # as text (``default=str``) instead of raising out of the marking.
     return shown_on_one_line(json.dumps(shown, default=str))
@@ -1419,8 +1406,6 @@ def _marker_value(
 def mark_operator_only_options(
     data: Dict[str, Any],
     written: Optional[RepositorySettings] = None,
-    references: Sequence["EnvironmentReference"] = (),
-    environment_values: Iterable[str] = (),
 ) -> Dict[str, Any]:
     """A copy of *data*, a dumped AshConfig, with these options shown as ignored.
 
@@ -1429,39 +1414,38 @@ def mark_operator_only_options(
     file is, so the options it sets here were shown as applied, while a scan
     of the repository that holds it ignores them
     (``confine_operator_only_options``). Each marked option is shown as
-    ``<operator only; ignored from this file: VALUE>`` instead, VALUE as JSON.
-    The marker is only as wide as the callers and *written* make it: a shape
-    whose load already dropped an option and whose record does not carry it
-    answers without the option and without a marker, so a caller-named file's
-    dropped reporter options read as an empty options table. *data* and
-    everything in it are left as they are: the marker is written into a copy.
+    ``<operator only; ignored from this file: VALUE>`` instead. The marker is
+    only as wide as the callers and *written* make it: a shape whose load
+    already dropped an option and whose record does not carry it answers
+    without the option and without a marker, so a caller-named file's dropped
+    reporter options read as an empty options table. *data* and everything in
+    it are left as they are: the marker is written into a copy.
 
     *written* is what the file's chain wrote for these options (a
-    ``RepositorySettings`` that read the chain): only those are marked, with
-    the value that chain's repository files wrote -- the dump may no longer
-    hold it, since the load left it out -- and a marker is written in even
-    where the load left the option out of the dump. A place a file of the
-    chain outside a checkout still sets (``set_elsewhere``) is not marked:
-    a scan keeps that file's value. A dump holds a scanner's typed options
-    whether a file wrote them or not, so the limit a file never named is the
-    configuration's own, and is shown as it is. Without *written*, every one
-    *data* holds is marked, with the dump's value.
+    ``RepositorySettings`` that read the chain): only those are marked, and a
+    marker is written in even where the load left the option out of the dump. A
+    place a file of the chain outside a checkout still sets (``set_elsewhere``)
+    is not marked: a scan keeps that file's value. A dump holds a scanner's
+    typed options whether a file wrote them or not, so the limit a file never
+    named is the configuration's own, and is shown as it is. Every option
+    *data* holds that *written* does not name is left as it is.
 
-    VALUE is shown as ``_marker_value`` shows it, never as a value the chain
-    read from the environment: as the reference the file wrote,
-    ``<from ${VAR}>``, from one of *references* (the chain's
-    ``environment_references``) at that place or else from the loader's own
-    mark on the scalar, which carries the reference the file wrote.
-    *environment_values* are the values and keys the configuration read from
-    the environment (``config_environment_values(config)``). That record walks
-    mappings, lists and strings, so a set member is not in it; the loader's own
-    mark on the scalar covers that. Only a leaf that matches one of them
-    (a string that is or contains one, a number or boolean whose text equals
-    one) and that neither a reference nor the mark shows is shown as the
-    placeholder, which says nothing of where the value came from. Such a leaf
-    may be a literal the file wrote: the two cannot be told apart, and the
-    marker shows less rather than more. A literal no read touches is shown as
-    JSON on one line, the repository's own text.
+    VALUE is the client's file's own text, shown as ``_marker_value`` shows
+    it: every literal exactly as written, and a leaf or key written as a
+    reference as ``<from ${VAR}>``. Nothing in the answer depends on whether a
+    literal equals, or contains, a value the server read, so a guess gets the
+    answer a miss gets.
+
+    One condition decides whether VALUE is shown at all: whether the value
+    came from the client's file. A place that ``written.withheld`` names (one
+    a file of the chain that is not the client's also writes, or one the
+    client's file wrote beside such a file) is ``WITHHELD_PLACEHOLDER`` whatever
+    the value is, because the client's file merged over the other file's
+    document and may hold the other file's value there. That decision rests on
+    the chain's structure only, never on a value. With *written* None nothing
+    is known to be the client's file's, so every marked option is the
+    placeholder; no production caller passes None (both MCP get_config calls
+    pass the record the load made).
 
     The rest of an off-host reporter's section (``aws_region`` and the other
     destination options) is not marked: it is not an operator-only option. The
@@ -1475,7 +1459,6 @@ def mark_operator_only_options(
     (``RepositorySettings``) holds only the operator-only places, so it has
     nothing to mark for the rest of the section.
     """
-    needles = environment_strings(environment_values)
     marked = copy.deepcopy(data)
     for kind, listed in (
         ("reporters", OPERATOR_ONLY_OPTIONS),
@@ -1510,21 +1493,20 @@ def mark_operator_only_options(
                         plugin if kind == "scanners" else folded_section_name(key),
                         option,
                     )
-                    if wrote is None:
+                    if written is None or wrote is None:
                         if option not in options:
                             continue
-                        value = options[option]
+                        shown = WITHHELD_PLACEHOLDER
                     else:
                         if place not in wrote:
                             continue
-                        if written is not None and written.set_elsewhere(
-                            kind, plugin, option
-                        ):
+                        if written.set_elsewhere(kind, plugin, option):
                             continue
-                        value = wrote[place]
-                    options[option] = operator_only_marker(
-                        _marker_value(value, kind, key, option, references, needles)
-                    )
+                        if written.withheld(kind, place):
+                            shown = WITHHELD_PLACEHOLDER
+                        else:
+                            shown = _marker_value(wrote[place])
+                    options[option] = operator_only_marker(shown)
     return marked
 
 
