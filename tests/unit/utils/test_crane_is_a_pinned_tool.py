@@ -65,6 +65,15 @@ def test_the_license_entry_names_the_pinned_version():
     assert entry.repository == "https://github.com/google/go-containerregistry"
 
 
+def test_the_version_arguments_leave_crane_an_executable_on_path():
+    """A ``version_probe`` would answer for crane too, and would take it out of the
+    executables the image check accounts for: the entry would list none, and
+    /usr/local/bin/crane would be owned by no package and no entry in the table."""
+    entry = THIRD_PARTY_LICENSES["crane"]
+    assert entry.version_probe == ()
+    assert entry.index_record()["executables"] == ["crane"]
+
+
 def test_the_image_installs_the_pinned_crane():
     dockerfile = (Path(__file__).resolve().parents[3] / "Dockerfile").read_text()
     assert "install-pinned-tool crane " in dockerfile
