@@ -48,11 +48,18 @@ from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
 )
 from automated_security_helper.core.enums import ScannerStatus
-from automated_security_helper.core.exceptions import DEFAULT_SENTENCES, ReasonCode
+from automated_security_helper.core.exceptions import (
+    DEFAULT_SENTENCES,
+    ReasonCode,
+    is_reason_code,
+)
 from automated_security_helper.core.status_order import grade as grade_status
 from automated_security_helper.models.workspace import is_workspace_scan
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.short_reason import short_error_reason
+from automated_security_helper.utils.short_reason import (
+    is_short_reason,
+    short_error_reason,
+)
 
 
 class ScannerMetrics(ScannerSeverityCount):
@@ -505,6 +512,13 @@ def _reason_pair(holder: object) -> tuple[str, str] | None:
     read back) or one per-target report. The two parts are read from the one holder
     and never mixed: a code from one report beside the sentence of another would
     say something neither recorded.
+
+    A pair read back from a results file is text nobody here wrote, so it has to
+    pass the check the scan phase writes by: the code is written as a reason code
+    (``is_reason_code``) and the sentence is a short reason (``is_short_reason``:
+    one printable line, at most 200 characters, no local path). A pair that fails
+    either reads as no reason, so a planted path or a malformed code never reaches a
+    row, a flat output or a report.
     """
     if isinstance(holder, dict):
         code = holder.get("error_reason_code")
@@ -512,7 +526,7 @@ def _reason_pair(holder: object) -> tuple[str, str] | None:
     else:
         code = getattr(holder, "error_reason_code", None)
         sentence = getattr(holder, "error_reason", None)
-    if isinstance(code, str) and code and isinstance(sentence, str) and sentence:
+    if is_reason_code(code) and is_short_reason(sentence):
         return code, sentence
     return None
 

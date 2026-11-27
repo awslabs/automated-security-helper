@@ -16,6 +16,7 @@ from automated_security_helper.models.flat_vulnerability import (
 from automated_security_helper.models.vocab import Disposition
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.core.exceptions import is_reason_code
 from automated_security_helper.core.unified_metrics import (
     get_unified_scanner_metrics,
     recorded_error_sentence,
@@ -471,6 +472,17 @@ class ReportContentEmitter:
                 and durations_unrecorded
                 and not metrics.duration
             )
+            # The metrics hold only a pair that passed the check when they read it
+            # back; it is checked again where it is copied into the flat outputs,
+            # so a row built any other way cannot put a path or a malformed code
+            # into ash.flat.json or the YAML report. A pair that fails is dropped
+            # whole: a sentence is never shown under a code it was not recorded with.
+            reason_fit_to_copy = (
+                (metrics.error_reason, metrics.error_reason_code)
+                if is_short_reason(metrics.error_reason)
+                and is_reason_code(metrics.error_reason_code)
+                else (None, None)
+            )
             results.append(
                 {
                     "scanner_name": metrics.scanner_name,
@@ -499,8 +511,8 @@ class ReportContentEmitter:
                     # for an ERROR row whose cause nothing recorded. The reports for
                     # people show the sentence only after get_scanners_not_run has
                     # checked it again.
-                    "error_reason": metrics.error_reason,
-                    "error_reason_code": metrics.error_reason_code,
+                    "error_reason": reason_fit_to_copy[0],
+                    "error_reason_code": reason_fit_to_copy[1],
                     # Seconds the scanner took; None, in a report for people, when
                     # it did not run or the results record no duration for it. The
                     # text and html reporters render a Duration column from this
