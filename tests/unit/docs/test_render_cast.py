@@ -28,6 +28,7 @@ must-flag and a must-not-flag input.
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib
 import io
 import os
@@ -2189,3 +2190,153 @@ def test_rendering_twice_in_one_process_gives_the_same_text(rc, recording):
     args = (recording.cast, recording.record, recording.storyboard)
     first, second = rc.render(*args), rc.render(*args)
     assert first == second
+
+
+# ---------------------------------------------------------------------------
+# The environment: a recording has one set of images, whatever the host sets
+# ---------------------------------------------------------------------------
+
+# rich takes the Unicode table its cell widths come from out of the UNICODE_VERSION
+# environment variable, and uses its newest table when the variable is unset. These
+# characters measure differently from one table to another. A name an older
+# interpreter's unicodedata may not know is built with chr().
+CHECK_MARK = "\N{WHITE HEAVY CHECK MARK}"
+CROSS_MARK = "\N{CROSS MARK}"
+WARNING_SIGN = "\N{WARNING SIGN}"
+NEXT_TRACK = "\N{BLACK RIGHT-POINTING DOUBLE TRIANGLE WITH VERTICAL BAR}"
+ROCKET = "\N{ROCKET}"
+SHAKING_FACE = chr(0x1FAE8)
+FINGERPRINT = chr(0x1FAC6)
+PEPET = chr(0x0897)
+
+#: ASH's progress icons, two emoji of recent Unicode versions, and a letter followed by
+#: a combining mark that is newer than the 15.1.0 table.
+ICON_PARTS = (
+    CHECK_MARK,
+    CROSS_MARK,
+    WARNING_SIGN + VS16,
+    NEXT_TRACK + VS16,
+    ROCKET,
+    SHAKING_FACE,
+    FINGERPRINT,
+    "a" + PEPET,
+)
+ICONS = " ".join(ICON_PARTS)
+
+#: Tables to plant. The 8.0.0 table measures the check mark, cross mark and rocket one
+#: cell wide. The 15.1.0 table measures U+1FAC6 and U+0897 as one cell each, where the
+#: newest table says two and zero.
+PLANTED_UNICODE_VERSIONS = ("8.0.0", "15.1.0")
+
+
+def measured_differently(char: str, version: str) -> bool:
+    """Whether table ``version`` measures ``char`` unlike the newest table."""
+    planted = cell_len(char, unicode_version=version)
+    return planted != cell_len(char, unicode_version="latest")
+
+
+def recording_with_typed(core, command: str):
+    """The small recording whose first scene types ``command``."""
+    runs = mini_runs(core)
+    runs["version"] = core.SceneRun(command, (core.RawChunk(0.02, "ash 1.0\r\n"),))
+    return build_recording(core, storyboard_data(cols=60), runs)
+
+
+def run_cli_under(
+    args: list[str], unicode_version: str | None, cwd: Path
+) -> subprocess.CompletedProcess:
+    """The command line in a fresh interpreter whose environment holds the given
+    UNICODE_VERSION, or none."""
+    env = dict(os.environ)
+    env.pop("UNICODE_VERSION", None)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    if unicode_version is not None:
+        env["UNICODE_VERSION"] = unicode_version
+    return subprocess.run(
+        [sys.executable, "-B", str(MODULE), *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=cwd,
+        timeout=300,
+    )
+
+
+def outcome(core, recording, directory: Path, version: str | None) -> tuple:
+    """What the command line does with a recording when the environment holds the given
+    UNICODE_VERSION, or none: its exit status, what it said if it refused, and a digest
+    of each image it wrote."""
+    directory.mkdir()
+    paths = write_inputs(core, recording, directory, storyboard_data(cols=60))
+    done = run_cli_under(cli_args(paths), version, directory)
+    digests = tuple(
+        hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
+        for path in (paths["svg"], paths["poster"])
+    )
+    refusal = done.stderr if done.returncode else ""
+    return done.returncode, refusal, digests
+
+
+def agreed_outcome(core, recording, tmp_path: Path) -> tuple:
+    """Run a recording through the command line with no UNICODE_VERSION and with each
+    planted one, require the same outcome every time, and return it."""
+    outcomes = {}
+    for version in (None, *PLANTED_UNICODE_VERSIONS):
+        directory = tmp_path / f"unicode-{version or 'unset'}"
+        outcomes[version] = outcome(core, recording, directory, version)
+    for version in PLANTED_UNICODE_VERSIONS:
+        assert outcomes[version] == outcomes[None], f"UNICODE_VERSION={version}"
+    return outcomes[None]
+
+
+def test_the_images_do_not_depend_on_the_unicode_version_in_the_environment(
+    core, tmp_path
+):
+    """rich reads UNICODE_VERSION to choose the table its cell widths come from, so a
+    renderer that left the choice to rich would draw other images on another host.
+    The same recording goes through the command line with the variable absent and
+    planted, and every run writes the same bytes."""
+    for version in PLANTED_UNICODE_VERSIONS:
+        assert any(measured_differently(char, version) for char in ICONS)
+    recording = recording_with_output(core, ICONS + "\r\n", cols=60)
+    status, refusal, digests = agreed_outcome(core, recording, tmp_path)
+    assert (status, refusal) == (0, "")
+    assert all(digests)
+
+
+def test_a_typed_command_is_judged_the_same_under_any_unicode_version(core, tmp_path):
+    """A command is revealed one cell at a time, so the renderer refuses one that holds
+    a wide character, and whether the check mark is wide cannot depend on the host."""
+    assert any(measured_differently(CHECK_MARK, v) for v in PLANTED_UNICODE_VERSIONS)
+    recording = recording_with_typed(core, f"ash {CHECK_MARK}")
+    status, refusal, digests = agreed_outcome(core, recording, tmp_path)
+    assert status == 2
+    assert "not one cell wide" in refusal
+    assert digests == (None, None)
+
+
+def test_every_cell_width_call_names_the_pinned_table(rc, core, monkeypatch):
+    """Printing a character, joining a mark to the cell before it and judging a typed
+    command each measure with ``UNICODE_TABLE``; none leaves the table to rich."""
+    seen: dict[str, set[str]] = {"cell_len": set(), "get_character_cell_size": set()}
+
+    def spy(name: str):
+        real = getattr(rc, name)
+
+        def measured(text: str, unicode_version: str = "auto") -> int:
+            seen[name].add(unicode_version)
+            return real(text, unicode_version)
+
+        return measured
+
+    for name in seen:
+        monkeypatch.setattr(rc, name, spy(name))
+    recording = recording_with_output(core, f"{SUN}{VS16}\r\n")
+    rc.render(recording.cast, recording.record, recording.storyboard)
+    assert seen == {name: {rc.UNICODE_TABLE} for name in seen}
+
+
+def test_the_pinned_table_is_the_newest_one_rich_ships(rc):
+    """``"latest"`` is the table rich itself picks when UNICODE_VERSION is unset, so a
+    host that sets nothing keeps the images it always drew."""
+    assert rc.UNICODE_TABLE == "latest"
