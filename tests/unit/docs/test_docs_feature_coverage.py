@@ -38,7 +38,7 @@ import os
 import re
 import sys
 import uuid
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import pytest
@@ -138,8 +138,22 @@ def _inventory() -> tuple:
     return tuple(_cov().inventory())
 
 
+def _keyed_by_id(features) -> dict:
+    """``features`` keyed by id, once no id is listed twice: a dict built straight
+    from them keeps one of two features that share an id and drops the other, so a
+    test comparing its keys would pass over the duplicate."""
+    features = list(features)
+    repeated = sorted(
+        fid
+        for fid, count in Counter(feature.id for feature in features).items()
+        if count > 1
+    )
+    assert not repeated, f"feature ids listed more than once: {repeated}"
+    return {feature.id: feature for feature in features}
+
+
 def _by_id() -> dict:
-    return {feature.id: feature for feature in _inventory()}
+    return _keyed_by_id(_inventory())
 
 
 # --------------------------------------------------------------------------- #
@@ -1273,10 +1287,7 @@ def test_commands_sharing_a_callback_are_one_feature_named_by_the_longest_visibl
     cov = _cov()
     module = synthetic_module("fake_cli.py", FAKE_CLI)
 
-    features = {
-        feature.id: feature
-        for feature in cov.cli_features(typer.main.get_command(module.app))
-    }
+    features = _keyed_by_id(cov.cli_features(typer.main.get_command(module.app)))
 
     run = cov.function_region(module.run)
     assert set(features) == {
@@ -1394,10 +1405,7 @@ def test_an_option_a_branch_of_the_callback_reads_is_measured_in_that_branch_too
     module = synthetic_module("fake_scan_cli.py", FAKE_SCAN_CLI)
     node = _fake_scan_node()
 
-    features = {
-        feature.id: feature
-        for feature in cov.cli_features(typer.main.get_command(module.app))
-    }
+    features = _keyed_by_id(cov.cli_features(typer.main.get_command(module.app)))
 
     command = cov.function_region(module.scan)
     assert features["command:ash scan"].regions == (command,)
@@ -1622,7 +1630,7 @@ def test_each_plugin_is_measured_in_its_own_work_method(synthetic_package):
         }
     )
 
-    features = {feature.id: feature for feature in cov.plugin_features(package)}
+    features = _keyed_by_id(cov.plugin_features(package))
 
     scanners = sys.modules[f"{package.__name__}.scanners"]
     reporters = sys.modules[f"{package.__name__}.reporters"]
@@ -1666,7 +1674,7 @@ def test_plugins_that_share_one_work_method_say_so(synthetic_package):
     package = synthetic_package({"scanners": SYNTHETIC_SCANNERS})
 
     # plugin_features imports the package's modules; the fixture runs only its __init__.
-    features = {feature.id: feature for feature in cov.plugin_features(package)}
+    features = _keyed_by_id(cov.plugin_features(package))
     scanners = sys.modules[f"{package.__name__}.scanners"]
 
     first = f"scanner:{checks._declared_plugin_name(scanners.FirstShared)}"
@@ -1689,7 +1697,7 @@ def test_plugins_that_share_a_work_method_each_need_a_method_of_their_own(
     checks = _checks()
     package = synthetic_package({"scanners": SYNTHETIC_SCANNERS})
 
-    features = {feature.id: feature for feature in cov.plugin_features(package)}
+    features = _keyed_by_id(cov.plugin_features(package))
 
     scanners = sys.modules[f"{package.__name__}.scanners"]
 
@@ -1727,7 +1735,7 @@ def test_a_plugin_that_shares_its_work_method_is_covered_where_its_own_method_ra
     cov = _cov()
     checks = _checks()
     package = synthetic_package({"scanners": SYNTHETIC_SCANNERS})
-    features = {feature.id: feature for feature in cov.plugin_features(package)}
+    features = _keyed_by_id(cov.plugin_features(package))
     scanners = sys.modules[f"{package.__name__}.scanners"]
     ids = {
         "first": f"scanner:{checks._declared_plugin_name(scanners.FirstShared)}",
@@ -2387,7 +2395,7 @@ def test_the_config_features_are_the_rows_of_the_configuration_reference():
     )
     sections, _missing = generator.walk_config(AshConfig)
     rows = {f"config:{row['full']}" for section in sections for row in section.rows}
-    config = {f.id: f for f in _inventory() if f.kind == "config"}
+    config = _keyed_by_id(f for f in _inventory() if f.kind == "config")
 
     assert set(config) == rows
     for fid in (
@@ -3752,6 +3760,46 @@ def _changes_directory_before_the_scan(moves: str) -> str:
             ),
             id="cd-after-the-prompt-of-a-console-block",
         ),
+        pytest.param(
+            _changes_directory_before_the_scan("echo cd"),
+            id="the-word-as-an-argument",
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan('echo "cd sub"'),
+            id="the-word-inside-a-string",
+        ),
+        pytest.param(
+            _join(
+                _saved_config(SEVERITY, save_as=".ash.yaml"),
+                _scan_block("echo cd && ash scan --offline"),
+            ),
+            id="the-word-as-an-argument-in-the-loading-block",
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan("if [ -d sub ]; then cd sub; fi"),
+            id="cd-after-then",
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan('for d in sub; do cd "$d"; done'),
+            id="cd-after-do",
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan("sleep 1 & cd sub"),
+            id="cd-after-a-lone-ampersand",
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan('case "$PWD" in *) cd sub ;; esac'),
+            id="cd-in-a-case-arm",
+        ),
+        pytest.param(_changes_directory_before_the_scan('eval "$SETUP"'), id="eval"),
+        pytest.param(
+            _changes_directory_before_the_scan("source ./setup.sh"),
+            id="source-of-a-file",
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan(". ./setup.sh"),
+            id="dot-of-a-file",
+        ),
     ],
 )
 def test_after_a_shell_block_of_the_session_changes_directory_no_saved_config_counts(
@@ -3760,13 +3808,18 @@ def test_after_a_shell_block_of_the_session_changes_directory_no_saved_config_co
     """The runner carries the directory a shell block ends in into the next block of
     its session (docs_runner.py, ``_carry_state``), while every save stays anchored at
     the page's project (``_save``). So once a shell block of the session, at or before
-    the block that loaded a configuration, holds cd, pushd or popd in command position
-    (at the start of a line, after its indentation, or after ;, &&, ||, |, ( or {),
-    nothing shows which file the scan read, and no saved configuration counts under any
-    name: one discovery reads, one --config names, or one ASH_CONFIG names. A console
-    block is read as the commands the runner runs from it, its prompts taken off. A cd
-    in a subshell, which moves nothing after it, stops the credit too: the reading is
-    static, and an uncovered feature is the safe side of a doubt."""
+    the block that loaded a configuration, may have changed directory, nothing shows
+    which file the scan read, and no saved configuration counts under any name: one
+    discovery reads, one --config names, or one ASH_CONFIG names.
+
+    The read is a word match, not a parse. A word cd, pushd, popd, eval or source
+    anywhere in the block's text stops the credit, wherever it stands and inside
+    quotes too, and so does a word "." followed on its line by a file to read. A word
+    is a run of letters, digits and the characters _ . / -, so cd-notes, --source-dir
+    and ./setup.sh are words of their own. A console block is read as the commands the
+    runner runs from it, its prompts taken off. The read is static, so a cd in a
+    subshell, which moves nothing after it, stops the credit too: an uncovered feature
+    is the safe side of every doubt."""
     run = _loading_run(tmp_path, text=text)
 
     result = _covered(run, _config_features())
@@ -3807,27 +3860,43 @@ def test_a_shell_block_that_changed_directory_stops_the_credit_though_it_failed(
     ("text", "loading"),
     [
         pytest.param(
-            _changes_directory_before_the_scan("echo cd"),
-            -1,
-            id="the-word-as-an-argument",
-        ),
-        pytest.param(
             _changes_directory_before_the_scan("ls cd-notes"),
             -1,
             id="an-argument-that-starts-with-the-word",
         ),
         pytest.param(
-            _changes_directory_before_the_scan('echo "cd sub"'),
+            _changes_directory_before_the_scan("mkdir -p sub && ls sub"),
             -1,
-            id="the-word-inside-a-string",
+            id="a-block-with-none-of-the-words",
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan("cat ./notes.txt"),
+            -1,
+            id="a-path-that-starts-with-a-dot",
+        ),
+        pytest.param(
+            _join(
+                _saved_config(SEVERITY, save_as="sub/.ash.yaml"),
+                _scan_block("ash --source-dir sub --offline"),
+            ),
+            -1,
+            id="the-scans-own-source-dir",
         ),
         pytest.param(
             _join(
                 _saved_config(SEVERITY, save_as=".ash.yaml"),
-                _scan_block("echo cd && ash scan --offline"),
+                _scan_block("ash --source-dir . --offline"),
             ),
             -1,
-            id="the-word-as-an-argument-in-the-loading-block",
+            id="the-scans-own-source-dir-dot-before-an-option",
+        ),
+        pytest.param(
+            _join(
+                _saved_config(SEVERITY, save_as=".ash.yaml"),
+                _scan_block("ash scan --offline --source-dir ."),
+            ),
+            -1,
+            id="the-scans-own-source-dir-dot-at-the-end-of-its-line",
         ),
         pytest.param(
             _join(
@@ -3859,13 +3928,17 @@ def test_a_shell_block_that_changed_directory_stops_the_credit_though_it_failed(
         ),
     ],
 )
-def test_a_saved_config_still_counts_where_no_shell_of_its_session_changed_directory_before_the_load(
+def test_a_saved_config_still_counts_where_no_shell_block_of_its_session_before_the_load_holds_the_words(
     tmp_path, text, loading
 ):
-    """The word alone stops nothing. As an argument or inside a string it is not a
-    command; a cd in an earlier session moved nothing in this one, which starts in a
-    fresh copy of its fixture; a cd after the loading block moved nothing that block
-    ran; and a file saved for another program is not a shell block of the session."""
+    """Only the words stop the credit, and only in a shell block of the loading block's
+    own session at or before it. These leave the credit as the saved-config rules give
+    it: a word that only holds the letters (cd-notes, the scan's --source-dir,
+    ./notes.txt); a "." that names no file (the scan's --source-dir . before an option
+    or at the end of its line); a block with none of the words; a cd in an earlier
+    session, since a new session starts in a fresh copy of its fixture; a cd after the
+    loading block; and a cd line in a file saved for another program, which is not a
+    shell block."""
     run = _loading_run(tmp_path, text=text, loading=loading)
 
     result = _covered(run, _config_features())
@@ -4086,6 +4159,242 @@ def test_of_two_saved_configs_in_the_directory_source_dir_names_only_the_one_dis
 
     assert "config:project_name" in result, (picked, outranked)
     assert "config:fail_on_findings" not in result, (picked, outranked)
+
+
+#: A configuration saved under the name discovery reads first, and one only a command
+#: can name; each sets rows of its own.
+DISCOVERED = _saved_config(SEVERITY, save_as=".ash.yaml")
+NAMED = _saved_config("project_name: demo", save_as=TEAM)
+
+
+@pytest.mark.parametrize(
+    ("variant", "covered", "uncovered"),
+    [
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED,
+                    NAMED,
+                    _scan_block(f"ash scan --config {TEAM} --offline"),
+                )
+            },
+            {"config:project_name"},
+            SEVERITY_ROWS,
+            id="the-scan-names-its-config-with-config",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED, NAMED, _scan_block(f"ash scan -c {TEAM} --offline")
+                )
+            },
+            {"config:project_name"},
+            SEVERITY_ROWS,
+            id="the-scan-names-its-config-with-c",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED,
+                    NAMED,
+                    _scan_block(f"ash scan --config={TEAM} --offline"),
+                )
+            },
+            {"config:project_name"},
+            SEVERITY_ROWS,
+            id="the-scan-names-its-config-with-config-equals",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED,
+                    _scan_block("ash scan --config configs/other.yaml --offline"),
+                )
+            },
+            set(),
+            SEVERITY_ROWS,
+            id="the-scan-names-a-config-the-page-did-not-save",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED,
+                    NAMED,
+                    _scan_block(f"ASH_CONFIG={TEAM} ash scan --offline"),
+                )
+            },
+            {"config:project_name"},
+            SEVERITY_ROWS,
+            id="ash-config-on-the-loading-scan",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED,
+                    NAMED,
+                    _scan_block(f"export ASH_CONFIG={TEAM}\nash scan --offline"),
+                )
+            },
+            {"config:project_name"},
+            SEVERITY_ROWS,
+            id="ash-config-exported-in-the-loading-block",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED, _scan_block(f"export ASH_CONFIG={TEAM}"), _scan_block()
+                )
+            },
+            set(),
+            SEVERITY_ROWS,
+            id="ash-config-exported-by-an-earlier-block",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED,
+                    _scan_block(f"declare -x ASH_CONFIG={TEAM}"),
+                    _scan_block(),
+                )
+            },
+            set(),
+            SEVERITY_ROWS,
+            id="ash-config-declared-by-an-earlier-block",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED,
+                    _scan_block(f"set -a\nASH_CONFIG={TEAM}\nset +a"),
+                    _scan_block(),
+                )
+            },
+            set(),
+            SEVERITY_ROWS,
+            id="ash-config-assigned-under-set-a-by-an-earlier-block",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED, _scan_block(f"ASH_CONFIG={TEAM}"), _scan_block()
+                )
+            },
+            set(),
+            SEVERITY_ROWS,
+            id="ash-config-assigned-by-an-earlier-block",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED,
+                    _scan_block(f"ASH_CONFIG={TEAM} ash config get"),
+                    _scan_block(),
+                )
+            },
+            set(),
+            SEVERITY_ROWS,
+            id="ash-config-as-a-prefix-in-an-earlier-block",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED, _scan_block("export ASH_SOURCE_DIR=sub"), _scan_block()
+                )
+            },
+            set(),
+            SEVERITY_ROWS,
+            id="ash-source-dir-exported-by-an-earlier-block",
+        ),
+        pytest.param(
+            {"text": _join(DISCOVERED, _scan_block("ash report"))},
+            set(),
+            SEVERITY_ROWS,
+            id="a-report-runs-no-discovery",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED, NAMED, _scan_block(f"ash config get --config {TEAM}")
+                )
+            },
+            {"config:project_name"},
+            SEVERITY_ROWS,
+            id="config-get-names-its-config",
+        ),
+        pytest.param(
+            {"text": _join(DISCOVERED, _scan_block("ash config get"))},
+            SEVERITY_ROWS,
+            set(),
+            id="config-get-discovers-as-the-scan-does",
+        ),
+        pytest.param(
+            {"text": _join(DISCOVERED, _scan_block("ash config validate"))},
+            SEVERITY_ROWS,
+            set(),
+            id="config-validate-discovers-as-the-scan-does",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED,
+                    _scan_block(
+                        "ash scan --offline --config-overrides 'fail_on_findings=false'"
+                    ),
+                )
+            },
+            SEVERITY_ROWS,
+            set(),
+            id="config-overrides-names-no-config",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    _scan_block(f"export ASH_CONFIG={TEAM}"),
+                    _scan_block("ls", fresh=True),
+                    DISCOVERED,
+                    _scan_block(),
+                )
+            },
+            SEVERITY_ROWS,
+            set(),
+            id="ash-config-set-in-an-earlier-session",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED, _scan_block(), _scan_block(f"export ASH_CONFIG={TEAM}")
+                ),
+                "loading": 0,
+            },
+            SEVERITY_ROWS,
+            set(),
+            id="ash-config-set-after-the-loading-block",
+        ),
+    ],
+)
+def test_a_discovered_config_counts_only_through_a_command_that_ran_discovery(
+    tmp_path, variant, covered, uncovered
+):
+    """A command reads a configuration through discovery only when it is given no
+    config path: resolve_config discovers only when config_path is None (config/
+    resolve_config.py), and --config and -c take ASH_CONFIG as their environment
+    variable, on the scan (cli/scan.py) and the config commands (cli/config.py) alike.
+    So when the loading block gives --config or -c in any spelling, or ASH_CONFIG is
+    assigned in a shell block of the session at or before it (on the command, by
+    export or declare -x, or by a plain assignment, which the runner's set -a
+    exports), no file counts through discovery, and only a file the command names can
+    count. An ASH_SOURCE_DIR assigned the same way stops it too: the command then
+    searches the directory that variable names, not the working directory. The
+    commands whose code shows discovery are the scan and the config commands (get and
+    validate here); ash report resolves with no directory and so discovers nothing.
+    An assignment in an earlier session, or after the loading block, changes nothing,
+    and --config-overrides names no config."""
+    run = _loading_run(tmp_path, **variant)
+
+    result = _covered(run, _config_features())
+
+    assert covered <= result, sorted(covered - result)
+    assert not uncovered & result, sorted(uncovered & result)
 
 
 @pytest.mark.parametrize(
