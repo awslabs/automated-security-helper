@@ -103,7 +103,8 @@ def test_a_library_callers_options_reach_the_inner_scan_not_the_host_programs_ar
     assert argv[:3] == ["scan", "fs", str(opts.source_dir)]
     assert "--source-dir" not in argv
     assert _after_flag(argv, "--output-dir") == [str(opts.output_dir)]
-    assert _after_flag(argv, "--scanners") == ["bandit"]
+    assert _after_flag(argv, "--add-scanners") == ["bandit"]
+    assert _after_flag(argv, "--scanners") == []
     assert _after_flag(argv, "--config-overrides") == ["global_settings.x=1"]
     assert "/elsewhere" not in argv
     assert "grype" not in argv
@@ -186,6 +187,7 @@ def test_the_scan_cli_reads_every_forwarded_option_as_the_builder_spells_it(
     from automated_security_helper.cli.main import app
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.delenv("ASH_SCANNERS", raising=False)
     opts = _every_option_set(tmp_path)
     argv = ras._nix_inner_argv(opts)
 
@@ -200,7 +202,9 @@ def test_the_scan_cli_reads_every_forwarded_option_as_the_builder_spells_it(
     assert read("output_dir") == str(opts.output_dir)
     assert read("config") == opts.config
     assert read("config_overrides") == ["a=1", "b=2"]
-    assert read("scanners") == ["bandit", "semgrep"]
+    # The legacy list is given as the additive flag the CLI reads the same way.
+    assert read("add_scanners") == ["bandit", "semgrep"]
+    assert not read("scanners")
     assert read("exclude_scanners") == ["grype"]
     assert read("ash_plugin_modules") == ["my.plugins"]
     assert read("output_formats") == [ExportFormat.SARIF.value]
@@ -242,7 +246,8 @@ def test_every_forwarded_option_is_spelled_as_the_scan_cli_reads_it(tmp_path):
     assert _after_flag(argv, "--output-dir") == [str(opts.output_dir)]
     assert _after_flag(argv, "--config") == [str(tmp_path / "ash.yaml")]
     assert _after_flag(argv, "--config-overrides") == ["a=1", "b=2"]
-    assert _after_flag(argv, "--scanners") == ["bandit", "semgrep"]
+    assert _after_flag(argv, "--add-scanners") == ["bandit", "semgrep"]
+    assert _after_flag(argv, "--scanners") == []
     assert _after_flag(argv, "--exclude-scanners") == ["grype"]
     assert _after_flag(argv, "--ash-plugin-modules") == ["my.plugins"]
     assert _after_flag(argv, "--output-formats") == [ExportFormat.SARIF.value]
@@ -696,14 +701,16 @@ def test_the_workspace_subject_reads_every_option_the_inner_scan_is_given(
 ):
     """The test above spells the command line out; this one hands it to the command
     that runs inside the shell, so a flag the subject does not take is an error here
-    and not a Nix run that fails inside the shell. The options of a directory scan
-    (the changed-files scope, a shard, saved results) are not given to a workspace
-    scan, so none is set."""
+    and not a Nix run that fails inside the shell. The options of a directory scan that
+    a workspace scan does not take are not given to it: no shard is set here, and the
+    saved results, which are set, are left out of the command by the builder. The
+    changed-files scope is given: the subject takes it and applies it to each project."""
     import typer
 
     from automated_security_helper.cli.main import app
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.delenv("ASH_SCANNERS", raising=False)
     plan = SimpleNamespace(
         workspace_file="/ws/dev.code-workspace",
         workspace_config_source="/ws/policy.yaml",
@@ -712,16 +719,16 @@ def test_the_workspace_subject_reads_every_option_the_inner_scan_is_given(
         update={
             "workspace_plan": plan,
             "allow_missing_projects": True,
-            "changed_files_only": False,
-            "existing_results": None,
             "shard_index": None,
             "shard_count": None,
         }
     )
+    assert opts.existing_results, "saved results are set; the builder drops them"
     argv = ras._nix_inner_argv(opts)
 
     subject = typer.main.get_command(app).commands["scan"].commands["workspace"]
     assert argv[:3] == ["scan", "workspace", "/ws/dev.code-workspace"]
+    assert "--use-existing" not in argv
     parsed = subject.make_context("workspace", argv[2:], resilient_parsing=False).params
 
     def read(name):
@@ -733,12 +740,82 @@ def test_the_workspace_subject_reads_every_option_the_inner_scan_is_given(
     assert read("output_dir") == str(opts.output_dir)
     assert read("config") == opts.config
     assert read("config_overrides") == ["a=1", "b=2"]
-    assert read("scanners") == ["bandit", "semgrep"]
+    assert read("add_scanners") == ["bandit", "semgrep"]
+    assert not read("scanners")
     assert read("exclude_scanners") == ["grype"]
     assert read("output_formats") == [ExportFormat.SARIF.value]
     assert read("strategy") == ExecutionStrategy.SEQUENTIAL.value
     assert read("quiet") is True
     assert read("fail_on_incomplete_scanners") is True
+    assert read("changed_files_only") is True
+    assert read("base_ref") == "origin/trunk"
+
+
+def test_a_workspace_scan_in_nix_mode_gives_the_inner_scan_its_changed_files_scope(
+    tmp_path,
+):
+    """``ash --workspace FILE --changed-files-only --mode nix`` scopes each project to
+    the files its own repository changed, and the inner scan, the ``workspace``
+    subject, is given the scope and reads it as the options ``fs`` reads: the command
+    line carries the pair once, and the subject parses it to the same values."""
+    import typer
+
+    from automated_security_helper.cli.main import app
+
+    plan = SimpleNamespace(
+        workspace_file="/ws/dev.code-workspace", workspace_config_source=None
+    )
+    opts = ras.ScanOptions(
+        source_dir=tmp_path / "src",
+        output_dir=tmp_path / "out",
+        mode=RunMode.nix,
+        changed_files_only=True,
+        base_ref="origin/trunk",
+    )
+    argv = ras._nix_inner_argv(opts.model_copy(update={"workspace_plan": plan}))
+
+    assert argv[:3] == ["scan", "workspace", "/ws/dev.code-workspace"]
+    assert argv.count("--changed-files-only") == 1
+    assert _after_flag(argv, "--base-ref") == ["origin/trunk"]
+    subject = typer.main.get_command(app).commands["scan"].commands["workspace"]
+    parsed = subject.make_context("workspace", argv[2:], resilient_parsing=False).params
+    assert parsed["changed_files_only"] is True
+    assert parsed["base_ref"] == "origin/trunk"
+
+
+def test_a_workspace_scan_in_nix_mode_is_asked_to_read_no_saved_results(
+    tmp_path, monkeypatch
+):
+    """``ash --workspace FILE --use-existing --mode nix`` is taken by the host, which
+    hands the run the output directory's results file, and the scan inside the shell
+    reads none: the workspace executor scans every project afresh. The ``workspace``
+    subject declares no ``--use-existing``, so the option in the command would end the
+    scan with a usage error. A directory scan is still given it."""
+    import typer
+
+    from automated_security_helper.cli.main import app
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.delenv("ASH_SCANNERS", raising=False)
+    out = tmp_path / "out"
+    plan = SimpleNamespace(
+        workspace_file="/ws/dev.code-workspace", workspace_config_source=None
+    )
+    opts = ras.ScanOptions(
+        source_dir=tmp_path / "src",
+        output_dir=out,
+        mode=RunMode.nix,
+        existing_results=str(out / "ash_aggregated_results.json"),
+    )
+
+    argv = ras._nix_inner_argv(opts.model_copy(update={"workspace_plan": plan}))
+
+    assert argv[:3] == ["scan", "workspace", "/ws/dev.code-workspace"]
+    assert "--use-existing" not in argv
+    subject = typer.main.get_command(app).commands["scan"].commands["workspace"]
+    parsed = subject.make_context("workspace", argv[2:], resilient_parsing=False).params
+    assert parsed["file"] == "/ws/dev.code-workspace"
+    assert "--use-existing" in ras._nix_inner_argv(opts), "the directory scan's control"
 
 
 @pytest.fixture
@@ -782,7 +859,7 @@ def test_values_a_shell_would_split_reach_the_launcher_as_single_arguments(
     for flag, value in (
         ("fs", str(awkward_dir)),
         ("--config-overrides", awkward_override),
-        ("--scanners", "scanner with space"),
+        ("--add-scanners", "scanner with space"),
     ):
         assert cmd.count(value) == 1, (value, cmd)
         assert cmd[cmd.index(value) - 1] == flag, (flag, cmd)
@@ -995,6 +1072,150 @@ def test_an_additive_flag_crosses_the_nix_boundary_as_an_addition(launched, tmp_
     assert _after_flag(argv, "--add-scanners") == ["trivy"]
     assert _after_flag(argv, "--only-scanners") == []
     assert _after_flag(argv, "--scanners") == []
+
+
+def test_the_deprecated_scanners_list_crosses_the_nix_boundary_as_an_addition(
+    launched, tmp_path
+):
+    """The scan CLI prints a deprecation line for ``--scanners``, and this process
+    printed it already for the flag or ``ASH_SCANNERS`` that named the list. The scan
+    inside the shell shares this process's standard error and skips the line only
+    inside the container, so a list that crossed as ``--scanners`` printed it a second
+    time. It crosses as ``--add-scanners``, which the CLI reads the same way and does
+    not deprecate, ahead of the call's own additions, the order this process folds the
+    two lists in."""
+    _run(tmp_path, scanners=["bandit", "semgrep"], add_scanners=["trivy"])
+    argv = launched["argv"]
+
+    assert _after_flag(argv, "--add-scanners") == ["bandit", "semgrep", "trivy"]
+    assert _after_flag(argv, "--scanners") == []
+    assert _after_flag(argv, "--only-scanners") == []
+
+
+def test_no_option_the_scan_subjects_deprecate_crosses_the_nix_boundary(
+    tmp_path, monkeypatch
+):
+    """Each key in ``DEPRECATED_KEYS`` is an option its subject reads with a
+    deprecation line, and the inner scan prints that line on this process's standard
+    error. The flags are read from the subject commands, so a key added to the list is
+    checked here without a change to this test, and none may be on the inner command
+    line of either subject."""
+    import typer
+
+    from automated_security_helper.cli.main import app
+    from automated_security_helper.cli.scan_group import DEPRECATED_KEYS
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    plan = SimpleNamespace(
+        workspace_file="/ws/dev.code-workspace", workspace_config_source=None
+    )
+    every = _every_option_set(tmp_path)
+    inner = {
+        "fs": ras._nix_inner_argv(every),
+        "workspace": ras._nix_inner_argv(
+            every.model_copy(
+                update={
+                    "workspace_plan": plan,
+                    "existing_results": None,
+                    "shard_index": None,
+                    "shard_count": None,
+                }
+            )
+        ),
+    }
+    subjects = typer.main.get_command(app).commands["scan"].commands
+
+    for name, argv in inner.items():
+        assert argv[:2] == ["scan", name]
+        deprecated = {
+            flag
+            for param in subjects[name].params
+            if param.name in DEPRECATED_KEYS
+            for flag in (*param.opts, *param.secondary_opts)
+        }
+        # The control: --scanners is among them, so an empty intersection is a command
+        # line free of them and not a lookup that found none.
+        assert "--scanners" in deprecated, (name, sorted(deprecated))
+        assert not deprecated.intersection(argv), (name, argv)
+
+
+def test_the_scan_inside_the_shell_prints_no_deprecation_line_for_a_scanner_list(
+    tmp_path, monkeypatch
+):
+    """Nix mode runs two scans that share one standard error: this process, which
+    prints the deprecation line for ``--scanners`` once, and the scan inside the shell,
+    whose command line the builder makes. The line is skipped only inside the
+    container, so a list given to the shell as ``--scanners`` printed it again. This
+    runs the builder's command line through the scan CLI, as the shell does: no line
+    is printed, and the scan selects what this process would. The control is the same
+    command line with the list spelled ``--scanners``, which prints it, so the quiet
+    run is a run that got as far as the line."""
+    from typer.testing import CliRunner
+
+    from automated_security_helper.cli import scan as scan_module
+    from automated_security_helper.cli.main import app
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    for name in (
+        "ASH_CONFIG",
+        "ASH_SOURCE_DIR",
+        "ASH_OUTPUT_DIR",
+        "ASH_WORKSPACE",
+        "ASH_WORKSPACE_CONFIG",
+        "ASH_SCANNERS",
+        "ASH_EXCLUDED_SCANNERS",
+        "ASH_MODE",
+        "ASH_IN_CONTAINER",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("COLUMNS", "400")
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.chdir(tmp_path)
+    source = tmp_path / "src"
+    source.mkdir()
+    reached: Dict[str, Any] = {}
+
+    def fake_run_ash_scan(**kwargs):
+        reached.update(kwargs)
+        return AshAggregatedResults()
+
+    monkeypatch.setattr(scan_module, "run_ash_scan", fake_run_ash_scan)
+
+    def inner_scan(arguments):
+        reached.clear()
+        result = CliRunner().invoke(app, arguments)
+        assert reached, f"the scan was not reached: {result.output}"
+        return result.output, dict(reached)
+
+    opts = ras.ScanOptions(
+        source_dir=source,
+        output_dir=tmp_path / "out",
+        mode=RunMode.nix,
+        scanners=["bandit"],
+        progress=False,
+        show_summary=False,
+    )
+    argv = ras._nix_inner_argv(opts)
+    deprecation_line = "DeprecationWarning: --scanners"
+
+    control_output, _ = inner_scan(
+        ["--scanners" if arg == "--add-scanners" else arg for arg in argv]
+    )
+    assert deprecation_line in control_output, control_output
+
+    output, given = inner_scan(argv)
+    assert deprecation_line not in output, output
+    host = ras._selection_layers(opts, MagicMock())
+    inner = ras._selection_layers(
+        SimpleNamespace(
+            mode=RunMode.local,
+            scanners=given["scanners"],
+            only_scanners=given["only_scanners"],
+            add_scanners=given["add_scanners"],
+        ),
+        MagicMock(),
+    )
+    assert inner == host
 
 
 def test_a_config_only_selection_sends_no_selection_flag_across_the_nix_boundary(

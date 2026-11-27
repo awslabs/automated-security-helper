@@ -1659,6 +1659,38 @@ class TestTheInnerArgvIsAcceptedByTheInnerCli:
             assert ctx.params["ignore_suppressions"] is True
             assert "source_dir" not in ctx.params
 
+    def test_a_workspace_invocation_that_asked_for_saved_results_is_still_read(
+        self, tmp_path
+    ):
+        """The legacy spellings of a workspace scan take ``--use-existing``, and the host
+        hands the container the results file it resolved. The scan inside is the
+        ``workspace`` subject, which declares no such option, so the flag would end it
+        with a usage error; its executor scans every project afresh, so nothing is lost
+        by leaving the flag out of the command."""
+        out = tmp_path / "out"
+        argv = self._inner_argv(
+            tmp_path,
+            workspace_relative_file="team/dev.code-workspace",
+            existing_results=(out / "ash_aggregated_results.json").as_posix(),
+        )
+
+        assert "--use-existing" not in argv
+        with self._parse_workspace(argv) as ctx:
+            assert ctx.params["file"] == "/src/team/dev.code-workspace"
+
+    def test_the_workspace_subject_declares_no_use_existing_option(self):
+        """Guards the premise of the row above: were the option declared, leaving it
+        out of the command would be a silent behavior change rather than the fix. Parsed
+        with a bare command, as the undeclared flag above is, so the code is click's own
+        and not the one ``ash`` maps it to."""
+        from typer.exceptions import TyperException
+
+        with pytest.raises(TyperException) as refusal:
+            self._parse_workspace(["/src/dev.code-workspace", "--use-existing"])
+
+        assert "--use-existing" in str(refusal.value)
+        assert refusal.value.exit_code == 2
+
 
 # ---------------------------------------------------------------------------
 # _execute_container

@@ -432,12 +432,11 @@ class TestSkeleton:
         }
         # What a workspace scan does not take: the options that read one directory,
         # an image or a remote repository, and the engine's `workspace`, which is
-        # the subject's FILE argument there.
+        # the subject's FILE argument there. The changed-files scope is taken: each
+        # project is scoped by a diff of its own repository.
         not_taken = {
             "source_dir",
             "use_existing",
-            "changed_files_only",
-            "base_ref",
             "staged",
             "baseline",
             "shard_index",
@@ -468,6 +467,7 @@ class TestSkeleton:
         assert {"workspace_config", "allow_missing_projects", "dry_run"} <= set(
             skeleton
         )
+        assert {"changed_files_only", "base_ref"} <= set(skeleton)
 
     def test_the_express_key_is_refused_with_the_flag_to_use(self, runner, tmp_path):
         """The thin client decides express/cold from the raw argv before any

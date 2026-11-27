@@ -190,6 +190,62 @@ class TestRunCommandAssembly:
             if arg == "--mount"
         )
 
+    @pytest.mark.parametrize(
+        "workspace_relative_file",
+        [
+            pytest.param("dev.code-workspace", id="workspace"),
+            pytest.param(None, id="directory"),
+        ],
+    )
+    def test_the_scan_inside_is_given_no_changed_files_scope(
+        self, tmp_path, workspace_relative_file
+    ):
+        """The host refuses ``--changed-files-only`` with ``--mode container`` before
+        anything is built (cli/scan.py), because this command forwards no such scope:
+        the scan inside would report every finding for a scan that asked for the
+        changed files. The command line carries neither the option nor its ref."""
+        command = _run_command(
+            tmp_path,
+            tmp_path / "out",
+            workspace_relative_file=workspace_relative_file,
+        )
+        assert "--changed-files-only" not in command
+        assert "--base-ref" not in command
+
+    def test_the_scan_inside_a_workspace_is_asked_to_read_no_saved_results(
+        self, tmp_path
+    ):
+        """``ash --workspace FILE --use-existing --mode container`` is taken by the host,
+        and the scan it runs reads no saved results: the workspace executor scans every
+        project afresh. ``ash scan workspace`` declares no ``--use-existing``, so the
+        option in the command would end the scan inside with a usage error."""
+        out = tmp_path / "out"
+        command = _run_command(
+            tmp_path,
+            out,
+            workspace_relative_file="dev.code-workspace",
+            existing_results=(out / "ash_aggregated_results.json").as_posix(),
+        )
+        index = command.index("workspace")
+        assert command[index - 1 : index + 2] == [
+            "scan",
+            "workspace",
+            "/src/dev.code-workspace",
+        ]
+        assert "--use-existing" not in command
+        assert "--existing-results" not in command
+
+    def test_the_scan_inside_a_directory_is_still_asked_to_read_them(self, tmp_path):
+        """The control for the row above: a directory scan reads the output
+        directory's results file, and the command says so after the subject."""
+        out = tmp_path / "out"
+        command = _run_command(
+            tmp_path,
+            out,
+            existing_results=(out / "ash_aggregated_results.json").as_posix(),
+        )
+        assert "--use-existing" in command[command.index("fs") :]
+
 
 class TestOutsideRootIsRefusedBeforeAnyContainerStarts:
     """Containment is decided before mode dispatch, asserted for container mode.
