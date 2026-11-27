@@ -49,6 +49,10 @@ and a link whose data cannot be read, and each has to reach one verdict, in one 
 words, with the refused upload removed. An encrypted member, a link too, is a row of
 ``REFUSED``, since its flag is read before anything else. What the module's own code
 raises is not about the archive and is not caught.
+
+Names that differ only in case or in Unicode normalization are read as one path on
+Windows and macOS. The rows that turn on it say what those platforms would, whatever
+this host is, through ``_names_fold_together``.
 """
 
 from __future__ import annotations
@@ -61,6 +65,7 @@ import hashlib
 import io
 import os
 import struct
+import sys
 import tarfile
 import threading
 import warnings
@@ -1846,6 +1851,149 @@ class TestNamesWindowsCannotHold:
 
     def test_the_rule_follows_the_platform(self):
         assert sa._ON_WINDOWS is (os.name == "nt")
+
+
+# ---------------------------------------------------------------------------
+# Rule 4 where names that differ only in case or normalization are one path.
+# ---------------------------------------------------------------------------
+
+_CAFE_COMPOSED = "caf\N{LATIN SMALL LETTER E WITH ACUTE}.py"
+_CAFE_DECOMPOSED = "cafe\N{COMBINING ACUTE ACCENT}.py"
+#: What the refusal adds where the two names it gives are not spelled alike.
+_FOLDED_NOTE = (
+    " (names that differ only in case or in Unicode normalization are one path on "
+    "this platform)"
+)
+
+
+@pytest.fixture(params=["windows", "macos"])
+def folding_platform(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> str:
+    """Windows, then macOS, as far as rule 4 can tell, whatever this host is."""
+    monkeypatch.setattr(sa, "_ON_WINDOWS", request.param == "windows")
+    if request.param == "macos":
+        monkeypatch.setattr(sys, "platform", "darwin")
+    return request.param
+
+
+@pytest.fixture
+def linux(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A platform that keeps a file for each spelling, whatever this host is."""
+    monkeypatch.setattr(sa, "_ON_WINDOWS", False)
+    monkeypatch.setattr(sys, "platform", "linux")
+
+
+#: Archives whose members land on one path where names fold, and on two on Linux:
+#: the archive, and the refusal's words where names fold.
+FOLDED = [
+    pytest.param(
+        # zipimport and `python app.zip` run the first member; the second is written
+        # over it on the filesystem the scan reads.
+        _zip_members([("app.py", b"EVIL = True\n"), ("APP.py", b"EVIL = False\n")]),
+        "zip entries 'app.py' and 'APP.py' are extracted to one path" + _FOLDED_NOTE,
+        id="two-names-that-differ-in-case",
+    ),
+    pytest.param(
+        _zip_members(
+            [(_CAFE_COMPOSED, b"EVIL = True\n"), (_CAFE_DECOMPOSED, b"EVIL = False\n")]
+        ),
+        f"zip entries {_CAFE_COMPOSED!r} and {_CAFE_DECOMPOSED!r} are extracted to one "
+        "path" + _FOLDED_NOTE,
+        id="one-name-in-nfc-and-in-nfd",
+    ),
+    pytest.param(
+        _zip_members([("pkg", b"a file"), ("PKG/", b"")]),
+        "zip entries 'pkg' and 'PKG/' are extracted to one path" + _FOLDED_NOTE,
+        id="a-file-and-a-directory-that-differ-in-case",
+    ),
+    pytest.param(
+        _zip_members([("pkg", b"a file"), ("PKG/mod.py", b"x")]),
+        "zip entry 'PKG/mod.py' is under 'pkg', which the archive holds as a file"
+        + _FOLDED_NOTE,
+        id="a-member-under-a-file-that-differs-in-case",
+    ),
+    pytest.param(
+        # As spelled, "B.py" sorts away from "b.py" with "a.py" between them: the
+        # names are folded before they are compared.
+        _zip_members([("B.py", b"1"), ("a.py", b"2"), ("b.py", b"3")]),
+        "zip entries 'B.py' and 'b.py' are extracted to one path" + _FOLDED_NOTE,
+        id="names-that-sort-apart-as-spelled",
+    ),
+]
+
+#: Archives whose paths stay distinct when names fold, so every platform admits them.
+STAY_DISTINCT = [
+    pytest.param(
+        _zip_members([("Docs/", b""), ("docs/guide.md", b"# Guide\n")]),
+        id="a-directory-and-a-file-in-it-that-differ-in-case",
+    ),
+    pytest.param(
+        _zip_members([("app.py", b"1"), ("apps.py", b"2"), ("app/mod.py", b"3")]),
+        id="names-with-a-common-start",
+    ),
+]
+
+
+class TestNamesThatFoldIntoOnePath:
+    """On Windows and macOS names that differ only in case or in Unicode normalization
+    are read as one path, so the second member can be written over the first and the
+    tree scanned is not the one ``zipimport`` or ``python app.zip`` reads. Red at the
+    base: each archive was admitted by both entry points on every platform."""
+
+    @pytest.mark.parametrize("payload,message", FOLDED)
+    def test_the_shared_function_refuses_them_where_names_fold(
+        self, folding_platform, tmp_path, payload, message
+    ):
+        destination = tmp_path / "tree"
+
+        refused = _extraction_refusal(_archive_file(tmp_path, payload), destination)
+
+        assert (refused.kind, str(refused)) == (Kind.PATH_COLLISION, message)
+        assert not destination.exists(), "a refused archive made the destination"
+
+    @pytest.mark.parametrize("payload,message", FOLDED)
+    def test_the_finalize_refuses_them_in_the_same_words(
+        self, folding_platform, tmp_path, payload, message
+    ):
+        delivered = _verdict(_finalize_refusal(payload, tmp_path / "workspace"))
+
+        assert delivered == (Kind.PATH_COLLISION, message)
+
+    @pytest.mark.parametrize("payload,message", FOLDED)
+    def test_each_is_admitted_where_names_do_not_fold(self, linux, payload, message):
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            members = sa.admit_zip_members(archive)
+
+            assert [member.filename for member in members] == archive.namelist()
+
+    @pytest.mark.parametrize("payload", STAY_DISTINCT)
+    def test_paths_that_stay_distinct_are_admitted_where_names_fold(
+        self, folding_platform, payload
+    ):
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            members = sa.admit_zip_members(archive)
+
+            assert [member.filename for member in members] == archive.namelist()
+
+
+class TestThePlatformDecidesWhetherNamesFold:
+    @pytest.mark.parametrize(
+        "windows,platform,folds",
+        [
+            pytest.param(True, "win32", True, id="windows"),
+            pytest.param(False, "darwin", True, id="macos"),
+            pytest.param(False, "linux", False, id="linux"),
+            pytest.param(False, "freebsd14", False, id="another-unix"),
+        ],
+    )
+    def test_windows_and_macos_fold_and_the_rest_do_not(
+        self, monkeypatch, windows, platform, folds
+    ):
+        monkeypatch.setattr(sa, "_ON_WINDOWS", windows)
+        monkeypatch.setattr(sys, "platform", platform)
+
+        assert sa._names_fold_together() is folds
 
 
 # ---------------------------------------------------------------------------

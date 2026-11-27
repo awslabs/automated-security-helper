@@ -12,8 +12,9 @@ anything in it is scanned, and both are held to the rules here, so the two entry
 points cannot drift apart: an archive one of them refuses, the other refuses in the
 same words. The rules are the ones the MCP delivery enforced, moved here, with
 additions that hold for both: a NUL, a ``.`` or an empty component in a member name,
-a Unicode path field that renames a member, two members on one path, an encrypted
-member, and a file that holds anything besides one zip (below).
+a Unicode path field that renames a member, two members on one path (names that differ
+only in case or Unicode normalization count as one on Windows and macOS), an
+encrypted member, and a file that holds anything besides one zip (below).
 
 What is refused
 ---------------
@@ -59,7 +60,12 @@ destination as it was.
    member under a path the archive holds as a file. zipfile writes the later of two
    members over the earlier, so the tree scanned would hold one of two files, while
    a reader that looks members up by name, as ``zipimport`` and ``python app.zip``
-   do, can run the other.
+   do, can run the other. On Windows and macOS, whose usual filesystems keep one file
+   for names that differ only in case (``app.py`` and ``APP.py``), and on macOS also
+   for names that differ only in Unicode normalization (a letter with an accent
+   written as one character, or as the letter and a combining accent), paths are
+   compared after NFC normalization and case folding on both; elsewhere they are
+   compared as the archive spells them.
 5. Links. Every symbolic link is refused, wherever it points. Resolving a target
    before extraction races the extraction (an earlier member can make the directory
    a later link's path runs through), and a source tree needs none. The refusal
@@ -133,9 +139,12 @@ do not load it.
 
 Limits
 ------
-* Rule 4 compares names as the archive spells them. Names that differ only in case
-  are one file on a filesystem that ignores case, and names that differ only in
-  Unicode normalization are one on a filesystem that normalizes them. There zipfile
+* Rule 4 folds names only on Windows and macOS (``_names_fold_together`` decides it).
+  Elsewhere it compares them as the archive spells them, so a tree extracted on Linux
+  and copied onto a filesystem that ignores case can still lose a file. The fold is
+  Unicode's, NFC and then case folding; a filesystem that equates more names than
+  that, or answers to a second name for a file (the 8.3 short names NTFS can keep for
+  long names), can still hold two members' paths as one. Where that happens zipfile
   writes the later of two files over the earlier, and a file and a directory end the
   extraction with the ``OSError`` the filesystem raises.
 * A member whose data is damaged is found when extraction reaches it, after the
@@ -166,6 +175,8 @@ import io
 import os
 import stat
 import struct
+import sys
+import unicodedata
 import zipfile
 from dataclasses import dataclass, field
 from enum import Enum
@@ -888,32 +899,90 @@ def _corrupt_unicode_path(
     )
 
 
+#: What a path-collision refusal adds when its two names are one path only because the
+#: platform folds names (rule 4): they are not spelled alike.
+_FOLDED_NAMES_NOTE = (
+    " (names that differ only in case or in Unicode normalization are one path "
+    "on this platform)"
+)
+
+
+def _names_fold_together() -> bool:
+    """Whether rule 4 compares paths by case and Unicode normalization, not as spelled.
+
+    NTFS (Windows) keeps one file for names that differ only in case, and APFS (macOS,
+    as it is set up by default) for names that differ in case or in Unicode
+    normalization; the filesystems of Linux and the other Unix systems keep two. Both
+    platforms get the same fold, since a source tree has no use for two names that
+    differ in nothing else. Rule 4 asks here, and nowhere else, so that a test can say
+    what another platform would.
+    """
+    return _ON_WINDOWS or sys.platform == "darwin"
+
+
+def _path_key(name: str, folded: bool) -> str:
+    """The key by which rule 4 sorts and compares the path of the member ``name``.
+
+    The name less a directory's trailing ``/``, after NFC normalization and case
+    folding when ``folded``, with each ``/`` read as the lowest character (an admitted
+    name holds no NUL, and neither step makes one or a ``/``).
+    """
+    path = name.removesuffix("/")
+    if folded:
+        path = unicodedata.normalize("NFC", path).casefold()
+    return path.replace("/", "\x00")
+
+
+def _folded_note(holder: str, other: str, *, under: bool) -> str:
+    """The note a collision needs when only folding makes ``other`` meet ``holder``.
+
+    ``other`` meets ``holder`` as spelled when it is the same path, or, when ``under``,
+    a path under it; then there is nothing to add.
+    """
+    exact_holder = _path_key(holder, folded=False)
+    exact_other = _path_key(other, folded=False)
+    if under:
+        spelled_alike = exact_other.startswith(exact_holder + "\x00")
+    else:
+        spelled_alike = exact_other == exact_holder
+    return "" if spelled_alike else _FOLDED_NAMES_NOTE
+
+
 def _refuse_shared_paths(members: List[zipfile.ZipInfo]) -> None:
     """Refuse two members extracted to one path, and a member under a file.
 
     A member's path is the name zipfile extracts it under, less a directory's
-    trailing ``/``; the name rules leave zipfile nothing else to rewrite in it.
+    trailing ``/``; the name rules leave zipfile nothing else to rewrite in it. Where
+    the platform's filesystems keep one file for names that differ only in case, or
+    in Unicode normalization too (:func:`_names_fold_together`), paths are compared
+    after NFC normalization and case folding, so ``app.py`` and ``APP.py`` are one
+    path there and two on Linux.
+
     Sorted with each ``/`` read as the lowest character (an admitted name holds no
     NUL), a path is followed at once by its duplicates and then by the paths under
-    it, so comparing each path with the next one finds every case in one pass.
+    it, so comparing each path with the next one finds every case in one pass; the key
+    is a function of the path alone, so folding it changes nothing about that.
     """
+    folded = _names_fold_together()
     order = sorted(
-        (info.filename.removesuffix("/").replace("/", "\x00"), position)
+        (_path_key(info.filename, folded), position)
         for position, info in enumerate(members)
     )
     for (path, earlier), (following, later) in zip(order, order[1:]):
+        holder = members[earlier].filename
+        other = members[later].filename
         if following == path:
             raise SourceArchiveRefused(
                 SourceArchiveRefusal.PATH_COLLISION,
-                f"zip entries {members[earlier].filename!r} and "
-                f"{members[later].filename!r} are extracted to one path",
+                f"zip entries {holder!r} and {other!r} are extracted to one path"
+                f"{_folded_note(holder, other, under=False)}",
             )
-        holder = members[earlier].filename
         if following.startswith(path + "\x00") and not holder.endswith("/"):
             raise SourceArchiveRefused(
                 SourceArchiveRefusal.PATH_COLLISION,
-                f"zip entry {members[later].filename!r} is under {holder!r}, "
-                "which the archive holds as a file",
+                f"zip entry {other!r} is under {holder!r}, "
+                "which the archive holds as a file"
+                f"{_folded_note(holder, other, under=True)}",
             )
 
 

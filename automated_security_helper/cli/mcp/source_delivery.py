@@ -2759,15 +2759,16 @@ def set_source_zip_finalize(
             holds a backslash, a NUL, or a ``.`` or empty component (or, on
             Windows, a name Windows cannot hold), a Unicode path field, in the
             central directory or a local header, that names another file, two
-            members extracted to one path or one under a file, a symlink member,
-            an encrypted member, or a file that holds anything besides one zip:
-            bytes before, between or after its members (two zips end to end, a tar
-            whose last member is a zip), or a local header or data descriptor that
-            disagrees with the central directory, each refused as not a zip; or an
-            archive zipfile cannot read (a zip version or compression method it does
-            not implement, a method whose module this Python lacks, a member with
-            damaged data), refused in the words ``ash scan fs --archive`` uses. A
-            refused upload is removed.
+            members extracted to one path or one under a file (names that differ
+            only in case or Unicode normalization are read as one path on Windows
+            and macOS), a symlink member, an encrypted member, or a file that holds
+            anything besides one zip: bytes before, between or after its members
+            (two zips end to end, a tar whose last member is a zip), or a local
+            header or data descriptor that disagrees with the central directory,
+            each refused as not a zip; or an archive zipfile cannot read (a zip
+            version or compression method it does not implement, a method whose
+            module this Python lacks, a member with damaged data), refused in the
+            words ``ash scan fs --archive`` uses. A refused upload is removed.
         zipfile.BadZipFile: if the assembled bytes are not a zip archive. The
             refusal (kind ``not-a-zip``) is a ``BadZipFile`` as well. The
             checksum matching means the client sent what it meant to send, so
