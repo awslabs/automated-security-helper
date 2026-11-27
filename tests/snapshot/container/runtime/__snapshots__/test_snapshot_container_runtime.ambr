@@ -19,8 +19,6 @@
   dict({
     'exit_code': 2,
     'host_output_after_container': '''
-                   ERROR    Container execution failed with code 2
-      
       === ASH Scan Completed in <DURATION>: Next Steps ===
       View detailed findings...
         - SARIF: 'out/reports/ash.sarif'

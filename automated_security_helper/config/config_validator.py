@@ -3701,8 +3701,10 @@ def _built_in_section_classes(segment_name: str) -> Dict[str, type[BaseModel]]:
 _ABSOLUTE_PATH_PATTERN = re.compile(r"^(?:/|[A-Za-z]:/)")
 
 #: What follows "Path '<pattern>' " in absolute_path_warning, which the linter
-#: reads back to fold the validator's copy of the warning into its own.
-ABSOLUTE_PATH_MESSAGE = "is absolute, so it matches nothing"
+#: reads back to fold the validator's copy of the warning into its own. It claims
+#: only what is true of every path the warning is given for: in the scan root, a
+#: file is reported relative to the root, so an absolute pattern matches none.
+ABSOLUTE_PATH_MESSAGE = "is absolute, so it matches nothing in the scan root"
 
 _DRIVE_PATH_PATTERN = re.compile(r"^[A-Za-z]:/")
 _GLOB_CHARACTERS = frozenset("*?[")
@@ -3746,11 +3748,13 @@ def _is_directory_under(relative: str, project_root: Path) -> bool:
 _REPEATED_SLASHES = re.compile(r"/{2,}")
 
 
-def _relative_through_links(form: str, project_root: Path) -> str:
-    """The rest of the absolute ``form`` under the root when its literal part
+def _relative_through_links(form: str, project_root: Path) -> Optional[str]:
+    """The rest of the absolute ``form`` after the root when its literal part
     (before any glob) reaches the root through a symbolic link: the pattern
     spelled through a linked path to the scanned tree, where the root is
-    resolved (``source_dir.resolve()``). Empty when it does not."""
+    resolved (``source_dir.resolve()``). Empty when the link resolves to the root
+    itself and nothing follows it; None when the literal part does not reach the
+    root."""
     literal: List[str] = []
     tail: List[str] = []
     for part in form.split("/"):
@@ -3759,15 +3763,21 @@ def _relative_through_links(form: str, project_root: Path) -> str:
         else:
             literal.append(part)
     if len(literal) < 2 or _DOT_COMPONENTS & set(literal):
-        return ""
+        return None
     try:
         real = Path(os.path.realpath("/".join(literal))).as_posix()
     except (OSError, ValueError):
-        return ""
+        return None
     root = project_root.as_posix().rstrip("/") + "/"
-    if not real.startswith(root):
-        return ""
-    return "/".join([real[len(root) :], *tail]) if tail else real[len(root) :]
+    # The root itself is under it: its real path is the root with its slash left off.
+    under = real if real.endswith("/") else real + "/"
+    if not under.startswith(root):
+        return None
+    below = real[len(root) :]
+    if not below:
+        # The link resolves to the root itself: what is left is what follows it.
+        return "/".join(tail)
+    return "/".join([below, *tail]) if tail else below
 
 
 def absolute_path_warning(
@@ -3777,22 +3787,38 @@ def absolute_path_warning(
     ignore_path: bool = True,
     shown_pattern: Optional[str] = None,
 ) -> Optional[str]:
-    """The warning for an ignore or suppression ``path`` that is absolute, or None.
+    """The warning for an ignore or suppression ``path`` that is absolute and can
+    name no path a scan reports, or None.
 
-    The matcher compares ``path`` with file paths relative to the scan root
-    (utils/path_matching.py), so an absolute pattern matches nothing anywhere,
-    and the files it names are scanned. ``ash config lint`` and ``ash config
-    validate`` both report it, with the spelling that matches when there is
-    one:
+    The matcher compares ``path`` with the path a scan reports for a file. For a
+    file in the scan root that is relative to the root (utils/path_matching.py),
+    so an absolute pattern matches nothing there, and the files it names are
+    scanned. For a file outside the source directory it is the path the scanner
+    wrote, which is absolute: a converted file under an output directory outside
+    the tree, as ``/out`` is in a container scan, or a file in an image
+    (``sarif_utils._normalize_sarif_uri`` strips the source directory and nothing
+    else). The pattern is compared with that as written, so an absolute pattern
+    can match it, and saying it matches nothing would be false.
 
-    * a pattern under ``project_root``: the rest of it after the root, compared
-      case-insensitively only for a Windows path, a drive (``C:/...``) or a
-      root on a UNC share (``//server/share/repo``), as Windows does;
+    So ``ash config lint`` and ``ash config validate`` warn about an absolute
+    pattern only when it cannot name a path a scan reports, with the spelling
+    that matches when there is one:
+
+    * a pattern under ``project_root``, or the root itself: the rest of it after
+      the root, compared case-insensitively only for a Windows path, a drive
+      (``C:/...``) or a root on a UNC share (``//server/share/repo``), as
+      Windows does;
     * ``/x``: ``x``, when what ``x`` names before any glob exists under the root
-      (``/vendor/**`` for the root's ``vendor``);
-    * otherwise, a drive or a UNC share (``//server/share``) outside the root,
-      ``/x`` that names nothing under it, or a rest that holds a "." or ".."
-      component (``..`` leaves the root): none, only "write it relative".
+      (``/vendor/**`` for the root's ``vendor``), or a pattern that reaches the
+      root through a link;
+    * a pattern with a "." or ".." component, which no reported path holds
+      (``..`` leaves the root), and one that is only separators (``/``), which
+      the matcher reads as no path: none, only "write it relative".
+
+    Any other absolute pattern draws no warning: a drive or a UNC share outside
+    the root, ``/x`` that names nothing under it, and ``/**``, which the matcher
+    reads as ``**``. Whether it can match is decided on the path as it is, also
+    for one the config read from the environment.
 
     A remainder that ends in ``/``, or that has no glob and is a directory in
     the root, names a directory, and is spelled as
@@ -3817,12 +3843,14 @@ def absolute_path_warning(
     root = project_root.as_posix().rstrip("/") + "/"
     drive = _DRIVE_PATH_PATTERN.match(form) is not None
     windows = drive or root.startswith("//")
+    # The root itself is under it: '/root' is '/root/' with its slash left off.
+    under = form if form.endswith("/") else form + "/"
     under_root = (
-        form.lower().startswith(root.lower()) if windows else form.startswith(root)
+        under.lower().startswith(root.lower()) if windows else under.startswith(root)
     )
-    if read_from_environment:
-        relative = ""
-    elif under_root:
+    # Where the path points is read from the path as it is, one read from the
+    # environment included; only the spelling it is given below is hidden.
+    if under_root:
         # The rest after the root, with the slashes a doubled separator leaves
         # ('/root//build') taken out: left in, the rest was '/build', which
         # joined to the root is the host's '/build', and the advice another
@@ -3834,7 +3862,22 @@ def absolute_path_warning(
     elif _names_something_under(form.lstrip("/"), project_root):
         relative = form.lstrip("/")
     else:
-        relative = _relative_through_links(form, project_root)
+        linked = _relative_through_links(form, project_root)
+        # A link that resolves to the root is the root, as its own spelling is.
+        under_root = linked is not None
+        relative = linked or ""
+    if not (
+        under_root
+        or relative
+        or _DOT_COMPONENTS & set(form.split("/"))
+        or not form.strip("/")
+    ):
+        # Not under the root, not named in it, no "." or ".." component, and
+        # more than separators: compared as written with a file reported outside
+        # the source directory, which keeps its absolute path, so it can match.
+        return None
+    if read_from_environment:
+        relative = ""
     if _DOT_COMPONENTS & set(relative.split("/")):
         relative = ""
     if relative and windows:
@@ -3850,7 +3893,7 @@ def absolute_path_warning(
     )
     return (
         f"Path '{shown_pattern}' {ABSOLUTE_PATH_MESSAGE}: ignore and suppression "
-        f"paths are matched relative to the scan root. {advice}"
+        f"paths match a file in the scan root by its path relative to it. {advice}"
     )
 
 

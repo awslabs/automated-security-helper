@@ -21,9 +21,10 @@ What is held to what:
   name the harvested lockfile each match a finding reported at the path
   syft gives the lockfile, so none of them reads as unused, and a finding for
   another crate or another rustls version is not suppressed (the control).
-  An entry for the provenance manifest the harvest writes beside the lockfile
-  (detect-secrets reads its sha256 digest as a secret) names the manifest,
-  not the lockfile, and is not one of the four.
+  Each entry for a provenance manifest the harvest writes beside a lockfile
+  (detect-secrets reads the manifest's sha256 digest as a secret) names that
+  manifest, not the lockfile, and is not one of the four, so how many packages
+  the repository harvests changes nothing the oracle asserts.
 """
 
 from __future__ import annotations
