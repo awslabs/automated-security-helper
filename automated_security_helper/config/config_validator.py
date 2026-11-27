@@ -2330,13 +2330,15 @@ def _schema_names() -> frozenset:
     """Every name the configuration schema defines, from AshConfig down.
 
     Each model's field names and aliases (a declared plugin's key, such as
-    `bandit` or `cdk-nag`, is a field of its segment) and the models' class
-    names. A message names these as the path of what it refuses, and an input
-    value equal to one (a section's `name: bandit`) is not something to hide.
+    `bandit` or `cdk-nag`, is a field of its segment), the models' class names
+    and the old spellings of the table of renamed keys. A message names these as
+    the path of what it refuses, and an input value equal to one (a section's
+    `name: bandit`) is not something to hide.
     """
     from pydantic import BaseModel
 
     from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.models import spelling_table
 
     names: set = set()
     seen: set = set()
@@ -2362,6 +2364,8 @@ def _schema_names() -> frozenset:
                 walk(nested)
 
     walk(AshConfig)
+    for row in spelling_table.ROWS:
+        names.update(row.old)
     return frozenset(names)
 
 

@@ -261,6 +261,18 @@ def _without(data: Dict[Any, Any], old: str) -> Dict[Any, Any]:
     return {key: value for key, value in data.items() if key != old}
 
 
+def _field_reads(model: type[BaseModel], name: str, key: str) -> bool:
+    """Whether the field ``name`` of ``model`` reads ``key`` itself, as a key of
+    its alias or of its validation alias."""
+    field = model.model_fields.get(name)
+    if field is None:
+        return False
+    return key in (
+        *_alias_strings(field.alias),
+        *_alias_strings(field.validation_alias),
+    )
+
+
 def check_spellings(model: type[BaseModel], data: Any, info: ValidationInfo) -> Any:
     """The body of a ``mode="before"`` validator: one spelling per field.
 
@@ -271,8 +283,10 @@ def check_spellings(model: type[BaseModel], data: Any, info: ValidationInfo) -> 
     A config built from a mapping says the deprecation while the row is live (a
     ``DeprecationWarning`` and, where the load collects them, a line), drops an
     old key equal to the canonical one, refuses different values, and otherwise
-    renames the old key where it stood. From the row's removal release it does
-    the same and says nothing: the model reads an old spelling at every release
+    leaves a lone old key the field reads itself under its aliases (so the
+    location pydantic prints for an error names the key as the data wrote it) and
+    renames any other old key where it stood. From the row's removal release it
+    does the same and says nothing: the model reads an old spelling at every release
     and refuses none, so an entry built in code keeps loading, and what refuses a
     removed spelling is a reader of a document (the loader's fold, and
     ``config.spellings.refuse_removed_spellings``). A file the loader read has
@@ -315,10 +329,11 @@ def check_spellings(model: type[BaseModel], data: Any, info: ValidationInfo) -> 
                     kind = getattr(model, "ENTRY_KIND", None) or model.__name__
                     warned.append(f"In {kind}: {message}")
             if row.canonical not in data:
-                data = {
-                    (row.canonical if key == old else key): value
-                    for key, value in data.items()
-                }
+                if not _field_reads(model, row.canonical, old):
+                    data = {
+                        (row.canonical if key == old else key): value
+                        for key, value in data.items()
+                    }
             elif data[old] == data[row.canonical]:
                 data = _without(data, old)
             else:
