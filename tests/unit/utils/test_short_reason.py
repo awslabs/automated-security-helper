@@ -115,3 +115,26 @@ def test_the_reporter_uses_the_same_limit_and_check():
     assert report_content_emitter.short_error_reason(prefix + "read nothing") == (
         "read nothing"
     )
+
+
+@pytest.mark.parametrize(
+    "sentence, why",
+    [
+        ("line one\nline two", "a line break inside the first sentence"),
+        ("line one\r\nline two", "a carriage return and a line break"),
+        ("tab\tseparated", "a tab"),
+        ("escape \x1b[31m red", "an escape sequence"),
+        ("line" + chr(0x2028) + "separator", "a Unicode line separator"),
+    ],
+)
+def test_the_reporter_applies_the_printable_line_rule_too(sentence, why):
+    """The first sentence of an error is held to the whole check, not to its length
+    and its path rule alone: ``_SENTENCE_END`` does not end a sentence at a bare line
+    break, so a two-line text was returned whole and could break a Markdown table."""
+    from automated_security_helper.plugin_modules.ash_builtin.reporters import (
+        report_content_emitter,
+    )
+
+    prefix = "Failed to execute x scanner on source: "
+
+    assert report_content_emitter.short_error_reason(prefix + sentence) is None, why

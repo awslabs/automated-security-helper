@@ -8,6 +8,11 @@ execution logs"; the reason was only in ``ash.log`` and in the ``errors`` of the
 scanner's per-target reports in ``ash_aggregated_results.json``. The reports now
 list an ERROR scanner under "Scanners that did not run" with the first sentence
 of its recorded failure, without the paths, stderr and details that follow it.
+
+A scanner whose row records why it failed (``error_reason``, which the scan phase
+and the executor write) is listed with that sentence instead, once it passes the
+check for a short sentence with no path in it that the scan phase writes by. The
+first sentence of the error is read for an error that recorded no reason.
 """
 
 import pytest
@@ -17,6 +22,10 @@ from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerStatusInfo,
+    ScannerTargetStatusInfo,
+)
+from automated_security_helper.plugin_modules.ash_builtin.reporters import (
+    report_content_emitter,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporter import (
     HtmlReporter,
@@ -89,6 +98,48 @@ def _entries(model: AshAggregatedResults) -> dict:
         for entry in ReportContentEmitter(model).get_scanners_not_run()
         for name in entry["scanners"]
     }
+
+
+#: What a scanner's row records when the scan phase or the executor said why it
+#: failed: a code and one sentence with no path in it. It is not what the first
+#: sentence of CHECKOV_EXIT says, so a test that finds it in a report knows the
+#: recorded reason was shown and not the error beside it.
+RECORDED_CODE = "timed_out"
+RECORDED_REASON = "it timed out after 30 s and was killed"
+#: A recorded sentence with a path in it, as a results file edited by hand or
+#: written by another tool can hold.
+PLANTED = "could not read /home/me/secret/results.json"
+
+
+def _recorded(
+    *names: str,
+    sentence: object = RECORDED_REASON,
+    code: object = RECORDED_CODE,
+    errors: tuple = (),
+) -> AshAggregatedResults:
+    """A scan in which each named scanner's ERROR row records why it failed.
+
+    ``errors`` are the errors its per-target report holds beside the row, the text
+    the first-sentence reading starts from. None by default, so the row's own
+    reason is all there is to show; ``sentence=None`` and ``code=None`` record
+    no reason.
+    """
+    model = AshAggregatedResults(ash_config=get_default_config())
+    for name in names or ("checkov",):
+        model.scanner_results[name] = ScannerTargetStatusInfo(
+            status=ScannerStatus.ERROR,
+            error_reason=sentence,
+            error_reason_code=code,
+        )
+        model.additional_reports[name] = {
+            "source": {
+                "scanner_name": name,
+                "status": "ERROR",
+                "errors": list(errors),
+            }
+        }
+    model._flat_cache = None
+    return model
 
 
 class TestTheShortReason:
@@ -205,3 +256,240 @@ class TestEveryReportShowsIt:
 
         assert f"<strong>checkov</strong> (ERROR): {CHECKOV_REASON}" in page
         assert "/home/me" not in page
+
+
+class TestTheEmitterListsTheRecordedReason:
+    """The reason a row records is listed in place of the first sentence of the error."""
+
+    def test_the_recorded_reason_is_listed(self):
+        assert _entries(_recorded()) == {"checkov": ("ERROR", RECORDED_REASON)}
+
+    def test_it_is_listed_instead_of_the_first_sentence_of_the_error(self):
+        model = _recorded(errors=(CHECKOV_EXIT,))
+
+        assert _entries(model) == {"checkov": ("ERROR", RECORDED_REASON)}
+
+    def test_an_error_that_recorded_no_reason_is_listed_by_its_first_sentence(self):
+        model = _recorded(sentence=None, code=None, errors=(CHECKOV_EXIT,))
+
+        assert _entries(model) == {"checkov": ("ERROR", CHECKOV_REASON)}
+
+    @pytest.mark.parametrize(
+        "errors", [(), ("something the scan phase did not write",)]
+    )
+    def test_a_scanner_with_neither_has_no_entry(self, errors):
+        model = _recorded(sentence=None, code=None, errors=errors)
+
+        assert _entries(model) == {}
+
+    def test_a_sentence_with_no_code_is_not_a_recorded_reason(self):
+        model = _recorded(code=None, errors=(CHECKOV_EXIT,))
+
+        assert _entries(model) == {"checkov": ("ERROR", CHECKOV_REASON)}
+
+    def test_scanners_that_recorded_the_same_reason_share_an_entry(self):
+        entries = ReportContentEmitter(
+            _recorded("checkov", "trivy")
+        ).get_scanners_not_run()
+
+        assert entries == [
+            {
+                "scanners": ["checkov", "trivy"],
+                "status": "ERROR",
+                "reason": RECORDED_REASON,
+            }
+        ]
+
+    def test_the_counts_of_an_error_only_the_statistics_decided_are_listed(self):
+        model = AshAggregatedResults(ash_config=get_default_config())
+        model.additional_reports["checkov"] = {
+            "source": {
+                "scanner_name": "checkov",
+                "status": "ERROR",
+                "targets_attempted": 3,
+                "targets_failed": 2,
+            }
+        }
+        model._flat_cache = None
+
+        assert _entries(model) == {
+            "checkov": ("ERROR", "it failed on 2 of its 3 target(s)")
+        }
+
+    def test_a_scanner_in_error_for_a_stale_database_is_still_left_to_its_own_heading(
+        self, monkeypatch
+    ):
+        from automated_security_helper.utils import content_db_staleness
+
+        monkeypatch.setattr(
+            content_db_staleness,
+            "scanners_in_error_for_a_stale_database",
+            lambda model: {"checkov"},
+        )
+
+        assert _entries(_recorded()) == {}
+
+
+class TestTheFirstSentenceIsOneLine:
+    """The first sentence of an error is held to the rule a recorded reason is held to.
+
+    A bare line break does not end a sentence, so the text up to the next full stop
+    could run over two lines and break a Markdown bullet or table row.
+    """
+
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            "line one\nline two",
+            "line one\r\nline two",
+            "tab\tseparated",
+            "escape \x1b[31m red",
+        ],
+    )
+    def test_an_error_whose_first_sentence_is_not_one_line_has_no_entry(self, sentence):
+        assert _entries(_model(checkov=[FAILED + sentence])) == {}
+
+    def test_a_first_sentence_that_ends_at_the_line_break_is_still_listed(self):
+        model = _model(checkov=[FAILED + "its tool failed.\nthe next line"])
+
+        assert _entries(model) == {"checkov": ("ERROR", "its tool failed")}
+
+
+class TestAPathInARecordedReasonIsNotShown:
+    """A results file read back by ``ash report`` can hold any text in ``error_reason``.
+
+    The scan phase writes sentences with no path in them, but this is where a
+    results file's text reaches a reader, so the emitter holds it to the same
+    check again.
+    """
+
+    NOT_SHORT_REASONS = [
+        pytest.param(PLANTED, id="posix-path"),
+        pytest.param("could not read C:\\Users\\me\\scan\\out", id="drive-path"),
+        pytest.param("could not read ~/scan/out", id="home-path"),
+        pytest.param("its tool wrote to \\\\server\\share\\out", id="unc-path"),
+        pytest.param("y" * (SHORT_ERROR_REASON_LIMIT + 1), id="over-the-limit"),
+        pytest.param("its tool said\nsomething else", id="two-lines"),
+        pytest.param("its tool said\tsomething else", id="control-character"),
+    ]
+
+    @pytest.mark.parametrize("sentence", NOT_SHORT_REASONS)
+    def test_it_is_not_listed(self, sentence):
+        assert _entries(_recorded(sentence=sentence)) == {}
+
+    @pytest.mark.parametrize("sentence", NOT_SHORT_REASONS)
+    def test_the_first_sentence_of_the_error_is_read_instead(self, sentence):
+        model = _recorded(sentence=sentence, errors=(CHECKOV_EXIT,))
+
+        assert _entries(model) == {"checkov": ("ERROR", CHECKOV_REASON)}
+
+    def test_control_without_the_check_the_path_is_listed(self, monkeypatch):
+        """The check at render is what keeps the planted path out: remove it and it shows."""
+        monkeypatch.setattr(
+            report_content_emitter,
+            "is_short_reason",
+            lambda text: isinstance(text, str) and bool(text),
+        )
+
+        assert _entries(_recorded(sentence=PLANTED)) == {"checkov": ("ERROR", PLANTED)}
+
+
+class TestEveryReportShowsTheRecordedReason:
+    def test_text(self, test_plugin_context):
+        text = TextReporter(context=test_plugin_context).report(
+            _recorded(errors=(CHECKOV_EXIT,))
+        )
+
+        assert HEADING in text
+        assert f"- checkov (ERROR): {RECORDED_REASON}" in text
+        assert CHECKOV_REASON not in text
+
+    @pytest.mark.parametrize("compact", [False, True])
+    def test_markdown(self, test_plugin_context, compact):
+        reporter = MarkdownReporter(context=test_plugin_context)
+        reporter.config = MarkdownReporterConfig.model_validate(
+            {"options": {"compact": compact}}
+        )
+
+        markdown = reporter.report(_recorded(errors=(CHECKOV_EXIT,)))
+
+        assert HEADING in markdown
+        assert f"- checkov (ERROR): {RECORDED_REASON}" in markdown
+        assert CHECKOV_REASON not in markdown
+
+    def test_html(self, test_plugin_context):
+        page = HtmlReporter(context=test_plugin_context).report(
+            _recorded(errors=(CHECKOV_EXIT,))
+        )
+
+        assert f"<strong>checkov</strong> (ERROR): {RECORDED_REASON}" in page
+        assert CHECKOV_REASON not in page
+
+
+class TestNoReportShowsAPlantedPath:
+    def test_text(self, test_plugin_context):
+        text = TextReporter(context=test_plugin_context).report(
+            _recorded(sentence=PLANTED)
+        )
+
+        assert "/home/me" not in text
+        assert HEADING not in text
+
+    @pytest.mark.parametrize("compact", [False, True])
+    def test_markdown(self, test_plugin_context, compact):
+        reporter = MarkdownReporter(context=test_plugin_context)
+        reporter.config = MarkdownReporterConfig.model_validate(
+            {"options": {"compact": compact}}
+        )
+
+        markdown = reporter.report(_recorded(sentence=PLANTED))
+
+        assert "/home/me" not in markdown
+        assert HEADING not in markdown
+
+    def test_html(self, test_plugin_context):
+        page = HtmlReporter(context=test_plugin_context).report(
+            _recorded(sentence=PLANTED)
+        )
+
+        assert "/home/me" not in page
+        assert HEADING not in page
+
+
+class TestTheScannerResultsRowsCarryTheReason:
+    """``ash.flat.json`` writes these rows as they are, so the reason reaches it too."""
+
+    def test_an_error_row_has_the_recorded_reason_and_its_code(self):
+        (row,) = ReportContentEmitter(_recorded()).get_scanner_results()
+
+        assert row["error_reason"] == RECORDED_REASON
+        assert row["error_reason_code"] == RECORDED_CODE
+
+    def test_an_error_row_that_recorded_none_has_none(self):
+        model = _recorded(sentence=None, code=None, errors=(CHECKOV_EXIT,))
+
+        (row,) = ReportContentEmitter(model).get_scanner_results()
+
+        assert row["error_reason"] is None
+        assert row["error_reason_code"] is None
+
+    def test_a_row_that_is_not_in_error_has_none_whatever_its_row_kept(self):
+        model = _recorded()
+        model.scanner_results["bandit"] = ScannerTargetStatusInfo(
+            status=ScannerStatus.PASSED,
+            error_reason=RECORDED_REASON,
+            error_reason_code=RECORDED_CODE,
+        )
+        model.additional_reports["bandit"] = {
+            "source": {"scanner_name": "bandit", "status": "PASSED"}
+        }
+        model._flat_cache = None
+
+        rows = {
+            row["scanner_name"]: row
+            for row in ReportContentEmitter(model).get_scanner_results()
+        }
+
+        assert rows["bandit"]["error_reason"] is None
+        assert rows["bandit"]["error_reason_code"] is None
+        assert rows["checkov"]["error_reason"] == RECORDED_REASON

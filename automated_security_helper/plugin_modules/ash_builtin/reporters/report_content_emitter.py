@@ -40,7 +40,7 @@ from automated_security_helper.utils.finding_clusters import (
 from automated_security_helper.utils.policy_origin import is_policy_origin
 from automated_security_helper.utils.short_reason import (
     SHORT_REASON_LIMIT,
-    names_a_local_path,
+    is_short_reason,
 )
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_COUNT_KEYS,
@@ -489,6 +489,14 @@ class ReportContentEmitter:
                     # for every other status.
                     "missing_reason": metrics.missing_reason,
                     "skipped_reason": metrics.skipped_reason,
+                    # Why an ERROR scanner failed and the kind of failure it was, the
+                    # same two strings as its scanner_results row in
+                    # ash_aggregated_results.json. None for every other status, and
+                    # for an ERROR row whose cause nothing recorded. The reports for
+                    # people show the sentence only after get_scanners_not_run has
+                    # checked it again.
+                    "error_reason": metrics.error_reason,
+                    "error_reason_code": metrics.error_reason_code,
                     # Seconds the scanner took; None, in a report for people, when
                     # it did not run or the results record no duration for it. The
                     # text and html reporters render a Duration column from this
@@ -527,12 +535,17 @@ class ReportContentEmitter:
         the status, so without this list a report says that npm-audit was skipped
         and leaves "no lockfile beside a package.json" in the log.
 
-        For ERROR it is :func:`short_error_reason` of the first error recorded in
-        the scanner's per-target reports: one sentence with no path, no stderr and
-        no validation details, since a summary can be posted where the machine's
-        paths and the tool's output should not be. A scanner whose error has no
-        such sentence has no entry, and a scanner in ERROR only for a stale content
-        database has none either: it is reported under its own heading.
+        For ERROR it is the reason recorded for the scanner (the ``error_reason``
+        of its row, one sentence the scan phase and the executor wrote with no
+        path in it) when that still passes :func:`is_short_reason` here, because a
+        results file read back by ``ash report`` can hold any text in that field.
+        When none is recorded, or it does not pass, it is :func:`short_error_reason`
+        of the first error recorded in the scanner's per-target reports: one
+        sentence with no path, no stderr and no validation details, since a summary
+        can be posted where the machine's paths and the tool's output should not
+        be. A scanner with neither has no entry, and a scanner in ERROR only for a
+        stale content database has none either: it is reported under its own
+        heading.
 
         Scanners are grouped because one option often leaves many out: a run
         with ``--scanners npm-audit`` skips every other scanner for the one
@@ -556,7 +569,7 @@ class ReportContentEmitter:
                     stale = scanners_in_error_for_a_stale_database(self.model)
                 if result["scanner_name"] in stale:
                     continue
-                reason = self._error_reason(result["scanner_name"])
+                reason = self._error_reason(result)
             else:
                 continue
             if not reason:
@@ -568,22 +581,48 @@ class ReportContentEmitter:
             group["scanners"].append(result["scanner_name"])
         return list(groups.values())
 
-    def _error_reason(self, scanner_name: str) -> Optional[str]:
-        """The short reason of the first error the scanner's reports record."""
+    def _error_reason(self, result: Dict[str, Any]) -> Optional[str]:
+        """The short reason an ERROR scanner is listed with, or None.
+
+        *result* is the scanner's row of :meth:`get_scanner_results`. Its recorded
+        ``error_reason`` is shown when it is still a short reason: this is where a
+        results file's text first reaches a reader, so it is held to the rule the
+        scan phase writes by (``utils/short_reason.py``) here too, and a recorded
+        sentence that names a local path, or is not one printable line, is not
+        shown. Otherwise the first sentence of the first error the scanner's
+        reports record, which is how a results file written before reasons were
+        recorded is read, and an error nobody gave a reason.
+        """
+        recorded = result.get("error_reason")
+        if is_short_reason(recorded):
+            return str(recorded).strip()
+        return self._first_error_sentence(result["scanner_name"])
+
+    def _first_error_sentence(self, scanner_name: str) -> Optional[str]:
+        """The short reason of the first error the scanner's reports record.
+
+        Read in the order ``recorded_error`` reads the errors in: each report's own
+        ``errors``, then the ``errors`` of its ``raw_results``, which is where the
+        executor also leaves the failure it recorded.
+        """
         reports = self.model.additional_reports.get(scanner_name)
         if not isinstance(reports, dict):
             return None
         for report in reports.values():
             if not isinstance(report, dict):
                 continue
-            errors = report.get("errors")
-            if not isinstance(errors, list):
-                continue
-            for error in errors:
-                if isinstance(error, str):
-                    reason = short_error_reason(error)
-                    if reason:
-                        return reason
+            raw_results = report.get("raw_results")
+            for errors in (
+                report.get("errors"),
+                raw_results.get("errors") if isinstance(raw_results, dict) else None,
+            ):
+                if not isinstance(errors, list):
+                    continue
+                for error in errors:
+                    if isinstance(error, str):
+                        reason = short_error_reason(error)
+                        if reason:
+                            return reason
         return None
 
     def get_scan_summary(self) -> Dict[str, Any]:
@@ -1244,8 +1283,8 @@ _ASIDE = re.compile(r"\s*\([^()]*\)")
 #: space, or the end of the text.
 _SENTENCE_END = re.compile(r"[.:;](?:\s|\Z)|\Z")
 #: The longest reason shown; a longer first sentence is not a short reason. The
-#: limit, and the check for a local path below, are the ones a scanner's recorded
-#: reason is held to (``utils/short_reason.py``).
+#: limit, and the rest of the check below (one printable line, no local path), are
+#: the ones a scanner's recorded reason is held to (``utils/short_reason.py``).
 SHORT_ERROR_REASON_LIMIT = SHORT_REASON_LIMIT
 
 
@@ -1262,10 +1301,11 @@ def short_error_reason(error: str) -> Optional[str]:
     Only a message that opens with the scan phase's prefix is read. The asides in
     parentheses are removed, and the text is cut at the end of its first
     sentence, so the stderr, the log paths and validation details that follow are
-    never shown. A result that is empty, longer than
-    :data:`SHORT_ERROR_REASON_LIMIT`, or still holds something that looks like a
-    local path gives None: the report then names the scanner in the table only,
-    as it did before.
+    never shown. A result that is not a short reason (:func:`is_short_reason`:
+    empty, longer than :data:`SHORT_ERROR_REASON_LIMIT`, more than one printable
+    line, or something that looks like a local path) or still holds a parenthesis
+    gives None: the report then names the scanner in the table only, as it did
+    before.
     """
     match = _FAILURE_PREFIX.match(error)
     if match is None:
@@ -1276,8 +1316,6 @@ def short_error_reason(error: str) -> Optional[str]:
         previous, body = body, _ASIDE.sub("", body)
     end = _SENTENCE_END.search(body)
     sentence = body[: end.start() if end else len(body)].strip()
-    if not sentence or len(sentence) > SHORT_ERROR_REASON_LIMIT:
-        return None
-    if names_a_local_path(sentence) or "(" in sentence or ")" in sentence:
+    if not is_short_reason(sentence) or "(" in sentence or ")" in sentence:
         return None
     return sentence
