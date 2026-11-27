@@ -1482,6 +1482,37 @@ class TestAppendOntoAnUntypedPluginOption:
             in appended[0]
         )
 
+    @pytest.mark.parametrize(
+        ("then_key", "named", "applications"),
+        [
+            pytest.param(_UPLINK, 0, 1, id="set-whole-one-application"),
+            pytest.param(_UPLINK, 0, 2, id="set-whole-two-applications"),
+            pytest.param(_LOCAL, 1, 1, id="another-list-one-application"),
+            pytest.param(_LOCAL, 1, 2, id="another-list-two-applications"),
+        ],
+    )
+    def test_a_list_set_whole_after_the_append_is_not_warned_of(
+        self, caplog, then_key, named, applications
+    ):
+        """``=`` after the ``+=`` that started the list sets the whole list, in the
+        same application or a later one, so building a reporter that sends findings
+        off the host names nothing; ``=`` on another reporter's list leaves the
+        record, and the key is named. The apply's third item is an operator
+        (``=``, ``+=`` or ``-=``) and is compared with ``REPLACE``: read as a truth
+        value, ``=`` would count as an append and the record would stay."""
+        appended = f'{_UPLINK}+=["{_UPLINK_ITEM}"]'
+        then = f'{then_key}=["chosen"]'
+
+        with caplog.at_level("WARNING", logger="ash"):
+            if applications == 1:
+                config = apply_config_overrides(AshConfig(), [appended, then])
+            else:
+                started = apply_config_overrides(AshConfig(), [appended])
+                config = apply_config_overrides(started, [then])
+            reporter_section(config, _UplinkReporter)
+
+        assert len(_warnings_naming(caplog, _UPLINK)) == named
+
     def test_the_warned_keys_stay_bounded_in_a_long_lived_process(self, caplog):
         module = _resolve_config_module()
         warned = module._APPEND_TO_UNREAD_SECTION_WARNED
