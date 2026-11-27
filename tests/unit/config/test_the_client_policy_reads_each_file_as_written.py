@@ -57,8 +57,8 @@ _REPO = {
     ],
 }
 
-#: The key the denied value pattern below refuses, at its pointer.
-_KEY_DENIED = "key 'expiration' at '/global_settings/ignore_paths/0/expiration'"
+#: The pattern below, as a denial's reason names it.
+_PATTERN_NAMED = "denied_value_patterns regex '^expiration$'"
 
 
 def _write(path: Path, document: Dict[str, Any]) -> Path:
@@ -177,7 +177,8 @@ def test_a_key_pattern_naming_the_old_spelling_refuses_a_delivered_file_that_wri
     ((path, denials),) = found
     assert path == only.resolve()
     (denial,) = denials
-    assert _KEY_DENIED in denial.reason
+    assert denial.pointer.startswith("/global_settings/ignore_paths")
+    assert _PATTERN_NAMED in denial.reason
 
 
 def test_a_key_pattern_naming_the_old_spelling_refuses_an_operator_base_as_written(
@@ -197,7 +198,8 @@ def test_a_key_pattern_naming_the_old_spelling_refuses_an_operator_base_as_writt
     )
 
     (denial,) = found[org.resolve()]
-    assert _KEY_DENIED in denial.reason
+    assert denial.pointer.startswith("/global_settings/ignore_paths")
+    assert _PATTERN_NAMED in denial.reason
 
 
 def test_the_marking_reads_a_folded_copy_and_leaves_each_file_as_written(
