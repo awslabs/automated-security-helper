@@ -25,7 +25,9 @@ here in the same commit and say why. The executed-block floor is read from the
 illustrative seed (docs/illustrative-seed/): it is what the runner executed at main,
 plus one for every seed line a converting commit has deleted, so nothing is edited
 here when a marked block starts to run, and a block deleted instead of converted
-shows up as a floor the runner no longer meets.
+shows up as a floor the runner no longer meets. The count must also equal the floor,
+not only reach it: a block added that runs raises EXECUTED_BLOCKS_ADDED_SINCE_MAIN, so
+that no slack from an earlier addition hides a block deleted since.
 
 WHAT THIS DOES NOT CHECK
 ------------------------
@@ -66,7 +68,15 @@ SEED_LINES_ON_RUN_PAGES_AT_MAIN = 514
 #: nothing runs) rather than by making it run. Each such commit raises this by the
 #: number of lines it removed and says in its message why the examples are not run.
 SEED_LINES_RETIRED_NOT_RUN = 0
+#: Blocks the runner executes beyond what main had and the seed accounts for: a block
+#: added that runs. Each commit that adds one raises this by the number it adds, so the
+#: count of executed blocks equals its floor, and no slack from an earlier addition
+#: lets a block deleted instead of converted go unseen.
+EXECUTED_BLOCKS_ADDED_SINCE_MAIN = 0
 SEED_DIR = REPO_ROOT / "docs" / "illustrative-seed"
+#: How a seed line of a pipeline kept from its CI runner (``runner=none``) begins, which
+#: the line is told apart by: restated here rather than imported, like the rest.
+CI_RUNNER_LINE = "runner=none: "
 #: The output samples the runner compares with their run block's output, measured the
 #: same way. A sample marker the runner stops honoring would otherwise pass silently,
 #: since an uncompared sample fails nothing. The floor in force is this or the count of
@@ -516,7 +526,9 @@ def seed_lines_on_run_pages(directory: Path = SEED_DIR) -> int:
     follows does not move with a change to the seed's reader. A line is
     ``<page path>`` TAB ``<reason>``, and the runner runs a ``.md`` page: a
     ``.md.template`` is a source the rendered page is made from, and its blocks run on
-    the page.
+    the page. A ``runner=none: `` line is not counted: converting that marker hands the
+    pipeline to a CI runner, which is no block the docs runner executes. A bare
+    ``save-as=`` line is counted: the block runs once it is converted.
     """
     if not directory.is_dir():
         return 0
@@ -525,8 +537,10 @@ def seed_lines_on_run_pages(directory: Path = SEED_DIR) -> int:
         if path.suffix != ".tsv":
             continue
         for line in path.read_text(encoding="utf-8").splitlines():
-            page = line.partition("\t")[0]
-            if page and not page.endswith(".md.template"):
+            page, _tab, text = line.partition("\t")
+            if page.endswith(".md.template") or text.startswith(CI_RUNNER_LINE):
+                continue
+            if page:
                 count += 1
     return count
 
@@ -539,19 +553,40 @@ def executed_blocks_floor(seed_lines_on_run_pages_now: int) -> int:
     a marked block run and deletes its line, so each line that is gone adds a block the
     runner executes. The floor rises by one for each, with no number to edit in the
     commit that converts. A line deleted with its block, not converted, is the one thing
-    the seed cannot tell, so that commit says so in SEED_LINES_RETIRED_NOT_RUN.
+    the seed cannot tell, so that commit says so in SEED_LINES_RETIRED_NOT_RUN. Blocks
+    added that run are the other, and EXECUTED_BLOCKS_ADDED_SINCE_MAIN counts them.
     """
     converted = SEED_LINES_ON_RUN_PAGES_AT_MAIN - seed_lines_on_run_pages_now
-    return EXECUTED_BLOCKS_AT_MAIN + converted - SEED_LINES_RETIRED_NOT_RUN
+    return (
+        EXECUTED_BLOCKS_AT_MAIN
+        + converted
+        - SEED_LINES_RETIRED_NOT_RUN
+        + EXECUTED_BLOCKS_ADDED_SINCE_MAIN
+    )
 
 
 def executed_blocks_problems(
     executed: int, seed_lines_on_run_pages_now: int
 ) -> list[str]:
-    """What is wrong with the count of executed blocks, given the seed as it is now."""
+    """What is wrong with the count of executed blocks, given the seed as it is now.
+
+    The count must equal its floor. Below it, a block stopped running; above it, the
+    floor has slack, and slack hides a block deleted instead of converted: blocks added
+    earlier keep the count over a floor that has since risen by the deleted ones.
+    """
     floor = executed_blocks_floor(seed_lines_on_run_pages_now)
-    if executed >= floor:
+    if executed == floor:
         return []
+    if executed > floor:
+        return [
+            (
+                f"the runner executes {executed} blocks, {executed - floor} more than "
+                f"the {floor} the counters account for. Blocks that run were added: "
+                "raise EXECUTED_BLOCKS_ADDED_SINCE_MAIN by "
+                f"{executed - floor} in the same commit. Leaving the slack lets a block "
+                "that is deleted instead of converted go unseen."
+            )
+        ]
     return [
         (
             f"the runner executes {executed} blocks, down from {floor}: the "
@@ -630,11 +665,13 @@ def test_a_seed_line_of_a_pipeline_no_runner_runs_does_not_move_the_floor(tmp_pa
 
 @pytest.mark.unit
 def test_every_seed_line_that_is_gone_raises_the_executed_floor_by_one():
+    """The step is what is pinned, not the floor itself: SEED_LINES_RETIRED_NOT_RUN and
+    EXECUTED_BLOCKS_ADDED_SINCE_MAIN move the floor, and a commit that raises either
+    as the contributor page asks must not turn this red."""
     full = SEED_LINES_ON_RUN_PAGES_AT_MAIN
 
-    assert executed_blocks_floor(full) == EXECUTED_BLOCKS_AT_MAIN
-    assert executed_blocks_floor(full - 1) == EXECUTED_BLOCKS_AT_MAIN + 1
-    assert executed_blocks_floor(0) == EXECUTED_BLOCKS_AT_MAIN + full
+    assert executed_blocks_floor(full - 1) - executed_blocks_floor(full) == 1
+    assert executed_blocks_floor(0) - executed_blocks_floor(full) == full
 
 
 @pytest.mark.unit
@@ -657,7 +694,7 @@ def test_the_seed_this_floor_reads_is_in_this_checkout_and_has_not_grown():
     the runner. This says why first, and that the count never exceeds main's."""
     assert SEED_DIR.is_dir(), f"{SEED_DIR} is gone; the executed-block floor reads it"
     now = seed_lines_on_run_pages()
-    assert 0 < now <= SEED_LINES_ON_RUN_PAGES_AT_MAIN, (
+    assert 0 <= now <= SEED_LINES_ON_RUN_PAGES_AT_MAIN, (
         f"{now} seed lines sit on pages the runner runs; main had "
         f"{SEED_LINES_ON_RUN_PAGES_AT_MAIN}, and the seed only shrinks"
     )

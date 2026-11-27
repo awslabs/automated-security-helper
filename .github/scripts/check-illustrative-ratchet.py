@@ -32,8 +32,19 @@ its lines are looked up under its old path. A page moved and rewritten in one ch
 fall under that bar, and then its lines are new ones: move it in a pull request of its
 own, without edits.
 
-A seed the fork point does not have is not compared. The change that introduces it has
-nothing to be held to, and a note says so; every later range is held to what it left.
+A seed the fork point does not have, and no commit before it ever had, is not compared.
+The change that introduces it has nothing to be held to, and a note says so; every later
+range is held to what it left.
+
+A seed the fork point lacks but an earlier commit had is a lost seed, which is not the
+same. Converting the last page deletes its seed file, and git keeps no empty directory,
+so the directory goes with it; a ``.gitkeep`` in ``docs/illustrative-seed`` is what keeps
+it. Read as an introduction, that loss would switch the whole check off for every range
+cut afterwards: a marker and the line that covers it would be compared with nothing. So
+a range that leaves the seed lost fails. Where the head has the seed again it is compared
+with the last commit that held it, so restoring a seed as it was passes and restoring it
+with a line it never had does not.
+
 Files in the seed directory that are not a ``.tsv`` directly in it are not seeds, as
 docs_checks reads it.
 
@@ -64,6 +75,7 @@ import argparse
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -125,13 +137,15 @@ class Entry:
 
 @dataclass(frozen=True)
 class Violation:
-    """A line the head's seed holds that the fork point's does not."""
+    """A line the head's seed holds that the fork point's does not or, with no page, a
+    seed that was lost at the fork point and is still gone at the head."""
 
     seed: str  # ILLUSTRATIVE or UNEXECUTED
-    file: str  # the seed file at the head that holds the line
-    page: str  # the page the line is for
-    base_page: str  # the page it was looked up under at the fork point
-    text: str  # the marker's reason, or the block's first command
+    file: str  # the seed file at the head that holds the line; a lost seed's path
+    page: str  # the page the line is for; empty for a lost seed
+    base_page: str  # the page it was looked up under at the fork point; empty if lost
+    text: str  # the marker's reason, or the block's first command; the commit that
+    # removed a lost seed
     number: int  # the line's number in ``file``
 
 
@@ -291,35 +305,75 @@ def compare(
     return violations
 
 
+def seed_pathspec(seed: str) -> str:
+    """The path git is asked about for ``seed``: its directory, or its one file."""
+    return f"{ILLUSTRATIVE_SEED_DIR}/" if seed == ILLUSTRATIVE else UNEXECUTED_SEED_FILE
+
+
+def lost_seed(repo: Path, base: str, seed: str) -> tuple[str, str | None] | None:
+    """How a seed that ``base`` does not have was lost, or None when it never existed.
+
+    The result is the newest commit in ``base``'s history that touched the seed, which
+    is the one that removed it, and the commit just before it that still held the seed
+    (None when no parent of the removing commit has it, which compare cannot use).
+    """
+    removed = git(
+        repo, "log", "-1", "--format=%H", base, "--", seed_pathspec(seed)
+    ).strip()
+    if not removed:
+        return None
+    parents = git(repo, "rev-list", "--parents", "-n", "1", removed).split()[1:]
+    holder = next((p for p in parents if seed_paths(repo, p)[seed]), None)
+    return removed, holder
+
+
 def find_added_lines(
     repo: Path, base: str, head: str
 ) -> tuple[list[Violation], list[str]]:
     """The lines the seeds at ``head`` hold that those at ``base`` do not, and notes.
 
-    ``base`` is the fork point. A seed that does not exist at ``base`` has nothing to be
-    compared with, and a note says that this range introduces it.
+    ``base`` is the fork point. A seed that does not exist at ``base`` and never did has
+    nothing to be compared with, and a note says that this range introduces it. A seed
+    that ``base`` lost (an earlier commit had it) is a violation while the head still
+    lacks it; where the head has it again, the lines are compared with the last commit
+    that held it.
     """
     base_paths = seed_paths(repo, base)
     head_paths = seed_paths(repo, head)
     violations: list[Violation] = []
     notes: list[str] = []
-    renames: dict[str, str] | None = None
+    renames: dict[str, dict[str, str]] = {}
     for seed in SEEDS:
         head_entries = read_seed(repo, head, seed, head_paths[seed])
-        if not base_paths[seed]:
-            if head_entries:
-                notes.append(
-                    f"the {seed} seed is not in the base ({base[:10]}), so this range "
-                    f"introduces it and there is nothing to compare its "
-                    f"{len(head_entries)} line(s) with"
+        compared, compared_paths = base, base_paths[seed]
+        if not compared_paths:
+            lost = lost_seed(repo, base, seed)
+            if lost is None:
+                if head_entries:
+                    notes.append(
+                        f"the {seed} seed is not in the base ({base[:10]}), so this "
+                        f"range introduces it and there is nothing to compare its "
+                        f"{len(head_entries)} line(s) with"
+                    )
+                continue
+            removed, holder = lost
+            if holder is None or not head_paths[seed]:
+                violations.append(
+                    Violation(seed, seed_pathspec(seed).rstrip("/"), "", "", removed, 1)
                 )
-            continue
+                continue
+            compared, compared_paths = holder, seed_paths(repo, holder)[seed]
+            notes.append(
+                f"the {seed} seed is not in the base ({base[:10]}): {removed[:10]} "
+                f"removed it, so this range is compared with {holder[:10]}, the last "
+                "commit that held it"
+            )
         if not head_entries:
             continue  # nothing can have been added
-        if renames is None:
-            renames = page_renames(repo, base, head)
-        base_entries = read_seed(repo, base, seed, base_paths[seed])
-        violations += compare(seed, base_entries, head_entries, renames)
+        if compared not in renames:
+            renames[compared] = page_renames(repo, compared, head)
+        base_entries = read_seed(repo, compared, seed, compared_paths)
+        violations += compare(seed, base_entries, head_entries, renames[compared])
     return violations, notes
 
 
@@ -344,6 +398,23 @@ def explain(violation: Violation, base: str) -> str:
         if violation.seed == ILLUSTRATIVE
         else f"the unexecuted-command seed ({UNEXECUTED_SEED_FILE})"
     )
+    if not violation.page:
+        if violation.seed == ILLUSTRATIVE:
+            restore = (
+                f"Restore {ILLUSTRATIVE_SEED_DIR} with its page files as they were, "
+                "and keep a .gitkeep in it: git keeps no empty directory, so deleting "
+                "the last page's file deleted the directory."
+            )
+        else:
+            restore = (
+                f"Restore {UNEXECUTED_SEED_FILE}, empty if no line is left: the file "
+                "is what arms the check, so an empty one still refuses every command."
+            )
+        return (
+            f"{violation.file}: {where} is gone at the fork point ({base[:10]}), "
+            f"where {violation.text[:10]} removed it, so this range has no seed to be "
+            f"compared with, and the docs checks are not held to one either. {restore}"
+        )
     moved = (
         f" (looked up as {violation.base_page}, where git sees the page at the fork "
         "point)"
@@ -355,18 +426,27 @@ def explain(violation: Violation, base: str) -> str:
             "A block that cannot run yet is no reason to add a line: make it run, "
             "and delete its line in the same commit."
         )
+        follow = (
+            "The move also renames the page's seed file to the new page's name and "
+            "writes the new path in each of its lines; the lines then follow the page."
+        )
     else:
         fix = (
-            "Fence the command as bash so the docs runner executes it, or, if the "
-            "block is what the block above it prints, mark it output."
+            "Fence the command as bash so the docs runner executes it (as console "
+            "when the block shows $ prompts with their output), mark the block output "
+            "if it is what the block above it prints, or write the command in prose."
+        )
+        follow = (
+            "The move also writes the new path in each of its lines; the lines then "
+            "follow the page."
         )
     return (
         f"{violation.file}:{violation.number} adds a line for {violation.page}"
         f"{moved} that {where} did not hold at the fork point ({base[:10]}): "
         f"{violation.text!r}. The seed only shrinks, so a line is never added to it, "
         f"never reworded and never moved to another page. {fix} If the page was only "
-        "moved, move it in a pull request of its own, with no other edit, so git sees "
-        "the move and the lines follow it."
+        "moved, move it in a pull request of its own and change nothing else in the "
+        f"page, so git sees the move. {follow}"
     )
 
 
@@ -450,8 +530,8 @@ def _page_text(reasons: tuple[str, ...]) -> str:
 
 class _SelfRepo:
     """A repository the self-test builds. Its base commit holds two pages with markers,
-    their seed files and the unexecuted-command seed, or, when ``seeded`` is false, one
-    file and no seed at all."""
+    their seed files with the ``.gitkeep`` that keeps the directory, and the
+    unexecuted-command seed, or, when ``seeded`` is false, one file and no seed at all."""
 
     def __init__(self, path: Path, seeded: bool = True) -> None:
         self.path = path
@@ -460,6 +540,7 @@ class _SelfRepo:
         if seeded:
             self.mark("docs/a.md", DOCKER, BUCKET)
             self.mark("docs/b.md", DOCKER)
+            self.write(f"{ILLUSTRATIVE_SEED_DIR}/.gitkeep", "")
             self.write(UNEXECUTED_SEED_FILE, f"docs/a.md\t{SCAN}\n")
         else:
             self.write("README.md", "x\n")
@@ -489,6 +570,18 @@ class _SelfRepo:
     def move(self, old: str, new: str) -> None:
         (self.path / new).parent.mkdir(parents=True, exist_ok=True)
         self.git("mv", old, new)
+
+    def lose(self, *rels: str) -> str:
+        """Delete each of ``rels`` (a file, or a directory with what it holds), commit
+        that, and make the commit the fork point: a base that has lost them."""
+        for rel in rels:
+            target = self.path / rel
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+        self.base = self.commit("the seed deleted")
+        return self.base
 
     def mark(self, page: str, *reasons: str) -> None:
         """Make ``page`` carry a marker for each reason, and write the seed file that
@@ -626,6 +719,42 @@ def _case_introduced(r: _SelfRepo) -> list[tuple[str, str]]:
     return []
 
 
+def _case_every_page_converted(r: _SelfRepo) -> list[tuple[str, str]]:
+    r.mark("docs/a.md")
+    r.mark("docs/b.md")
+    r.commit("every page converted; the .gitkeep keeps the directory")
+    return []
+
+
+def _case_lost_and_left(r: _SelfRepo) -> list[tuple[str, str]]:
+    lost = r.lose(ILLUSTRATIVE_SEED_DIR)
+    r.commit("a change that leaves the illustrative seed gone")
+    return [("", lost)]
+
+
+def _case_command_seed_lost_and_left(r: _SelfRepo) -> list[tuple[str, str]]:
+    lost = r.lose(UNEXECUTED_SEED_FILE)
+    r.commit("a change that leaves the unexecuted-command seed gone")
+    return [("", lost)]
+
+
+def _case_lost_and_restored(r: _SelfRepo) -> list[tuple[str, str]]:
+    before = r.base
+    r.lose(ILLUSTRATIVE_SEED_DIR, UNEXECUTED_SEED_FILE)
+    r.git("checkout", "-q", before, "--", ILLUSTRATIVE_SEED_DIR, UNEXECUTED_SEED_FILE)
+    r.commit("the seeds restored as they were")
+    return []
+
+
+def _case_lost_and_restored_with_a_line(r: _SelfRepo) -> list[tuple[str, str]]:
+    before = r.base
+    r.lose(ILLUSTRATIVE_SEED_DIR)
+    r.git("checkout", "-q", before, "--", ILLUSTRATIVE_SEED_DIR)
+    r.mark("docs/b.md", DOCKER, "an added reason")
+    r.commit("the seed restored, with a line added")
+    return [("docs/b.md", "an added reason")]
+
+
 #: (name, the change, whether the base holds the seeds). A case returns the (page, text)
 #: of each line the check must report, and nothing when it must pass.
 _CASES: tuple[tuple[str, Case, bool], ...] = (
@@ -645,6 +774,19 @@ _CASES: tuple[tuple[str, Case, bool], ...] = (
     ("a command added to the unexecuted seed", _case_command_added, True),
     ("a command removed from it", _case_command_removed, True),
     ("files that are not seeds", _case_not_seeds, True),
+    ("every page converted, the directory kept", _case_every_page_converted, True),
+    ("the illustrative seed lost, and left gone", _case_lost_and_left, True),
+    (
+        "the unexecuted-command seed lost, and left gone",
+        _case_command_seed_lost_and_left,
+        True,
+    ),
+    ("both seeds lost, and restored as they were", _case_lost_and_restored, True),
+    (
+        "a lost seed restored with a line it never had",
+        _case_lost_and_restored_with_a_line,
+        True,
+    ),
     ("a range that introduces the seeds", _case_introduced, False),
 )
 

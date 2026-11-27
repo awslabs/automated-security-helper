@@ -895,8 +895,10 @@ def marker_problems(block: Block, root: Path) -> list[str]:
             )
         if lang in WINDOWS_SHELLS or lang in ("zsh", "fish"):
             problems.append(
-                f"{lang} blocks cannot run in the docs job (it executes bash on Linux); "
-                f'mark it <!-- doctest: illustrative reason="..." -->'
+                f"{lang} blocks cannot run in the docs job (it executes bash on Linux): "
+                "write the example as a bash or console block that runs, or in prose. A "
+                "new illustrative marker is refused (see 'The illustrative ratchet' on "
+                "the contributor page)"
             )
         return problems
 
@@ -1366,7 +1368,10 @@ def check_markers(files: Iterable[Path], root: Path = REPO_ROOT) -> list[Finding
 # ---------------------------------------------------------------------------
 #
 # ``<!-- doctest: illustrative reason="..." -->`` keeps a block out of the runs, and the
-# docs are moving to blocks that all run. The markers that exist today are frozen in a
+# docs are moving to blocks that all run. Two other markers keep a block out of them the
+# same way: ``runner=none reason="..."``, which keeps a pipeline from its CI runner, and
+# a bare ``save-as=<path>`` on a shell or Python block, which saves it and never runs it
+# (``run save-as=<path>`` saves and runs it). The markers that exist today are frozen in a
 # seed that may only shrink.
 #
 # THE SEED. One file per page under ILLUSTRATIVE_SEED_DIR, so that changes converting
@@ -1374,9 +1379,11 @@ def check_markers(files: Iterable[Path], root: Path = REPO_ROOT) -> list[Finding
 # encoded (illustrative_seed_name: a page has one name, and a name gives back one page).
 # A line is the page's path, a tab, and the marker's reason with its whitespace
 # collapsed, one line for each marker the parser binds to a block, in the order of the
-# page. A marker that binds to no block (one inside an example fence, in a table cell,
-# or with a blank line before its fence) governs nothing and has no line. A
-# ``.md.template`` and the page it renders to have a marker each, so a file each.
+# page: ``runner=none: `` comes before the reason of a runner=none marker, and a bare
+# save-as marker's line is ``save-as=<path>``. A marker that binds to no block (one
+# inside an example fence, in a table cell, or with a blank line before its fence)
+# governs nothing and has no line. A ``.md.template`` and the page it renders to have a
+# marker each, so a file each.
 #
 # THE SEED CHECK, in check_markers: a marker the seed does not list is a finding, and so
 # is a seed line no marker matches, so a commit that converts a block deletes its line
@@ -1389,11 +1396,16 @@ def check_markers(files: Iterable[Path], root: Path = REPO_ROOT) -> list[Finding
 # with no UNEXECUTED_SEED_FILE is not held to that: the pages the unit tests write in a
 # temporary root are checked without either. This checkout has both, and
 # tests/unit/docs/test_illustrative_ratchet.py fails when it stops having them.
+# Converting the last page deletes its seed file, and git keeps no empty directory, so
+# ILLUSTRATIVE_SEED_DIR/.gitkeep is what keeps the directory, and with it the check.
 #
 # AGAINST RELABELING. Fencing a bash block as ``text`` takes it out of the runs with no
 # marker, so the seed check never sees it. A block in a language nothing runs (the
-# family "other": text and the rest, groovy aside) that shows an ``ash`` command line or
-# a ``$`` prompt line is a finding, unless it is the output of the run block above it
+# family "other": text and the rest, groovy aside) that shows an ``ash`` command line, a
+# ``$`` prompt line, or a line that starts with a program (_program_line: ASH, a
+# container runtime, uv, uvx, pip, git or aws, after a ``%`` or ``PS>`` prompt,
+# environment assignments and a wrapper such as ``sudo``) is a finding, unless it is the
+# output of the run block above it
 # (output_samples), or the page is a record of a past release (is_historical_doc) or one
 # a generator writes (is_generated_page: the repository's list of those names the page,
 # and the banner that opens it names the generator the list gives it), or
@@ -1414,6 +1426,19 @@ UNEXECUTED_SEED_FILE = "scripts/docs_unexecuted_commands_seed.tsv"
 _PAGE_SUFFIXES = (".md", ".md.template")
 
 _PROMPT_LINE = re.compile(r"^\s*\$ +(?P<command>\S.*)$")
+#: The prompts that are not a ``$``: a ``%`` (csh and zsh), and PowerShell's ``PS>`` or
+#: ``PS C:\path>``.
+_OTHER_PROMPT = re.compile(r"^\s*(?:%\s+|PS(?: [^>\n]*)?>\s*)")
+_ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+#: Words that run the next word as a command, and so may stand in front of a program.
+_WRAPPERS = frozenset({"sudo", "env", "time", "nohup", "exec", "command"})
+#: The programs a line may start with, besides ASH_PROGRAMS and CONTAINER_RUNTIMES, to
+#: show a command in a block nothing runs.
+_OTHER_PROGRAMS = frozenset({"uv", "uvx", "pip", "git", "aws"})
+#: What a ``runner=none`` marker's seed line puts before its reason, and what a bare
+#: ``save-as=`` marker's line is made of: both say which marker the line stands for.
+RUNNER_NONE_PREFIX = f"runner={CI_RUNNER_NONE}: "
+SAVE_ONLY_PREFIX = f"{SAVE_AS}="
 
 
 def illustrative_seed_name(page: str) -> str:
@@ -1446,21 +1471,36 @@ def illustrative_seed_page(name: str) -> str | None:
     return page if illustrative_seed_name(page) == name else None
 
 
-def illustrative_markers(page: Page) -> list[tuple[int, str]]:
-    """(line, reason) of each illustrative marker bound to a block of ``page``, in page
-    order: the markers the seed lists.
+def _collapsed(reason: object) -> str:
+    """``reason`` with each run of whitespace read as one space; empty if it is no text."""
+    return " ".join(reason.split()) if isinstance(reason, str) else ""
 
-    A reason has each run of whitespace read as one space, which is how the seed holds
-    it, so two spellings of one reason are one reason. A marker with no reason
-    (marker_problems reports it) reads as the empty string.
+
+def illustrative_markers(page: Page) -> list[tuple[int, str]]:
+    """(line, text) of each marker bound to a block of ``page`` that keeps the block out
+    of the runs, in page order: the markers the seed lists.
+
+    That is an ``illustrative`` marker, with its reason; a ``runner=none`` marker, which
+    keeps a pipeline from its runner and whose reason follows the same rules, as
+    ``runner=none: <reason>``; and a bare ``save-as=<path>`` marker on a shell or Python
+    block, which saves the block and never runs it, as ``save-as=<path>`` (a block saved
+    with ``run`` runs, and a saved config, Dockerfile or text block is a file and no
+    command). A reason has each run of whitespace read as one space, which is how the
+    seed holds it, so two spellings of one reason are one reason. A marker with no
+    reason (marker_problems reports it) reads as the empty string.
     """
     found: list[tuple[int, str]] = []
     for block in page.blocks:
         marker = block.marker
-        if marker is not None and marker.mode == "illustrative":
-            reason = marker.keys.get("reason")
-            text = " ".join(reason.split()) if isinstance(reason, str) else ""
-            found.append((marker.line, text))
+        if marker is None:
+            continue
+        if marker.mode == "illustrative":
+            found.append((marker.line, _collapsed(marker.keys.get("reason"))))
+        elif marker.mode == "config" and marker.keys.get("runner") == CI_RUNNER_NONE:
+            reason = _collapsed(marker.keys.get("reason"))
+            found.append((marker.line, RUNNER_NONE_PREFIX + reason if reason else ""))
+        elif block.mode == "save" and block.family in ("shell", "python"):
+            found.append((marker.line, f"{SAVE_ONLY_PREFIX}{block.save_as or ''}"))
     return found
 
 
@@ -1475,13 +1515,46 @@ def _continued(lines: list[str], index: int, command: str) -> str:
     return command
 
 
+def _program_line(line: str) -> str | None:
+    """The command ``line`` shows when it starts with a program, or None.
+
+    A program is ASH under any of its names, a container runtime, ``uv``, ``uvx``,
+    ``pip``, ``git`` or ``aws``, and it may follow a ``%`` or ``PS>`` prompt (a ``$``
+    prompt is read by _PROMPT_LINE, for any command), environment assignments, and a
+    wrapper such as ``sudo`` with its options. It must have an argument: a word alone is
+    prose. The command is the line after its prompt, which is how the seed names it.
+    """
+    text = _OTHER_PROMPT.sub("", line, count=1).strip()
+    words = text.split()
+    index = 0
+    while index < len(words) and (
+        _ENV_ASSIGNMENT.match(words[index])
+        or words[index] in _WRAPPERS
+        or (index > 0 and words[index - 1] in _WRAPPERS and words[index][0] == "-")
+    ):
+        index += 1
+    if index + 1 >= len(words):
+        return None
+    program = words[index]
+    if (
+        program in ASH_PROGRAMS
+        or program in CONTAINER_RUNTIMES
+        or program in _OTHER_PROGRAMS
+    ):
+        return text
+    return None
+
+
 def _first_command(block: Block) -> str | None:
     """The first command a block shows, without its prompt and with its words one space
     apart; None when it shows none.
 
     A command is an ``ash`` command line (ash_lines, which reads a diff as the lines it
-    adds and keeps) or any line that is a ``$`` prompt and a command. Whichever comes
-    first names the block, and where one line is both, it is read as an ash line.
+    adds and keeps), any line that is a ``$`` prompt and a command, or a line that starts
+    with a program (_program_line), so that a block does not leave the count by showing
+    its command behind ``uvx``, ``sudo``, an environment assignment or another prompt.
+    Whichever comes first names the block, and where one line is both, it is read as an
+    ash line.
     """
     first_ash = ash_lines(block.body, block.lang)[:1]
     lines = block.body.split("\n")
@@ -1493,6 +1566,9 @@ def _first_command(block: Block) -> str | None:
         prompt = _PROMPT_LINE.match(line)
         if prompt:
             return " ".join(_continued(lines, index, prompt.group("command")).split())
+        program = _program_line(line)
+        if program is not None:
+            return " ".join(_continued(lines, index, program).split())
     return " ".join(first_ash[0][1].split()) if first_ash else None
 
 
@@ -1770,16 +1846,37 @@ def _seed_findings(
                     line.number,
                     f"this seed line is for {rel}, which does not exist: delete the "
                     "line, and its file once it has none, in the commit that deletes "
-                    "or renames the page",
+                    f"or renames the page. Keep {ILLUSTRATIVE_SEED_DIR}/.gitkeep, and "
+                    f"{UNEXECUTED_SEED_FILE} even when it is empty: they keep the "
+                    "checks armed",
                 )
                 for line in lines
             ]
     return findings
 
 
+def _unlisted_marker(text: str) -> str:
+    """The finding for a marker the illustrative seed does not list, by what ``text``
+    says the marker is (illustrative_markers)."""
+    if text.startswith(RUNNER_NONE_PREFIX):
+        reason = text[len(RUNNER_NONE_PREFIX) :]
+        what = f"this runner=none marker (reason {reason!r})"
+    elif text.startswith(SAVE_ONLY_PREFIX):
+        what = f"this marker, which saves a block and never runs it ({text!r}),"
+    else:
+        what = f"this illustrative marker (reason {text!r})"
+    return (
+        f"{what} is not in the illustrative seed, and the seed only shrinks: make the "
+        "block run (a saved block runs with run save-as=), or delete it. A block that "
+        "cannot run yet is no reason to add a line; see 'The illustrative ratchet' on "
+        "the contributor page"
+    )
+
+
 def illustrative_seed_problems(pages: Sequence[Page], root: Path) -> list[Finding]:
-    """The illustrative markers of ``pages`` are the lines of the seed under ``root``.
-    Nothing when ``root`` has no seed directory (see the section above)."""
+    """The markers of ``pages`` that keep a block out of the runs are the lines of the
+    seed under ``root``. Nothing when ``root`` has no seed directory (see the section
+    above)."""
     read = read_illustrative_seed(root)
     if read is None:
         return []
@@ -1789,12 +1886,7 @@ def illustrative_seed_problems(pages: Sequence[Page], root: Path) -> list[Findin
         seed,
         root,
         illustrative_markers,
-        lambda reason: (
-            f"this illustrative marker (reason {reason!r}) is not in the illustrative "
-            "seed, and the seed only shrinks: make the block run, or delete it. A "
-            "block that cannot run yet is no reason to add a line; see 'The "
-            "illustrative ratchet' on the contributor page"
-        ),
+        _unlisted_marker,
         lambda reason: (
             f"the seed has a line for this page with the reason {reason!r}, and no "
             "illustrative marker on the page has it: delete the line in the commit "
@@ -1827,9 +1919,10 @@ def unexecuted_command_problems(pages: Sequence[Page], root: Path) -> list[Findi
         ],
         lambda command: (
             f"this block shows a command that nothing runs ({command!r}): fence it as "
-            "bash so the docs runner executes it, mark it output if it is what the "
-            "block above prints, or write the command in prose. The blocks like this "
-            f"are listed in {UNEXECUTED_SEED_FILE}, which only shrinks"
+            "bash so the docs runner executes it (as console when it shows $ prompts "
+            "with their output), mark it output if it is what the block above prints, "
+            "or write the command in prose. The blocks like this are listed in "
+            f"{UNEXECUTED_SEED_FILE}, which only shrinks"
         ),
         lambda command: (
             f"no block on this page shows this command ({command!r}), which this seed "
