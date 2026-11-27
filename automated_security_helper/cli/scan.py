@@ -862,14 +862,14 @@ def _validate_shard_options(
             "--shard-index/--shard-count cannot be combined with --workspace. "
             "Both spread one scan over more compute, but along different axes, and "
             "only sharding is recombinable: it partitions the scanners and stamps "
-            "the partition onto the results so 'ash merge' can prove the shards "
-            "reconstruct exactly one whole scan. Workspace mode's unified results "
-            "file is assembled from the per-project payloads and carries none of "
-            "each project's scan metadata, so a sharded workspace run would write "
-            "results that merge has no provenance to verify coverage from -- and "
-            "an unverifiable partial scan reads as a clean one. Either scan the "
-            "workspace whole on one executor, or give each CI job one project via "
-            "--source-dir and shard that."
+            "the partition onto the results so 'ash results merge' can prove the "
+            "shards reconstruct exactly one whole scan. Workspace mode's unified "
+            "results file is assembled from the per-project payloads and carries "
+            "none of each project's scan metadata, so a sharded workspace run would "
+            "write results that merge has no provenance to verify coverage from -- "
+            "and an unverifiable partial scan reads as a clean one. Either scan the "
+            "workspace whole on one executor, or give each CI job one project with "
+            "`ash scan fs <project>` and shard that."
         )
 
     try:
@@ -2154,8 +2154,9 @@ def run_ash_scan_cli_command(
             if given
         ]
         _fail_workspace(
-            f"{' and '.join(offending)} only applies in workspace mode; pass "
-            f"'--workspace <file>' or '--workspace auto' as well."
+            f"{' and '.join(offending)} only applies in workspace mode; run "
+            f"`ash scan workspace <file>` (or `ash scan workspace auto`) to scan a "
+            f"workspace."
         )
 
     # Built HERE, above the workspace block, rather than with the other
