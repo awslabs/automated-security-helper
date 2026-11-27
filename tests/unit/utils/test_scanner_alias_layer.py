@@ -1506,7 +1506,9 @@ def test_an_option_key_a_patch_reads_under_the_retired_name_keeps_its_reference(
     and the fold's rule keeps the option, so the load records the key's
     reference where it records it when the same patch adds the section under
     bandit, the canonical control no fold touches: the two loads record the
-    same key references, and there is one."""
+    same key references, and there is one. It guards the replay's key
+    tokens: a filter that read a token as an option name of its own would
+    drop it, and the key's reference with it."""
     from automated_security_helper.config.ash_config import (
         config_env_var_is_interpolatable,
     )
@@ -1556,6 +1558,66 @@ def test_an_option_key_a_patch_reads_under_the_retired_name_keeps_its_reference(
         key_references(retired),
         key_references(canonical),
     )
+
+
+def test_an_undeclared_option_key_a_patch_reads_under_the_retired_name_leaves_no_reference(
+    retired_oldname, tmp_path, monkeypatch
+):
+    """The patch adds the whole section with confidence_level: low and an
+    option key read from the environment, ${KEY}, which reads
+    retired_only_knob, a name bandit does not declare. Under the retired
+    name the pointer lands on bandit's section and the fold's rule drops the
+    option with its key, in the configuration and in the copy the references
+    are followed through, so the load records no reference for the key. The
+    canonical-control row adds the section under bandit, where no fold drops
+    the option: the load is refused for an option bandit does not declare."""
+    from automated_security_helper.config.ash_config import (
+        config_env_var_is_interpolatable,
+    )
+    from automated_security_helper.config.resolve_config import (
+        ConfigFileRefused,
+        load_config_file_for_run,
+    )
+
+    # The premise: a config file may read the variable.
+    assert config_env_var_is_interpolatable(_FOLD_KEY_VAR)
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.setenv(_FOLD_KEY_VAR, "retired_only_knob")
+
+    def written(section):
+        folder = tmp_path / section
+        folder.mkdir()
+        path = folder / "patched.yaml"
+        path.write_text(
+            "scanners:\n  oldname:\n    enabled: true\n"
+            "patch:\n"
+            "  - op: add\n"
+            f"    path: /scanners/{section}\n"
+            "    value:\n"
+            "      options:\n"
+            "        confidence_level: low\n"
+            f"        ${{{_FOLD_KEY_VAR}}}: 1\n",
+            encoding="utf-8",
+        )
+        return path
+
+    with pytest.raises(ConfigFileRefused):
+        load_config_file_for_run(written("bandit"))
+
+    _, config = load_config_file_for_run(written("oldname"))
+
+    assert config.scanners.bandit.options.confidence_level == "low"
+    assert not hasattr(config.scanners.bandit.options, "retired_only_knob")
+    stray = [
+        reference
+        for reference in (
+            *config._environment_references,
+            *config._displayed_environment_references,
+        )
+        if reference.key and reference.resolved == "retired_only_knob"
+    ]
+    assert stray == [], stray
 
 
 # A value read from the environment in a section a ``patch`` adds under the
