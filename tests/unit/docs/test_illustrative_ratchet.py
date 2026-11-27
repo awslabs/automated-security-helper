@@ -30,6 +30,7 @@ do that. The seed is a count of what is allowed to stay, nothing more.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import json
 import os
@@ -37,6 +38,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -80,10 +82,93 @@ def ratchet():
 
 
 def _write(root: Path, rel: str, text: str) -> Path:
+    """Write ``text`` with a newline that is the same on every platform: the files are
+    committed to git, and a platform newline would put a carriage return in a seed line."""
     path = root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text, encoding="utf-8", newline="\n")
     return path
+
+
+def _clean_environment() -> dict[str, str]:
+    """This process's environment without the variables git exports to a hook, and with
+    no global or system git configuration: what a test's git and script processes get.
+
+    A hook that runs pytest (pre-commit, pre-push) hands it GIT_DIR, GIT_WORK_TREE and
+    GIT_INDEX_FILE, which override ``git -C``: every ``add -A`` and ``commit`` of a
+    temporary repository below would then land in the caller's own repository. The
+    global configuration leaks in the same way, a ``core.fsmonitor`` that starts a
+    daemon in each of them among it.
+    """
+    clean = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.upper().startswith("GIT_")
+    }
+    clean["GIT_CONFIG_GLOBAL"] = os.devnull
+    clean["GIT_CONFIG_NOSYSTEM"] = "1"
+    return clean
+
+
+@contextlib.contextmanager
+def _clean_process_environment():
+    """This process's environment, cleaned as _clean_environment says, for the calls into
+    the script that run git here: its git helper reads the environment from this process.
+    """
+    with mock.patch.dict(os.environ, _clean_environment(), clear=True):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _what_git_exports_to_a_hook_stays_out_of_every_test(monkeypatch):
+    for name in list(os.environ):
+        if name.upper().startswith("GIT_"):
+            monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
+def _plain_git(path: Path, *args: str) -> str:
+    """git on a repository this test made, with none of the variables a hook exports."""
+    proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(path),
+            "-c",
+            "user.name=ratchet-test",
+            "-c",
+            "user.email=ratchet-test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=_clean_environment(),
+    )
+    return proc.stdout
+
+
+def _run_script(path: Path, *args: str) -> subprocess.CompletedProcess:
+    """A script of this checkout as a child process, in an environment a hook cannot
+    reach."""
+    return subprocess.run(
+        [sys.executable, "-I", "-B", str(path), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_clean_environment(),
+    )
+
+
+def _main(*argv: str) -> int:
+    """The script's main, in this process, in an environment a hook cannot reach."""
+    with _clean_process_environment():
+        return ratchet().main(list(argv))
 
 
 def _block(reason: str, body: str = "docker ps") -> str:
@@ -634,6 +719,38 @@ def test_the_writer_refuses_to_run_where_a_seed_exists(tmp_path):
     assert {path.name: path.read_bytes() for path in directory.iterdir()} == before
 
 
+def _files_under(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "present",
+    ["only the directory", "only the file", "both"],
+)
+def test_the_writer_refuses_to_run_where_any_seed_exists(tmp_path, present):
+    """A writer that refused only when both seeds exist, or looked at one of them, would
+    let ``rm -r docs/illustrative-seed`` and ``write-seeds`` rebuild the illustrative
+    seed with every marker added since, so each seed alone is refused, and nothing in
+    the root changes."""
+    dc = checks()
+    page = _write(tmp_path, "docs/a.md", _page(NEEDS_DOCKER))
+    if present != "only the file":
+        _write(tmp_path, f"{dc.ILLUSTRATIVE_SEED_DIR}/.gitkeep", "")
+    if present != "only the directory":
+        _write(tmp_path, dc.UNEXECUTED_SEED_FILE, "")
+    before = _files_under(tmp_path)
+
+    with pytest.raises(FileExistsError, match="already"):
+        dc.write_seeds([page], tmp_path)
+
+    assert _files_under(tmp_path) == before
+
+
 # ---------------------------------------------------------------------------
 # The seed in this checkout is what the parser binds in it
 # ---------------------------------------------------------------------------
@@ -672,7 +789,7 @@ def test_the_committed_seed_is_what_the_parser_binds_in_the_corpus(corpus):
 def test_the_seed_holds_no_more_lines_than_main_did(corpus):
     lines = sum(len(text) for text in _committed_seed().values())
 
-    assert 0 < lines <= SEED_AT_MAIN, (
+    assert 0 <= lines <= SEED_AT_MAIN, (
         f"the seed holds {lines} lines; main had {SEED_AT_MAIN}, and it only shrinks"
     )
 
@@ -714,12 +831,26 @@ def test_the_seed_checks_report_nothing_on_the_corpus(corpus):
 
 @pytest.mark.integration
 def test_the_seed_writer_refuses_to_run_in_this_checkout():
-    result = subprocess.run(
-        [sys.executable, "-I", "-B", str(CHECKS_PATH), "write-seeds"],
-        capture_output=True,
-        text=True,
-        check=False,
+    """Where both seeds are gone the writer does not refuse: it writes about 600 lines of
+    seed into the source tree, built from the pages as they are now, and the arming test
+    then passes on the next run, so the deletion it exists to report is hidden. So the
+    writer is not started unless both seeds are here."""
+    dc = checks()
+    missing = [
+        rel
+        for rel, present in (
+            (dc.ILLUSTRATIVE_SEED_DIR, (REPO_ROOT / dc.ILLUSTRATIVE_SEED_DIR).is_dir()),
+            (dc.UNEXECUTED_SEED_FILE, (REPO_ROOT / dc.UNEXECUTED_SEED_FILE).is_file()),
+        )
+        if not present
+    ]
+    assert not missing, (
+        f"{missing} is gone from this checkout, so the writer was not started: it would "
+        "write both seeds into the tree and hide the deletion. Restore the seeds; "
+        "test_the_ratchets_are_armed_on_this_checkout names which"
     )
+
+    result = _run_script(CHECKS_PATH, "write-seeds")
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "already" in result.stderr
@@ -727,12 +858,7 @@ def test_the_seed_writer_refuses_to_run_in_this_checkout():
 
 @pytest.mark.integration
 def test_the_seed_writer_names_what_it_takes():
-    result = subprocess.run(
-        [sys.executable, "-I", "-B", str(CHECKS_PATH), "nonsense"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = _run_script(CHECKS_PATH, "nonsense")
 
     assert result.returncode == 64, result.stdout + result.stderr
     assert "write-seeds" in result.stderr
@@ -775,26 +901,7 @@ class _Repo:
         self.base = self.commit("base")
 
     def git(self, *args: str) -> str:
-        proc = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(self.path),
-                "-c",
-                "user.name=ratchet-test",
-                "-c",
-                "user.email=ratchet-test@example.invalid",
-                "-c",
-                "commit.gpgsign=false",
-                "-c",
-                "core.hooksPath=/dev/null",
-                *args,
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return proc.stdout
+        return _plain_git(self.path, *args)
 
     def commit(self, message: str = "change") -> str:
         self.git("add", "-A")
@@ -810,10 +917,7 @@ class _Repo:
 
     def added(self) -> list[tuple[str, str]]:
         """(page, text) of each line the head adds to the seeds, as the script reads."""
-        violations, _notes = ratchet().find_added_lines(
-            self.path, self.base, self.head()
-        )
-        return [(v.page, v.text) for v in violations]
+        return [(v.page, v.text) for v in _violations(self)]
 
 
 @pytest.fixture
@@ -949,7 +1053,8 @@ def test_a_range_that_introduces_the_seed_has_nothing_to_compare_with(tmp_path):
     _seed(repo.path, "docs/a.md", NEEDS_DOCKER)
     head = repo.commit("the seed")
 
-    violations, notes = ratchet().find_added_lines(repo.path, repo.base, head)
+    with _clean_process_environment():
+        violations, notes = ratchet().find_added_lines(repo.path, repo.base, head)
 
     assert violations == []
     assert any("not in the base" in note for note in notes), notes
@@ -957,7 +1062,10 @@ def test_a_range_that_introduces_the_seed_has_nothing_to_compare_with(tmp_path):
 
 def _violations(repo: _Repo):
     """What the script finds in the range from the repository's base to its head."""
-    violations, _notes = ratchet().find_added_lines(repo.path, repo.base, repo.head())
+    with _clean_process_environment():
+        violations, _notes = ratchet().find_added_lines(
+            repo.path, repo.base, repo.head()
+        )
     return violations
 
 
@@ -972,6 +1080,34 @@ def _lose(repo: _Repo, *rels: str) -> str:
             target.unlink()
     repo.base = repo.commit("the seed deleted")
     return repo.base
+
+
+def _ratchet_cli(repo: _Repo, head: str) -> subprocess.CompletedProcess:
+    """The script as a developer runs it, with ``--base``: a child process comparing the
+    repository's base with ``head``."""
+    return _run_script(
+        RATCHET_PATH, "--repo", str(repo.path), "--base", repo.base, "--head", head
+    )
+
+
+def _summary(capsys) -> str:
+    """The one summary line the script printed: the range it compared, and what it found.
+    Exit 0 also means "no range, nothing to do", which prints no such line, so a test
+    that reads only the exit code cannot tell a clean comparison from none."""
+    lines = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("illustrative ratchet (")
+    ]
+    assert len(lines) == 1, f"no range was compared, or two were: {lines}"
+    return lines[0]
+
+
+def _compared(what: str, base: str, head: str, found: int) -> str:
+    return (
+        f"illustrative ratchet ({what}, {base[:10]}..{head[:10]}): "
+        f"{found} line(s) added to the seeds"
+    )
 
 
 @pytest.mark.integration
@@ -1070,23 +1206,7 @@ def test_the_script_exits_one_when_the_fork_point_lost_a_seed(repo):
     _lose(repo, checks().ILLUSTRATIVE_SEED_DIR)
     head = repo.commit("a change that leaves the seed gone")
 
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-I",
-            "-B",
-            str(RATCHET_PATH),
-            "--repo",
-            str(repo.path),
-            "--base",
-            repo.base,
-            "--head",
-            head,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = _ratchet_cli(repo, head)
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "::error" in result.stdout
@@ -1134,44 +1254,6 @@ def test_the_failure_for_a_lost_seed_says_how_to_restore_it():
     assert "a" * 10 in message
 
 
-def _plain_git(path: Path, *args: str) -> str:
-    """git on a repository this test made, with none of the variables a hook exports."""
-    proc = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(path),
-            "-c",
-            "user.name=ratchet-test",
-            "-c",
-            "user.email=ratchet-test@example.invalid",
-            "-c",
-            "commit.gpgsign=false",
-            "-c",
-            "core.hooksPath=/dev/null",
-            *args,
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-        env=_clean_environment(),
-    )
-    return proc.stdout
-
-
-def _clean_environment() -> dict[str, str]:
-    """This process's environment without the variables git exports to a hook, and with
-    no global or system git configuration: what a test's git and script processes get."""
-    clean = {
-        name: value
-        for name, value in os.environ.items()
-        if not name.upper().startswith("GIT_")
-    }
-    clean["GIT_CONFIG_GLOBAL"] = os.devnull
-    clean["GIT_CONFIG_NOSYSTEM"] = "1"
-    return clean
-
-
 @pytest.mark.integration
 def test_what_git_exports_to_a_hook_does_not_reach_the_repositories_a_test_builds(
     tmp_path, monkeypatch
@@ -1198,13 +1280,19 @@ def test_what_git_exports_to_a_hook_does_not_reach_the_repositories_a_test_build
 
     repo = _Repo(tmp_path / "repo")
     _seed(repo.path, "docs/b.md", NEEDS_DOCKER, "an added reason")
-    repo.commit("a line added")
+    head = repo.commit("a line added")
 
     assert repo.added() == [("docs/b.md", "an added reason")]
     assert _plain_git(repo.path, "log", "--format=%s").split("\n")[:-1] == [
         "a line added",
         "base",
     ]
+    # The script itself, as a child process and in this one, reads the repository it is
+    # given, not the one the variables name.
+    child = _ratchet_cli(repo, head)
+    assert child.returncode == 1, child.stdout + child.stderr
+    assert "an added reason" in child.stdout
+    assert _main("--repo", str(repo.path), "--base", repo.base, "--head", head) == 1
     after = (
         _plain_git(other, "rev-parse", "HEAD"),
         _plain_git(other, "status", "--porcelain"),
@@ -1244,31 +1332,20 @@ def test_the_script_exits_one_on_an_added_line_and_zero_on_a_clean_range(repo):
     _seed(repo.path, "docs/b.md", NEEDS_DOCKER, "an added reason")
     dirty = repo.commit("a line")
 
-    def run(head: str):
-        return subprocess.run(
-            [
-                sys.executable,
-                "-I",
-                "-B",
-                str(RATCHET_PATH),
-                "--repo",
-                str(repo.path),
-                "--base",
-                repo.base,
-                "--head",
-                head,
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-    passed, failed = run(clean), run(dirty)
+    passed, failed = _ratchet_cli(repo, clean), _ratchet_cli(repo, dirty)
 
     assert passed.returncode == 0, passed.stdout + passed.stderr
+    assert (
+        f"{repo.base[:10]}..{clean[:10]}): 0 line(s) added to the seeds"
+        in passed.stdout
+    )
     assert failed.returncode == 1, failed.stdout + failed.stderr
     assert "an added reason" in failed.stdout
     assert "::error" in failed.stdout
+    assert (
+        f"{repo.base[:10]}..{dirty[:10]}): 1 line(s) added to the seeds"
+        in failed.stdout
+    )
 
 
 def _event(tmp_path: Path, monkeypatch, name: str, payload: dict) -> None:
@@ -1280,38 +1357,63 @@ def _event(tmp_path: Path, monkeypatch, name: str, payload: dict) -> None:
 
 @pytest.mark.integration
 def test_a_pull_request_is_read_from_its_fork_point_to_its_head(
-    repo, tmp_path, monkeypatch
+    repo, tmp_path, monkeypatch, capsys
 ):
+    """Exit 0 also means "no range, nothing to do", so each half reads the summary line:
+    the range that was compared, and what was found in it."""
     _seed(repo.path, "docs/b.md", NEEDS_DOCKER, "an added reason")
     head = repo.commit("a line")
     payload = {"pull_request": {"base": {"sha": repo.base}, "head": {"sha": head}}}
     _event(tmp_path, monkeypatch, "pull_request", payload)
 
-    assert ratchet().main(["--repo", str(repo.path)]) == 1
+    assert _main("--repo", str(repo.path)) == 1
+    assert _summary(capsys) == _compared("pull request", repo.base, head, 1)
 
-    payload["pull_request"]["head"]["sha"] = repo.base
+    # The clean half is a head that is not its base: one that adds nothing to the seeds.
+    repo.git("checkout", "-q", "-b", "clean", repo.base)
+    clean = repo.commit("a pull request that leaves the seeds alone")
+    payload["pull_request"]["head"]["sha"] = clean
     _event(tmp_path, monkeypatch, "pull_request", payload)
-    assert ratchet().main(["--repo", str(repo.path)]) == 0
+
+    assert _main("--repo", str(repo.path)) == 0
+    assert _summary(capsys) == _compared("pull request", repo.base, clean, 0)
 
 
 @pytest.mark.integration
 def test_a_merge_queue_entry_is_read_from_its_base_to_its_head(
-    repo, tmp_path, monkeypatch
+    repo, tmp_path, monkeypatch, capsys
 ):
     _seed(repo.path, "docs/b.md", NEEDS_DOCKER, "an added reason")
     head = repo.commit("a line")
     payload = {"merge_group": {"base_sha": repo.base, "head_sha": head}}
     _event(tmp_path, monkeypatch, "merge_group", payload)
 
-    assert ratchet().main(["--repo", str(repo.path)]) == 1
+    assert _main("--repo", str(repo.path)) == 1
+    assert _summary(capsys) == _compared("merge queue entry", repo.base, head, 1)
+
+
+@pytest.mark.integration
+def test_a_merge_queue_entry_that_leaves_the_seeds_alone_passes(
+    repo, tmp_path, monkeypatch, capsys
+):
+    """The control for the case above: a check that flags every merge queue entry fails
+    this one, and one that reads no range at all prints no summary line."""
+    head = repo.commit("a change that leaves the seeds alone")
+    payload = {"merge_group": {"base_sha": repo.base, "head_sha": head}}
+    _event(tmp_path, monkeypatch, "merge_group", payload)
+
+    assert _main("--repo", str(repo.path)) == 0
+    assert _summary(capsys) == _compared("merge queue entry", repo.base, head, 0)
 
 
 @pytest.mark.integration
 def test_a_fork_point_is_where_the_pull_request_left_main_not_where_main_is(
-    repo, tmp_path, monkeypatch
+    repo, tmp_path, monkeypatch, capsys
 ):
     """Main moved on and shrank the seed (a conversion elsewhere). The pull request, cut
-    before that, leaves the seed alone and must not be charged for the difference."""
+    before that, leaves the seed alone and must not be charged for the difference. Its
+    base is not an ancestor of its head, the shape a range resolver could give up on, and
+    giving up exits 0 too, so the summary line has to name the range that was compared."""
     main = repo.git("rev-parse", "--abbrev-ref", "HEAD").strip()
     repo.git("checkout", "-q", "-b", "feature")
     feature = repo.commit("the pull request, which leaves the seed alone")
@@ -1322,7 +1424,8 @@ def test_a_fork_point_is_where_the_pull_request_left_main_not_where_main_is(
     payload = {"pull_request": {"base": {"sha": moved_on}, "head": {"sha": feature}}}
     _event(tmp_path, monkeypatch, "pull_request", payload)
 
-    assert ratchet().main(["--repo", str(repo.path)]) == 0
+    assert _main("--repo", str(repo.path)) == 0
+    assert _summary(capsys) == _compared("pull request", repo.base, feature, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -1332,12 +1435,7 @@ def test_a_fork_point_is_where_the_pull_request_left_main_not_where_main_is(
 
 @pytest.mark.integration
 def test_the_script_passes_its_own_self_test():
-    result = subprocess.run(
-        [sys.executable, "-I", "-B", str(RATCHET_PATH), "--self-test"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = _run_script(RATCHET_PATH, "--self-test")
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "0 failure(s)" in result.stdout
@@ -1374,31 +1472,121 @@ def test_the_self_test_fails_when_the_comparison_flags_everything(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _snapshot_trailers_steps() -> list[dict]:
-    import yaml
+TRAILERS_COMMAND = "python3 .github/scripts/check-snapshot-trailers.py"
+RATCHET_COMMAND = "python3 .github/scripts/check-illustrative-ratchet.py"
+SELF_TEST_COMMAND = f"{RATCHET_COMMAND} --self-test"
 
-    workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+
+def _ratchet_step_problems(workflow: dict) -> list[str]:
+    """What lets the ratchet step of the snapshot-trailers job pass over a violation, or
+    never run the check, in ``workflow`` (a workflow file, loaded). Empty for a step that
+    fails the job: the check is a line of its own, after the self-test, under ``set -e``,
+    and nothing in the job or the step makes a failure of it not count."""
     job = workflow["jobs"]["snapshot-trailers"]
-    assert "if" not in job, "a job-level `if:` that can be false reads as a failure"
-    return job["steps"]
+    steps = job["steps"]
+    problems = [
+        f"the job sets `{key}:`, which can read a failure as a pass or a skip"
+        for key in ("if", "continue-on-error")
+        if key in job
+    ]
+    runs = [str(step.get("run", "")) for step in steps]
+    trailers = [i for i, run in enumerate(runs) if "check-snapshot-trailers.py" in run]
+    ratchets = [i for i, run in enumerate(runs) if "check-illustrative-ratchet" in run]
+    if len(ratchets) != 1:
+        return [*problems, f"{len(ratchets)} steps run the ratchet; one must"]
+    index = ratchets[0]
+    problems += [
+        f"the ratchet step sets `{key}:`; it is for every event the job runs on, "
+        "and a failure of it fails the job"
+        for key in ("if", "continue-on-error")
+        if key in steps[index]
+    ]
+    if not trailers or index < trailers[0]:
+        problems.append("the ratchet step does not come after the trailer step")
+    lines = [line.strip() for line in runs[index].splitlines()]
+    if "set -euo pipefail" not in lines:
+        problems.append("the step does not run under `set -euo pipefail`")
+    self_tests = [n for n, line in enumerate(lines) if line == SELF_TEST_COMMAND]
+    checks = [n for n, line in enumerate(lines) if line == RATCHET_COMMAND]
+    if len(self_tests) != 1:
+        problems.append(f"{len(self_tests)} lines are the self-test, not one")
+    if len(checks) != 1:
+        problems.append(f"{len(checks)} lines are the check, not one")
+    if self_tests and checks and checks[0] < self_tests[0]:
+        problems.append("the check runs before the self-test")
+    problems += [
+        f"`{line}` lets the step pass when a command in it fails"
+        for line in lines
+        if "||" in line or line.startswith("set +e")
+    ]
+    return problems
+
+
+_SET_E = "set -euo pipefail\n"
+_SELF_TEST_LINE = f"{SELF_TEST_COMMAND}\n"
+_CHECK_LINE = f"{RATCHET_COMMAND}\n"
+_GOOD_RATCHET_RUN = _SET_E + _SELF_TEST_LINE + _CHECK_LINE
+
+
+def _workflow(
+    run: str = _GOOD_RATCHET_RUN,
+    *,
+    step: dict | None = None,
+    job: dict | None = None,
+    ratchet_first: bool = False,
+) -> dict:
+    """A workflow of the shape the real one has: a trailer step, then the ratchet step."""
+    trailers = {"name": "trailers", "run": f"{TRAILERS_COMMAND} --orphans"}
+    ratchet = {"name": "ratchet", "shell": "bash", "run": run, **(step or {})}
+    steps = [ratchet, trailers] if ratchet_first else [trailers, ratchet]
+    return {"jobs": {"snapshot-trailers": {**(job or {}), "steps": steps}}}
+
+
+_BROKEN_RATCHET_STEPS = {
+    "the self-test twice, so the check itself never runs": _workflow(
+        _SET_E + _SELF_TEST_LINE + _SELF_TEST_LINE
+    ),
+    "the check forgiven with || true": _workflow(
+        _SET_E + _SELF_TEST_LINE + f"{RATCHET_COMMAND} || true\n"
+    ),
+    "the self-test forgiven with || true": _workflow(
+        _SET_E + f"{SELF_TEST_COMMAND} || true\n" + _CHECK_LINE
+    ),
+    "the check left out": _workflow(_SET_E + _SELF_TEST_LINE),
+    "the check commented out": _workflow(_SET_E + _SELF_TEST_LINE + "# " + _CHECK_LINE),
+    "the check before the self-test": _workflow(_SET_E + _CHECK_LINE + _SELF_TEST_LINE),
+    "no set -e": _workflow(_SELF_TEST_LINE + _CHECK_LINE),
+    "set +e after it": _workflow(_SET_E + "set +e\n" + _SELF_TEST_LINE + _CHECK_LINE),
+    "continue-on-error on the step": _workflow(step={"continue-on-error": True}),
+    "continue-on-error on the job": _workflow(job={"continue-on-error": True}),
+    "an event filter on the step": _workflow(
+        step={"if": "github.event_name == 'pull_request'"}
+    ),
+    "an if on the job": _workflow(job={"if": "github.event_name == 'push'"}),
+    "the step before the trailer step": _workflow(ratchet_first=True),
+}
 
 
 @pytest.mark.unit
 def test_the_snapshot_trailers_job_runs_the_ratchet_after_its_trailer_step():
-    steps = _snapshot_trailers_steps()
-    runs = [str(step.get("run", "")) for step in steps]
-    trailers = next(
-        i for i, run in enumerate(runs) if "check-snapshot-trailers.py" in run
-    )
-    ratchets = [i for i, run in enumerate(runs) if "check-illustrative-ratchet" in run]
+    import yaml
 
-    assert len(ratchets) == 1, runs
-    index = ratchets[0]
-    assert index > trailers
-    run = runs[index]
-    assert "set -euo pipefail" in run
-    assert run.index("--self-test") < run.rindex("check-illustrative-ratchet.py")
-    assert "if" not in steps[index], "the ratchet is for every event the job runs on"
+    workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+
+    assert _ratchet_step_problems(workflow) == []
+
+
+@pytest.mark.unit
+def test_a_ratchet_step_of_the_shape_the_job_needs_has_no_problem():
+    """The control for the cases below: the check that finds a problem in each of them
+    finds none here."""
+    assert _ratchet_step_problems(_workflow()) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", sorted(_BROKEN_RATCHET_STEPS))
+def test_a_ratchet_step_that_cannot_fail_the_job_is_a_problem(name):
+    assert _ratchet_step_problems(_BROKEN_RATCHET_STEPS[name]), name
 
 
 @pytest.mark.unit
