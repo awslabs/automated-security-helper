@@ -275,9 +275,7 @@ def check_register(
             raise ImageRegisterError(f"family {family.name!r} is declared twice")
         family_names.add(family.name)
         if not family.package_manager.strip():
-            raise ImageRegisterError(
-                f"family {family.name!r} names no package manager"
-            )
+            raise ImageRegisterError(f"family {family.name!r} names no package manager")
 
     step_keys: set[str] = set()
     for step in build_steps:

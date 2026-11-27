@@ -466,7 +466,9 @@ _ACCEPTED = {
     "the small register the planted cases start from": lambda ir: _base(),
     "a second family on another package manager": lambda ir: _also(
         "families",
-        ir.OsFamily("alpine-3", "apk", ir.HostMatch(ids=("alpine",), versions=("3.24",))),
+        ir.OsFamily(
+            "alpine-3", "apk", ir.HostMatch(ids=("alpine",), versions=("3.24",))
+        ),
     ),
     "a package that provides nothing": lambda ir: _also(
         "packages", _package(provides=())
@@ -523,7 +525,8 @@ def test_a_nodesource_source_names_its_major_its_key_and_its_list_line() -> None
         }
         fields[missing] = " "
         with pytest.raises(
-            ValueError, match="a nodesource source names its major, key_url and list_line"
+            ValueError,
+            match="a nodesource source names its major, key_url and list_line",
         ):
             ir.PackageSource("nodesource", **fields)
 

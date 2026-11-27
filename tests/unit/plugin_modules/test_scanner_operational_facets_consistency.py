@@ -1055,7 +1055,8 @@ def test_the_install_command_reader_has_a_positive_and_a_negative_control(
 
 def test_the_two_scanners_left_out_of_the_image_say_why() -> None:
     reasons = {
-        name: _ops(_class_named(name)).image.reason for name in ("snyk-code", "ferret-scan")
+        name: _ops(_class_named(name)).image.reason
+        for name in ("snyk-code", "ferret-scan")
     }
 
     assert [n for n, r in sorted(_IMAGE_ROUTES.items()) if r == "not_in_image"] == [
@@ -1127,9 +1128,13 @@ def test_an_image_note_is_a_verbatim_run_of_dockerfile_comments(cls) -> None:
 
 
 def test_no_image_note_says_anything_about_licensing() -> None:
-    notes = [line for cls in SCANNER_CLASSES for line in _ops(cls).image.dockerfile_note]
+    notes = [
+        line for cls in SCANNER_CLASSES for line in _ops(cls).image.dockerfile_note
+    ]
     licensing_lines = {
-        line for line in _DOCKERFILE_LINES if line.startswith("#") and _LICENSING.search(line)
+        line
+        for line in _DOCKERFILE_LINES
+        if line.startswith("#") and _LICENSING.search(line)
     }
 
     assert notes, "no scanner carries a note, so the check below would pass on nothing"

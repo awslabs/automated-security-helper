@@ -303,9 +303,7 @@ def test_the_path_reader_has_controls_in_both_directions() -> None:
     assert image_path_problems({"a"}, {"a"}, {"a"}, set()) == [
         "a is installed by a release-asset scanner and by an engine step"
     ]
-    assert image_path_problems({"a"}, {"a"}, {"z"}, set()) == [
-        "z is not a pinned tool"
-    ]
+    assert image_path_problems({"a"}, {"a"}, {"z"}, set()) == ["z is not a pinned tool"]
 
 
 def _released_tools() -> set[str]:
@@ -389,9 +387,7 @@ def test_the_image_loads_the_alpha_modules_of_the_scanners_that_bring_a_tool() -
     """The Dockerfile's own words: the modules listed are the alpha ones that bring
     tools of their own. A scanner whose tool is another scanner's, or is not in the
     image, is not listed."""
-    routes = {
-        name: facets.image.route for name, facets in _facets_by_name().items()
-    }
+    routes = {name: facets.image.route for name, facets in _facets_by_name().items()}
     bring_a_tool = {opsf.ImageRoute.RELEASE_ASSET, opsf.ImageRoute.DEPENDENCIES_INSTALL}
     expected = {
         m.plugin_module
