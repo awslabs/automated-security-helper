@@ -39,7 +39,7 @@ A config file inside the repository you scan, including the `.ash.yaml` that ASH
 
 ASH never merges sources and does not look in parent directories. Every other source it finds is ignored, with a warning that names it. The [configuration reference](../reference/configuration.md#where-ash-finds-its-configuration) lists all the locations in order.
 
-A config file at any location other than `.ash.yaml` at the root still loads, and ASH prints one warning that names the file, says the location is deprecated, and names `.ash.yaml` as the path to move it to. Support for those locations is removed in ASH 4.0; the warning starts in 3.9. When both `.ash.yaml` and a legacy file exist, `.ash.yaml` is used and one warning names the legacy file it shadows. `--config`, `-c`, and the `ASH_CONFIG` variable name a file directly and produce no warning.
+A config file at any location other than `.ash.yaml` at the root still loads, and ASH prints one warning that names the file, says the location is deprecated, and names `.ash.yaml` as the path to move it to (for `.ashrc.toml` and `ashrc.toml`, the file to rewrite it in as YAML). Support for those locations is removed in ASH 4.0; the warning starts in 3.9. When both `.ash.yaml` and a legacy file exist, `.ash.yaml` is used and one warning names the legacy file it shadows. `--config`, `-c`, and the `ASH_CONFIG` variable name a file directly and produce no warning.
 
 ### Move an existing config to `.ash.yaml` {#move-config}
 
@@ -57,7 +57,9 @@ For a config under another legacy name, such as `.ashrc.yaml`, use that name as 
 git mv .ashrc.yaml .ash.yaml
 ```
 
-The deprecation warning names the file ASH loaded and the `.ash.yaml` path to move it to. Run `ash config validate` afterward to confirm that ASH reads the new location.
+A TOML file, `.ashrc.toml` or `ashrc.toml`, cannot be moved this way: `.ash.yaml` is read as YAML, so the moved file is refused and every scan exits 3 until it is fixed. Write the same settings as YAML in a new `.ash.yaml`, then remove the TOML file with `git rm`. Only the syntax changes: a `[global_settings]` table in the TOML file is a `global_settings:` mapping in YAML.
+
+The deprecation warning names the file ASH loaded and the `.ash.yaml` path to move it to, or, for a TOML file, to rewrite it in. Run `ash config validate` afterward to confirm that ASH reads the new location.
 
 The commands that edit a config file (`ash config update`, `ash config wizard`, and `ash inspect findings`) write YAML, and JSON into a file whose name ends in `.json`. They refuse TOML files, and `update` and `wizard` also refuse a file that uses `extends` or `patch` or reads values from the environment, because a rewrite would store what the references resolve to. With no config file, `wizard` and `inspect findings` create `.ash.yaml`. `ash config update --set` takes the same `key.path=value` form as [`--config-overrides`](#overrides), including JSON values and `+=`. `update` and `wizard` exit 3 and leave the file unchanged when a scan refuses it, and `update` also when a `--set` leaves a config a scan would refuse. Neither checks the options of plugins loaded from `ash_plugin_modules`, so a scan can still refuse a file they wrote. They write every setting, defaults included, keep top-level keys ASH does not know (a JSON `$schema`, for example), and keep no comment other than the schema line.
 

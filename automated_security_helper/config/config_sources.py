@@ -2104,11 +2104,23 @@ def canonical_path_for(source: ConfigSource) -> Path:
 
 
 def _legacy_location_warning(source: ConfigSource) -> str:
+    canonical = describe_config_path(canonical_path_for(source))
+    if is_toml_file(source.path):
+        # Only an ashrc name is a TOML legacy location (no dedicated name ends in
+        # .toml, and a pyproject.toml table is not a legacy location). The
+        # canonical file is read as YAML (the parser is chosen by the file
+        # suffix), so this file renamed to it would be refused.
+        remedy = (
+            f"rewrite this file as YAML in {canonical} and delete it; "
+            f"{ASH_CANONICAL_CONFIG_FILE_NAME} is read as YAML, so renaming the "
+            "TOML file is not enough"
+        )
+    else:
+        remedy = f"move this file to {canonical}"
     return (
         f"ASH is reading its configuration from {source.label}, a deprecated "
         f"location that ASH 4.0 stops reading. The canonical config file is "
-        f"{ASH_CANONICAL_CONFIG_FILE_NAME} at the scan root: move this file to "
-        f"{describe_config_path(canonical_path_for(source))}."
+        f"{ASH_CANONICAL_CONFIG_FILE_NAME} at the scan root: {remedy}."
     )
 
 

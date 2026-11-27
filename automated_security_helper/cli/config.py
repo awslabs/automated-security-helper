@@ -884,6 +884,18 @@ def _new_source_refusal(search_dir: Path, target: Path) -> str | None:
             f"Edit {selected.label}, or pass --config to write the new file "
             "somewhere else"
         )
+    elif is_toml_file(selected.path):
+        # After the pyproject branch: pyproject.toml is a TOML file too, and its
+        # [tool.ash] table is edited where it is. Any other TOML source is an
+        # ashrc file. The target is read as YAML (the parser is chosen by the
+        # file suffix), so the TOML file renamed to it would be refused.
+        advice = (
+            f"Rewrite {selected.label} as YAML in {target} and delete the TOML "
+            f"file ({target} is the canonical config file, and it is read as "
+            "YAML, so renaming the TOML file is not enough), edit "
+            f"{selected.label} in place, or pass --config to write the new file "
+            "somewhere else"
+        )
     else:
         advice = (
             f"Move {selected.label} to {target} (the canonical config file), "
