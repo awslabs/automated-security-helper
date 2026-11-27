@@ -182,7 +182,7 @@ jobs:
       - name: Install scanner tools
         run: ash dependencies install --tool grype
       - name: Run ASH
-        run: ash scan --mode local --no-progress --fail-on-findings
+        run: ash scan fs . --mode local --no-progress --fail-on-findings
 """
 
 SHARDED = """\
@@ -197,7 +197,7 @@ jobs:
     steps:
       - name: Scan one shard
         run: >-
-          ash scan --mode local --no-progress --no-fail-on-findings
+          ash scan fs . --mode local --no-progress --no-fail-on-findings
           --shard-index "${SHARD}" --shard-count 4
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -209,7 +209,7 @@ jobs:
     steps:
       - name: Merge the shards
         run: >-
-          ash merge --fail-on-findings --output-dir .ash/ash_output
+          ash results merge --fail-on-findings --output-dir .ash/ash_output
           --results shards/ash-shard-0
 """
 
@@ -272,7 +272,7 @@ def test_a_job_needing_a_failing_job_runs_only_when_its_if_admits_that():
     ``!cancelled()`` or ``failure()``; a dependent of a passing job runs as before."""
     load = _api("reports", "load_workflow")
     plan = _api("reports", "act_job_plan")
-    base = "on:\n  push:\njobs:\n  scan:\n    steps:\n      - run: ash scan .\n"
+    base = "on:\n  push:\njobs:\n  scan:\n    steps:\n      - run: ash scan fs .\n"
     dependent = "  after:\n    needs: scan\n{condition}    steps:\n      - run: echo\n"
     for condition, expected in [
         ("", []),
@@ -291,7 +291,7 @@ def test_a_job_needing_a_failing_job_runs_only_when_its_if_admits_that():
         text = base + dependent.format(condition=condition)
         jobs = [job for job in plan(load(text), {}) if job != "scan"]
         assert jobs == expected, (condition, jobs)
-    quiet = base.replace("ash scan .", "ash scan --no-fail-on-findings .")
+    quiet = base.replace("ash scan fs .", "ash scan fs . --no-fail-on-findings")
     for condition in ["", "    if: ${{ github.event_name == 'push' }}\n"]:
         text = quiet + dependent.format(condition=condition)
         assert "after" in plan(load(text), {}), condition
@@ -344,8 +344,8 @@ def test_the_expression_reader_follows_githubs_literals_and_coercions():
     plan = _api("reports", "act_job_plan")
     scan = "on:\n  push:\njobs:\n  scan:\n    steps:\n      - run: {command}\n"
     after = "  after:\n    needs: scan\n    if: {condition}\n    steps:\n      - run: echo\n"
-    passing = scan.format(command="ash scan --no-fail-on-findings .")
-    failing = scan.format(command="ash scan .")
+    passing = scan.format(command="ash scan fs . --no-fail-on-findings")
+    failing = scan.format(command="ash scan fs .")
     for condition, expected in [
         ("${{ false }}", False),
         ("${{ true }}", True),
@@ -412,9 +412,11 @@ def test_failure_reads_every_ancestor_of_a_job():
         "  mid:\n    needs: scan\n    if: always()\n    steps:\n      - run: echo\n"
         "  last:\n    needs: mid\n    if: failure()\n    steps:\n      - run: echo\n"
     )
-    failing = plan(load(chain.format(command="ash scan .")), {})
+    failing = plan(load(chain.format(command="ash scan fs .")), {})
     assert sorted(failing) == ["last", "mid", "scan"], sorted(failing)
-    passing = plan(load(chain.format(command="ash scan --no-fail-on-findings .")), {})
+    passing = plan(
+        load(chain.format(command="ash scan fs . --no-fail-on-findings")), {}
+    )
     assert sorted(passing) == ["mid", "scan"], sorted(passing)
     # The implicit success() of a job with no `if` (and the written `success()`) reads
     # the same ancestors: `last` needs only `mid`, which ran and passed under always(),
@@ -422,10 +424,10 @@ def test_failure_reads_every_ancestor_of_a_job():
     # transitively failed. After a passing scan it runs.
     for condition in ("", "    if: success()\n"):
         no_if = chain.replace("    if: failure()\n", condition)
-        failing = plan(load(no_if.format(command="ash scan .")), {})
+        failing = plan(load(no_if.format(command="ash scan fs .")), {})
         assert sorted(failing) == ["mid", "scan"], (condition, sorted(failing))
         passing = plan(
-            load(no_if.format(command="ash scan --no-fail-on-findings .")), {}
+            load(no_if.format(command="ash scan fs . --no-fail-on-findings")), {}
         )
         assert sorted(passing) == ["last", "mid", "scan"], (condition, sorted(passing))
 

@@ -144,11 +144,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run ASH
-        run: ash scan --mode local --no-progress
+        run: ash scan fs . --mode local --no-progress
 """
 CHANGED_FILES_STEPS = """\
 - name: Run ASH
-  run: ash scan --mode local --no-progress --changed-files-only --base-ref origin/main
+  run: ash scan fs . --mode local --no-progress --changed-files-only --base-ref origin/main
 """
 CONDITIONAL_CHANGED_STEPS = """\
 - name: Run ASH
@@ -159,13 +159,13 @@ CONDITIONAL_CHANGED_STEPS = """\
     if [ -n "${BASE_REF}" ]; then
       set -- --changed-files-only --base-ref "origin/${BASE_REF}"
     fi
-    ash scan --mode local --no-progress "$@"
+    ash scan fs . --mode local --no-progress "$@"
 """
 POSITIONALS_WITHOUT_THE_FLAG = """\
 - name: Run ASH
   run: |
     set -- --no-progress
-    ash scan --mode local "$@"
+    ash scan fs . --mode local "$@"
 """
 CONDITIONAL_ON_ONE_LINE_STEPS = """\
 - name: Run ASH
@@ -173,19 +173,19 @@ CONDITIONAL_ON_ONE_LINE_STEPS = """\
     BASE_REF: ${{ github.base_ref }}
   run: |
     if [ -n "${BASE_REF}" ]; then set -- --changed-files-only --base-ref "origin/${BASE_REF}"; fi
-    ash scan --mode local --no-progress "$@"
+    ash scan fs . --mode local --no-progress "$@"
 """
 RESET_POSITIONALS_STEPS = """\
 - name: Run ASH
   run: |
     set -- --changed-files-only
     set --
-    ash scan --mode local --no-progress "$@"
+    ash scan fs . --mode local --no-progress "$@"
 """
 ASH_BEFORE_THE_SET_STEPS = """\
 - name: Run ASH
   run: |
-    ash scan --mode local --no-progress "$@"
+    ash scan fs . --mode local --no-progress "$@"
     set -- --changed-files-only
 """
 IF_ELIF_ELSE_RESET_STEPS = """\
@@ -200,7 +200,7 @@ IF_ELIF_ELSE_RESET_STEPS = """\
     else
       set --
     fi
-    ash scan --mode local --no-progress "$@"
+    ash scan fs . --mode local --no-progress "$@"
 """
 CASE_ARM_RESET_STEPS = """\
 - name: Run ASH
@@ -210,7 +210,7 @@ CASE_ARM_RESET_STEPS = """\
       push) set -- ;;
       *) : ;;
     esac
-    ash scan --mode local --no-progress "$@"
+    ash scan fs . --mode local --no-progress "$@"
 """
 CASE_ARM_SETS_THE_FLAG_STEPS = """\
 - name: Run ASH
@@ -219,21 +219,21 @@ CASE_ARM_SETS_THE_FLAG_STEPS = """\
     case "${EVENT}" in
       pull_request) set -- --changed-files-only --base-ref "origin/${BASE_REF}" ;;
     esac
-    ash scan --mode local --no-progress "$@"
+    ash scan fs . --mode local --no-progress "$@"
 """
 ACCUMULATED_POSITIONALS_STEPS = """\
 - name: Run ASH
   run: |
     set -- --changed-files-only
     set -- "$@" --base-ref origin/main
-    ash scan --mode local --no-progress "$@"
+    ash scan fs . --mode local --no-progress "$@"
 """
 REPLACED_AFTER_THE_FLAG_STEPS = """\
 - name: Run ASH
   run: |
     set -- --changed-files-only
     set -- --base-ref origin/main
-    ash scan --mode local --no-progress "$@"
+    ash scan fs . --mode local --no-progress "$@"
 """
 PUSH_ONLY_REUSABLE = """\
 on:
@@ -261,21 +261,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo "--changed-files-only is not passed here"
-      - run: ash scan --mode local --no-progress
+      - run: ash scan fs . --mode local --no-progress
 """
-AZURE = "steps:\n  - script: ash scan --mode local --no-progress\n"
-GITLAB = "ash-scan:\n  image: python:3.12\n  script:\n    - ash scan --mode local\n"
+AZURE = "steps:\n  - script: ash scan fs . --mode local --no-progress\n"
+GITLAB = (
+    "ash-scan:\n  image: python:3.12\n  script:\n    - ash scan fs . --mode local\n"
+)
 GITLAB_MR = """\
 ash-scan:
   script:
-    - ash scan --mode local --changed-files-only --base-ref "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    - ash scan fs . --mode local --changed-files-only --base-ref "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
 """
-JENKINS_YAML = "pipeline:\n  steps:\n    - sh: ash scan --mode local\n"
-JENKINSFILE = "pipeline {\n  agent any\n  stages { stage('ASH') { steps { sh 'ash scan --mode local' } } }\n}\n"
-BUILDSPEC = (
-    "version: 0.2\nphases:\n  build:\n    commands:\n      - ash scan --mode local\n"
-)
-CIRCLECI = "version: 2.1\njobs:\n  ash:\n    docker:\n      - image: cimg/python:3.12-node\n    steps:\n      - run: ash scan --mode local\n"
+JENKINS_YAML = "pipeline:\n  steps:\n    - sh: ash scan fs . --mode local\n"
+JENKINSFILE = "pipeline {\n  agent any\n  stages { stage('ASH') { steps { sh 'ash scan fs . --mode local' } } }\n}\n"
+BUILDSPEC = "version: 0.2\nphases:\n  build:\n    commands:\n      - ash scan fs . --mode local\n"
+CIRCLECI = "version: 2.1\njobs:\n  ash:\n    docker:\n      - image: cimg/python:3.12-node\n    steps:\n      - run: ash scan fs . --mode local\n"
 
 A_PAGE = [
     ("config kind=github-actions save-as=.github/workflows/ash.yml", WORKFLOW, "yaml"),

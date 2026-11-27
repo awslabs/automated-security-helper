@@ -119,19 +119,19 @@ jobs:
         with:
           persist-credentials: false
       - name: Run ASH
-        run: ash scan --mode local --no-progress
+        run: ash scan fs . --mode local --no-progress
 """
 
 GHA_STEPS = """\
 - name: Run ASH
-  run: ash scan --mode local --no-progress --fail-on-findings
+  run: ash scan fs . --mode local --no-progress --fail-on-findings
 """
 
 GITLAB_PIPELINE = """\
 ash-scan:
   image: python:3.12
   script:
-    - ash scan --mode local --no-progress
+    - ash scan fs . --mode local --no-progress
 """
 
 GITLAB_FRAGMENT = """\
@@ -145,14 +145,14 @@ version: 0.2
 phases:
   build:
     commands:
-      - ash scan --mode local --no-progress
+      - ash scan fs . --mode local --no-progress
 """
 
 AZURE = """\
 pool:
   vmImage: ubuntu-latest
 steps:
-  - script: ash scan --mode local --no-progress
+  - script: ash scan fs . --mode local --no-progress
 """
 
 JENKINS_YAML = """\
@@ -160,7 +160,7 @@ pipeline:
   stages:
     - stage: ASH
       steps:
-        - sh: ash scan --mode local --no-progress
+        - sh: ash scan fs . --mode local --no-progress
 """
 
 JENKINSFILE = """\
@@ -170,7 +170,7 @@ pipeline {
     stage('ASH') {
       steps {
         sh '''
-          ash scan --mode local --no-progress
+          ash scan fs . --mode local --no-progress
         '''
       }
     }
@@ -186,7 +186,7 @@ jobs:
       - image: cimg/python:3.12-node
     steps:
       - checkout
-      - run: ash scan --mode local --no-progress
+      - run: ash scan fs . --mode local --no-progress
 workflows:
   ash:
     jobs:
@@ -215,12 +215,12 @@ jobs:
       - image: cimg/python:3.12-node
     steps:
       - checkout
-      - run: ash scan --mode local --bogus-short-form
+      - run: ash scan fs . --mode local --bogus-short-form
       - run:
           name: Run ASH
           command: |
             export PATH="$HOME/ash-venv/bin:$PATH"
-            ash scan --mode local --bogus-long-form
+            ash scan fs . --mode local --bogus-long-form
 """
     page = _write(tmp_path, "docs/page.md", _block("config kind=circleci", body))
     checks = _checks()
@@ -231,7 +231,7 @@ jobs:
     )
     cli = _messages(checks.check_cli([page], tmp_path))
     for flag in ("--bogus-short-form", "--bogus-long-form"):
-        assert any(f"{flag} is not an option of 'ash scan'" in m for m in cli), (
+        assert any(f"{flag} is not an option of 'ash scan fs'" in m for m in cli), (
             f"the CLI check did not read the ash line with {flag} in a CircleCI "
             f"run step; it reported: {cli}"
         )
@@ -253,7 +253,7 @@ def test_jenkinsfile_is_a_kind_of_groovy_block_whose_sh_steps_get_the_cli_check(
         + "; ".join(_messages(marker_findings))
     )
     cli = _messages(checks.check_cli([page], tmp_path))
-    assert any("--bogus-in-sh is not an option of 'ash scan'" in m for m in cli), cli
+    assert any("--bogus-in-sh is not an option of 'ash scan fs'" in m for m in cli), cli
 
 
 @pytest.mark.unit
