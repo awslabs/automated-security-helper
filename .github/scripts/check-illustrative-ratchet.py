@@ -69,7 +69,7 @@ import sys
 import tempfile
 from collections import Counter
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Callable
 from urllib.parse import quote
 
@@ -216,10 +216,8 @@ def parse_seed(file: str, text: str) -> list[Entry]:
 
 
 def _is_seed_file(path: str) -> bool:
-    return (
-        PurePosixPath(path).parent.as_posix() == ILLUSTRATIVE_SEED_DIR
-        and path.endswith(ILLUSTRATIVE_SEED_SUFFIX)
-    )
+    directly_in_the_seed_directory = path.rpartition("/")[0] == ILLUSTRATIVE_SEED_DIR
+    return directly_in_the_seed_directory and path.endswith(ILLUSTRATIVE_SEED_SUFFIX)
 
 
 def read_seed(repo: Path, rev: str, seed: str, paths: list[str]) -> list[Entry]:

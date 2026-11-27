@@ -330,8 +330,10 @@ def test_marker_check_passes_a_page_whose_markers_the_seed_lists(fixture_root):
 SEED_DEFECTS = [
     (
         "a marker the seed does not list",
-        f'<!-- doctest: illustrative reason="needs Docker" -->\n{FENCE}bash\n'
-        f"docker ps\n{FENCE}\n",
+        (
+            f'<!-- doctest: illustrative reason="needs Docker" -->\n{FENCE}bash\n'
+            f"docker ps\n{FENCE}\n"
+        ),
         [],
         [],
         "not in the illustrative seed",
