@@ -761,6 +761,7 @@ class TestTheScriptRunsWithNothingInstalled:
 import hashlib  # noqa: E402
 import io  # noqa: E402
 import json  # noqa: E402
+import shlex  # noqa: E402
 import shutil  # noqa: E402
 
 from tests.unit.utils.pygit2_bundle_fixture import fake_pygit2_site  # noqa: E402
@@ -1088,6 +1089,46 @@ def test_the_version_match_is_a_whole_version(output, version, expected):
     assert installer.reports_version(output, version) is expected
 
 
+# How each pinned executable is asked to report its version, written down here and
+# not read from the entry's ``version_args``. A fake built from the field the check
+# reads would agree with whatever the table said, so a removed or misspelled entry
+# would still pass. crane has no ``--version`` flag ("Error: unknown flag:
+# --version") and prints its release from a ``version`` subcommand; every other
+# pinned executable takes ``--version``.
+_VERSION_COMMANDS = {"crane": ("version",)}
+
+
+def _version_command(tool: str) -> "tuple[str, ...]":
+    return _VERSION_COMMANDS.get(tool, ("--version",))
+
+
+def _fake_executable(name: str, version: str, accepted: "tuple[str, ...]") -> str:
+    """The text of a ``/bin/sh`` stand-in for ``name`` that answers one command line.
+
+    ``accepted`` is the whole argument list the real program reports its version
+    with. Any other is refused the way crane refuses ``--version``: "Error: unknown
+    flag: ..." on stderr and status 1, before anything else runs, so a check that
+    asks the wrong question gets an error where a laxer fake would hand it a
+    version. The number of arguments is compared as well as each one, so an extra
+    argument and a missing one are refused too.
+
+    Asked rightly, the fake touches ``$HOME/.cache/<name>``, as opengrep's
+    self-extracting bundle writes there on its first run.
+    """
+    conditions = [f'[ "$#" -eq {len(accepted)} ]']
+    conditions += [
+        f'[ "${position}" = {shlex.quote(argument)} ]'
+        for position, argument in enumerate(accepted, 1)
+    ]
+    accepts = " && ".join(conditions)
+    return (
+        "#!/bin/sh\n"
+        f'{accepts} || {{ echo "Error: unknown flag: $*" >&2; exit 1; }}\n'
+        f'mkdir -p "$HOME/.cache" && touch "$HOME/.cache/{name}"\n'
+        f'echo "{name} {version}"\n'
+    )
+
+
 @pytest.mark.skipif(
     os.name == "nt",
     reason="runs only in the Linux image build; the fixtures are POSIX executables",
@@ -1138,7 +1179,11 @@ class TestVerifyThirdParty:
 
     @staticmethod
     def _tree(tmp_path: Path):
-        """A complete third-party tree, a PATH of fake executables, and the pins."""
+        """A complete third-party tree, a PATH of fake executables, and the pins.
+
+        Each fake answers only the command line its real tool reports its version
+        with (``_version_command``) and refuses every other.
+        """
         # Keyed by pin, not by tool: semgrep's LICENSE and COPYRIGHT are
         # byte-identical to opengrep's and share their digests, so two files
         # sharing a pin must share bytes here too.
@@ -1165,17 +1210,68 @@ class TestVerifyThirdParty:
             for name in entry.executable_names:
                 exe = bin_dir / name
                 exe.write_text(
-                    f'#!/bin/sh\nmkdir -p "$HOME/.cache" && touch "$HOME/.cache/{name}"\n'
-                    f'echo "{name} {entry.version.lstrip("v")}"\n'
+                    _fake_executable(
+                        name, entry.version.lstrip("v"), _version_command(entry.tool)
+                    )
                 )
                 exe.chmod(0o755)
         return pins, third_party, str(bin_dir)
 
     def test_a_complete_tree_passes_and_gets_an_index(self, tmp_path):
+        """Every executable in the table is asked its version the way its own tool
+        answers it. The fakes refuse any other command line, so this fails when the
+        check asks one a way the tool does not take (crane has no --version), and
+        not only when the version it prints is wrong."""
         pins, third_party, path = self._tree(tmp_path)
         assert installer.verify_third_party(pins, third_party, path, []) == []
         index = json.loads((third_party / "index.json").read_text())
         assert [row["tool"] for row in index["tools"]] == sorted(THIRD_PARTY_LICENSES)
+
+    @staticmethod
+    def _asked(exe: Path, *args: str) -> "subprocess.CompletedProcess[str]":
+        """A fake run directly, with whatever HOME the test has set."""
+        return subprocess.run(  # nosec B603 - a fake executable this test wrote
+            [str(exe), *args],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+
+    def test_every_fake_answers_only_its_own_version_command(
+        self, tmp_path, monkeypatch
+    ):
+        """Control for ``_tree``: a fake that took any argument would hand the check
+        a version whichever way it asked, and the test above would be no stronger
+        than it was. Each one answers its own command line, and refuses no
+        arguments, an extra argument and the other spelling, with an error on
+        stderr and nothing on stdout."""
+        _, _, path = self._tree(tmp_path)
+        home = tmp_path / "fake-home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        reached = []
+        for tool, entry in THIRD_PARTY_LICENSES.items():
+            if entry.version_probe:
+                continue
+            right = _version_command(tool)
+            other = ("--version",) if right == ("version",) else ("version",)
+            for name in entry.executable_names:
+                exe = Path(path) / name
+                answered = self._asked(exe, *right)
+                assert answered.returncode == 0, (name, answered.stderr)
+                assert installer.reports_version(
+                    answered.stdout, entry.version.lstrip("v")
+                ), (name, answered.stdout)
+                for wrong in ((), ("--no-such-flag",), (*right, "extra"), other):
+                    refused = self._asked(exe, *wrong)
+                    assert refused.returncode == 1, (name, wrong, refused.returncode)
+                    assert refused.stdout == "", (name, wrong, refused.stdout)
+                    assert "unknown flag" in refused.stderr, (name, wrong)
+                reached.append(name)
+        # Control for the loop itself: it reached crane, whose spelling differs from
+        # the rest, and uvx, the second executable of one entry.
+        assert {"crane", "grype", "uv", "uvx"} <= set(reached), reached
 
     def _fails(self, pins, third_party, path, needle, site_dirs=()):
         site_dirs = list(site_dirs)
@@ -1184,6 +1280,7 @@ class TestVerifyThirdParty:
         assert not (third_party / "index.json").exists(), (
             "the index lists what was verified, so it must not be written on failure"
         )
+        return problems
 
     def test_a_missing_file(self, tmp_path):
         pins, third_party, path = self._tree(tmp_path)
@@ -1210,6 +1307,35 @@ class TestVerifyThirdParty:
         exe = Path(path) / "grype"
         exe.write_text('#!/bin/sh\necho "grype 0.119.0"\n')
         self._fails(pins, third_party, path, "does not report 0.122.1")
+
+    @pytest.mark.parametrize(
+        "declared,asked",
+        [
+            pytest.param("", "--version", id="removed"),
+            pytest.param('version_args=("-v",),', "-v", id="misspelled"),
+        ],
+    )
+    def test_a_table_that_asks_crane_the_wrong_way_fails(
+        self, tmp_path, declared, asked
+    ):
+        """crane has no --version flag, and the table names its ``version``
+        subcommand. A copy of the table that names none, or another spelling, makes
+        the check ask the way crane does not answer, and it fails on crane's own
+        refusal: the fakes tell a wrong spelling from the right one."""
+        pins, third_party, path = self._tree(tmp_path)
+        table = pins / "utils" / "tool_downloads.py"
+        source = table.read_text()
+        crane = 'version_args=("version",),'
+        assert source.count(crane) == 1, "crane's entry moved; update this test"
+        table.write_text(source.replace(crane, declared))
+        pinned = THIRD_PARTY_LICENSES["crane"].version.lstrip("v")
+
+        problems = self._fails(
+            pins, third_party, path, f"crane {asked}` does not report {pinned}"
+        )
+
+        assert len(problems) == 1, problems
+        assert f"unknown flag: {asked}" in problems[0], problems
 
     def test_an_executable_missing_from_path(self, tmp_path):
         pins, third_party, path = self._tree(tmp_path)

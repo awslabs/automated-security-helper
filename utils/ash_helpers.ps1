@@ -156,6 +156,18 @@ function Invoke-ASH {
     `$env:ASH_OCI_RUNNER`, the deprecated name, is honored when `OCI_RUNNER` is unset,
     with a deprecation warning.
 
+    The whole value is run as one command, so it takes no runner arguments. A value
+    from `OCI_RUNNER` or `ASH_OCI_RUNNER` that has a directory part (a `\` or a `/`)
+    must be an absolute path, or it is refused with 3 before anything is built or
+    run. On Windows an absolute path starts with a drive letter, a colon and a
+    separator (`C:\tools\docker.exe`) or with two separators
+    (`\\server\share\docker.exe`), so `C:sub\docker.exe`, which is relative to drive
+    C's current directory, and `\tools\docker.exe`, which is relative to the current
+    drive's root, are refused. Elsewhere it starts with `/`. A value that starts with
+    `~`, which Invoke-ASH does not expand, and one that holds a character a path
+    cannot hold are refused too, each with a text of its own. A value given as
+    -OCIRunner is used as written.
+
     .PARAMETER AshImageName
     The image to build and run. Defaults to `$env:ASH_IMAGE_NAME` if it is set and not
     empty, otherwise `automated-security-helper`. A name without a tag gets
@@ -342,6 +354,45 @@ function Invoke-ASH {
     begin {
         $ashRoot = (Get-Item $PSScriptRoot).Parent.FullName
         $onWindows = ($PSVersionTable.PSVersion.Major -le 5) -or $IsWindows
+        # Whether a path is rooted, for the refusals of a relative OCI_RUNNER and
+        # OCI_RUNNER_WRAPPER below and for each name that is resolved under the working
+        # directory when it is not rooted. On Windows a path is rooted only when it
+        # starts with a drive letter, a colon and a separator (C:\, C:/) or with two
+        # separators (\\server\share, //server/share). IsPathRooted also takes C:sub\x,
+        # which is relative to drive C's current directory, and \x, which is relative
+        # to the current drive's root. IsPathFullyQualified gives the answer where the
+        # runtime has it (.NET Core 2.1 and later, so PowerShell 6.1 and later; it also
+        # takes a separator followed by a ?, as in the \??\ prefix, which the pattern
+        # does not), and the pattern gives it on Windows PowerShell 5.1. Elsewhere a
+        # path is rooted only when it starts with /. This reads only where a path
+        # starts: the callers still take both \ and / as separators on every
+        # platform, as PowerShell does when it resolves a command name. Compared with
+        # patterns, not String.StartsWith, which compares with the culture and so
+        # skips a leading zero-width character.
+        function Test-AshRootedPath([string]$Path) {
+            if (-not $onWindows) {
+                return [regex]::IsMatch($Path, '\A/')
+            }
+            if ($null -ne [System.IO.Path].GetMethod('IsPathFullyQualified', [Type[]]@([string]))) {
+                return [System.IO.Path]::IsPathFullyQualified($Path)
+            }
+            return [regex]::IsMatch($Path, '\A(?:[A-Za-z]:[\\/]|[\\/]{2})')
+        }
+        # The characters a path cannot hold, for the same refusals: the runtime's list,
+        # and on Windows " < and > too. Windows PowerShell 5.1's list holds those three
+        # and PowerShell 7's does not, though no Windows file name can hold them, so
+        # with them added the two versions refuse the same values.
+        $invalidPathChars = [System.IO.Path]::GetInvalidPathChars()
+        if ($onWindows) {
+            $invalidPathChars = [char[]](@($invalidPathChars) + [char[]]'"<>')
+        }
+        # What those refusals ask for in place of a relative path.
+        $absolutePathText = if ($onWindows) {
+            'an absolute path, one that starts with a drive letter, a colon and a separator (C:\) or with two separators (\\server\share)'
+        }
+        else {
+            'an absolute path'
+        }
         # The exit code every refusal leaves in $LASTEXITCODE before it throws: 3, the
         # code ASH uses for input it refuses, as ./ash and utils/ash_helpers.sh do.
         # A failed build is not a refusal and keeps the build's own code. The second
@@ -863,7 +914,7 @@ function Invoke-ASH {
         # can be a subcommand's name (`--phases report`, `--source-dir report`), so the
         # word after one of these is the option's value, not the subcommand.
         # BEGIN generated: ps1-root-value-options (scripts/generate_wrapper_tables.py)
-        $ashRootValueOptions = @('--add-scanners', '--ash-config-from-host', '--ash-plugin-modules', '--ash-revision-to-install', '--base-ref', '--baseline', '--build-target', '--config', '--config-file-from-another-checkout', '--config-file-from-scanned-repository', '--config-overrides', '--container-gid', '--container-uid', '--custom-build-arg', '--custom-containerfile', '--exclude-scanners', '--format', '--formats', '--image', '--image-archive', '--image-layout', '--log-level', '--min-severity', '--mode', '--oci', '--oci-runner', '--offline-semgrep-rulesets', '--only-scanners', '--output-dir', '--output-format', '--output-formats', '--phases', '--require-scanner-selection', '--runner', '--sandbox', '--scanners', '--shard-count', '--shard-index', '--source-dir', '--strategy', '--workspace', '--workspace-config', '-c', '-f', '-g', '-o', '-u')
+        $ashRootValueOptions = @('--add-scanners', '--ash-config-from-host', '--ash-plugin-modules', '--ash-revision-to-install', '--base-ref', '--baseline', '--build-target', '--config', '--config-file-from-another-checkout', '--config-file-from-scanned-repository', '--config-overrides', '--container-gid', '--container-uid', '--custom-build-arg', '--custom-containerfile', '--exclude-scanners', '--format', '--formats', '--git-depth', '--git-ref', '--image', '--image-archive', '--image-layout', '--log-level', '--min-severity', '--mode', '--oci', '--oci-runner', '--offline-semgrep-rulesets', '--only-scanners', '--output-dir', '--output-format', '--output-formats', '--phases', '--require-scanner-selection', '--runner', '--sandbox', '--scanners', '--shard-count', '--shard-index', '--source-dir', '--source-git', '--strategy', '--workspace', '--workspace-config', '-c', '-f', '-g', '-o', '-u')
         # END generated: ps1-root-value-options
         # BEGIN generated: ps1-option-subcommands (scripts/generate_wrapper_tables.py)
         $ashOptionSubcommands = @{
@@ -944,7 +995,10 @@ function Invoke-ASH {
         # read, or more than the 40 the kernel allows): callers refuse on $null.
         function Resolve-AshRealPath([string]$Path) {
             $separators = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
-            if (-not [System.IO.Path]::IsPathRooted($Path)) {
+            # A drive-relative or root-relative name (C:x, \x) is not rooted, but Combine
+            # keeps it as it is, since IsPathRooted holds for it, so it stays on its
+            # drive.
+            if (-not (Test-AshRootedPath $Path)) {
                 $Path = [System.IO.Path]::Combine((Get-Location).ProviderPath, $Path)
             }
             $root = [System.IO.Path]::GetPathRoot($Path)
@@ -1524,7 +1578,9 @@ function Invoke-ASH {
             # after a link by text and so finds another file than the one the kernel,
             # ./ash and a local scan read.
             # A name rooted without a drive (\repo\cfg.yaml) is on the current drive, so
-            # it is compared with the scanned trees, which start with one. Windows
+            # it is compared with the scanned trees, which start with one. A
+            # drive-relative name (C:cfg.yaml) is not rooted as Test-AshRootedPath reads
+            # it, but Combine keeps it as it is, so it is read on its own drive. Windows
             # PowerShell 5.1 throws from the path functions on a quote or a control
             # character, as in the quotes cmd keeps in set ASH_CONFIG="C:\x.yaml": no
             # file has such a name, so the throw is refused as a missing file with the
@@ -1535,7 +1591,7 @@ function Invoke-ASH {
                 if ($onWindows -and $envConfigGiven -match '^[\\/](?![\\/])') {
                     $envConfigAbsolute = [System.IO.Path]::GetPathRoot((Get-Location).ProviderPath).TrimEnd('\', '/') + $envConfigGiven
                 }
-                elseif ([System.IO.Path]::IsPathRooted($envConfigGiven)) {
+                elseif (Test-AshRootedPath $envConfigGiven) {
                     $envConfigAbsolute = $envConfigGiven
                 }
                 else {
@@ -1955,25 +2011,53 @@ function Invoke-ASH {
     process {
         try {
             # A relative path that came from the OCI_RUNNER environment variable (or the
-            # deprecated ASH_OCI_RUNNER) names a file under the working directory, usually
-            # the repository being scanned. It is refused, as ./ash and the ash CLI refuse
-            # it: not run, and not replaced by looking for another runtime. The same path
-            # given as -OCIRunner is the caller's own, typed where they stand, and is used
-            # as written. A leading ~ is not expanded from the environment, so ~/bin/docker
-            # is refused as a relative path, as ./ash refuses it. A value holding a
-            # character a path cannot hold is refused the same way: Windows PowerShell
-            # 5.1's IsPathRooted throws on one, which would end in a generic exception
-            # with no exit code set. Thrown from a variable, with $LASTEXITCODE set first.
+            # deprecated ASH_OCI_RUNNER) names a file through the working directory,
+            # usually the repository being scanned. It is refused, as ./ash and the ash
+            # CLI refuse it: not run, and not replaced by looking for another runtime. The
+            # same path given as -OCIRunner is the caller's own, typed where they stand,
+            # and is used as written. The whole value is judged, not its first word:
+            # $runners above holds it whole and Get-Command below looks it up whole, so
+            # it is one command and takes no runner arguments, and docker ./bin/docker
+            # names a file in a directory "docker ." under the working directory.
+            # Rooted is as Test-AshRootedPath reads it, so on Windows C:sub\docker.exe
+            # and \tools\docker.exe are relative. A leading ~ is not expanded from the
+            # environment, as ./ash does not expand it, and a value holding a character
+            # a path cannot hold names no file: each of the two is refused with a text
+            # of its own, which names the ~ or the character. None of the three checks
+            # throws, on any PowerShell. Thrown from a variable, with $LASTEXITCODE set
+            # first.
             if (-not $PSBoundParameters.ContainsKey('OCIRunner') -and -not [string]::IsNullOrEmpty($OCIRunner) -and
-                $OCIRunner -match '[\\/]' -and
-                ($OCIRunner.IndexOfAny([System.IO.Path]::GetInvalidPathChars()) -ge 0 -or -not [System.IO.Path]::IsPathRooted($OCIRunner))) {
-                $envRunnerRefusal = "$ociRunnerSource starts with the relative path $(Format-AshShownValue $OCIRunner), which names a file under the working directory (usually the repository being scanned), so it is not run, and no other runtime is looked for in its place. Set OCI_RUNNER to a command name or an absolute path."
-                $global:LASTEXITCODE = $refusalExitCode
-                throw $envRunnerRefusal
+                $OCIRunner -match '[\\/]') {
+                $invalidAt = $OCIRunner.IndexOfAny($invalidPathChars)
+                $envRunnerRefusal = if ($invalidAt -ge 0) {
+                    "$ociRunnerSource holds the character '$(Format-AshShownValue ($OCIRunner.Substring($invalidAt, 1)))', which a path cannot hold, so $(Format-AshShownValue $OCIRunner) names no file and is not run, and no other runtime is looked for in its place. Set OCI_RUNNER to a command name or $absolutePathText, without that character."
+                }
+                elseif ($OCIRunner.StartsWith('~', [System.StringComparison]::Ordinal)) {
+                    "$ociRunnerSource starts with ~, which Invoke-ASH does not expand, so $(Format-AshShownValue $OCIRunner) is not run, and no other runtime is looked for in its place. Set OCI_RUNNER to the absolute path, with the home directory written out."
+                }
+                elseif (-not (Test-AshRootedPath $OCIRunner)) {
+                    "$ociRunnerSource is the relative path $(Format-AshShownValue $OCIRunner), which is resolved against the working directory (usually the repository being scanned), so it is not run, and no other runtime is looked for in its place. The whole value is run as one command and takes no runner arguments: set OCI_RUNNER to a command name or $absolutePathText."
+                }
+                if ($envRunnerRefusal) {
+                    $global:LASTEXITCODE = $refusalExitCode
+                    throw $envRunnerRefusal
+                }
             }
             $RESOLVED_OCI_RUNNER = $null
             foreach ($runner in $runners) {
-                if ($FOUND = Get-Command $runner -ErrorAction SilentlyContinue) {
+                # A lookup that throws finds no runner, as one that returns nothing
+                # does, so the value is refused below with 3 like any runner not found.
+                # Windows PowerShell 5.1 throws "The network path was not found" for a
+                # UNC path whose server it cannot reach, which -ErrorAction
+                # SilentlyContinue does not stop; PowerShell 7 returns nothing for it.
+                $FOUND = $null
+                try {
+                    $FOUND = Get-Command $runner -ErrorAction SilentlyContinue
+                }
+                catch {
+                    $FOUND = $null
+                }
+                if ($FOUND) {
                     # A program by its full path: its Name alone ("docker") would run
                     # whichever program PATH holds under that name, or none, when the
                     # runner was named by a path outside PATH.
@@ -2003,19 +2087,32 @@ function Invoke-ASH {
                 # into words at whitespace, as ./ash splits it.
                 $OCI_WRAPPER = @("$env:OCI_RUNNER_WRAPPER" -split '\s+' | Where-Object { $_ })
 
-                # A first word with a directory part that is not rooted names a file under
-                # the working directory, usually the repository being scanned. It is
-                # refused, as ./ash and the ash CLI refuse it: not run, and the runtime
+                # A first word with a directory part that is not rooted names a file
+                # through the working directory, usually the repository being scanned. It
+                # is refused, as ./ash and the ash CLI refuse it: not run, and the runtime
                 # does not start without the wrapper the operator asked for. A command
-                # name and a rooted path are used as given. Thrown from a variable, with
-                # $LASTEXITCODE set first, as the runner refusal above.
+                # name and a rooted path are used as given. The first word is judged as
+                # OCI_RUNNER is above: rooted as Test-AshRootedPath reads it, and a
+                # leading ~ and a character a path cannot hold refused with texts of
+                # their own. Thrown from a variable, with $LASTEXITCODE set first, as the
+                # runner refusal above.
                 if ($OCI_WRAPPER.Count -gt 0) {
                     $wrapperWord = [string]$OCI_WRAPPER[0]
-                    if ($wrapperWord -match '[\\/]' -and
-                        ($wrapperWord.IndexOfAny([System.IO.Path]::GetInvalidPathChars()) -ge 0 -or -not [System.IO.Path]::IsPathRooted($wrapperWord))) {
-                        $wrapperRefusal = "OCI_RUNNER_WRAPPER starts with the relative path $(Format-AshShownValue $wrapperWord), which names a file under the working directory (usually the repository being scanned), so it is not run, and the OCI runner does not start without the wrapper. Start OCI_RUNNER_WRAPPER with a command name or an absolute path."
-                        $global:LASTEXITCODE = $refusalExitCode
-                        throw $wrapperRefusal
+                    if ($wrapperWord -match '[\\/]') {
+                        $invalidAt = $wrapperWord.IndexOfAny($invalidPathChars)
+                        $wrapperRefusal = if ($invalidAt -ge 0) {
+                            "OCI_RUNNER_WRAPPER holds the character '$(Format-AshShownValue ($wrapperWord.Substring($invalidAt, 1)))' in its first word, which a path cannot hold, so $(Format-AshShownValue $wrapperWord) names no file and is not run, and the OCI runner does not start without the wrapper. Start OCI_RUNNER_WRAPPER with a command name or $absolutePathText, without that character."
+                        }
+                        elseif ($wrapperWord.StartsWith('~', [System.StringComparison]::Ordinal)) {
+                            "OCI_RUNNER_WRAPPER starts with ~, which Invoke-ASH does not expand, so $(Format-AshShownValue $wrapperWord) is not run, and the OCI runner does not start without the wrapper. Start OCI_RUNNER_WRAPPER with the absolute path, with the home directory written out."
+                        }
+                        elseif (-not (Test-AshRootedPath $wrapperWord)) {
+                            "OCI_RUNNER_WRAPPER starts with the relative path $(Format-AshShownValue $wrapperWord), which is resolved against the working directory (usually the repository being scanned), so it is not run, and the OCI runner does not start without the wrapper. Start OCI_RUNNER_WRAPPER with a command name or $absolutePathText."
+                        }
+                        if ($wrapperRefusal) {
+                            $global:LASTEXITCODE = $refusalExitCode
+                            throw $wrapperRefusal
+                        }
                     }
                 }
 

@@ -30,6 +30,8 @@ pytestmark = pytest.mark.unit
 CAPTURED = Path(__file__).resolve().parents[2] / "test_data" / "images" / "captured"
 LAYER = "sha256:9fd2968b2b1e3dfa271598db3b56fb431faf5827450d945c04c335b51ae4c077"
 DIFF_ID = "sha256:1d22db9c2a74a638d7ce577905a5ea8943518f004a81dbce6251a68809df2b2a"
+#: A reference that carries its digest, which names one manifest wherever it is read.
+PINNED_REF = "registry.example.com/team/app@sha256:" + "a" * 64
 
 
 def _package_of(message):
@@ -40,6 +42,12 @@ def _package_of(message):
 def _captured_sarif() -> SarifReport:
     return SarifReport.model_validate_json(
         (CAPTURED / "trivy-0.76.2-secret-image.sarif").read_text(encoding="utf-8")
+    )
+
+
+def _captured_document() -> dict:
+    return json.loads(
+        (CAPTURED / "trivy-0.76.2-secret-image.json").read_text(encoding="utf-8")
     )
 
 
@@ -256,8 +264,9 @@ class TestTheScannerRunsTheLayerPass:
         return seen
 
     def _args(self, scanner, tmp_path):
-        scanner._image_layers_json = tmp_path / "layers.json"
-        return ["trivy", "image", "--format", "sarif", "--output", "/o.sarif", "ref"]
+        # A digest names one manifest wherever it is read, so both runs read the
+        # same bytes and the pass runs. The bare-tag rows below pin the guard.
+        return self._argv_naming(scanner, tmp_path, PINNED_REF)
 
     def test_the_second_pass_asks_for_json_and_fills_the_column(
         self, tmp_path, monkeypatch
@@ -294,3 +303,161 @@ class TestTheScannerRunsTheLayerPass:
         )
         report = _captured_sarif()
         assert scanner._attach_image_layers(report, self._args(scanner, tmp_path)) == 0
+
+    def test_a_bare_tag_with_no_engine_store_skips_the_pass(
+        self, tmp_path, monkeypatch
+    ):
+        # A tag no local store serves can resolve to a DIFFERENT manifest on
+        # the second pull, and layers joined across two images attribute the
+        # wrong build: the pass is skipped, running nothing. The tool's start is
+        # recorded, not made to raise: the pass catches a raise as its own
+        # failure, so a raise could not tell a skipped pass from one that ran.
+        scanner = self._scanner(tmp_path)
+        seen = self._fake_spawn(monkeypatch, None)
+        args = self._argv_naming(scanner, tmp_path, "ref")
+        scanner._image_engine_socket = None
+        report = _captured_sarif()
+        assert scanner._attach_image_layers(report, args) == 0
+        assert "argv" not in seen
+        assert _layer_of(report) == [None]
+
+    def test_a_digest_pinned_reference_runs_without_an_engine(
+        self, tmp_path, monkeypatch
+    ):
+        # A digest names one manifest wherever it is read, so the join is
+        # sound with no local store at all.
+        scanner = self._scanner(tmp_path)
+        document = json.loads(
+            (CAPTURED / "trivy-0.76.2-secret-image.json").read_text(encoding="utf-8")
+        )
+        seen = self._fake_spawn(monkeypatch, document)
+        args = self._args(scanner, tmp_path)
+        scanner._image_engine_socket = None
+        report = _captured_sarif()
+        assert scanner._attach_image_layers(report, args) == 1
+        assert _layer_of(report) == [LAYER]
+        assert seen["argv"][-1] == PINNED_REF
+
+    def _argv_naming(self, scanner, tmp_path, subject):
+        """The pass's invocation with *subject* as the reference, last."""
+        scanner._image_layers_json = tmp_path / "layers.json"
+        return ["trivy", "image", "--format", "sarif", "--output", "/o.sarif", subject]
+
+    def test_a_bare_tag_skips_the_pass_even_when_an_engine_socket_is_set(
+        self, tmp_path, monkeypatch
+    ):
+        """A socket does not say the engine's store holds the tag, so no second run.
+
+        ``--image-src`` names the engine's store and then the registry, so a tag
+        the store does not hold is pulled by each of the two runs, which can
+        resolve it to two manifests. Only a payload or a digest makes both reads
+        the same bytes, so a bare tag runs no second trivy whatever engine is
+        detected.
+        """
+        scanner = self._scanner(tmp_path)
+        scanner._image_engine_socket = "/run/docker.sock"
+        seen = self._fake_spawn(monkeypatch, _captured_document())
+        argv = self._argv_naming(
+            scanner, tmp_path, "registry.example.com/team/app:1.2.3"
+        )
+        report = _captured_sarif()
+        assert scanner._attach_image_layers(report, argv) == 0
+        assert "argv" not in seen
+        assert _layer_of(report) == [None]
+
+    def test_a_digest_pinned_reference_runs_the_pass_when_an_engine_socket_is_set(
+        self, tmp_path, monkeypatch
+    ):
+        """The control: a digest names one manifest wherever it is read."""
+        scanner = self._scanner(tmp_path)
+        scanner._image_engine_socket = "/run/docker.sock"
+        seen = self._fake_spawn(monkeypatch, _captured_document())
+        argv = self._argv_naming(scanner, tmp_path, PINNED_REF)
+        report = _captured_sarif()
+        assert scanner._attach_image_layers(report, argv) == 1
+        assert _layer_of(report) == [LAYER]
+        assert seen["argv"][-1] == PINNED_REF
+
+    def test_a_scan_budget_that_cannot_be_worked_out_leaves_the_results_alone(
+        self, tmp_path, monkeypatch
+    ):
+        """Working out the pass's time budget is part of the pass, not of the scan.
+
+        The pass is attribution: any failure of it leaves the column empty and the
+        scan's results as they were. The budget was computed before the ``try``
+        that keeps it that way, so an error there escaped into the scan.
+        """
+        scanner = self._scanner(tmp_path)
+
+        def broken(self):
+            raise RuntimeError("the timeout lookup failed")
+
+        monkeypatch.setattr(type(scanner), "_effective_scan_timeout", broken)
+        seen = self._fake_spawn(monkeypatch, _captured_document())
+        argv = self._argv_naming(scanner, tmp_path, PINNED_REF)
+        report = _captured_sarif()
+        assert scanner._attach_image_layers(report, argv) == 0
+        assert "argv" not in seen
+        assert _layer_of(report) == [None]
+
+    @pytest.mark.parametrize(
+        "locator_args",
+        [
+            pytest.param(
+                {"ref": "registry.example.com/team/app@sha256:" + "a" * 64},
+                id="written-pinned",
+            ),
+            pytest.param(
+                {
+                    "ref": "registry.example.com/team/app:1.2.3",
+                    "resolved_digest": "sha256:" + "a" * 64,
+                    "resolved_from": "registry",
+                },
+                id="registry-resolved-tag",
+            ),
+        ],
+    )
+    def test_the_scans_own_argv_names_a_pinned_subject_last(
+        self, tmp_path, monkeypatch, locator_args
+    ):
+        # The rows above build the argv by hand with the reference last, the
+        # token the pass reads as the subject. Built by the scan's own
+        # resolution, a pinned reference read remotely must be that token too:
+        # with the output file last, the pass skipped a join that is sound.
+        from automated_security_helper.core.asset import ImageLocator
+        from automated_security_helper.core.container_engine import ContainerEngine
+
+        scanner = self._scanner(tmp_path)
+        scanner._image_engine = ContainerEngine.NONE
+        scanner._image_engine_socket = None
+        document = json.loads(
+            (CAPTURED / "trivy-0.76.2-secret-image.json").read_text(encoding="utf-8")
+        )
+        seen = self._fake_spawn(monkeypatch, document)
+        locator = ImageLocator(**locator_args)
+        argv, _results, _env = scanner._execute_image_scan(locator)
+        report = _captured_sarif()
+        assert scanner._attach_image_layers(report, argv) == 1
+        assert _layer_of(report) == [LAYER]
+        assert seen["argv"][-2:] == ["--", locator.pulled_ref()]
+
+    def test_the_scans_own_argv_still_skips_a_bare_tag_with_no_engine(
+        self, tmp_path, monkeypatch
+    ):
+        # The control, through the same resolution: a tag with no digest is
+        # still not read a second time. The tool's start is recorded, not made
+        # to raise, since the pass catches a raise as its own failure.
+        from automated_security_helper.core.asset import ImageLocator
+        from automated_security_helper.core.container_engine import ContainerEngine
+
+        scanner = self._scanner(tmp_path)
+        scanner._image_engine = ContainerEngine.NONE
+        scanner._image_engine_socket = None
+        seen = self._fake_spawn(monkeypatch, None)
+        argv, _results, _env = scanner._execute_image_scan(
+            ImageLocator(ref="registry.example.com/team/app:1.2.3")
+        )
+        report = _captured_sarif()
+        assert scanner._attach_image_layers(report, argv) == 0
+        assert "argv" not in seen
+        assert _layer_of(report) == [None]

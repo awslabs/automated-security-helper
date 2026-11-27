@@ -891,8 +891,16 @@ def _offline_probe_config(tmp_path, monkeypatch, **scanner_kwargs):
     monkeypatch.setattr(staleness, "_built_from_trivy", probe)
     scanner = _scanner(tmp_path, offline=True, **scanner_kwargs)
     assert scanner.validate_plugin_dependencies() is True
-    (config_file,) = seen
-    return config_file
+    # One validation reads the offline gate more than once: the forced-binary
+    # prefix (__pydantic_init_subclass__ wraps every override) and the base
+    # method's own _forced_binary_satisfies each consult
+    # _forced_binary_precluded_reason, which asks _offline_database_available,
+    # before trivy's override asks it directly. The claim here is WHICH config
+    # every one of those reads passes, not how many reads there are.
+    assert seen, "the offline probe never ran"
+    distinct = set(seen)
+    assert len(distinct) == 1, seen
+    return seen[0]
 
 
 def test_the_offline_check_reads_through_the_operators_trivy_config(
@@ -1163,6 +1171,82 @@ def test_the_severity_counts_match_trivys_ratings(tmp_path):
     scanner = _scanner(tmp_path)
     counts = get_severity_metrics_from_sarif(_parse(scanner, _raw()), scanner.context)
     assert (counts.critical, counts.high, counts.medium, counts.low) == (0, 3, 7, 0)
+
+
+# --------------------------------------------------------------------------- #
+# An image scan's results keep the package their message names
+# --------------------------------------------------------------------------- #
+
+#: The capture's findings as an image scan reads them: each keeps its package name,
+#: and none has an install path, since no lockfile in the scanned directory is about
+#: an image.
+IMAGE_EXPECTED = {
+    (rule, uri, line, severity, package, None)
+    for (rule, uri, line, severity, package, _path) in EXPECTED
+}
+
+
+def _no_layer_pass(self, sarif_report, final_args) -> int:
+    """Stands in for the layer pass, which starts trivy and has tests of its own."""
+    return 0
+
+
+class _NoLockfileRead:
+    """Stands in for ``NpmLockIndex`` where building one is the defect."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        raise AssertionError("an image scan read the scanned directory's lockfiles")
+
+
+@pytest.mark.parametrize("in_image", [True, False], ids=["image", "filesystem"])
+def test_a_result_carries_the_package_data_its_message_names(
+    tmp_path, monkeypatch, in_image
+):
+    """Name, version and the fix flag come from trivy's message, for an image too.
+
+    An image scan skipped the whole package step, so its results carried none of
+    the three, though only the join to the scanned directory's lockfiles is about
+    the host tree. The filesystem case is the control: it gets the same three.
+    """
+    monkeypatch.setattr(TrivyScanner, "_attach_image_layers", _no_layer_pass)
+    scanner = _scanner(tmp_path)
+    scanner._image_scan_in_progress = in_image
+
+    report = _parse(scanner, _raw())
+
+    bags = [
+        result.properties.model_dump(exclude_none=True) if result.properties else {}
+        for result in report.get_all_results()
+    ]
+    seen = {
+        (bag.get("package_name"), bag.get("package_version"), bag.get("fix_available"))
+        for bag in bags
+    }
+    assert seen == {("lodash", "4.17.20", True), ("requests", "2.19.1", True)}
+
+
+def test_an_image_result_is_not_joined_to_a_lockfile_of_the_scanned_directory(
+    tmp_path, monkeypatch
+):
+    """An in-image path that spells the host's lockfile name is not the host's file.
+
+    The scanned directory holds a package-lock.json with lodash on the line the
+    capture's result names, so a join would give the result that file's install
+    path. An image result keeps its package data and gets no install path, and no
+    lockfile of the scanned directory is read for it.
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        _trivy_scanner_base,
+    )
+
+    monkeypatch.setattr(TrivyScanner, "_attach_image_layers", _no_layer_pass)
+    monkeypatch.setattr(_trivy_scanner_base, "NpmLockIndex", _NoLockfileRead)
+    scanner = _scanner(tmp_path)
+    scanner._image_scan_in_progress = True
+
+    report = _parse(scanner, _raw())
+
+    assert _findings(report) == IMAGE_EXPECTED
 
 
 # --------------------------------------------------------------------------- #

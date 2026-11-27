@@ -12,6 +12,8 @@ file, never runs it).
 
 from __future__ import annotations
 
+import errno
+import os
 import sys
 from pathlib import Path
 
@@ -21,8 +23,21 @@ from automated_security_helper.utils import install_providers as ip
 from automated_security_helper.utils.download_utils import (
     create_pinned_tool_install_command,
 )
+from tests.utils.stand_ins import write_stand_in
 
 pytestmark = pytest.mark.unit
+
+
+def _marker_program(directory: Path, name: str, marker: Path) -> Path:
+    """A program named ``name`` that creates ``marker`` if it is ever started.
+
+    In the form the host starts (``tests/utils/stand_ins.py``): the script on POSIX,
+    a ``<name>.bat`` launcher for it on Windows, where a shebang script is no
+    program. The path returned is the file a start names, the one a test forces.
+    """
+    source = f"open({str(marker)!r}, 'w').close()\n"
+    return write_stand_in(directory, name, source).files[-1]
+
 
 DEFAULT = ip.RouteContext(platform_name="linux", arch="amd64", bin_dir=Path("/x/bin"))
 EXPLICIT = ip.RouteContext(
@@ -449,11 +464,9 @@ def test_a_virtualenv_is_read_from_its_cfg_and_nothing_is_executed(tmp_path):
 @pytest.fixture
 def executable(tmp_path):
     marker = tmp_path / "RAN"
-    path = tmp_path / "tool-dir" / "checkov"
-    path.parent.mkdir()
-    path.write_text(f"#!/bin/sh\ntouch {marker}\n")
-    path.chmod(0o755)
-    return path, marker
+    tool_dir = tmp_path / "tool-dir"
+    tool_dir.mkdir()
+    return _marker_program(tool_dir, "checkov", marker), marker
 
 
 def test_a_forced_binary_is_hashed_never_executed(executable):
@@ -507,13 +520,85 @@ def test_forced_binary_refusals_name_the_key_and_the_path(tmp_path, executable):
         assert reason in refusal, (text, refusal)
 
 
+@pytest.mark.parametrize(
+    "name, admitted",
+    [
+        ("checkov.exe", True),
+        ("checkov.com", True),
+        ("checkov.bat", True),
+        ("checkov.cmd", True),
+        ("CHECKOV.EXE", True),
+        ("checkov", False),
+        ("checkov.sh", False),
+        ("checkov.py", False),
+        ("checkov.ps1", False),
+    ],
+)
+def test_on_windows_a_forced_binary_is_a_name_windows_starts(
+    tmp_path, monkeypatch, name, admitted
+):
+    """Windows keeps no execute permission a check can read (``os.access(X_OK)`` is
+    true of every file, a descriptor's stat has no execute bits), so there a forced
+    binary is a program by its name: an image ``CreateProcess`` runs or a batch file
+    cmd.exe runs. The mode bits are the opposite of the answer on purpose: a shell
+    script with every execute bit set is no program on Windows, and a ``.cmd`` with
+    none is one. The file check behind a recorded force answers the same way."""
+    import hashlib
+
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    candidate = tools / name
+    candidate.write_text("#!/bin/sh\nexit 0\n")
+    candidate.chmod(0o644 if admitted else 0o755)
+    recorded = ip.ForcedBinary(
+        scanner_key="checkov",
+        path=candidate,
+        sha256=hashlib.sha256(candidate.read_bytes()).hexdigest(),
+    )
+
+    with monkeypatch.context() as host:
+        host.setattr(sys, "platform", "win32")
+        result = ip.validate_forced_binary("checkov", str(candidate))
+        usable = ip.forced_binary_still_usable(recorded)
+
+    if admitted:
+        assert result == recorded, result
+    else:
+        assert result == (
+            f"--binary-path checkov={candidate}: the file is not executable"
+        ), result
+    assert usable is admitted
+
+
+def test_a_directory_the_open_refuses_is_named_as_not_a_regular_file(
+    tmp_path, monkeypatch
+):
+    """Windows opens no directory with ``os.open`` (it answers EACCES), so there a
+    directory reaches the open's error branch rather than the regular-file check on
+    the descriptor. The refusal still names it for what it is."""
+    directory = tmp_path / "tool-dir"
+    directory.mkdir()
+    real_open = os.open
+
+    def open_as_windows_does(path, flags, *args, **kwargs):
+        if os.fspath(path) == os.fspath(directory):
+            raise PermissionError(errno.EACCES, "Permission denied", os.fspath(path))
+        return real_open(path, flags, *args, **kwargs)
+
+    with monkeypatch.context() as host:
+        host.setattr(os, "open", open_as_windows_does)
+        refusal = ip.validate_forced_binary("checkov", str(directory))
+
+    assert refusal == (
+        f"--binary-path checkov={directory}: the path is not a regular file"
+    ), refusal
+
+
 def test_an_in_tree_forced_binary_needs_the_existing_opt_in(tmp_path, monkeypatch):
     monkeypatch.delenv("ASH_ALLOW_IN_TREE_TOOLS", raising=False)
     tree = tmp_path / "tree"
     tree.mkdir()
-    inside = tree / "checkov"
-    inside.write_text("#!/bin/sh\n")
-    inside.chmod(0o755)
+    inside = _marker_program(tree, "checkov", tmp_path / "RAN")
 
     refused = ip.validate_forced_binary("checkov", str(inside), tree)
     monkeypatch.setenv("ASH_ALLOW_IN_TREE_TOOLS", "1")

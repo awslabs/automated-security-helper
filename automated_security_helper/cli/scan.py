@@ -422,10 +422,13 @@ def _clone_git_source(ctx: typer.Context, url: str, ref: str | None, depth: int)
     ``set_source_git`` tool runs); this makes the clone, with the same git
     environment (``clone_remote_source``). The temporary directory is removed
     when the click context closes, which every ending of the command reaches,
-    an exit and an error included. A clone git refuses or cannot make exits 1,
-    the answer for a run that produced no scan, naming what git said.
+    an exit and an error included. It is removed the way the MCP delivery
+    removes a clone (``_remove_tree``): git makes its pack files read-only, and
+    Windows does not delete a read-only file. What cannot be removed is named on
+    stderr, and the exit code stays the command's own, because the scan is over
+    by then. A clone git refuses or cannot make exits 1, the answer for a run
+    that produced no scan, naming what git said.
     """
-    import shutil
     import tempfile
 
     from automated_security_helper.cli.mcp.source_delivery import (
@@ -433,11 +436,23 @@ def _clone_git_source(ctx: typer.Context, url: str, ref: str | None, depth: int)
         GitCommandError,
         GitTimeoutError,
         SessionWorkspaceError,
+        _remove_tree,
         clone_remote_source,
     )
 
     root = Path(tempfile.mkdtemp(prefix="ash-source-git-"))
-    ctx.call_on_close(lambda: shutil.rmtree(root, ignore_errors=True))
+
+    def remove_the_clone() -> None:
+        if not _remove_tree(root):
+            echo(
+                shown_on_one_line(
+                    "--source-git: could not remove all of the temporary clone, "
+                    f"so delete this directory by hand: {root}"
+                ),
+                err=True,
+            )
+
+    ctx.call_on_close(remove_the_clone)
     try:
         return clone_remote_source(url, ref, depth=depth, destination=root).as_posix()
     except CloneRequestRefused as refusal:
@@ -1708,12 +1723,16 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--image",
             rich_help_panel="Scan",
+            # No square brackets in this text: --help renders it as Rich
+            # markup, which drops a bracketed word such as "[@sha256:digest]",
+            # and the CLI reference renders it as markdown, which reads
+            # "[x][y]" as a link.
             help=(
-                "Scan a container image named by reference "
-                "(registry/repo[:tag]) instead of a source "
-                "directory. ASH fetches nothing itself: the image is prepared "
-                "by a container engine or the scanner tools' own registry "
-                "clients. Repeat it, or give a comma list, to scan several "
+                "Scan a container image named by reference (registry/repo, "
+                "optionally followed by :tag, @sha256:digest or both) instead "
+                "of a source directory. ASH fetches nothing itself: the image "
+                "is prepared by a container engine or the scanner tools' own "
+                "registry clients. Repeat it, or give a comma list, to scan several "
                 "images: each is its own scan, with its own reports under "
                 "<output-dir>/<NN>-<image>-<hash>/, and the exit code is the "
                 "worst of theirs. Exclusive with --source-dir, --image-archive "
@@ -1746,6 +1765,43 @@ def run_ash_scan_cli_command(
                 "of a source directory. Needs no container engine. Exclusive "
                 "with --source-dir, --image and --image-archive."
             ),
+        ),
+    ] = None,
+    source_git: Annotated[
+        str | None,
+        typer.Option(
+            "--source-git",
+            metavar="URL",
+            rich_help_panel="Scan",
+            help=(
+                "Scan a remote git repository instead of a source directory: "
+                "ASH clones it (https or ssh URL, or user@host:path; never a "
+                "local path) into a temporary directory, scans that, and "
+                "removes it. git runs without your configuration or "
+                "credentials, so the repository must be readable anonymously "
+                "or by a key a non-interactive ssh finds. Same request rules "
+                "as the MCP set_source_git tool. Exclusive with --source-dir, "
+                "--workspace, the image options, --staged, --use-existing and "
+                "--changed-files-only."
+            ),
+        ),
+    ] = None,
+    git_ref: Annotated[
+        str | None,
+        typer.Option(
+            "--git-ref",
+            metavar="REF",
+            rich_help_panel="Scan",
+            help="Branch, tag or commit of --source-git to scan. Default: the remote's default branch.",
+        ),
+    ] = None,
+    git_depth: Annotated[
+        int | None,
+        typer.Option(
+            "--git-depth",
+            metavar="N",
+            rich_help_panel="Scan",
+            help="How many commits of history --source-git fetches, 1 to 1000 (default 1).",
         ),
     ] = None,
 ):
@@ -1820,10 +1876,12 @@ def run_ash_scan_cli_command(
     except ImageListRefused as refusal:
         _fail_usage(str(refusal))
 
-    # Options that read or filter by the directory the scan starts in are not
-    # an image scan's subject: --staged could exit 0 as "nothing staged"
-    # without the image ever being scanned. Refused first, before the options'
-    # own mode checks, so the operator is told the real conflict.
+    # Scope options an image scan cannot obey, refused first, before the
+    # options' own mode checks, so the operator is told the real conflict.
+    # The rules themselves live in run_ash_scan's _refuse_an_image_scan_scope,
+    # one gate for the CLI and every library caller; this loop exists for the
+    # CLI wording only: it names the flag as typed, or the variable that set
+    # it, which the shared gate cannot know.
     for image_flag, image_value in (
         ("--image", images or None),
         ("--image-archive", image_archive),
@@ -1831,44 +1889,56 @@ def run_ash_scan_cli_command(
     ):
         if image_value is None:
             continue
-        for other_flag, other_given in (
-            ("--staged", staged),
-            ("--baseline", baseline is not None),
-            ("--use-existing", use_existing),
-            ("--changed-files-only", changed_files_only),
+        for other_flag, param, envvar, other_given, why in (
+            (
+                "--staged",
+                "staged",
+                "ASH_STAGED",
+                staged,
+                "scopes the scan to the git index, and an image has none",
+            ),
+            (
+                "--baseline",
+                "baseline",
+                "ASH_BASELINE",
+                baseline is not None,
+                # The reason is the tool's: a baseline is scoped to a scanned
+                # directory (its scan_source) and matched on finding identity,
+                # which for an image carries the image's digest, with a looser
+                # rule-file-message pairing beside it that would pair a
+                # different image's findings.
+                (
+                    "is scoped to a scanned directory, and an image's findings "
+                    "are matched on identities that carry its digest, so no "
+                    "baseline can stand for another image"
+                ),
+            ),
+            (
+                "--use-existing",
+                "use_existing",
+                None,
+                use_existing,
+                "reads saved results, so nothing would be scanned",
+            ),
+            (
+                "--changed-files-only",
+                "changed_files_only",
+                "ASH_CHANGED_FILES_ONLY",
+                changed_files_only,
+                "scopes a scan by git history, and an image has none",
+            ),
         ):
-            if other_given:
-                reason = (
-                    f"{other_flag} reads the working directory, which an image "
-                    "scan does not scan. Scan the image on its own."
-                )
-                if other_flag == "--baseline":
-                    # Kept refused on purpose, and the reason is the tool's:
-                    # a baseline is scoped to a scanned directory (its
-                    # scan_source) and matched on finding identity, which for an
-                    # image carries the image's digest, with a looser
-                    # rule-file-message pairing beside it that would pair a
-                    # different image's findings.
-                    reason = (
-                        "a baseline is scoped to a scanned directory, and an "
-                        "image's findings are matched on identities that carry "
-                        "its digest, so no baseline can stand for another image. "
-                        "Scan the image on its own."
-                    )
-                _fail_usage(
-                    f"{image_flag} cannot be combined with {other_flag}: {reason}"
-                )
-        if changed_files_only:
-            # An image has no diff base, so the scope means nothing there. It is
-            # said once and then dropped, so no git process starts for it and the
-            # whole image is scanned (the run's own warning, below the CLI, is
-            # not reached: the flag no longer arrives).
-            echo(
-                f"Warning: --changed-files-only has no meaning for {image_flag}: "
-                "an image has no diff base, so the whole image is scanned.",
-                err=True,
+            if not other_given:
+                continue
+            source = other_flag
+            if envvar is not None and _from_environment(ctx, param):
+                # The operator may never have typed the flag: name the
+                # variable that set it, as the sibling refusals do.
+                source = f"{envvar} is set, and {other_flag}"
+            _fail_usage(
+                f"{source} cannot be combined with {image_flag}: it {why}. "
+                "Scan the image on its own."
             )
-            changed_files_only = False
 
     if baseline is not None:
         from automated_security_helper.express.runtime import CHILD_ENV
@@ -2189,6 +2259,46 @@ def run_ash_scan_cli_command(
             if payload_refusal is not None:
                 _fail_usage(shown_on_one_line(payload_refusal))
 
+    # A remote git repository as the subject (--source-git): its own rules first,
+    # before any work, so a conflicting or refused request does nothing. The
+    # request rules are the MCP set_source_git tool's, run by the same function.
+    if (git_ref is not None or git_depth is not None) and source_git is None:
+        _fail_usage(
+            "--git-ref and --git-depth apply to --source-git only; "
+            "they name which part of the remote repository to scan."
+        )
+    if source_git is not None:
+        for other_flag, other_given in (
+            (
+                "--source-dir",
+                source_dir is not None,
+            ),
+            ("--workspace", workspace is not None),
+            ("--image", bool(images)),
+            ("--image-archive", image_archive is not None),
+            ("--image-layout", image_layout is not None),
+            ("--staged", staged),
+            ("--use-existing", use_existing),
+            ("--changed-files-only", changed_files_only),
+        ):
+            if other_given:
+                _fail_usage(
+                    f"--source-git cannot be combined with {other_flag}: one scan "
+                    "has one subject, and the clone has no working-tree state to "
+                    "read. Scan the repository on its own."
+                )
+        from automated_security_helper.cli.mcp.source_delivery import (
+            CloneRequestRefused,
+            validated_remote_clone_request,
+        )
+
+        try:
+            validated_remote_clone_request(
+                source_git, git_ref, 1 if git_depth is None else git_depth
+            )
+        except CloneRequestRefused as refusal:
+            _fail_usage(shown_on_one_line(f"--source-git: {refusal}"))
+
     workspace_plan: WorkspacePlan | None = None
     if workspace is not None:
         workspace_plan = _handle_workspace_mode(
@@ -2272,6 +2382,17 @@ def run_ash_scan_cli_command(
         custom_build_arg = []
 
     # Resolve cwd-based defaults at call time (not import time).
+    if source_git is not None:
+        # The subject is a clone of the remote repository, made here into a
+        # temporary directory that is removed when the command ends however it
+        # ends (the click context's close callback runs on every exit). The
+        # output directory then defaults beside the working directory, not
+        # inside the clone, which would take the results with it.
+        source_dir = _clone_git_source(
+            ctx, source_git, git_ref, 1 if git_depth is None else git_depth
+        )
+        if output_dir is None:
+            output_dir = Path.cwd().joinpath(".ash", "ash_output").as_posix()
     if source_dir is None:
         source_dir = Path.cwd().as_posix()
     # Refused before anything else uses it. A missing --source-dir used to run a

@@ -13,6 +13,8 @@ files in the scanned tree maps nothing, and that a converted file with no sideca
 """
 
 import json
+import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -542,13 +544,16 @@ def test_the_scanner_executor_places_results_through_the_one_call():
 
 PLACE_CALL = "place_converted_results(raw_results"
 SUPPRESS_CALL = "apply_suppressions_to_sarif("
+#: PLACE_CALL as the formatter may lay it out: the image branch pushed the call
+#: one indent deeper, past the line length, so it can wrap after the paren.
+PLACE_CALL_PATTERN = re.compile(r"place_converted_results\(\s*raw_results")
 
 
 def _places_before_suppressing(source: str) -> bool:
     """Whether the first placement call precedes the first suppression call."""
-    placed = source.find(PLACE_CALL)
+    placed = PLACE_CALL_PATTERN.search(source)
     suppressed = source.find(SUPPRESS_CALL)
-    return 0 <= placed < suppressed
+    return placed is not None and placed.start() < suppressed
 
 
 def test_the_scanner_executor_places_before_it_applies_suppressions():
@@ -557,7 +562,7 @@ def test_the_scanner_executor_places_before_it_applies_suppressions():
 
     source = Path(scanner_executor.__file__).read_text(encoding="utf-8")
 
-    assert source.count(PLACE_CALL) == 1
+    assert len(PLACE_CALL_PATTERN.findall(source)) == 1
     assert _places_before_suppressing(source)
 
 
@@ -588,8 +593,30 @@ def _map_through_source(context, script: Path, source_name: str) -> SarifReport:
 
 @pytest.mark.parametrize(
     "name",
-    ["my:config.json", "sub\\config.json", "a'b.json"],
-    ids=["colon-in-name", "backslash-in-name", "quote-in-name"],
+    [
+        # The colon and backslash names are POSIX file names only. On Windows a colon
+        # starts an NTFS alternate data stream (my:config.json is the stream
+        # config.json of a file named my) and a backslash separates path parts
+        # (sub\config.json is the file config.json in a directory sub), so neither
+        # is part of a file name there.
+        pytest.param(
+            "my:config.json",
+            id="colon-in-name",
+            marks=pytest.mark.skipif(
+                sys.platform == "win32",
+                reason="a colon starts an NTFS alternate data stream on Windows",
+            ),
+        ),
+        pytest.param(
+            "sub\\config.json",
+            id="backslash-in-name",
+            marks=pytest.mark.skipif(
+                sys.platform == "win32",
+                reason="a backslash separates path parts on Windows",
+            ),
+        ),
+        pytest.param("a'b.json", id="quote-in-name"),
+    ],
 )
 def test_a_posix_file_name_with_a_colon_or_backslash_is_a_source(converted, name):
     """Containment is the check on a name; the text refusals are scheme and drive."""

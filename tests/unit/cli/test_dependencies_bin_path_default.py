@@ -19,6 +19,7 @@ import subprocess
 import sys
 
 import pytest
+import typer.rich_utils
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
@@ -26,28 +27,39 @@ from automated_security_helper.core import constants
 from tests.snapshot.support.normalize import pinned_terminal_env
 from tests.utils.helpers import importing_this_checkout
 
+#: Wide enough that no cell of the options table wraps the default onto two lines.
+_HELP_WIDTH = 200
 
-def _help() -> str:
+
+def _help(monkeypatch: pytest.MonkeyPatch) -> str:
+    # The attribute, not only COLUMNS: typer.rich_utils reads TERMINAL_WIDTH once, when
+    # it is first imported, into MAX_WIDTH, and a set MAX_WIDTH is the width rich uses,
+    # whatever COLUMNS says. A snapshot test that imported it first in the same worker,
+    # under the snapshots' TERMINAL_WIDTH=100, left this help 100 columns wide, where
+    # the options column wraps "[default: (~/.ash/bin)]" onto two lines (the macOS unit
+    # legs failed so). tests/unit/cli/test_config_help_names_tool_ash.py pins it the
+    # same way.
+    monkeypatch.setattr(typer.rich_utils, "MAX_WIDTH", _HELP_WIDTH)
     result = CliRunner().invoke(
-        app, ["dependencies", "install", "--help"], env={"COLUMNS": "200"}
+        app, ["dependencies", "install", "--help"], env={"COLUMNS": str(_HELP_WIDTH)}
     )
     assert result.exit_code == 0, result.output
     return " ".join(result.output.split())
 
 
 @pytest.mark.unit
-def test_the_default_is_shown_as_the_documented_path():
-    text = _help()
+def test_the_default_is_shown_as_the_documented_path(monkeypatch):
+    text = _help(monkeypatch)
     assert "[default: (~/.ash/bin)]" in text, text
     assert "[env var: ASH_BIN_PATH]" in text, text
 
 
 @pytest.mark.unit
-def test_the_help_does_not_contain_the_resolved_default():
+def test_the_help_does_not_contain_the_resolved_default(monkeypatch):
     """The resolved path is this machine's; it has no place in the help text."""
     resolved = str(constants.ASH_BIN_PATH)
     assert resolved != "~/.ash/bin"
-    assert resolved not in _help()
+    assert resolved not in _help(monkeypatch)
 
 
 _RENDER_HELP = (

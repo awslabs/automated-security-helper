@@ -12,7 +12,10 @@ matched a checkov finding, because the finding carried no resource.
 checkov's JSON report names the resource of every record. The scanner asks for
 that report on every run and copies each record's resource to its SARIF result
 under ``ash_resource_id``, the resource-identity contract of
-``utils/package_identity.py``.
+``utils/package_identity.py``. An id that one file's records give at two line
+ranges names two resources, so it is copied to neither. The records of the checks
+that passed count as places, so a finding keeps or loses its id whichever of the
+other checks fail.
 """
 
 import importlib.util
@@ -27,6 +30,8 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.models.core import AshSuppression
+from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
     CheckovScanner,
     CheckovScannerConfig,
@@ -36,10 +41,12 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scann
     attach_checkov_resources,
     checkov_resources,
 )
+from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.package_identity import (
     ASH_RESOURCE_ID_KEY,
     extract_resource_identity,
 )
+from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
 
 pytestmark = pytest.mark.unit
 
@@ -59,10 +66,14 @@ def _record(check_id, path, lines, resource):
     }
 
 
-def _report(check_type, failed=(), skipped=()):
+def _report(check_type, failed=(), skipped=(), passed=()):
     return {
         "check_type": check_type,
-        "results": {"failed_checks": list(failed), "skipped_checks": list(skipped)},
+        "results": {
+            "failed_checks": list(failed),
+            "skipped_checks": list(skipped),
+            "passed_checks": list(passed),
+        },
     }
 
 
@@ -262,6 +273,18 @@ class TestOnlyFrameworksThatNameAResource:
 
 
 class TestEveryCheckovFrameworkIsClassified:
+    def test_the_frameworks_that_name_a_resource_are_pinned(self):
+        # A framework is listed only after its ids were shown to name one
+        # resource in a file, so a change to the list is a reviewed change.
+        assert _RESOURCE_FRAMEWORKS == frozenset(
+            {"terraform", "terraform_plan", "cloudformation", "kubernetes", "bicep"}
+        )
+
+    @pytest.mark.parametrize("check_type", ["arm", "terraform_json"])
+    def test_arm_and_terraform_json_are_classified_as_naming_none(self, check_type):
+        assert check_type in _NO_RESOURCE_FRAMEWORKS
+        assert check_type not in _RESOURCE_FRAMEWORKS
+
     def test_the_two_sets_do_not_overlap(self):
         assert _RESOURCE_FRAMEWORKS.isdisjoint(_NO_RESOURCE_FRAMEWORKS)
 
@@ -374,6 +397,468 @@ class TestAKeyTheReportsDisagreeOnGetsNoResource:
 
         assert attached == 1
         assert _resource(sarif["runs"][0]["results"][2]) == "c.d"
+
+
+#: The id checkov gives a resource named by a template parameter that has no
+#: default: the name stays the expression, so it is the same for every resource
+#: of the type that the expression names.
+SHARED_ID = "Microsoft.Storage/storageAccounts.[parameters('n')]"
+
+
+class TestAnIdTwoResourcesOfAFileShareNamesNeither:
+    """Every check on one resource gives that resource's lines, so one id at two
+    line ranges of one file is two resources that share it. A suppression scoped
+    to it would cover the findings of both, so neither is given it."""
+
+    @pytest.mark.parametrize("check_type", sorted(_RESOURCE_FRAMEWORKS))
+    def test_one_id_at_two_line_ranges_names_neither(self, check_type):
+        sarif = _sarif(
+            _result("CKV_AZURE_33", "main.json", 5, 20),
+            _result("CKV_AZURE_33", "main.json", 21, 36),
+        )
+
+        attached = _attach(
+            sarif,
+            _report(
+                check_type,
+                failed=[
+                    _record("CKV_AZURE_33", "/main.json", (5, 20), SHARED_ID),
+                    _record("CKV_AZURE_33", "/main.json", (21, 36), SHARED_ID),
+                ],
+            ),
+        )
+
+        assert attached == 0
+        assert [_resource(r) for r in sarif["runs"][0]["results"]] == [None, None]
+
+    @pytest.mark.parametrize("check_type", sorted(_RESOURCE_FRAMEWORKS))
+    def test_control_two_ids_at_two_line_ranges_are_both_named(self, check_type):
+        first = "Microsoft.Storage/storageAccounts.[parameters('a')]"
+        second = "Microsoft.Storage/storageAccounts.[parameters('b')]"
+        sarif = _sarif(
+            _result("CKV_AZURE_33", "main.json", 5, 20),
+            _result("CKV_AZURE_33", "main.json", 21, 36),
+        )
+
+        attached = _attach(
+            sarif,
+            _report(
+                check_type,
+                failed=[
+                    _record("CKV_AZURE_33", "/main.json", (5, 20), first),
+                    _record("CKV_AZURE_33", "/main.json", (21, 36), second),
+                ],
+            ),
+        )
+
+        assert attached == 2
+        assert [_resource(r) for r in sarif["runs"][0]["results"]] == [first, second]
+
+    def test_the_two_resources_need_not_fail_the_same_check(self):
+        # No key repeats: each check fails on one resource only. The line
+        # ranges are what show that the id names two resources.
+        sarif = _sarif(
+            _result("CKV_AZURE_33", "main.json", 5, 20),
+            _result("CKV_AZURE_35", "main.json", 21, 36),
+        )
+
+        attached = _attach(
+            sarif,
+            _report(
+                "bicep",
+                failed=[
+                    _record("CKV_AZURE_33", "/main.json", (5, 20), SHARED_ID),
+                    _record("CKV_AZURE_35", "/main.json", (21, 36), SHARED_ID),
+                ],
+            ),
+        )
+
+        assert attached == 0
+
+    def test_a_skipped_record_is_one_of_the_places(self):
+        sarif = _sarif(
+            _result("CKV_AZURE_33", "main.json", 5, 20),
+            _result(
+                "CKV_AZURE_33",
+                "main.json",
+                21,
+                36,
+                suppressions=[{"kind": "inSource"}],
+            ),
+        )
+
+        attached = _attach(
+            sarif,
+            _report(
+                "bicep",
+                failed=[_record("CKV_AZURE_33", "/main.json", (5, 20), SHARED_ID)],
+                skipped=[_record("CKV_AZURE_33", "/main.json", (21, 36), SHARED_ID)],
+            ),
+        )
+
+        assert attached == 0
+
+    def test_control_one_resource_that_several_checks_flag_keeps_its_id(self):
+        sarif = _sarif(
+            _result("CKV_AZURE_33", "main.json", 5, 20),
+            _result("CKV_AZURE_35", "main.json", 5, 20),
+        )
+
+        attached = _attach(
+            sarif,
+            _report(
+                "bicep",
+                failed=[
+                    _record("CKV_AZURE_33", "/main.json", (5, 20), SHARED_ID),
+                    _record("CKV_AZURE_35", "/main.json", (5, 20), SHARED_ID),
+                ],
+            ),
+        )
+
+        assert attached == 2
+        assert {_resource(r) for r in sarif["runs"][0]["results"]} == {SHARED_ID}
+
+    def test_control_one_id_in_two_files_is_named_in_each(self):
+        # A suppression names its path, so the same id in another file is
+        # another suppression's.
+        sarif = _sarif(
+            _result("CKV_AZURE_33", "a.json", 5, 20),
+            _result("CKV_AZURE_33", "b.json", 21, 36),
+        )
+
+        attached = _attach(
+            sarif,
+            _report(
+                "bicep",
+                failed=[
+                    _record("CKV_AZURE_33", "/a.json", (5, 20), SHARED_ID),
+                    _record("CKV_AZURE_33", "/b.json", (21, 36), SHARED_ID),
+                ],
+            ),
+        )
+
+        assert attached == 2
+
+    def test_the_other_resources_of_the_file_are_still_named(self):
+        sarif = _sarif(
+            _result("CKV_AZURE_33", "main.json", 5, 20),
+            _result("CKV_AZURE_33", "main.json", 21, 36),
+            _result("CKV_AZURE_33", "main.json", 40, 52),
+        )
+
+        attached = _attach(
+            sarif,
+            _report(
+                "bicep",
+                failed=[
+                    _record("CKV_AZURE_33", "/main.json", (5, 20), SHARED_ID),
+                    _record("CKV_AZURE_33", "/main.json", (21, 36), SHARED_ID),
+                    _record(
+                        "CKV_AZURE_33",
+                        "/main.json",
+                        (40, 52),
+                        "Microsoft.Storage/storageAccounts.st",
+                    ),
+                ],
+            ),
+        )
+
+        assert attached == 1
+        assert [_resource(r) for r in sarif["runs"][0]["results"]] == [
+            None,
+            None,
+            "Microsoft.Storage/storageAccounts.st",
+        ]
+
+
+class TestWhetherAnIdIsSharedDoesNotDependOnWhichChecksFail:
+    """checkov's JSON report lists the checks that passed as well as the ones that
+    failed or were skipped, and a check gives the lines of the resource it ran on
+    whichever way it went. So the places of a resource are read from every record
+    of a file. Read from the failed and skipped records alone, a finding kept its
+    id while the check at the resource's other place passed and lost it when that
+    check started to fail: the id of a finding depended on which other checks
+    failed. A check that passed has no result in the SARIF report, so it counts as
+    a place and is not an entry of any key."""
+
+    @pytest.mark.parametrize("check_type", sorted(_RESOURCE_FRAMEWORKS))
+    def test_a_check_that_passed_at_another_place_is_one_of_the_places(
+        self, check_type
+    ):
+        """One id at two line ranges is two resources that share it, also when the
+        check at the second range passed: the finding at the first range does not
+        carry the id, as it does not when that check failed."""
+        sarif = _sarif(_result("CKV_AZURE_33", "main.json", 5, 20))
+
+        attached = _attach(
+            sarif,
+            _report(
+                check_type,
+                failed=[_record("CKV_AZURE_33", "/main.json", (5, 20), SHARED_ID)],
+                passed=[_record("CKV_AZURE_35", "/main.json", (21, 36), SHARED_ID)],
+            ),
+        )
+
+        assert attached == 0
+        assert [_resource(r) for r in sarif["runs"][0]["results"]] == [None]
+
+    def test_the_check_that_passed_may_be_at_the_first_place(self):
+        """The order of the two places does not matter: the finding at the second
+        range loses the id when the check at the first range passed."""
+        sarif = _sarif(_result("CKV_AZURE_33", "main.json", 21, 36))
+
+        attached = _attach(
+            sarif,
+            _report(
+                "bicep",
+                failed=[_record("CKV_AZURE_33", "/main.json", (21, 36), SHARED_ID)],
+                passed=[_record("CKV_AZURE_35", "/main.json", (5, 20), SHARED_ID)],
+            ),
+        )
+
+        assert attached == 0
+        assert [_resource(r) for r in sarif["runs"][0]["results"]] == [None]
+
+    def test_a_skipped_finding_loses_its_id_to_a_check_that_passed_elsewhere(self):
+        """A skipped record is a finding too, and is dropped the same way."""
+        sarif = _sarif(
+            _result(
+                "CKV_AZURE_33", "main.json", 5, 20, suppressions=[{"kind": "inSource"}]
+            )
+        )
+
+        attached = _attach(
+            sarif,
+            _report(
+                "bicep",
+                skipped=[_record("CKV_AZURE_33", "/main.json", (5, 20), SHARED_ID)],
+                passed=[_record("CKV_AZURE_35", "/main.json", (21, 36), SHARED_ID)],
+            ),
+        )
+
+        assert attached == 0
+        assert [_resource(r) for r in sarif["runs"][0]["results"]] == [None]
+
+    def test_the_check_that_passed_is_not_an_entry_of_any_key(self):
+        """The SARIF report has no result for a check that passed, so its record is
+        read for its place and given no entry: the failed record keeps its one
+        entry, now None, and no key is made for the passed one."""
+        report = _report(
+            "bicep",
+            failed=[_record("CKV_AZURE_33", "/main.json", (5, 20), SHARED_ID)],
+            passed=[_record("CKV_AZURE_35", "/main.json", (21, 36), SHARED_ID)],
+        )
+
+        assert checkov_resources([report]) == {
+            ("CKV_AZURE_33", "main.json", 5, 20): [None]
+        }
+
+    def test_control_two_failed_places_still_name_neither(self):
+        """The case that was already handled: the check at each place failed."""
+        sarif = _sarif(
+            _result("CKV_AZURE_33", "main.json", 5, 20),
+            _result("CKV_AZURE_35", "main.json", 21, 36),
+        )
+
+        attached = _attach(
+            sarif,
+            _report(
+                "bicep",
+                failed=[
+                    _record("CKV_AZURE_33", "/main.json", (5, 20), SHARED_ID),
+                    _record("CKV_AZURE_35", "/main.json", (21, 36), SHARED_ID),
+                ],
+            ),
+        )
+
+        assert attached == 0
+        assert [_resource(r) for r in sarif["runs"][0]["results"]] == [None, None]
+
+    def test_control_one_place_keeps_its_id_whatever_else_passes_or_fails(self):
+        """A resource at one line range keeps its id whichever way its own checks
+        went, and whichever way the checks of the file's other resources went."""
+        mine = "Microsoft.Storage/storageAccounts.mine"
+        sibling = "Microsoft.Storage/storageAccounts.sibling"
+        quiet = "Microsoft.Storage/storageAccounts.quiet"
+        clean = "Microsoft.Storage/storageAccounts.clean"
+        sarif = _sarif(
+            _result("CKV_AZURE_33", "main.json", 5, 20),
+            _result("CKV_AZURE_33", "main.json", 40, 52),
+            _result(
+                "CKV_AZURE_35", "main.json", 60, 70, suppressions=[{"kind": "inSource"}]
+            ),
+        )
+
+        attached = _attach(
+            sarif,
+            _report(
+                "bicep",
+                failed=[
+                    _record("CKV_AZURE_33", "/main.json", (5, 20), mine),
+                    _record("CKV_AZURE_33", "/main.json", (40, 52), sibling),
+                ],
+                skipped=[_record("CKV_AZURE_35", "/main.json", (60, 70), quiet)],
+                passed=[
+                    # another check on the same resource, at its own lines
+                    _record("CKV_AZURE_35", "/main.json", (5, 20), mine),
+                    # a resource of the file that no check failed on
+                    _record("CKV_AZURE_33", "/main.json", (21, 36), clean),
+                    _record("CKV_AZURE_35", "/main.json", (21, 36), clean),
+                ],
+            ),
+        )
+
+        assert attached == 3
+        assert [_resource(r) for r in sarif["runs"][0]["results"]] == [
+            mine,
+            sibling,
+            quiet,
+        ]
+
+    def test_control_a_check_that_passed_in_another_file_is_not_a_place(self):
+        """The same id in another file is another suppression's, as for a check
+        that failed there."""
+        sarif = _sarif(_result("CKV_AZURE_33", "a.json", 5, 20))
+
+        attached = _attach(
+            sarif,
+            _report(
+                "bicep",
+                failed=[_record("CKV_AZURE_33", "/a.json", (5, 20), SHARED_ID)],
+                passed=[_record("CKV_AZURE_35", "/b.json", (21, 36), SHARED_ID)],
+            ),
+        )
+
+        assert attached == 1
+        assert [_resource(r) for r in sarif["runs"][0]["results"]] == [SHARED_ID]
+
+    def test_control_a_check_of_a_framework_naming_no_resource_is_not_a_place(self):
+        """A record of a framework that names no resource gives no id, so it gives
+        no place either, whatever its resource field holds."""
+        sarif = _sarif(_result("CKV_AWS_17", "main.tf", 1, 7))
+        db = "aws_db_instance.a"
+
+        attached = _attach(
+            sarif,
+            _report(
+                "terraform",
+                failed=[_record("CKV_AWS_17", "/main.tf", (1, 7), db)],
+            ),
+            _report(
+                "secrets",
+                passed=[_record("CKV_SECRET_1", "/main.tf", (9, 16), db)],
+            ),
+        )
+
+        assert attached == 1
+        assert [_resource(r) for r in sarif["runs"][0]["results"]] == [db]
+
+    def test_control_a_passed_check_takes_no_place_in_the_order_of_a_key(self):
+        """In a plan every record is at line 1, so one rule's records of several
+        resources share a key. Only the failed one has a result in the SARIF
+        report, and the result takes the entry of the record at its position: an
+        entry made for the passed record would hand it another resource's id."""
+        passed_on, failed_on = "module.db.x.this", "module.db2.x.this"
+        sarif = _sarif(_result("CKV_AWS_17", "tfplan.json", 1, 1))
+        report = _report(
+            "terraform_plan",
+            failed=[_record("CKV_AWS_17", "/tfplan.json", (0, 0), failed_on)],
+            passed=[_record("CKV_AWS_17", "/tfplan.json", (0, 0), passed_on)],
+        )
+
+        assert checkov_resources([report]) == {
+            ("CKV_AWS_17", "tfplan.json", 1, 1): [failed_on]
+        }
+        assert attach_checkov_resources(sarif, checkov_resources([report])) == 1
+        assert [_resource(r) for r in sarif["runs"][0]["results"]] == [failed_on]
+
+    @pytest.mark.parametrize(
+        "passed",
+        [
+            "text",
+            None,
+            7,
+            {"a": 1},
+            [None, "x", 3],
+            [{"check_id": "C", "resource": "r"}],
+            [_record("C", "/a.json", (5, 6), None)],
+            [_record("C", "/a.json", (5, 6), 7)],
+        ],
+    )
+    def test_control_a_passed_list_of_another_shape_is_read_for_what_it_holds(
+        self, passed
+    ):
+        """A passed list that is not a list of records, a record without its key
+        and a record with no resource text add no place, and no error."""
+        report = _report("bicep", failed=[_record("C", "/a.json", (1, 2), "r")])
+        report["results"]["passed_checks"] = passed
+
+        assert checkov_resources([report]) == {("C", "a.json", 1, 2): ["r"]}
+
+
+def _scanned(first_id, second_id):
+    """The flat findings of two records of one rule in one file, with these ids."""
+    sarif = {
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {"driver": {"name": "Checkov"}},
+                "results": [
+                    _result("CKV_AZURE_33", "main.json", 5, 20, message={"text": "m"}),
+                    _result("CKV_AZURE_33", "main.json", 21, 36, message={"text": "m"}),
+                ],
+            }
+        ],
+    }
+    _attach(
+        sarif,
+        _report(
+            "bicep",
+            failed=[
+                _record("CKV_AZURE_33", "/main.json", (5, 20), first_id),
+                _record("CKV_AZURE_33", "/main.json", (21, 36), second_id),
+            ],
+        ),
+    )
+    report = SarifReport.model_validate(json.loads(json.dumps(sarif)))
+    return [
+        FlatVulnerability.from_sarif_result(
+            result, "checkov", SCANNER_TOOL_TYPES["checkov"], report.runs[0]
+        )
+        for result in report.runs[0].results
+    ]
+
+
+def _suppression(**fields):
+    return AshSuppression.model_validate(
+        {"path": "main.json", "reason": "test", **fields}
+    )
+
+
+class TestAResourceScopedSuppressionCoversOnlyItsResource:
+    def test_a_suppression_for_a_shared_id_cannot_cover_the_second_record(self):
+        first, second = _scanned(SHARED_ID, SHARED_ID)
+        entry = _suppression(scope={"resource_id": SHARED_ID})
+
+        assert not entry.matches(second)
+        assert not entry.matches(first)
+
+    def test_path_and_lines_still_cover_the_first_record_alone(self):
+        first, second = _scanned(SHARED_ID, SHARED_ID)
+        entry = _suppression(line_start=5, line_end=20)
+
+        assert entry.matches(first)
+        assert not entry.matches(second)
+
+    def test_control_a_unique_id_binds_the_suppression_to_its_record(self):
+        first, second = _scanned(
+            SHARED_ID, "Microsoft.Storage/storageAccounts.[parameters('other')]"
+        )
+        entry = _suppression(scope={"resource_id": SHARED_ID})
+
+        assert first.resource_id == SHARED_ID
+        assert entry.matches(first)
+        assert not entry.matches(second)
 
 
 class TestAReportThatIsNotAsExpectedIsReadForWhatItHolds:
@@ -717,6 +1202,56 @@ class TestTheScannerReadsBothReports:
         raw = scanner._read_results_file(results_file)
 
         assert [_resource(r) for r in raw["runs"][0]["results"]] == [None, None]
+
+
+class TestTheScannerReadsTheChecksThatPassed:
+    """checkov writes the checks that passed into its JSON report, and nothing in
+    the command line the scanner builds asks it to leave them out, so the report
+    the scanner reads holds the places those checks give."""
+
+    @pytest.mark.parametrize("flag", ["--quiet", "-q", "--compact"])
+    def test_control_the_command_line_asks_for_no_flag_that_drops_them(
+        self, tmp_path, flag
+    ):
+        scanner = _scanner(tmp_path, tmp_path / "out")
+
+        assert flag not in {arg.key for arg in scanner.args.extra_args}
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX paths")
+    def test_a_finding_loses_its_id_to_a_check_that_passed_at_another_place(
+        self, tmp_path
+    ):
+        source = tmp_path / "src"
+        source.mkdir()
+        scanner = _scanner(source, tmp_path / "out", additional_formats=["json"])
+        results_dir = Path(scanner.results_dir) / "source"
+        results_dir.mkdir(parents=True, exist_ok=True)
+        written = (source / "main.json").as_posix()
+        results_file = results_dir / "results_sarif.sarif"
+        results_file.write_text(
+            json.dumps(
+                _sarif(_result("CKV_AZURE_33", quote(written.lstrip("/")), 5, 20))
+            ),
+            encoding="utf-8",
+        )
+        failed = {
+            **_record("CKV_AZURE_33", written, (5, 20), SHARED_ID),
+            "file_abs_path": written,
+        }
+        passed = {
+            **_record("CKV_AZURE_35", written, (21, 36), SHARED_ID),
+            "file_abs_path": written,
+        }
+        (results_dir / "results_json.json").write_text(
+            json.dumps([_report("bicep", failed=[failed], passed=[passed])]),
+            encoding="utf-8",
+        )
+        scanner._checkov_cwd = Path("/")
+        scanner._checkov_target = source
+
+        raw = scanner._read_results_file(results_file)
+
+        assert [_resource(r) for r in raw["runs"][0]["results"]] == [None]
 
 
 class TestANameThatIsNotUtf8CostsNothing:

@@ -384,7 +384,9 @@ global_settings:
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: zizmor/dangerous-triggers
       path: .github/workflows/ash-dependabot-auto-merge.yml
-      reason: "Reviewed. The workflow_run trigger is the point of the file: it approves a dependabot bump only after every required check on the head is green. The header of the workflow, under THE SAFETY OF THE TRIGGER, names why nothing the audit warns about can happen there. ASH runs zizmor without its inline ignore comments, so the decision is recorded here."
+      line_start: 113
+      line_end: 113
+      reason: "Reviewed. The workflow_run trigger is the point of the file: it approves a dependabot bump only after every required check on the head is green. The header of the workflow, under THE SAFETY OF THE TRIGGER, names why nothing the audit warns about can happen there. ASH runs zizmor without its inline ignore comments, so the decision is recorded here, pinned to the trigger's own line: zizmor 1.33.1 reports that line, a release that reports the whole on: block still overlaps it, and a dangerous trigger reported on another line of the file is not covered. .ash/.ash_alpha_plugins.yaml carries the same entry."
     - rule_id: generic-api-key
       path: tests/unit/utils/test_finding_trend.py
       reason: "False positive. A report-id helper whose default argument is a made-up twelve-character token, so the generated ids are fixed. The provider-specific gitleaks rules still apply to this file."
@@ -3175,7 +3177,7 @@ global_settings:
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
       symbol: version_output
-      reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
+      reason: "subprocess.run of the tool's version command on an installed binary in a throwaway HOME; nothing downloaded is executed."
     # === GuardDog: hits the self-scan reports with max_hits: 0 ===
     # Measured with GuardDog 3.2.0 over the tree the plugin stages, with no hit limit
     # (scanners.guarddog.options.max_hits: 0 in .ash/.ash_alpha_plugins.yaml, the
@@ -3301,6 +3303,11 @@ global_settings:
       line_start: 187
       line_end: 187
       reason: "'.env' is the example file name a docs graphic row shows for the secrets category; display data, not a read."
+    - rule_id: threat-process-download-exec
+      path: automated_security_helper/utils/install_providers.py
+      line_start: 293
+      line_end: 293
+      reason: "A tuple comparison in classify_install_command that recognizes a declared install command of the shape <interpreter> -m pip install, so the command is classed as a Python environment install; nothing is downloaded or run here. Pinned to its line, not scoped to the function as the GuardDog entries that name a definition are: the function is the whole install-command parser, longer than the line budget a symbol scope is held to (tests/unit/config/test_symbol_migration_record.py), and a scope over all of it would excuse a download-and-run shape added anywhere in the parser."
     # === semgrep/opengrep Python compatibility (ASH requires 3.10+) ===
     - rule_id: "python.lang.compatibility.*"
       path: "automated_security_helper/**/*.py"
@@ -3350,6 +3357,14 @@ global_settings:
         that must be redacted from runner output. The fixture exists to prove
         redaction. The reason does not repeat the assignment, so this file does not
         flag itself.
+    # === gitleaks: the made-up token in the fail-closed plugin tests ===
+    # The entry the sorted test-code section above would hold, with that section's
+    # reason; .ash/.ash_alpha_plugins.yaml holds the same entry in its own test-code
+    # section. It sits here, below the lines of this file that the alpha-plugins
+    # config pins ferret-scan entries to, because a line added above them moves them.
+    - rule_id: generic-api-key
+      path: tests/unit/base/test_a_plugin_with_no_tool_or_directory_fails_closed.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     # === PR #820: suppressions for the test files and generated fixtures this branch adds ===
     # Each entry names one rule and one file; an entry the base already carries is not repeated.
     # The bandit entries this section once carried are in the sorted test-code section above.
@@ -3769,31 +3784,31 @@ global_settings:
         the severity label "LOW". No value is held.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/finding_diff.py
-      line_start: 254
-      line_end: 278
+      line_start: 350
+      line_end: 350
       reason: >-
         False positive. The schema notes map the dropped _secret_detection
         column name to the sentence saying the pair consumer applies it on the
-        host. The flagged value is that sentence. The range spans the two
-        lines the shipped and in-tree scanners attribute the construct to.
+        host. The flagged value is that sentence. The range is the one line
+        the shipped and in-tree scanners both attribute the construct to.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/finding_diff.py
-      line_start: 260
-      line_end: 284
+      line_start: 356
+      line_end: 356
       reason: >-
         False positive. The schema notes map the dropped is_secret_detection
         column name to the sentence saying the diff never joins on it. The
-        flagged value is that sentence. The range spans the two lines the
-        shipped and in-tree scanners attribute the construct to.
+        flagged value is that sentence. The range is the one line the
+        shipped and in-tree scanners both attribute the construct to.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/finding_identity.py
-      line_start: 741
-      line_end: 765
+      line_start: 780
+      line_end: 780
       reason: >-
         False positive. The SECRET_CORRELATION_PREFIX constant names the
         correlation family's id prefix (secret/<file>:<line>). A label, not a
-        value. The range spans the two lines the shipped and in-tree scanners
-        attribute the constant to.
+        value. The range is the one line the shipped and in-tree scanners
+        both attribute the constant to.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/plugin_conformance/fixture_plugin/transcripts/transcripts.json
       reason: >-
@@ -3860,12 +3875,234 @@ global_settings:
         input the code under test must refuse or report, or as a harness
         fallback. Here /tmp/app.tar and friends are CLI argument fixtures the
         classifier under test parses; no file is created under them.
+    # The sdist-lock harvester writes a provenance manifest beside each lockfile it
+    # extracts, and detect-secrets' hex detector reports the sdist's sha256 digest
+    # in it. That digest is the pin uv.lock carries, a content hash and not a
+    # secret. A secret rule may not be suppressed by a directory glob, so each
+    # manifest the self-scan reports is named in its own entries, each pinned to the
+    # digest line. HarvestManifest.to_json writes the digest on line 6. The test
+    # file that refuses such a glob
+    # (tests/unit/config/test_no_directory_glob_secret_suppressions.py) checks
+    # these entries: it fails and names the line to use if that moves.
+    #
+    # A manifest is reported by the path the scan that wrote it gives it, and a
+    # glob-free path matches only itself, so each package version has two entries,
+    # one after the other. Each path is <output dir>/converted/sdist-lock-harvester/
+    # sdist-locks/<package>/<version>/harvest-manifest.json, with the output
+    # directory being:
+    #   - .ash/ash_output, the default, inside the scanned tree: a scan that
+    #     writes there reports the path relative to the tree.
+    #   - /out, for a container scan. The scan inside the image runs with
+    #     --source-dir /src --output-dir /out (_assemble_run_command in
+    #     automated_security_helper/interactions/run_ash_container.py), so its
+    #     output is outside the source directory, and a converted file there keeps
+    #     its absolute path (_finding_uri in the detect-secrets scanner): only the
+    #     source directory is stripped from a reported path (_normalize_sarif_uri in
+    #     automated_security_helper/utils/sarif_utils.py).
+    # That test file also fails when a manifest has an entry for one spelling and not
+    # the other. `ash config validate` and `ash config lint` draw no warning for these
+    # /out paths: a path outside the source directory is compared as written with the
+    # path the container scan reports. An output directory other than these two is not
+    # covered: the manual pre-commit hook writes to .ash/ash_output_precommit_local.
+    #
+    # Taking a new version of a package named here, or a newly harvested package:
+    # the required self-scan reads this file from the pull request's base commit,
+    # so an entry added in the pull request that takes the version applies only once
+    # that merges, and the scan reports the new manifest until then. Merge a change
+    # that adds both entries first (copy the pair, change the version in both paths
+    # and in both reasons), then the change that takes the version, which also
+    # deletes the old version's two entries.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
-      path: "**/sdist-lock-harvester/sdist-locks/**/harvest-manifest.json"
+      path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/ast-serialize/0.12.1/harvest-manifest.json
+      line_start: 6
+      line_end: 6
       reason: >-
-        False positive. The provenance manifests the sdist-lock harvester
-        writes beside each harvested lockfile record the sdist's sha256 package
-        digest (the same pin uv.lock carries); content digests, not secrets.
+        False positive. Line 6 is the sha256 digest of the ast-serialize 0.12.1
+        sdist that uv.lock pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/ast-serialize/0.12.1/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        ast-serialize 0.12.1: the scan inside the image writes its output to /out,
+        outside its source directory, so the converted file is reported by its
+        absolute path. Line 6 is the sha256 digest of the sdist that uv.lock pins;
+        a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/cryptography/50.0.2/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. Line 6 is the sha256 digest of the cryptography 50.0.2
+        sdist that uv.lock pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/cryptography/50.0.2/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        cryptography 50.0.2: the scan inside the image writes its output to /out,
+        outside its source directory, so the converted file is reported by its
+        absolute path. Line 6 is the sha256 digest of the sdist that uv.lock pins;
+        a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/hypothesis/6.170.15/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. Line 6 is the sha256 digest of the hypothesis 6.170.15
+        sdist that uv.lock pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/hypothesis/6.170.15/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        hypothesis 6.170.15: the scan inside the image writes its output to /out,
+        outside its source directory, so the converted file is reported by its
+        absolute path. Line 6 is the sha256 digest of the sdist that uv.lock pins;
+        a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/orjson/3.12.0/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. Line 6 is the sha256 digest of the orjson 3.12.0 sdist
+        that uv.lock pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/orjson/3.12.0/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        orjson 3.12.0: the scan inside the image writes its output to /out, outside
+        its source directory, so the converted file is reported by its absolute
+        path. Line 6 is the sha256 digest of the sdist that uv.lock pins; a content
+        digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/polars-runtime-32/1.44.2/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. Line 6 is the sha256 digest of the polars-runtime-32
+        1.44.2 sdist that uv.lock pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/polars-runtime-32/1.44.2/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        polars-runtime-32 1.44.2: the scan inside the image writes its output to
+        /out, outside its source directory, so the converted file is reported by
+        its absolute path. Line 6 is the sha256 digest of the sdist that uv.lock
+        pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/pydantic-core/2.46.5/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. Line 6 is the sha256 digest of the pydantic-core 2.46.5
+        sdist that uv.lock pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/pydantic-core/2.46.5/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        pydantic-core 2.46.5: the scan inside the image writes its output to /out,
+        outside its source directory, so the converted file is reported by its
+        absolute path. Line 6 is the sha256 digest of the sdist that uv.lock pins;
+        a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/pydantic-core/2.50.4/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. Line 6 is the sha256 digest of the pydantic-core 2.50.4
+        sdist that ash-agent-plugins/agentic-coding/transpiler/uv.lock pins; a
+        content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/pydantic-core/2.50.4/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        pydantic-core 2.50.4: the scan inside the image writes its output to /out,
+        outside its source directory, so the converted file is reported by its
+        absolute path. Line 6 is the sha256 digest of the sdist that
+        ash-agent-plugins/agentic-coding/transpiler/uv.lock pins; a content digest,
+        not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/rpds-py/0.30.0/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. Line 6 is the sha256 digest of the rpds-py 0.30.0 sdist
+        that uv.lock and ash-agent-plugins/agentic-coding/transpiler/uv.lock
+        both pin; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/rpds-py/0.30.0/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        rpds-py 0.30.0: the scan inside the image writes its output to /out,
+        outside its source directory, so the converted file is reported by its
+        absolute path. Line 6 is the sha256 digest of the sdist that uv.lock and
+        ash-agent-plugins/agentic-coding/transpiler/uv.lock both pin; a content
+        digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/rtoml/0.13.0/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. Line 6 is the sha256 digest of the rtoml 0.13.0 sdist
+        that uv.lock pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/rtoml/0.13.0/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        rtoml 0.13.0: the scan inside the image writes its output to /out, outside
+        its source directory, so the converted file is reported by its absolute
+        path. Line 6 is the sha256 digest of the sdist that uv.lock pins; a content
+        digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/ruff/0.16.10/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. Line 6 is the sha256 digest of the ruff 0.16.10 sdist
+        that uv.lock pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/ruff/0.16.10/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        ruff 0.16.10: the scan inside the image writes its output to /out, outside
+        its source directory, so the converted file is reported by its absolute
+        path. Line 6 is the sha256 digest of the sdist that uv.lock pins; a content
+        digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/uv/0.13.5/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. Line 6 is the sha256 digest of the uv 0.13.5 sdist that
+        uv.lock pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/uv/0.13.5/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for uv
+        0.13.5: the scan inside the image writes its output to /out, outside its
+        source directory, so the converted file is reported by its absolute path.
+        Line 6 is the sha256 digest of the sdist that uv.lock pins; a content
+        digest, not a secret.
     # Harvested third-party Cargo.lock advisories. The sdist-lock harvester
     # extracts the Cargo.lock embedded in a dependency's PyPI sdist so grype
     # and trivy can read the upstream project's own build pins. Those pins are
@@ -3978,22 +4215,69 @@ global_settings:
         2.46.5, rpds-py 0.30.0 and rtoml 0.13.0 (trivy's bare GHSA id and
         grype's -pyo3 suffixed id alike). The pin is each upstream's build
         input.
-    - rule_id: "GHSA-2mjx-qc3c-rqvc*"
-      path: "**/sdist-lock-harvester/sdist-locks/**/Cargo.lock"
-      package_name: rustls
+    # rustls in polars' harvested Cargo.lock: rustls 0.23.43 is statically
+    # linked into the polars-runtime-32 wheel, so only a polars release built
+    # against a fixed rustls (0.23.45 for GHSA-2mjx-qc3c-rqvc, 0.23.46 for
+    # GHSA-c8m5-c952-6cm4) removes it. One entry per scanner spelling: trivy
+    # reports the bare GHSA id, grype the id with the package name appended. The
+    # path names the harvest directory with a `*` version segment, so the entries
+    # survive a polars bump, and the rustls version pin with the expires date
+    # forces the revisit. tests/utils/sdist_harvest_oracle.py holds these four
+    # to the paths syft reports for the harvested lockfile and checks that no
+    # entry over the harvest layout covers another crate or another rustls
+    # version there.
+    - rule_id: "GHSA-2mjx-qc3c-rqvc"
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
+      package_name: "rustls"
+      package_version: "0.23.43"
       expires: "2026-12-27"
       reason: >-
-        rustls advisory inside polars-runtime-32 1.44.2's sdist-embedded
-        Cargo.lock (trivy's bare GHSA id and grype's -rustls suffixed id
-        alike). Upstream polars' build input.
+        GHSA-2mjx-qc3c-rqvc (RUSTSEC-2026-0285, trivy spelling): rustls 0.23.43,
+        statically linked into the polars-runtime-32 1.44.2 wheel, accepts TLS 1.3
+        handshake messages across encryption-state changes; fixed in rustls
+        0.23.45. The crate is compiled into the upstream wheel, so no local pin or
+        override can replace it; only a polars release built against the fixed
+        rustls does. Revisit on the next polars bump.
+    - rule_id: "GHSA-2mjx-qc3c-rqvc-rustls"
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
+      package_name: "rustls"
+      package_version: "0.23.43"
+      expires: "2026-12-27"
+      reason: >-
+        GHSA-2mjx-qc3c-rqvc (grype spelling): the same rustls 0.23.43 TLS 1.3
+        handshake finding as the trivy entry above, in the harvested lockfile of
+        the compiled polars wheel. Removable only by a polars release built
+        against rustls 0.23.45 or later. Revisit on the next polars bump.
+    - rule_id: "GHSA-c8m5-c952-6cm4"
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
+      package_name: "rustls"
+      package_version: "0.23.43"
+      expires: "2026-12-27"
+      reason: >-
+        GHSA-c8m5-c952-6cm4 (RUSTSEC-2026-0346, trivy spelling): rustls 0.23.43
+        Debug formatting of Session values can expose TLS master secrets in logs;
+        fixed in rustls 0.23.46. Statically linked into the polars-runtime-32
+        1.44.2 wheel; polars does not log rustls Session debug output on ASH's
+        read paths, and only a polars release built against the fixed rustls
+        removes the code. Revisit on the next polars bump.
+    - rule_id: "GHSA-c8m5-c952-6cm4-rustls"
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
+      package_name: "rustls"
+      package_version: "0.23.43"
+      expires: "2026-12-27"
+      reason: >-
+        GHSA-c8m5-c952-6cm4 (grype spelling): the same rustls 0.23.43 Session
+        Debug formatting finding as the trivy entry above, in the harvested
+        lockfile of the compiled polars wheel. Removable only by a polars release
+        built against rustls 0.23.46 or later. Revisit on the next polars bump.
     - rule_id: "GHSA-c8m5-c952-6cm4*"
-      path: "**/sdist-lock-harvester/sdist-locks/**/Cargo.lock"
+      path: "**/sdist-lock-harvester/sdist-locks/uv/*/Cargo.lock"
       package_name: rustls
       expires: "2026-12-27"
       reason: >-
-        rustls advisory inside the sdist-embedded Cargo.locks of
-        polars-runtime-32 1.44.2 and uv 0.13.5 (trivy's bare GHSA id and
-        grype's -rustls suffixed id alike). Each upstream's build input.
+        rustls advisory inside uv 0.13.5's sdist-embedded Cargo.lock (trivy's
+        bare GHSA id and grype's -rustls suffixed id alike). Upstream uv's build
+        input; polars' copy of the same advisory has its own entries above.
     # No GitHub Actions entries. `yaml.github-actions.security.*` was suppressed
     # over every workflow on the claim that interpolations were author-defined;
     # removing it surfaced shell injection through `${{ inputs.* }}` in

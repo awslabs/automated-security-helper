@@ -799,6 +799,8 @@ async def run_ash_scan(
         scan_asset = None
         if source_dir is None or not source_dir.strip():
             from automated_security_helper.cli.mcp.source_delivery import (
+                SessionWorkspaceError,
+                SourceDeliveryBusyError,
                 ensure_session_image_scan_dir,
                 get_session_image_locator,
             )
@@ -846,7 +848,32 @@ async def run_ash_scan(
                 scan_asset = Asset.for_image(image_locator)
                 try:
                     source_dir = str(ensure_session_image_scan_dir(session_id))
-                except Exception as workspace_error:  # noqa: BLE001 - one refusal
+                except SourceDeliveryBusyError as busy_error:
+                    # Retryable, and its own case as everywhere else in this
+                    # module: telling the client the workspace is UNAVAILABLE
+                    # for a held lock sends it away instead of back.
+                    message = raw_controls_on_one_line(str(busy_error))
+                    await _tell_client_error(ctx, message)
+                    return with_exit_code(
+                        {
+                            "success": False,
+                            "error": raw_controls_on_one_line(message),
+                            "error_type": McpErrorType.SOURCE_DELIVERY_BUSY.value,
+                            "session_id": session_id,
+                        },
+                        REFUSED_INTERNAL_EXIT_CODE,
+                    )
+                except (SessionWorkspaceError, OSError) as workspace_error:
+                    # Only the failures creating a directory can have: a
+                    # TypeError here is a bug, and the broad catch that used
+                    # to swallow one reported it as "could not be created"
+                    # with no trace; it now reaches the outer handler, which
+                    # logs it.
+                    log_unexpected_error(
+                        logger,
+                        workspace_error,
+                        "Creating the session image-scan directory failed",
+                    )
                     message = raw_controls_on_one_line(
                         "the session workspace for the delivered image could "
                         f"not be created: {error_text(workspace_error)}"
@@ -857,6 +884,7 @@ async def run_ash_scan(
                             "success": False,
                             "error": raw_controls_on_one_line(message),
                             "error_type": McpErrorType.SESSION_WORKSPACE_UNAVAILABLE.value,
+                            "session_id": session_id,
                         },
                         REFUSED_INTERNAL_EXIT_CODE,
                     )
@@ -887,6 +915,36 @@ async def run_ash_scan(
         )
         if not Path(source_dir).is_absolute():
             source_dir = str(Path.cwd() / source_dir)
+
+        # The session's image-scan ANCHOR is not a source tree: an image scan
+        # returns it as directory_path (it is where the output lands), and the
+        # session-identity guidance tells a client whose id rotates to pass a
+        # returned path back in. Accepted here, it holds no source files, so
+        # the scan would complete clean having scanned nothing -- the exact
+        # result _resolve_omitted_source_dir exists to prevent. Only for a
+        # CALLER's path: with scan_asset set, the anchor in source_dir is the
+        # server's own choice two blocks up, the legitimate image-scan shape.
+        from automated_security_helper.cli.mcp.source_delivery import (
+            is_session_image_scan_dir,
+        )
+
+        if scan_asset is None and is_session_image_scan_dir(source_dir, session_id):
+            message = raw_controls_on_one_line(
+                "source_dir names this session's image-scan directory, which "
+                "holds only scan output, never a source tree. To scan the "
+                "delivered image, call run_ash_scan with no source_dir; to "
+                "scan a directory, name one that holds sources."
+            )
+            await _tell_client_error(ctx, message)
+            return with_exit_code(
+                {
+                    "success": False,
+                    "error": raw_controls_on_one_line(message),
+                    "error_type": McpErrorType.SOURCE_DIR_NOT_USABLE.value,
+                    "session_id": session_id,
+                },
+                REFUSED_USAGE_EXIT_CODE,
+            )
 
         # A profile this session bound with select_profile supplies the config
         # when the caller names none. The caller's own config_path wins, because
@@ -1161,6 +1219,10 @@ async def run_ash_scan(
             "progress": 0.0,
             "message": "Scan started, initializing scanners. Use get_scan_progress to track progress.",
             "directory_path": str(directory_path_obj),
+            # What the scan is OF: for an image, directory_path is only the
+            # anchor the output lands under, never a source tree to send back
+            # as source_dir (the server refuses that round trip).
+            "scan_subject": "image" if scan_asset is not None else "directory",
             "session_id": session_id,
             "important": {
                 "connection_management": (
@@ -3119,8 +3181,12 @@ async def set_source_image(
 
     Returns:
         Dict with success and image_ref; success=False with error for a value
-        that can never be a reference, and error_type source_delivery_busy
-        while a scan of this session runs.
+        that can never be a reference, with error_type source_delivery_busy
+        while a scan of this session runs, image_registry_not_permitted for a
+        registry the operator's ASH_MCP_IMAGE_ALLOWED_REGISTRIES list does not
+        admit (empty unless the operator sets it; the archive upload needs no
+        registry and is not gated), and session_workspace_unavailable when the
+        session's workspace directory cannot be created.
     """
     try:
         session_id = resolve_caller_session_id(ctx)
@@ -3148,6 +3214,13 @@ async def set_source_image(
             ),
             "error_type": type(e).__name__,
         }
+    if not result.get("success"):
+        # As the sibling deliveries do: a client following log notifications
+        # must see a busy or refused delivery, not silence.
+        await _tell_client_error(
+            ctx,
+            raw_controls_on_one_line(str(result.get("error", "delivery refused"))),
+        )
     return _with_session(result, session_id)
 
 
@@ -3279,6 +3352,12 @@ async def set_source_image_archive_finalize(
             raw_controls_on_one_line(
                 f"Image archive delivered for session {session_id}"
             ),
+        )
+    else:
+        # As the zip finalize does: a client following log notifications must
+        # see a busy, checksum-mismatch or not-a-tar refusal, not silence.
+        await _tell_client_error(
+            ctx, raw_controls_on_one_line(str(result.get("error", "finalize failed")))
         )
     return _with_session(result, session_id)
 
