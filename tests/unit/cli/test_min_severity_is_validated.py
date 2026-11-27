@@ -68,7 +68,16 @@ def test_scan_accepts_each_documented_value_in_any_case(in_tmp, value):
 
 def test_merge_refuses_an_unknown_value(in_tmp):
     result = _invoke(
-        ["merge", "--output-dir", "o", "--results", "r", "--min-severity", "bogus"]
+        [
+            "results",
+            "merge",
+            "--output-dir",
+            "o",
+            "--results",
+            "r",
+            "--min-severity",
+            "bogus",
+        ]
     )
 
     assert result.exit_code == USAGE_ERROR_EXIT, result.output
@@ -80,7 +89,7 @@ def test_merge_accepts_each_value_in_any_case(in_tmp, value):
     """The Terraform executor passes its MinSeverity variable through unchanged."""
     import typer.main
 
-    command = typer.main.get_command(app).commands["merge"]
+    command = typer.main.get_command(app).commands["results"].commands["merge"]
     ctx = command.make_context(
         "merge", ["--output-dir", "o", "--results", "r", "--min-severity", value]
     )
@@ -89,7 +98,16 @@ def test_merge_accepts_each_value_in_any_case(in_tmp, value):
     assert MinSeverity(ctx.params["min_severity"]) == MinSeverity(value.lower())
 
     result = _invoke(
-        ["merge", "--output-dir", "o", "--results", "r", "--min-severity", value]
+        [
+            "results",
+            "merge",
+            "--output-dir",
+            "o",
+            "--results",
+            "r",
+            "--min-severity",
+            value,
+        ]
     )
     # The merge itself then refuses the missing results; the severity was accepted.
     assert "--min-severity" not in _plain(result.output), result.output
@@ -126,11 +144,12 @@ def test_the_cli_choices_are_the_ranked_values():
 
     values = [member.value for member in MinSeverity]
     command = typer.main.get_command(app)
-    for name in ("scan", "merge"):
-        param = next(
-            p for p in command.commands[name].params if p.name == "min_severity"
-        )
-        assert list(param.type.choices) == values, name
+    for path in (("scan",), ("results", "merge")):
+        leaf = command
+        for name in path:
+            leaf = leaf.commands[name]
+        param = next(p for p in leaf.params if p.name == "min_severity")
+        assert list(param.type.choices) == values, path
     assert values == VALID
     assert set(_SEVERITY_RANK) == set(values)
     assert _MIN_SEVERITY_RANK == _SEVERITY_RANK

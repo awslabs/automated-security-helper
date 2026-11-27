@@ -53,7 +53,7 @@ tags. So the spelling is hyphenated (``cfn-nag``, ``detect-secrets``,
 ``core/scanner_inventory.py`` reports for its own table. Matching against a
 snake_cased set would recognize none of the three hyphenated names.
 
-The set covers every scanner ASH ships, which is the sixteen in
+The set covers every scanner ASH ships, which is the fifteen in
 ``plugin_modules/ash_builtin/scanners`` plus the scanners of the in-tree packages
 that ``load_internal_plugins()`` does not load: the vendored three
 (``ferret-scan``, ``snyk-code``, ``trivy-repo``) and the Betterleaks, GuardDog and
@@ -144,7 +144,6 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
     "mcp-config": ScannerToolType.SAST.value,
     "npm-audit": ScannerToolType.SCA.value,
     "opengrep": ScannerToolType.SAST.value,
-    "semgrep": ScannerToolType.SAST.value,
     "snyk-code": ScannerToolType.SAST.value,
     "syft": ScannerToolType.SBOM.value,
     "trivy": ScannerToolType.SCA.value,
@@ -163,7 +162,7 @@ SCANNER_TAG_NAMES: FrozenSet[str] = frozenset(SCANNER_TOOL_TYPES)
 #: ``container_image`` target kind, by config name. The flat extractor and the
 #: SARIF suppression pass honor the image attribution properties only for a
 #: scanner that could have been handed an image, and they must answer the same
-#: in every process -- ``ash scan`` and ``ash merge`` over another process's
+#: in every process -- ``ashx scan`` and ``ashx results merge`` over another process's
 #: results alike -- so for shipped scanners the answer cannot depend on which
 #: scanner modules the current process happens to have imported
 #: (``scanner_tool_types.scanner_serves_container_images`` consults this table
@@ -179,10 +178,17 @@ IMAGE_SERVING_SCANNERS: FrozenSet[str] = frozenset({"grype", "syft", "trivy"})
 #: a ``dependencies install --tool`` name -- and resolves to the plugin on the
 #: right. It is a general table rather than a per-name special case so a
 #: retirement is one line here plus the fold ``config/ash_config.py`` already
-#: carries. The table is empty today: no shipped scanner is retired. A
-#: retirement adds its row here; alias-only options the serving plugin does not
-#: declare are dropped at the fold, with a log line naming them.
-SCANNER_NAME_ALIASES: Dict[str, str] = {}
+#: carries.
+#:
+#: ``semgrep``: the semgrep scanner plugin was removed in v4. opengrep is a fork
+#: of semgrep with the same rule syntax, ``p/ci`` default ruleset and SARIF
+#: output, so a config written for the semgrep scanner runs unchanged against
+#: the opengrep plugin. Alias-only options the opengrep plugin does not declare
+#: (``tool_version``, ``install_timeout``: both described the retired uv-tool
+#: install path) are dropped at the fold, with a log line naming them.
+SCANNER_NAME_ALIASES: Dict[str, str] = {
+    "semgrep": "opengrep",
+}
 
 #: The spellings under which an alias is recognized: ASCII letters, digits and
 #: ``+`` kept, lowered. The same reduction ``AshConfig.get_plugin_config``
@@ -199,7 +205,7 @@ def canonical_scanner_name(name: str) -> str:
     """The scanner name ``name`` selects, with retired names resolved.
 
     An alias of ``SCANNER_NAME_ALIASES`` (matched case- and
-    punctuation-insensitively, so ``Old-Name`` and ``old_name`` count) answers
+    punctuation-insensitively, so ``Semgrep`` and ``sem_grep`` count) answers
     its canonical plugin name; any other name answers itself unchanged, in the
     caller's own spelling. Callers that log the mapping do so themselves: this
     module has no logger on purpose.
@@ -211,8 +217,8 @@ def selection_key(name: str) -> str:
     """The key two scanner names are compared on when a run selects scanners.
 
     Lower-cased and stripped, with a retired name resolved to the scanner that
-    serves it, so a retired spelling and the scanner serving it compare equal.
-    The scan phase, the selection helpers and the dependencies tool lookup all
-    compare names through this one function.
+    serves it, so ``" Semgrep "`` and ``"opengrep"`` compare equal. The scan
+    phase, the selection helpers, the dependencies tool lookup and the MCP
+    result filters all compare names through this one function.
     """
     return canonical_scanner_name(name.strip()).lower().strip()

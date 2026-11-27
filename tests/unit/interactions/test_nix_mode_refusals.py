@@ -1,13 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Regression tests: ``ash scan --mode nix`` refuses with a message, not a traceback.
+"""Regression tests: ``ashx scan --mode nix`` refuses with a message, not a traceback.
 
 ``run_ash_nix`` raises when ``nix`` is not on PATH and when it is called from inside
 a Nix-mode run (the recursion guard). Nothing caught either, so the command ended in
 an uncaught ``RuntimeError``: the operator got a traceback and whatever exit code the
 interpreter chose. Both now print the message on stderr and exit 1, the code
-``ash scan`` uses for its other refused invocations (see ``_fail_usage`` in
+``ashx scan`` uses for its other refused invocations (see ``_fail_usage`` in
 ``cli/scan.py``): 2 means "actionable findings", so a refusal must not exit 2.
 """
 

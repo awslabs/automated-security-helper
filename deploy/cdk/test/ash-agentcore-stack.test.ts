@@ -16,6 +16,20 @@ import {
   DEFAULT_REBUILD_SCHEDULE,
 } from '../lib/ash-config';
 
+/** The first ASH release whose `ashx mcp` accepts `--stateless-http`. */
+const FIRST_RELEASE_WITH_STATELESS_HTTP: [number, number, number] = [4, 0, 0];
+
+/** True when `ref` is a vX.Y.Z tag at or above `floor`; false for anything else. */
+function isAtLeast(ref: string, floor: [number, number, number]): boolean {
+  const match = /^v(\d+)\.(\d+)\.(\d+)$/.exec(ref);
+  if (!match) return false;
+  const parts = match.slice(1).map(Number);
+  for (let i = 0; i < 3; i += 1) {
+    if (parts[i] !== floor[i]) return parts[i] > floor[i];
+  }
+  return true;
+}
+
 function synth(): Template {
   const app = new App({ analyticsReporting: false });
   return Template.fromStack(new AshAgentCoreStack(app, 'AshAgentCore'));
@@ -66,7 +80,8 @@ describe('AgentCore runtime contract', () => {
       Source: Match.objectLike({ BuildSpec: spec }),
     });
     const buildSpec = JSON.stringify(spec.asObject());
-    expect(buildSpec).toContain('ash mcp --transport streamable-http');
+    expect(buildSpec).toContain('ASH_CLI=ashx');
+    expect(buildSpec).toContain('mcp --transport streamable-http');
     expect(buildSpec).toContain('ASH_MCP_HOST:-0.0.0.0');
     expect(buildSpec).toContain('ASH_MCP_PORT:-8000');
     expect(buildSpec).toContain('ASH_MCP_MOUNT_PATH:-/mcp');
@@ -130,6 +145,41 @@ describe('AgentCore runtime contract', () => {
     expect(buildSpec).toContain('--no-stateless-http');
   });
 
+  test('the default AshVersion is a release whose ashx mcp has --stateless-http', () => {
+    /*
+     * McpStatelessHttp defaults to true, and the entrypoint refuses to start
+     * stateless on an ASH without the option (exit 65). So the shipped AshVersion
+     * default must name a release that has it, or the one-click template cannot
+     * deploy with its own defaults.
+     *
+     * v4.0.0 is the first such release: `git grep stateless v3.7.0 v3.7.1 --
+     * automated_security_helper` finds nothing. Until v4.0.0 this stack set
+     * ASH_MCP_STATELESS_FALLBACK=warn to start stateful instead; that fallback was
+     * removed when the default reached v4.0.0, and this test is what keeps the
+     * default from moving back below it.
+     *
+     * Compared as a version, not as a string, so the next bump passes without an
+     * edit. A default that is not a vX.Y.Z tag (a branch, a commit) fails
+     * outright: it cannot be shown to have the option.
+     */
+    const parameters = template.toJSON().Parameters;
+    expect(parameters[ASH_PARAMETER_NAMES.mcpStatelessHttp].Default).toBe('true');
+    const shipped = parameters[ASH_PARAMETER_NAMES.ashVersion].Default;
+    expect(shipped).toBe(DEFAULT_ASH_VERSION);
+    expect(isAtLeast(shipped, FIRST_RELEASE_WITH_STATELESS_HTTP)).toBe(true);
+  });
+
+  test('the version comparison above rejects the refs it has to reject', () => {
+    // The control for the test above: a comparison that returned true for
+    // everything would make it decorative.
+    expect(isAtLeast('v3.7.0', FIRST_RELEASE_WITH_STATELESS_HTTP)).toBe(false);
+    expect(isAtLeast('v3.99.99', FIRST_RELEASE_WITH_STATELESS_HTTP)).toBe(false);
+    expect(isAtLeast('main', FIRST_RELEASE_WITH_STATELESS_HTTP)).toBe(false);
+    expect(isAtLeast('v4.0.0', FIRST_RELEASE_WITH_STATELESS_HTTP)).toBe(true);
+    expect(isAtLeast('v4.0.1', FIRST_RELEASE_WITH_STATELESS_HTTP)).toBe(true);
+    expect(isAtLeast('v10.0.0', FIRST_RELEASE_WITH_STATELESS_HTTP)).toBe(true);
+  });
+
   test('the runtime sets no stateless fallback', () => {
     /*
      * AshVersion defaults to DEFAULT_ASH_VERSION and McpStatelessHttp defaults to
@@ -151,18 +201,6 @@ describe('AgentCore runtime contract', () => {
     const variables = environment.asObject();
     expect(variables).toHaveProperty('ASH_MCP_STATELESS');
     expect(Object.keys(variables)).not.toContain('ASH_MCP_STATELESS_FALLBACK');
-  });
-
-  test('the parameter defaults this stack ships are the ones that needed resolving', () => {
-    // AshVersion is the packaged release, which `cz bump` moves at every release,
-    // so it is read from DEFAULT_ASH_VERSION rather than written out: a literal
-    // here turned every release bump red. The fallback the runtime used to set
-    // went at the first release with --stateless-http, and
-    // tests/unit/deploy/test_agentcore_stateless_fallback_tripwire.py now holds
-    // it out.
-    const parameters = template.toJSON().Parameters;
-    expect(parameters[ASH_PARAMETER_NAMES.ashVersion].Default).toBe(DEFAULT_ASH_VERSION);
-    expect(parameters[ASH_PARAMETER_NAMES.mcpStatelessHttp].Default).toBe('true');
   });
 
   test('the runtime name contains no hyphens', () => {

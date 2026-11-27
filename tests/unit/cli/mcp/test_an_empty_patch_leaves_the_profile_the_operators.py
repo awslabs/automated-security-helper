@@ -46,7 +46,7 @@ from automated_security_helper.config.sandbox_grants import in_any_checkout
 
 pytestmark = pytest.mark.unit
 
-SESSION = "empty-patch"
+CLIENT_ID = "empty-patch"
 OP = {"op": "replace", "path": "/project_name", "value": "client"}
 
 
@@ -66,13 +66,13 @@ def _bound_profile(tmp_path: Path, monkeypatch, **binding) -> Path:
     recorded binding can make ``session_config_was_patched`` answer True for it.
     """
     root = tmp_path / "workspace-root"
-    profile = root / SESSION / "config" / "ash.yaml"
+    profile = root / CLIENT_ID / "config" / "ash.yaml"
     profile.parent.mkdir(parents=True)
     profile.write_text("project_name: registered\n", encoding="utf-8")
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(root))
     assert not config_is_client_supplied(profile)
     bind_session_config(
-        SESSION,
+        CLIENT_ID,
         config=AshConfig(project_name="registered"),
         profile_name="p",
         config_path=profile.as_posix(),
@@ -145,7 +145,7 @@ def test_a_binding_says_whether_a_client_changed_the_profile(
     non-empty ``patch_ops``, or any ``override_yaml``, an empty one included."""
     profile = _bound_profile(tmp_path, monkeypatch, **binding)
 
-    state = get_session_state(SESSION)
+    state = get_session_state(CLIENT_ID)
     assert state is not None
     assert state.client_changed is changed
     assert session_config_was_patched(profile) is state.client_changed

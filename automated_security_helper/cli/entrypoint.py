@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Console-script entry point that cannot fail without saying why.
 
-The bug this exists for: ``ash --version`` exited 1 with *completely empty*
+The bug this exists for: ``ash --version`` (the v3 name of ``ashx``) exited 1 with *completely empty*
 stdout and stderr, leaving an operator a bare exit code and nothing to act on.
 Seen on the MSIX packaging leg (job 105400271151, run 35279579798), both through
 the Windows app-execution alias and by invoking the venv's own ``ash.exe``
@@ -33,7 +33,7 @@ Two mechanisms here, because they cover different failures:
 
 * :func:`ensure_std_streams` gives the process a writable stream *before*
   anything else runs. This is the actual fix, and it is deliberately the first
-  statement in :func:`main`: once the sink exists, every reporter above works
+  statement in :func:`_guarded`: once the sink exists, every reporter above works
   again, and the Rich traceback ASH configures with
   ``pretty_exceptions_enable=True`` renders exactly as it does on a normal
   terminal. Repairing the sink beats teaching each reporter to cope.
@@ -71,10 +71,17 @@ ASH's traceback rather than called: on a terminal its frame came out as color
 codes written as text.
 
 The heavy import of ``automated_security_helper.cli.main`` happens *inside*
-:func:`main`, after the streams are known good. That ordering is load-bearing.
+:func:`_guarded`, after the streams are known good. That ordering is load-bearing.
 An incompatibility that breaks importing pydantic models, plugins or config --
 the shape a new Python release produces -- would otherwise raise before any of
-this ran, and be discarded by the same missing sink.
+this ran, and be discarded by the same missing sink. The ``_load_*`` helpers exist
+only to defer that import into :func:`_guarded`'s ``try``.
+
+Three console-script entry points sit on top of it: :func:`main` for ``ashx``
+and ``automated-security-helper``, :func:`main_ash` for the deprecated ``ash``
+and :func:`main_ashv3` for the deprecated ``ashv3``. The two deprecated ones
+print a one-line notice before running. They differ only in which callable they
+load, so the failure ladder has exactly one copy.
 
 Known limitation: an exception raised while importing this module, or
 ``automated_security_helper/__init__.py`` above it, still precedes the repair and
@@ -93,7 +100,7 @@ from typing import Any, Callable
 
 #: Prefix for the last-resort report. Deliberately greppable, and it names the
 #: program because on this path nothing else has identified itself yet.
-_BANNER = "ash: fatal error"
+_BANNER = "ashx: fatal error"
 
 #: The modules whose exception hooks only print the traceback, which ASH's
 #: traceback prints in their place: typer's, rich.traceback.install()'s, and the
@@ -800,15 +807,54 @@ def _emit(text: str, stream) -> None:
     _write_raw(text)
 
 
-def main() -> None:
-    """Entry point for the ``ash``, ``ashv3``, ``automated-security-helper`` and
-    ``agentic-security-harness`` scripts.
+def _load_run_app():
+    """Import and return ``cli.main.run_app``, the target of ``ashx``.
+
+    The import lives in a function so :func:`_guarded` can perform it inside its
+    own ``try``. See the module docstring: the import is the most likely thing to
+    fail, and it must not run until the streams are repaired.
+    """
+    from automated_security_helper.cli.main import run_app
+
+    return run_app
+
+
+def _load_run_ash_alias():
+    """Import and return ``cli.main.run_ash_alias``, the target of ``ash``.
+
+    Like ``run_ashv3`` it prints its deprecation notice to ``sys.stderr``, so it
+    is reached through the stream repair for the same reason.
+    """
+    from automated_security_helper.cli.main import run_ash_alias
+
+    return run_ash_alias
+
+
+def _load_run_ashv3():
+    """Import and return ``cli.main.run_ashv3``, the target of ``ashv3``.
+
+    ``run_ashv3`` prints the deprecation notice to ``sys.stderr`` before running
+    the app, so it has to be reached through the repair rather than around it. On
+    a console-less host the notice would otherwise be the statement that failed.
+    """
+    from automated_security_helper.cli.main import run_ashv3
+
+    return run_ashv3
+
+
+def _guarded(load) -> None:
+    """Repair the streams, then run what *load* imports.
+
+    One copy of the failure ladder (:func:`_run_reporting_failures`), shared by
+    every console script: two copies of it could drift, and this is the code that
+    runs when nothing else can report anything.
 
     Shutdown contract: this is the one place that installs ASH's SIGTERM and
-    SIGINT handlers (core/cancellation.install_sigterm_shutdown and
-    install_sigint_shutdown; the cancellation module docstring, "SIGTERM on
-    the CLI", is the contract). A SIGTERM to the process then stops a running
-    ``ash scan`` through the same cancellation path a timeout uses, the
+    SIGINT handlers, for every console script (``ashx``, the deprecated ``ash``
+    and ``ashv3``, ``automated-security-helper`` and ``agentic-security-harness``;
+    core/cancellation.install_sigterm_shutdown and install_sigint_shutdown; the
+    cancellation module docstring, "SIGTERM on the CLI", is the contract). A
+    SIGTERM to the process then stops a running ``ashx scan`` through the same cancellation path a timeout uses, the
     running tool included, and the command exits ASH_EXIT_TERMINATED (143);
     with no scan running, on a second SIGTERM, on Windows and for a process
     started with SIGTERM ignored, the signal keeps the semantics it had
@@ -822,10 +868,11 @@ def main() -> None:
     """
 
     def run() -> None:
-        # Imported here, not at module scope: see the module docstring. The
+        # Called here, not at module scope: see the module docstring. The
         # streams have to be usable before this line can fail. The handler
-        # install comes first so it covers the CLI import and everything after;
-        # core.cancellation imports only the standard library.
+        # install comes first so it covers the CLI import (which *load* performs)
+        # and everything after; core.cancellation imports only the standard
+        # library.
         from automated_security_helper.core.cancellation import (
             install_sigint_shutdown,
             install_sigterm_shutdown,
@@ -859,9 +906,7 @@ def main() -> None:
         if code is not None:
             raise SystemExit(code)
 
-        from automated_security_helper.cli.main import run_app
-
-        run_app()
+        load()()
 
     _run_reporting_failures(run)
 
@@ -873,7 +918,7 @@ def run_module_app(app: Callable[..., Any]) -> None:
     automated_security_helper.cli.config``), which calls its own app rather than
     ASH's: an exception escaping it is reported as main() reports one, through
     ASH's console, instead of by typer's hook. A usage error exits as it does
-    under the ``ash`` root group (cli/main.py's AshTyperGroup): with
+    under the ``ashx`` root group (cli/main.py's AshTyperGroup): with
     ASH_EXIT_USAGE_ERROR, its message shown, not obeyed. Run as its own app the
     sub-app had click's own handling, which exits 2, ASH's code for actionable
     findings, and prints the mistyped token as given.
@@ -984,3 +1029,30 @@ def _run_reporting_failures(run: Callable[[], Any]) -> None:
         # `from None` because _report_failure has already printed exc in full;
         # re-raising it would render the same traceback a second time.
         raise SystemExit(1) from None
+
+
+def main() -> None:
+    """Entry point for the ``ashx`` and ``automated-security-helper`` scripts."""
+    _guarded(_load_run_app)
+
+
+def main_ash() -> None:
+    """Entry point for the deprecated ``ash`` console script.
+
+    Separate from :func:`main` so the notice fires once per process and never for
+    the ``ashx`` name. The exit code is the CLI's own: the notice is printed and
+    then the same app runs.
+    """
+    _guarded(_load_run_ash_alias)
+
+
+def main_ashv3() -> None:
+    """Entry point for the deprecated ``ashv3`` console script.
+
+    Separate from :func:`main` so the deprecation notice fires once per process
+    and never for the ``ashx`` name. ``automated-security-helper`` deliberately
+    keeps :func:`main` and stays silent: it is the escape hatch for hosts where a
+    short name resolves to something else, and that collision is real -- MSYS2
+    ships the Almquist shell as ``ash``.
+    """
+    _guarded(_load_run_ashv3)

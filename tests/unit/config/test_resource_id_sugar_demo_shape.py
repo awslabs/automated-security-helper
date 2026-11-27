@@ -216,15 +216,15 @@ class TestDemoShapeEndToEnd:
         assert len(suppressions) == 27
         # The one expiring entry is the dependency rule with no resource_id,
         # as in the real file.
-        expiring = [s for s in suppressions if s.expiration is not None]
+        expiring = [s for s in suppressions if s.expires is not None]
         assert len(expiring) == 1
-        assert expiring[0].expiration == "2099-12-31"
+        assert expiring[0].expires == "2099-12-31"
         assert expiring[0].rule_id == "GHSA-demo-advisory"
         assert expiring[0].scope is None
 
     def test_expires_on_a_sugar_entry_also_loads(self):
         """NOT the demo shape (the real file's one expires entry carries no
-        resource_id); this fixture's own extra coverage of the expires alias
+        resource_id); this fixture's own extra coverage of the expires key
         combined with the sugar key on one entry."""
         config = build_config(
             {
@@ -246,7 +246,7 @@ class TestDemoShapeEndToEnd:
         )
         assert config._resolution_warnings == []
         (entry,) = config.global_settings.suppressions
-        assert entry.expiration == "2099-12-31"
+        assert entry.expires == "2099-12-31"
         assert entry.scope is not None and entry.scope.resource_id
 
     def test_it_suppresses_exactly_the_intended_findings(self):

@@ -29,18 +29,18 @@ global_settings:
 | `reason` | yes | Why the finding is suppressed. It appears in the reports. |
 | `rule_id` | no | The rule to suppress, as ASH reports it. Without it, the entry suppresses every rule in its path. |
 | `line_start`, `line_end` | no | Lines the finding must overlap, inclusive. `line_start` alone runs to the end of the file. |
-| `expires` | no | The date, `YYYY-MM-DD`, from which the suppression stops matching. `expiration` is a deprecated alias, removed in ASH v4. |
+| `expires` | no | The date, `YYYY-MM-DD`, from which the suppression stops matching. ASH 4.0 removed the `expiration` spelling. |
 | `symbol` | no | Only findings inside this function, class, or method; see [Scope a suppression to a symbol](#symbol) |
 | `package_name`, `package_version`, `package_path` | no | Only findings about this dependency, for dependency scanners such as grype and npm-audit |
 | `image` | no | Only findings inside a container image whose submitted reference or resolved digest matches this case-insensitive glob; see [Scan container images](scan-container-images.md#findings-identity-and-suppressions). A finding that is not inside an image never matches |
 | `resource_id` | no | Only findings about this resource, for the scanners that name one: cdk-nag (the construct path) and checkov (for Terraform, a Terraform plan, CloudFormation, Kubernetes and Bicep; the name checkov gives it, such as `aws_db_instance.this`, `module.db.aws_db_instance.this` or `AWS::S3::Bucket.Bucket`, unless checkov gives that name to two resources of one file). A finding with no resource never matches |
 
-- Paths match case-sensitively: `tests/**` does not match `Tests/`. In a pattern without `**`, `*` also matches across directory separators, so `src/*.py` matches `src/sub/app.py`; `**` matches any depth. A path that starts with `./` matches nothing, and neither does an empty path, `.` or `./`. A path with no glob character names a file and the directory of that name: `tests` and `tests/` both match every finding below `tests/`, and the bare `tests` also matches a file named `tests`. Both are anchored at the top of the scanned directory, so neither matches anything in `pkg/tests/`; write `**/tests/**` for a `tests` directory at any depth. `ash config validate` and `ash config lint` warn, saying what to write instead, about a path that starts with `./` (`./src/app.py` is `src/app.py`) and about an empty path or `.`, and exit 0. A path whose leading names match the tree only in another case (`tests/**` against `Tests/`) gets a warning that names the tree's spelling and says that patterns match case-sensitively.
-- Upgrading changes what an existing entry matches. Before the bare-directory rule (issue #894), a glob-free `tests` matched only a file of exactly that name, `tests/` matched no finding at all, and `ash config validate` flagged both as matching nothing; both now cover every finding below `tests/`, and that warning is gone. A bare-name entry kept from an earlier release therefore widens, silently, into a whole-directory suppression. When you upgrade, check each suppression and ignore path whose `path` has no glob character, once, and name a file or add a glob where the directory was not meant.
+- Paths match case-sensitively: `tests/**` does not match `Tests/`. In a pattern without `**`, `*` also matches across directory separators, so `src/*.py` matches `src/sub/app.py`; `**` matches any depth. A path that starts with `./` matches nothing, and neither does an empty path, `.` or `./`. A path with no glob character names a file and the directory of that name: `tests` and `tests/` both match every finding below `tests/`, and the bare `tests` also matches a file named `tests`. Both are anchored at the top of the scanned directory, so neither matches anything in `pkg/tests/`; write `**/tests/**` for a `tests` directory at any depth. `ashx config validate` and `ashx config lint` warn, saying what to write instead, about a path that starts with `./` (`./src/app.py` is `src/app.py`) and about an empty path or `.`, and exit 0. A path whose leading names match the tree only in another case (`tests/**` against `Tests/`) gets a warning that names the tree's spelling and says that patterns match case-sensitively.
+- Upgrading changes what an existing entry matches. Before the bare-directory rule (issue #894), a glob-free `tests` matched only a file of exactly that name, `tests/` matched no finding at all, and `ashx config validate` flagged both as matching nothing; both now cover every finding below `tests/`, and that warning is gone. A bare-name entry kept from an earlier release therefore widens, silently, into a whole-directory suppression. When you upgrade, check each suppression and ignore path whose `path` has no glob character, once, and name a file or add a glob where the directory was not meant.
 - A file whose name is not valid UTF-8 is reported with each such byte written as `\udcNN` (a latin-1 `secr\xe9t.py` as `secr\udce9t.py`). A `path` matches it written that way, since the `\` of a `\udcNN` escape is part of the name and not a separator, or with `?` for that `\` (`secr?udce9t.py`), or by a glob such as `secr*t.py`. An ignore path matches such a file the same way when ASH lists the files to scan. A UTF-8 file name that spells the same `\udcNN` text reads as the same name, so in a tree that holds both files, both are reported under that name, and a path that matches one matches both.
 - `rule_id` is a case-insensitive pattern with no scanner prefix. It matches any scanner that reports that rule ID.
-- Quote the `expires` date. YAML reads an unquoted `2027-01-31` as a date, not a string, and ASH then refuses the whole config (exit 3). `ash config lint` and `ash config get` name the problem.
-- A key that is not in the table warns at config load, and when a known key is close, the warning names it: `ruleId` warns with `Unknown key 'ruleId' (did you mean 'rule_id'?)`, and the entry suppresses nothing until the key is fixed, so a typo can only narrow what is suppressed. Set `fail_on_unknown_keys: true` to make it an error (exit 3) instead; ASH v4 makes that the default. The same holds for an ignore path.
+- Quote the `expires` date. YAML reads an unquoted `2027-01-31` as a date, not a string, and ASH then refuses the whole config (exit 3). `ashx config lint` and `ashx config get` name the problem.
+- A key that is not in the table is refused at config load (exit 3), and when a known key is close, the error names it: `ruleId` is refused with `Unknown key 'ruleId' (did you mean 'rule_id'?)`. Since ASH 4.0 this is the default (`fail_on_unknown_keys: true`). With `fail_on_unknown_keys: false`, which keeps the behavior of ASH 3.x, the config loads with a warning that names the key, and the entry suppresses nothing until the key is fixed, so a typo can only narrow what is suppressed. The same holds for an ignore path.
 
 To try a suppression before you write it into the file, pass it for one run. In a repository where detect-secrets reports `SECRET-SECRET-KEYWORD` in `app.py`, this run passes:
 
@@ -49,7 +49,7 @@ ash --source-dir . --scanners detect-secrets --offline --no-progress \
   --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "rule_id": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password"}]'
 ```
 
-With `rule_id` misspelled, the entry suppresses nothing instead of suppressing every rule in `app.py`: the run warns, naming the key, and fails on the finding the entry was meant to suppress (exit 2). Set `fail_on_unknown_keys: true` to refuse the config outright (exit 3); ASH v4 makes that the default.
+With `rule_id` misspelled, the entry cannot suppress every rule in `app.py`: since ASH 4.0 the config is refused outright (exit 3), naming the key. With `fail_on_unknown_keys: false`, the 3.x behavior, the run warns, naming the key, and the entry suppresses nothing, so the run fails on the finding the entry was meant to suppress (exit 2).
 
 ### Suppress a finding in a harvested lockfile {#harvested}
 
@@ -80,7 +80,7 @@ ASH's own `.ash.yaml` carries the worked set of these entries (the rustls
 advisories in polars' harvested `Cargo.lock`), one per scanner spelling of the
 same GHSA id, each with the evidence in its reason.
 
-<!-- doctest: run expect-exit=2 -->
+<!-- doctest: run expect-exit=3 -->
 ```bash
 ash --source-dir . --scanners detect-secrets --offline --no-progress \
   --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "ruleId": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password"}]'
@@ -88,7 +88,7 @@ ash --source-dir . --scanners detect-secrets --offline --no-progress \
 
 ### Expiration {#expiration}
 
-On its `expires` date, by the local clock of the machine that runs the scan (UTC in the container image, which sets `TZ=UTC`), a suppression stops matching, and the finding fails the next scan again. `expires` is the canonical spelling of the field; `expiration` is accepted as a deprecated alias when a config is read, and the alias is removed in ASH v4. At the start of a scan, ASH logs one warning that lists every suppression and ignore path that has expired, including those whose date is today, and then a warning for the ignore paths and one for the suppressions that expire within the next 30 days. With `--ignore-suppressions`, these warnings leave suppressions out. `ash config lint` reports suppressions that have expired, and `ash config lint --fix` removes them.
+On its `expires` date, by the local clock of the machine that runs the scan (UTC in the container image, which sets `TZ=UTC`), a suppression stops matching, and the finding fails the next scan again. `expires` is the only spelling of the field: ASH 4.0 removed `expiration`, and a config that writes it is refused as an unknown key, with `expires` as the did-you-mean. At the start of a scan, ASH logs one warning that lists every suppression and ignore path that has expired, including those whose date is today, and then a warning for the ignore paths and one for the suppressions that expire within the next 30 days. With `--ignore-suppressions`, these warnings leave suppressions out. `ashx config lint` reports suppressions that have expired, and `ashx config lint --fix` removes them.
 
 An expired suppression no longer applies, so this run fails on the finding and names the entry:
 
@@ -117,7 +117,7 @@ global_settings:
       reason: run_hook only runs commands from the deploy manifest
 ```
 
-A symbol suppression also needs an entry for its file in `.ash.lock`; [create both with `ash suppress add`](#lock).
+A symbol suppression also needs an entry for its file in `.ash.lock`; [create both with `ashx suppress add`](#lock).
 
 ASH finds the definition by parsing the file with tree-sitter, for Python, JavaScript, TypeScript, and Java files. The parsers are in the `symbols` extra, which is not installed by default; without it, a suppression with `symbol` matches nothing and the scan logs a warning that names the extra. The container image includes it. For the qualified-name grammar, the fail-closed rules, and the resolver's API and limits, see [Symbol resolution](../reference/symbol-resolution.md).
 
@@ -125,18 +125,18 @@ ASH finds the definition by parsing the file with tree-sitter, for Python, JavaS
 
 A symbol suppression follows its definition when the code moves, so a definition that is rewritten would keep a review that no longer describes it. The lock prevents that. `.ash.lock`, a committed JSON file at the top of the scanned directory (`--source-dir`, usually the repository root -- the lock follows the scanned directory, wherever the config file lives), records the SHA-256 of each file a symbol suppression names, taken when the suppression was reviewed, and the `(rule_id, symbol)` scopes reviewed on it:
 
-- A symbol suppression the lock does not record is refused when the config is validated, by `ash scan` and by `ash config validate`: a file with no entry, and equally a `(rule_id, symbol)` the file's entry does not record, so locking a file for one rule does not approve suppressions added to it later. The message names the `ash suppress add` command to run, which records a new scope on an existing entry without re-hashing. The rule id is compared case-insensitively, the symbol exactly.
+- A symbol suppression the lock does not record is refused when the config is validated, by `ashx scan` and by `ashx config validate`: a file with no entry, and equally a `(rule_id, symbol)` the file's entry does not record, so locking a file for one rule does not approve suppressions added to it later. The message names the `ashx suppress add` command to run, which records a new scope on an existing entry without re-hashing. The rule id is compared case-insensitively, the symbol exactly.
 - A symbol suppression's `path` must name one file. A glob or directory path cannot be hashed, so it is refused with its own message; lock each file that holds a suppressed definition with its own entry.
 - When the file's bytes no longer hash to the entry, every symbol suppression bound to that file stops applying. Its findings are reported again, and the scan prints one notice that names the file, the suppressions, and the refresh command.
 - Line-range suppressions are not affected.
 
 The whole file is hashed, not the definition, so reformatting a definition and editing it are treated alike. The file is read as bytes, so a checkout that rewrites line endings changes the hash; refresh the lock on that checkout.
 
-Create the suppression and its lock entry together with `ash suppress add`:
+Create the suppression and its lock entry together with `ashx suppress add`:
 
 <!-- doctest: illustrative reason="names src/deploy.py and its Deployer.run_hook method, which the docs runner's sample project does not have" -->
 ```bash
-ash suppress add B602 --symbol Deployer.run_hook --file src/deploy.py \
+ashx suppress add B602 --symbol Deployer.run_hook --file src/deploy.py \
   --reason "run_hook only runs commands from the deploy manifest"
 ```
 
@@ -146,20 +146,20 @@ After you change a locked file, read the change, confirm the suppressions still 
 
 <!-- doctest: illustrative reason="re-hashes src/deploy.py, a locked file the docs runner's sample project does not have" -->
 ```bash
-ash suppress refresh src/deploy.py   # or --all, after reviewing every change
+ashx suppress refresh src/deploy.py   # or --all, after reviewing every change
 ```
 
-A refresh re-approves each changed file it touches, so the whole-lock run is asked for explicitly with `--all`, never by leaving the paths off. A locked file that no longer exists cannot be re-hashed; `refresh` reports it and exits 1, and `ash suppress refresh --drop-missing <file>` removes the dead entry (then remove its suppressions from the config).
+A refresh re-approves each changed file it touches, so the whole-lock run is asked for explicitly with `--all`, never by leaving the paths off. A locked file that no longer exists cannot be re-hashed; `refresh` reports it and exits 1, and `ashx suppress refresh --drop-missing <file>` removes the dead entry (then remove its suppressions from the config).
 
-`ash suppress verify` exits 1 and lists every locked file that changed or is gone, and every symbol suppression the checked configs hold that the lock does not record. Run it in CI. It prints which config files it checked: the named `--config` files (repeatable for a repository with more than one), or the one config a scan of the source directory discovers; suppressions contributed by an `extends` base are not read.
+`ashx suppress verify` exits 1 and lists every locked file that changed or is gone, and every symbol suppression the checked configs hold that the lock does not record. Run it in CI. It prints which config files it checked: the named `--config` files (repeatable for a repository with more than one), or the one config a scan of the source directory discovers; suppressions contributed by an `extends` base are not read.
 
 Commit `.ash.lock` with the change it belongs to, so a reviewer sees the new hash beside the edit it covers. The commands are the supported way to write the file. Its keys are sorted, so the same entries produce the same bytes in any order; each entry keeps the `created` stamp of its first review, `refresh` keeps it too, and a refresh that changes nothing rewrites nothing, so two independently created locks differ only in those stamps.
 
-The lock was first written inside the `.ash/` directory. ASH still reads that older file when `.ash.lock` does not exist, with a deprecation warning; move it with `git mv .ash/ash.lock .ash.lock` (any later `ash suppress add` or `refresh` also writes `.ash.lock` and leaves the old file for `git rm`). Reading it is deprecated since v3.9 and ends in v4.0.
+The lock was first written inside the `.ash/` directory. ASH still reads that older file when `.ash.lock` does not exist, with a deprecation warning; move it with `git mv .ash/ash.lock .ash.lock` (any later `ashx suppress add` or `refresh` also writes `.ash.lock` and leaves the old file for `git rm`). Reading it is deprecated since v3.9 and ends in v4.1.
 
 ### Installing the extra {#installing-the-extra}
 
-When the extra is missing, the scan warning and `ash config lint` print a command that installs the extra's packages. The command is read from the metadata of the ASH you run, so it fits that ASH whatever its version or source. It runs the `uv` that ASH depends on through the Python interpreter that runs ASH and installs into that interpreter's environment, so it reaches a virtualenv, a `uv tool install` or `pipx install` environment, and a checkout's `uv sync` environment alike. The hint prints the interpreter's full path where this shows `<python>`:
+When the extra is missing, the scan warning and `ashx config lint` print a command that installs the extra's packages. The command is read from the metadata of the ASH you run, so it fits that ASH whatever its version or source. It runs the `uv` that ASH depends on through the Python interpreter that runs ASH and installs into that interpreter's environment, so it reaches a virtualenv, a `uv tool install` or `pipx install` environment, and a checkout's `uv sync` environment alike. The hint prints the interpreter's full path where this shows `<python>`:
 
 <!-- doctest: illustrative reason="shows the command the warning prints, with a placeholder for the interpreter path" -->
 ```bash
@@ -201,12 +201,12 @@ SCRATCH_DIR = "/tmp/ash-build"
 
 ### The scanners' own comments
 
-Most scanners have their own inline syntax. ASH runs bandit, semgrep, opengrep, checkov, cdk-nag, cfn-nag, and detect-secrets in a way that honors it. For cfn-guard, cfn-lint, gitleaks, and zizmor, ASH turns the tools' own ignore comments off unless an operator source turns them on for that scanner, so a repository cannot hide its own findings that way; use ASH's suppressions instead:
+Most scanners have their own inline syntax. ASH runs bandit, opengrep, checkov, cdk-nag, cfn-nag, and detect-secrets in a way that honors it. For cfn-guard, cfn-lint, gitleaks, and zizmor, ASH turns the tools' own ignore comments off unless an operator source turns them on for that scanner, so a repository cannot hide its own findings that way; use ASH's suppressions instead:
 
 | Scanner | Comment | In ASH's results |
 |---|---|---|
 | bandit | `# nosec`, `# nosec B602` | Not reported. Set `scanners.bandit.options.ignore_nosec: true` to make bandit ignore these comments. |
-| semgrep, opengrep | `# nosemgrep`, `# nosemgrep: <rule-id>` | Reported as suppressed |
+| opengrep | `# nosemgrep`, `# nosemgrep: <rule-id>` | Reported as suppressed |
 | checkov | `# checkov:skip=CKV_AWS_18:reason`, or `checkov: skip:` in a CloudFormation resource's `Metadata` | Reported as suppressed, with checkov's reason |
 | cdk-nag | `cdk_nag: rules_to_suppress:` in a resource's `Metadata` | Reported as suppressed, with the reason |
 | cfn-guard | `guard: SuppressedRules:` in a resource's `Metadata` | Reported, unless an operator turns the comments on; then not reported |
@@ -304,11 +304,11 @@ global_settings:
 
 The `unused-suppressions` reporter, on by default, writes `.ash/ash_output/reports/ash.unused-suppressions.json` and `ash.unused-suppressions.md`. They list each entry in `global_settings.suppressions` that matched no finding in the scan, including expired ones. They do not cover ignore paths, `global_settings.exclusions`, or inline suppressions.
 
-After a scan, `ash config lint --fix-unused` comments out the entries that the report lists, with the date. When it comments out every entry, it leaves `suppressions: []` above them, so the file still loads; remove the `[]` when you turn an entry back on. A suppression can look unused in one environment and still be needed in another, for example when a scanner whose finding it covers is not installed locally but runs in CI. Check the report before you remove entries.
+After a scan, `ashx config lint --fix-unused` comments out the entries that the report lists, with the date. When it comments out every entry, it leaves `suppressions: []` above them, so the file still loads; remove the `[]` when you turn an entry back on. A suppression can look unused in one environment and still be needed in another, for example when a scanner whose finding it covers is not installed locally but runs in CI. Check the report before you remove entries.
 
 ## Add a suppression while you review findings {#inspect}
 
-`ash inspect findings` opens the last scan's findings in your terminal. Select a finding and press `x` to suppress it: ASH asks for a reason and an optional expiration, and adds an entry with the finding's path and rule ID, and its line as `line_start` and `line_end`, to the config file (the `--config` file, else the config ASH discovers, else a new `.ash.yaml` in the current directory). It keeps the comments of a YAML file, except one whose `global_settings` is written inline (`global_settings: {...}`), which it rewrites in full, and it writes a JSON config back as JSON. If the file already has an identical entry, nothing is added, and the status bar says so; an entry for another line, reason, or expiration with the same rule ID and path is added. It does not edit TOML files, or a file that uses `extends` but has no suppressions list of its own.
+`ashx results inspect findings` opens the last scan's findings in your terminal. Select a finding and press `x` to suppress it: ASH asks for a reason and an optional expiration, and adds an entry with the finding's path and rule ID, and its line as `line_start` and `line_end`, to the config file (the `--config` file, else the config ASH discovers, else a new `.ash.yaml` in the current directory). It keeps the comments of a YAML file, except one whose `global_settings` is written inline (`global_settings: {...}`), which it rewrites in full, and it writes a JSON config back as JSON. If the file already has an identical entry, nothing is added, and the status bar says so; an entry for another line, reason, or expiration with the same rule ID and path is added. It does not edit TOML files, or a file that uses `extends` but has no suppressions list of its own.
 
 ## See every finding {#ignore-suppressions}
 

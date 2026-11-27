@@ -522,36 +522,6 @@ def represent_tagged_reference(
     return dumper.represent_scalar("!ENV", str(value).removeprefix(EXPLICIT_ENV_TAG))
 
 
-class _QuotedStr(str):
-    """A string ``_rewrite_config_with_entry`` writes quoted, as ``_ConfigDumper``
-    would, among existing values it writes as they were."""
-
-    __slots__ = ()
-
-
-class _EntryRewriteDumper(yaml.SafeDumper):
-    pass
-
-
-_EntryRewriteDumper.add_representer(
-    _QuotedStr,
-    lambda dumper, value: dumper.represent_scalar(
-        "tag:yaml.org,2002:str", str(value), style="'"
-    ),
-)
-
-
-def _quote_references(value: Any) -> Any:
-    """``value`` with every string that reads as ``!ENV`` marked to be quoted."""
-    if isinstance(value, dict):
-        return {k: _quote_references(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_quote_references(v) for v in value]
-    if isinstance(value, str) and ENV_REFERENCE_PATTERN.match(value):
-        return _QuotedStr(value)
-    return value
-
-
 # Define BuildConfig class
 class BuildConfig(RedactedSection):
     """Configuration model for build-time settings."""
@@ -851,7 +821,7 @@ class _PluginConfigSegment(RedactedSection):
     the two whole, silently reverting either the override or the rest of the
     file. They are merged key by key instead, the alias -- the documented
     spelling -- winning where both set the same key. A hand-written config with
-    both is also flagged by ``ash config lint``.
+    both is also flagged by ``ashx config lint``.
     """
 
     @model_validator(mode="before")
@@ -888,7 +858,9 @@ class _PluginConfigSegment(RedactedSection):
         # where it was merged in silently. A document load folds there and
         # never reaches this branch; it runs for a configuration built from a
         # dict directly.
-        declared = {info.alias or name for name, info in cls.model_fields.items()}
+        declared = {
+            field_info.alias or name for name, field_info in cls.model_fields.items()
+        }
         folded = {_folded_section_name(key): key for key in declared}
         for key in list(data):
             if not isinstance(key, str) or key in declared:
@@ -958,36 +930,34 @@ class _ScannerConfigSegmentBase(_PluginConfigSegment):
         """Fold a retired scanner's section onto the plugin that serves it.
 
         ``utils/scanner_names.SCANNER_NAME_ALIASES`` names the retired scanners
-        (the table is empty today; a retirement adds one row there). A config
-        written for a retired name keeps working: its section is applied to the
-        canonical plugin's section, with one log line naming the mapping, so
-        ``enabled`` and the shared options take effect on the scanner that
-        actually runs.
+        (today: ``semgrep``, served by the opengrep plugin). A config written for
+        one of them keeps working: its section is applied to the canonical
+        plugin's section, with one log line naming the mapping, so ``enabled``
+        and the shared options take effect on the scanner that actually runs.
 
         Without the fold, a retired name would land in the ``extra="allow"``
         bucket and read as an unknown third-party scanner: never instantiated,
-        never run, and the operator's ``<retired name>: enabled: false``
-        silently ignored while the serving scanner ran anyway.
+        never run, and the operator's ``semgrep: enabled: false`` silently
+        ignored while opengrep ran anyway.
 
         Merge rules, stated in fold order:
 
-        * ``name`` is dropped: the alias section's literal (``name: <retired
-          name>``) is the one key that must not reach the canonical plugin's
-          config.
+        * ``name`` is dropped: the alias section's literal (``name: semgrep``)
+          is the one key that must not reach the canonical plugin's config.
         * Option keys the canonical options model does not declare are dropped,
           each named in a warning: carrying them as extras would show settings
-          that nothing reads (a retired scanner's install options can describe
-          machinery its serving plugin does not have).
+          that nothing reads (semgrep's ``tool_version`` and ``install_timeout``
+          described its retired uv-tool install, which opengrep does not have).
         * A section already present under the canonical name is the base and
           the alias section is the overlay, key by key -- the same choice as
-          the field-name-spelling fold above, for the same reason:
+          ``_read_field_name_spellings_as_aliases`` above, for the same reason:
           ``apply_config_overrides`` round-trips through ``model_dump()``, which
           emits the canonical section with every default filled in, so on any
           override run the canonical side is mostly machine-written defaults
-          while the alias side holds what the operator actually wrote (the
-          alias section's ``enabled: false`` must win over the dumped
+          while the alias side holds what the operator actually wrote
+          (``scanners.semgrep.enabled=false`` must win over the dumped
           ``enabled: true``). A hand-written config with both spellings is
-          flagged by ``ash config lint``.
+          flagged by ``ashx config lint``.
 
         Across documents (an ``extends`` chain, a workspace overlay) the later
         document wins whatever spelling either one uses: the document loader
@@ -1797,7 +1767,7 @@ class SandboxConfig(RedactedSection):
         Field(
             description=(
                 "Scanners allowed a network when the scan is online. Null (the default) "
-                "uses each scanner's declared need: semgrep, opengrep, grype, trivy, "
+                "uses each scanner's declared need: opengrep, grype, trivy, "
                 "npm-audit and snyk-code fetch rules, databases or audit data. A list "
                 "replaces those defaults. Under --offline no scanner gets a network. "
                 "Honored only from --config-overrides or a config file outside every "
@@ -1952,7 +1922,7 @@ class AshDeduplicationConfig(RedactedSection):
                 "`duplicate_sources` (on the primary: the other members' scanner, "
                 "rule, id and severity). Rows and counts are unchanged. Off by "
                 "default because the columns change the CSV header. CLI: "
-                "`--annotate-duplicates` on `ash scan` and `ash report`."
+                "`--annotate-duplicates` on `ashx scan` and `ashx results report`."
             )
         ),
     ] = False
@@ -1974,14 +1944,15 @@ class AshDeduplicationConfig(RedactedSection):
                 "Finding ids, SARIF, per-scanner metrics, suppressions, "
                 "baselines, the CSV, flat-JSON and JUnit reports and the exit "
                 "code are unchanged. Off by default because it changes row "
-                "counts. CLI: `--fold-duplicates` on `ash scan` and `ash report`."
+                "counts. CLI: `--fold-duplicates` on `ashx scan` and "
+                "`ashx results report`."
             )
         ),
     ] = False
 
 
 class AshHistoryConfig(RedactedSection):
-    """Run history: a compact record of each completed scan, for ``ash trend``."""
+    """Run history: a compact record of each completed scan, for ``ashx results trend``."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -2382,7 +2353,7 @@ class ContentDbStalenessOverride(RedactedSection):
             description=(
                 "The content database's registry name, as listed in "
                 "automated_security_helper/utils/content_databases.py: grype-db, "
-                "trivy-db, semgrep-offline-rules or opengrep-offline-rules."
+                "trivy-db or opengrep-offline-rules."
             )
         ),
     ]
@@ -2865,16 +2836,19 @@ class AshConfig(RedactedSection):
         Field(
             description=(
                 "Whether an unknown key in a suppression or ignore-path entry "
-                "refuses the config at load. False (the default) loads the "
-                "config with a warning that names the key, with a did-you-mean, "
-                "and the entry it sits in suppresses nothing until it is fixed, "
-                "so a typo can never widen a suppression. True refuses the "
-                "config, naming the same key. ASH v4 flips the default to True; "
-                "set it True now to adopt the error early."
+                "refuses the config at load. True (the default since ASH 4.0) "
+                "refuses the config, naming the key, with a did-you-mean. False "
+                "keeps the 3.x behavior: the config loads with a warning that "
+                "names the same key, and the entry it sits in suppresses nothing "
+                "until it is fixed, so a typo can never widen a suppression. The "
+                "same setting decides what a suppression's scope.engines block does "
+                "when a scan starts and the block names a scanner no plugin of the "
+                "run registers, or the named scanner refuses it: True refuses the "
+                "scan, False warns. Either way the block suppresses nothing."
             )
         ),
-        # The default is the one v4 gate (utils/unknown_keys.py), so the v4
-        # bump flips the field and the raw-document read together.
+        # The default is the one gate (utils/unknown_keys.py), so the field and
+        # the raw-document read agree.
     ] = UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT
 
     honor_ignore_files: Annotated[
@@ -2907,7 +2881,7 @@ class AshConfig(RedactedSection):
         Field(
             description=(
                 "What a scan does when a scanner's content database (grype's or "
-                "trivy's vulnerability database, the offline semgrep/opengrep "
+                "trivy's vulnerability database, the offline opengrep "
                 "rulesets) was built longer ago than the bound declared for it in "
                 "automated_security_helper/utils/content_databases.py. 'fail' (the "
                 "default) keeps the scanner's findings and exits 1, naming the "
@@ -3214,7 +3188,9 @@ class AshConfig(RedactedSection):
         The direct dump is a JSON document for a ``.json`` path, as
         render_config_file writes one; a JSON path whose dump has to write
         references is refused. The whole text is built before the file is
-        opened, so a dump that fails leaves an existing file as it was.
+        opened, and it is then written to a staged file beside the target that
+        replaces it in one step, so a dump that fails, and a write cut short
+        (a full disk, a kill), leave an existing file as it was.
         """
         from automated_security_helper.config.config_sources import is_json_file
         from automated_security_helper.config.config_writer import (
@@ -3272,14 +3248,10 @@ class AshConfig(RedactedSection):
                     # cannot write.
                     data = without_env_scalars(data)
                 text = yaml.dump(data, Dumper=_ConfigDumper, indent=2)
-            with open(config_path, mode="w", encoding="utf-8") as f:
-                f.write(text)
+            _replace_with_staged(config_path, text)
             return
         render = render_config_file_as_written if as_written else render_config_file
-        config_path.write_text(
-            render(config_path, self, [SCHEMA_COMMENT]),
-            encoding="utf-8",
-        )
+        _replace_with_staged(config_path, render(config_path, self, [SCHEMA_COMMENT]))
 
     def __repr_args__(self):
         """The fields as pydantic's repr shows them, except that a config whose
@@ -3671,16 +3643,19 @@ def _same_suppression(existing: Any, suppression: AshSuppression) -> bool:
     """
     if not isinstance(existing, dict):
         return False
-    for spelling in ("expires", "expiration"):
-        if isinstance(existing.get(spelling), date):
-            existing = {**existing, spelling: existing[spelling].isoformat()}
+    if isinstance(existing.get("expires"), date):
+        existing = {**existing, "expires": existing["expires"].isoformat()}
     try:
         existing_suppression = AshSuppression.model_validate(existing)
     except ValidationError:
         return False
+    # client_supplied is set by ASH, never written (the writer drops it and a
+    # value in a file is ignored), so it is no part of what the entry holds.
     return existing_suppression.model_dump(
-        mode="json", exclude_none=True
-    ) == suppression.model_dump(mode="json", exclude_none=True)
+        mode="json", exclude_none=True, exclude={"client_supplied"}
+    ) == suppression.model_dump(
+        mode="json", exclude_none=True, exclude={"client_supplied"}
+    )
 
 
 class _KeepsEnvReferences(_NoAliasSafeLoader):
@@ -4395,6 +4370,9 @@ def _write_checked(
             "the config is not writable, so the suppression is not saved",
             config_path,
         )
+    # Only now, with the containment checks passed: nothing is created through
+    # a link that leads outside the root.
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     # A new config is created as a plain create would make it; an existing
     # one's copy starts private and takes the earlier mode below. A directory
     # this process may not write refuses the staging, and the replace below
@@ -4519,6 +4497,55 @@ def _write_checked(
     _sync_directory(target.parent)
 
 
+def _replace_with_staged(config_path: Path, text: str) -> None:
+    """Write *text* as the whole of *config_path* through a staged file.
+
+    The text goes to a file beside the target, is synced, and replaces the
+    target in one os.replace, so a write cut short (a full disk, a kill)
+    leaves an existing file as it was, where a write on the file itself
+    would have truncated it. The staged file takes the earlier file's owner,
+    group and mode; a new file gets the mode a plain create gives it. A
+    symlinked config stays a link, with the new bytes in its target. A
+    failure at any step removes the staged file and raises the system's own
+    error; a config mounted as one file, whose entry cannot be replaced, is
+    refused in words that say so, with the file untouched."""
+    target = Path(os.path.realpath(config_path))
+    try:
+        earlier_status: Optional[os.stat_result] = target.stat()
+    except FileNotFoundError:
+        earlier_status = None
+    if earlier_status is not None and not os.access(target, os.W_OK):
+        raise PermissionError(errno.EACCES, "Permission denied", str(config_path))
+    descriptor, staged = _staged_beside(
+        target, 0o666 if earlier_status is None else 0o600
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            if earlier_status is not None:
+                kept_mode = _give_earlier_owner_and_mode(
+                    handle.fileno(), earlier_status
+                )
+            handle.write(text.encode("utf-8"))
+            handle.flush()
+            os.fsync(handle.fileno())
+        if earlier_status is not None and not hasattr(os, "fchmod"):
+            os.chmod(staged, kept_mode)
+        try:
+            os.replace(staged, target)
+        except OSError as error:
+            if error.errno != errno.EBUSY:
+                raise
+            raise OSError(
+                errno.EBUSY,
+                f"{config_path} is mounted as a single file, so it cannot be "
+                "replaced; it is unchanged",
+            ) from None
+    except BaseException:
+        staged.unlink(missing_ok=True)
+        raise
+    _sync_directory(target.parent)
+
+
 def _decoded_for_save(config_path: Path, earlier: bytes) -> str:
     """The text of the file a save edits, or a refusal that leaves it untouched.
 
@@ -4590,7 +4617,9 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
         not_a_file = str(e)
     if not_a_file is not None:
         raise _left_unchanged(not_a_file, config_path)
-    config_path.parent.mkdir(parents=True, exist_ok=True)
+    # The directory is made in _write_checked, after its containment refusals:
+    # made here, a link pointing outside got directories created through it
+    # before the save refused.
     # The file's bytes as they are: what a failed write puts back, and where
     # its own line ending is read from. Read as the recheck before the replace
     # reads (read_config_bytes, so the same size bound): the two reads must

@@ -50,7 +50,7 @@ from automated_security_helper.base.scanner_plugin import (
     plugin_missing_dependency_reason,
 )
 from automated_security_helper.cli.dependency_check import check_dependencies
-from automated_security_helper.cli.params import from_command_line
+from automated_security_helper.cli.params import ColorOption, from_command_line
 from automated_security_helper.config.named_config import (
     refuse_a_named_config_that_does_not_exist,
 )
@@ -314,9 +314,9 @@ def _resolve_tool_aliases(tools: List[str]) -> dict[str, str]:
     replacement and prints one warning to stderr per alias, however many times it
     was passed. A retired scanner name resolves through ``canonical_scanner_name``
     -- the same case- and punctuation-insensitive lookup every other entry point
-    applies, so a retired name installs its serving plugin's tool too. Every
-    other name maps to itself, so an unknown name is still refused by the caller
-    exactly as before.
+    applies, so ``--tool Semgrep`` installs opengrep's tool too. Every other name
+    maps to itself, so an unknown name is still refused by the caller exactly as
+    before.
     """
     resolved: dict[str, str] = {}
     aliases_by_key = _deprecated_aliases_by_key()
@@ -877,6 +877,14 @@ def _shown_command(args: Iterable[Any], values: Iterable[str]) -> str:
     return text_without_values(shown, value_tuple(values))
 
 
+class _TimedOutExitCode(int):
+    """The exit code of a command stopped at INSTALL_COMMAND_TIMEOUT_SECONDS.
+
+    An ``int`` with the code's own value, so every caller reads it as before;
+    the type alone says the command timed out rather than failed.
+    """
+
+
 def run_command(args: List[str], shell: bool = False):
     """Run a command and return the exit code.
 
@@ -992,7 +1000,12 @@ def run_command(args: List[str], shell: bool = False):
             # whatever its code says, and may have no code: the answer is a
             # non-zero number either way.
             code = result.returncode
-            return code if isinstance(code, int) and code != 0 else 1
+            code = code if isinstance(code, int) and code != 0 else 1
+            # A command stopped at its timeout is told apart from one that
+            # exited non-zero: _run_install_command does not retry it.
+            if getattr(result, "timed_out", False) is True:
+                return _TimedOutExitCode(code)
+            return code
         return result.returncode
     except Exception as e:
         print(
@@ -1023,6 +1036,10 @@ def _run_install_command(cmd: List[str], shell: bool = False) -> int:
     code = run_command(cmd)
     for attempt, delay in enumerate(_APT_RETRY_DELAYS_SECONDS, start=2):
         if code == 0:
+            break
+        if isinstance(code, _TimedOutExitCode):
+            # Stopped after an hour, not failed fast: a stalled apt-get (the
+            # dpkg lock held) would stall again, three hours in all.
             break
         print(
             f"apt-get install failed with exit code {code}; retrying in "
@@ -1215,7 +1232,7 @@ def install_dependencies(
     debug: Annotated[
         bool, typer.Option("--debug", "-d", help="Enable debug logging")
     ] = False,
-    color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
+    color: ColorOption = True,
 ) -> int:
     """Install dependencies for ASH plugins.
 
@@ -1403,7 +1420,7 @@ def install_dependencies(
     work_dir = output_dir.joinpath(ASH_WORK_DIR_NAME)
     # config_path is what makes --config/ASH_CONFIG mean anything here. Omitting it
     # made the option accept a path and then quietly ignore it, so
-    # `ash dependencies install --config .ash/.ash_alpha_plugins.yaml` resolved
+    # `ashx dependencies install --config .ash/.ash_alpha_plugins.yaml` resolved
     # the default config instead and installed dependencies for the wrong set of
     # plugins.
     try:
@@ -1423,7 +1440,7 @@ def install_dependencies(
     # `--config` previously resolved the config's *values* and stopped there. The
     # scanners a config adds through `ash_plugin_modules` were never imported, so
     # their plugin classes never registered, so
-    # `ash dependencies install --config .ash/.ash_alpha_plugins.yaml` installed
+    # `ashx dependencies install --config .ash/.ash_alpha_plugins.yaml` installed
     # dependencies for the built-in set and reported success -- and trivy, snyk and
     # ferret had to be installed by hand in CI before the scan.
     #
@@ -1508,7 +1525,7 @@ def install_dependencies(
                 # The plugin's own section of the resolved config, looked up the way
                 # the scan path looks it up (ExecutionEngine.get_scanner). Without
                 # it every plugin was built from its defaults, so a
-                # `--config-overrides scanners.semgrep.options.tool_version===X`
+                # `--config-overrides scanners.bandit.options.tool_version===X`
                 # reached resolved_config and stopped there: the scanner installed
                 # its default range, and the image carried whatever release PyPI
                 # had that day instead of the version its license entry records.

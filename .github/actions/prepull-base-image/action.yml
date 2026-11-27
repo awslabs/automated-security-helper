@@ -21,7 +21,7 @@ description: >-
 # sees is "the scan produced no output", three steps removed from the cause.
 #
 # Pulling once per job, ahead of the build, puts the retry in one place instead of at every
-# `ash container build` call site, and leaves the build itself untouched: the runtimes use a base
+# `ashx container build` call site, and leaves the build itself untouched: the runtimes use a base
 # image already in the local store rather than going back to the registry.
 #
 # TWO QUOTAS WEAR THE SAME WIRE ERROR, AND ONLY ONE IS WORTH WAITING ON
@@ -165,8 +165,8 @@ description: >-
 #     base-image-override=<fallback repo>@<pin>
 #
 # as this action's `base-image-override` output. Each caller maps it into the `env:` of
-# every step that builds, as ASH_BASE_IMAGE_OVERRIDE, and each of the three build
-# entrypoints -- run_ash_container.py's `_build_image`, `./ash`, and utils/ash_helpers.ps1 --
+# every step that builds, as ASH_BASE_IMAGE_OVERRIDE, and each of the build
+# entrypoints -- run_ash_container.py's `_build_image` and utils/ash_helpers.ps1 --
 # passes it through as `--build-arg BASE_IMAGE=...`. That is uniform across every runtime and every builder
 # driver, because no runtime has any say in which reference a build-arg names.
 #
@@ -404,7 +404,7 @@ description: >-
 #
 # How each runtime is handed the layout on a hit, measured or read from source as noted:
 #
-#   docker, `docker build` (docker driver)   ./ash and ash_helpers.ps1. The layout is loaded
+#   docker, `docker build` (docker driver)   ash_helpers.ps1. The layout is loaded
 #       into the engine as a docker-archive tagged under the Dockerfile's FROM reference, and
 #       the engine's builder prefers a local image by default (measured: with the tag present
 #       and its registry host unresolvable, the build succeeds). The oci-layout context is
@@ -613,6 +613,11 @@ runs:
       run: |
         set -uo pipefail
 
+        # Every scratch file this step makes goes in here, and the trap removes it, so a
+        # self-hosted or reused runner does not collect one log per pull.
+        scratch="$(mktemp -d)"
+        trap 'rm -rf "${scratch}"' EXIT
+
         runtime="${RUNTIME:-docker}"
 
         # EVERY EXPANSION OF `wrapper` IS GUARDED, BECAUSE IT IS USUALLY EMPTY
@@ -686,7 +691,7 @@ runs:
         # all about why -- the reason was one line on stderr, discarded. A refusal has to carry
         # it, and it has to carry the argv too, because the step now asks more than one
         # question and "which one failed" is half the diagnosis.
-        inspect_log="$(mktemp)"
+        inspect_log="$(mktemp "${scratch}/inspect.XXXXXX")"
 
         # Answers with an empty string rather than a non-zero exit on some runtimes, so every
         # caller has to reject emptiness explicitly. Two empty ids compare equal, and "the
@@ -850,7 +855,7 @@ runs:
         pull_ref() {
           local ref="$1" kind="$2"
           local log n sleep_for
-          log="$(mktemp)"
+          log="$(mktemp "${scratch}/pull.XXXXXX")"
           for n in $(seq 1 "${ATTEMPTS}"); do
             pulls=$(( pulls + 1 ))
             echo "=== pull ${ref} (attempt ${n} of ${ATTEMPTS}) ==="

@@ -57,7 +57,7 @@ def _an_info_line_logged_outside_every_run(monkeypatch):
     """The homeless INFO line, logged during a hosted scan: what the recording
     last resort saw."""
     last_resort, held_back = _only_the_last_resort(monkeypatch)
-    scope, token = ash_log.open_run_log_scope()
+    scope, reset_handle = ash_log.open_run_log_scope()
     try:
 
         def an_info_line_no_scan_owns() -> None:
@@ -67,7 +67,7 @@ def _an_info_line_logged_outside_every_run(monkeypatch):
         outside.start()
         outside.join(30)
     finally:
-        ash_log.end_run_log_scope(scope, token)
+        ash_log.end_run_log_scope(scope, reset_handle)
         _put_back(held_back)
     return last_resort.records
 

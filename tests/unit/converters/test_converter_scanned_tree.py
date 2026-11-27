@@ -14,7 +14,7 @@ to files in a separate "host" directory holding a marker string, and check that:
 - a regular in-tree input still converts as before.
 
 ``tests/unit/interactions/test_scan_does_not_follow_tree_symlinks.py`` runs the same
-shapes through a whole ``ash scan``.
+shapes through a whole ``ashx scan``.
 """
 
 from __future__ import annotations

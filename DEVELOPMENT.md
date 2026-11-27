@@ -230,8 +230,9 @@ timezone.
    ```
 
 The `snapshot-trailers` CI job fails if a golden file changed in a commit that has no
-non-empty `Snapshot-Update:` trailer. The trailer has to be on a commit that touched the
-file, so a separate follow-up commit that only adds it does not count. To fix:
+non-empty `Snapshot-Update:` trailer. Every commit that touches a golden file needs its
+own trailer: a separate follow-up commit that only adds one does not count, and neither
+does the trailer of an earlier commit that changed the same file. To fix:
 
 - if the change is in your latest commit, run
   `git commit --amend --no-edit --trailer "Snapshot-Update: <why>"`;
@@ -265,11 +266,13 @@ test module that still exists. If you delete or rename a test module, syrupy nev
 its snapshot file, so `check-snapshot-trailers.py --orphans` (in CI, and in
 `test_snapshot_policy.py`) checks that every file under a `tests/**/__snapshots__/`
 directory belongs to a `<test_module>.py` next to that directory, and that no
-`__snapshots__` directory is empty. When you rename a module, move its snapshots with it;
-when you delete one, delete its snapshots. Either change needs a `Snapshot-Update:`
-trailer like any other. The check takes its list from git: tracked snapshots and untracked
-ones that are not ignored, so a snapshot not yet added is checked, and anything under an
-ignored directory, such as `tests/pytest-temp`, is not. It needs a git work tree.
+`__snapshots__` directory is empty. It checks the VS Code extension's `.snap` files and
+PNG baselines against their test files and `scenarios.json` the same way. When you
+rename a module, move its snapshots with it; when you delete one, delete its snapshots.
+Either change needs a `Snapshot-Update:` trailer like any other. The check takes its
+list from git: tracked snapshots and untracked ones that are not ignored, so a snapshot
+not yet added is checked, and anything under an ignored directory, such as
+`tests/pytest-temp`, is not. It needs a git work tree.
 
 ### Output that differs by operating system
 
@@ -285,7 +288,7 @@ snapshot looks unused to the runs that skip it.
 What container mode and Nix mode print before and after the runtime is snapshotted
 in-process, with only the runner process or the `nix develop` call replaced, under
 `tests/snapshot/container/`. What only a real runtime can produce (output from inside
-the image, a real container or Nix scan, the `./ash` and `ash_helpers.ps1` wrappers) is
+the image, a real container or Nix scan, the `ash_helpers.ps1` wrapper) is
 in `tests/snapshot/container/runtime/`, marked `container_runtime` or `nix_runtime`.
 `tests/conftest.py` deselects those unless `pytest --run-container-snapshots` or
 `pytest --run-nix-snapshots` is passed, which the scan-validation container legs and the
@@ -324,7 +327,7 @@ uv run ruff format .
 
 <!-- doctest: illustrative reason="runs ash from this repository's own environment, so it needs a checkout of this repository" -->
 ```bash
-uv run ash
+uv run ashx
 ```
 
 - Regenerate the wrapper tables after you add or change a subcommand or an option of the
@@ -510,16 +513,16 @@ uv run cz bump --changelog --dry-run
 
 ### Release line
 
-`main` carries breaking (`feat!`) commits that ship in 3.x by maintainer decision, because 4.0.0 is reserved for the v4 packaging work. The `RELEASE_LINE` value committed at the top of `ash-create-release.yml` controls this. It is not a dispatch input, so the line a release lands on is decided in reviewed history:
+The `RELEASE_LINE` value committed at the top of `ash-create-release.yml` decides how a detected major increment is treated. It is not a dispatch input, so the line a release lands on is decided in reviewed history. It is `auto` for 4.x:
 
-- `3.x` (the default): if commitizen detects a major increment, the workflow runs `cz bump --increment MINOR` instead, logs a warning that names every breaking commit it overrode, and lists them in the run summary. A patch or minor increment is left alone. The commits are not rewritten, so their `BREAKING CHANGE` notes still render in `CHANGELOG.md`. The job fails if the current version is not 3.x, or if the bump still produced a version outside 3.x.
-- `auto`: commitizen's own semver, so a breaking change produces a major.
+- `auto` (the setting for 4.x): commitizen's own semver, so a breaking change produces a major.
+- `3.x`: kept `main` on 3.x while v4 was being built, when `main` carried breaking (`feat!`) commits that shipped in 3.x by maintainer decision. If commitizen detects a major increment, the workflow runs `cz bump --increment MINOR` instead, logs a warning that names every breaking commit it overrode, and lists them in the run summary. A patch or minor increment is left alone. The commits are not rewritten, so their `BREAKING CHANGE` notes still render in `CHANGELOG.md`. The job fails if the current version is not 3.x, or if the bump still produced a version outside 3.x.
 
 A release whose version understates it can carry hand-written notes in `.github/release-notes/<tag>.md`. The changelog template (`.github/changelog/CHANGELOG.md.j2`) renders that file under the version heading, and the tag workflow publishes that version's `CHANGELOG.md` entry, curated notes included, at the top of the GitHub Release body, ahead of GitHub's generated notes. `v3.8.0.md` lists the behavior changes that 3.8.0 ships in a minor release, with their opt-outs.
 
 Hand-written notes go under `## Unreleased` in `CHANGELOG.md`. commitizen would replace that section with the generated entry, so before bumping, the workflow moves its body into `.github/release-notes/<next tag>.md`, below any curated notes already there, and removes the section. The new entry then carries the curated notes, the hand-written notes, and the generated sections, and so does the GitHub Release. The step fails before bumping if that text contains a Jinja delimiter (`{{`, `{%`, `{#`) or if the next tag cannot be determined. An empty or absent section is left alone.
 
-To cut 4.0.0 once v4 is on `main`: set `RELEASE_LINE` to `auto` in the change that lands v4, then run the workflow. Once the version is 4.x, `3.x` refuses to run, so a setting left at `3.x` fails loudly rather than capping 4.x.
+On v4 every `version_files` entry is 4.0.0 (`chore(release): set every version to 4.0.0`) and `RELEASE_LINE` is `auto`, so the workflow cuts 4.x releases by commitizen's own rules. On a 4.x version `3.x` refuses to run, so a setting put back to `3.x` fails loudly rather than capping 4.x.
 
 Preview either line locally:
 

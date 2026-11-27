@@ -1,10 +1,15 @@
 [project]
 name = "automated-security-helper"
-version = "3.8.0"
+version = "4.0.0"
 description = "Automated Security Helper, the agentic security harness: open-source orchestration for code, infrastructure, secret, and dependency scanners"
 requires-python = ">=3.11,<3.15"
 readme = "README.md"
 license = "Apache-2.0"
+# Pinned rather than left to hatchling's default globs (LICEN[CS]E*, COPYING*,
+# NOTICE*, AUTHORS*), which would add any new root file matching them to the
+# wheel's dist-info/licenses/. packaging/assert-paths-filter.py reads this list as
+# wheel inputs and requires the wheel to hold exactly these files.
+license-files = [ "LICENSE", "NOTICE",]
 classifiers = [ "Development Status :: 5 - Production/Stable", "Intended Audience :: Developers", "License :: OSI Approved :: Apache Software License", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12", "Programming Language :: Python :: 3.13", "Programming Language :: Python :: 3.14",]
 dependencies = [
  "uv>=0.13.4,<0.14",
@@ -236,20 +241,35 @@ build-backend = "hatchling.build"
 Repository = "https://github.com/awslabs/automated-security-helper"
 
 [project.scripts]
-# Every alias goes through cli.entrypoint:main rather than the bare Typer app.
-# pip's generated stub imports the target and calls it, so pointing at `app`
-# meant the import of the whole CLI happened before any ASH code ran -- and on a
-# host where sys.stderr is None (a console-less Windows app; see that module's
-# docstring) a failure there exits 1 with both streams empty. main() reattaches
-# the streams first, then imports.
-ash = "automated_security_helper.cli.entrypoint:main"
-ashv3 = "automated_security_helper.cli.entrypoint:main"
+# Every alias goes through cli.entrypoint rather than the bare Typer app. pip's
+# generated stub imports the target and calls it, so pointing at `app` meant the
+# import of the whole CLI happened before any ASH code ran -- and on a host where
+# sys.stderr is None (a console-less Windows app; see that module's docstring) a
+# failure there exits 1 with both streams empty. These entry points reattach the
+# streams first, then import.
+ashx = "automated_security_helper.cli.entrypoint:main"
+# Deprecated: `ash` was the v3 command. v4 renamed it because Alpine, BusyBox and
+# MSYS2 ship the Almquist shell as `ash`, so a bare `ash` on PATH is often not ASH.
+# It stays through v4 so existing scripts keep working: `main_ash` prints one
+# deprecation line to stderr and then runs the same app, so arguments, output and
+# exit codes are unchanged. The deb and rpm do not put it on PATH; see
+# packaging/cli-name.sh.
+ash = "automated_security_helper.cli.entrypoint:main_ash"
+# Deprecated: `main_ashv3` warns on stderr and then runs the app. It names a
+# version, so it reads wrong now that v4 exists. Each deprecated name is its own
+# entry point rather than a Typer callback so the warning fires once per process
+# and never for `ashx`. Routing it through cli.entrypoint too is what lets the
+# warning itself reach a stream on a console-less host.
+ashv3 = "automated_security_helper.cli.entrypoint:main_ashv3"
+# Kept indefinitely and deliberately silent. This is the escape hatch for hosts
+# where a short name resolves to something else -- MSYS2 ships the Almquist shell
+# as `ash` and has already shadowed ASH's v3 entry point.
 automated-security-helper = "automated_security_helper.cli.entrypoint:main"
 agentic-security-harness = "automated_security_helper.cli.entrypoint:main"
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "3.8.0"
+version = "4.0.0"
 # Every entry below names a file that pins an ASH git tag someone else installs
 # from. They are listed here because a pin nothing rewrites goes stale silently:
 # the release succeeds, the package version moves, and the stale pin keeps
@@ -286,6 +306,14 @@ version = "3.8.0"
 # refs instead of consulting a list, so the next omission fails a test rather than
 # shipping. Adding a pin here without adding it there is safe; the reverse is what
 # this comment exists to prevent.
+#
+# The package-manager and extension manifests further down each carry a comment of
+# their own inside the list, which is the right place for their anchors but not
+# where a reader scanning this header looks. By name, so the header covers them:
+# packaging/chocolatey/ash.nuspec, the three winget manifests
+# (Amazon.AutomatedSecurityHelper.yaml, Amazon.AutomatedSecurityHelper.installer.yaml
+# and Amazon.AutomatedSecurityHelper.locale.en-US.yaml), packaging/msix/AppxManifest.xml,
+# editors/vscode/package.json and deploy/kubernetes-operator/pyproject.toml.
 #
 # building-your-own-image.md joined when its install commands stopped naming
 # ASH's distribution bare, which PyPI resolves to an unrelated project, and
@@ -366,23 +394,13 @@ version_files = [
     "ash-agent-plugins/agentic-coding/transpiler/_base/commands/scan.md:automated-security-helper@",
     "ash-agent-plugins/agentic-coding/transpiler/_base/references/troubleshooting.md:automated-security-helper@",
     "docs/content/docs/plugins/alpha/trivy-plugin.md:automated-security-helper.git@",
+    # Entries from the v3 mainline whose targets still exist on this branch. The
+    # cdk/cdk-constructs targets are NOT repeated from mainline's spellings: the
+    # anchored variants below supersede them.
     "docs/content/index.md:ash_version:",
     "docs/content/index.md:automated-security-helper.git@",
     "docs/content/index.md:--branch v",
     "docs/content/index.md:rev: v",
-    "deploy/cdk/lib/ash-config.ts:DEFAULT_ASH_VERSION =",
-    "deploy/cdk/templates/AshAgentCore.template.json:\"Default\": \"v[0-9]",
-    "deploy/cdk/templates/AshCodeCommitGate.template.json:\"Default\": \"v[0-9]",
-    "deploy/cdk/templates/AshDistributedPipeline.template.json:\"Default\": \"v[0-9]",
-    "deploy/cdk/templates/AshFargate.template.json:\"Default\": \"v[0-9]",
-    "deploy/cdk/templates/AshImagePipeline.template.json:\"Default\": \"v[0-9]",
-    "deploy/cdk/README.md:\\| `AshVersion` \\|",
-    "deploy/cdk-constructs/src/private/commands.ts:DEFAULT_ASH_REF =",
-    "deploy/cdk-constructs/buildspec.yml:ASH_VERSION:",
-    "deploy/cdk-constructs/buildspec-merge.yml:ASH_VERSION:",
-    "deploy/cdk-constructs/buildspec-shard.yml:ASH_VERSION:",
-    "deploy/cdk-constructs/README.md:automated-security-helper.git@",
-    "deploy/cdk-constructs/test/ash-scan-step.test.ts:automated-security-helper.git@",
     "deploy/terraform/modules/agentcore/examples/basic/main.tf:^\\s+ash_version\\s+=",
     "deploy/terraform/modules/ash-image-pipeline/examples/basic/main.tf:^\\s+ash_version\\s+=",
     "deploy/terraform/modules/codecommit-gate/examples/basic/main.tf:^\\s+ash_version\\s+=",
@@ -395,6 +413,116 @@ version_files = [
     "tests/unit/test_no_bare_name_install_hints.py",
     "tests/unit/test_reusable_workflow_defaults.py:CHECKED_ASH_VERSION",
     "tests/unit/test_reusable_workflow_defaults.py:automated-security-helper@",
+    # The native Windows manifests. Each of these carries the package version as
+    # structured data a package manager reads, so a stale one installs an old ASH
+    # rather than failing -- the same shape as Formula/ash.rb above.
+    #
+    # On the anchors, which are load-bearing in a way the entries above are not.
+    # commitizen matches each regex per LINE and then replaces the current version
+    # within the lines that matched, so a pattern that matches one line too many
+    # rewrites a number that is not the package version:
+    #
+    #   ^PackageVersion   winget manifests also carry `ManifestVersion: 1.12.0`,
+    #                     the schema version. An unanchored `PackageVersion` does
+    #                     not match it, but `Version` would, and the schema version
+    #                     moving with ASH's releases would fail validation against
+    #                     a schema that does not exist. The `^` also keeps it off
+    #                     the two-space-indented keys inside the installer list.
+    #   <version>         the nuspec's own `<version>` element. Plain `version`
+    #                     would also match `<?xml version="1.0"` on line 1 and the
+    #                     `version="[3.10,3.14)"` Python dependency range, neither
+    #                     of which is ASH's version.
+    #   ^  InstallerUrl   needed as its own entry and easy to miss: the release
+    #                     asset URL embeds the version TWICE (`/v3.7.0/` and
+    #                     `-3.7.0-`) and lives on a line no PackageVersion pattern
+    #                     reaches. commitizen replaces every occurrence within a
+    #                     matching line, so one entry fixes both. Without it a bump
+    #                     leaves winget pointing at the previous release's asset.
+    #   ^\s+Version=      AppxManifest.xml's Identity/@Version. MSIX requires
+    #                     four-part `a.b.c.d`, and this works only because
+    #                     commitizen replaces the current version as a substring:
+    #                     `3.7.0` sits at the head of `3.7.0.0`. The indent anchor
+    #                     matters because `TargetDeviceFamily` also has a
+    #                     `Version=` attribute, which today merely happens not to
+    #                     contain the release version.
+    "packaging/chocolatey/ash.nuspec:<version>",
+    "packaging/winget/Amazon.AutomatedSecurityHelper.yaml:^PackageVersion",
+    "packaging/winget/Amazon.AutomatedSecurityHelper.installer.yaml:^PackageVersion",
+    "packaging/winget/Amazon.AutomatedSecurityHelper.installer.yaml:^  InstallerUrl",
+    "packaging/winget/Amazon.AutomatedSecurityHelper.locale.en-US.yaml:^PackageVersion",
+    'packaging/msix/AppxManifest.xml:^\s+Version=',
+    # The VS Code extension's manifest. Anchored at two spaces because top-level
+    # keys in that file are 2-space indented and every nested key sits at four or
+    # more, which keeps the pattern off the devDependency ranges -- simulating a
+    # bump from each version that appears in one (3.6.0 for @vscode/vsce, 5.9.3 for
+    # typescript, 1.85.0 for @types/vscode, 22.19.0 for @types/node) rewrites zero
+    # lines, so no future ASH version can collide with a dependency range.
+    #
+    # editors/vscode/package-lock.json carries the same version at `.version` and
+    # at `.packages[""].version` and is deliberately NOT listed. Its 6-space
+    # indentation is indistinguishable from every dependency's own "version" line,
+    # so there is no anchor that reaches one without risking the others, and an
+    # entry that cannot be anchored safely is worse than none. Measured: setting
+    # package.json to 3.8.0 against a 3.7.0 lock still gives `npm ci` exit 0 with
+    # no EUSAGE, so the drift is inert. `npm install --package-lock-only --prefix
+    # editors/vscode` after a bump brings it into step if that ever matters.
+    #
+    # Nothing under editors/jetbrains/ is listed, and that is a decision rather
+    # than an omission: a JetBrains plugin is versioned against the IDE builds it
+    # supports, not against the tool it drives, so tying it to ASH would force a
+    # plugin bump on every ASH patch and block a plugin fix behind an ASH release.
+    # It pins no ASH version, ref or install command, so it carries no literal that
+    # can go stale -- which is the whole failure this list exists to prevent.
+    "editors/vscode/package.json:^  \"version\"",
+    # The Kubernetes operator's own project file. Anchored at the start of the line
+    # because its kopf and kubernetes pins live in a dependencies array whose
+    # entries are indented strings, never a bare `version =` key.
+    "deploy/kubernetes-operator/pyproject.toml:^version",
+    # The CDK defaults: DEFAULT_ASH_VERSION is the ASH tag deploy/cdk builds
+    # images from, and DEFAULT_ASH_REF the tag deploy/cdk-constructs installs in
+    # CodeBuild. Each is one `export const NAME = 'v<version>';` line, so
+    # commitizen rewrites the version inside it and leaves the leading "v" alone,
+    # as with Formula/ash.rb.
+    #
+    # The files after each constant are committed output generated from it, and
+    # each has a drift gate that byte-compares it against a fresh generation:
+    # synth-templates.sh --check for the templates, check:buildspec and the
+    # constructs jest suite for the buildspecs. Rewriting only the constant would
+    # hand those gates a failure on the bump commit, the same way _base/ needs the
+    # transpiler hook below. These entries rewrite the generated lines in place,
+    # and the gates then confirm the result equals a regeneration. Measured with
+    # `cz bump 4.0.0 --files-only`: each template changes on its `"Default"` line
+    # only and each buildspec on its `ASH_VERSION:` line only, and both gates pass
+    # afterwards. AshEksOperator.template.json has no AshVersion parameter, which
+    # is why the templates are listed one by one rather than globbed: a glob
+    # would include it, and an entry that matches no line fails
+    # test_every_version_files_entry_rewrites_a_line.
+    #
+    # deploy/quick-create-links.md is generated from those templates too, but it
+    # has a .template sibling, so it is re-rendered by a pre_bump_hook below
+    # instead of being listed here; see
+    # test_no_version_files_target_has_a_template_sibling.
+    #
+    # deploy/cdk/test/ash-agentcore-stack.test.ts holds AshVersion's default at
+    # or above the first release whose `ashx mcp` has --stateless-http (v4.0.0).
+    # It compares versions rather than a literal, so it is not listed either and
+    # needs no edit on a bump.
+    "deploy/cdk/lib/ash-config.ts:^export const DEFAULT_ASH_VERSION =",
+    'deploy/cdk/templates/AshAgentCore.template.json:^\s+"Default": "v',
+    'deploy/cdk/templates/AshCodeCommitGate.template.json:^\s+"Default": "v',
+    'deploy/cdk/templates/AshDistributedPipeline.template.json:^\s+"Default": "v',
+    'deploy/cdk/templates/AshFargate.template.json:^\s+"Default": "v',
+    'deploy/cdk/templates/AshImagePipeline.template.json:^\s+"Default": "v',
+    "deploy/cdk/README.md:^\\| `AshVersion`",
+    "deploy/cdk-constructs/src/private/commands.ts:^export const DEFAULT_ASH_REF =",
+    'deploy/cdk-constructs/buildspec.yml:^\s+ASH_VERSION: v',
+    'deploy/cdk-constructs/buildspec-shard.yml:^\s+ASH_VERSION: v',
+    'deploy/cdk-constructs/buildspec-merge.yml:^\s+ASH_VERSION: v',
+    "deploy/cdk-constructs/README.md:automated-security-helper.git@",
+    # Two jest assertions spell the default install ref as a literal tag, which
+    # the tree-wide pin walk watches like any other install command. Listing the
+    # file moves them with DEFAULT_ASH_REF rather than exempting it from the walk.
+    "deploy/cdk-constructs/test/ash-scan-step.test.ts:automated-security-helper.git@",
 ]
 # Rewriting _base/ is only half the chain: the 17 generated trees are still on
 # the old tag until the transpiler reruns, and `agentic-plugins check` byte-
@@ -402,8 +530,14 @@ version_files = [
 # drift failure on the release commit. This hook runs after version_files are
 # rewritten and before the bump commit is made, and commitizen commits with
 # `git commit -a`, so the regenerated trees land in that same commit.
+#
+# The second hook re-renders deploy/quick-create-links.md, whose parameter table
+# is read from the CDK templates that version_files has just rewritten. The
+# IaC drift workflow re-renders the document and fails on any git diff, so a
+# bump that left the table on the old AshVersion would fail it.
 pre_bump_hooks = [
     "uv run --project ash-agent-plugins/agentic-coding/transpiler agentic-plugins build",
+    "uv run python scripts/render_quick_create_links.py render",
 ]
 tag_format = "v$version"
 changelog_file = "CHANGELOG.md"
@@ -1259,17 +1393,6 @@ disable_error_code = [
 ]
 
 [[tool.mypy.overrides]]
-module = "automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner"
-disable_error_code = [
-    "arg-type",
-    "attr-defined",
-    "call-arg",
-    "no-untyped-def",
-    "type-arg",
-    "union-attr",
-]
-
-[[tool.mypy.overrides]]
 module = "automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner"
 disable_error_code = [
     "arg-type",
@@ -1685,11 +1808,13 @@ exclude = [ ".uv-cache/",]
 skip-excluded-dirs = true
 
 [tool.hatch.build.targets.sdist]
-# "/Dockerfile" is anchored to the project root. hatch reads include entries as
-# gitignore patterns, so a bare "Dockerfile" matched every file of that name at any
-# depth and shipped tests/test_data/snapshot_fixture/repo/Dockerfile in the sdist,
-# which .github/scripts/assert-artifact-contents.py refuses (a top-level tests/).
-include = [ "automated_security_helper", "/Dockerfile", "automated_security_helper/assets/ASH_INSTALLED_REVISION", "automated_security_helper/assets/Dockerfile",]
+# Hatch reads these as gitignore patterns, so a bare "Dockerfile" matches a file of
+# that name at any depth. It pulled deploy/kubernetes-operator/Dockerfile, every
+# Dockerfile under deploy/cdk/node_modules and tests/test_data/snapshot_fixture/repo/
+# Dockerfile into the sdist (.github/scripts/assert-artifact-contents.py refuses the
+# last, a top-level tests/). The leading slash anchors each entry to the repository
+# root. tests/unit/test_sdist_file_selection.py holds it.
+include = [ "/automated_security_helper", "/Dockerfile", "automated_security_helper/assets/ASH_INSTALLED_REVISION", "automated_security_helper/assets/Dockerfile",]
 
 [tool.hatch.build.targets.wheel]
 include = [ "automated_security_helper", "automated_security_helper/assets", "automated_security_helper/assets/ASH_INSTALLED_REVISION", "automated_security_helper/assets/Dockerfile",]

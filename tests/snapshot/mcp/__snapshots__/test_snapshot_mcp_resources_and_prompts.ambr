@@ -381,7 +381,6 @@
         • mcp-config
         • npm-audit
         • opengrep
-        • semgrep
         • syft
         • trivy
         • zizmor
@@ -434,7 +433,6 @@
         • mcp-config
         • npm-audit
         • opengrep
-        • semgrep
         • syft
         • trivy
         • zizmor

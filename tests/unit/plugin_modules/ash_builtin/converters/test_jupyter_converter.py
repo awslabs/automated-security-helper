@@ -1813,7 +1813,7 @@ class TestConvert:
         )
         converter.context.config.global_settings.ignore_paths = [
             IgnorePathWithReason(
-                path="vendor/*", reason="third-party code", expiration=expiration
+                path="vendor/*", reason="third-party code", expires=expiration
             )
         ]
         monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])

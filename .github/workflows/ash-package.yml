@@ -88,6 +88,49 @@ on:
   merge_group:
     types: [checks_requested]
   workflow_dispatch: {}
+  # Called by ash-package-formats.yml, which runs this whole workflow on a push to a
+  # branch that touches packaging. The triggers above, and the reasons given for
+  # having no push trigger here, are unchanged: that file carries the paths filter so
+  # this one does not have to.
+  #
+  # Also called by ash-release-assets.yml, which takes the .msix, .nupkg and Flatpak
+  # bundle this workflow builds, gates and installs, and stages them as release
+  # assets. `ref` is how the release run builds the exact commit it is about to tag:
+  # on a closed pull request the event's own ref is refs/pull/<n>/merge, which is not
+  # main. Empty means the event's commit, which is what every other caller wants.
+  #
+  # The two signing secrets are declared so that caller can hand them over explicitly
+  # for a release, and only for a release. ash-package-formats.yml passes none, so a
+  # branch push still self-signs (tests/unit/test_package_formats_workflow.py).
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to check out and build. Empty means the event's commit.
+        type: string
+        required: false
+        default: ""
+    secrets:
+      MSIX_SIGNING_PFX_BASE64:
+        required: false
+      MSIX_SIGNING_PFX_PASSWORD:
+        required: false
+    # The ID of each artifact a caller downloads, for actions/download-artifact's
+    # artifact-ids. IDs, not names: a name carries the run_attempt of the attempt that
+    # uploaded it, which a caller job re-run by "Re-run failed jobs" in a later attempt
+    # cannot recompute (tests/unit/test_artifact_downloads_take_the_producers_id.py).
+    outputs:
+      package-artifact-id:
+        description: The artifact holding the gated wheel and sdist
+        value: ${{ jobs.build.outputs.artifact-id }}
+      flatpak-artifact-id:
+        description: The artifact holding the N Flatpak bundle
+        value: ${{ jobs.flatpak.outputs.artifact-id }}
+      msix-artifact-id:
+        description: The artifact holding the built .msix
+        value: ${{ jobs.msix.outputs.artifact-id }}
+      nupkg-artifact-id:
+        description: The artifact holding the gated .nupkg
+        value: ${{ jobs.chocolatey.outputs.artifact-id }}
 
 permissions:
   contents: read
@@ -114,6 +157,10 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+    # upload-artifact's artifact-id, so the jobs below download this attempt's upload
+    # whichever attempt they themselves run in.
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       # Default fetch-depth (1) on purpose. hatch_build.py stamps
       # automated_security_helper/assets/ASH_INSTALLED_REVISION during the build
@@ -121,6 +168,8 @@ jobs:
       # built from the installed package fetches by id. That needs no history,
       # so a full clone would buy nothing here.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
@@ -153,6 +202,19 @@ jobs:
       - name: Prove the artifact-contents check can fail
         run: uv run --no-project python .github/scripts/assert-artifact-contents.py --self-test
 
+      # The native packages have their own contents gate,
+      # packaging/assert-package-contents.py, and it runs on the real packages inside
+      # the msix, chocolatey and flatpak jobs below (from verify-on-windows.ps1 and
+      # flatpak/build.sh). Its positive control runs HERE, on Linux and before any
+      # build: it plants payload in fixture MSIX, .nupkg and Flatpak trees shaped like
+      # the real ones, requires each to be rejected by the intended check, and requires
+      # the clean fixtures to be accepted. A Windows job that is red for an unrelated
+      # reason would otherwise leave this gate's own control unrun. `uv run --script`
+      # because the MSIX fixtures are parsed with defusedxml, which the script's PEP 723
+      # block declares.
+      - name: Prove the package-contents check can fail
+        run: uv run --script packaging/assert-package-contents.py --self-test
+
       - name: Build wheel and sdist
         run: uv build --out-dir dist
 
@@ -183,7 +245,7 @@ jobs:
 
       # The operator invariant for the whole installer program: no artifact
       # published from this repository may carry third-party scanner source or
-      # assets. ASH invokes bandit, checkov, semgrep, grype, syft, trivy,
+      # assets. ASH invokes bandit, checkov, grype, syft, trivy,
       # opengrep, npm-audit, detect-secrets, cdk-nag and cfn-nag; it redistributes
       # none of them. Two vendored .jsii.tgz bundles (aws-cdk-lib, cdk-nag) lived
       # in the tree until commit 760f3647, so this is a regression guard rather
@@ -260,20 +322,27 @@ jobs:
           echo "installing ${wheel}"
           # A fresh venv, and --no-cache so a previously built wheel of the same
           # version cannot be substituted for the one just produced.
-          uv venv /tmp/ash-wheel-check
-          VIRTUAL_ENV=/tmp/ash-wheel-check uv pip install --no-cache "${wheel}"
+          # Under RUNNER_TEMP, which the runner empties after the job, not /tmp.
+          venv="${RUNNER_TEMP}/ash-wheel-check"
+          uv venv "${venv}"
+          VIRTUAL_ENV="${venv}" uv pip install --no-cache "${wheel}"
           # The console script, not `python -m`: the entry point is what the deb,
           # rpm, MSIX, Flatpak, Chocolatey and winget packages put on PATH, and it
           # is declared in wheel metadata that a plain import would not exercise.
-          /tmp/ash-wheel-check/bin/ash --version
+          "${venv}/bin/ashx" --version
           # The wheel carries the GenAI guide for its own version, so the command
           # writes it with no network: every proxy points at a closed port here, and
           # the copy must be the docs page the wheel was built from.
           HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 NO_PROXY='' \
-            /tmp/ash-wheel-check/bin/ash get-genai-guide --output /tmp/ash-genai-guide.md
-          cmp /tmp/ash-genai-guide.md docs/content/docs/genai-steering-guide.md
+            "${venv}/bin/ashx" get-genai-guide --output "${RUNNER_TEMP}/ash-genai-guide.md"
+          cmp "${RUNNER_TEMP}/ash-genai-guide.md" docs/content/docs/genai-steering-guide.md
+          # The wheel also declares the deprecated `ash` alias, which pip, pipx and
+          # Homebrew installs still put on PATH: same exit code and --version output
+          # as `ashx`, plus exactly one deprecation line on stderr.
+          PATH="${venv}/bin:${PATH}" bash .github/actions/validate-install/assert-deprecated-alias.sh
 
       - name: Upload wheel and sdist
+        id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # run_attempt is in the name because artifact names are immutable within a
@@ -294,3 +363,769 @@ jobs:
           # artifact that a later phase would download and treat as a build.
           if-no-files-found: error
           retention-days: 14
+
+  # Native packages: deb and rpm. Their jobs live in ash-native-packages.yml, which
+  # builds its own wheel the same way (`uv build`), gates it with the same
+  # artifact-contents check, and then builds, payload-gates, installs and scans each
+  # package inside its target distribution, with upgrade legs and negative controls.
+  # They moved because that workflow needs a `push` trigger, which this one
+  # deliberately does not have (see the header above). Comments on the jobs below that
+  # compare against "the deb and rpm jobs" mean the legs in that workflow.
+  #
+  # Testing inside a distro image PUBLISHES NOTHING. It pulls a public base image,
+  # builds a package in it and throws the container away.
+  #
+  # Every verification runs the same script a developer runs locally, rather than
+  # reimplementing the steps in YAML. A verification that exists twice drifts, and the
+  # copy in CI is the one nobody runs by hand.
+
+  # WHY THIS JOB HAS NO `container:` KEY WHEN THE DEB AND RPM JOBS DO
+  #
+  # flatpak-builder drives bwrap, and bwrap has to create a user namespace. Measured on
+  # a Docker 25.0 host before this job was written:
+  #
+  #   docker run fedora:41 bwrap --dev-bind / / --unshare-user-try /bin/true
+  #     -> bwrap: No permissions to creating new namespace, likely because the kernel
+  #        does not allow non-privileged user namespaces.       (exit 1)
+  #   docker run --privileged fedora:41 <same>                  (exit 0)
+  #
+  # A GitHub job `container:` is not privileged and there is no input to make it so, so
+  # the .deb and .rpm pattern cannot be copied here: the build would fail inside bwrap
+  # with a message about namespaces that says nothing about packaging. This job runs on
+  # the runner host instead, where the flatpak build sandbox is the isolation and no
+  # outer container is needed for it.
+  #
+  # That trades away the property the two jobs above are built around -- building in an
+  # image that starts with neither the interpreter nor pip, so the package's own declared
+  # dependencies have to be right. A Flatpak has no equivalent claim to test: its
+  # dependency is a runtime it names by exact branch, flatpak installs that runtime or
+  # fails, and the runtime is byte-identical everywhere. The host's own python3, pip and
+  # git are invisible to both the build sandbox and the app sandbox, so the runner image
+  # cannot mask a missing dependency the way debian:bookworm's preinstalled python would
+  # have.
+  #
+  # `sudo` on the verification step, for two reasons that are both about the missing
+  # container: the script installs flatpak-builder with apt-get, and it installs the
+  # runtime and the bundle into the system installation. Inside a job container the
+  # steps above already run as root.
+  #
+  # Not cached. The runtime is a 633 MB download, and a cache of it would restore a
+  # comparable number of bytes from a different CDN while adding a way for a job to test
+  # a runtime that is no longer what `flatpak install` would give a user. The
+  # verification's first step asserts bwrap works before anything else runs, so if the
+  # runner image ever stops permitting user namespaces this job says so in its first
+  # twenty lines rather than in a flatpak-builder trace.
+  #
+  # Testing here PUBLISHES NOTHING, exactly as for the .deb and .rpm: it pulls a public
+  # runtime from Flathub, builds a bundle, installs it locally and throws the machine
+  # away. NOTHING IS SUBMITTED TO FLATHUB by this job or by anything under
+  # packaging/flatpak/.
+  flatpak:
+    name: "native: flatpak (org.freedesktop.Sdk 24.08)"
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    # Longer than the 25 minutes the .deb and .rpm jobs get: this one downloads a 633 MB
+    # runtime before it can build, builds two bundles (N and N-1), and each first `ashx`
+    # run after an install or update resolves ASH's runtime dependencies from a Python
+    # index, which the other two do at install time.
+    timeout-minutes: 60
+    steps:
+      # Full history: build-test-wheels.sh takes the upgrade leg's N-1 from it
+      # (packaging/n1-source.sh), and a shallow clone fails that derivation.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      # download-artifact reads an empty artifact-ids as no filter and downloads every
+      # artifact of the run, so the ID the build job handed over is held to a number first.
+      - name: Check the wheel artifact ID
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ needs.build.outputs.artifact-id }}
+        run: |
+          if [[ ! "$ARTIFACT_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::the build job's artifact-id output is '${ARTIFACT_ID}', not an artifact ID. Without one, download-artifact would fetch every artifact in the run."
+            exit 1
+          fi
+          echo "wheel artifact: ${ARTIFACT_ID}"
+
+      - name: Download the wheel built and gated by the build job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          path: dist
+
+      # The upgrade leg's N-1 wheel: this tree with its version lowered (3.7.0 -> 3.6.0),
+      # built and gated by the same script the deb and rpm legs use. Built here and never
+      # uploaded, because a workflow artifact on a public repository is downloadable by
+      # anyone and this wheel is this tree's code under a version it is not. Only its
+      # dist-prev/ half is used; N stays the wheel the build job gated. `sudo` because the
+      # script installs its harness tools with apt-get.
+      - name: Build and gate the N-1 wheel for the upgrade leg
+        run: sudo REPO="$GITHUB_WORKSPACE" bash packaging/build-test-wheels.sh "$RUNNER_TEMP/flatpak-wheels"
+
+      # Builds N and N-1 bundles, installs N fresh, runs the findings, clean and
+      # incomplete cases from tests/e2e/fixtures/cases.json with every verdict from
+      # scripts/e2e/assert_outcome.py, shows those verdicts rejecting wrong outcomes,
+      # uninstalls, then installs N-1 from a local remote and `flatpak update`s it to N.
+      - name: Build the Flatpak, install it, run the e2e cases, upgrade and uninstall
+        run: sudo --preserve-env=REPO,DIST,PREV_DIST,TMPDIR,OUT bash packaging/flatpak/verify-in-container.sh
+        env:
+          # The script's build output and logs go in a mktemp directory, so keep that
+          # under RUNNER_TEMP rather than the runner's /tmp.
+          TMPDIR: ${{ runner.temp }}
+          REPO: ${{ github.workspace }}
+          DIST: ${{ github.workspace }}/dist
+          PREV_DIST: ${{ runner.temp }}/flatpak-wheels/dist-prev
+          # Where build.sh writes the bundles: N at the top level, N-1 under prev/. Moved
+          # out of the script's mktemp directory, which it removes on exit, so the N
+          # bundle it installed and updated to survives for the upload below.
+          OUT: ${{ github.workspace }}/build/flatpak-out
+
+      # The N bundle only: `*.flatpak` does not descend into prev/, where the N-1 bundle
+      # (this tree under a version it is not) stays. ash-release-assets.yml unpacks it
+      # and runs the tree gate build.sh ran, on these bytes, before a release attaches it.
+      - name: Upload the N Flatpak bundle
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ash-flatpak-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: build/flatpak-out/*.flatpak
+          if-no-files-found: error
+          retention-days: 14
+
+  # The MSIX. Unlike the two jobs above there is no container: a hosted Windows runner is
+  # both the build host and the test host, and that is a real weakness of this job rather
+  # than a choice. There is no Windows equivalent of "build it in the distro image so a
+  # missing dependency cannot be masked by the build host", so a dependency present on the
+  # runner and absent on a user's machine would pass here. The dependency that matters is a
+  # Python interpreter, and the launcher probes for one explicitly and reports its absence
+  # as an actionable message, which is the closest available substitute.
+  #
+  # windows-latest, and two facts about it that are worth writing down because they change
+  # what this job can prove:
+  #
+  #   * It is Windows Server 2025 (10.0.26100), and it ships exactly ONE Windows SDK,
+  #     10.0.26100.0. windows-2022 ships four. So nothing here may hardcode an SDK version,
+  #     and build.ps1 globs for the newest instead -- sorting by parsed version, because
+  #     sorting those directory names as strings puts 10.0.9.x above 10.0.26100.x.
+  #   * Microsoft's MSIX support matrix has columns for Windows Server 2019 and 2022 and
+  #     none for 2025, and windows.appExecutionAlias is documented as NOT supported on
+  #     Server 2019 with no statement either way for later releases. So whether typing
+  #     `ashx` works on this runner is not something documentation answers.
+  #     verify-on-windows.ps1 therefore MEASURES alias availability and warns rather than
+  #     failing when they are absent, and falls back to the packaged executables so the
+  #     scan assertion still runs. If the deployment stack turns out to be unavailable on
+  #     Server 2025 entirely, windows-2022 is the documented-supported fallback label.
+  #
+  # No container: key and no Docker-based action anywhere in this job, deliberately. A
+  # Docker action's image is pulled in the job PREPARE phase, before its `if:` is
+  # evaluated, so a conditionally-run container step is an unconditional network
+  # dependency -- which has already cost this repository a CI failure that reported red
+  # having run zero tests.
+  msix:
+    name: "native: msix (windows-latest)"
+    needs: build
+    runs-on: windows-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    # Longer than the 25 the deb and rpm jobs get. This one additionally downloads a managed
+    # CPython for uv, searches the SDK for two tools, compiles three launchers twice (N and
+    # the N-1 package the upgrade leg starts from), and installs all of ASH's
+    # dependencies twice, once per venv bootstrap, before four scans. The bootstrap alone
+    # measured about 90 seconds on windows-latest.
+    timeout-minutes: 55
+    steps:
+      # No "install git first" step, unlike the deb and rpm jobs. Those run in distro images
+      # with no git, where actions/checkout silently falls back to a REST tarball. The
+      # Windows runner image ships git.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+
+      # An explicit interpreter, so this job tests the package rather than testing which
+      # Python the runner image happens to prefer that week. 3.13 is the newest version
+      # ash-unified-ci.yml exercises, and it is the same ceiling the launcher enforces for
+      # a user.
+      #
+      # The pin was originally added for a different and wrong reason, which is recorded
+      # because the wrong reason is still written down in places. The launcher's old
+      # `py -3` probe picked Python 3.14.7 out of the hosted toolcache and `ash --version`
+      # exited 1 writing nothing at all, so 3.14 was blamed. Pinning 3.13 did not fix it:
+      # the job then failed identically on 3.13.15. The cause was the launcher building
+      # its venv at a staging path and renaming it, which breaks every console-script shim
+      # in the venv; packaging/msix/AshLauncher.cs CreateVenv has the detail. The pin is
+      # kept on its own merits, not as a workaround for a 3.14 defect that was never there.
+      - name: Use a Python this project is exercised on
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      # download-artifact reads an empty artifact-ids as no filter and downloads every
+      # artifact of the run, so the ID the build job handed over is held to a number first.
+      - name: Check the wheel artifact ID
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ needs.build.outputs.artifact-id }}
+        run: |
+          if [[ ! "$ARTIFACT_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::the build job's artifact-id output is '${ARTIFACT_ID}', not an artifact ID. Without one, download-artifact would fetch every artifact in the run."
+            exit 1
+          fi
+          echo "wheel artifact: ${ARTIFACT_ID}"
+
+      - name: Download the wheel built and gated by the build job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          path: dist
+
+      # One script, the same one a developer runs. The alternative was reimplementing the
+      # steps in YAML, and the native-packages comment above says why that is wrong: a
+      # verification that exists twice drifts, and the copy in CI is the one nobody runs by
+      # hand.
+      #
+      # The two secrets are passed through `env:` and read as $env:NAME, not interpolated
+      # into the script body. That differs from the build job's artifact-path step above,
+      # which interpolates directly and explains at length why -- but that step handles two
+      # filenames produced by `uv build`, and these are secrets. A secret interpolated into
+      # a script body is a secret in the run log's command echo, and it defeats the
+      # masking. $env: and not $ because the shell here is pwsh, which expands $env:NAME and
+      # treats $NAME as a PowerShell variable that was never set.
+      #
+      # A SECRET IS NOT AVAILABLE TO A RUN TRIGGERED FROM A FORK, so on a fork PR both of
+      # these are the empty string. That is handled rather than tolerated: build.ps1 reads
+      # an empty certificate secret as "generate a throwaway self-signed one", which is the
+      # same path a developer with no certificate takes. The job does not fail, and it does
+      # not silently skip signing either. Which path ran is printed by build.ps1 as
+      # "signing certificate: supplied" or "generating a throwaway self-signed one".
+      #
+      # In practice, on this repository today, the self-signed path is the one CI exercises:
+      # neither secret is configured, so every run generates its own certificate. The
+      # supplied-certificate path is exercised the first time one is set, and the only
+      # difference between them is where the .pfx bytes came from.
+      # What the script proves, in order: N and an N-1 package (this tree with a lowered
+      # version, built in RUNNER_TEMP and never uploaded) are built and signed; a copy of N
+      # with one changed byte is refused by Add-AppxPackage; N-1 installs fresh and reports
+      # its version; the upgrade to N moves the installed version and REBUILDS the venv
+      # Windows keeps across updates; the three e2e cases (tests/e2e/fixtures/cases.json)
+      # exit exactly 2, 0 and 1 with the counts and report paths scripts/e2e/assert_outcome.py
+      # requires; two negative controls on that verdict must fail; a same-version reinstall
+      # keeps the venv; and uninstall removes the package, the venv and the aliases.
+      - name: Build the .msix, upgrade from N-1, run the e2e scans, and uninstall
+        shell: pwsh
+        env:
+          MSIX_SIGNING_PFX_BASE64: ${{ secrets.MSIX_SIGNING_PFX_BASE64 }}
+          MSIX_SIGNING_PFX_PASSWORD: ${{ secrets.MSIX_SIGNING_PFX_PASSWORD }}
+        run: |
+          ./packaging/msix/verify-on-windows.ps1 `
+            -PfxBase64 "$env:MSIX_SIGNING_PFX_BASE64" `
+            -PfxPassword "$env:MSIX_SIGNING_PFX_PASSWORD"
+
+      # Uploaded so the artifact can be inspected without a Windows machine, and because
+      # packaging/winget/ declares this filename as its installer against a templated
+      # release asset URL -- an upload here is the only place that filename is produced by
+      # the code that decides it rather than asserted in a manifest. It is also the .msix
+      # ash-release-assets.yml stages as a release asset and renders the winget
+      # manifests from.
+      #
+      # Same run_attempt suffix as the build job's upload, for the same reason: artifact
+      # names are immutable within a run from upload-artifact v4 onward, so "Re-run all
+      # jobs" on a run that already uploaded would otherwise fail the upload and redden a
+      # tree that was green.
+      - name: Upload the built .msix
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ash-msix-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: build/msix/*.msix
+          if-no-files-found: error
+          retention-days: 14
+
+  # The Chocolatey nuspec, checked against NuGet's published XSD.
+  #
+  # One job per format, following deb and rpm, and not one shared "validate the
+  # manifests" job holding both this and the winget check. A shared job would be cheaper
+  # by about thirty seconds of runner time and would couple the two formats: dropping
+  # Chocolatey would delete the job the winget check lives in, so the two could not be
+  # landed or reverted independently.
+  #
+  # It does not need the build job. Nothing here reads the wheel: the script checks a
+  # metadata file against a published schema and cross-checks the version it declares
+  # against the nuspec itself. So this starts immediately instead of queueing behind a
+  # build whose output it would not open.
+  #
+  # The script rejects two deliberately broken copies of the nuspec before validating
+  # the real one, for the reason the "Prove the artifact-contents check can fail" step
+  # above gives: xmllint invoked without --schema parses the document and exits 0, so a
+  # validator that has never been observed failing may be checking nothing, and its
+  # passing output looks identical either way.
+  nuspec:
+    name: "schema: chocolatey nuspec (NuGet XSD)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+
+      # xmllint comes from libxml2-utils, which is NOT in the ubuntu-24.04 runner
+      # image's apt package list -- checked against
+      # images/ubuntu/Ubuntu2404-Readme.md in actions/runner-images, whose list runs
+      # from acl to zsync and contains no libxml2 package. validate-nuspec.sh fails
+      # with a named error if xmllint is missing rather than skipping the check, so
+      # dropping this step would redden the job rather than quietly pass it, but there
+      # is no reason to make anyone read that error.
+      - name: Install xmllint
+        run: |
+          set -euo pipefail
+          sudo apt-get -qq update >/dev/null
+          sudo apt-get -qq install -y --no-install-recommends libxml2-utils >/dev/null
+          xmllint --version
+
+      - name: Validate ash.nuspec against NuGet's published XSD
+        run: bash packaging/chocolatey/validate-nuspec.sh
+
+  # The Chocolatey package. Same principle as the deb and rpm jobs: build the package
+  # in the environment that will install it, then install it and make it do real work.
+  #
+  # windows-latest rather than a container, because Chocolatey is a Windows tool and
+  # Linux Docker cannot run a Windows image. The runner ships what this needs already:
+  # images/windows/Windows2025-VS2026-Readme.md in actions/runner-images lists
+  # "Chocolatey 2.7.4" and "Python 3.12.10", and the label table in that repository's
+  # README maps windows-latest to Windows Server 2025 with that image. So there is no
+  # bootstrap step, and `choco pack` is reachable here and nowhere else in this
+  # workflow.
+  #
+  # The one place this is weaker than the deb and rpm jobs, and it is a property of the
+  # runner rather than a choice: those two start from an image with no interpreter, so
+  # the package's own dependency declaration is what makes the install work. A
+  # windows-latest runner already has Python on PATH and cannot be stripped of it, so
+  # verify-on-windows.ps1 instead asserts that Chocolatey resolved and installed the
+  # declared python3 dependency. That catches a dependency nothing can satisfy, which
+  # is the failure the rpm job found on Amazon Linux, without claiming the host was
+  # bare.
+  #
+  # A plain `run:` step, like deb and rpm use. A Docker-based action would be worse
+  # than unnecessary here: its image is pulled in the job's prepare phase, before any
+  # `if:` on the step is evaluated, so a conditional container step is an unconditional
+  # network dependency.
+  chocolatey:
+    name: "native: chocolatey (windows-latest)"
+    needs: build
+    runs-on: windows-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    # The e2e leg installs three times and upgrades once, and every install builds a venv
+    # and resolves ASH's runtime dependencies from a Python index. It also builds an N-1
+    # wheel.
+    timeout-minutes: 50
+    permissions:
+      contents: read
+    steps:
+      # Full history and every tag, because N-1 is derived from them rather than named:
+      # E2E_PREV_REF=auto below makes scripts/e2e/prev_tree.py take the newest release tag,
+      # else the newest ancestor, that differs from HEAD and carries packaging/chocolatey.
+      # It used to be the tip of one development branch, fetched by name, and that fetch
+      # fails once the branch is merged and deleted, which would have turned this job red
+      # on main the day the channel landed there. In a shallow clone the derivation fails
+      # and says so. tests/unit/test_e2e_n1_fetch.py rebuilds both clones.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      # download-artifact reads an empty artifact-ids as no filter and downloads every
+      # artifact of the run, so the ID the build job handed over is held to a number first.
+      - name: Check the wheel artifact ID
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ needs.build.outputs.artifact-id }}
+        run: |
+          if [[ ! "$ARTIFACT_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::the build job's artifact-id output is '${ARTIFACT_ID}', not an artifact ID. Without one, download-artifact would fetch every artifact in the run."
+            exit 1
+          fi
+          echo "wheel artifact: ${ARTIFACT_ID}"
+
+      - name: Download the wheel built and gated by the build job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          path: dist
+
+      # uv runs the e2e harness (scripts/e2e) and builds the N-1 wheel. No cache: an e2e
+      # leg is a fresh install by definition, and a saved Actions cache is a publish
+      # surface (.github/scripts/assert-publish-surfaces.py) this job has no reason to open.
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      # `shell: pwsh` is the default on windows-latest and is stated anyway, because
+      # the body is a PowerShell script invocation and the difference matters: pwsh
+      # does not glob for external commands and expands $env:VAR rather than $VAR. See
+      # the long note above the artifact-contents step for how that bit this workflow
+      # before. Nothing is globbed here; the path is literal and the wheel is found by
+      # the script itself.
+      #
+      # $Repo and $Work are interpolated directly rather than passed through env:, for
+      # the same reason the artifact-contents step interpolates its two paths: `env:` plus
+      # "$REPO" would reintroduce a shell dependency, since pwsh expands $env:REPO and
+      # not $REPO. github.workspace and runner.temp are not event payload, so they are
+      # not an injection surface.
+      #
+      # The script runs the three e2e cases (exit 2, 0 and 1) against the installed shim,
+      # upgrades from N-1, uninstalls twice, and shows each gate failing on a planted
+      # defect, including a package whose install script exits 1.
+      #
+      # -OutDir is in the workspace so the upload below can name it with a relative path.
+      # The script writes exactly one file there, the N .nupkg it installs, upgrades to and
+      # gates with packaging/assert-package-contents.py; N-1 and the negative-control
+      # packages go under -Work.
+      - name: Build N and N-1, install, scan, upgrade, uninstall, negative controls
+        shell: pwsh
+        env:
+          E2E_PREV_REF: auto
+        run: ./packaging/chocolatey/verify-on-windows.ps1 -Repo "${{ github.workspace }}" -OutDir "${{ github.workspace }}\build\choco-out" -Work "${{ runner.temp }}\ash-choco-e2e"
+
+      # The .nupkg the step above gated and installed, kept for ash-release-assets.yml,
+      # which gates it again on these bytes before a release attaches it. Same
+      # run_attempt suffix as the other uploads here, for the same reason.
+      - name: Upload the gated .nupkg
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ash-nupkg-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: build/choco-out/*.nupkg
+          if-no-files-found: error
+          retention-days: 14
+
+  # The winget manifest set, checked against Microsoft's published JSON Schemas.
+  #
+  # The checked-in set, on Linux, with no client and no artifact. The winget-client job
+  # below runs the real client (`winget validate`, install, upgrade, uninstall) on the
+  # sets rendered from the built .msix; this job is the fast check of the files as
+  # committed, and it also checks what a schema cannot: that the three files agree, that
+  # the version is the one pyproject.toml declares, and that the installer URL names the
+  # release tag and the filename packaging/msix/build.ps1 writes.
+  #
+  # Its own job rather than a step on the nuspec job above, so that the two Windows
+  # packaging formats can be landed and reverted independently of each other.
+  #
+  # No `needs: build` and no artifact download. The manifests describe the MSIX, not the
+  # wheel, so there is nothing in the build job's output for this to open; the version
+  # they declare is cross-checked against pyproject.toml instead.
+  #
+  # validate-manifests.py corrupts one field per manifest and requires each broken copy
+  # to be rejected before it validates the real ones, and requires the rejection message
+  # to name the field that was corrupted. Both halves are load-bearing. A JSON Schema
+  # check whose schema fetch returned an error page can exit 0, and a rejection caused by
+  # an unrelated error proves nothing about the constraint the control was written for.
+  winget:
+    name: "schema: winget manifests (published JSON Schemas)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+
+      # No --no-project and no `uv sync`. The script carries PEP 723 inline metadata
+      # naming the packages it needs, which uv reads and resolves into an ephemeral
+      # environment, so the project is never synced. Measured at 0.7 seconds warm,
+      # against roughly a minute for a project sync.
+      - name: Validate the winget manifests against Microsoft's published JSON Schemas
+        run: uv run packaging/winget/validate-manifests.py
+
+  # The winget channel end to end, through the real client: validate, a refused install
+  # with a wrong InstallerSha256, a fresh install, the three shared e2e cases (exit 2, 0
+  # and 1, judged by scripts/e2e/assert_outcome.py), an uninstall, an N-1 to N upgrade,
+  # and a second uninstall. packaging/winget/verify-on-windows.ps1 has the detail.
+  #
+  # It installs the .msix the msix job built and uploaded, not one of its own, so the
+  # artifact winget installs is the artifact that job gated. No release asset exists
+  # for an unreleased commit, so the script serves that file from 127.0.0.1 and renders
+  # a loopback manifest set for it (set-release-metadata.py --local-url-base, which
+  # validate-manifests.py --local-installer holds to loopback). The release-URL set is
+  # rendered too, from the same file, and that is the one `winget validate` reads.
+  #
+  # THE CLIENT. The hosted Windows images do not list winget:
+  # images/windows/Windows2025-VS2026-Readme.md in actions/runner-images lists
+  # Chocolatey and does not mention it. The script uses a client already registered
+  # for the runner account if there is one, then tries to register the App Installer
+  # Windows Server 2025 can carry, then installs one pinned winget-cli release whose two
+  # downloads are checked against SHA-256 digests in the script. A client older than
+  # 1.12.210, the first with the 1.12 manifest schemas, does not count. It prints which
+  # of the three it used. If none works this job fails rather than skipping, because a
+  # winget leg that passes without a client has tested nothing.
+  #
+  # The signing secrets are passed for the N-1 build only: a real certificate, once
+  # configured, has to sign N-1 with the same subject as N, or Windows sees two
+  # different packages and the upgrade is not one. They are empty on a fork and on a
+  # call from ash-package-formats.yml, and build.ps1 then self-signs, as in the msix job.
+  winget-client:
+    name: "native: winget client (windows-latest)"
+    needs: [build, msix]
+    runs-on: windows-latest
+    # Two first-run venv bootstraps (N and N-1), one N-1 wheel and .msix build, and a
+    # client download of about 300 MB when the host has no winget.
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          # No cache: a cache save is a publish surface (.github/scripts/
+          # assert-publish-surfaces.py), and this job gains nothing a cold uv lacks.
+          enable-cache: false
+
+      # The same interpreter the msix job pins, for the same reason. It also runs
+      # scripts/e2e/run_case.py, lower_version.py (tomllib) and the loopback server.
+      - name: Use a Python this project is exercised on
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      # download-artifact reads an empty artifact-ids as no filter and downloads every
+      # artifact of the run, so the ID the msix job handed over is held to a number first.
+      - name: Check the .msix artifact ID
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ needs.msix.outputs.artifact-id }}
+        run: |
+          if [[ ! "$ARTIFACT_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::the msix job's artifact-id output is '${ARTIFACT_ID}', not an artifact ID. Without one, download-artifact would fetch every artifact in the run."
+            exit 1
+          fi
+          echo ".msix artifact: ${ARTIFACT_ID}"
+
+      - name: Download the .msix built and installed by the msix job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.msix.outputs.artifact-id }}
+          path: build/msix-artifact
+
+      - name: Install, scan, upgrade and uninstall ASH through the winget client
+        shell: pwsh
+        env:
+          MSIX_SIGNING_PFX_BASE64: ${{ secrets.MSIX_SIGNING_PFX_BASE64 }}
+          MSIX_SIGNING_PFX_PASSWORD: ${{ secrets.MSIX_SIGNING_PFX_PASSWORD }}
+        run: |
+          ./packaging/winget/verify-on-windows.ps1 `
+            -PfxBase64 "$env:MSIX_SIGNING_PFX_BASE64" `
+            -PfxPassword "$env:MSIX_SIGNING_PFX_PASSWORD"
+  # The Homebrew tap, exercised rather than parsed.
+  #
+  # WHY THIS JOB IS HERE AND NOT IN ash-install-methods.yml
+  #
+  # That workflow is the closer neighbour by subject: it already has a `homebrew`
+  # matrix method and already filters on `Formula/**`. It is also the workflow whose
+  # triggers the comment at the top of this file explains are wrong for a gate --
+  # `branches: [main]` skips any pull request stacked on a non-main base, and there is
+  # no `merge_group` leg, so a queue entry never gets a verdict. Putting a real
+  # `brew install` there would put the most expensive check in the repository behind
+  # the least reliable trigger.
+  #
+  # WHY THE CHEAP CHECK STAYS WHERE IT IS
+  #
+  # `ruby -c Formula/ash.rb` remains in .github/actions/validate-install, unchanged,
+  # and runs on four operating systems. It is not redundant with this job, it is the
+  # fast signal: a syntax error is reported in seconds there, against a job here that
+  # takes tens of minutes and depends on PyPI being reachable and five Rust
+  # compilations succeeding. If a PyPI blip reddens this job, the formula still has a
+  # check that answered.
+  #
+  # It also cannot be upgraded in place. `brew audit` needs Homebrew on PATH, and per
+  # actions/runner-images' Ubuntu 24.04 image notes Homebrew is pre-installed at
+  # /home/linuxbrew but deliberately NOT added to PATH -- it needs
+  # `eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"` first. Two of that
+  # matrix's four homebrew cells are Linux, so adding a brew command there would fail
+  # on them for a reason unrelated to the formula.
+  #
+  # WHY macos-latest
+  #
+  # macOS is the platform essentially every Homebrew user installs ASH on, which makes
+  # it the real target environment rather than the convenient one -- the same standard
+  # the deb and rpm jobs in ash-native-packages.yml are held to, where the package is built inside the
+  # distro that will install it. Per actions/runner-images, `macos-latest` is macOS 26
+  # Arm64 and that image ships Homebrew 6.0.22, Ruby 3.4.10 and Rust 1.98.1. This is a
+  # public repository, so GitHub-hosted macOS minutes are free and cost is not the
+  # deciding factor; queue time is, and this job blocks nothing else.
+  #
+  # WHAT THIS JOB BUILDS: THIS COMMIT, THROUGH A COPY OF THE FORMULA
+  #
+  # Formula/ash.rb builds from the git tag on its `url` line, which is the form it is
+  # published in. Installed verbatim it would build that release, and its test block
+  # runs `ashx`, which a release before v4 does not have. So the tap gets a copy
+  # written by scripts/e2e/brew_formula.py: the same file with that one line pointed at
+  # a `git archive` tarball of this commit. The resource block, install and test block
+  # are the formula's own, and tests/unit/test_e2e_brew_formula.py holds the copy to
+  # that one-line difference. `brew audit --strict` then runs on the copy and on the
+  # release formula itself, so the published form is still checked as written.
+  # tests/unit/test_homebrew_formula_version.py keeps the release tag equal to this
+  # repository's version. The full e2e for this channel (exit codes, upgrade,
+  # uninstall, a missing-resource control) is the `homebrew` job in ash-e2e.yml.
+  #
+  # No version literal appears in this file on purpose. A number written here would be
+  # a fourth place that pins ASH's version and nothing rewrites, which is the failure
+  # the [tool.commitizen] version_files comment in pyproject.toml exists to describe.
+  homebrew:
+    name: "native: homebrew (macos-latest)"
+    runs-on: macos-latest
+    # 90 rather than the 25 the deb and rpm jobs use. --no-binary=:all: means every one
+    # of the 77 resources is compiled from its sdist, five of them Rust extensions
+    # (cryptography, pydantic-core, rpds-py, rtoml, orjson), and Homebrew has to build
+    # rust, openssl@3, pkgconf, python@3.12 and uv first if the image has no bottle
+    # cached for them.
+    timeout-minutes: 90
+    env:
+      HOMEBREW_NO_ANALYTICS: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+
+      # Recorded, not assumed. If a future image drops Homebrew or moves it, this line
+      # says so in one place instead of the failure surfacing as `brew: command not
+      # found` inside a 90-minute step.
+      - name: Record the Homebrew and Ruby the image shipped
+        run: |
+          set -euo pipefail
+          brew --version
+          ruby --version
+
+      # The same check .github/actions/validate-install runs, repeated here only as a
+      # fast fail: a syntax error caught in two seconds beats one caught after Homebrew
+      # has installed a Rust toolchain.
+      - name: Formula parses
+        run: ruby -c Formula/ash.rb
+
+      # `--formula` disambiguates the path from a cask. `--build-from-source` is
+      # explicit rather than necessary -- a formula outside a tap has no bottle -- and
+      # it documents that every resource is compiled here.
+      # Homebrew will not install a formula from a bare file path. Measured on the
+      # first run of this job (run 35275790822):
+      #
+      #   ##[error]Homebrew requires formulae to be in a tap, rejecting:
+      #     ./Formula/ash.rb
+      #   To create a tap, run e.g.  brew tap-new <user|org>/<repository>
+      #
+      # `ruby -c` had already passed on the same file in the step above, which is the
+      # useful part: the formula was fine and the invocation was not. Nothing local
+      # could have caught this, because `brew` is not installable on the machine this
+      # branch was written on -- this is the CI-only defect the formula work said to
+      # read this job's first run for.
+      #
+      # So the formula goes into a throwaway local tap and is installed by its
+      # qualified name. `brew tap-new` creates the directory layout and the git
+      # repository Homebrew expects, with no flags: a tap without a git repository is
+      # not one as far as `brew audit` is concerned, and no flag here can be verified
+      # off a macOS runner, so the plain invocation is the one to use. The tap is local
+      # to the runner and never pushed. Formula/ash.rb at the repository root stays the
+      # single source of truth: the tap holds a copy rendered from it, pointed at a
+      # tarball of this commit (see WHAT THIS JOB BUILDS above), and the diff below
+      # shows the copy differs only in its source lines.
+      - name: Put a head-built copy of the formula in a local tap
+        run: |
+          set -euo pipefail
+          brew tap-new ash/local
+          tap_dir="$(brew --repository ash/local)"
+          mkdir -p "${tap_dir}/Formula"
+          version="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -n 1)"
+          tarball="${RUNNER_TEMP}/automated-security-helper-${version}.tar.gz"
+          git archive --format=tar.gz --prefix="automated-security-helper-${version}/" -o "${tarball}" HEAD
+          python3 scripts/e2e/brew_formula.py --formula Formula/ash.rb --tarball "${tarball}" \
+            --version "${version}" --out "${tap_dir}/Formula/ash.rb"
+          echo "tap: ${tap_dir}"
+          rc=0
+          diff -u Formula/ash.rb "${tap_dir}/Formula/ash.rb" || rc=$?
+          # 1 is "they differ", which the copy must; 0 would mean the source line was
+          # not rewritten, and 2 that diff itself failed.
+          if [ "${rc}" -ne 1 ]; then
+            echo "::error::diff of the tap copy against Formula/ash.rb exited ${rc}, expected 1"
+            exit 1
+          fi
+
+      - name: Install ASH from the formula
+        run: brew install --verbose --build-from-source ash/local/ash
+
+      # The formula's own `test do` block: a real scan of a fixture planted with an AWS
+      # secret, asserting a non-zero SARIF result count. Asserting exit 0 would prove
+      # nothing, because an ASH scan that finds nothing also exits 0.
+      - name: Run the formula's test block
+        run: brew test --verbose ash/local/ash
+
+      # Audit runs LAST, and the ordering is the point. It is the cheapest step here,
+      # so putting it first would be the obvious choice, but `--strict` enables cops
+      # that have nothing to do with the resource block and some of which only apply to
+      # homebrew/core. If audit were first and tripped one of those, it would hide the
+      # install and test evidence behind a style finding, and a maintainer would have no
+      # way to tell a real defect from a core-only rule without re-running by hand.
+      # Last, the log above it already shows whether the block installs.
+      #
+      # If a strict-only finding does fire, satisfy it. Dropping `--strict` would remove
+      # the check that catches a malformed resource block, which is the reason audit is
+      # in this job at all.
+      #
+      # Both forms are audited: the copy that was just installed, then the release
+      # formula, put in the tap with one addition.
+      #
+      # `brew audit --strict` requires a git `url` that names a tag to also name the
+      # tag's commit (`revision:`), and says so: "Git should specify a full commit
+      # hash in `revision:`". The committed formula cannot carry that hash. It is
+      # written by `cz bump` in the commit that the release tag then names, and a
+      # commit cannot contain its own hash; any other commit's hash would make
+      # Homebrew refuse the checkout of the tag. So the committed line stays
+      # tag-only, and the release audit adds `revision:` from `git rev-parse HEAD`,
+      # which is the commit a release tag names. The step then requires that to be
+      # the only difference.
+      - name: Audit the formula against Homebrew's own rules
+        run: |
+          set -euo pipefail
+          brew audit --strict ash/local/ash
+          tap_dir="$(brew --repository ash/local)"
+          cp Formula/ash.rb "${tap_dir}/Formula/ash.rb"
+          head_commit="$(git rev-parse HEAD)"
+          case "${head_commit}" in
+            *[!0-9a-f]* | "") echo "::error::git rev-parse HEAD gave '${head_commit}'"; exit 1 ;;
+          esac
+          [ "${#head_commit}" -eq 40 ] || { echo "::error::'${head_commit}' is not a full commit hash"; exit 1; }
+          sed -E -i.orig "s|^(  url \"[^\"]+\", tag: \"v[^\"]+\")\$|\\1, revision: \"${head_commit}\"|" "${tap_dir}/Formula/ash.rb"
+          rm -f "${tap_dir:?}/Formula/ash.rb.orig"
+          rc=0
+          diff -u Formula/ash.rb "${tap_dir}/Formula/ash.rb" || rc=$?
+          [ "${rc}" -eq 1 ] || { echo "::error::the release audit copy differs from Formula/ash.rb by something other than revision (diff exit ${rc})"; exit 1; }
+          [ "$(diff Formula/ash.rb "${tap_dir}/Formula/ash.rb" | grep -c '^>')" -eq 1 ] || { echo "::error::more than one line differs"; exit 1; }
+          grep -q "revision: \"${head_commit}\"" "${tap_dir}/Formula/ash.rb"
+          brew audit --strict ash/local/ash
+

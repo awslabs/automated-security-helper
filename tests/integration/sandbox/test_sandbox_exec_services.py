@@ -5,7 +5,7 @@
 
 macOS only. The scanner is the sandbox-escape fixture plugin running
 tests/test_data/sandbox_escape/macos_services_probe.py as its tool, through a real
-``ash scan``, so the spawn goes through the same choke point as a builtin scanner.
+``ashx scan``, so the spawn goes through the same choke point as a builtin scanner.
 
 Three levels: the tools a user would reach for (``open -a TextEdit``, ``pbpaste``,
 ``security find-generic-password``); the Mach lookup of each service itself, which
@@ -35,6 +35,7 @@ from typing import Iterator
 
 import pytest
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.utils.sandbox import clear_backend_cache, resolve_backend
 from automated_security_helper.utils.sandbox.scope import SandboxUnavailable
 from tests.utils.helpers import checkout_env
@@ -109,10 +110,15 @@ def _require_sandbox_exec() -> None:
 
 
 def _ash_executable() -> str:
-    beside = Path(sys.executable).with_name("ash")
-    found = str(beside) if beside.exists() else shutil.which("ash")
+    # The canonical command, not the deprecated `ash`, whose own deprecation line
+    # would land in the stderr this test reads.
+    beside = Path(sys.executable).with_name(CANONICAL_CLI_NAME)
+    found = str(beside) if beside.exists() else shutil.which(CANONICAL_CLI_NAME)
     if not found:
-        pytest.fail("the ash entry point is not installed beside this interpreter")
+        pytest.fail(
+            f"the {CANONICAL_CLI_NAME} entry point is not installed beside this "
+            "interpreter"
+        )
     return found
 
 
@@ -281,8 +287,6 @@ def _attempt(
         mode,
         "--offline",
         "--no-progress",
-        # An on/off flag: `--fail-on-findings false` is refused, since `ash scan`
-        # takes no extra arguments.
         "--no-fail-on-findings",
         # The fixture plugin, as an operator installs one. Its module sits in this
         # git checkout, which an in-tree config may not import from.

@@ -30,7 +30,7 @@ Everything below is importable from `automated_security_helper.utils.symbol_span
 | `is_valid_symbol` / `SYMBOL_PATTERN` | `is_valid_symbol(symbol: str) -> bool` | Whether a string is a well-formed dotted qualified name. The pattern is dot-joined segments of `#?(?!\d)[\w$]+`: Unicode identifiers, `$` for JavaScript, a `#` prefix for a JS/TS private member. Matched whole. |
 | `symbols_extra_available` | `symbols_extra_available() -> bool` | True if tree-sitter and every grammar in the table import. |
 | `clear_symbol_cache` | `clear_symbol_cache() -> None` | Drops every cached parse. For tests. |
-| `symbols_extra_install_command` / `symbols_extra_install_hint` | `-> str` | The install command (read from the running distribution's metadata, so it matches the ASH you run) and the full hint the scan warning and `ash config lint` print. |
+| `symbols_extra_install_command` / `symbols_extra_install_hint` | `-> str` | The install command (read from the running distribution's metadata, so it matches the ASH you run) and the full hint the scan warning and `ashx config lint` print. |
 | `SymbolsUnavailableError` | subclass of `RuntimeError` | tree-sitter or a grammar module could not be imported, or the installed binding's API is not the one this module calls. |
 | `SymbolParseError` | subclass of `ValueError` | tree-sitter parsed the file with errors, so its spans are not trusted. |
 
@@ -108,7 +108,7 @@ span. The causes:
 
 This is the same posture as an expired suppression: a stale reference resurfaces its
 findings loudly instead of silently hiding them. The remediation is also the same -- fix
-the reference or re-triage the finding. `ash config lint` flags an entry whose `symbol` is
+the reference or re-triage the finding. `ashx config lint` flags an entry whose `symbol` is
 not a well-formed qualified name, an entry whose `path` names a file type with no grammar,
 and a config that uses `symbol` while the extra is missing.
 

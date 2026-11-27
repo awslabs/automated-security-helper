@@ -11,7 +11,7 @@
 
 This page is generated from the scanner facets register in the ASH source code by `scripts/generate_facets_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH ships 23 scanners, and every one declares, per facet of the shared vocabulary, whether its native output maps into the shared pipeline. The register is production code (`automated_security_helper/base/scanner_facets.py`): the declaration has runtime consumers, and a scanner without one is refused by the registry totality test. The four states:
+ASH ships 22 scanners, and every one declares, per facet of the shared vocabulary, whether its native output maps into the shared pipeline. The register is production code (`automated_security_helper/base/scanner_facets.py`): the declaration has runtime consumers, and a scanner without one is refused by the registry totality test. The four states:
 
 - `mapped`: the facet lands where the shared pipeline reads it, and the cell names the native field it comes from. The corpus-consistency gate (`tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py`) holds these cells against the committed fixtures.
 - `mappable-dropped`: the native output carries the value and ASH discards it today: a roadmap record, not a promise. The cell names the native field and why it is dropped.
@@ -37,7 +37,6 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | [`mcp-config`](#mcp-config) | 8 | 0 | 12 | 0 |
 | [`npm-audit`](#npm-audit) | 14 | 0 | 5 | 1 |
 | [`opengrep`](#opengrep) | 11 | 0 | 8 | 1 |
-| [`semgrep`](#semgrep) | 10 | 0 | 9 | 1 |
 | [`syft`](#syft) | 0 | 2 | 17 | 1 |
 | [`trivy`](#trivy) | 15 | 0 | 3 | 2 |
 | [`zizmor`](#zizmor) | 10 | 0 | 10 | 0 |
@@ -63,7 +62,7 @@ Ranges are written in the grammar native to the runtime: `python` uses PEP 440 s
 | [`checkov`](#checkov) | `python` | all | `>=3.10,<3.15` | `pin` | yes, [https://github.com/bridgecrewio/checkov/issues/7777](https://github.com/bridgecrewio/checkov/issues/7777) | CPython 3.15 made array_hook a required argument of json.decoder.JSONArray (signature 3.14.9: (s_and_end, scan_once, \_w, \_ws); 3.15.0: (s_and_end, scan_once, array_hook, \_w, \_ws)); checkov's Decoder.json_array (checkov/common/parsers/json/decoder.py) calls it without one, so every JSON document that holds an array fails to parse, and on a large tree the parallel runner can wait indefinitely on the worker error; reported against checkov 3.4.3 and 3.4.0 on 3.15.0; a fix is proposed upstream in bridgecrewio/checkov#7778 and not merged |
 | [`guarddog`](#guarddog) | `python` | all | `>=3.10,<3.14` | `pin` | yes, no upstream issue exists to cite: a search of the VirusTotal/yara-python issues for a cp314 report found none (a 'wheel' search returned issues, so the search itself works; read 2026-11-25); re-check pygit2 and yara-python cp314 wheels at the next guarddog version bump | pygit2 1.18 and yara-python 4.5 publish no CPython 3.14 wheels at the pinned guarddog==3.2.0, so on a host where uv would pick 3.14 the install builds them from source, which needs libgit2 headers and a C toolchain, and fails; measured with uv 0.12 on Linux x86_64: an unconstrained 'uv tool install guarddog==3.2.0' picked 3.14 and failed on pygit2, and with --python '&gt;=3.10,&lt;3.14' it installed; PyPI read 2026-11-25: pygit2 publishes cp314 wheels from 1.19.0, while yara-python publishes none through 4.5.4 |
 
-2 of 23 scanners declare a row. The other 21 declare none: no incompatibility between their tool versions and their runtime versions is known.
+2 of 22 scanners declare a row. The other 20 declare none: no incompatibility between their tool versions and their runtime versions is known.
 
 ## `actionlint`
 
@@ -413,33 +412,6 @@ Ranges are written in the grammar native to the runtime: `python` uses PEP 440 s
 | `remediation_text` | `n/a` |  | rule help describes the rule, not a remediation; fixes are recorded under fix_available |
 | `snippet` | `mapped` | results[].locations[].physicalLocation.region.snippet.text |  |
 | `references` | `unconfirmed` |  | UNCONFIRMED: the committed captures' SARIF rules carry no helpUri (the rule help is help.markdown text, not a link). A rule helpUri would be read into the flat references by the shared rule read (FlatVulnerability.from_sarif_result); redeclare MAPPED when a capture carrying one is committed (the corpus gate lists this cell as a fixture owed until then) |
-| `tags` | `mapped` | tool.driver.rules[].properties.tags, read into the flat tags when the result carries none (they also feed the CWE read) |  |
-| `extras` | `mapped` | results[].properties (SARIF property bag, passed through unmodified) | the committed capture's bag is empty ({}), so this cell rests on the pass-through, not on a populated key |
-
-## `semgrep`
-
-- Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner.SemgrepScanner`
-
-| Facet | State | Native field | Reason |
-|-------|-------|--------------|--------|
-| `rule_id` | `mapped` | results[].ruleId |  |
-| `severity` | `mapped` | tool.driver.rules[].defaultConfiguration.level | the tool writes no level on a result (the committed captures' result keys are fingerprints, locations, message, properties, ruleId); the level lives on the rule, and SARIF's default-level semantics resolve a result without one through it |
-| `file_path` | `mapped` | results[].locations[].physicalLocation.artifactLocation.uri |  |
-| `line_range` | `mapped` | results[].locations[].physicalLocation.region.startLine/endLine |  |
-| `column` | `mapped` | results[].locations[].physicalLocation.region.startColumn/endColumn |  |
-| `message` | `mapped` | results[].message.text |  |
-| `resource_id` | `n/a` |  | pure code SAST; the only locators in its output are file paths, which are never resource ids |
-| `resource_type` | `n/a` |  | pure code SAST; no deployable resource exists in the output |
-| `package_name` | `n/a` |  | code findings name a file and a rule, not a package |
-| `package_version` | `n/a` |  | code findings name a file and a rule, not a package |
-| `package_path` | `n/a` |  | code findings name a file and a rule, not a package |
-| `taxonomy_cve` | `n/a` |  | code rules carry no CVE ids |
-| `taxonomy_cwe` | `mapped` | tool.driver.rules[].properties.tags (CWE entries) |  |
-| `fingerprints` | `n/a` |  | semgrep OSS writes the placeholder 'requires login' as results[].fingerprints."matchBasedId/v1" (the committed capture shows it), which the finding-identity reader discards; a real match-based id needs semgrep's logged-in engine, and the opengrep fork is the build that emits one |
-| `fix_available` | `n/a` |  | semgrep 1.187.0's SARIF has no fixes key even for a rule that carries `fix:` (tests/test_data/scanners/semgrep/captured/semgrep-1.187.0-fix-rule.sarif: result keys are exactly fingerprints, locations, message, properties, ruleId), so there is nothing in the SARIF ASH reads to map |
-| `remediation_text` | `n/a` |  | rule help describes the rule, not a remediation; fixes are recorded under fix_available |
-| `snippet` | `mapped` | results[].locations[].physicalLocation.region.snippet.text |  |
-| `references` | `unconfirmed` |  | UNCONFIRMED: the committed captures are local-rule runs, whose SARIF rules carry no helpUri. A registry rule's helpUri is read into the flat references by the shared rule read (FlatVulnerability.from_sarif_result); redeclare MAPPED when a registry-rule capture is committed (the corpus gate lists this cell as a fixture owed until then) |
 | `tags` | `mapped` | tool.driver.rules[].properties.tags, read into the flat tags when the result carries none (they also feed the CWE read) |  |
 | `extras` | `mapped` | results[].properties (SARIF property bag, passed through unmodified) | the committed capture's bag is empty ({}), so this cell rests on the pass-through, not on a populated key |
 

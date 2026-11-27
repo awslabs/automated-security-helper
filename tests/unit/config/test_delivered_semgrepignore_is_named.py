@@ -43,16 +43,12 @@ def mcp_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _scanner_warnings(scanner_name: str, source: Path, out: Path) -> List[str]:
     config = AshConfig(project_name="test")
     context = PluginContext(source_dir=source, output_dir=out, config=config)
-    if scanner_name == "semgrep":
-        from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-            SemgrepScanner as Scanner,
-            SemgrepScannerConfig as ScannerConfig,
-        )
-    else:
-        from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
-            OpengrepScanner as Scanner,
-            OpengrepScannerConfig as ScannerConfig,
-        )
+    assert scanner_name == "opengrep", scanner_name
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+        OpengrepScanner as Scanner,
+        OpengrepScannerConfig as ScannerConfig,
+    )
+
     scanner = Scanner(context=context, config=ScannerConfig(enabled=True))
     scanner._resolve_arguments(target=source, results_file=out / "r.sarif")
     return [w for w in config._resolution_warnings if ".semgrepignore" in w]
@@ -65,7 +61,7 @@ def _tree(parent: Path) -> Path:
     return source
 
 
-@pytest.mark.parametrize("scanner_name", ["semgrep", "opengrep"])
+@pytest.mark.parametrize("scanner_name", ["opengrep"])
 def test_a_delivered_semgrepignore_is_named_as_client_supplied(
     mcp_root: Path, tmp_path: Path, scanner_name: str
 ) -> None:
@@ -87,7 +83,7 @@ def test_a_semgrepignore_elsewhere_keeps_the_existing_note(
     out = tmp_path / "out"
     out.mkdir()
 
-    (note,) = _scanner_warnings("semgrep", source, out)
+    (note,) = _scanner_warnings("opengrep", source, out)
 
     assert CLIENT_WORDING not in note
     assert note == (
@@ -112,7 +108,7 @@ def test_a_link_to_a_delivered_semgrepignore_is_the_clients(
     out = tmp_path / "out"
     out.mkdir()
 
-    (note,) = _scanner_warnings("semgrep", source, out)
+    (note,) = _scanner_warnings("opengrep", source, out)
 
     assert CLIENT_WORDING in note
 
@@ -133,7 +129,7 @@ def test_a_delivered_link_to_a_semgrepignore_elsewhere_is_the_clients(
     out = tmp_path / "out"
     out.mkdir()
 
-    (note,) = _scanner_warnings("semgrep", source, out)
+    (note,) = _scanner_warnings("opengrep", source, out)
 
     assert CLIENT_WORDING in note
     assert (source / ".semgrepignore").as_posix() in note
@@ -145,9 +141,9 @@ def test_the_checkpoint_in_the_results_carries_the_wording(
 ) -> None:
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
     from automated_security_helper.models.asharp_model import AshAggregatedResults
-    from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-        SemgrepScanner,
-        SemgrepScannerConfig,
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+        OpengrepScanner,
+        OpengrepScannerConfig,
     )
 
     source = _tree(mcp_root / "session-1")
@@ -155,8 +151,8 @@ def test_the_checkpoint_in_the_results_carries_the_wording(
     out.mkdir()
     config = AshConfig(project_name="test")
     context = PluginContext(source_dir=source, output_dir=out, config=config)
-    SemgrepScanner(
-        context=context, config=SemgrepScannerConfig(enabled=True)
+    OpengrepScanner(
+        context=context, config=OpengrepScannerConfig(enabled=True)
     )._resolve_arguments(target=source, results_file=out / "r.sarif")
 
     class _Engine:
@@ -200,9 +196,9 @@ def test_a_note_the_scanner_adds_while_scanning_reaches_the_results(
     """The scanner adds its note while the phases run; the checkpoints are taken after."""
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
     from automated_security_helper.models.asharp_model import AshAggregatedResults
-    from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-        SemgrepScanner,
-        SemgrepScannerConfig,
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+        OpengrepScanner,
+        OpengrepScannerConfig,
     )
 
     source = _tree(mcp_root / "session-1")
@@ -213,8 +209,8 @@ def test_a_note_the_scanner_adds_while_scanning_reaches_the_results(
     class _Engine:
         def execute_phases(self, phases=None):
             context = PluginContext(source_dir=source, output_dir=out, config=config)
-            SemgrepScanner(
-                context=context, config=SemgrepScannerConfig(enabled=True)
+            OpengrepScanner(
+                context=context, config=OpengrepScannerConfig(enabled=True)
             )._resolve_arguments(target=source, results_file=out / "r.sarif")
             return AshAggregatedResults()
 

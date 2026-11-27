@@ -27,14 +27,16 @@ XDG_DATA_HOME and XDG_CONFIG_HOME to the runner's environment
 A scan through the image prints the inner ASH's whole log first, and that log
 carries timings and tool-install chatter that differ on every run. What the user
 reads as the result is what the host prints after the container exits, so for
-``ash --mode container`` the snapshot keeps the host's output from its first line
+``ashx --mode container`` the snapshot keeps the host's output from its first line
 after the container: "Container execution failed with code N" or, for status 0,
-the "ASH Scan Completed" banner. The wrappers print the inner ASH directly, so
-for them the snapshot keeps the exit status and the last line printed: the inner
-verdict for ./ash, the status Invoke-ASH returns for the PowerShell one. Only
+the "ASH Scan Completed" banner. The PowerShell wrapper prints the inner ASH
+directly, so for it the snapshot keeps the exit status and the last line printed:
+the status Invoke-ASH returns. (The root ``./ash`` bash wrapper had a snapshot here
+on 3.x; v4 removed that script, and its scans go through ``ashx --mode container``.)
+Only
 bandit is selected: its version is fixed when the image is built, and the
 fixture's two bandit findings are the same on every architecture. grype and
-semgrep read advisory and rule data that changes daily.
+opengrep read advisory and rule data that changes daily.
 """
 
 from __future__ import annotations
@@ -129,12 +131,12 @@ def runner_store_in_environ(monkeypatch):
 
 @pytest.mark.e2e
 def test_ash_version_in_image(snapshot):
-    assert _in_image("ash", "--version") == snapshot
+    assert _in_image("ashx", "--version") == snapshot
 
 
 @pytest.mark.e2e
-def test_build_image_help_in_image(text_snapshot):
-    result = _in_image("ash", "build-image", "--help")
+def test_container_build_help_in_image(text_snapshot):
+    result = _in_image("ashx", "container", "build", "--help")
     assert result["exit_code"] == 0
     assert result["stdout"] == text_snapshot("txt")
 
@@ -205,38 +207,6 @@ def _wrapper_env() -> dict[str, str]:
     if ":" in IMAGE:
         env["ASH_IMAGE_NAME"] = IMAGE
     return env
-
-
-@pytest.mark.e2e
-def test_bash_wrapper_scan_of_the_fixture(snapshot, fixture_repo, in_tmp):
-    result = subprocess.run(  # nosec B603 - the repository's own wrapper, list args
-        [
-            "bash",
-            str(REPO_ROOT / "ash"),
-            "--no-build",
-            "--build-target",
-            "ci",
-            "--source-dir",
-            "src",
-            "--output-dir",
-            "out",
-            "--scanners",
-            "bandit",
-            "--no-progress",
-        ],
-        cwd=in_tmp,
-        env=_wrapper_env(),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=600,
-        check=False,
-    )
-    assert {
-        "exit_code": result.returncode,
-        "announced_the_run": "Running ASH scan using built image..." in result.stdout,
-        "last_line": _last_line(result.stdout),
-    } == snapshot
 
 
 def _pwsh(script: str, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess:

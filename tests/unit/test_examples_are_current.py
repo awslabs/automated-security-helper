@@ -159,8 +159,8 @@ def test_the_codebuild_example_passes_only_options_the_cli_declares():
 
     assert {invocation.command_path(root) for invocation in invocations} == {
         "",
-        "report",
-    }, "the reader no longer sees the scan and report command lines"
+        "results report",
+    }, "the reader no longer sees the scan and results report command lines"
     problems = [
         p for invocation in invocations for p in unknown_to_cli(invocation, root)
     ]

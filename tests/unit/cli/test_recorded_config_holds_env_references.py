@@ -191,6 +191,7 @@ def runs(tmp_path_factory: pytest.TempPathFactory):
         found["defaults_merge"] = runner.invoke(
             app,
             [
+                "results",
                 "merge",
                 "--results",
                 str(defaults_root / "shard" / "ash_aggregated_results.json"),
@@ -206,7 +207,7 @@ def runs(tmp_path_factory: pytest.TempPathFactory):
         def merge(output: str, *extra: str):
             return runner.invoke(
                 app,
-                ["merge", "--results", shard_results, "--output-dir", output]
+                ["results", "merge", "--results", shard_results, "--output-dir", output]
                 + ["--debug", *extra],
                 env=env,
             )
@@ -214,7 +215,7 @@ def runs(tmp_path_factory: pytest.TempPathFactory):
         def report(*extra: str):
             return runner.invoke(
                 app,
-                ["report", "--format", "gitlab-cyclonedx"]
+                ["results", "report", "--format", "gitlab-cyclonedx"]
                 + ["--output-dir", str(root / "shard"), "--debug", *extra],
                 env=env,
             )

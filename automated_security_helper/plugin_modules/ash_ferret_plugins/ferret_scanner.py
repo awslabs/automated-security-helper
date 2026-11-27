@@ -261,7 +261,7 @@ UNSUPPORTED_FERRET_OPTIONS = {
     "memory_scrub": "Redaction is not supported in ASH integration. Use ferret-scan CLI directly for redaction.",
     # Suppression options - ASH has its own system
     "generate_suppressions": "ASH manages suppressions centrally. Add them to global_settings.suppressions in the ASH config file (for example .ash.yaml) instead.",
-    "show_suppressed": "ASH manages suppressions centrally. ASH's reports count suppressed findings, and ash scan --ignore-suppressions reports them as findings.",
+    "show_suppressed": "ASH manages suppressions centrally. ASH's reports count suppressed findings, and ashx scan --ignore-suppressions reports them as findings.",
     "suppressions_file": "ASH manages suppressions centrally. Add them to global_settings.suppressions in the ASH config file (for example .ash.yaml) instead.",
     # Text extraction mode - not scanning
     "extract_text": "Text extraction mode is not supported. Use ferret-scan CLI directly for text extraction.",
@@ -1581,7 +1581,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 return False
             self._plugin_log(
                 "ferret-scan binary not found. Install it with "
-                "'ash dependencies install', which applies the version range this "
+                "'ashx dependencies install', which applies the version range this "
                 f"plugin supports, or by hand with 'pip install \"ferret-scan{DEFAULT_VERSION_CONSTRAINT}\"'. "
                 "A bare 'pip install ferret-scan' resolves to the newest release, "
                 "which may be outside the supported range. Source: "

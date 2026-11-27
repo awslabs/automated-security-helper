@@ -47,7 +47,6 @@ from __future__ import annotations
 import copy
 import importlib
 import re
-import threading
 from enum import Enum
 from typing import Any, Literal, Mapping, Optional
 
@@ -61,10 +60,6 @@ from automated_security_helper.base.plugin_provisioning import (
 #: The manifest schema this code reads and writes.
 MANIFEST_SCHEMA_VERSION = 1
 
-#: The release that stops accepting the pre-rename "community" spellings. They are
-#: aliases for one release: accepted, mapped to the alpha spelling, and warned about.
-COMMUNITY_ALIASES_DROPPED_IN = "3.9.0"
-
 #: The version a manifest declares for a plugin that ships inside the ASH wheel
 #: and so is versioned with it.
 BUNDLED_VERSION = "bundled"
@@ -76,35 +71,18 @@ _REF = re.compile(
 _MODULE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
 _VERSION = re.compile(r"\d+(?:\.\d+)*(?:[A-Za-z0-9.+-]*)")
 
-_WARNED_COMMUNITY_ALIASES: set[str] = set()
-# Workspace mode builds engines on several threads, so the check-then-add below
-# is taken under a lock to keep the warning to once per process.
-_WARNED_LOCK = threading.Lock()
-
-
-def warn_community_alias(old: str, new: str) -> None:
-    """Say once per process that the "community" spelling *old* is now *new*."""
-    with _WARNED_LOCK:
-        if old in _WARNED_COMMUNITY_ALIASES:
-            return
-        _WARNED_COMMUNITY_ALIASES.add(old)
-    # Imported here: the log module is not needed to read a manifest.
-    from automated_security_helper.utils.log import ASH_LOGGER
-
-    ASH_LOGGER.warning(
-        f"'{old}' is deprecated: the community tier is now called alpha, so use "
-        f"'{new}'. The old spelling is accepted until ASH "
-        f"{COMMUNITY_ALIASES_DROPPED_IN} and is removed in that release.",
-        extra={"markup": False},
-    )
-
 
 class ManifestSchemaError(ValueError):
     """A manifest this code refuses to read, with the reason as prose."""
 
 
 class PluginTier(str, Enum):
-    """The maturity tier, declared in the manifest and nowhere else."""
+    """The maturity tier, declared in the manifest and nowhere else.
+
+    ``"community"`` and ``"community_optin"``, this tier's spellings before the
+    alpha rename, were aliases of ``alpha`` through 3.x and are refused from 4.0
+    like any other value outside the three below.
+    """
 
     #: Maintained and promoted.
     SUPPORTED = "supported"
@@ -112,15 +90,6 @@ class PluginTier(str, Enum):
     ALPHA = "alpha"
     #: Retiring; ``superseded_by`` names the target.
     DEPRECATED = "deprecated"
-
-    @classmethod
-    def _missing_(cls, value: object) -> "PluginTier | None":
-        """``"community"``, this tier's spelling before the rename, is an alias
-        of ``alpha`` for one release and warns when it is read."""
-        if value in ("community", "community_optin"):
-            warn_community_alias(str(value), cls.ALPHA.value)
-            return cls.ALPHA
-        return None
 
 
 class _Frozen(BaseModel):

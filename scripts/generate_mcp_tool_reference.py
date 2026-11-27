@@ -1380,6 +1380,7 @@ def main() -> int:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from _reference_docs import (
         add_docs_root_argument,
+        canonical_cli,
         prepare_environment,
         refuse_check_to_stdout,
         write_or_check,
@@ -1391,8 +1392,8 @@ def main() -> int:
 
     docs_root = Path(args.docs_root).resolve()
     prepare_environment(docs_root)
+    page = canonical_cli(render_reference_page())
     if args.output:
-        page = render_reference_page()
         if args.output == "-":
             sys.stdout.write(page)
             return 0
@@ -1407,7 +1408,7 @@ def main() -> int:
                 "ash-agent-plugins/agentic-coding/transpiler agentic-plugins build"
             ),
         ),
-        (docs_root / REFERENCE_PAGE, render_reference_page(), ""),
+        (docs_root / REFERENCE_PAGE, page, ""),
     ):
         status |= _write_or_check(target, expected, args.check, after, docs_root)
     return status

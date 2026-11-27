@@ -150,7 +150,7 @@ def test_the_scan_gate_follows_the_console_rule(
 #: The guide's whole rule, whitespace-normalized: pinning the full sentences,
 #: not clauses, so a changed default level or a reordered precedence shows too.
 _RULE = (
-    "Under `ash scan`, a line no handler takes reaches stderr at the scan's"
+    "Under `ashx scan`, a line no handler takes reaches stderr at the scan's"
     " console level: its flags first, then `ASH_DEBUG` or `ASH_VERBOSE`, then"
     " `INFO`, and `ERROR` for `--quiet` and `--simple` unless `--verbose` or"
     " `--debug` is also given. `--log-level INFO` reads as the default, so it"

@@ -278,7 +278,7 @@ def scanner_serves_container_images(scanner_name: Any) -> Optional[bool]:
 
     For a scanner ASH ships the answer is the static
     ``scanner_names.IMAGE_SERVING_SCANNERS`` table, so it is the same in every
-    process: ``ash merge`` reads results another process wrote, and an answer
+    process: ``ashx results merge`` reads results another process wrote, and an answer
     that depended on which scanner modules this process had imported gave one
     result two identities (and made it matchable by ``image:`` suppressions in
     one process and not the other). A test checks the table against each

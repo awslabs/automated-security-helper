@@ -223,7 +223,7 @@ class OfflineTestStack(cdk.Stack):
                         "build": {
                             "commands": [
                                 "echo 'Running ASH offline scan...'",
-                                "ash --version || echo 'ASH not found in image -- upload bundle to S3 first'",
+                                "ashx --version || echo 'ASH not found in image -- upload bundle to S3 first'",
                             ],
                         },
                     },

@@ -1,0 +1,434 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: ASH - Native Packages (deb, rpm)
+# Builds the .deb and .rpm from the CI-built wheel inside each target distribution,
+# asserts neither package ships third-party scanner code, installs each one with the
+# distribution's own package manager, and requires a real scan to report a real
+# finding. Then proves every one of those checks can fail.
+#
+# WHY THIS IS ITS OWN WORKFLOW
+#
+# The deb and rpm jobs used to live in ash-package.yml. They moved here because they
+# grew from two legs to twenty-four (four distributions, an upgrade leg on each, two
+# legs installing beside a uv tool install of the latest release, eleven negative
+# controls and three version-ordering checks), and because ash-package.yml deliberately has no `push` trigger
+# (its header explains why), while these legs need to run on a pushed branch before
+# a pull request exists. ash-package.yml still owns the wheel and sdist gate; each leg
+# here builds its own copy of the wheel the same way (`uv build`) and runs the same
+# artifact-contents gate on it before anything is packaged. Nothing is uploaded.
+#
+# WHAT IS ASSERTED, AND WHY NOT `ashx scan && echo ok`
+#
+# `ashx scan` exits 0 when it finds nothing, 2 when it finds something and 1 when a
+# selected scanner could not run. On a fixture planted with a secret, 0 is therefore the
+# FAILING outcome. Every assert leg and every upgrade leg runs the three shared e2e
+# cases (tests/e2e/fixtures/cases.json) and judges each with the shared e2e verdict,
+# scripts/e2e/assert_outcome.py: findings must exit exactly 2 with exactly three results
+# attributed to detect-secrets, clean must exit exactly 0, and incomplete must exit
+# exactly 1 with opengrep recorded MISSING or ERROR. Both reports must exist at their
+# exact paths. The shared shell logic is packaging/verify-lib.sh.
+#
+# The deb assert legs install Debian's and Ubuntu's own `ash` shell package first and
+# require it to keep working beside the package, before and after the purge, with
+# /usr/bin/ash absent from the package's file list (packaging/cli-name.sh explains
+# why). The rpm legs do the same with a stand-in package owning /usr/bin/ash, because
+# neither EL image has one.
+#
+# THE ARTIFACT-CONTENTS RULE FOR THESE FORMATS
+#
+# .github/scripts/assert-artifact-contents.py cannot read a .deb or an .rpm: it exits
+# 2 on both, which the self-tests job below re-measures. packaging/assert-package-payload.py
+# closes the gap: it pins the package payload member by member, rejects links (hard
+# links included), device nodes, setuid/setgid modes and group- or world-writable
+# modes, applies the gate's own content rules (imported, not
+# copied) to every member, and hands the wheel it extracts from the built package back
+# to the gate. Both packages are built with gzip
+# payload compression so that check can read them with the standard library alone.
+#
+# THE NEGATIVE CONTROLS
+#
+# Each gate is shown failing on a real artifact or a real install, not only on a unit
+# fixture: an empty-payload package must fail the payload gate, a package whose
+# post-install script fails must fail the install step, the clean case's real output
+# judged as the findings case must fail on its exit code and count, a scan that exits 0
+# with findings present must fail on its exit code alone, and the real exit-1 and exit-2
+# outputs must each fail when judged as the other. A check that has never been seen failing passes
+# forever.
+#
+# THE UPGRADE LEGS
+#
+# Each distribution installs N-1, upgrades to N, and requires the venv to have been
+# REBUILT from the N wheel -- the rpm used to report N while the venv kept running
+# N-1 -- while a probe samples every 50 ms that /usr/lib/automated-security-helper/venv stays usable
+# throughout. Each then fails an upgrade on purpose (Python index unreachable) and requires
+# the previous working install to survive, and the deb legs also require prerm to keep
+# the venv on `upgrade` and `failed-upgrade`.
+# Last, each rebuilds the venv as a plain directory, the layout earlier builds of
+# these packages used, and requires a reinstall to migrate it to the symlink.
+#
+# N-1 is the previous commit, not this tree at a lower version: packaging/n1-source.sh
+# takes it from the history with scripts/e2e/prev_tree.py (--prev-ref auto, the
+# derivation every upgrade leg shares), refuses one with HEAD's tree, and the leg builds
+# N-1's package with N-1's own packaging scripts and gates it with N-1's own payload
+# checker. So the upgrade runs this commit's maintainer scripts over an install an older
+# package's scripts made, which is where the rpm stale-venv and deb prerm defects lived.
+# That is why every package leg checks out the full history, and the log of each one
+# names both commits.
+#
+# NO ALTERNATIVES, NO DIVERSIONS
+#
+# Shipping no /usr/bin/ash is not enough: a maintainer script can still register one
+# with update-alternatives or move the shell aside with dpkg-divert. Every built package's
+# scripts are refused statically if they call either (or EL's `alternatives`), and every
+# install and upgrade is checked on the host for an alternative or a diversion pointing
+# into the package. Two negative legs plant `update-alternatives --install /usr/bin/ash`
+# in postinst and %post and require both checks to catch it.
+#
+# THE GATE
+#
+# `native-packages: gate` needs every other job and fails unless each succeeded, so this
+# workflow has one check name that does not move with the matrix labels. It reads this
+# file's own `jobs:` (.github/scripts/assert-workflow-gate.py), so a job added without
+# being added to its `needs` turns it red instead of going ungated. It first shows its
+# own verdict rejecting planted failed, skipped and missing jobs.
+#
+# THE RELEASE ASSETS
+#
+# Two assert legs, Debian 12 for the .deb and Amazon Linux 2023 for the .rpm, upload the
+# package they built, payload-gated, installed, scanned with and purged. Those bytes are
+# what ash-release-assets.yml gates again and a release attaches, which is why the
+# upload comes from a leg that exercised the package rather than from a separate build.
+# The other assert legs build the same package in other images and upload nothing; one
+# file per format is what a release carries. N-1 packages are never uploaded.
+#
+# Testing in a distribution image PUBLISHES NOTHING. The two uploads above are workflow
+# artifacts, which on this public repository anyone can download, and are allowlisted as
+# such in .github/scripts/assert-publish-surfaces.py. Nothing here creates a release.
+
+# No paths filter on push or pull_request. `native-packages: gate` is a required check,
+# and a required check whose workflow a paths filter skipped never reports, so the rule
+# it belongs to is never satisfied. Every push runs every leg. A paths filter added back
+# here fails tests/unit/test_required_checks_run_on_every_push.py.
+on:
+  push:
+    branches: ["**"]
+  # `["**"]` so a PR stacked on a nested branch name still runs, as in ash-package.yml.
+  pull_request:
+    branches: ["**"]
+  # merge_group takes no paths filter, so a queued entry always gets a verdict.
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch: {}
+  # Called by ash-release-assets.yml for the .deb and .rpm a release attaches. `ref` is
+  # the commit to build; empty means the event's commit. The concurrency group below
+  # uses the caller's workflow name, so a call never shares a group with a push run.
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to check out and build. Empty means the event's commit.
+        type: string
+        required: false
+        default: ""
+    # IDs, not names, for the reason ash-package.yml's workflow_call outputs give.
+    outputs:
+      deb-artifact-id:
+        description: The artifact holding the verified .deb
+        value: ${{ jobs.package.outputs.deb-artifact-id }}
+      rpm-artifact-id:
+        description: The artifact holding the verified .rpm
+        value: ${{ jobs.package.outputs.rpm-artifact-id }}
+
+permissions:
+  contents: read
+
+concurrency:
+  # github.sha is in the group so consecutive pushes to one branch each get a run
+  # rather than queueing behind each other; pull_request runs are cancelled by a newer
+  # push to the same PR.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'pr' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  self-tests:
+    name: Prove the packaging checks can fail
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          # The same uv the container legs install (packaging/verify-lib.sh), which is
+          # the floor pyproject.toml declares.
+          version: "0.13.4"
+          # Stated rather than left out: the default ("auto") turns the cache on for a
+          # push on a GitHub-hosted runner, a cache in this public repository is
+          # readable by anyone, and .github/scripts/assert-publish-surfaces.py refuses
+          # an unallowlisted one, including the default-on kind.
+          enable-cache: false
+
+      # The payload checker imports the gate's rules, so the one thing that can drift
+      # is its partition of the gate's verdicts into payload and structure. This
+      # reports a moved gate as that, rather than as a mysterious package failure.
+      - name: The gate contract the payload checker depends on still holds
+        run: >-
+          uv run --no-project python packaging/assert-package-payload.py
+          --assert-gate-contract
+          --artifact-gate .github/scripts/assert-artifact-contents.py
+
+      - name: The payload rules can reject planted payload, pinned and imported alike
+        run: >-
+          uv run --no-project python packaging/assert-package-payload.py --self-test
+          --artifact-gate .github/scripts/assert-artifact-contents.py
+
+      # The workflow has no paths filter today, which the checker reads as covering
+      # every file. If one is added back, a wheel input missing from it is a change
+      # that reaches the packages with every leg below skipped. The checker builds the wheel itself,
+      # in-process under an audit hook, and records every repository file the build
+      # opens. Without `--isolated`, `--with hatchling` adds nothing when the
+      # interpreter uv picks already has a hatchling, whatever its version: a .venv
+      # in or above the checkout (one with hatchling 1.32.0 was picked that way,
+      # under a 1.32.4 floor). `--isolated` builds a fresh environment, so the newest
+      # release is resolved, as `uv build` does for [build-system] requires. The
+      # checker still refuses to measure if the installed hatchling does not satisfy
+      # that requirement, so a stale one turns this step red rather than measuring a
+      # different build.
+      - name: The paths filters here and in ash-package-formats.yml cover every input to the wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --isolated --no-project --with hatchling python packaging/assert-paths-filter.py --self-test
+          uv run --isolated --no-project --with hatchling python packaging/assert-paths-filter.py
+          # ash-package-formats.yml wraps the same wheel and keeps a push paths filter,
+          # so its list must cover the same measured inputs. This workflow runs on every
+          # push, so a drift there turns this step red even when that one is skipped.
+          uv run --isolated --no-project --with hatchling python packaging/assert-paths-filter.py --workflow .github/workflows/ash-package-formats.yml --event push
+
+      # Toolchain-free: the name check runs before either build looks for its tool.
+      - name: The deb and rpm builds refuse the same names, and the docs follow them
+        shell: bash
+        run: bash packaging/test-build-names.sh
+
+      - name: The e2e verdict can reject every planted wrong outcome
+        run: uv run --no-project python scripts/e2e/assert_outcome.py --self-test
+
+      - name: The artifact-contents gate can still fail
+        run: uv run --no-project python .github/scripts/assert-artifact-contents.py --self-test
+
+      # The N-1 derivation the upgrade legs run, on histories built to break it: every
+      # candidate with HEAD's tree must be refused, never built.
+      - name: The N-1 derivation refuses an N-1 with HEAD's tree
+        shell: bash
+        run: bash packaging/test-n1-source.sh
+
+      # The gate, the N-1 wiring and the alternatives checks, held by unit tests that
+      # need no container: tests/unit/test_native_packages_workflow.py.
+      - name: Unit tests for this workflow's gate, N-1 source and alternatives checks
+        run: >-
+          uv run --group dev pytest tests/unit/test_native_packages_workflow.py
+          tests/unit/test_posix_bash_helper.py
+          -p no:cacheprovider -o addopts="" -v
+
+      # Measured rather than asserted in a comment. If the gate ever learns to read
+      # these containers, this fails and the payload checker's docstring is then wrong
+      # and findable.
+      - name: Confirm the wheel gate still refuses package formats outright
+        shell: bash
+        run: |
+          set -uo pipefail
+          printf '!<arch>\n' > "$RUNNER_TEMP/not-a-wheel.deb"
+          printf '\355\253\356\333' > "$RUNNER_TEMP/not-a-wheel.rpm"
+          failures=0
+          for f in "$RUNNER_TEMP/not-a-wheel.deb" "$RUNNER_TEMP/not-a-wheel.rpm"; do
+            set +e
+            uv run --no-project python .github/scripts/assert-artifact-contents.py "$f"
+            rc=$?
+            set -e
+            echo "gate on $(basename "$f") exited ${rc}"
+            if [ "${rc}" -ne 2 ]; then
+              echo "::error::the artifact gate exited ${rc} on ${f}; 2 (cannot read) was expected." >&2
+              failures=$((failures + 1))
+            fi
+          done
+          [ "${failures}" -eq 0 ]
+
+  package:
+    name: ${{ matrix.label }}
+    needs: self-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # One name per family: a matrix job's outputs are combined from every leg, and only
+    # the deb asset leg writes deb-artifact-id and the rpm one rpm-artifact-id, so
+    # neither is overwritten by a leg that uploaded nothing.
+    outputs:
+      deb-artifact-id: ${{ steps.artifact-id.outputs.deb-artifact-id }}
+      rpm-artifact-id: ${{ steps.artifact-id.outputs.rpm-artifact-id }}
+    container:
+      # Pinned by digest: every one of these tags is rebuilt on point releases, so a
+      # tag pins the suite and not the image. `label` carries the readable name.
+      image: ${{ matrix.image }}
+    strategy:
+      # One distribution failing must not hide the others.
+      fail-fast: false
+      matrix:
+        include:
+          - { label: "deb: Debian 12 (bookworm), beside Debian's ash shell", family: deb, mode: assert, asset: true, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
+          - { label: "deb: Ubuntu 24.04 (noble), beside Ubuntu's ash shell", family: deb, mode: assert, image: "ubuntu@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3" }
+          - { label: "rpm: Amazon Linux 2023", family: rpm, mode: assert, asset: true, image: "public.ecr.aws/amazonlinux/amazonlinux@sha256:12052e9b5d3fd85769abbdd863dd038e1890c9ace31d5fdbe1afa78eda97d061" }
+          - { label: "rpm: RHEL UBI 9", family: rpm, mode: assert, image: "redhat/ubi9@sha256:094ea2ecfd3225af8f93807b99daa9ff33710fc705ebdf6e8466f46ed605585c" }
+          - { label: "upgrade: deb, Debian 12", family: deb, mode: upgrade, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
+          - { label: "upgrade: deb, Ubuntu 24.04", family: deb, mode: upgrade, image: "ubuntu@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3" }
+          - { label: "upgrade: rpm, Amazon Linux 2023", family: rpm, mode: upgrade, image: "public.ecr.aws/amazonlinux/amazonlinux@sha256:12052e9b5d3fd85769abbdd863dd038e1890c9ace31d5fdbe1afa78eda97d061" }
+          - { label: "upgrade: rpm, RHEL UBI 9", family: rpm, mode: upgrade, image: "redhat/ubi9@sha256:094ea2ecfd3225af8f93807b99daa9ff33710fc705ebdf6e8466f46ed605585c" }
+          # The latest published release shipped no native package. Its users have the CLI
+          # from `uv tool install git+...@<tag>`; these install the package beside that
+          # and assert which ash and which ashx each resolves (verify-lib.sh vl_from_release).
+          - { label: "from release: deb, Debian 12, beside a uv tool install of the release", family: deb, mode: from-release, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
+          - { label: "from release: rpm, Amazon Linux 2023, beside a uv tool install of the release", family: rpm, mode: from-release, image: "public.ecr.aws/amazonlinux/amazonlinux@sha256:12052e9b5d3fd85769abbdd863dd038e1890c9ace31d5fdbe1afa78eda97d061" }
+          # PEP 440 pre-, post- and dev-releases must sort correctly under each
+          # distribution's own comparator (packaging/test-version-map.sh).
+          - { label: "version map: dpkg ordering", family: deb, mode: version-map, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
+          - { label: "version map: rpm ordering, Amazon Linux 2023", family: rpm, mode: version-map, image: "public.ecr.aws/amazonlinux/amazonlinux@sha256:12052e9b5d3fd85769abbdd863dd038e1890c9ace31d5fdbe1afa78eda97d061" }
+          - { label: "version map: rpm ordering, RHEL UBI 9", family: rpm, mode: version-map, image: "redhat/ubi9@sha256:094ea2ecfd3225af8f93807b99daa9ff33710fc705ebdf6e8466f46ed605585c" }
+          # The findings, exit-code and incomplete controls exercise packaging/verify-lib.sh, which
+          # both formats share, so one distribution is enough for them. The install and
+          # payload controls are format-specific and run on one image per format.
+          - { label: "negative control: clean output judged as findings must fail", family: deb, mode: negative-findings, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
+          - { label: "negative control: exit 0 with findings must fail the exit-code check", family: deb, mode: negative-scan-rc, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
+          - { label: "negative control: exit 1 and exit 2 must each fail as the other", family: deb, mode: negative-incomplete, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
+          - { label: "negative control: deb with a failing postinst must fail install", family: deb, mode: negative-install, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
+          - { label: "negative control: rpm with a failing %post must fail install", family: rpm, mode: negative-install, image: "public.ecr.aws/amazonlinux/amazonlinux@sha256:12052e9b5d3fd85769abbdd863dd038e1890c9ace31d5fdbe1afa78eda97d061" }
+          - { label: "negative control: empty-payload deb must fail the payload gate", family: deb, mode: negative-payload, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
+          - { label: "negative control: empty-payload rpm must fail the payload gate", family: rpm, mode: negative-payload, image: "public.ecr.aws/amazonlinux/amazonlinux@sha256:12052e9b5d3fd85769abbdd863dd038e1890c9ace31d5fdbe1afa78eda97d061" }
+          - { label: "negative control: deb shipping /usr/bin/ash must fail the shell-path checks", family: deb, mode: negative-shell-path, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
+          - { label: "negative control: rpm shipping /usr/bin/ash must fail the shell-path checks", family: rpm, mode: negative-shell-path, image: "public.ecr.aws/amazonlinux/amazonlinux@sha256:12052e9b5d3fd85769abbdd863dd038e1890c9ace31d5fdbe1afa78eda97d061" }
+          - { label: "negative control: deb registering /usr/bin/ash as an alternative must fail", family: deb, mode: negative-alternatives, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
+          - { label: "negative control: rpm registering /usr/bin/ash as an alternative must fail", family: rpm, mode: negative-alternatives, image: "public.ecr.aws/amazonlinux/amazonlinux@sha256:12052e9b5d3fd85769abbdd863dd038e1890c9ace31d5fdbe1afa78eda97d061" }
+    steps:
+      # Before checkout, because actions/checkout needs git and none of these images
+      # ships it; without git it silently falls back to a REST tarball. `shell: bash`
+      # because a bare `run:` inside a container is `sh -e`, and Debian's sh is dash,
+      # which has no pipefail.
+      - name: Install git for actions/checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v dnf >/dev/null 2>&1; then
+            dnf -q -y install git tar gzip >/dev/null
+          else
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get -qq update >/dev/null
+            apt-get -qq install -y --no-install-recommends git ca-certificates >/dev/null
+          fi
+          git --version
+
+      # Full history and every tag: N-1 is derived from them (packaging/n1-source.sh),
+      # and in a shallow clone the derivation fails and says so.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      # Built here rather than in a shared job and downloaded, because a workflow
+      # artifact on a public repository is downloadable by anyone, and the N-1 wheel is
+      # this tree's code under a version it is not. The script gates both wheels with
+      # the artifact-contents check before anything packages them.
+      #
+      # Paths come from $GITHUB_WORKSPACE and $RUNNER_TEMP, not from the github.workspace
+      # and runner.temp contexts: inside a job container the contexts still hold the
+      # HOST paths, while the environment variables hold the paths the container sees.
+      - name: Build and gate the N and N-1 wheels, N-1 from the previous commit
+        shell: bash
+        env:
+          # The from-release legs also need the latest published release's wheel, which
+          # takes the GitHub releases API; the token only raises its rate limit.
+          N1_BUILD_RELEASE: ${{ matrix.mode == 'from-release' && '1' || '' }}
+          GITHUB_TOKEN: ${{ matrix.mode == 'from-release' && github.token || '' }}
+        run: REPO="$GITHUB_WORKSPACE" bash packaging/build-test-wheels.sh "$RUNNER_TEMP/native-wheels"
+
+      # The same script a developer runs locally; a verification that exists twice
+      # drifts, and the copy in CI is the one nobody runs by hand.
+      - name: Verify (${{ matrix.family }}, ${{ matrix.mode }})
+        shell: bash
+        env:
+          FAMILY: ${{ matrix.family }}
+          MODE: ${{ matrix.mode }}
+        run: |
+          set -euo pipefail
+          export REPO="$GITHUB_WORKSPACE"
+          export DIST="$RUNNER_TEMP/native-wheels/dist"
+          export PREV_DIST="$RUNNER_TEMP/native-wheels/dist-prev"
+          export RELEASE_DIST="$RUNNER_TEMP/native-wheels/dist-release"
+          # N-1's own tree and the record of which commit it is, both written by
+          # build-test-wheels.sh.
+          export PREV_SRC="$RUNNER_TEMP/native-wheels/prev/src"
+          export N1_ENV="$RUNNER_TEMP/native-wheels/n1.env"
+          # The package's build directory, in the workspace so the upload below can name
+          # it with a relative path (the github.workspace context is the host's path).
+          export OUT="$GITHUB_WORKSPACE/build/native-packages"
+          bash "packaging/${FAMILY}/verify-in-container.sh" --mode "${MODE}"
+
+      # Only after the verification passed, and only from the two legs named in the
+      # header. `*.${{ matrix.family }}` at the top of OUT is the one package that leg
+      # built; the negative-control variants are written under subdirectories or by
+      # other legs.
+      - name: Upload the verified package for the release assets
+        if: matrix.asset
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ash-${{ matrix.family }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: build/native-packages/*.${{ matrix.family }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Hand the uploaded package's artifact ID to the release
+        if: matrix.asset
+        id: artifact-id
+        env:
+          FAMILY: ${{ matrix.family }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        run: |
+          set -eu
+          case "$FAMILY" in
+            deb) echo "deb-artifact-id=${ARTIFACT_ID}" >> "$GITHUB_OUTPUT" ;;
+            rpm) echo "rpm-artifact-id=${ARTIFACT_ID}" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::no artifact-id output for package family '${FAMILY}'"; exit 1 ;;
+          esac
+
+  # The one check name this workflow reports regardless of the matrix. `if: always()`
+  # so it reports a verdict when a job it needs failed or was skipped, rather than
+  # being skipped itself, which a ruleset reads as neither pass nor fail.
+  gate:
+    name: "native-packages: gate"
+    needs: [self-tests, package]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Checked out for the census: the gate reads this file's own jobs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+
+      - name: The gate's verdict rejects planted failed, skipped and missing jobs
+        env:
+          GATE_JOB: ${{ github.job }}
+        run: >-
+          python3 .github/scripts/assert-workflow-gate.py --self-test
+          --workflow .github/workflows/ash-native-packages.yml --gate-job "$GATE_JOB"
+
+      - name: Require every job to have succeeded
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          GATE_JOB: ${{ github.job }}
+        run: >-
+          python3 .github/scripts/assert-workflow-gate.py
+          --workflow .github/workflows/ash-native-packages.yml --gate-job "$GATE_JOB"

@@ -65,6 +65,8 @@ from typing import Any
 
 import yaml
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
+
 from . import census, env, manifest, reports, verdict
 from . import (
     run_act,
@@ -154,8 +156,8 @@ REFUSALS = {
         r"not our ref|couldn't find remote ref|failed to find branch, tag, or commit"
     ),
 }
-#: A command that runs an ASH scan or merge: ``ash scan``, ``ash merge``, or ``ash``
-#: followed by an option, which scans (reports.RUNS_SCAN_OR_MERGE).
+#: A command that runs an ASH scan or merge: ``ash scan``, ``ash results merge``, or
+#: ``ash`` followed by an option, which scans (reports.RUNS_SCAN_OR_MERGE).
 _RUNS_ASH = reports.RUNS_SCAN_OR_MERGE
 
 
@@ -226,8 +228,8 @@ def _yaml_strings(node: Any) -> Iterator[str]:
 
 
 def runs_ash(text: str, kind: str | None = None) -> bool:
-    """Whether the block runs ASH: ``ash scan``, ``ash merge``, ``ash`` followed by an
-    option (the scan is the CLI's default command), or ASH's reusable workflow.
+    """Whether the block runs ASH: ``ash scan``, ``ash results merge``, ``ash`` followed
+    by an option (the scan is the CLI's default command), or ASH's reusable workflow.
 
     A block of a YAML ``kind`` is read as YAML loads it, as the act plan and the
     GitLab checks read a pipeline: each string is matched on its own, so a folded or
@@ -387,7 +389,9 @@ def system_ash_problem(path: str = env.SYSTEM_PATH) -> str | None:
     Every runner starts with that PATH after its own directory, so a pipeline that
     skipped its install or broke its PATH line would run such an ash and pass.
     """
-    found = shutil.which("ash", path=path)
+    found = shutil.which(env.DOCUMENTED_COMMAND, path=path) or shutil.which(
+        CANONICAL_CLI_NAME, path=path
+    )
     if found is None:
         return None
     return (
@@ -1320,8 +1324,8 @@ def scan_verdict_problems(prepared: Prepared, log: str) -> list[str]:
 
     gitlab-ci-local prints each output line of a job as ``<job> > <line>``, so each
     verdict is attributed to its job: every job whose script runs ``ash scan``,
-    ``ash merge`` or ``ash`` with options gives exactly one, and no other job, nor a
-    line outside every job, gives one. Jenkinsfile Runner, the CodeBuild agent and
+    ``ash results merge`` or ``ash`` with options gives exactly one, and no other job,
+    nor a line outside every job, gives one. Jenkinsfile Runner, the CodeBuild agent and
     ``circleci local execute`` each run one build or job per launch, and their logs
     do not tell its steps apart; each page's block scans once in it, so the log holds
     exactly one verdict.
@@ -1476,7 +1480,8 @@ def _act_problems(prepared, launched, log, expected) -> list[str]:
         {job: entry.result for job, entry in plan.items()},
         runs={job: entry.runs for job, entry in plan.items() if entry.caller is None},
     )
-    merge = reports.gating_step(workflow, "merge")
+    # The pages' merge step runs `ashx results merge`; 4.0 has no top-level `merge`.
+    merge = reports.gating_step(workflow, "results merge")
     gating = {job: entry.runs for job, entry in plan.items() if entry.gates}
     if plan and not gating:
         problems.append(

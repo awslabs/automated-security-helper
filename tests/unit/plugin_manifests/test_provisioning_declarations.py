@@ -149,7 +149,6 @@ def test_the_content_databases_are_unchanged_by_the_move() -> None:
     assert rows == [
         ("grype-db", "grype", (), timedelta(hours=120), True),
         ("trivy-db", "trivy-repo", ("trivy",), timedelta(hours=24), False),
-        ("semgrep-offline-rules", "semgrep", (), timedelta(days=30), False),
         ("opengrep-offline-rules", "opengrep", (), timedelta(days=30), False),
     ]
 

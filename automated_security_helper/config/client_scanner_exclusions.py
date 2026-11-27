@@ -1778,11 +1778,9 @@ def _entry_fields(entry: Any) -> Tuple[Optional[str], Optional[str], Any]:
     """
     pattern, reason = _pattern_of(entry)
     if isinstance(entry, Mapping):
-        # The canonical spelling first; "expiration" is the deprecated alias
-        # (models/core.py), still read until ASH v4 removes it.
-        if "expires" in entry:
-            return pattern, reason, entry.get("expires")
-        return pattern, reason, entry.get("expiration")
+        # ``expires`` only: ASH 4.0 removed the ``expiration`` spelling
+        # (models/core.py), which the model refuses in a config.
+        return pattern, reason, entry.get("expires")
     if isinstance(entry, str):
         return pattern, reason, None
     return pattern, reason, getattr(entry, "expires", None)
@@ -1823,17 +1821,14 @@ def _operator_fields(source: Any) -> Optional[Dict[str, Any]]:
     expiration. None for any other shape.
     """
     if isinstance(source, Mapping):
-        fields = {
+        # No ``expiration`` folding: ASH 4.0 removed that spelling, so a key
+        # of that name is an unknown key the model refuses, and
+        # ``_merged_field_by_field`` leaves it out like any other field the
+        # model does not take.
+        return {
             key: value.isoformat() if isinstance(value, date) else value
             for key, value in source.items()
         }
-        # The deprecated "expiration" spelling is folded onto the canonical
-        # "expires" so an overlay over a model dump (which writes "expires")
-        # never carries both spellings. An entry that wrote both is left as
-        # written: the model refuses a disagreement itself.
-        if "expiration" in fields and "expires" not in fields:
-            fields["expires"] = fields.pop("expiration")
-        return fields
     if isinstance(source, str):
         return {"path": source}
     return None
@@ -1860,14 +1855,14 @@ def _merged_field_by_field(template: BaseModel, fields: Dict[str, Any]) -> BaseM
     model = type(template)
     merged: Dict[str, Any] = {**template.model_dump(), "expires": None}
     for key, value in fields.items():
-        if key in ("expires", "expiration"):
+        if key == "expires":
             continue
         try:
             model.model_validate({**merged, key: value})
         except Exception:  # noqa: BLE001 -- this field alone is not the model's
             continue
         merged[key] = value
-    expiration = fields.get("expires", fields.get("expiration"))
+    expiration = fields.get("expires")
     if expiration is not None:
         try:
             model.model_validate({**merged, "expires": expiration})

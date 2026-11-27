@@ -1,10 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ignore_paths[].expiration`` is enforced the way ``suppressions[].expiration`` is.
+"""``ignore_paths[].expires`` is enforced the way ``suppressions[].expires`` is.
 
 The rule both follow is the one suppressions have always had
-(``utils/suppression_matcher.py``): ``expiration`` is a YYYY-MM-DD date read on
+(``utils/suppression_matcher.py``): ``expires`` is a YYYY-MM-DD date read on
 this host's clock, the entry stops applying at the start of that day (so on the
 expiration date itself it no longer applies), a date that is not YYYY-MM-DD
 refuses the config when it is loaded, and an entry that expires within 30 days
@@ -206,7 +206,7 @@ class TestPostScanFiltering:
         config = _config(
             ignore_paths=[
                 IgnorePathWithReason(
-                    path=IGNORE_PATTERN, reason="vendored", expiration=expiration
+                    path=IGNORE_PATTERN, reason="vendored", expires=expiration
                 )
             ]
         )
@@ -237,7 +237,7 @@ class TestPostScanFiltering:
                     rule_id="RULE-1",
                     path=FINDING_PATH,
                     reason="accepted",
-                    expiration=expiration,
+                    expires=expiration,
                 )
             ]
         )
@@ -252,7 +252,7 @@ class TestPostScanFiltering:
         config = _config(
             ignore_paths=[
                 IgnorePathWithReason(
-                    path=IGNORE_PATTERN, reason="vendored", expiration="2026-06-01"
+                    path=IGNORE_PATTERN, reason="vendored", expires="2026-06-01"
                 ),
                 IgnorePathWithReason(path="build/**", reason="generated"),
             ]
@@ -282,10 +282,10 @@ class TestScannerPreFiltering:
 
     def test_orchestrator_passes_only_live_ignore_paths_to_the_engine(self, tmp_path):
         live = IgnorePathWithReason(
-            path="build/**", reason="generated", expiration="2026-06-16"
+            path="build/**", reason="generated", expires="2026-06-16"
         )
         expired = IgnorePathWithReason(
-            path=IGNORE_PATTERN, reason="vendored", expiration="2026-06-15"
+            path=IGNORE_PATTERN, reason="vendored", expires="2026-06-15"
         )
         config = _config(ignore_paths=[live, expired])
         source = tmp_path / "src"
@@ -331,7 +331,7 @@ class TestArchiveConverter:
         config = _config(
             ignore_paths=[
                 IgnorePathWithReason(
-                    path="vendor/*", reason="vendored", expiration=expiration
+                    path="vendor/*", reason="vendored", expires=expiration
                 )
             ]
         )
@@ -367,12 +367,12 @@ class TestMalformedExpiration:
     @pytest.mark.parametrize("written", ["2026/06/30", "30-06-2026", "soon", ""])
     def test_model_refuses_a_malformed_date(self, written):
         with pytest.raises(ValidationError) as excinfo:
-            IgnorePathWithReason(path="vendor/**", reason="r", expiration=written)
+            IgnorePathWithReason(path="vendor/**", reason="r", expires=written)
         assert "YYYY-MM-DD" in str(excinfo.value)
 
     def test_suppression_refuses_the_same_dates(self):
         with pytest.raises(ValidationError):
-            AshSuppression(path="a.py", reason="r", expiration="2026/06/30")
+            AshSuppression(path="a.py", reason="r", expires="2026/06/30")
 
     def test_config_file_with_a_malformed_date_is_refused(self, tmp_path):
         """The scanned repository's own config is refused whole, never applied in part.
@@ -398,7 +398,7 @@ class TestMalformedExpiration:
             "  ignore_paths:\n"
             "    - path: 'vendor/**'\n"
             "      reason: vendored\n"
-            "      expiration: '2026/06/30'\n",
+            "      expires: '2026/06/30'\n",
             encoding="utf-8",
         )
         with pytest.raises(ConfigFileRefused) as excinfo:
@@ -414,7 +414,7 @@ class TestMalformedExpiration:
         by its location, not by its path or its date.
         """
         entry = IgnorePathWithReason.model_construct(
-            path=IGNORE_PATTERN, reason="vendored", expiration="2026/06/30"
+            path=IGNORE_PATTERN, reason="vendored", expires="2026/06/30"
         )
         config = _config()
         config.global_settings.ignore_paths = [entry]
@@ -454,7 +454,7 @@ class TestExpiryWarning:
                     IgnorePathWithReason(
                         path=IGNORE_PATTERN,
                         reason="vendored until the upgrade",
-                        expiration="2026-07-01",
+                        expires="2026-07-01",
                     )
                 ]
             ),
@@ -472,7 +472,7 @@ class TestExpiryWarning:
             _config(
                 ignore_paths=[
                     IgnorePathWithReason(
-                        path=IGNORE_PATTERN, reason="vendored", expiration=expiration
+                        path=IGNORE_PATTERN, reason="vendored", expires=expiration
                     )
                 ]
             ),
@@ -492,7 +492,7 @@ class TestExpiryWarning:
                         rule_id="B101",
                         path="a.py",
                         reason="accepted",
-                        expiration="2026-06-20",
+                        expires="2026-06-20",
                     )
                 ]
             ),
@@ -515,12 +515,12 @@ class TestExpiryWarning:
         config = _config(
             ignore_paths=[
                 IgnorePathWithReason(
-                    path=IGNORE_PATTERN, reason="vendored", expiration="2026-07-01"
+                    path=IGNORE_PATTERN, reason="vendored", expires="2026-07-01"
                 )
             ],
             suppressions=[
                 AshSuppression(
-                    rule_id="B101", path="a.py", reason="r", expiration="2026-06-20"
+                    rule_id="B101", path="a.py", reason="r", expires="2026-06-20"
                 )
             ],
         )
@@ -541,12 +541,12 @@ class TestExpiryWarning:
             _config(
                 ignore_paths=[
                     IgnorePathWithReason(
-                        path=IGNORE_PATTERN, reason="vendored", expiration="2026-06-15"
+                        path=IGNORE_PATTERN, reason="vendored", expires="2026-06-15"
                     )
                 ],
                 suppressions=[
                     AshSuppression(
-                        rule_id="B101", path="a.py", reason="r", expiration="2026-06-15"
+                        rule_id="B101", path="a.py", reason="r", expires="2026-06-15"
                     )
                 ],
             ),
@@ -578,7 +578,7 @@ class TestExpiredEntriesWarning:
         return _config(
             ignore_paths=[
                 IgnorePathWithReason(
-                    path=IGNORE_PATTERN, reason="vendored", expiration="2026-06-01"
+                    path=IGNORE_PATTERN, reason="vendored", expires="2026-06-01"
                 ),
                 IgnorePathWithReason(path="build/**", reason="generated"),
             ],
@@ -587,10 +587,10 @@ class TestExpiredEntriesWarning:
                     rule_id="B101",
                     path="tests/a.py",
                     reason="asserts in tests",
-                    expiration="2026-06-15",
+                    expires="2026-06-15",
                 ),
                 AshSuppression(
-                    rule_id="B602", path="b.py", reason="r", expiration="2027-01-01"
+                    rule_id="B602", path="b.py", reason="r", expires="2027-01-01"
                 ),
             ],
         )
@@ -622,7 +622,7 @@ class TestExpiredEntriesWarning:
             ignore_paths=[IgnorePathWithReason(path="build/**", reason="generated")],
             suppressions=[
                 AshSuppression(
-                    rule_id="B602", path="b.py", reason="r", expiration="2027-01-01"
+                    rule_id="B602", path="b.py", reason="r", expires="2027-01-01"
                 )
             ],
         )
@@ -635,15 +635,15 @@ class TestExpiredEntriesWarning:
         config = _config(
             ignore_paths=[
                 IgnorePathWithReason(
-                    path="build/**", reason="generated", expiration="2026-06-01"
+                    path="build/**", reason="generated", expires="2026-06-01"
                 ),
                 IgnorePathWithReason(
-                    path=IGNORE_PATTERN, reason="vendored", expiration="2026-07-01"
+                    path=IGNORE_PATTERN, reason="vendored", expires="2026-07-01"
                 ),
             ],
             suppressions=[
                 AshSuppression(
-                    rule_id="B101", path="a.py", reason="r", expiration="2026-07-01"
+                    rule_id="B101", path="a.py", reason="r", expires="2026-07-01"
                 )
             ],
         )
@@ -721,7 +721,7 @@ class TestExpiryWarningsPrintConfigTextAsWritten:
             config = _config(
                 ignore_paths=[
                     IgnorePathWithReason(
-                        path="vendor/**", reason=self.TEXT, expiration=expiration
+                        path="vendor/**", reason=self.TEXT, expires=expiration
                     )
                 ]
             )
@@ -732,7 +732,7 @@ class TestExpiryWarningsPrintConfigTextAsWritten:
                         rule_id="B101",
                         path="a.py",
                         reason=self.TEXT,
-                        expiration=expiration,
+                        expires=expiration,
                     )
                 ]
             )
@@ -749,7 +749,7 @@ class TestExpiryWarningsPrintConfigTextAsWritten:
         value read from the environment.
         """
         entry = IgnorePathWithReason.model_construct(
-            path="vendor/[/x]", reason=self.TEXT, expiration="TBD-UNPARSED"
+            path="vendor/[/x]", reason=self.TEXT, expires="TBD-UNPARSED"
         )
         config = _config(ignore_paths=[entry])
         assert handle_suppression_expiration_check(
@@ -799,12 +799,12 @@ class TestExpiryWarningsCoverScannerOptionLists:
                 scanner: {
                     "options": {
                         field: [
-                            {"path": "old", "reason": "r", "expiration": "2026-06-01"},
-                            {"path": "soon", "reason": "r", "expiration": "2026-07-01"},
+                            {"path": "old", "reason": "r", "expires": "2026-06-01"},
+                            {"path": "soon", "reason": "r", "expires": "2026-07-01"},
                             {
                                 "path": "later",
                                 "reason": "r",
-                                "expiration": "2027-01-01",
+                                "expires": "2027-01-01",
                             },
                         ]
                     }
@@ -839,15 +839,13 @@ class TestExpiryWarningsCoverScannerOptionLists:
             project_name="test-project",
             global_settings={
                 "ignore_paths": [
-                    {"path": "vendor/**", "reason": "r", "expiration": "2026-06-01"}
+                    {"path": "vendor/**", "reason": "r", "expires": "2026-06-01"}
                 ]
             },
             scanners={
                 scanner: {
                     "options": {
-                        field: [
-                            {"path": "old", "reason": "r", "expiration": "2026-06-01"}
-                        ]
+                        field: [{"path": "old", "reason": "r", "expires": "2026-06-01"}]
                     }
                 }
             },
@@ -882,7 +880,7 @@ class TestExpiryWarningsCoverScannerOptionLists:
             project_name="test-project",
             global_settings={
                 "ignore_paths": [
-                    {"path": "vendor/**", "reason": "r", "expiration": "2026-07-01"}
+                    {"path": "vendor/**", "reason": "r", "expires": "2026-07-01"}
                 ]
             },
             scanners={
@@ -892,7 +890,7 @@ class TestExpiryWarningsCoverScannerOptionLists:
                             {
                                 "path": "soon",
                                 "reason": "r",
-                                "expiration": "2026-07-01",
+                                "expires": "2026-07-01",
                             }
                         ]
                     }
@@ -937,7 +935,7 @@ class TestScannerOptionLists:
 
     ``scanners.bandit.options.excluded_paths``, ``scanners.checkov.options.skip_path``
     and ``scanners.syft.options.exclude`` share the ``IgnorePathWithReason`` model
-    and its ``expiration`` field, and the published schema describes that field
+    and its ``expires`` field, and the published schema describes that field
     the same way for all of them.
     """
 
@@ -976,7 +974,7 @@ class TestScannerOptionLists:
     @staticmethod
     def _entry(expiration):
         return IgnorePathWithReason(
-            path="vendor", reason="vendored", expiration=expiration
+            path="vendor", reason="vendored", expires=expiration
         )
 
     @pytest.mark.parametrize(
@@ -1049,7 +1047,7 @@ class TestScannerOptionLists:
                 options=GuardDogScannerConfigOptions(
                     excluded_paths=[
                         IgnorePathWithReason(
-                            path="vendor/**", reason="vendored", expiration=expiration
+                            path="vendor/**", reason="vendored", expires=expiration
                         )
                     ]
                 )
@@ -1073,7 +1071,7 @@ class TestScannerOptionLists:
     def test_malformed_date_is_refused(self, options_cls, field):
         with pytest.raises(ValidationError) as excinfo:
             options_cls(
-                **{field: [{"path": "vendor", "reason": "r", "expiration": "TBD"}]}
+                **{field: [{"path": "vendor", "reason": "r", "expires": "TBD"}]}
             )
         assert "YYYY-MM-DD" in str(excinfo.value)
 
@@ -1112,7 +1110,7 @@ class TestStoredResults:
         assert config.project_name == "results-written-before-expiration-checks", (
             "the stored config was replaced instead of kept"
         )
-        assert [p.expiration for p in config.global_settings.ignore_paths] == ["TBD"]
+        assert [p.expires for p in config.global_settings.ignore_paths] == ["TBD"]
         bandit = config.get_plugin_config("scanner", "bandit")
         options = bandit.options if hasattr(bandit, "options") else bandit["options"]
         excluded = (
@@ -1121,11 +1119,9 @@ class TestStoredResults:
             else options["excluded_paths"]
         )
         expirations = [
-            # A model keeps ``expiration`` as a deprecated property of ``expires``;
-            # a dumped dict spells the field by its canonical name.
-            e.expiration
-            if hasattr(e, "expiration")
-            else e.get("expires", e.get("expiration"))
+            # ASH 4.0 removed the ``expiration`` spelling; a stored file that
+            # still has it is read as ``expires``, on a model or a dumped dict.
+            e.expires if hasattr(e, "expires") else e.get("expires")
             for e in excluded
         ]
         assert expirations == ["next quarter"]
@@ -1165,7 +1161,7 @@ class TestStoredResults:
                 "automated_security_helper.models.asharp_model.ASH_LOGGER"
             ) as logger:
                 model = AshAggregatedResults.model_validate(data)
-            assert model.ash_config.global_settings.ignore_paths[0].expiration == (
+            assert model.ash_config.global_settings.ignore_paths[0].expires == (
                 stored
             ), "kept as written"
             logged = " ".join(
@@ -1220,6 +1216,30 @@ class TestStoredResults:
             ".excluded_paths[0].expiration'" in w and "bandit" in w for w in warned
         ), warned
 
+    def test_an_entry_stored_as_expires_is_located_at_expires(self):
+        """The location names the key as the stored file wrote it: an entry
+        stored as ``expires`` is located at ``.expires``, one stored as
+        ``expiration`` (the fixture's other entries) at ``.expiration``."""
+        data = json.loads(self.FIXTURE.read_text(encoding="utf-8"))
+        entry = data["ash_config"]["global_settings"]["ignore_paths"][0]
+        entry["expires"] = entry.pop("expiration")
+        with patch(
+            "automated_security_helper.models.asharp_model.ASH_LOGGER"
+        ) as logger:
+            model = AshAggregatedResults.model_validate(data)
+        assert model.ash_config.global_settings.ignore_paths[0].expires == "TBD"
+        warned = [str(c.args[0]) for c in logger.warning.call_args_list]
+        assert any("'global_settings.ignore_paths[0].expires'" in w for w in warned), (
+            warned
+        )
+        assert not any(
+            "'global_settings.ignore_paths[0].expiration'" in w for w in warned
+        ), warned
+        # The bandit entry is still stored as ``expiration``.
+        assert any(
+            ".excluded_paths[0].expiration'" in w and "bandit" in w for w in warned
+        ), warned
+
     @pytest.mark.parametrize(
         "where", ["beside-in-bandit-options", "in-the-entry-itself"]
     )
@@ -1261,7 +1281,7 @@ class TestStoredResults:
         """``AshSuppression.matches``, ``active_ignore_paths`` and
         ``should_suppress_finding`` all read an unparseable date as one that does
         not apply, so a kept 'TBD' entry suppresses nothing."""
-        fields = {"path": "app.py", "reason": "r", "expiration": "TBD"}
+        fields = {"path": "app.py", "reason": "r", "expires": "TBD"}
         if kind is AshSuppression:
             fields["rule_id"] = "B101"
         entry = kind.model_construct(**fields)
@@ -1324,7 +1344,7 @@ class TestLint:
             "    - rule_id: B101\n"
             "      path: a.py\n"
             "      reason: r\n"
-            "      expiration: '2026-06-15'\n",
+            "      expires: '2026-06-15'\n",
         )
         expired = [
             i
@@ -1344,7 +1364,7 @@ class TestLint:
             "    - rule_id: B101\n"
             "      path: a.py\n"
             "      reason: r\n"
-            "      expiration: '2026-06-16'\n",
+            "      expires: '2026-06-16'\n",
         )
         assert not [i for i in issues if i.category == LintCategory.SUPPRESSION_EXPIRED]
 
@@ -1356,7 +1376,7 @@ class TestLint:
             "  ignore_paths:\n"
             "    - path: 'vendor/**'\n"
             "      reason: vendored\n"
-            f"      expiration: '{expiration}'\n",
+            f"      expires: '{expiration}'\n",
         )
         found = [
             i
@@ -1395,7 +1415,7 @@ class TestLint:
             "  ignore_paths:\n"
             "    - path: 'vendor/**'\n"
             "      reason: vendored\n"
-            f"      expiration: {written}\n",
+            f"      expires: {written}\n",
         )
         errors = [
             i
@@ -1412,7 +1432,7 @@ class TestLint:
             "    - rule_id: B101\n"
             "      path: a.py\n"
             "      reason: r\n"
-            "      expiration: 2026-06-30\n",
+            "      expires: 2026-06-30\n",
         )
         assert [
             i
@@ -1435,7 +1455,7 @@ class TestLint:
             f"      {field}:\n"
             "        - path: vendor\n"
             "          reason: vendored\n"
-            f"          expiration: {expiration}\n",
+            f"          expires: {expiration}\n",
         )
         return self._at(issues, f"scanners.{scanner}.options.{field}[0]")
 
@@ -1461,7 +1481,7 @@ class TestLint:
         assert len(errors) == 1, issues
         # The model's message, as a scan prints it, names the entry by its place.
         assert errors[0].message.startswith(
-            f"Invalid value at 'scanners.{scanner}.options.{field}[0].expiration': "
+            f"Invalid value at 'scanners.{scanner}.options.{field}[0].expires': "
         ), errors[0].message
 
 
@@ -1495,10 +1515,10 @@ class TestWorkspacePolicy:
             "  ignore_paths:\n"
             "    - path: 'api/vendor/*'\n"
             "      reason: third party\n"
-            f"      expiration: '{expiration}'\n",
+            f"      expires: '{expiration}'\n",
         )
         (project,) = resolve_workspace(workspace).projects
-        assert [p.expiration for p in project.policy_ignore_paths] == [expiration]
+        assert [p.expires for p in project.policy_ignore_paths] == [expiration]
         return project, _project_config_with_policy(
             project, ProjectScanSettings(output_dir=tmp_path / "out")
         )
@@ -1529,7 +1549,7 @@ class TestWorkspacePolicy:
             "  ignore_paths:\n"
             "    - path: 'api/vendor/*'\n"
             "      reason: third party\n"
-            "      expiration: '2026/06/30'\n",
+            "      expires: '2026/06/30'\n",
         )
         with pytest.raises(WorkspaceDefinitionError) as excinfo:
             resolve_workspace(workspace)

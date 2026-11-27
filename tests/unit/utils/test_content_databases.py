@@ -37,7 +37,7 @@ import yaml
 
 from automated_security_helper.utils import content_databases as cdb
 from tests.utils import workflow_commands as wc
-from tests.utils.helpers import checkout_env
+from tests.utils.helpers import checkout_env, iter_repo_files
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 REGISTRY = REPO_ROOT / "automated_security_helper" / "utils" / "content_databases.py"
@@ -70,9 +70,7 @@ class TestTheRegistry:
             GRYPE.max_age
         )
 
-    @pytest.mark.parametrize(
-        "name", ["trivy-db", "semgrep-offline-rules", "opengrep-offline-rules"]
-    )
+    @pytest.mark.parametrize("name", ["trivy-db", "opengrep-offline-rules"])
     def test_databases_without_ci_guards_are_not_cacheable(self, name):
         """Each now declares a max age for the scan-time check, which is not a CI guard.
 
@@ -195,8 +193,12 @@ class TestTheCommandLine:
 
 def _source_files():
     for root in ("automated_security_helper", "utils", ".github", "scripts"):
-        for path in (REPO_ROOT / root).rglob("*"):
-            if path.is_file() and path.suffix in {
+        # iter_repo_files never enters the tests' scratch tree or node_modules
+        # (scripts/e2e/inspector/node_modules is where npm installs).
+        for path in iter_repo_files(
+            REPO_ROOT / root, skip_dirs=frozenset({"node_modules"})
+        ):
+            if path.suffix in {
                 ".py",
                 ".yml",
                 ".yaml",
@@ -205,7 +207,6 @@ def _source_files():
             }:
                 yield path
     yield REPO_ROOT / "Dockerfile"
-    yield REPO_ROOT / "ash"
 
 
 @pytest.mark.unit
@@ -505,7 +506,7 @@ class TestTheCommandLineInProcess:
         assert capsys.readouterr().out.startswith("grype-db-v1-w86400-b")
 
     def test_cache_key_refuses_an_unbounded_database(self, capsys):
-        assert cdb.main(["cache-key", "semgrep-offline-rules"]) == 2
+        assert cdb.main(["cache-key", "opengrep-offline-rules"]) == 2
         assert "must not be cached" in capsys.readouterr().err
 
     def test_unknown_name(self, capsys):

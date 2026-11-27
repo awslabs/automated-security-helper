@@ -47,8 +47,9 @@ def _plain(text: str) -> str:
 
 
 def _option_help(command: str, name: str) -> str:
-    root = typer.main.get_command(app)
-    cmd = root.commands[command]
+    cmd = typer.main.get_command(app)
+    for word in command.split():
+        cmd = cmd.commands[word]
     return next(param.help for param in cmd.params if param.name == name)
 
 
@@ -75,7 +76,7 @@ class TestTheIncompleteScanOptOut:
         assert "drop --fail-on-incomplete-scanners" not in out
         assert "--no-fail-on-incomplete-scanners" in out
 
-    @pytest.mark.parametrize("command", ["scan", "merge"])
+    @pytest.mark.parametrize("command", ["scan", "results merge"])
     def test_the_help_says_the_gate_is_on_by_default_and_nothing_else(self, command):
         text = _plain(_option_help(command, "fail_on_incomplete_scanners"))
 
@@ -327,7 +328,7 @@ class TestPathsArePrintedAsGiven:
             side_effect=ShardCoverageError(f"shard {name} completed none"),
         ):
             result = CliRunner().invoke(
-                app, ["merge", "--output-dir", "merged", "--results", "."]
+                app, ["results", "merge", "--output-dir", "merged", "--results", "."]
             )
 
         assert result.exit_code == 1, result.output

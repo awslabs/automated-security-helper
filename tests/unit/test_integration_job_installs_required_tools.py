@@ -48,7 +48,8 @@ def _installed_tools() -> set[str]:
     tools: set[str] = set()
     for step in _integration_steps():
         run = step.get("run") or ""
-        if "ash dependencies install" not in run:
+        # The v4 command; the deprecated `ash` alias would print a warning in CI.
+        if "ashx dependencies install" not in run:
             continue
         words = run.split()
         tools |= {words[i + 1] for i, word in enumerate(words) if word == "--tool"}
@@ -92,7 +93,7 @@ def test_the_docs_examples_job_installs_exactly_what_the_integration_job_does() 
             str(step["run"])
             for step in jobs[job_id]["steps"]
             if str(step.get("run", "")).strip().startswith("uv sync")
-            or "ash dependencies install" in str(step.get("run", ""))
+            or re.search(r"\bashx? dependencies install", str(step.get("run", "")))
         ]
 
     integration = installs("integration-test")

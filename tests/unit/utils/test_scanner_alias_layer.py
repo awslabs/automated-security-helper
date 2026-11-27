@@ -3,13 +3,13 @@
 
 """The retired-scanner alias layer: one table, one lookup, one comparison key.
 
-``SCANNER_NAME_ALIASES`` is empty today -- no shipped scanner is retired -- so
-every live behavior is unchanged: ``canonical_scanner_name`` answers the name
-it was given and ``selection_key`` is strip-then-lower. These tests pin the
-mechanism itself by patching one alias row in, so the day a retirement adds a
-real row, the row is the whole change: the config fold, the scan phase's
-resolution and the dependencies tool lookup are already wired through the
-table. Adapted from the v4 program (#981), whose table carried a live row.
+On main ``SCANNER_NAME_ALIASES`` is empty -- no scanner is retired there. On the
+v4 line it holds the one live row, ``semgrep`` -> ``opengrep`` (the semgrep plugin
+was removed and opengrep serves its name), and every other name behaves as before:
+``canonical_scanner_name`` answers the name it was given and ``selection_key`` is
+strip-then-lower. These tests pin the mechanism itself by patching one alias row
+in: the config fold, the scan phase's resolution and the dependencies tool lookup
+are wired through the table, so a retirement's row is the whole change.
 """
 
 import copy
@@ -28,8 +28,8 @@ from automated_security_helper.utils.scanner_names import (
 pytestmark = pytest.mark.unit
 
 
-def test_the_table_is_empty_until_a_scanner_is_retired():
-    assert SCANNER_NAME_ALIASES == {}
+def test_the_table_holds_the_one_retired_scanner():
+    assert SCANNER_NAME_ALIASES == {"semgrep": "opengrep"}
 
 
 @pytest.mark.parametrize(

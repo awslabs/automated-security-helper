@@ -14,8 +14,8 @@
   What is kept for upload leaves out every symbolic link, every dot entry and every
   secret-shaped name; an ``.ash/ash_output`` directory is kept as ``ash_output``.
 * The result each job of a GitHub workflow should have follows from what it runs: a
-  job that runs ``ash scan``, ``ash merge`` or ``ash`` with options (a scan) without
-  ``--no-fail-on-findings``, or
+  job that runs ``ash scan``, ``ash results merge`` or ``ash`` with options (a scan)
+  without ``--no-fail-on-findings``, or
   the job of the reusable scan workflow when its caller leaves ``fail-on-findings``
   on, fails, because every runnable block runs on a fixture with findings; any other
   job passes. A job that calls a reusable workflow is expected under the job ids of
@@ -88,19 +88,23 @@ _OPTION_SCAN = r"-(?:[A-Za-z]|-(?!(?:help|version)(?![\w-]))[A-Za-z])"
 
 def _runs_ash(subcommands: str, space: str = _ASH_SPACE) -> re.Pattern[str]:
     """``ash`` followed by one of ``subcommands`` or by an option."""
-    return re.compile(rf"(?<![\w.-])ash{space}(?:(?:{subcommands})\b|{_OPTION_SCAN})")
+    return re.compile(rf"(?<![\w.-])ashx?{space}(?:(?:{subcommands})\b|{_OPTION_SCAN})")
 
 
 #: A command that runs an ASH scan: ``ash scan``, or ``ash`` followed by an option,
 #: since the scan is the CLI's default command (``ash --source-dir .`` scans).
 RUNS_SCAN = _runs_ash("scan")
-#: A command that runs an ASH scan or ``ash merge``.
-RUNS_SCAN_OR_MERGE = _runs_ash("scan|merge")
+#: A command that runs an ASH scan or a merge: ``ash results merge``, the spelling the
+#: pages use since 4.0 removed the top-level ``ash merge``, or ``ash merge`` itself, so a
+#: page that still writes it gates on findings and fails on its missing verdict line.
+RUNS_SCAN_OR_MERGE = _runs_ash(rf"scan|(?:results{_ASH_SPACE})?merge")
 #: RUNS_SCAN_OR_MERGE for a YAML block that does not parse, read as written.
-RUNS_SCAN_OR_MERGE_ANY_LINE = _runs_ash("scan|merge", _ANY_SPACE)
+RUNS_SCAN_OR_MERGE_ANY_LINE = _runs_ash(
+    rf"scan|(?:results{_ANY_SPACE})?merge", _ANY_SPACE
+)
 _GATES = RUNS_SCAN_OR_MERGE
 _MATRIX = re.compile(r"\$\{\{\s*matrix\.([\w-]+)\s*\}\}")
-_RUNS_ASH = re.compile(r"(?<![\w.-])uvx\b.*?(?<![\w.-])ash(?![\w.-])")
+_RUNS_ASH = re.compile(r"(?<![\w.-])uvx\b.*?(?<![\w.-])ashx?(?![\w.-])")
 #: Names the kept copies leave out: Jenkins' keys and secrets, and private keys.
 _SECRET_SHAPED = re.compile(
     r"^(?:secrets|secret\.key.*|identity\.key\.enc)$|\.(?:key|pem)$", re.IGNORECASE
@@ -504,8 +508,8 @@ class _JobCondition:
         if isinstance(condition, bool):
             return _and_values(self._success(needs), condition) is not False
         try:
-            tokens = _tokens(_expression_body(str(condition)))
-            value, rest = self._or(tokens, needs)
+            terms = _tokens(_expression_body(str(condition)))
+            value, rest = self._or(terms, needs)
             if rest:
                 raise ValueError(f"unread tail {rest!r}")
         except ValueError:
@@ -515,7 +519,7 @@ class _JobCondition:
             if any(function in str(condition) for function in _STATUS_FUNCTIONS):
                 return True
             return _and_values(self._success(needs), None) is not False
-        if not any(token in _STATUS_FUNCTIONS for token in tokens):
+        if not any(term in _STATUS_FUNCTIONS for term in terms):
             value = _and_values(self._success(needs), value)
         return value is not False
 
@@ -545,64 +549,64 @@ class _JobCondition:
 
     def evaluate(self, text: str, needs: list[str]) -> Any:
         """The value of expression ``text`` alone, without the implicit ``success()``."""
-        tokens = _tokens(_expression_body(text))
-        value, rest = self._or(tokens, needs)
+        terms = _tokens(_expression_body(text))
+        value, rest = self._or(terms, needs)
         if rest:
             raise ValueError(f"unread tail {rest!r}")
         return value
 
-    def _or(self, tokens: list[str], needs: list[str]) -> tuple[Any, list[str]]:
-        value, tokens = self._and(tokens, needs)
-        while tokens and tokens[0] == "||":
-            other, tokens = self._and(tokens[1:], needs)
+    def _or(self, terms: list[str], needs: list[str]) -> tuple[Any, list[str]]:
+        value, terms = self._and(terms, needs)
+        while terms and terms[0] == "||":
+            other, terms = self._and(terms[1:], needs)
             left, right = _truth(value), _truth(other)
             value = (
                 True
                 if left or right
                 else (False if left is False and right is False else None)
             )
-        return value, tokens
+        return value, terms
 
-    def _and(self, tokens: list[str], needs: list[str]) -> tuple[Any, list[str]]:
-        value, tokens = self._not(tokens, needs)
-        while tokens and tokens[0] == "&&":
-            other, tokens = self._not(tokens[1:], needs)
+    def _and(self, terms: list[str], needs: list[str]) -> tuple[Any, list[str]]:
+        value, terms = self._not(terms, needs)
+        while terms and terms[0] == "&&":
+            other, terms = self._not(terms[1:], needs)
             value = _and_values(value, other)
-        return value, tokens
+        return value, terms
 
-    def _not(self, tokens: list[str], needs: list[str]) -> tuple[Any, list[str]]:
-        if tokens and tokens[0] == "!":
-            value, tokens = self._not(tokens[1:], needs)
+    def _not(self, terms: list[str], needs: list[str]) -> tuple[Any, list[str]]:
+        if terms and terms[0] == "!":
+            value, terms = self._not(terms[1:], needs)
             truth = _truth(value)
-            return (None if truth is None else not truth), tokens
-        return self._comparison(tokens, needs)
+            return (None if truth is None else not truth), terms
+        return self._comparison(terms, needs)
 
-    def _comparison(self, tokens: list[str], needs: list[str]) -> tuple[Any, list[str]]:
-        value, tokens = self._primary(tokens, needs)
-        if tokens and tokens[0] in ("==", "!="):
-            other, rest = self._primary(tokens[1:], needs)
+    def _comparison(self, terms: list[str], needs: list[str]) -> tuple[Any, list[str]]:
+        value, terms = self._primary(terms, needs)
+        if terms and terms[0] in ("==", "!="):
+            other, rest = self._primary(terms[1:], needs)
             if value is None or other is None:
                 return None, rest
             equal = _github_equal(value, other)
-            return (equal if tokens[0] == "==" else not equal), rest
-        return value, tokens
+            return (equal if terms[0] == "==" else not equal), rest
+        return value, terms
 
-    def _primary(self, tokens: list[str], needs: list[str]) -> tuple[Any, list[str]]:
-        if not tokens:
+    def _primary(self, terms: list[str], needs: list[str]) -> tuple[Any, list[str]]:
+        if not terms:
             raise ValueError("an operand is missing")
-        token, rest = tokens[0], tokens[1:]
-        if token == "(":
+        term, rest = terms[0], terms[1:]
+        if term == "(":
             value, rest = self._or(rest, needs)
             if not rest or rest[0] != ")":
                 raise ValueError("a parenthesis is not closed")
             return value, rest[1:]
-        if token.startswith("'"):
-            return token[1:-1].replace("''", "'"), rest
-        if token in _LITERALS:
-            return _LITERALS[token], rest
-        if _NUMBER_TEXT.fullmatch(token):
-            return float(token), rest
-        return self._path(token, needs), rest
+        if term.startswith("'"):
+            return term[1:-1].replace("''", "'"), rest
+        if term in _LITERALS:
+            return _LITERALS[term], rest
+        if _NUMBER_TEXT.fullmatch(term):
+            return float(term), rest
+        return self._path(term, needs), rest
 
     def _path(self, token: str, needs: list[str]) -> Any:
         if token == "always()":
@@ -654,18 +658,16 @@ class _StepCondition(_JobCondition):
 
 
 def _tokens(text: str) -> list[str]:
-    tokens = []
+    terms = []
     position = 0
     text = text.strip()
     while position < len(text):
         match = _EXPRESSION_TOKEN.match(text, position)
         if match is None or match.end() == position:
             raise ValueError(f"cannot read {text[position:]!r}")
-        tokens.append(
-            match["string"] or match["op"] or match["number"] or match["path"]
-        )
+        terms.append(match["string"] or match["op"] or match["number"] or match["path"])
         position = match.end()
-    return tokens
+    return terms
 
 
 def _truth(value: Any) -> bool | None:
@@ -985,11 +987,13 @@ def conditional_steps(
 
 
 def gating_step(workflow: Mapping[str, Any], command: str) -> tuple[str, str] | None:
-    """(job, step name) of the first step that runs ``ash <command>``."""
+    """(job, step name) of the first step that runs ``ash <command>``. The words of a
+    command such as ``results merge`` are separated the way ``ash`` is from its first."""
+    words = _ASH_SPACE.join(re.escape(word) for word in command.split())
     for job_id, job in (workflow.get("jobs") or {}).items():
         for step in (job or {}).get("steps") or []:
             run = str((step or {}).get("run", ""))
-            if re.search(rf"(?<![\w.-])ash{_ASH_SPACE}{command}\b", run):
+            if re.search(rf"(?<![\w.-])ashx?{_ASH_SPACE}{words}\b", run):
                 return str(job_id), str(step.get("name") or "")
     return None
 

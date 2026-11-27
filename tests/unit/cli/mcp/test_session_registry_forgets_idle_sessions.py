@@ -203,7 +203,7 @@ def test_the_stdio_session_with_a_bound_profile_has_a_binding_by_none_and_by_id(
 
 
 def test_is_idle_since_asks_the_binding_test_it_is_given(registry) -> None:
-    session = _unused_for_a_long_time(registry.session_for("quiet"))
+    entry = _unused_for_a_long_time(registry.session_for("quiet"))
     cutoff = time.monotonic()
     asked = []
 
@@ -211,6 +211,6 @@ def test_is_idle_since_asks_the_binding_test_it_is_given(registry) -> None:
         asked.append(session_id)
         return True
 
-    assert session.is_idle_since(cutoff, holds) is False
+    assert entry.is_idle_since(cutoff, holds) is False
     assert asked == ["quiet"]
-    assert session.is_idle_since(cutoff, lambda _id: False) is True
+    assert entry.is_idle_since(cutoff, lambda _id: False) is True

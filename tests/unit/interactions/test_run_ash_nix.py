@@ -640,7 +640,7 @@ class TestRunAshNix:
             "automated_security_helper.interactions.run_ash_nix.find_executable",
             lambda _: "/usr/bin/nix",
         )
-        monkeypatch.setattr(sys, "argv", ["ash", "scan", "--quiet", "--mode", "nix"])
+        monkeypatch.setattr(sys, "argv", ["ashx", "scan", "--quiet", "--mode", "nix"])
 
         run_ash_nix()
 

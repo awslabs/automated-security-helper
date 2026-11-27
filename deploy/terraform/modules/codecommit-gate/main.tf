@@ -503,7 +503,7 @@ resource "aws_lambda_function" "gate" {
   #
   # ASH_SCAN_EXTRA_ARGS is named separately because it is the one value whose
   # contents this module neither constrains nor reads: it is free text an
-  # operator supplies, appended to the `ash scan` command line. Calling it
+  # operator supplies, appended to the `ashx scan` command line. Calling it
   # non-secret is a statement about how it is meant to be used, not something
   # this module enforces, so do not pass a secret through it. The one secret this
   # deployment does hold, the MCP auth header, lives in Secrets Manager in the
@@ -541,7 +541,7 @@ resource "aws_lambda_function" "gate" {
 
   environment {
     variables = {
-      # Handed to `ash scan --min-severity`. ASH evaluates the threshold; the
+      # Handed to `ashx scan --min-severity`. ASH evaluates the threshold; the
       # handler only reports what ASH decided. Lowered, because the validation
       # accepts any case and ASH should get the spelling it ranks.
       ASH_MIN_SEVERITY          = lower(var.min_severity)

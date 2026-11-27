@@ -158,7 +158,7 @@ class TestAddSuppressionToConfig:
             rule_id="R-2",
             path="foo.py",
             reason="temporary",
-            expiration=exp,
+            expires=exp,
             line_start=10,
             line_end=20,
         )
@@ -185,7 +185,7 @@ class TestAddSuppressionToConfig:
         assert "rule_id" not in entry
         assert "line_start" not in entry
         assert "line_end" not in entry
-        assert "expiration" not in entry
+        assert "expires" not in entry
 
     def test_handles_empty_existing_file(self, tmp_path: Path):
         config_path = tmp_path / ".ash.yaml"
@@ -394,7 +394,7 @@ def test_an_unquoted_expiration_in_the_file_is_the_same_date(tmp_path: Path):
     config_path.write_text(
         "global_settings:\n  suppressions:\n"
         "    - rule_id: B101\n      path: src/app.py\n      reason: asserts in tests\n"
-        "      line_start: 10\n      line_end: 10\n      expiration: 2099-01-31\n",
+        "      line_start: 10\n      line_end: 10\n      expires: 2099-01-31\n",
         encoding="utf-8",
     )
 

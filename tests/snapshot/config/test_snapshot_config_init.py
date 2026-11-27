@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""`ash config init`, `ash config get`, and the defaults a user is handed.
+"""`ashx config init`, `ashx config get`, and the defaults a user is handed.
 
 The defaults differ on Windows (semgrep and opengrep are off there), so every surface
 that renders them is snapshotted once per host in CONFIG_HOSTS, on every OS.

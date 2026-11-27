@@ -282,7 +282,7 @@ class TestRunContainerMode:
             ):
                 with patch("pathlib.Path.exists", return_value=True):
                     with patch(
-                        "builtins.open",
+                        "automated_security_helper.interactions.run_ash_scan._open_a_regular_file_for_text",
                         MagicMock(
                             return_value=MagicMock(
                                 __enter__=MagicMock(

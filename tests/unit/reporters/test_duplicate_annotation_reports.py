@@ -202,6 +202,7 @@ def _cli_csv(output_dir, *extra):
     result = CliRunner().invoke(
         app,
         [
+            "results",
             "report",
             "--format",
             "csv",
@@ -368,6 +369,7 @@ def _invoke_report_csv(output_dir, *extra, log_level):
     return CliRunner().invoke(
         app,
         [
+            "results",
             "report",
             "--format",
             "csv",
@@ -483,6 +485,7 @@ def test_a_request_the_results_cannot_record_is_said_not_swallowed(tmp_path, cap
         result = CliRunner().invoke(
             app,
             [
+                "results",
                 "report",
                 "--format",
                 "csv",

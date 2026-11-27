@@ -51,7 +51,16 @@ def results_dir(tmp_path: Path) -> Path:
 
 def _report(output_dir: Path, *extra: str):
     return CliRunner().invoke(
-        app, ["report", "--format", "sarif", "--output-dir", str(output_dir), *extra]
+        app,
+        [
+            "results",
+            "report",
+            "--format",
+            "sarif",
+            "--output-dir",
+            str(output_dir),
+            *extra,
+        ],
     )
 
 

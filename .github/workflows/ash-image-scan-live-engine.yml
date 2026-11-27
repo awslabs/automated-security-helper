@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: ASH - Image scan against a live engine and registry
-# Runs `ash scan --image <tag>` against a real container engine and a real
+# Runs `ashx scan --image <tag>` against a real container engine and a real
 # registry, with nothing faked, and requires the report's identity scope to key on
 # the registry's digest.
 #
@@ -75,16 +75,20 @@ jobs:
         run: |
           set -euo pipefail
           pip install .
-          ash dependencies install --tool syft
-      # crane is not a scanner or reporter plugin, so `ash dependencies install` does
+          ashx dependencies install --tool syft
+      # crane is not a scanner or reporter plugin, so `ashx dependencies install` does
       # not know it. The image build installs it with this script from the same pins
       # (utils/tool_downloads.py), which verifies the archive and the executable digests.
+      # The directory goes to the two scan steps as a step output, and each prepends it
+      # to its own PATH, rather than through GITHUB_PATH, which would put it ahead of
+      # everything in every later step of the job (zizmor's github-env audit).
       - name: Install the pinned crane
+        id: crane
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/crane-bin"
           python3 automated_security_helper/assets/install-pinned-tool.py crane -b "$RUNNER_TEMP/crane-bin"
-          echo "$RUNNER_TEMP/crane-bin" >> "$GITHUB_PATH"
+          echo "bin=$RUNNER_TEMP/crane-bin" >> "$GITHUB_OUTPUT"
       - name: Start a local registry
         run: |
           set -euo pipefail
@@ -125,9 +129,11 @@ jobs:
       - name: Scan by tag while the engine holds the image (rung 1, the engine)
         env:
           EXPECTED_DIGEST: ${{ steps.digest.outputs.digest }}
+          CRANE_BIN: ${{ steps.crane.outputs.bin }}
         run: |
           set -euo pipefail
-          ash scan --image "$IMAGE_TAG" --only-scanners syft --log-level INFO \
+          export PATH="$CRANE_BIN:$PATH"
+          ashx scan --image "$IMAGE_TAG" --only-scanners syft --log-level INFO \
             --output-dir "$RUNNER_TEMP/scan-engine" 2>&1 | tee "$RUNNER_TEMP/scan-engine.log"
           grep -F "through the local docker engine" "$RUNNER_TEMP/scan-engine.log"
           python3 .github/scripts/assert-image-scan-scope.py \
@@ -144,9 +150,11 @@ jobs:
       - name: Scan by tag with the engine empty (rung 2, the registry)
         env:
           EXPECTED_DIGEST: ${{ steps.digest.outputs.digest }}
+          CRANE_BIN: ${{ steps.crane.outputs.bin }}
         run: |
           set -euo pipefail
-          ash scan --image "$IMAGE_TAG" --only-scanners syft --log-level INFO \
+          export PATH="$CRANE_BIN:$PATH"
+          ashx scan --image "$IMAGE_TAG" --only-scanners syft --log-level INFO \
             --output-dir "$RUNNER_TEMP/scan-registry" 2>&1 | tee "$RUNNER_TEMP/scan-registry.log"
           grep -F "through the registry (crane digest)" "$RUNNER_TEMP/scan-registry.log"
           python3 .github/scripts/assert-image-scan-scope.py \

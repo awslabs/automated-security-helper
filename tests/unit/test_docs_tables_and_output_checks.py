@@ -1144,6 +1144,37 @@ def test_the_files_a_reporter_writes_are_read_from_its_code(tmp_path, file_code)
     assert dc.check_report_files([page], tmp_path, file_code) == []
 
 
+@pytest.mark.integration
+def test_a_vscode_setting_is_named_only_on_the_extensions_own_pages(
+    tmp_path, file_code
+):
+    """`ash.executablePath` reads like a report file; the extension's manifest says it is a setting."""
+    _write(
+        file_code,
+        "editors/vscode/package.json",
+        json.dumps(
+            {
+                "contributes": {
+                    "configuration": {"properties": {"ash.executablePath": {}}}
+                }
+            }
+        ),
+    )
+    inside = _write(
+        tmp_path, "editors/vscode/README.md", "Set `ash.executablePath` to a path.\n"
+    )
+    elsewhere = _write(
+        tmp_path, "docs/page.md", "Set `ash.executablePath` to a path.\n"
+    )
+    findings = dc.check_report_files([inside, elsewhere], tmp_path, file_code)
+    assert [f.path for f in findings] == ["docs/page.md"]
+    unknown = _write(
+        tmp_path, "editors/vscode/OTHER.md", "Set `ash.noSuchSetting` to a path.\n"
+    )
+    findings = dc.check_report_files([unknown], tmp_path, file_code)
+    assert [f.path for f in findings] == ["editors/vscode/OTHER.md"]
+
+
 REPORTER_WRITES = """
 from pathlib import Path
 
@@ -1340,7 +1371,7 @@ CLEAN_SCANNER_TABLES = """# Scanners
 
 | What your repository has | Built-in scanners | Alpha plugins |
 |---|---|---|
-| Python code | bandit, semgrep, opengrep | snyk-code |
+| Python code | bandit, opengrep | snyk-code |
 | Secrets, in any file | detect-secrets | ferret-scan (sensitive data), trivy-repo |
 | CDK apps | cfn-nag, checkov (on the templates `cdk synth` writes) | |
 
@@ -1352,7 +1383,7 @@ CLEAN_SCANNER_TABLES = """# Scanners
 
 | Scanners | What they both do |
 |---|---|
-| semgrep and opengrep | x |
+| bandit and opengrep | x |
 """
 
 SCANNER_DEFECTS = [
@@ -1363,6 +1394,14 @@ SCANNER_DEFECTS = [
             "| Secrets | detect-secrets, trufflehog | |\n"
         ),
         "'trufflehog' in the Built-in scanners column is not a scanner ASH ships",
+    ),
+    (
+        "the retired scanner name, which opengrep now serves as an alias",
+        "| What | Built-in scanners |\n|---|---|\n| Python | bandit, semgrep |\n",
+        (
+            "'semgrep' in the Built-in scanners column is not a scanner ASH ships; "
+            "did you mean 'opengrep'?"
+        ),
     ),
     (
         "a misspelled scanner row",
@@ -1406,7 +1445,7 @@ def test_the_scanner_check_counts_what_it_examined(tmp_path):
     notes: list[str] = []
     assert dc.check_scanner_names([page], tmp_path, notes=notes) == []
     assert notes == [
-        "examined 9 cells in 4 scanner columns: 14 scanner names, 0 other items"
+        "examined 9 cells in 4 scanner columns: 13 scanner names, 0 other items"
     ]
 
 

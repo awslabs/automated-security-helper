@@ -92,7 +92,7 @@ def test_the_scan_argv_forces_incomplete_scanners_to_fail(gate, monkeypatch, tmp
     # value is not asserted here -- this test is about argv -- but a stub that
     # refused the keyword would fail on the signature rather than on the property.
     def _fake_run(argv, cwd=None, env=None):
-        if list(argv) == ["ash", "scan", "--help"]:
+        if list(argv) == ["ashx", "scan", "--help"]:
             return SimpleNamespace(returncode=0, stdout=SCAN_HELP, stderr="")
         captured.append(list(argv))
         return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -111,7 +111,7 @@ def test_the_scan_argv_forces_incomplete_scanners_to_fail(gate, monkeypatch, tmp
 
 
 def _resolve_scan_params(argv: list[str]) -> dict[str, Any]:
-    """Resolve an ``ash scan`` argv through the real CLI and return the parameter values.
+    """Resolve an ``ashx scan`` argv through the real CLI and return the parameter values.
 
     Membership in argv is not the property that matters. ``click`` resolves a repeated option
     to its LAST occurrence, so a flag can sit in argv and still resolve to the opposite value --
@@ -128,7 +128,7 @@ def _resolve_scan_params(argv: list[str]) -> dict[str, Any]:
 
     from automated_security_helper.cli.main import app
 
-    assert argv[:2] == ["ash", "scan"], f"unexpected argv prefix: {argv[:2]}"
+    assert argv[:2] == ["ashx", "scan"], f"unexpected argv prefix: {argv[:2]}"
     scan_command = typer.main.get_command(app).commands["scan"]
     return scan_command.make_context("scan", argv[2:], resilient_parsing=False).params
 
@@ -147,7 +147,7 @@ def _capture_argv(gate, monkeypatch, tmp_path) -> list[list[str]]:
     captured: list[list[str]] = []
 
     def _fake_run(argv, cwd=None, env=None):
-        if list(argv) == ["ash", "scan", "--help"]:
+        if list(argv) == ["ashx", "scan", "--help"]:
             return SimpleNamespace(returncode=0, stdout=SCAN_HELP, stderr="")
         captured.append(list(argv))
         return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -527,7 +527,7 @@ def test_a_reserved_option_would_really_have_narrowed_the_scan(
     what ASH does. Each case here is resolved through the real CLI, so the assertion is on the
     value ASH would have used rather than on a token being present in a list. A spelling ASH
     does not declare is a usage error, so resolving it raises and the case fails -- which is
-    what makes this a control and not a restatement. (While ``ash scan`` set
+    what makes this a control and not a restatement. (While ``ashx scan`` set
     ignore_unknown_options, such a spelling left the parameter at its default, and the
     assertion failed instead.)
 
@@ -535,7 +535,7 @@ def test_a_reserved_option_would_really_have_narrowed_the_scan(
     resolves ``-c/tmp/none.yaml`` to the same value as ``-c /tmp/none.yaml``, and no amount of
     splitting on ``=`` recovers the ``-c`` from the attached form.
     """
-    params = _resolve_scan_params(["ash", "scan", *argv_tail])
+    params = _resolve_scan_params(["ashx", "scan", *argv_tail])
 
     assert params[parameter] == expected, (
         f"{argv_tail} resolves {parameter} to {params[parameter]!r}, not {expected!r}; if this "

@@ -58,7 +58,7 @@ def _write_results(directory: Path) -> Path:
 
 
 def _report(*args):
-    return CliRunner().invoke(app, ["report", "--log-level", "ERROR", *args])
+    return CliRunner().invoke(app, ["results", "report", "--log-level", "ERROR", *args])
 
 
 # --- the writer ---

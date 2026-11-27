@@ -167,7 +167,7 @@ class TestScannerNameFromAResult:
         assert self._name(tags=None) is None
 
     def test_a_non_text_tag_is_skipped(self):
-        assert self._name(tags=[5, "semgrep"]) == "semgrep"
+        assert self._name(tags=[5, "opengrep"]) == "opengrep"
 
     def test_a_text_scanner_name_is_returned(self):
         """Control."""

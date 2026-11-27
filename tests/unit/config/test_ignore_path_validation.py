@@ -348,7 +348,7 @@ class TestIgnorePathLinting:
 
 
 class TestIgnorePathValidation:
-    """Tests for ignore_path validation in the config validator (ash config validate)."""
+    """Tests for ignore_path validation in the config validator (ashx config validate)."""
 
     def test_validate_accepts_a_directory_without_glob(
         self, config_with_dir_ignore_path
@@ -363,7 +363,7 @@ class TestIgnorePathValidation:
         assert not [e for e in errors if "points to a directory" in e], errors
 
     def test_validate_passes_with_valid_paths(self, config_with_valid_ignore_paths):
-        """ash config validate should pass with properly formed paths."""
+        """ashx config validate should pass with properly formed paths."""
         is_valid, errors = ConfigValidator.validate_config_file(
             config_with_valid_ignore_paths
         )
@@ -375,7 +375,7 @@ class TestIgnorePathValidation:
     def test_validate_no_warning_for_nonexistent_path(
         self, config_with_nonexistent_dir_path
     ):
-        """ash config validate should not warn about paths that don't exist as directories."""
+        """ashx config validate should not warn about paths that don't exist as directories."""
         is_valid, errors = ConfigValidator.validate_config_file(
             config_with_nonexistent_dir_path
         )
@@ -396,7 +396,7 @@ class TestIgnorePathValidation:
         assert not [e for e in errors if "points to a directory" in e], errors
 
     def test_validate_with_source_dir(self, tmp_path):
-        """ash config validate should accept source_dir for path resolution."""
+        """ashx config validate should accept source_dir for path resolution."""
         # Create source with a directory
         source_dir = tmp_path / "project"
         source_dir.mkdir()

@@ -378,7 +378,7 @@ def is_blank_bin_path(value: "str | None") -> bool:
     relative "  ". So a value is blank when it is only whitespace or when every
     component Path() keeps is: "  /", " /" and "\\t/" are blank. "/" and "." name
     a directory, and so does " /x", a relative path, so they are not blank.
-    ``ash dependencies install`` makes a relative --bin-path absolute, where it was
+    ``ashx dependencies install`` makes a relative --bin-path absolute, where it was
     typed. A relative ASH_BIN_PATH is used neither by tool lookup nor by installs
     (subprocess_utils.usable_bin_path).
     """
@@ -457,7 +457,7 @@ def _resolve_default_severity_level(raw: Optional[str]) -> str:
     ------------------------------------
     This module is imported before anything can catch an exception from it, so
     raising would turn one mistyped variable into an ASH that cannot start at all
-    -- ``ash --help`` included -- and report it as an import error rather than as a
+    -- ``ashx --help`` included -- and report it as an import error rather than as a
     configuration problem. The fallback is announced at WARNING instead, which
     reaches stderr through ``logging.lastResort`` even this early in the process.
 
@@ -500,7 +500,7 @@ ASH_DEFAULT_SEVERITY_LEVEL = _resolve_default_severity_level(
 # The canonical config file: ``.ash.yaml`` at the scan root. Discovery looks here
 # first, and every command that creates a config file writes it here. Every other
 # location below is a legacy one that still loads, warns once that it is
-# deprecated, and is removed in ASH 4.0.
+# deprecated, and is removed in ASH 4.1.
 ASH_CANONICAL_CONFIG_FILE_NAME = ".ash.yaml"
 
 # The legacy name list, in the order discovery has always read it (each at the

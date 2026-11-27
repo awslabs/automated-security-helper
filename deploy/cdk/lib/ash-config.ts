@@ -45,6 +45,8 @@ import {
   DefaultStackSynthesizer,
   Duration,
   Fn,
+  FileAssetSource,
+  ISynthesisSession,
   IStackSynthesizer,
   RemovalPolicy,
   Stack,
@@ -52,6 +54,8 @@ import {
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+
+import { pruneDependenciesImpliedByReferences } from './ash-implied-dependencies';
 
 /**
  * Canonical parameter names, shared with the Terraform mirror.
@@ -74,6 +78,11 @@ export const ASH_PARAMETER_NAMES = {
   codeCommitRepositoryArn: 'CodeCommitRepositoryArn',
   kmsKeyArn: 'KmsKeyArn',
   vpcSubnetIds: 'VpcSubnetIds',
+  // The companion to vpcSubnetIds. Lambda's VpcConfig requires at least one
+  // security group alongside the subnets, so a target that reads one reads both,
+  // and naming it here keeps the pair from being spelled two different ways by two
+  // stacks. First consumed by AshEksOperator; see that stack's header.
+  vpcSecurityGroupIds: 'VpcSecurityGroupIds',
   vpcId: 'VpcId',
   scanEgressCidr: 'ScanEgressCidr',
   certificateArn: 'CertificateArn',
@@ -97,7 +106,7 @@ export const ASH_PARAMETER_NAMES = {
  * never maintained again. tests/unit/deploy/test_deploy_ash_cli_contract.py holds
  * both properties.
  */
-export const DEFAULT_ASH_VERSION = 'v3.8.0';
+export const DEFAULT_ASH_VERSION = 'v4.0.0';
 
 /**
  * Default cadence for the scheduled rebuild that keeps the image patched.
@@ -235,8 +244,15 @@ export function ashVersion(scope: Stack): CfnParameter {
     default: DEFAULT_ASH_VERSION,
     minLength: 1,
     description:
-      'ASH git ref (tag, branch, or full commit SHA) to build the image from, for example ' +
-      'v3.7.0. Pinning a tag makes the build reproducible; the scheduled rebuild ' +
+      // No concrete release here. The release bump rewrites only the "Default" line
+      // of the committed templates, so a version in this text would leave them out
+      // of step with a fresh synth and fail the template-drift check on the release PR.
+      // The example also avoids the word "release": ferret-scan v2.5.2 reads it as a
+      // sign the file is production config and boosts its API_KEY_OR_SECRET guesses
+      // on hashed CDK logical ids in two of the templates from MEDIUM to HIGH.
+      'ASH git ref (tag, branch, or full commit SHA) to build the image from, for example a ' +
+      'version tag such as vMAJOR.MINOR.PATCH. ' +
+      'Pinning a tag makes the build reproducible; the scheduled rebuild ' +
       'still repulls base-image and OS patches for that same ASH revision.',
   });
 }
@@ -1073,5 +1089,27 @@ export function accessLogArchiveProps(): s3.BucketProps {
  * asset would need a staging bucket and would reintroduce the dependency.
  */
 export function ashSynthesizer(): IStackSynthesizer {
-  return new DefaultStackSynthesizer({ generateBootstrapVersionRule: false });
+  return new AshStackSynthesizer({ generateBootstrapVersionRule: false });
+}
+
+/**
+ * The default synthesizer, plus one cleanup that has to happen after CDK's prepare
+ * phase: dropping `DependsOn` entries that a `Ref` or `Fn::GetAtt` already implies.
+ * See ash-implied-dependencies.ts for what is dropped, what is kept, and why the
+ * cleanup cannot live in a constructor or an aspect.
+ *
+ * It rides on the synthesizer for the same reason the bootstrap default does:
+ * every stack already takes `ashSynthesizer()` as its own default, so a stack built
+ * by a test gets the same template as the one `bin/ash.ts` commits.
+ */
+export class AshStackSynthesizer extends DefaultStackSynthesizer {
+  protected synthesizeTemplate(
+    session: ISynthesisSession,
+    lookupRoleArn?: string,
+    lookupRoleExternalId?: string,
+    lookupRoleAdditionalOptions?: { [key: string]: unknown },
+  ): FileAssetSource {
+    pruneDependenciesImpliedByReferences(this.boundStack);
+    return super.synthesizeTemplate(session, lookupRoleArn, lookupRoleExternalId, lookupRoleAdditionalOptions);
+  }
 }

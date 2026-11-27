@@ -9,7 +9,7 @@ A security scanner run against a stale database returns a result that looks exac
 clean one. Measured with grype v0.111.0 under ASH's offline settings: a database built 10 days
 earlier scanned with exit 0 and no warning, and ASH's own offline validator called it "0 days
 old" because it read the file's mtime rather than the database's build time. trivy's
-``--skip-db-update`` does the same, and the offline semgrep and opengrep rulesets never aged
+``--skip-db-update`` does the same, and the offline opengrep ruleset never aged
 out at all. Online, grype and trivy refresh a stale database themselves and fail loudly when
 they cannot; offline nothing did.
 
@@ -56,7 +56,7 @@ under ``warn``. Every measurement, fresh or stale, also goes into the invocation
 under ``INVOCATION_PROPERTY``. The invocation rather than the run's own property bag because
 ``SarifReport.merge_sarif_report`` keeps only the first scanner's run-level properties and
 extends invocations, so a run property would vanish from ``ash.sarif`` for every scanner but
-one. The exit-code gate, the reports and ``ash merge`` all read it back from there, so the
+one. The exit-code gate, the reports and ``ashx merge`` all read it back from there, so the
 decision travels with the results: a container-mode scan's host reads it out of
 ``ash_aggregated_results.json``, and a merged shard keeps the policy its own scan ran under.
 
@@ -800,7 +800,6 @@ def _built_from_ruleset_dir(ctx: ProbeContext) -> tuple[datetime, str]:
 MEASURERS: Dict[str, Callable[[ProbeContext], tuple[datetime, str]]] = {
     "grype-db": _built_from_grype,
     "trivy-db": _built_from_trivy,
-    "semgrep-offline-rules": _built_from_ruleset_dir,
     "opengrep-offline-rules": _built_from_ruleset_dir,
 }
 

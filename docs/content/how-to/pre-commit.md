@@ -16,7 +16,7 @@ Prerequisites:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.8.0
+    rev: v4.0.0
     hooks:
       - id: ash
 ```
@@ -37,7 +37,7 @@ Exit code 1 means the scan did not complete, for example because a scanner was M
 
 Ignore ASH's output directory in git, so the reports are not committed. ASH leaves its own
 files there out of the scan whether or not `.gitignore` lists them, but it scans a file
-committed there like any other. `ash config init`
+committed there like any other. `ashx config init`
 writes a `.ash/.gitignore` that ignores it, or add the line yourself:
 
 ```text
@@ -126,7 +126,7 @@ on every commit. To run without Node.js there, exclude the two scanners:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.8.0
+    rev: v4.0.0
     hooks:
       - id: ash
         args: [--exclude-scanners, cdk-nag, --exclude-scanners, npm-audit]
@@ -191,7 +191,7 @@ The hook has no `stages` setting, so it runs on every commit. To run it less oft
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.8.0
+    rev: v4.0.0
     hooks:
       - id: ash
         stages: [pre-push]
@@ -273,7 +273,7 @@ both.
 | | Pre-commit hook (`ash`) | CI scan |
 |---|---|---|
 | Mode | `--mode precommit` | `local` by default, or `container` |
-| Scanners | The five in [What the hook runs](#behavior), plus any you add with `--scanners` | Every scanner your configuration enables, including the ones precommit mode leaves out, such as semgrep, opengrep, grype, trivy, and gitleaks |
+| Scanners | The five in [What the hook runs](#behavior), plus any you add with `--scanners` | Every scanner your configuration enables, including the ones precommit mode leaves out, such as opengrep, grype, trivy, and gitleaks |
 | Runs | On the developer's machine, per commit or push | On a clean runner, per pull request or push |
 | Output | Simplified, no progress display | The full summary and report files, for upload as artifacts or SARIF |
 | Cost | A few seconds per commit after the first run, growing with the staged set ([What it costs](#cost)) | Installs the scanner tools each build, or uses an image you prepared |
@@ -345,7 +345,7 @@ Or point the hook at a newer Python that is on your `PATH`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.8.0
+    rev: v4.0.0
     hooks:
       - id: ash
         language_version: python3.12
@@ -386,7 +386,7 @@ in that order. The first run builds the image and takes several minutes, so give
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.8.0
+    rev: v4.0.0
     hooks:
       - id: ash-full-scan
         stages: [manual]
@@ -408,7 +408,7 @@ pre-commit run --hook-stage manual ash-full-scan --all-files
 `.pre-commit-hooks.yaml` defines no Nix hook: `ash` and `ash-simple-scan` run precommit
 mode and `ash-full-scan` runs container mode, and ASH takes one `--mode` per run. To scan
 with the scanners that ASH's `flake.nix` supplies, add a `local` hook that calls
-`ash scan --mode nix` on an `ash` already on `PATH`, and give it a slow stage like
+`ashx scan --mode nix` on an `ash` already on `PATH`, and give it a slow stage like
 `ash-full-scan`:
 
 <!-- doctest: config kind=pre-commit -->
@@ -418,7 +418,7 @@ repos:
     hooks:
       - id: ash-nix
         name: ASH scan in Nix mode
-        entry: ash scan --mode nix --no-progress
+        entry: ashx scan --mode nix --no-progress
         language: system
         pass_filenames: false
         stages: [manual]
@@ -426,7 +426,7 @@ repos:
 
 <!-- doctest: illustrative reason="runs ASH in Nix mode, which needs Nix and the network" -->
 ```bash
-uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0'
+uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v4.0.0'
 pre-commit run --hook-stage manual ash-nix --all-files
 ```
 

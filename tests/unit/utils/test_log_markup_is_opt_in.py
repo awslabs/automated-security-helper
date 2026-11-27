@@ -609,10 +609,10 @@ def test_an_expired_entry_whose_name_reads_as_markup_is_logged_as_text(
     monkeypatch.setattr(suppression_expiration_checker, "ASH_LOGGER", logger)
     capsys.readouterr()
     suppression = AshSuppression(
-        rule_id="R[/x]", path="src/*", reason="probe", expiration="2020-01-01"
+        rule_id="R[/x]", path="src/*", reason="probe", expires="2020-01-01"
     )
     ignore_path = IgnorePathWithReason(
-        path="R[/x]", reason="probe", expiration="2020-01-01"
+        path="R[/x]", reason="probe", expires="2020-01-01"
     )
     try:
         # An expired suppression is passed over before the finding is looked at.

@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What ``ash scan`` prints, and exits with, when it refuses or fails.
+"""What ``ashx scan`` prints, and exits with, when it refuses or fails.
 
 Every case runs the real CLI in-process. Where reaching the failure would need a real
 scanner, the one function that would run it is replaced, and everything between the
@@ -61,9 +61,12 @@ class TestArgumentRefusals:
         )
 
     def test_misspelled_option(self, run_cli, snapshot, monkeypatch):
-        # A misspelled option is refused as a usage error, before any scan starts:
-        # the probe would show which directory a scan reached, and must not be
-        # reached at all.
+        # MEASURED: on 3.x, `ash scan` was declared with ignore_unknown_options and
+        # allow_extra_args (it forwarded extra arguments to the container), so a
+        # misspelled option was not refused and the scan ran on '.'. `ashx scan`
+        # refuses it with exit 2 and the closest option names, as a usage error
+        # before any scan starts. The probe stays: if the refusal ever regresses,
+        # it shows which directory the scan would scan.
         monkeypatch.setattr(
             "automated_security_helper.core.orchestrator.ASHScanOrchestrator.create",
             _report_orchestrator_reached,
@@ -86,7 +89,7 @@ class TestArgumentRefusals:
         )
 
     def test_option_before_a_subcommand_that_does_not_take_it(self, run_cli, snapshot):
-        assert run_cli(["--source-dir", "src", "report"]) == snapshot
+        assert run_cli(["--source-dir", "src", "results", "report"]) == snapshot
 
 
 def _report_scan_started(self, phases=None):

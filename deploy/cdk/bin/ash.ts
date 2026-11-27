@@ -39,6 +39,7 @@ import { AwsSolutionsChecks } from 'cdk-nag';
 import { AshAgentCoreStack } from '../lib/ash-agentcore-stack';
 import { AshCodeCommitGateStack } from '../lib/ash-codecommit-gate-stack';
 import { AshDistributedPipelineStack } from '../lib/ash-distributed-pipeline-stack';
+import { AshEksOperatorStack } from '../lib/ash-eks-operator-stack';
 import { AshFargateStack } from '../lib/ash-fargate-stack';
 import { AshImagePipelineStack } from '../lib/ash-image-pipeline-stack';
 
@@ -69,6 +70,10 @@ new AshAgentCoreStack(app, 'AshAgentCore', { env });
 new AshFargateStack(app, 'AshFargate', { env });
 new AshCodeCommitGateStack(app, 'AshCodeCommitGate', { env });
 new AshDistributedPipelineStack(app, 'AshDistributedPipeline', { env });
+// Installs the operator into a cluster the adopter already runs. Unlike the five
+// above it builds no image: the operator image is a required parameter pointing at
+// the adopter's own registry, for the reasons in the stack's header.
+new AshEksOperatorStack(app, 'AshEksOperator', { env });
 
 // cdk-nag runs over every stack on every synth, so a finding cannot be
 // introduced without either being fixed or being suppressed with a stated

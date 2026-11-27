@@ -3,7 +3,7 @@ description: "Run ASH scan with a configurable method and validate results"
 
 inputs:
   method:
-    description: "Scan method: python-local, python-container, bash, sh-helper, powershell"
+    description: "Scan method: python-local, python-container, sh-helper, powershell"
     required: true
   os:
     description: "Runner OS label"
@@ -127,7 +127,7 @@ runs:
     # steps below that consume what this bootstraps are both gated
     # `oci-runner == 'docker'`, and ASH's own container build shells out to
     # `<runner> build` -- `podman build`, never `docker buildx` -- on every
-    # entrypoint (utils/ash_helpers.ps1, ./ash, run_ash_container.py). So on the
+    # entrypoint (utils/ash_helpers.ps1, run_ash_container.py). So on the
     # podman cells this used to boot a `docker-container` buildkit builder and
     # pull moby/buildkit:buildx-stable-1 from Docker Hub that nothing then used:
     # six matrix cells paying a network round trip purely as failure surface. One
@@ -194,7 +194,7 @@ runs:
       shell: bash
       run: mkdir -p .ash/ash_output
 
-    # The python-local legs run `ash dependencies install`, which downloads the pinned
+    # The python-local legs run `ashx dependencies install`, which downloads the pinned
     # scanner release assets. Restored here, re-verified by ASH on every use, saved
     # after the scan from a push to main only. See the action for what it holds.
     - name: Restore the tool download cache
@@ -216,7 +216,7 @@ runs:
         oci-runner: ${{ inputs.oci-runner }}
         runner-wrapper: ${{ (inputs.oci-runner == 'finch' || inputs.oci-runner == 'nerdctl') && 'sudo' || '' }}
 
-    # cfn-nag is a Ruby gem, so `ash dependencies install` can only provision it
+    # cfn-nag is a Ruby gem, so `ashx dependencies install` can only provision it
     # where a usable Ruby exists. This is the python-local legs' problem alone: the
     # container legs get cfn-nag from the image and are unaffected.
     #
@@ -290,7 +290,7 @@ runs:
         retry npm install -g snyk
         snyk version
 
-        # trivy is installed further down by `ash dependencies install --tool
+        # trivy is installed further down by `ashx dependencies install --tool
         # trivy-repo`, against a version and SHA256 pinned in the repository.
         #
         # What was here before: three per-platform installs -- `curl … | sh` on
@@ -302,8 +302,8 @@ runs:
         # against.
         #
         # snyk and ferret-scan stay here: neither has an ASH install path, snyk
-        # arrives through npm, and ferret-scan through pip against the constraint its
-        # own plugin declares.
+        # arrives through npm, and ferret-scan through pip at the version its own
+        # plugin recommends.
 
         # `pip install ferret-scan` resolves to whatever is newest, which is not
         # a version anyone chose. ferret-scan 2.3.3 was published at
@@ -314,17 +314,22 @@ runs:
         # unrelated merge-queue branches broke in the same window with no source
         # change.
         #
-        # The plugin already declares the range it is tested against, so read it
-        # from there rather than repeating it here -- one source of truth, and if
-        # the constant moves this fails loudly instead of silently reverting to
-        # installing latest.
-        FERRET_CONSTRAINT="$(python -c 'from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import DEFAULT_VERSION_CONSTRAINT as c; print(c)')"
-        if [ -z "$FERRET_CONSTRAINT" ]; then
-          echo "::error::Could not read ferret-scan's declared version constraint from its ASH plugin. Refusing to install an unconstrained version."
+        # The plugin's supported range is wider than the version the repository's own
+        # pins were measured against: 2.6.0 is admitted, but it stopped reporting the
+        # operator auth module's pinned line and re-scored the test's, so the range's
+        # newest release is not a version anyone chose either. The plugin names the
+        # version its fixtures were run against (RECOMMENDED_VERSION); install exactly
+        # that, read from the plugin so there is one source of truth and a missing
+        # constant fails loudly instead of reverting to installing latest. Moving it
+        # is the plugin's fixture-matrix pass, which also re-pins the line-anchored
+        # suppressions in the alpha config.
+        FERRET_VERSION="$(python -c 'from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import RECOMMENDED_VERSION as v; print(v)')"
+        if [ -z "$FERRET_VERSION" ]; then
+          echo "::error::Could not read ferret-scan's recommended version from its ASH plugin. Refusing to install an unconstrained version."
           exit 1
         fi
-        echo "Installing ferret-scan against its plugin-declared constraint: ${FERRET_CONSTRAINT}"
-        retry pip install "ferret-scan${FERRET_CONSTRAINT}"
+        echo "Installing ferret-scan at the plugin's recommended version: ${FERRET_VERSION}"
+        retry pip install "ferret-scan==${FERRET_VERSION}"
         ferret-scan --version
 
     # trivy, hadolint and GuardDog are the alpha-plugin tools ASH can provision
@@ -355,12 +360,12 @@ runs:
         # and exits non-zero if it cannot -- a PATH-dependent version check here
         # would fail for a working install and pass for none.
         if [ "${RUNNER_OS}" = "Windows" ]; then
-          ash dependencies install \
+          ashx dependencies install \
             --config .ash/.ash_alpha_plugins.yaml \
             --tool trivy-repo \
             --tool hadolint
         else
-          ash dependencies install \
+          ashx dependencies install \
             --config .ash/.ash_alpha_plugins.yaml \
             --tool trivy-repo \
             --tool guarddog \
@@ -376,9 +381,9 @@ runs:
         ASH_TEST_CONFIG_FILE: ${{ inputs.config-file }}
       run: |
         if [ "${ASH_TEST_CONFIG_FILE}" = "alpha" ]; then
-          ash config validate --config .ash/.ash_alpha_plugins.yaml
+          ashx config validate --config .ash/.ash_alpha_plugins.yaml
         else
-          ash config validate --config .ash.yaml
+          ashx config validate --config .ash.yaml
         fi
 
     # The Windows half of "Set up Ruby for cfn-nag" above, deliberately placed here
@@ -425,29 +430,23 @@ runs:
 
     # The step above prepends MSYS2's usr/bin, and that directory contains an
     # executable named `ash` -- the Almquist shell. So does Git for Windows'
-    # usr/bin, since Git for Windows is MSYS2-derived. Nothing above reads `ash`,
-    # which is why the comment on setup-ruby says everything after it "does not
-    # care which bash is first": that is true
-    # of bash and blind to ash, and the two Windows steps below invoke `ash`
-    # five and one times respectively.
+    # usr/bin, since Git for Windows is MSYS2-derived. That collision is one of the
+    # reasons v4 made `ashx` the canonical command, and every invocation below uses
+    # `ashx`, which neither tree ships. The deprecated `ash` alias pip also installs
+    # would still lose to MSYS2 here: when it did, `ash --version` became "Illegal
+    # option --", `ashx dependencies install` became "cannot open dependencies", and
+    # the step ended in about half a second having run no scanner, with the only
+    # visible symptom a missing artifact four steps later.
     #
-    # Untreated, all six resolve to a shell. `ash --version` and `ash --help`
-    # become "Illegal option --", `ash dependencies install` and `ash config get`
-    # become "cannot open dependencies" / "cannot open config", and the step ends
-    # in about half a second having run no scanner at all. Nothing writes
-    # .ash/ash_output, so the artifact upload finds no files and "Verify scan
-    # completed" is SKIPPED rather than failed -- the visible symptom is a
-    # missing artifact four steps later, not a shadowed binary.
-    #
-    # Why this promotes ASH's own scripts directory and not Git Bash's bin.
-    # Promoting Git Bash cannot fix this: its bin ships no `ash`, so MSYS2 would
-    # still win, and its usr/bin ships an Almquist shell of its own, so winning
-    # would change which wrong `ash` runs. It would also be actively harmful
-    # here -- `ash dependencies install` on line 319 is what triggers cfn-nag's
-    # gem install, and that compiles psych's C extension (cfn_nag_scanner.py
-    # gates it on RI_DEVKIT for exactly this reason). Putting Git's sh ahead of
-    # MSYS2's during that compile is the 18e5cba9 failure described above: an
-    # MSYS-translated path handed to a make from a different mount table.
+    # ASH's scripts directory is still promoted ahead of MSYS2, because `ashx` not
+    # being shadowed today is a fact about two other projects' file lists, and the
+    # identity assertion in the next Windows step is what would catch a change.
+    # Promoting Git Bash's bin instead would be harmful -- `ashx dependencies
+    # install` below is what triggers cfn-nag's gem install, which compiles psych's
+    # C extension (cfn_nag_scanner.py gates it on RI_DEVKIT for exactly this
+    # reason), and putting Git's sh ahead of MSYS2's during that compile is the
+    # 18e5cba9 failure described above: an MSYS-translated path handed to a make
+    # from a different mount table.
     #
     # Re-adding ASH's scripts directory promotes it without removing MSYS2, so
     # sh, make and gcc still all come from the one coherent tree psych needs.
@@ -471,9 +470,9 @@ runs:
           (python -c "import sysconfig; print(sysconfig.get_path('scripts'))"),
           (python -c "import sysconfig; print(sysconfig.get_path('scripts', scheme='nt_user'))")
         ) | Where-Object { $_ } | Select-Object -Unique
-        $found = @($candidates | Where-Object { Test-Path (Join-Path $_ 'ash.exe') })
+        $found = @($candidates | Where-Object { Test-Path (Join-Path $_ 'ashx.exe') })
         if ($found.Count -eq 0) {
-          Write-Host "::error::No ash.exe in any Python scripts directory, so ASH's entry point cannot be put ahead of MSYS2's Almquist shell. Looked in: $($candidates -join ' ; ')"
+          Write-Host "::error::No ashx.exe in any Python scripts directory, so ASH's entry point cannot be put ahead of the MSYS2 toolchain. Looked in: $($candidates -join ' ; ')"
           exit 1
         }
         foreach ($dir in $found) {
@@ -508,7 +507,7 @@ runs:
         ASH_GHA_BUILD_CACHE_EXPORT: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'max' || 'none' }}
       run: |
         echo "Testing ASH using Python (Container) on ${ASH_TEST_OS} (${ASH_TEST_PLATFORM}) with config: ${ASH_TEST_CONFIG_FILE}"
-        ash --version
+        ashx --version
         OFFLINE_FLAG=""
         if [ "${ASH_TEST_OFFLINE}" = "true" ]; then
           # npm-audit asks the registry, so offline it reports MISSING for every
@@ -522,9 +521,9 @@ runs:
         # Teed so the cache report below can count the build steps the layer cache
         # served. pipefail (bash's default here) keeps ash's exit status.
         if [ "${ASH_TEST_CONFIG_FILE}" = "alpha" ]; then
-          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
+          ashx --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
         else
-          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
+          ashx --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
         fi
 
     - name: "Cache report: image-layers"
@@ -558,8 +557,8 @@ runs:
       run: |
         echo "Checking for plugin execution errors..."
         export PATH="$HOME/.local/bin:$PATH"
-        if command -v ash >/dev/null 2>&1; then
-          REPORT_CMD="ash results report --format text"
+        if command -v ashx >/dev/null 2>&1; then
+          REPORT_CMD="ashx results report --format text"
         else
           REPORT_CMD="python -m automated_security_helper results report --format text"
         fi
@@ -600,30 +599,30 @@ runs:
         # See "Put ASH's entry point ahead of the MSYS2 toolchain (Windows)".
         $env:PATH = "$env:ASH_ENTRY_POINT_DIRS;$env:PATH"
         Write-Host "Testing ASH using Python (Local) on $env:ASH_TEST_OS ($env:ASH_TEST_PLATFORM) with config: $env:ASH_TEST_CONFIG_FILE"
-        # Assert that 'ash' is ASH before using it six times. MSYS2 and Git for
-        # Windows each ship an Almquist shell of the same name, and when one
-        # shadows the scanner every invocation below fails as "Illegal option --"
-        # or "cannot open <subcommand>" -- errors that name neither PATH nor the
-        # shell, and which left this step red while looking like a missing
-        # artifact. One line here says what actually resolved.
-        $AshPath = (Get-Command ash -ErrorAction SilentlyContinue).Source
+        # Assert that 'ashx' is ASH before using it six times. MSYS2 and Git for
+        # Windows each ship an Almquist shell named `ash`, and when one shadowed the
+        # deprecated alias every invocation failed as "Illegal option --" or
+        # "cannot open <subcommand>" -- errors that name neither PATH nor the
+        # shell. Neither ships `ashx` today; this line is what would say so if
+        # one ever did, and it records what actually resolved.
+        $AshPath = (Get-Command ashx -ErrorAction SilentlyContinue).Source
         if (-not $AshPath) {
-          Write-Host "::error::'ash' is not on PATH at all, so ASH was never installed or its scripts directory was never added."
+          Write-Host "::error::'ashx' is not on PATH at all, so ASH was never installed or its scripts directory was never added."
           exit 1
         }
-        if ($AshPath -notmatch '\\Scripts\\ash\.exe$') {
-          Write-Host "::error::The name ash resolved to $AshPath, which is not the ASH entry point -- an ash.exe under a Python Scripts directory was expected. MSYS2 and Git for Windows both ship an Almquist shell named ash; one of them is shadowing the scanner, so the invocations below would run a shell instead."
+        if ($AshPath -notmatch '\\Scripts\\ashx\.exe$') {
+          Write-Host "::error::The name ashx resolved to $AshPath, which is not the ASH entry point -- an ashx.exe under a Python Scripts directory was expected. Something else on PATH is shadowing the scanner, so the invocations below would not run ASH."
           exit 1
         }
-        Write-Host "ash resolves to $AshPath"
-        ash --version
-        ash --help
-        ash dependencies install
-        ash config get
+        Write-Host "ashx resolves to $AshPath"
+        ashx --version
+        ashx --help
+        ashx dependencies install
+        ashx config get
         if ("$env:ASH_TEST_CONFIG_FILE" -eq "alpha") {
-          ash --mode local --build-target ci --verbose --no-progress --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
+          ashx --mode local --build-target ci --verbose --no-progress --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
         } else {
-          ash --mode local --build-target ci --verbose --no-progress --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
+          ashx --mode local --build-target ci --verbose --no-progress --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
         }
 
     - name: Validate No Plugin Errors (Python Local Windows)
@@ -640,18 +639,18 @@ runs:
         # used to be the check, and it is case-insensitive by default, so any
         # report line containing lower-case "error" inflated the count on top of
         # the legend-line offset the other legs carried.
-        & ash results report --format text 2>&1 | Write-Host
+        & ashx results report --format text 2>&1 | Write-Host
         $ReportExit = $LASTEXITCODE
         # This exit code used to be discarded outright (`$null = $LASTEXITCODE`),
         # and that was an exception this leg alone made. The container, Unix and
-        # bash legs run the same `ash results report` under `shell: bash`, which the runner
+        # bash legs run the same `ashx results report` under `shell: bash`, which the runner
         # invokes as `bash --noprofile --norc -eo pipefail {0}` -- so `-e` aborts
         # those steps when the report command fails. `shell: pwsh` is
         # `pwsh -command ". '{0}'"`, which does not abort on a native non-zero
         # exit; it only sets $LASTEXITCODE. Discarding it therefore made a report
         # failure fatal on three legs and invisible on the fourth.
         #
-        # Why that matters here rather than being cosmetic: `ash results report` failing
+        # Why that matters here rather than being cosmetic: `ashx results report` failing
         # means ASH could not load the very results file the counter below is
         # about to reach a verdict from. Measured on run 35137617199 --
         # `Error loading results file: 'charmap' codec can't decode byte 0x9d`,
@@ -666,7 +665,7 @@ runs:
         # and say it *before* the counter runs so the two outcomes cannot be
         # confused in the log.
         if ($ReportExit -ne 0) {
-          Write-Host "::error::'ash results report --format text' exited $ReportExit, so ASH could not load .ash/ash_output/ash_aggregated_results.json. This step cannot evaluate whether a plugin errored -- the result below, whatever it says, is not evidence either way. Fix the report failure printed above first."
+          Write-Host "::error::'ashx results report --format text' exited $ReportExit, so ASH could not load .ash/ash_output/ash_aggregated_results.json. This step cannot evaluate whether a plugin errored -- the result below, whatever it says, is not evidence either way. Fix the report failure printed above first."
           exit $ReportExit
         }
         # setup-python puts `python` on PATH everywhere and `python3` only on
@@ -693,10 +692,10 @@ runs:
           Write-Host "::error::ash resolved to '$AshPath', not the ASH entry point"
           exit 1
         }
-        & ash dependencies install --tool hadolint --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_hadolint_plugins]"
+        & ashx dependencies install --tool hadolint --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_hadolint_plugins]"
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         $Out = Join-Path $env:RUNNER_TEMP "hadolint-out"
-        & ash scan --mode local --no-progress --simple `
+        & ashx scan --mode local --no-progress --simple `
           --source-dir tests/test_data/scanners/hadolint/positive `
           --output-dir $Out `
           --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins `
@@ -720,14 +719,14 @@ runs:
         ASH_TEST_CONFIG_FILE: ${{ inputs.config-file }}
       run: |
         echo "Testing ASH using Python (Local) on ${ASH_TEST_OS} (${ASH_TEST_PLATFORM}) with config: ${ASH_TEST_CONFIG_FILE}"
-        ash --version
-        ash --help
-        ash dependencies install
-        ash config get
+        ashx --version
+        ashx --help
+        ashx dependencies install
+        ashx config get
         if [ "${ASH_TEST_CONFIG_FILE}" = "alpha" ]; then
-          ash --mode local --build-target ci --verbose --no-progress --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
+          ashx --mode local --build-target ci --verbose --no-progress --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
         else
-          ash --mode local --build-target ci --verbose --no-progress --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
+          ashx --mode local --build-target ci --verbose --no-progress --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
         fi
 
     - name: Validate No Plugin Errors (Python Local Unix)
@@ -740,12 +739,12 @@ runs:
         # Still printed, because it is what a human reads when this step fails.
         # It is no longer what the check is computed from; see the script's module
         # docstring for why counting "ERROR" in rendered prose was off by one.
-        ash results report --format text
+        ashx results report --format text
         python3 "${{ github.action_path }}/count_scanner_errors.py" \
           .ash/ash_output/ash_aggregated_results.json
 
     # hadolint is an alpha scanner, so the default scans above, which list no
-    # alpha module, never run it, and the plain `ash dependencies install` above
+    # alpha module, never run it, and the plain `ashx dependencies install` above
     # does not install it either: its name is a tool only once its module is loaded.
     # So this installs it with the module loaded and runs that copy on the committed
     # fixture with only hadolint selected, on every OS. The fixture has known findings at every
@@ -759,11 +758,11 @@ runs:
       env:
         ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
       run: |
-        ash dependencies install --tool hadolint \
+        ashx dependencies install --tool hadolint \
           --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_hadolint_plugins]"
         out="${RUNNER_TEMP}/hadolint-out"
         set +e
-        ash scan --mode local --no-progress --simple \
+        ashx scan --mode local --no-progress --simple \
           --source-dir tests/test_data/scanners/hadolint/positive \
           --output-dir "$out" \
           --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins \
@@ -843,33 +842,16 @@ runs:
           .ash/ash_output/ash_aggregated_results.json
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    # Bash scan
-    - name: Validate ASH using Bash
-      if: inputs.method == 'bash'
-      shell: bash
-      env:
-        ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
-        ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
-        ACTIONS_RUNTIME_TOKEN: ${{ steps.cache-creds.outputs.ACTIONS_RUNTIME_TOKEN }}
-        ACTIONS_CACHE_URL: ${{ steps.cache-creds.outputs.ACTIONS_CACHE_URL }}
-        ACTIONS_RESULTS_URL: ${{ steps.cache-creds.outputs.ACTIONS_RESULTS_URL }}
-        SNYK_TOKEN: ${{ inputs.snyk-token }}
-        ASH_TEST_OS: ${{ inputs.os }}
-        ASH_TEST_PLATFORM: ${{ steps.platform.outputs.platform }}
-        ASH_TEST_CONFIG_FILE: ${{ inputs.config-file }}
-      run: |
-        echo "Testing ASH using Bash on ${ASH_TEST_OS} (${ASH_TEST_PLATFORM}) with config: ${ASH_TEST_CONFIG_FILE}"
-        chmod +x ./ash
-        if [ "${ASH_TEST_CONFIG_FILE}" = "alpha" ]; then
-          ./ash --build-target ci --verbose --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
-        else
-          ./ash --build-target ci --verbose --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
-        fi
+    # The `bash` method used to live here, driving the root `ash` bash script.
+    # That script is gone -- the Python CLI absorbed its whole flag surface -- and
+    # with it the method. Nothing was dropped from the platform matrix: every
+    # `bash` cell had a `python-container` cell on the same os and oci-runner, so
+    # the two differed only in which entrypoint typed the same container build.
 
     # The sh helper, sourced the way its header says and the sandbox suite drives it:
-    # `. utils/ash_helpers.sh && invoke-ash ...`. invoke_ash runs "${ASH_ROOT_DIR}/ash",
-    # so this is ./ash through the helper's self-location, scanning for real on the same
-    # runners as the bash rows.
+    # `. utils/ash_helpers.sh && invoke-ash ...`. invoke_ash runs `ashx --mode
+    # container`, so this is the installed CLI through the helper's own wrapper,
+    # scanning for real on the same runners as the python-container rows.
     - name: Validate ASH using ash_helpers.sh
       if: inputs.method == 'sh-helper'
       shell: bash
@@ -885,7 +867,6 @@ runs:
         ASH_TEST_CONFIG_FILE: ${{ inputs.config-file }}
       run: |
         echo "Testing ASH using utils/ash_helpers.sh (invoke-ash) on ${ASH_TEST_OS} (${ASH_TEST_PLATFORM}) with config: ${ASH_TEST_CONFIG_FILE}"
-        chmod +x ./ash
         . ./utils/ash_helpers.sh
         if [ "${ASH_TEST_CONFIG_FILE}" = "alpha" ]; then
           invoke-ash --build-target ci --verbose --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
@@ -894,7 +875,7 @@ runs:
         fi
 
     - name: Validate No Plugin Errors (Bash)
-      if: inputs.method == 'bash' || inputs.method == 'sh-helper'
+      if: inputs.method == 'sh-helper'
       shell: bash
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
@@ -902,12 +883,15 @@ runs:
         ACTIONS_RUNTIME_TOKEN: ${{ steps.cache-creds.outputs.ACTIONS_RUNTIME_TOKEN }}
         ACTIONS_CACHE_URL: ${{ steps.cache-creds.outputs.ACTIONS_CACHE_URL }}
         ACTIONS_RESULTS_URL: ${{ steps.cache-creds.outputs.ACTIONS_RESULTS_URL }}
+        # The installed CLI runs on the host here (`ashx results report`), as in the
+        # other plugin-error steps, so it gets the tool-download cache they get.
+        ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
       run: |
         echo "Checking for plugin execution errors..."
         # Still printed, because it is what a human reads when this step fails.
         # It is no longer what the check is computed from; see the script's module
         # docstring for why counting "ERROR" in rendered prose was off by one.
-        ./ash results report --format text
+        ashx results report --format text
         python3 "${{ github.action_path }}/count_scanner_errors.py" \
           .ash/ash_output/ash_aggregated_results.json
 
@@ -1030,8 +1014,8 @@ runs:
         & $Python .github/scripts/assert_scanners_completed.py
         exit $LASTEXITCODE
 
-    # Snapshots of what ASH prints when a real runtime runs its image: `ash --version` and
-    # `ash build-image --help` inside it, `ash --mode container` and both wrappers scanning
+    # Snapshots of what ASH prints when a real runtime runs its image: `ashx --version` and
+    # `ashx container build --help` inside it, `ashx --mode container` and the PowerShell wrapper scanning
     # the snapshot fixture, and the exit status each one ends with; and, read from inside
     # the same image, who owns and can write its directories. The unit-test legs have
     # no runtime, so tests/conftest.py deselects these there; the image the scan above just
@@ -1047,9 +1031,9 @@ runs:
     # even when the self-scan failed: that verdict is about this repository's findings, and
     # these snapshots only need the image, which a failed build would fail here too.
     #
-    # Not on sh-helper: utils/ash_helpers.sh forwards to ./ash, none of these modules
-    # sources it, and every sh-helper row has a bash row on the same OS and runner whose
-    # step compares the same output (tests/unit/test_ci_container_runtime_snapshots_skip_the_sh_helper_legs.py
+    # Not on sh-helper: utils/ash_helpers.sh forwards to `ashx --mode container`, none of
+    # these modules sources it, and every sh-helper row has a python-container row on the
+    # same OS and runner whose step compares the same output (tests/unit/test_ci_container_runtime_snapshots_skip_the_sh_helper_legs.py
     # pins both).
     - name: Snapshot the container-runtime output
       if: ${{ !cancelled() && inputs.method != 'python-local' && inputs.method != 'sh-helper' }}
@@ -1066,7 +1050,6 @@ runs:
         # and fail unless at least one test actually executed.
         uv run --extra cdk pytest \
           tests/snapshot/container/runtime/test_snapshot_container_runtime.py \
-          tests/snapshot/container/runtime/test_snapshot_container_bash_wrapper.py \
           tests/snapshot/container/runtime/test_container_image_permissions.py \
           --run-container-snapshots --run-integration --no-cov -n 0 \
           | tee "${RUNNER_TEMP}/container-runtime-snapshot-pytest.log"

@@ -4,14 +4,14 @@
 
 ## Enabling it
 
-actionlint is a builtin scanner, enabled by default: a default scan runs it. `scanners.actionlint.enabled: false` in the ASH config turns it off, and `--scanners` and `--exclude-scanners` select it as they select any scanner. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ash dependencies install` and the container image provide it.
+actionlint is a builtin scanner, enabled by default: a default scan runs it. `scanners.actionlint.enabled: false` in the ASH config turns it off, and `--scanners` and `--exclude-scanners` select it as they select any scanner. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ashx dependencies install` and the container image provide it.
 
 ## Installing
 
 | Where | How |
 |---|---|
 | Container image | Installed (pinned v1.7.12) |
-| Local / pip install | `ash dependencies install --tool actionlint` downloads the pinned release asset and checks its SHA256 |
+| Local / pip install | `ashx dependencies install --tool actionlint` downloads the pinned release asset and checks its SHA256 |
 | Nix | `pkgs.actionlint` is in the flake's scanner set |
 
 The pinned version and digests are in `automated_security_helper/utils/tool_downloads.py`, transcribed from the release's `actionlint_<version>_checksums.txt`.
@@ -59,7 +59,7 @@ Each option names the program actionlint pipes every `run:` script to, started f
 
 <!-- doctest: illustrative reason="runs a full scan, which needs every scanner installed" -->
 ```bash
-ash scan --config-overrides 'scanners.actionlint.options.shellcheck=/opt/shellcheck/bin/shellcheck'
+ashx scan --config-overrides 'scanners.actionlint.options.shellcheck=/opt/shellcheck/bin/shellcheck'
 ```
 
 Whoever sets it, a program that resolves inside the scanned tree is refused. An operator's relative path is resolved against the source directory and must land outside the tree, and a path inside the tree that a symbolic link there leads out of it is refused too, whether you wrote it or a name was found at it through an absolute `PATH` entry inside the tree, because the link, not you, chose the program. A refused value is logged as a warning and actionlint runs with that integration off.

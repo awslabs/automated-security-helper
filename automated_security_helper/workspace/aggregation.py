@@ -12,7 +12,7 @@ combining is where the design can quietly go wrong in three ways. This module
 exists to make each of the three explicit and testable.
 
 1. The verdict must not move. For any project P, the findings reported for P and
-   the pass/fail verdict for P must be identical to what ``ash --source-dir P``
+   the pass/fail verdict for P must be identical to what ``ashx --source-dir P``
    would produce. So the actionable count here is derived exactly the way
    ``run_ash_scan._compute_exit_code`` derives it -- same precedence of
    ``properties.issue_severity`` over ``level``, same suppression skip, same
@@ -1123,7 +1123,7 @@ def no_scanner_ran_for_project(results: Any) -> bool:
     entry is SKIPPED clears it having measured nothing. Single-project mode asks
     both questions, in this order, inside ``_compute_exit_code``; the workspace
     layer asked only the first, so such a project reported zero findings, COMPLETED
-    and exit 0 while ``ash --source-dir P`` on the same project exited 1.
+    and exit 0 while ``ashx --source-dir P`` on the same project exited 1.
 
     Delegates for the same reason its sibling does, and the delegation carries one
     decision that is easy to get wrong by copying: an *empty* scanner set is not
@@ -1137,7 +1137,7 @@ def no_scanner_ran_for_project(results: Any) -> bool:
     ``metadata.expected_scanners`` is what tells them apart: ``ScanPhase`` is what
     records the roster, so a roster means the phase ran. The roster is passed here
     for the same reason ``_compute_exit_code`` passes it -- reading it from the same
-    field in both places is what keeps this layer's answer and ``ash --source-dir
+    field in both places is what keeps this layer's answer and ``ashx --source-dir
     P``'s from diverging, which is the whole point of the sibling above. A project
     with no roster and no scanners keeps the benign reading.
 
@@ -1155,14 +1155,16 @@ def no_scanner_ran_for_project(results: Any) -> bool:
         reports as FAILED.
     """
     from automated_security_helper.interactions.run_ash_scan import (
-        no_scanner_ran,
-        scanner_statuses,
+        scan_incompleteness,
     )
 
-    expected = list(
-        getattr(getattr(results, "metadata", None), "expected_scanners", None) or []
-    )
-    return no_scanner_ran(scanner_statuses(results), expected)
+    # The one read single-project mode and the workspace outcome
+    # (execution._coverage_fields) take, not a second assembly of no_scanner_ran's
+    # inputs: it also supplies the ran_against_a_stale_database and
+    # audited_some_targets arms, without which an ERROR scanner that audited some
+    # targets read as "nothing ran" beside its own "N of M targets unevaluated"
+    # row. gate=True asks the facts whatever the gate resolves to.
+    return scan_incompleteness(results, gate=True).no_scanner_ran
 
 
 def inputs_not_scanned_for_project(

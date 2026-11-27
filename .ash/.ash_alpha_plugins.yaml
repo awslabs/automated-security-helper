@@ -15,6 +15,72 @@ external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
   suppressions:
+    # === GuardDog false positives from the v4 branch's new code (line-pinned) ===
+    # Each is pinned to the one line GuardDog reports, read on the line before being
+    # listed, so a real finding elsewhere in the file is still reported. The reasons
+    # describe the pattern rather than quote it, so this file does not flag itself.
+    # .ash.yaml carries the same entries, as every GuardDog pin here must
+    # (tests/unit/test_ci_guarddog_self_scan_pins.py).
+    - rule_id: "threat-filesystem-read"
+      path: "automated_security_helper/cli/dependencies.py"
+      line_start: 897
+      line_end: 897
+      reason: >-
+        False positive. The line is part of a docstring that names the settings files a
+        package manager would read from the current directory (an npm settings file, a
+        gem Gemfile). It describes why commands start in an empty directory; nothing opens
+        one of those files.
+    - rule_id: "threat-filesystem-read"
+      path: "packaging/assert-package-payload.py"
+      line_start: 1104
+      line_end: 1104
+      reason: >-
+        False positive. The line is a probe member whose link target is a system password
+        database path, built so the payload checker must refuse a link that leaves the
+        artifact. The checker's tests read no such file; the path is data handed to the
+        function under test.
+    - rule_id: "threat-filesystem-read"
+      path: "packaging/assert-package-payload.py"
+      line_start: 1489
+      line_end: 1489
+      reason: >-
+        False positive. The line is a test-case member name that climbs out of the payload
+        root toward a system password database path, to check the payload checker refuses
+        it. The path is data handed to the function under test; nothing opens it.
+    - rule_id: "threat-filesystem-read"
+      path: "packaging/assert-package-payload.py"
+      line_start: 1507
+      line_end: 1507
+      reason: >-
+        False positive. The line is a test-case description for a wrapper replaced by a
+        symlink to a system password database path, to check the payload checker refuses
+        it. It is a label string; nothing opens that path.
+    - rule_id: "threat-filesystem-destruction"
+      path: "deploy/kubernetes-operator/tests/test_contract.py"
+      line_start: 94
+      line_end: 94
+      reason: >-
+        False positive. The line lists strings that look like shell commands, such as a
+        recursive delete after a semicolon, as arguments the contract's path guard must
+        refuse. They are test inputs; nothing on the shard path runs them as a shell.
+    - rule_id: "threat-network-exfiltration"
+      path: "deploy/kubernetes-operator/tests/test_auth.py"
+      line_start: 50
+      line_end: 50
+      reason: >-
+        False positive. The line asserts the server URL built from a made-up IPv4 host that
+        the test passes in its environment mapping. The test makes no connection.
+    # === The operator e2e's planted SNS topic: trivy-repo (line-pinned) ===
+    # The same two lines the cdk-nag, cfn-nag and checkov entries in .ash.yaml cover.
+    - rule_id: "AWS-0095"
+      path: "deploy/kubernetes-operator/tests/e2e/fixtures/dirty/template.yaml"
+      line_start: 7
+      line_end: 8
+      reason: >-
+        The fixture's one resource is an SNS topic with no KmsMasterKeyId, planted so the
+        operator e2e has in-scope work for the CloudFormation scanners. It is copied into
+        the e2e cluster as scan input only; nothing is deployed from it. Pinned to the
+        resource's two lines so a second resource added to the file still reports.
     # === Product code and documents: pinned or scoped to the file ===
     - rule_id: B104
       path: automated_security_helper/cli/mcp/__init__.py
@@ -46,15 +112,17 @@ global_settings:
         False positive. A changelog sentence about a Security Hub credentials check; it
         holds words, not a credential.
     - rule_id: API_KEY_OR_SECRET
-      path: ".github/release-notes/*.md"
+      path: ".github/release-notes/v3.8.0-details.md"
+      line_start: 2508
+      line_end: 2508
       reason: >-
         False positive. The release notes carry the same Security Hub credentials-check
         sentence as the CHANGELOG entry above, quoted in prose beside option names. They
         hold words, not a credential.
     - rule_id: API_KEY_OR_SECRET
       path: Dockerfile
-      line_start: 834
-      line_end: 836
+      line_start: 824
+      line_end: 826
       reason: >-
         False positive. The adduser command in the non-root-user block passes the
         --disabled-password flag, which the netrc_password detector in ferret-scan 2.6.1
@@ -63,8 +131,8 @@ global_settings:
         moves out of this range.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/assets/Dockerfile
-      line_start: 834
-      line_end: 836
+      line_start: 824
+      line_end: 826
       reason: >-
         False positive. This is the build-context copy of the Dockerfile entry above, with
         the same adduser --disabled-password flag that ferret-scan 2.6.1 reads as a
@@ -77,6 +145,170 @@ global_settings:
         converter option examples and table, which the detector reads as a social
         security number. The number is left out of this reason because it would make
         this file trip the same rule.
+    # === ferret-scan API_KEY_OR_SECRET keyword false positives in product code and pinned digests (line-pinned) ===
+    # ferret-scan reads the NAME on the left of an assignment, and an ordinary local
+    # whose name holds a word such as session or token reads as a credential. The
+    # test files' locals were renamed in source (ash_ferret_plugins/DEVELOPMENT.md,
+    # "Two-Pronged Approach"). The product identifiers are not renamed, because they
+    # sit in public or widely imported code, so each line is pinned instead, one entry
+    # per line or contiguous block, never the whole file, so a real credential added
+    # elsewhere in the file still reports. The reasons describe the pattern rather than
+    # quote the line, because a quoted line would make this file trip the same rule.
+    - rule_id: API_KEY_OR_SECRET
+      path: automated_security_helper/cli/mcp/session_identity.py
+      line_start: 134
+      line_end: 134
+      reason: >-
+        False positive. The line keeps the value that a context variable's set call
+        returns, so the variable can be reset afterwards. It holds no credential; the
+        detector reads the word in the name.
+    - rule_id: API_KEY_OR_SECRET
+      path: automated_security_helper/cli/mcp/workspace.py
+      line_start: 3259
+      line_end: 3259
+      reason: >-
+        False positive. The line keeps the pair returned by opening a run-log scope, the
+        second item being the handle used to reset that scope. No credential is held;
+        the detector reads the word in the name.
+    - rule_id: API_KEY_OR_SECRET
+      path: automated_security_helper/cli/mcp/workspace.py
+      line_start: 3376
+      line_end: 3376
+      reason: >-
+        False positive. The line looks up the registry entry for a client id. It holds a
+        registry object, not a credential; the detector reads the word in the name.
+    - rule_id: API_KEY_OR_SECRET
+      path: automated_security_helper/cli/mcp_server.py
+      line_start: 548
+      line_end: 548
+      reason: >-
+        False positive. The line holds a count of other registry entries that were
+        delivered; the detector reads the word in the name.
+    - rule_id: API_KEY_OR_SECRET
+      path: automated_security_helper/cli/mcp_server.py
+      line_start: 907
+      line_end: 907
+      reason: >-
+        False positive. The line is a code comment that says nothing is invented for a
+        client that has no bound profile. It holds prose, not a credential.
+    - rule_id: API_KEY_OR_SECRET
+      path: automated_security_helper/cli/mcp_tools.py
+      line_start: 2108
+      line_end: 2108
+      reason: >-
+        False positive. The line looks up the registry entry a scan claims. It holds a
+        registry object, not a credential; the detector reads the word in the name.
+    - rule_id: API_KEY_OR_SECRET
+      path: automated_security_helper/cli/mcp_tools.py
+      line_start: 2231
+      line_end: 2231
+      reason: >-
+        False positive. The line keeps the pair returned by opening a run-log scope, the
+        second item being the handle used to reset that scope. No credential is held.
+    - rule_id: API_KEY_OR_SECRET
+      path: automated_security_helper/cli/mcp_tools.py
+      line_start: 3644
+      line_end: 3644
+      reason: >-
+        False positive. The line keeps the pair returned by beginning a run-log scope,
+        the second item being the handle used to reset that scope. No credential is held.
+    - rule_id: API_KEY_OR_SECRET
+      path: automated_security_helper/core/cancellation.py
+      line_start: 378
+      line_end: 378
+      reason: >-
+        False positive. The line keeps the value that a context variable's set call
+        returns, so the cancel event can be reset afterwards. It holds no credential.
+    - rule_id: API_KEY_OR_SECRET
+      path: automated_security_helper/plugins/plugin_manager.py
+      line_start: 171
+      line_end: 171
+      reason: >-
+        False positive. The line keeps the value that a context variable's set call
+        returns, so the variable can be reset afterwards. It holds no credential.
+    - rule_id: API_KEY_OR_SECRET
+      path: automated_security_helper/utils/redacted_model.py
+      line_start: 1197
+      line_end: 1197
+      reason: >-
+        False positive. The line keeps the value that a context variable's set call
+        returns, so the variable can be reset afterwards. It holds no credential.
+    - rule_id: API_KEY_OR_SECRET
+      path: automated_security_helper/utils/redacted_model.py
+      line_start: 2192
+      line_end: 2195
+      reason: >-
+        False positive. The four lines each keep the value that a context variable's set
+        call returns, so each variable can be reset afterwards. None holds a credential;
+        the detector reads the word in the names.
+    - rule_id: API_KEY_OR_SECRET
+      path: automated_security_helper/utils/uv_tool_runner.py
+      line_start: 126
+      line_end: 126
+      reason: >-
+        False positive. The line keeps the value that a context variable's set call
+        returns, so the variable can be reset afterwards. It holds no credential.
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/assets/test_install_pinned_tool.py
+      line_start: 83
+      line_end: 83
+      reason: >-
+        False positive. The line holds the public SHA-256 of a vendored scanner
+        executable that the pinned-install test compares against. A published digest, not
+        a credential. Pinned to the line so a value added elsewhere in the file still
+        reports; the inline pragma is detect-secrets', which ferret-scan does not read.
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/assets/test_install_pinned_tool.py
+      line_start: 353
+      line_end: 353
+      reason: >-
+        False positive. The line holds a public SHA-256 archive digest used as a lookup
+        key in the pinned-install test. A published digest, not a credential.
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/assets/test_install_pinned_tool.py
+      line_start: 393
+      line_end: 393
+      reason: >-
+        False positive. The line holds a public SHA-256 archive digest used as a lookup
+        key in the pinned-install test. A published digest, not a credential.
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/assets/test_install_pinned_tool.py
+      line_start: 420
+      line_end: 420
+      reason: >-
+        False positive. The line holds the public SHA-256 of a vendored linter binary
+        that the pinned-install test compares against. A published digest, not a
+        credential.
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/assets/test_install_pinned_tool.py
+      line_start: 479
+      line_end: 479
+      reason: >-
+        False positive. The line holds a public SHA-256 archive digest used as a lookup
+        key in the pinned-install test. A published digest, not a credential.
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/assets/test_install_pinned_tool.py
+      line_start: 533
+      line_end: 533
+      reason: >-
+        False positive. The line holds a public SHA-256 archive digest used as a lookup
+        key in the pinned-install test. A published digest, not a credential.
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/assets/test_install_pinned_tool.py
+      line_start: 771
+      line_end: 773
+      reason: >-
+        False positive. The three lines hold public SHA-256 digests of release archives
+        and a vendored executable that the pinned-install test compares against.
+        Published digests, not credentials.
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/assets/test_install_pinned_tool.py
+      line_start: 1424
+      line_end: 1425
+      reason: >-
+        False positive. The two lines hold public SHA-256 digests of a bundle and its
+        contents that the pinned-install test compares against. Published digests, not
+        credentials.
     # === Test code and its support files: one entry per rule and file ===
     # The same entries .ash.yaml holds for the scanners this file runs (bandit,
     # gitleaks, ferret-scan); detect-secrets is off here, so its rules have none. The
@@ -289,9 +521,6 @@ global_settings:
     - path: automated_security_helper/schemas/cyclonedx_bom_1_6_schema/__init__.py
       rule_id: API_KEY_OR_SECRET
       reason: "False positive — generated CycloneDX schema definitions contain field names that match secret patterns"
-    - path: pyproject.toml
-      rule_id: API_KEY_OR_SECRET
-      reason: "False positive — hatch build config paths contain strings that match secret patterns"
     # === GuardDog false positives, continued: the docs-CI and MCP waves ===
     #
     # The same dispositions as the GuardDog block below: heuristics matching
@@ -327,12 +556,24 @@ global_settings:
         source JSON schema, not this generated file.
     - path: automated_security_helper/cli/mcp/sessions.py
       rule_id: API_KEY_OR_SECRET
+      line_start: 1237
+      line_end: 1237
+      reason: >-
+        False positive. The flagged line assigns a local variable named for an MCP
+        session object; the detector matches the variable name, and the assigned
+        value is a constructed object rather than a credential.
+    - path: automated_security_helper/cli/mcp/sessions.py
+      rule_id: API_KEY_OR_SECRET
+      line_start: 2566
+      line_end: 2566
       reason: >-
         False positive. The flagged line assigns a local variable named for an MCP
         session object; the detector matches the variable name, and the assigned
         value is a constructed object rather than a credential.
     - path: deploy/terraform/modules/fargate/main.tf
       rule_id: API_KEY_OR_SECRET
+      line_start: 20
+      line_end: 20
       reason: >-
         False positive. The flagged local's name contains the word "secret"
         (manage-auth-secret), but its value is a boolean computed from whether an
@@ -461,6 +702,8 @@ global_settings:
     # scoped to one file; nothing here is a glob.
     - path: automated_security_helper/config/operator_paths.py
       rule_id: API_KEY_OR_SECRET
+      line_start: 113
+      line_end: 113
       reason: >-
         False positive. The flagged line is a row in the table of scanner options
         that name a file. It pairs the detect-secrets scanner with its
@@ -509,8 +752,8 @@ global_settings:
         False positive. A module constant named for a fake MCP session, the same
         shape as the entries for the other MCP tests above.
     # === ferret-scan API_KEY_OR_SECRET: new detections in ferret-scan 2.6.0 ===
-    # The supported window admits ferret-scan 2.6.0, whose detectors report these
-    # nine sites at 95-100% confidence. Each was read at the reported line and is
+    # The supported window admits ferret-scan 2.6.0, whose detectors report the
+    # sites below at 95-100% confidence. Each was read at the reported line and is
     # pinned to it by line or, where a named definition holds it, by that
     # definition (symbol); none is a stored credential. The ferret-scan 2.5.x scans of
     # the same files did not report them.
@@ -546,20 +789,6 @@ global_settings:
       reason: >-
         False positive. This is ferret-scan's own detector regular expression
         for the trade_secret keywords, pattern text and not a value.
-    - path: .ash.yaml
-      rule_id: API_KEY_OR_SECRET
-      line_start: 654
-      line_end: 654
-      reason: >-
-        False positive. A suppression reason that quotes a placeholder fixture
-        literal; the text explains why another finding is a false positive.
-    - path: .ash.yaml
-      rule_id: API_KEY_OR_SECRET
-      line_start: 901
-      line_end: 901
-      reason: >-
-        False positive. A suppression reason that quotes a placeholder fixture
-        literal; the text explains why another finding is a false positive.
     - path: .github/workflows/ash-repo-docs.yml
       rule_id: API_KEY_OR_SECRET
       line_start: 159
@@ -627,10 +856,23 @@ global_settings:
         purpose. A range that drifts after a version bump fails loudly -- the
         findings come back and the scan goes red -- whereas a whole-file suppression
         would silently swallow a real secret added here later.
+    - path: packaging/winget/verify-on-windows.ps1
+      rule_id: API_KEY_OR_SECRET
+      line_start: 93
+      line_end: 94
+      reason: >-
+        False positive, for the same reason as the entry above. The two lines are the
+        published SHA256 digests of the winget client bundle and its dependencies
+        archive that the winget e2e leg installs, copied from that release's own
+        digest file and recomputed from the downloads. They are public by construction.
+        detect-secrets is handled by an inline `# pragma: allowlist secret` on each
+        line; ferret-scan does not honor that marker, hence this entry. Scoped to
+        those two lines, and tests/unit/test_winget_e2e.py holds the range to them, so
+        a version bump that moves them fails a test instead of drifting.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 1028
-      line_end: 1074
+      line_start: 1027
+      line_end: 1070
       reason: >-
         False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
         the commit SHA each bundled tool's release tag points to, and the SHA256 of
@@ -791,13 +1033,43 @@ global_settings:
     - rule_id: "*:Python Software Foundation License"
       path: "**"
       reason: "Python Software Foundation License is an approved license"
+    # MPL-2.0 is approved per (license, file, package), never repository-wide.
+    # trivy names license results "<package>:<license>" and puts every one on
+    # line 1, so a line range cannot narrow them; package_name (read from the
+    # result's "PkgName:" line) is what keeps a new MPL-2.0 package in these
+    # same files, or MPL-2.0 in any other file, failing.
+    # tests/unit/config/test_mpl_license_approval.py holds that.
+    - rule_id: "*:MPL-2.0"
+      path: "scripts/e2e/inspector/package-lock.json"
+      package_name: "lightningcss"
+      reason: >-
+        Weak-copyleft MPL-2.0, file-level only. lightningcss is an unmodified
+        transitive dependency of @modelcontextprotocol/inspector (via vite).
+        This lockfile pins the inspector that the MCPB end-to-end test
+        (scripts/e2e/mcpb.sh) installs into a scratch directory. Neither the
+        lockfile nor lightningcss is in the ASH wheel, sdist or image.
+    - rule_id: "*:MPL-2.0"
+      path: "scripts/e2e/inspector/package-lock.json"
+      package_name: "lightningcss-*"
+      reason: >-
+        The per-platform lightningcss binaries (lightningcss-linux-x64-gnu and
+        so on), MPL-2.0 like lightningcss itself, installed only for the same
+        end-to-end test and never shipped.
+    - rule_id: "*:MPL-2.0"
+      path: "deploy/kubernetes-operator/requirements.txt"
+      package_name: "certifi"
+      reason: >-
+        Weak-copyleft MPL-2.0, file-level only. certifi is an unmodified
+        transitive dependency of the operator (via kubernetes and requests),
+        installed from PyPI into the operator image as published. The
+        obligation covers modified MPL files, and none are modified.
     # =====================================================================
     # Alpha-plugin mode: bandit, ferret-scan, trivy-repo
     # =====================================================================
     #
     # This file enables a different scanner set from .ash.yaml -- bandit,
     # ferret-scan and trivy-repo, with cdk-nag, cfn-nag, checkov, detect-secrets,
-    # grype, npm-audit, opengrep, semgrep, snyk-code and syft all off. Everything
+    # grype, npm-audit, opengrep, snyk-code and syft all off. Everything
     # below exists because of that difference rather than because the code differs.
     # Most of it is trivy-repo asking a question checkov or cfn-nag already asked
     # under a different rule id and answering it differently, and the rest is
@@ -815,8 +1087,12 @@ global_settings:
     # CKV_AWS_51, AWS-0054 to CKV_AWS_2 and CFN_NAG_W56, AWS-0066 to CKV_AWS_50,
     # AWS-0089 to CKV_AWS_18, AWS-0098 to CKV_AWS_149, AWS-0104 to CFN_NAG_W5,
     # DS-0002 to CKV_DOCKER_3 and CKV_DOCKER_8, and DS-0026 to CKV_DOCKER_2.
-    # AWS-0036 maps to a decision recorded here against detect-secrets rather than
-    # checkov, on the same variable-name heuristic. That leaves two, AWS-0033 and
+    # (That count was taken when the CKV_AWS_149 decision was still recorded as
+    # inline skips in the agentcore and fargate modules. Those modules have since
+    # taken a kms_key_arn input and the skips are gone; the remaining AWS-0098
+    # entries rest on the conditional-key block below.) AWS-0036 maps to a
+    # decision recorded here against detect-secrets rather than checkov, on the
+    # same variable-name heuristic. That leaves two, AWS-0033 and
     # AWS-0132, where the nearest checkov rule asks a weaker question and therefore
     # passed, so the argument had to be assembled from the same cost family; both say
     # so where they sit.
@@ -827,7 +1103,7 @@ global_settings:
     # trivy documents that checks which fire on the ABSENCE of something cannot be
     # ignored inline, naming the missing-USER check as its example -- which is
     # DS-0002, one of the rules below. Keeping every one of them in this file also
-    # means `ash config validate` and the unused-suppressions report can see them,
+    # means `ashx config validate` and the unused-suppressions report can see them,
     # which an inline comment would not be.
     #
     # FERRET-SCAN, AT v2.4.5, reports two finding types here, both false positives
@@ -966,16 +1242,20 @@ global_settings:
     # Description says "Empty uses AWS-managed encryption", so a Default would
     # contradict the documented behaviour and point at a key nobody owns. The cost of
     # removing the option instead is a customer managed key per deployment, billed
-    # monthly per key plus per request, to encrypt container image build logs and a
-    # placeholder secret that the non-MCP stacks never read.
+    # monthly per key plus per request, to encrypt container image build logs and,
+    # on the two stacks that serve MCP, the auth header secret.
     #
     # The terraform modules reach the same place from the other direction, and the
-    # honest wording differs: there the inputs simply default to null, so trivy
-    # resolves the HCL correctly and the findings are accurate rather than artifacts.
-    # ECR encryption_type is a ternary on ecr_kms_key_arn, and the log groups set no
-    # kms_key_id at all. The trade is already recorded there against checkov's
-    # CKV_AWS_158 and CKV_AWS_149 as inline skips on
-    # deploy/terraform/modules/*/main.tf.
+    # honest wording differs: the findings there are accurate rather than artifacts.
+    # In ash-image-pipeline, codecommit-gate and codepipeline-executor the log
+    # groups set no kms_key_id, and ECR encryption_type is a ternary on an
+    # ecr_kms_key_arn input that defaults to null. Those log groups carry inline
+    # CKV_AWS_158 skips recording the trade. The agentcore and fargate modules take
+    # a kms_key_arn input instead and set kms_key_id from it on the auth header
+    # secret and the fargate task log group. trivy reports nothing on those
+    # resources, so they need no entry here. Measured: AWS-0017 fired on the
+    # fargate task log group before the input existed and does not with
+    # kms_key_id bound to it, even at its null default.
     - rule_id: AWS-0017
       path: deploy/cdk/templates/AshAgentCore.template.json
       reason: >-
@@ -1023,11 +1303,6 @@ global_settings:
         aws_cloudwatch_log_group.shard and aws_cloudwatch_log_group.merge, the two
         resources this module's inline CKV_AWS_158 skips already cover. Same
         reasoning as the ash-image-pipeline entry.
-    - rule_id: AWS-0017
-      path: deploy/terraform/modules/fargate/main.tf
-      reason: >-
-        aws_cloudwatch_log_group.task, the resource this module's inline CKV_AWS_158
-        skip already covers. Same reasoning as the ash-image-pipeline entry.
     - rule_id: AWS-0033
       path: deploy/cdk/templates/AshAgentCore.template.json
       reason: >-
@@ -1060,7 +1335,7 @@ global_settings:
         default the repository is encrypted with an Amazon-owned key and there is no
         customer key, which is what the variable's own description says. The
         variable is the opt-in, and the same trade is recorded against CKV_AWS_158
-        and CKV_AWS_149 elsewhere in these modules.
+        in the inline skips on the log groups of this module and two others.
     - rule_id: AWS-0033
       path: deploy/terraform/modules/codecommit-gate/main.tf
       reason: >-
@@ -1071,20 +1346,9 @@ global_settings:
       reason: >-
         ConfigMcpAuthHeaderSecret takes KmsKeyId from the HasKmsKey condition, so it
         is encrypted with the aws/secretsmanager managed key unless KmsKeyArn is
-        supplied. The identical trade is recorded against checkov's CKV_AWS_149 in
-        the agentcore and fargate terraform modules' inline skips.
-    - rule_id: AWS-0098
-      path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      reason: >-
-        ConfigMcpAuthHeaderSecret, same conditional KmsKeyId as the AshAgentCore
-        entry. This stack does not serve MCP, so the secret holds the disabled-auth
-        placeholder and nothing reads it.
-    - rule_id: AWS-0098
-      path: deploy/cdk/templates/AshDistributedPipeline.template.json
-      reason: >-
-        ConfigMcpAuthHeaderSecret, same conditional KmsKeyId as the AshAgentCore
-        entry. This stack runs the sharded executor, does not serve MCP, and gets
-        the placeholder secret nothing reads.
+        supplied. The agentcore and fargate terraform modules make the same choice
+        through a kms_key_arn input that defaults to null. Only the stacks that
+        serve MCP create this secret.
     - rule_id: AWS-0098
       path: deploy/cdk/templates/AshFargate.template.json
       reason: "ConfigMcpAuthHeaderSecret, same conditional KmsKeyId as the AshAgentCore entry."
@@ -1161,7 +1425,7 @@ global_settings:
     # keep one shape across both stacks.
     #
     # For the remaining pipeline buckets the trade is the one already recorded
-    # against CKV_AWS_158 and CKV_AWS_149: a customer managed key is billed monthly
+    # against CKV_AWS_158: a customer managed key is billed monthly
     # per key plus per request, and it would additionally need a decrypt grant on
     # every CodePipeline action role that touches an artifact. Wiring KmsKeyArn
     # through to these buckets is a reasonable follow-up for a deployment that needs
@@ -1236,6 +1500,14 @@ global_settings:
     # templates. TracingConfig is genuinely absent rather than conditional,
     # confirmed by reading the rendered Lambda resources, so the finding is accurate
     # and the answer is the cost rather than a parser difference.
+    #
+    # AshEksOperator has no entry because its installer function traces actively,
+    # an operator decision for that one function: it reaches a cluster endpoint that
+    # may be private and VPC-attached, and a trace tells an unreachable endpoint from
+    # a slow apply. trivy 0.69.3 no longer reports AWS-0066 on that template. The
+    # functions below keep the no-tracing decision, and
+    # deploy/cdk/test/ash-eks-operator-stack.test.ts fails if any of them gains a
+    # TracingConfig.
     - rule_id: AWS-0066
       path: deploy/cdk/templates/AshAgentCore.template.json
       reason: >-
@@ -1359,10 +1631,12 @@ global_settings:
     # questions, and the mapping is one to one:
     #
     #   DS-0002 "specify at least 1 USER command with a non-root user" maps to
-    #   CKV_DOCKER_3 on wrapper.Dockerfile, which sets no USER at all, and to
-    #   CKV_DOCKER_8 on gate.Dockerfile, which sets USER root. checkov reports
-    #   CKV_DOCKER_3 only on the first and CKV_DOCKER_8 only on the second; trivy
-    #   reports DS-0002 on both, because one rule covers both shapes.
+    #   CKV_DOCKER_3 on wrapper.Dockerfile, which sets no USER at all. It used to
+    #   map to CKV_DOCKER_8 on gate.Dockerfile too, which ended on USER root; since
+    #   #762 that file switches back to USER ${ASH_UID}:${ASH_GID} after its pip
+    #   install, so trivy v0.75.0 no longer reports DS-0002 there and the entry for
+    #   it is gone. A suppression that matches nothing would only hide the finding
+    #   if the file went back to ending on root.
     #
     #   DS-0026 "add HEALTHCHECK" maps to CKV_DOCKER_2 on both files.
     #
@@ -1392,16 +1666,6 @@ global_settings:
         one. The ash_image_target input decides this, not the wrapper. Same
         reasoning as this file's inline CKV_DOCKER_3 skip, and the reason the COPY
         instructions use --chmod rather than a RUN chmod.
-    - rule_id: DS-0002
-      path: deploy/terraform/modules/codecommit-gate/files/gate.Dockerfile
-      reason: >-
-        USER root is set and cannot be reverted: pip needs to write to
-        site-packages, ASH's scanners need root to run, and no fixed uid could be
-        restored because only the base image's non-root target defines one. This
-        image is a Lambda function, where each invocation gets a single-tenant
-        execution environment with a read-only root filesystem outside /tmp, so root
-        confers nothing across a boundary. Same reasoning as this file's inline
-        CKV_DOCKER_8 skip.
     - rule_id: DS-0026
       path: deploy/terraform/modules/ash-image-pipeline/files/wrapper.Dockerfile
       reason: >-
@@ -1421,6 +1685,29 @@ global_settings:
         Lambda manages this execution environment's lifecycle through the Runtime
         API and never reads a Docker HEALTHCHECK, so the instruction would have no
         effect. Same reasoning as this file's inline CKV_DOCKER_2 skip.
+    # The editors' visual-snapshot images follow the same one-to-one mapping. Each is
+    # built and run once per visual job with `docker run --rm`, so DS-0026 has no
+    # reader on either. The VS Code image sets USER node, which clears DS-0002 there;
+    # the JetBrains image cannot, and its inline CKV_DOCKER_3 skip says why.
+    - rule_id: DS-0002
+      path: editors/jetbrains/ui-test/Dockerfile
+      reason: >-
+        No USER on purpose: the container starts as root so ui-test-in-container.sh
+        can re-execute through run-unprivileged.sh as the owner of the mounted
+        checkout, whose uid is the runner's and unknown at build time. Same
+        reasoning as this file's inline CKV_DOCKER_3 skip.
+    - rule_id: DS-0026
+      path: editors/jetbrains/ui-test/Dockerfile
+      reason: >-
+        A one-shot test runner: the visual job runs it once and reads its exit
+        status, and nothing reads a HEALTHCHECK. Same reasoning as this file's
+        inline CKV_DOCKER_2 skip.
+    - rule_id: DS-0026
+      path: editors/vscode/test/visual/Dockerfile
+      reason: >-
+        A one-shot test runner: test/snapshots.ts runs it once and reads its exit
+        status, and nothing reads a HEALTHCHECK. Same reasoning as this file's
+        inline CKV_DOCKER_2 skip.
     # === GuardDog (#727): false positives, approved by the maintainer 2026-10-07 ===
     # The product-file entries here are the ones .ash.yaml holds too. This is the
     # config the self-scan runs GuardDog under, and it does not read .ash.yaml.
@@ -1464,8 +1751,8 @@ global_settings:
     # definition, line-pinned at module level.
     - rule_id: threat-runtime-environment-read
       path: deploy/cdk/lib/ash-container-scripts.ts
-      line_start: 559
-      line_end: 559
+      line_start: 549
+      line_end: 549
       reason: "The entrypoint reads one variable by name, ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN, the secret it needs to resolve; nothing else in the environment."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
@@ -1518,8 +1805,8 @@ global_settings:
       reason: "A warning message naming ~/.npmrc and ~/.yarnrc as what the audit copy keeps the package managers away from; nothing here reads the files."
     - rule_id: threat-filesystem-read
       path: scripts/generate_plugin_data_partial.py
-      line_start: 187
-      line_end: 187
+      line_start: 185
+      line_end: 185
       reason: "'.env' is the example file name a docs graphic row shows for the secrets category; display data, not a read."
     # === trivy license scanner: two expressions the approved list does not match ===
     #
@@ -1557,11 +1844,78 @@ global_settings:
         confirmed from the SPDX license page. The package is minimatch 10.2.5,
         vendored under aws-cdk-lib; the separate top-level minimatch 3.1.5 is ISC and
         is covered by the entry above.
+    # =====================================================================
+    # The Kubernetes operator under deploy/kubernetes-operator
+    # =====================================================================
+    #
+    # Twelve findings in this mode when the operator arrived. Six are bandit rules.
+    # The two planted ones below are repeated from .ash.yaml, path for path,
+    # because this file does not read that one. The other four (B104 on the 0.0.0.0
+    # bind, B108 on TMP_MOUNT) are a `# nosec` on their own lines in the source, so
+    # neither config lists them. The remaining six come from the two scanners only
+    # this mode runs. Every entry names one file, so the rest of the operator is
+    # still scanned with nothing excused.
+    - rule_id: B602
+      path: deploy/kubernetes-operator/tests/e2e/fixtures/dirty/vulnerable.py
+      reason: >-
+        A deliberate subprocess call with shell=True, planted so the operator e2e can
+        assert bandit reported it. The fixture is the assertion. Same entry as in
+        .ash.yaml.
+    - rule_id: B307
+      path: deploy/kubernetes-operator/tests/e2e/fixtures/dirty/vulnerable.py
+      reason: >-
+        A deliberate eval, planted beside the B602 for the same e2e assertion. Same
+        entry as in .ash.yaml.
+    # ferret-scan's unquoted-assignment heuristic, described in the
+    # API_KEY_OR_SECRET block near the top of this file. Each entry is pinned to
+    # the one line ferret reports, so a secret on any other line of either file is
+    # still reported. tests/unit/config/test_operator_auth_ferret_pins.py ties each
+    # range to that line's text, so an edit that moves the line fails a test
+    # instead of leaving the range on whatever moved in.
+    - rule_id: API_KEY_OR_SECRET
+      path: deploy/kubernetes-operator/ash_operator/auth.py
+      line_start: 80
+      line_end: 80
+      reason: >-
+        False positive. The line assigns a local named for the bearer credential
+        from the service account file the kubelet projects into the pod. The value
+        is read at run time; nothing is hardcoded.
+    - rule_id: API_KEY_OR_SECRET
+      path: deploy/kubernetes-operator/tests/test_auth.py
+      line_start: 34
+      line_end: 34
+      reason: >-
+        False positive. The line passes a placeholder string as the token the test
+        writes into a temporary service account directory. It is a fixture value,
+        not a credential.
+    # trivy-repo's RBAC rules on the operator's namespaced Role. Each verb below is
+    # the operator's job, and deploy/kubernetes-operator/tests/test_least_privilege.py
+    # pins the Role rule for rule, so widening any of them fails there first.
+    - rule_id: KSV-0048
+      path: deploy/kubernetes-operator/manifests/rbac.yaml
+      reason: >-
+        Two rules fire. The operator creates and deletes the shard and collector
+        Jobs for each AshScan, and creates and patches the Deployment for each
+        AshMcpServer. Creating those workloads is what the operator is for. Neither
+        rule grants update, and the Role is namespaced to ash-system.
+    - rule_id: KSV-0049
+      path: deploy/kubernetes-operator/manifests/rbac.yaml
+      reason: >-
+        The operator creates one immutable, content-addressed ConfigMap per run,
+        holding the ASH config and entrypoint scripts, and deletes it with the run.
+        It is granted no update or patch, so it cannot rewrite a ConfigMap a running
+        pod has mounted.
+    - rule_id: KSV-0056
+      path: deploy/kubernetes-operator/manifests/rbac.yaml
+      reason: >-
+        The operator creates and patches the ClusterIP Service in front of each
+        AshMcpServer. It has no delete on Services, the ownerReference collects
+        them, and it has no grant on endpoints, ingresses or networkpolicies.
     # === Test fixtures the alpha-plugins legs read as credentials (expires 2027-05-06) ===
     # Each entry is per file and per rule, with no line range, because the lines move
     # whenever a test is edited. The tests hold made-up values on purpose, to check
-    # that ASH hides, refuses or confines them. The key is expires, the canonical
-    # spelling (expiration is a deprecated alias, models/core.py); the date is six
+    # that ASH hides, refuses or confines them. The key is expires, the only
+    # spelling a config accepts (ASH 4.0 removed expiration, models/core.py); the date is six
     # months out so the list is reviewed then and an entry whose fixture has been
     # restructured is dropped.
     - rule_id: API_KEY_OR_SECRET
@@ -1750,7 +2104,7 @@ global_settings:
         is scanned at its tracked path. Staged into assets/ by hatch_build.py
         because tool_downloads.py imports it.
     # `/**` is load-bearing: without it this pattern matches the directory entry
-    # and nothing inside it, so the ignore did nothing. `ash config validate`
+    # and nothing inside it, so the ignore did nothing. `ashx config validate`
     # rejects it, but only where the directory exists -- tests/pytest-temp/ is
     # gitignored, so a fresh CI checkout has no such directory and the validator
     # stays quiet. It fails for a developer who has run pytest first. .ash.yaml
@@ -1863,8 +2217,6 @@ scanners:
   grype:
     enabled: false
   opengrep:
-    enabled: false
-  semgrep:
     enabled: false
   snyk-code:
     enabled: false

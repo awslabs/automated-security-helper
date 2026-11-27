@@ -1,0 +1,32 @@
+
+ Usage: ashx config init [OPTIONS]
+
+ Create a configuration file with every setting at its default.
+
+ Without --config, writes .ash.yaml, the canonical config file, in the
+ current directory, and refuses when the directory already has a config
+ source (a legacy name such as .ash/.ash.yaml, an ashrc file, or the tool.ash
+ table of pyproject.toml), since sources are never merged.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --config   -c                  <str>  Where to write the new config file. By default .ash.yaml   │
+│                                       in the current directory, the canonical config file a scan │
+│                                       of that directory reads first. Discovery reads these       │
+│                                       names: .ash.yaml at the root, then the deprecated          │
+│                                       ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml',          │
+│                                       'ash.yaml', 'ash.json'] (each at the root, then in .ash/;  │
+│                                       .ash.yaml only in .ash/), then ['.ashrc.toml',             │
+│                                       '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml',  │
+│                                       'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then │
+│                                       the tool.ash table of pyproject.toml at the root; the      │
+│                                       first found is used. Can also be set with the ASH_CONFIG   │
+│                                       environment variable.                                      │
+│                                       [env var: ASH_CONFIG]                                      │
+│ --verbose  -v                         Enable verbose logging                                     │
+│ --debug    -d                         Enable debug logging                                       │
+│ --color        --no-color  -C         Enable/disable colorized output [default: color]           │
+│ --force        --no-force             Overwrite the config file if it already exists at the      │
+│                                       target path.                                               │
+│                                       [default: no-force]                                        │
+│ --help     -h                         Show this message and exit.                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

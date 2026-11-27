@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What ``ash get-genai-guide`` prints when it succeeds locally, when GitHub fails,
+"""What ``ashx get-genai-guide`` prints when it succeeds locally, when GitHub fails,
 and when the installation has no copy of the guide.
 
 The command finds the guide relative to ``cli/main.py``'s own ``__file__``. Every test

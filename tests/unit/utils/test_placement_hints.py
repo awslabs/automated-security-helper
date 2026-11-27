@@ -8,8 +8,8 @@ A known misplacement gets a shaped suggestion naming where the key belongs
 The engine-specific spellings are seeded in the static table beside core's
 own (unknown-key warnings are produced at config load, which precedes plugin
 imports, so no import here and no plugin load is needed for them). The
-suggestion surfaces in both modes: inside the refusal under
-fail_on_unknown_keys, inside the warning otherwise. A key with no map entry
+suggestion surfaces in both modes: inside the refusal (the default since
+ASH 4.0), inside the warning under fail_on_unknown_keys: false. A key with no map entry
 falls through to closest_key unchanged.
 """
 
@@ -60,9 +60,9 @@ class TestPlacementSuggestions:
 
     def test_an_unmapped_key_falls_through_to_closest_key(self):
         message = unknown_keys_message(
-            ["expiraton"], ["expiration", "path", "reason"], "a suppression"
+            ["expirse"], ["expires", "path", "reason"], "a suppression"
         )
-        assert "did you mean 'expiration'?" in message
+        assert "did you mean 'expires'?" in message
 
     def test_hints_do_not_fire_outside_entry_kinds(self):
         message = unknown_keys_message(
@@ -76,7 +76,7 @@ class TestPlacementSuggestions:
         the ordinary did-you-mean applies instead."""
         message = unknown_keys_message(
             ["resource", "applies_to"],
-            ["path", "reason", "expiration"],
+            ["path", "reason", "expires"],
             "an ignore path",
         )
         assert "did you mean 'resource_id'?" not in message

@@ -336,12 +336,14 @@ def test_the_ci_legs_using_that_file_pass_snyk_on_the_command_line():
         line
         for line in action.splitlines()
         if ".ash_alpha_plugins.yaml" in line
-        and line.lstrip().startswith(("ash ", "./ash ", "Invoke-ASH "))
+        and line.lstrip().startswith(("ash ", "ashx ", "./ash ", "Invoke-ASH "))
         and " config validate " not in line
         and " dependencies install" not in line
     ]
 
-    assert len(scans) == 5, scans
+    # The container leg, the two python-local legs and the PowerShell leg. The
+    # Bash-script leg (``./ash``) is gone from the action: the entry point is ``ashx``.
+    assert len(scans) == 4, scans
     for line in scans:
         assert f"--ash-plugin-modules {SNYK}" in line, line
 

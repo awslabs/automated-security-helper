@@ -35,8 +35,9 @@ file whose author expected project scope.
 Two mechanisms keep that from happening, and the second exists because the first
 is not sufficient:
 
-* ``WORKSPACE_POLICY_FILE_NAMES`` is disjoint from ``ASH_CONFIG_FILE_NAMES``, so
-  *discovery* can never land on a project config. A test asserts the
+* ``WORKSPACE_POLICY_FILE_NAMES`` is disjoint from ``ASH_CONFIG_FILE_NAMES``,
+  ``ASH_RC_FILE_NAMES`` and ``pyproject.toml``, so *discovery* can never land on
+  a project config. A test asserts the
   disjointness rather than trusting it to stay true.
 * ``--workspace-config`` can name any path, so discovery's guarantee does not
   cover it. An explicit file is checked by RESOLVED IDENTITY against each
@@ -867,7 +868,11 @@ def _refuse_project_config_as_policy(
     a link ``pol.yaml`` to the root's own ``ash.yaml`` names a project config
     under another name, and the root project's config is in no project list.
     """
-    from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
+    from automated_security_helper.core.constants import (
+        ASH_CONFIG_FILE_NAMES,
+        ASH_PYPROJECT_FILE_NAME,
+        ASH_RC_FILE_NAMES,
+    )
 
     try:
         target = policy_path.resolve()
@@ -890,14 +895,22 @@ def _refuse_project_config_as_policy(
 
     # Also refuse by name. This catches the workspace root's own config even when
     # the caller passed no project list -- the common CLI shape, since the root
-    # project's config path is not known to argument parsing. The name the path
-    # was given and the name of the file it reaches both count: a link named
-    # otherwise still reads the root's config as the siblings' ceiling.
+    # project's config path is not known to argument parsing. The ashrc names
+    # and pyproject.toml are project config sources too, discovered after
+    # ASH_CONFIG_FILE_NAMES, so a root project configured by one of them is
+    # caught the same way. The name the path was given and the name of the file
+    # it reaches both count: a link named otherwise still reads the root's
+    # config as the siblings' ceiling.
+    project_config_names = {
+        *ASH_CONFIG_FILE_NAMES,
+        *ASH_RC_FILE_NAMES,
+        ASH_PYPROJECT_FILE_NAME,
+    }
     named_like_a_config = next(
         (
             name
             for name in (policy_path.name, target.name)
-            if name in ASH_CONFIG_FILE_NAMES
+            if name in project_config_names
         ),
         None,
     )

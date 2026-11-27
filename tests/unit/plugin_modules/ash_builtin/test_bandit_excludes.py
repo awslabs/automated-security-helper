@@ -321,7 +321,7 @@ def test_an_expired_global_ignore_path_does_not(scanner, context):
         target_type="source",
         global_ignore_paths=[
             IgnorePathWithReason(
-                path="vendor/**", reason="vendored", expiration="2000-01-01"
+                path="vendor/**", reason="vendored", expires="2000-01-01"
             )
         ],
     )

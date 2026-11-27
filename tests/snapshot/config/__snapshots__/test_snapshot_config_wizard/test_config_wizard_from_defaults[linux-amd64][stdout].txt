@@ -22,7 +22,6 @@ Scanner configuration
 │ mcp-config     │        yes        │
 │ npm-audit      │        yes        │
 │ opengrep       │        yes        │
-│ semgrep        │        yes        │
 │ syft           │        yes        │
 │ trivy          │        yes        │
 │ zizmor         │        yes        │
@@ -40,7 +39,6 @@ Scanner configuration
   Enable mcp-config? [Y/n]:
   Enable npm-audit? [Y/n]:
   Enable opengrep? [Y/n]:
-  Enable semgrep? [Y/n]:
   Enable syft? [Y/n]:
   Enable trivy? [Y/n]:
   Enable zizmor? [Y/n]:

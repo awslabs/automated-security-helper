@@ -4,11 +4,10 @@
 """Manifests of the builtin scanners (``plugin_modules/ash_builtin``).
 
 Pure data; see :mod:`automated_security_helper.plugin_manifests`. Every builtin
-scanner loads by default (``default_enabled``) and is ``supported``, except
-semgrep, whose manifest declares the retirement shape: ``deprecated``,
-superseded by opengrep, which lists ``semgrep`` among its aliases. The
-declaration changes no run: semgrep stays a scanner of its own until the
-retirement is decided and wired separately.
+scanner loads by default (``default_enabled``) and is ``supported``. The semgrep
+scanner plugin was removed in v4: opengrep, a fork of semgrep, lists ``semgrep``
+among its aliases, and ``utils/scanner_names.SCANNER_NAME_ALIASES`` resolves the
+name to opengrep wherever a scanner name is read.
 """
 
 from automated_security_helper.base.plugin_manifest import (
@@ -47,7 +46,6 @@ _SECTION_DESCRIPTIONS = {
     "mcp-config": "Configure the options for the MCP server config scanner",
     "npm-audit": "Configure the options for NpmAudit",
     "opengrep": "Configure the options for Opengrep",
-    "semgrep": "Configure the options for Semgrep",
     "syft": "Configure the options for Syft",
     "trivy": "Configure the options for Trivy (trivy fs)",
     "zizmor": "Configure the options for zizmor",
@@ -65,13 +63,6 @@ _EXCLUSIONS = {
     ),
     "checkov": (ExclusionOption(option="skip_path", kind="checkov"),),
     "opengrep": (
-        ExclusionOption(
-            option="exclude",
-            kind="glob",
-            default=("*-converted.py", "*_report_result.txt"),
-        ),
-    ),
-    "semgrep": (
         ExclusionOption(
             option="exclude",
             kind="glob",
@@ -221,15 +212,6 @@ MANIFESTS = (
         "OpengrepScannerConfigOptions",
         fixtures="opengrep",
         aliases=("semgrep",),
-    ),
-    _builtin(
-        "semgrep",
-        "semgrep_scanner",
-        "SemgrepScanner",
-        "SemgrepScannerConfigOptions",
-        fixtures="semgrep",
-        tier=PluginTier.DEPRECATED,
-        superseded_by="opengrep",
     ),
     _builtin(
         "syft",

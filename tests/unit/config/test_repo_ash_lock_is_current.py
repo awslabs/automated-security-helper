@@ -52,7 +52,7 @@ def test_every_symbol_suppression_of_our_configs_has_a_lock_entry():
 def test_the_lock_is_current():
     problems = AshLock.load(REPO).problems()
     assert not problems, (
-        f"{problems}: review the change, then run `ash suppress refresh <file>`"
+        f"{problems}: review the change, then run `ashx suppress refresh <file>`"
     )
 
 

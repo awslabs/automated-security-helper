@@ -87,8 +87,10 @@ KNOWN_VIOLATIONS: Dict[Tuple[str, str], int] = {
     ("base", "models"): 10,
     ("base", "plugins"): 5,
     # 96 -> 97: one more utils import landed with the vocabulary/facets waves this
-    # census re-measured at; the edge itself is long-known debt.
-    ("base", "utils"): 97,
+    # census re-measured at; the edge itself is long-known debt. 97 -> 96: 4.0 removed
+    # the community tier aliases, and with them the utils.log import of
+    # base/plugin_manifest.py's alias warning.
+    ("base", "utils"): 96,
     ("config", "core"): 42,
     ("config", "plugins"): 5,
     ("express", "cli"): 1,
@@ -112,7 +114,9 @@ KNOWN_VIOLATIONS: Dict[Tuple[str, str], int] = {
     # 70 -> 75: the sdist lock harvester (core.constants, core.exceptions), the MCP
     # config scanner (core.enums), cdk-nag (core.exceptions) and trivy
     # (core.container_engine) read core types the way the other plugins do.
-    ("plugin_modules", "core"): 81,
+    # 81 -> 80: the semgrep scanner and its core.enums import are gone (v4 retired
+    # semgrep; the opengrep plugin serves its rules).
+    ("plugin_modules", "core"): 80,
     ("plugin_modules", "interactions"): 2,
     ("plugin_modules", "workspace"): 1,
     ("schemas", "config"): 2,

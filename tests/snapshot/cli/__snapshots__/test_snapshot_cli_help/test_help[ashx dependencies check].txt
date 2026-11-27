@@ -1,0 +1,23 @@
+
+ Usage: ashx dependencies check [OPTIONS]
+
+ Check Grype and Trivy cache metadata without running or downloading tools.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --offline                                                               Check local offline      │
+│                                                                         cache files.             │
+│ --tool                                                   <grype|trivy>  Check this tool only.    │
+│                                                                         Repeat to select both    │
+│                                                                         tools.                   │
+│ --config                  -c                             <str>          Use the staleness policy │
+│                                                                         from this ASH config     │
+│                                                                         file.                    │
+│ --source-dir                                             <directory>    Directory the offline    │
+│                                                                         scan would scan.         │
+│                                                                         [default: .]             │
+│ --allow-stale-content-db      --no-allow-stale-conte…                   Override the configured  │
+│                                                                         age policy for all       │
+│                                                                         checked databases.       │
+│ --help                    -h                                            Show this message and    │
+│                                                                         exit.                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

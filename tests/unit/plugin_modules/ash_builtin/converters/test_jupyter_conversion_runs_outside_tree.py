@@ -322,7 +322,7 @@ def test_nbconvert_runs_beside_a_copy_with_an_exporter_ash_chose(
     (tree / "nb.ipynb").write_bytes(
         as_nbformat_writes(notebook(language, PROBE_EXPORTER))
     )
-    # Run from inside the tree, as `cd repo && ash scan` does, so a route that
+    # Run from inside the tree, as `cd repo && ashx scan` does, so a route that
     # inherited ASH's working directory would run nbconvert in the tree.
     monkeypatch.chdir(tree)
 
@@ -573,7 +573,7 @@ class TestTheDirectRouteRunsAResolvedNbconvert:
     def test_an_in_tree_copy_on_an_absolute_path_entry_is_refused(
         self, direct, tree, monkeypatch, ash_warnings
     ):
-        """An activated in-repo virtual environment, as ``uv run ash scan .`` gives."""
+        """An activated in-repo virtual environment, as ``uv run ashx scan .`` gives."""
         converter, observed, nbconvert = direct
         monkeypatch.delenv("ASH_ALLOW_IN_TREE_TOOLS", raising=False)
         in_tree = fake_executable(tree / ".venv" / "bin", NBCONVERT)

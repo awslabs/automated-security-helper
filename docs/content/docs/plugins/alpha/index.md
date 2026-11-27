@@ -98,8 +98,8 @@ scanners:
 
 ```bash
 # Example command line usage
-ash scan --ash-plugin-modules my_plugin
+ashx scan --ash-plugin-modules my_plugin
 ```
 ````
 
-> [!CAUTION] > **Alpha Plugin Security**: The alpha plugins listed above ship with ASH, in `automated_security_helper/plugin_modules`, and need no separate package. `ash scan` loads one only when its module is listed in `ash_plugin_modules` or passed with `--ash-plugin-modules`. Each runs an external tool: the container image includes trivy, Betterleaks, GuardDog and hadolint, and you install the Snyk CLI and ferret-scan yourself, so check where each tool comes from. A plugin published outside ASH is a third-party package you install separately (for example with `pip install`), and ASH imports it into its own process, so verify its source and trustworthiness before installing it.
+> [!CAUTION] > **Alpha Plugin Security**: The alpha plugins listed above ship with ASH, in `automated_security_helper/plugin_modules`, and need no separate package. `ashx scan` loads one only when its module is listed in `ash_plugin_modules` or passed with `--ash-plugin-modules`. Each runs an external tool: the container image includes trivy, Betterleaks, GuardDog and hadolint, and you install the Snyk CLI and ferret-scan yourself, so check where each tool comes from. A plugin published outside ASH is a third-party package you install separately (for example with `pip install`), and ASH imports it into its own process, so verify its source and trustworthiness before installing it.

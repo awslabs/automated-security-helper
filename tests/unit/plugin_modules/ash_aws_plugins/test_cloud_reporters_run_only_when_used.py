@@ -357,6 +357,7 @@ class TestReportCommand:
         try:
             get_command(app).main(
                 args=[
+                    "results",
                     "report",
                     "--format",
                     report_format,

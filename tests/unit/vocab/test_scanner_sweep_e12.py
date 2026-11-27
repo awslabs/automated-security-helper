@@ -382,23 +382,20 @@ def test_bandit_confidence_option_is_the_set_bandit_documents():
     assert json.loads(text).get("enum") == ["all", "low", "medium", "high"]
 
 
-def test_semgrep_and_opengrep_share_their_option_types():
+def test_opengrep_takes_the_shared_grep_option_types():
+    # The semgrep scanner that shared these types was removed in v4 (opengrep
+    # serves its name), so opengrep is the one grep-family scanner left to check.
     from automated_security_helper.plugin_modules.ash_builtin.scanners import (
         _grep_scanner_base as base,
         opengrep_scanner as opengrep,
-        semgrep_scanner as semgrep,
     )
 
     assert get_args(base.GrepSeverityWord) == ("INFO", "WARNING", "ERROR")
     assert get_args(base.GrepMetricsMode) == ("auto", "on", "off")
-    for options in (
-        semgrep.SemgrepScannerConfigOptions,
-        opengrep.OpengrepScannerConfigOptions,
-    ):
-        fields = options.model_fields
-        severity = fields["severity"].annotation
-        assert get_args(severity) == (base.GrepSeverityWord,)
-        assert fields["metrics"].annotation == base.GrepMetricsMode
+    fields = opengrep.OpengrepScannerConfigOptions.model_fields
+    severity = fields["severity"].annotation
+    assert get_args(severity) == (base.GrepSeverityWord,)
+    assert fields["metrics"].annotation == base.GrepMetricsMode
 
 
 def test_grype_threshold_option_is_the_pinned_text_alias():

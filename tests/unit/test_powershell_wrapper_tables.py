@@ -31,12 +31,36 @@ def _text() -> str:
     return HELPERS.read_text(encoding="utf-8")
 
 
-def _ps1_table(name: str) -> dict[str, set[str]]:
+def _ps1_rows(name: str, key: str) -> dict[str, list[str]]:
+    """The rows `'<key>' = @('<word>', ...)` of the hashtable ``$name``, each value a
+    list in its written order (a value may hold spaces: `'results report'`)."""
     block = re.search(rf"\${name} = @{{\n(.*?)\n\s*}}", _text(), re.DOTALL)
     assert block, f"${name} not found in utils/ash_helpers.ps1"
-    rows = re.findall(r"'(--[a-z-]+)'\s*=\s*'([^']*)'", block.group(1))
+    rows = re.findall(rf"'({key})'\s*=\s*@\(([^)]*)\)", block.group(1))
     assert rows, f"${name} has no rows"
-    return {option: set(takers.split()) for option, takers in rows}
+    return {row_key: re.findall(r"'([^']+)'", values) for row_key, values in rows}
+
+
+def _ps1_table(name: str) -> dict[str, set[str]]:
+    return {
+        option: set(takers) for option, takers in _ps1_rows(name, "--[a-z-]+").items()
+    }
+
+
+def _ps1_groups() -> dict[str, list[str]]:
+    return _ps1_rows("ashRoutedGroups", "[a-z][a-z -]*")
+
+
+def _commands_under(words: str, command) -> dict[str, object]:
+    """Every command under a group (nested groups included) by the words that name
+    it from the root, or the command itself when it is not a group."""
+    subcommands = getattr(command, "commands", None)
+    if not subcommands:
+        return {words: command}
+    found = {}
+    for name, subcommand in subcommands.items():
+        found.update(_commands_under(f"{words} {name}", subcommand))
+    return found
 
 
 def _ps1_list(name: str) -> list[str]:
@@ -71,22 +95,67 @@ def _options(command) -> set[str]:
     return found
 
 
+#: The groups whose commands take the options the wrapper adds. Written here by hand,
+#: so a group the generator starts or stops routing through fails until this says so.
+ROUTED_GROUPS = {"results", "container"}
+
+
 def test_the_subcommand_table_matches_the_real_commands():
     """The wrapper's lists of subcommands, and of which take each option it adds,
     checked against the real commands so they cannot drift from them."""
     root = typer.main.get_command(app)
     assert set(_ps1_list("ashSubcommands")) == set(root.commands)
+    # A command under `results` or `container` is named by its words: the group takes
+    # none of the options itself, and the wrapper puts them after the command its
+    # words name, where `ashx --config c.yaml results report` hands them too
+    # (AshTyperGroup._options_for_subcommand).
+    receivers = {}
+    for name, command in root.commands.items():
+        if name in ROUTED_GROUPS:
+            receivers.update(_commands_under(name, command))
+        else:
+            receivers[name] = command
     table = _ps1_table("ashOptionSubcommands")
     for option, takers in sorted(table.items()):
         assert option in _options(root), f"ash itself does not take {option}"
-        # A `container` word is followed by `build`, which takes what the root's
-        # options are handed to (AshTyperGroup._options_for_subcommand).
         assert takers == {
-            name
-            for name, command in root.commands.items()
-            if option
-            in _options(command.commands["build"] if name == "container" else command)
+            words for words, command in receivers.items() if option in _options(command)
         }, option
+
+
+def test_the_table_hands_the_options_to_the_results_commands():
+    """4.0 removed the top-level report and merge, so a wrapper's -Config and the rest
+    reach them only as `results report` and `results merge`; a command two groups down
+    is named by all its words."""
+    table = _ps1_table("ashOptionSubcommands")
+    assert {"results report", "results merge", "results inspect findings"} <= table[
+        "--config"
+    ]
+    assert "results merge" in table["--no-fail-on-findings"]
+    assert "container build" in table["--verbose"]
+    # A group's own word takes none of them.
+    assert not {"results", "container"} & set().union(*table.values())
+
+
+def test_the_routed_group_table_matches_the_real_groups():
+    """$ashRoutedGroups lists each group the options go through with its own commands
+    in the CLI's order, so the wrapper reads a command's words as far as they go: every
+    group under a routed group is listed too, and nothing else is."""
+    root = typer.main.get_command(app)
+    groups = _ps1_groups()
+    expected = {}
+
+    def collect(words, command):
+        subcommands = getattr(command, "commands", None)
+        if subcommands:
+            expected[words] = list(subcommands)
+            for name, subcommand in subcommands.items():
+                collect(f"{words} {name}", subcommand)
+
+    for name in ROUTED_GROUPS:
+        collect(name, root.commands[name])
+    assert groups == expected
+    assert {"results", "results inspect", "container"} <= set(groups)
 
 
 def test_every_option_the_wrapper_adds_has_a_table_row():

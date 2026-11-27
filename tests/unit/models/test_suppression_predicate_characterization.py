@@ -897,10 +897,16 @@ class TestExpiryAndUnknownKeys:
         assert supp(expires="2030-06-15").matches(finding()) is False
         assert supp(expires="2030-06-16").matches(finding()) is True
 
-    def test_the_deprecated_alias_reads_the_same(self, today):
+    def test_the_removed_alias_is_refused_in_a_config_and_read_from_a_results_file(
+        self, today
+    ):
         today(2030, 6, 15)
-        assert supp(expiration="2030-06-15").matches(finding()) is False
-        assert supp(expiration="2030-06-16").matches(finding()) is True
+        # ASH 4.0 removed the `expiration` spelling: a config refuses it.
+        with pytest.raises(ValueError, match="expiration"):
+            supp(expiration="2030-06-15")
+        # A results file written before 4.0 still reads it as `expires`.
+        assert stored(expiration="2030-06-15").matches(finding()) is False
+        assert stored(expiration="2030-06-16").matches(finding()) is True
 
     @pytest.mark.parametrize("bad", ["not-a-date", "", "2030-13-01", "06/15/2030"])
     def test_an_unreadable_date_kept_from_a_results_file_never_applies(self, bad):

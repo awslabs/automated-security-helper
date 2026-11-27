@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""`ash inspect sarif-fields`: the console tables and every file it writes.
+"""`ashx inspect sarif-fields`: the console tables and every file it writes.
 
 The input is tests/test_data/snapshot/sarif_fields: one aggregated report and one
 scanner report. The command sorts its input files and lists scanners by name, and the

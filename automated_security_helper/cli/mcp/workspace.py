@@ -6,7 +6,7 @@
 
 Why this module exists
 ----------------------
-Workspace mode was CLI-only. ``ash --workspace foo.code-workspace`` turns one file
+Workspace mode was CLI-only. ``ashx --workspace foo.code-workspace`` turns one file
 into N projects, scans each with its own config, threshold and policy, and
 aggregates the results -- and an MCP client had no way to ask for any of that. The
 two tools here are the MCP surface for it: :func:`mcp_resolve_workspace`, the
@@ -220,6 +220,7 @@ from automated_security_helper.interactions.run_ash_scan import (
     ScanOptions,
     build_project_scan_settings,
     incomplete_scanner_reason,
+    missing_on_some_files,
     resolve_workspace_execution_config,
 )
 from automated_security_helper.models.vocab import SeverityThreshold
@@ -1807,12 +1808,21 @@ def _project_coverage(
     rows = []
     for name in outcome.incomplete_scanners:
         status = str(statuses.get(name, ""))
+        detail = str(details.get(name, status))
         rows.append(
             {
                 "scanner": name,
                 "status": status,
-                "reason": incomplete_scanner_reason(status, partial=name in partial),
-                "detail": str(details.get(name, status)),
+                # The same three inputs ScanIncompleteness.to_payload gives the
+                # reason, so one scanner reads one token on both surfaces. The
+                # outcome stores the display status, which is all
+                # ``missing_dependencies`` is derived from.
+                "reason": incomplete_scanner_reason(
+                    status,
+                    partial=name in partial,
+                    missing_dependencies=missing_on_some_files(detail),
+                ),
+                "detail": detail,
             }
         )
     return {
@@ -2437,7 +2447,7 @@ async def mcp_resolve_workspace(
 ) -> Dict[str, Any]:
     """Resolve a workspace and return the plan. Scans nothing.
 
-    The MCP equivalent of ``ash --workspace ... --dry-run``, which is
+    The MCP equivalent of ``ashx --workspace ... --dry-run``, which is
     ``typer.echo(plan.render())`` and an exit at 0. Both halves of that matter
     here. The rendered plan comes back verbatim under ``plan``, because a plan
     reduced to a JSON dump is not the artifact ``render()`` was written to produce

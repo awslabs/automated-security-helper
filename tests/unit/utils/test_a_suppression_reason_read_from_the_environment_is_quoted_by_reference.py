@@ -167,7 +167,7 @@ def test_the_expiry_warning_quotes_the_reason_by_its_reference(
     tmp_path, canary, form, caplog
 ) -> None:
     soon = (date.today() + timedelta(days=5)).isoformat()
-    context = _context(tmp_path, form, extra=f"      expiration: '{soon}'\n")
+    context = _context(tmp_path, form, extra=f"      expires: '{soon}'\n")
 
     with caplog.at_level(logging.WARNING):
         handle_suppression_expiration_check(plugin_context=context)

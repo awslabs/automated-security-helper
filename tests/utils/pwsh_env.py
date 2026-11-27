@@ -283,8 +283,9 @@ def build_call(result, calls) -> list[str]:
 
 
 def run_env(run_call_argv: list[str]) -> dict[str, str]:
-    """The ``-e NAME=value`` pairs before the image name."""
-    before_image = run_call_argv[: run_call_argv.index("ash")]
+    """The ``-e NAME=value`` pairs before the image name (``ashx``, the image's
+    command, follows it)."""
+    before_image = run_call_argv[: run_call_argv.index("ashx")]
     pairs = [
         before_image[i + 1]
         for i, arg in enumerate(before_image[:-1])

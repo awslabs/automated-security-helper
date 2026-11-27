@@ -18,6 +18,7 @@ from typing import Annotated, Any, Dict, List, NoReturn, Optional
 import typer
 import yaml
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.utils.ash_lock import (
     LEGACY_LOCK_RELATIVE_PATH,
     LOCK_RELATIVE_PATH,
@@ -323,7 +324,7 @@ def refresh(
         if unknown:
             _fail(
                 f"{', '.join(unknown)} has no entry in {LOCK_RELATIVE_PATH}; "
-                "create one with `ash suppress add`"
+                f"create one with `{CANONICAL_CLI_NAME} suppress add`"
             )
     elif all_files:
         keys = sorted(lock.entries)

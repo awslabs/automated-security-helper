@@ -2,7 +2,7 @@
 """Minimal recursive S3 upload and download, using boto3.
 
 Exists because the shard and merge actions run *inside the ASH image* rather than
-a CodeBuild standard image. Running there is what puts `ash` directly on PATH,
+a CodeBuild standard image. Running there is what puts `ashx` directly on PATH,
 with no Docker-in-Docker and no privileged build. The trade is that the ASH image
 ships git, curl, and boto3 but not the AWS CLI, so `aws s3 cp --recursive` is not
 available. boto3 is, because ASH declares it as a runtime dependency.

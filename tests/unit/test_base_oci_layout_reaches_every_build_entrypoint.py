@@ -20,11 +20,12 @@ takes differs per runtime and per builder, and the action's header carries the m
   ``--build-arg BASE_IMAGE=ash-base-image`` and ``--pull=false``;
 * podman: nothing -- it has no oci-layout context; the action imports the layout into its store.
 
-There are three build call sites with their own argv construction, as for
-``ASH_BASE_IMAGE_OVERRIDE``: ``run_ash_container.py::_build_image``, ``./ash`` and
-``utils/ash_helpers.ps1``. This file mirrors
-``test_base_image_override_reaches_every_build_entrypoint.py`` for the new variable: one class
-per entrypoint, and a completeness guard over all three.
+There are two build call sites with their own argv construction, as for
+``ASH_BASE_IMAGE_OVERRIDE``: ``run_ash_container.py::_build_image`` and
+``utils/ash_helpers.ps1``. (The root ``./ash`` bash script was a third until the Python CLI
+absorbed it; its nerdctl/finch/docker/podman cases are the Python class's cases now.) This file
+mirrors ``test_base_image_override_reaches_every_build_entrypoint.py`` for the new variable: one
+class per entrypoint, and a completeness guard over both.
 
 Limitations
 -----------
@@ -34,16 +35,11 @@ unit test can see; the pre-pull action proves that in CI by pointing the registr
 0.0.0.0 on every warm leg, so a build that reached a registry would fail.
 """
 
-import os
-import shutil
-import stat
-import subprocess
 from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
 
-from tests.utils.host_ids import with_fixed_ids
 from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.interactions.run_ash_container import (
     BASE_OCI_LAYOUT_CONTEXT,
@@ -51,7 +47,6 @@ from automated_security_helper.interactions.run_ash_container import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ASH_SCRIPT = REPO_ROOT / "ash"
 PS1 = REPO_ROOT / "utils" / "ash_helpers.ps1"
 PY_BUILD = (
     REPO_ROOT / "automated_security_helper" / "interactions" / "run_ash_container.py"
@@ -73,7 +68,7 @@ BASE_ARG = f"BASE_IMAGE={BASE_OCI_LAYOUT_CONTEXT}"
 def test_the_context_name_is_the_one_every_entrypoint_uses():
     """One name, three files. A mismatch would point FROM at a context nobody attached."""
     assert BASE_OCI_LAYOUT_CONTEXT == "ash-base-image"
-    for path in (ASH_SCRIPT, PS1):
+    for path in (PY_BUILD, PS1):
         body = path.read_text(encoding="utf-8")
         assert "ash-base-image=oci-layout://" in body, path
         assert "BASE_IMAGE=ash-base-image" in body, path
@@ -263,119 +258,6 @@ class TestThePythonEntrypoint:
         )
 
 
-# --------------------------------------------------------------------------- bash
-
-_REQUIRES_BASH = [
-    pytest.mark.skipif(
-        os.name == "nt",
-        reason="bash on Windows runners is the WSL stub; ./ash is the POSIX entrypoint",
-    ),
-    pytest.mark.skipif(shutil.which("bash") is None, reason="./ash is bash"),
-    pytest.mark.skipif(not ASH_SCRIPT.is_file(), reason="./ash not present"),
-]
-
-RECORDING_RUNNER = """#!/bin/bash
-if [ "$1" = "build" ]; then
-  printf '%s\\n' "$*" > "$ARGV_LOG"
-  echo 'fake runner: refusing to build, argv recorded' >&2
-  exit 1
-fi
-echo "FAKE-RUNNER-INVOKED-WITH: $*"
-exit 0
-"""
-
-
-def _ash_build(tmp_path: Path, runner_name: str, value: str | None):
-    """Run ./ash under a runner with the given file name; return (proc, argv or None)."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir(exist_ok=True)
-    runner = bin_dir / runner_name
-    runner.write_text(RECORDING_RUNNER, encoding="utf-8")
-    runner.chmod(runner.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP)
-    (tmp_path / "src").mkdir(exist_ok=True)
-    argv_log = tmp_path / "argv"
-
-    # An unprivileged `id`, so the default non-root build reaches the runner when the
-    # suite itself runs as root.
-    env = with_fixed_ids(
-        {**os.environ, "OCI_RUNNER": str(runner), "ARGV_LOG": str(argv_log)},
-        tmp_path / "fixed-id-bin",
-    )
-    for name in (
-        VAR,
-        "ASH_BASE_IMAGE_OVERRIDE",
-        "DOCKER_EXTRA_ARGS",
-        "OCI_RUNNER_WRAPPER",
-    ):
-        env.pop(name, None)
-    if value is not None:
-        env[VAR] = value
-    proc = subprocess.run(  # nosec B603 B607 — fixed script path, list args, no shell
-        [
-            "bash",
-            str(ASH_SCRIPT),
-            "--source-dir",
-            str(tmp_path / "src"),
-            "--output-dir",
-            str(tmp_path / "out"),
-        ],
-        capture_output=True,
-        text=True,
-        cwd=str(REPO_ROOT),
-        env=env,
-        timeout=180,
-        check=False,
-    )
-    argv = argv_log.read_text(encoding="utf-8").split() if argv_log.is_file() else None
-    return proc, argv
-
-
-@pytest.mark.integration
-class TestTheBashEntrypoint:
-    """``./ash``: the bash scan legs, on docker, podman and finch."""
-
-    pytestmark = _REQUIRES_BASH
-
-    @pytest.mark.parametrize("runner", ["nerdctl", "finch"])
-    def test_nerdctl_and_finch_get_the_context_and_pull_false(self, tmp_path, runner):
-        proc, argv = _ash_build(tmp_path, runner, VALUE)
-        assert argv is not None, (
-            f"never reached the build:\n{proc.stdout}\n{proc.stderr}"
-        )
-
-        assert _pairs(argv, "--build-context") == [CONTEXT_NO_DIGEST], argv
-        assert BASE_ARG in _pairs(argv, "--build-arg"), argv
-        assert argv.count("--pull=false") == 1, argv
-
-    @pytest.mark.parametrize("runner", ["docker", "podman"])
-    def test_docker_and_podman_build_from_their_local_store(self, tmp_path, runner):
-        """./ash runs `<runner> build`: the docker driver, or podman. Neither gets a context."""
-        proc, argv = _ash_build(tmp_path, runner, VALUE)
-        assert argv is not None, (
-            f"never reached the build:\n{proc.stdout}\n{proc.stderr}"
-        )
-
-        assert "--build-context" not in argv, argv
-        assert not any(a.startswith("BASE_IMAGE=") for a in argv), argv
-        assert "local store" in proc.stderr, proc.stderr
-
-    def test_unset_changes_nothing(self, tmp_path):
-        proc, argv = _ash_build(tmp_path, "nerdctl", None)
-        assert argv is not None, proc.stderr
-        assert "--build-context" not in argv and "--pull=false" not in argv, argv
-
-    def test_empty_is_unset(self, tmp_path):
-        proc, argv = _ash_build(tmp_path, "nerdctl", "")
-        assert argv is not None, proc.stderr
-        assert "--build-context" not in argv, argv
-
-    def test_a_malformed_value_stops_before_the_build(self, tmp_path):
-        proc, argv = _ash_build(tmp_path, "nerdctl", LAYOUT_DIR)
-        assert proc.returncode != 0
-        assert argv is None, f"a refused value must not reach the build:\n{argv}"
-        assert VAR in proc.stderr, proc.stderr
-
-
 # --------------------------------------------------------------------------- powershell
 
 
@@ -430,10 +312,10 @@ class TestThePowerShellEntrypoint:
 
 @pytest.mark.unit
 class TestEveryBuildEntrypointIsCovered:
-    def test_all_three_build_entrypoints_read_the_variable(self):
+    def test_every_build_entrypoint_reads_the_variable(self):
         missing = [
             path.relative_to(REPO_ROOT).as_posix()
-            for path in (PY_BUILD, ASH_SCRIPT, PS1)
+            for path in (PY_BUILD, PS1)
             if VAR not in path.read_text(encoding="utf-8")
         ]
         assert missing == [], (
@@ -441,14 +323,26 @@ class TestEveryBuildEntrypointIsCovered:
             "warm CI leg, and one that ignores it goes back to the registry."
         )
 
-    def test_this_file_covers_all_three(self):
+    def test_this_file_covers_every_entrypoint(self):
         body = Path(__file__).read_text(encoding="utf-8")
         for name in (
             "TestThePythonEntrypoint",
-            "TestTheBashEntrypoint",
             "TestThePowerShellEntrypoint",
         ):
             assert f"class {name}" in body
+
+    def test_the_root_bash_entrypoint_stays_absent(self):
+        """The root ``ash`` bash script was absorbed into the Python CLI.
+
+        ``run_ash_container.py::_build_image`` is the build it used to type, so the ``bash``
+        scan legs became ``python-container`` legs on the same os and runtime (see
+        packaging/RECONCILIATION.md, "The CLI consolidation"). If a root ``ash`` script comes
+        back it is a third build entrypoint, and it has to be added to the tuple above rather
+        than slip past this guard.
+        """
+        assert not (REPO_ROOT / "ash").exists(), (
+            "a root ./ash entrypoint exists again; add it to this file's completeness guard"
+        )
 
     def test_only_the_prepull_action_sets_it(self):
         writer = (ACTION_DIR / "use_cached_layout.sh").read_text(encoding="utf-8")

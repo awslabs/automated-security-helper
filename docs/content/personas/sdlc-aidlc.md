@@ -21,7 +21,7 @@ flowchart LR
 
 | Moment | What runs | Guide |
 |---|---|---|
-| Write code | A terminal scan scoped to fast scanners, `ash inspect findings` to work through results, or a scan the editor's agent runs over MCP | [Scan on your machine](../getting-started/local.md), [Connect an AI agent](../getting-started/agents.md) |
+| Write code | A terminal scan scoped to fast scanners, `ashx results inspect findings` to work through results, or a scan the editor's agent runs over MCP | [Scan on your machine](../getting-started/local.md), [Connect an AI agent](../getting-started/agents.md) |
 | Commit | The `ash` pre-commit hook: precommit mode's five fast scanners, seconds per commit after the first run | [Run ASH with pre-commit](../how-to/pre-commit.md) |
 | Push | The same hook on `stages: [pre-push]`, or `ash-full-scan` for the container image's full scanner set | [When the hook runs](../how-to/pre-commit.md#stages), [The ash-full-scan hook](../how-to/pre-commit.md#full-scan) |
 | Pull request | The complete scan on a clean runner, gating on the exit code; the summary as a comment, findings as code scanning annotations, `--changed-files-only` so the gate counts the change's own findings | [Add ASH to CI](../getting-started/ci.md), [Gate on the files a change touches](../how-to/scale-large-repos.md#changed-files) |
@@ -47,11 +47,11 @@ results itself. The checkpoints map over directly:
 |---|---|---|
 | Write code in an editor | The agent generates code for a task | The agent scans over [MCP](../getting-started/agents.md) and fixes actionable findings before presenting the work |
 | Commit and push hooks | The agent's task or Unit ends | A precommit-mode scan at the task boundary rather than at each of dozens of commits; the hooks still back it up |
-| Review the pull request | A human approval gate | The scan summary, the diff's suppressions with reasons and expirations, and `ash diff` or `diff_scan_results` between before and after |
+| Review the pull request | A human approval gate | The scan summary, the diff's suppressions with reasons and expirations, and `ashx results diff` or `diff_scan_results` between before and after |
 | Triage a backlog | MCP-driven triage | `explain_finding` for context, `suggest_suppression` for a drafted, expiring exception a human approves ([MCP tools](../reference/mcp-tools.md)) |
 
 Two practices from the persona pages matter more here. Give the agent ASH's
-own instructions (`ash get-genai-guide`, or an
+own instructions (`ashx get-genai-guide`, or an
 [agent plugin](../how-to/agent-plugins.md) that packages the server and the
 guidance), so scanning is part of its definition of done rather than a step it
 can skip. And treat generated or fetched code as

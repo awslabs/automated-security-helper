@@ -21,6 +21,7 @@ more than one thread runs the checks one at a time in this process instead.
 from __future__ import annotations
 
 import ast
+import os
 import re
 import sys
 import threading
@@ -34,6 +35,25 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 MCP_SERVER_PY = REPO_ROOT / "automated_security_helper" / "cli" / "mcp_server.py"
 PYPROJECT_TOML = REPO_ROOT / "pyproject.toml"
 DOCS_DIR = REPO_ROOT / "docs"
+CLI_REFERENCE_MD = DOCS_DIR / "content" / "reference" / "cli.md"
+OUTPUT_FORMATS_MD = DOCS_DIR / "content" / "docs" / "output-formats.md"
+DOCS_INDEX_MD = DOCS_DIR / "content" / "index.md"
+DOCS_NAV_YML = DOCS_DIR / "content" / ".nav.yml"
+NATIVE_PACKAGES_DOCS_DIR = DOCS_DIR / "content" / "docs" / "native-packages"
+PACKAGING_DIR = REPO_ROOT / "packaging"
+CHOCOLATEY_NUSPEC = PACKAGING_DIR / "chocolatey" / "ash.nuspec"
+CHOCOLATEY_BUILD_PS1 = PACKAGING_DIR / "chocolatey" / "build.ps1"
+WINGET_LOCALE_MANIFEST = (
+    PACKAGING_DIR / "winget" / "Amazon.AutomatedSecurityHelper.locale.en-US.yaml"
+)
+MSIX_APPX_MANIFEST = PACKAGING_DIR / "msix" / "AppxManifest.xml"
+MSIX_BUILD_PS1 = PACKAGING_DIR / "msix" / "build.ps1"
+FLATPAK_MANIFEST = (
+    PACKAGING_DIR / "flatpak" / "io.github.awslabs.automated_security_helper.yml"
+)
+FLATPAK_BUILD_SH = PACKAGING_DIR / "flatpak" / "build.sh"
+RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ash-tag-on-merge.yml"
+RELEASE_ASSETS_PY = PACKAGING_DIR / "release-assets.py"
 
 # The name inventories (scanners, reporters, MCP tools) are compared against the
 # reference pages, which scripts/generate_*.py write from the code. A row there is
@@ -174,7 +194,7 @@ def collect_md_files() -> list[Path]:
     glob was not holding anything back, it was simply not looking.
 
     ``.md.template`` files are included alongside the ``.md`` files they render
-    to. Ten docs in this repository are generated from a sibling template, and
+    to. Eleven docs in this repository are generated from a sibling template, and
     the template is the file an edit has to land in -- a fix applied only to the
     rendered doc is discarded at the next release. Checking both means a stale
     list in a template is reported against the template's own path.
@@ -500,7 +520,7 @@ def compare_inventories(
 # ---------------------------------------------------------------------------
 #
 # "CLI flags in docs match source" grepped scan.py for --flags and required each to
-# appear somewhere in the hand-written docs/content/docs/cli-reference.md. That
+# appear somewhere in the hand-written docs/content/reference/cli.md. That
 # page is gone. Its replacement, docs/content/reference/cli.md, is written by
 # scripts/generate_cli_docs.py from the click tree of every command, and
 # tests/unit/test_generated_docs_freshness.py fails when the page differs from the
@@ -508,7 +528,115 @@ def compare_inventories(
 # Every other mention of an option in the docs is parsed and checked against the
 # same click tree by "ASH commands in docs match the CLI" (docs_checks.check_cli).
 # A grep of one command's source file against the generated page would be a weaker
-# copy of the freshness test.
+# copy of the freshness test, so main() no longer runs the check below.
+#
+# The helpers stay because tests/unit/test_verify_docs_freshness_cli_flags.py
+# drives them with an explicit docs body; they read no file unless called bare.
+
+
+def cli_option_spellings() -> set[str]:
+    """Every option spelling the top-level scan surface actually exposes.
+
+    Introspects the built click command rather than regexing scan.py. The regex
+    it replaced had two blind spots that made this check pass while covering
+    nothing:
+
+    - Its pattern was ``"(--[a-z][a-z0-9-]*)"``, so it only ever saw long flags.
+      Short forms -- ``-q``, ``-V``, ``-C``, ``-rev`` -- were invisible to it.
+    - It could not see a spelling that is not a literal in the source. A boolean
+      flag's negation is derived by typer from the parameter name, and the short
+      form for the OFF side is declared as ``"  /-C"``, which no regex looking
+      for a quoted flag will match.
+
+    Scope is deliberately the root callback plus ``scan``, which is what scan.py
+    defined and therefore what this check has always covered. Widening it to the
+    whole command tree would surface 12 further undocumented spellings under
+    ``config``, ``plugin`` and ``dependencies``; that is a real gap, but it is
+    pre-existing and belongs in its own change.
+    """
+    import click
+    import typer.main
+
+    from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
+    from automated_security_helper.cli.main import app
+
+    root = typer.main.get_command(app)
+    ctx = click.Context(root, info_name=CANONICAL_CLI_NAME)
+    scan = root.get_command(ctx, "scan")
+
+    spellings: set[str] = set()
+    for command in (root, scan):
+        if command is None:
+            continue
+        for param in command.params:
+            spellings.update(getattr(param, "opts", []) or [])
+            spellings.update(getattr(param, "secondary_opts", []) or [])
+    return {s for s in spellings if s.startswith("-")}
+
+
+# Injected by the framework, not part of ASH's documented surface.
+FRAMEWORK_SPELLINGS = frozenset(
+    {"--help", "-h", "--install-completion", "--show-completion"}
+)
+
+# A count this check must not silently fall below. Without a floor, anything that
+# makes introspection return an empty set -- an import error swallowed upstream, a
+# renamed subcommand -- yields zero failures and reports PASS.
+MIN_EXPECTED_SPELLINGS = 60
+
+
+def flag_is_documented(flag: str, docs: str) -> bool:
+    """True when ``flag`` appears in ``docs`` as a whole token.
+
+    The substring test this replaced reported ``--ash-revision`` as documented
+    because ``--ash-revision-to-install`` was in the table. Any flag that is a
+    prefix of a longer one passed without being mentioned anywhere.
+    """
+    pattern = r"(?<![\w-])" + re.escape(flag) + r"(?![\w-])"
+    return re.search(pattern, docs) is not None
+
+
+def check_cli_flags(
+    spellings: set[str] | None = None, docs: str | None = None
+) -> list[str]:
+    """Verify every option spelling on the scan surface appears in reference/cli.md.
+
+    Both arguments exist so the negative control in
+    tests/unit/test_verify_docs_freshness_cli_flags.py can hand this a docs body
+    with a flag removed and confirm it actually fails. A gate with no such test
+    is indistinguishable from one that cannot fail.
+    """
+    failures: list[str] = []
+    if spellings is None:
+        spellings = cli_option_spellings()
+    if docs is None:
+        docs = read_text(CLI_REFERENCE_MD)
+
+    if len(spellings) < MIN_EXPECTED_SPELLINGS:
+        failures.append(
+            f"only {len(spellings)} CLI option spellings were found, expected at "
+            f"least {MIN_EXPECTED_SPELLINGS}. The check cannot be trusted -- treat "
+            f"this as a broken check rather than as clean docs."
+        )
+        return failures
+
+    for flag in sorted(spellings):
+        if flag in FRAMEWORK_SPELLINGS:
+            continue
+        if flag_is_documented(flag, docs):
+            continue
+        # A boolean flag's auto-derived negation is covered by its positive form:
+        # typer generates --no-X from --X, and the docs describe the pair. This
+        # replaces a hand-maintained skip list that had grown to hold --no-build,
+        # --no-run, --no-progress and --no-color -- the last of which is why the
+        # -c/--no-color divergence went unflagged for so long.
+        if flag.startswith("--no-") and flag_is_documented("--" + flag[5:], docs):
+            continue
+        failures.append(
+            f"CLI flag {flag} is exposed by the CLI but missing from reference/cli.md"
+        )
+
+    return failures
 
 
 # ---------------------------------------------------------------------------
@@ -1715,6 +1843,8 @@ _DOCS_PATHS = (
     "PLUGIN_DATA_PARTIAL",
     "HOW_ASH_WORKS_MD",
     "CHOOSE_SCANNERS_MD",
+    "NATIVE_PACKAGES_DOCS_DIR",
+    "DOCS_NAV_YML",
 )
 #: Code files, by their path inside the package, so a rebase never depends on where
 #: the previous one put them.
@@ -2126,6 +2256,575 @@ def run_gate(checks, serial: bool = False) -> int:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Native package install pages
+# ---------------------------------------------------------------------------
+
+_FENCE = re.compile(r"^\s*(```|~~~)")
+_PLACEHOLDER = {"version": r"[0-9][0-9A-Za-z.+-]*", "arch": r"[A-Za-z0-9_]+"}
+
+# A pip-family command that resolves ASH's distribution NAME from an index. That name
+# on PyPI belongs to an unrelated third party, so any such command installs or
+# downloads someone else's package. Installing ASH from its own wheel file or its git
+# URL does not match: the wheel's filename uses underscores, the git URL continues
+# with ".git", and a PEP 508 direct reference (`name[extra] @ git+https://...`) names
+# where to fetch from rather than asking an index. An `@` alone is not enough: uv reads
+# `automated-security-helper@latest` and `@4.0.0` as an index version, so only an `@`
+# followed by a git, http(s) or file URL counts as a direct reference.
+_DIRECT_REFERENCE = r"(?!(?:\[[^\]]*\])?\s*@\s*(?:git\+|https?://|file:))"
+_INDEX_NAME_INSTALL = re.compile(
+    r"\b(?:pip3?\s+(?:download|install)|pipx\s+(?:install|run|inject)|uvx|"
+    r"uv\s+(?:tool\s+(?:install|run)|pip\s+install|add|run\s+--with)|"
+    r"poetry\s+add|pdm\s+add)"
+    r"(?![\w-])[^#\n]*?(?<![\w./-])automated-security-helper(?![\w.-])"
+    + _DIRECT_REFERENCE
+)
+
+# The same mistake in prose a program prints: "install automated-security-helper[x]"
+# with no command in front of it. Only applied to string literals in Python source,
+# where the text is a message to a user, never to docs, which legitimately say "the
+# name automated-security-helper on PyPI ...".
+_MESSAGE_NAME_INSTALL = re.compile(
+    r"\binstall\b\W{0,3}automated-security-helper(?![\w.-])" + _DIRECT_REFERENCE,
+    re.IGNORECASE,
+)
+
+# Python trees whose string literals are user-facing. tests/ is excluded because it
+# plants these strings on purpose.
+_PYTHON_MESSAGE_ROOTS = ("automated_security_helper", "scripts", "packaging", ".github")
+
+
+def _python_files(base: Path) -> list[Path]:
+    """Every ``.py`` file under ``base``, never entering an excluded directory.
+
+    ``dirnames`` is pruned in place, so ``scripts/e2e/inspector/node_modules`` (which
+    ``npm ci`` writes) is not walked at all; ``rglob`` listed all of it and dropped
+    the matches afterward. Not a git listing, because the freshness tests also point
+    this at planted trees that are not repositories.
+    """
+    found: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = [d for d in dirnames if d not in _EXCLUDED_MD_DIRS]
+        found.extend(Path(dirpath) / name for name in filenames if name.endswith(".py"))
+    return sorted(found)
+
+
+def _code_lines(path: Path) -> list[tuple[int, str]]:
+    """The lines a reader would copy and run.
+
+    Markdown: lines inside fenced blocks. The packaging READMEs are plain text and
+    indent their commands, so for them it is every line indented by two or more
+    spaces. Prose that names a command in order to warn against it is neither.
+    """
+    lines = read_text(path).splitlines()
+    out: list[tuple[int, str]] = []
+    if path.suffix == ".md" or path.name.endswith(".md.template"):
+        inside = False
+        for number, line in enumerate(lines, start=1):
+            if _FENCE.match(line):
+                inside = not inside
+                continue
+            if inside:
+                out.append((number, line))
+    else:
+        for number, line in enumerate(lines, start=1):
+            if line.startswith("  ") and line.strip():
+                out.append((number, line))
+    return out
+
+
+def _artifact_pattern(literal: str) -> re.Pattern[str]:
+    """Turn a build script's output filename into a pattern docs must follow.
+
+    ``literal`` uses ``<version>`` and ``<arch>`` where the script interpolates.
+    A doc may write the placeholder itself or a concrete value in its place.
+    """
+    parts = re.split(r"(<version>|<arch>)", literal)
+    regex = ""
+    for part in parts:
+        if part in ("<version>", "<arch>"):
+            name = part[1:-1]
+            regex += f"(?:{re.escape(part)}|{_PLACEHOLDER[name]})"
+        else:
+            regex += re.escape(part)
+    return re.compile(rf"^{regex}$")
+
+
+def _native_package_facts() -> dict[str, str]:
+    """Read every identifier the install pages repeat from the file that defines it."""
+    import yaml
+
+    nuspec = read_text(CHOCOLATEY_NUSPEC)
+    choco_id = re.search(r"<id>\s*([^<\s]+)\s*</id>", nuspec)
+    appx = re.search(
+        r"<Identity\b[^>]*\bName=\"([^\"]+)\"", read_text(MSIX_APPX_MANIFEST)
+    )
+    locale = yaml.safe_load(read_text(WINGET_LOCALE_MANIFEST))
+    flatpak = yaml.safe_load(read_text(FLATPAK_MANIFEST))
+    msix_name = re.search(
+        r"\"(automated-security-helper-)\"\s*\+\s*\$version\s*\+\s*\"(\.msix)\"",
+        read_text(MSIX_BUILD_PS1),
+    )
+    nupkg_name = re.search(
+        r"\"([\w.-]*)\$wheelVersion(\.nupkg)\"", read_text(CHOCOLATEY_BUILD_PS1)
+    )
+    bundle_name = re.search(
+        r"BUNDLE=\"\$OUTDIR/([\w.-]*)\$\{VERSION\}-\$\{ARCH\}(\.flatpak)\"",
+        read_text(FLATPAK_BUILD_SH),
+    )
+    missing = [
+        label
+        for label, match in (
+            ("<id> in ash.nuspec", choco_id),
+            ("Identity/@Name in AppxManifest.xml", appx),
+            ("the .msix filename in packaging/msix/build.ps1", msix_name),
+            ("the .nupkg filename in packaging/chocolatey/build.ps1", nupkg_name),
+            ("the bundle filename in packaging/flatpak/build.sh", bundle_name),
+        )
+        if match is None
+    ]
+    if not (choco_id and appx and msix_name and nupkg_name and bundle_name):
+        raise ValueError("could not read " + ", ".join(missing))
+    return {
+        "choco_id": choco_id.group(1),
+        "winget_id": locale["PackageIdentifier"],
+        "winget_moniker": locale["Moniker"],
+        "appx_name": appx.group(1),
+        "flatpak_id": flatpak["id"],
+        "flatpak_runtime": f"{flatpak['runtime']}//{flatpak['runtime-version']}",
+        "msix_file": f"{msix_name.group(1)}<version>{msix_name.group(2)}",
+        "nupkg_file": f"{nupkg_name.group(1)}<version>{nupkg_name.group(2)}",
+        "flatpak_file": f"{bundle_name.group(1)}<version>-<arch>{bundle_name.group(2)}",
+    }
+
+
+# What the install pages say a release carries, by packaging/release-assets.py key.
+# If that table starts attaching anything else, the "Publication status" section is
+# out of date.
+_DOCUMENTED_RELEASE_ASSETS = frozenset(
+    {
+        "wheel",
+        "sdist",
+        "mcpb",
+        "deb",
+        "rpm",
+        "msix",
+        "nupkg",
+        "flatpak",
+        "winget",
+        "vsix",
+        "jetbrains",
+    }
+)
+
+
+def _release_asset_keys() -> set[str]:
+    """The keys of the assets a release attaches.
+
+    The release workflow attaches `release-assets/*` only after
+    `packaging/release-assets.py check release-assets` has held that directory to
+    the script's ASSETS table, so the table is what a release carries. Both halves
+    of that are read here: a `gh release create` that attached anything other than
+    the checked directory would make the table say nothing about the release.
+    """
+    import yaml
+
+    # Only what a step runs counts, not a YAML comment or a shell comment inside a
+    # run: block, which a text search would credit.
+    workflow = yaml.safe_load(read_text(RELEASE_WORKFLOW)) or {}
+    runs: list[str] = []
+    for job in (workflow.get("jobs") or {}).values():
+        for step in (job or {}).get("steps") or []:
+            run = (step or {}).get("run")
+            if isinstance(run, str):
+                runs.append(
+                    "\n".join(
+                        line
+                        for line in run.splitlines()
+                        if not line.lstrip().startswith("#")
+                    )
+                )
+    # Command position only: an error message that QUOTES `gh release create`
+    # (the curated-notes recovery text does) must not be read as the command.
+    creates = []
+    for run in runs:
+        lines = run.splitlines()
+        for i, line in enumerate(lines):
+            if line.lstrip().startswith("gh release create"):
+                creates.append(lines[i:])
+    if len(creates) != 1:
+        raise ValueError(
+            f"expected one step running `gh release create` in "
+            f"{RELEASE_WORKFLOW.name}, found {len(creates)}"
+        )
+    command: list[str] = []
+    for line in creates[0]:
+        command.append(line)
+        if not line.rstrip().endswith("\\"):
+            break
+    attached = [
+        word
+        for line in command
+        for word in line.split()
+        if "/" in word and not word.startswith(("-", '"', "$"))
+    ]
+    if attached != ["release-assets/*"]:
+        raise ValueError(
+            f"`gh release create` in {RELEASE_WORKFLOW.name} attaches {attached}, "
+            "not the release-assets/* directory packaging/release-assets.py checks"
+        )
+    if not any(
+        re.search(r"release-assets\.py check release-assets\b", run) for run in runs
+    ):
+        raise ValueError(
+            f"{RELEASE_WORKFLOW.name} does not run `release-assets.py check` on the "
+            "directory it attaches"
+        )
+    table = re.search(
+        r"^ASSETS\b[^=\n]*= \((.*?)^\)",
+        read_text(RELEASE_ASSETS_PY),
+        re.MULTILINE | re.DOTALL,
+    )
+    keys = set(re.findall(r'\bkey="([\w-]+)"', table.group(1))) if table else set()
+    if not keys:
+        raise ValueError(f"no ASSETS keys in {RELEASE_ASSETS_PY.name}")
+    return keys
+
+
+def _nav_paths() -> set[str]:
+    import yaml
+
+    found: set[str] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, str):
+            found.add(node)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+        elif isinstance(node, dict):
+            for value in node.values():
+                walk(value)
+
+    walk(yaml.safe_load(read_text(DOCS_NAV_YML)).get("nav", []))
+    return found
+
+
+def check_native_package_docs() -> list[str]:
+    """The native package install pages must match the packaging they describe.
+
+    Why this check exists
+    ---------------------
+    Those pages repeat identifiers that are defined elsewhere: the Chocolatey package
+    id in ash.nuspec, the winget identifier and moniker in the winget manifests, the
+    MSIX identity name in AppxManifest.xml, the Flatpak app id and runtime in its
+    manifest, and the filename each build script writes. Each is a second copy, and a
+    second copy drifts silently: a renamed package id leaves every `choco install` on
+    the page naming a package that does not exist, and nothing else in the tree would
+    notice. The pages are also the place a reader learns that none of these packages
+    is on a public feed yet, so a command that installs from one (`winget install
+    ash`, `choco install ash` with no `--source`, `flatpak install flathub ...` for
+    ASH) is a wrong instruction, not a shortcut.
+
+    No copyable command on these pages runs a bare `ash`. It is a deprecated alias
+    that no native package installs, and on MSYS2, Git for Windows, Alpine and
+    BusyBox it is the Almquist shell. Installing ASH by its PyPI name is the
+    repository-wide check_no_index_name_install, not this one.
+    """
+    failures: list[str] = []
+    try:
+        facts = _native_package_facts()
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return [f"could not read the packaging sources: {exc}"]
+
+    try:
+        attached = _release_asset_keys()
+    except (OSError, ValueError) as exc:
+        return [f"could not read the release workflow: {exc}"]
+    if attached != _DOCUMENTED_RELEASE_ASSETS:
+        failures.append(
+            f"{RELEASE_ASSETS_PY.name} now attaches {sorted(attached)}, but the install "
+            f"pages say a release carries {sorted(_DOCUMENTED_RELEASE_ASSETS)}. "
+            "Update 'Publication status' in docs/native-packages/index.md and each "
+            "page's 'Get the package' steps, then this table"
+        )
+
+    pages = sorted(NATIVE_PACKAGES_DOCS_DIR.glob("*.md"))
+    if not pages:
+        return [
+            f"no install pages under {NATIVE_PACKAGES_DOCS_DIR.relative_to(REPO_ROOT)}"
+        ]
+
+    # Every page is reachable from the nav, and the nav names no missing page.
+    nav = _nav_paths()
+    docs_root = DOCS_DIR / "content"
+    for page in pages:
+        rel = page.relative_to(docs_root).as_posix()
+        if rel not in nav:
+            failures.append(f"{rel} is not in {DOCS_NAV_YML.name}")
+    prefix = NATIVE_PACKAGES_DOCS_DIR.relative_to(docs_root).as_posix() + "/"
+    for entry in sorted(p for p in nav if p.startswith(prefix)):
+        if not (docs_root / entry).is_file():
+            failures.append(f"{DOCS_NAV_YML.name} lists {entry}, which does not exist")
+
+    corpus = "\n".join(read_text(p) for p in pages)
+    for key in (
+        "choco_id",
+        "winget_id",
+        "winget_moniker",
+        "appx_name",
+        "flatpak_id",
+        "flatpak_runtime",
+        "msix_file",
+        "nupkg_file",
+        "flatpak_file",
+    ):
+        needle = facts[key]
+        if key == "choco_id":
+            present = re.search(rf"\bchoco install {re.escape(needle)}\b", corpus)
+        elif key == "winget_moniker":
+            present = re.search(rf"moniker `{re.escape(needle)}`", corpus)
+        else:
+            present = needle in corpus
+        if not present:
+            failures.append(f"no install page names {key} {needle!r}")
+
+    artifact_patterns = {
+        ".msix": _artifact_pattern(facts["msix_file"]),
+        ".nupkg": _artifact_pattern(facts["nupkg_file"]),
+        ".flatpak": _artifact_pattern(facts["flatpak_file"]),
+    }
+    artifact_token = re.compile(r"[\w<>.+-]+(\.msix|\.nupkg|\.flatpak)\b")
+
+    for page in pages:
+        rel = page.relative_to(REPO_ROOT).as_posix()
+        text = read_text(page)
+        for match in artifact_token.finditer(text):
+            token = match.group(0).rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+            if token.startswith("*") or token in (".msix", ".nupkg", ".flatpak"):
+                continue
+            if token.upper().startswith("README"):
+                continue  # packaging/msix/README.msix and friends are docs, not builds
+            if not artifact_patterns[match.group(1)].match(token):
+                failures.append(
+                    f"{rel}: {token!r} is not the filename the build writes "
+                    f"({facts[{'.msix': 'msix_file', '.nupkg': 'nupkg_file', '.flatpak': 'flatpak_file'}[match.group(1)]]})"
+                )
+        for number, line in _code_lines(page):
+            where = f"{rel}:{number}"
+            choco = re.search(
+                r"\bchoco\s+(install|upgrade|uninstall)\s+([^\s-][^\s]*)", line
+            )
+            if choco:
+                verb, pkg = choco.groups()
+                if pkg != facts["choco_id"]:
+                    failures.append(
+                        f"{where}: choco {verb} {pkg!r}, but the package id is "
+                        f"{facts['choco_id']!r}"
+                    )
+                if verb in ("install", "upgrade") and "--source" not in line:
+                    failures.append(
+                        f"{where}: choco {verb} with no --source installs from the "
+                        "community feed, where ASH is not published"
+                    )
+            winget = re.search(r"\bwinget\s+(install|upgrade|uninstall)\b", line)
+            if winget and "--manifest" not in line:
+                failures.append(
+                    f"{where}: winget {winget.group(1)} without --manifest uses the "
+                    "community source, where ASH is not published"
+                )
+            for app_id in re.findall(r"\bio\.github\.[\w.]+", line):
+                if app_id != facts["flatpak_id"]:
+                    failures.append(
+                        f"{where}: Flatpak app id {app_id!r}, but the manifest's is "
+                        f"{facts['flatpak_id']!r}"
+                    )
+            if (
+                re.search(r"\bflatpak\s+install\b", line)
+                and facts["flatpak_id"] in line
+            ):
+                failures.append(
+                    f"{where}: installs {facts['flatpak_id']} from a remote; it is not "
+                    "on Flathub, so install the bundle with --bundle"
+                )
+            appx = re.search(r"Get-AppxPackage\s+-Name\s+(\S+)", line)
+            if appx and appx.group(1) != facts["appx_name"]:
+                failures.append(
+                    f"{where}: Get-AppxPackage -Name {appx.group(1)}, but the MSIX "
+                    f"identity name is {facts['appx_name']!r}"
+                )
+
+    # The deprecated `ash` as a command on any install page.
+    for path in pages:
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        for number, line in _code_lines(path):
+            stripped = line.strip()
+            if re.match(r"^(?:\$\s*|PS[^>]*>\s*)?ash(?:\.exe)?(?:\s|$)", stripped) or (
+                re.search(r"--command=ash(?:\s|$)", stripped)
+            ):
+                failures.append(
+                    f"{rel}:{number}: runs `ash`, which no native package installs; "
+                    "the command is `ashx`"
+                )
+
+    return failures
+
+
+def _docstring_nodes(tree: ast.AST) -> set[int]:
+    """ids of the string constants that are docstrings, which no user is shown."""
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            body = getattr(node, "body", [])
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
+                found.add(id(body[0].value))
+    return found
+
+
+def _python_messages(path: Path) -> list[tuple[int, str]]:
+    """Every string literal in a Python file except docstrings, f-strings rendered.
+
+    An f-string's interpolations become ``{}``, so
+    ``f"install automated-security-helper[{EXTRA}]"`` reads as
+    ``install automated-security-helper[{}]``. Adjacent literals are one node after
+    parsing, so a message split across lines is checked whole. Comments are not
+    strings and are never read.
+    """
+    tree = ast.parse(read_text(path), filename=str(path))
+    docstrings = _docstring_nodes(tree)
+    inside_fstring: set[int] = set()
+    out: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.JoinedStr):
+            parts = []
+            for value in node.values:
+                inside_fstring.add(id(value))
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    parts.append(value.value)
+                else:
+                    parts.append("{}")
+            out.append((node.lineno, "".join(parts)))
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in docstrings
+            and id(node) not in inside_fstring
+        ):
+            out.append((node.lineno, node.value))
+    return out
+
+
+_BARE_ASH_REQUIREMENT = re.compile(r"^automated-security-helper(?:\[[^\]]*\])?$")
+
+
+def _argv_installs(path: Path) -> list[int]:
+    """Lines where a list or tuple literal is an install argv naming ASH bare.
+
+    ``["pip", "install", "automated-security-helper[cdk]"]`` is how the cdk-nag
+    scanner's install command was built. No single string in it reads as an
+    instruction, so the message rule cannot see it; the argv shape can.
+    """
+    tree = ast.parse(read_text(path), filename=str(path))
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.List, ast.Tuple)):
+            continue
+        words = [
+            e.value
+            for e in node.elts
+            if isinstance(e, ast.Constant) and isinstance(e.value, str)
+        ]
+        if {"install", "download"} & set(words) and any(
+            _BARE_ASH_REQUIREMENT.match(w) for w in words
+        ):
+            lines.append(node.lineno)
+    return lines
+
+
+def check_no_index_name_install() -> list[str]:
+    """Nothing a user reads may tell them to install ASH by its PyPI name.
+
+    Why this check exists
+    ---------------------
+    ASH installs from git. The name ``automated-security-helper`` on PyPI belongs to
+    an unrelated third party, so any instruction that resolves that name from an
+    index installs someone else's package. The instruction has been written at least
+    six times: the MSIX, Chocolatey and Flatpak READMEs' offline recipes, the
+    suppressions page, a `uvx automated-security-helper` example, the symbols-extra
+    hints in symbol_spans.py and config_linter.py, the cdk-nag scanner's own install
+    command, and an MCP reinstall hint. Each was fixed by hand and nothing stopped the
+    next one.
+
+    Three surfaces are read:
+
+    * copyable lines in every doc and template (fenced code in Markdown);
+    * indented command lines in the packaging READMEs, which are plain text;
+    * every non-docstring string literal in ASH's own Python, the gate scripts and
+      the packaging scripts, which is where a printed hint lives, and every list or
+      tuple literal there that is an install argv naming ASH without a URL.
+
+    Fetching ASH by its own wheel file, its git URL, or a PEP 508 direct reference to
+    the git URL is fine and is not reported. Prose that names the command to warn
+    against it is not on a copyable line, so it is not reported either.
+    """
+    failures: list[str] = []
+    # The packaging READMEs are documents, so they come from the docs root (REPO_ROOT
+    # is rebased onto it by --docs-root), not from the checkout the code is read from.
+    readmes = sorted(
+        p
+        for p in (REPO_ROOT / "packaging").glob("**/README*")
+        if p.is_file() and not _EXCLUDED_MD_DIRS.intersection(p.parts)
+    )
+    for path in sorted(set(collect_md_files()) | set(readmes)):
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        for number, line in _code_lines(path):
+            if _INDEX_NAME_INSTALL.search(line):
+                failures.append(
+                    f"{rel}:{number}: installs automated-security-helper by name from "
+                    "an index; that PyPI name belongs to an unrelated third party"
+                )
+
+    for root in _PYTHON_MESSAGE_ROOTS:
+        base = REPO_ROOT / root
+        if not base.is_dir():
+            continue
+        for path in _python_files(base):
+            if _EXCLUDED_MD_DIRS.intersection(path.parts):
+                continue
+            rel = path.relative_to(REPO_ROOT).as_posix()
+            try:
+                messages = _python_messages(path)
+                argv_lines = _argv_installs(path)
+            except SyntaxError as exc:
+                failures.append(f"{rel}: does not parse ({exc.msg})")
+                continue
+            for number, text in messages:
+                if _INDEX_NAME_INSTALL.search(text) or _MESSAGE_NAME_INSTALL.search(
+                    text
+                ):
+                    failures.append(
+                        f"{rel}:{number}: a message sends the user to ASH's PyPI "
+                        "name, which belongs to an unrelated third party. Use "
+                        "ash_git_requirement() / ash_extra_install_command() from "
+                        "core.constants, or the git URL"
+                    )
+            for number in argv_lines:
+                failures.append(
+                    f"{rel}:{number}: builds an install command for "
+                    "automated-security-helper by name, which resolves to an unrelated "
+                    "third party's package on PyPI"
+                )
+    return failures
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
@@ -2175,6 +2874,8 @@ def main(argv: list[str] | None = None) -> int:
         ("Config file path consistency", check_config_path),
         ("Suppression field name", check_suppression_field_name),
         ("Plugin options in docs exist and validate", check_plugin_option_keys),
+        ("Native package install pages match packaging", check_native_package_docs),
+        ("Nothing installs ASH by its PyPI name", check_no_index_name_install),
         ("Doc block markers are well formed", check_doc_markers),
         ("ASH commands in docs match the CLI", check_doc_cli),
         ("ASH environment variables in docs are read by ASH", check_doc_env_vars),

@@ -1,0 +1,108 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ash-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ash-operator
+  namespace: ash-system
+  labels:
+    app.kubernetes.io/name: ash-operator
+spec:
+  # Exactly one replica. The image runs `kopf run --standalone`, which turns kopf's
+  # peering off, and rbac.yaml grants no leases, so a second replica would dispatch
+  # every run twice. Running more than one needs both of those changed together; see
+  # the note at the end of the Role in rbac.yaml.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ash-operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ash-operator
+    spec:
+      serviceAccountName: ash-operator
+      securityContext:
+        runAsNonRoot: true
+        # Above 10000, so the uid cannot collide with an account on the node. The
+        # Dockerfile creates the same uid and gid.
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: operator
+          # Replace with your own build of deploy/kubernetes-operator/Dockerfile.
+          # No public image is published for this, for the same reason ASH itself
+          # publishes none.
+          image: ash-operator:local
+          imagePullPolicy: IfNotPresent
+          # --liveness starts kopf's health endpoint, which the two probes below
+          # read. It answers 200 only while kopf's event loop is running, so a hung
+          # operator is restarted instead of sitting Available with no watches.
+          args:
+            - "--namespace"
+            - "$(WATCH_NAMESPACE)"
+            - "--liveness=http://0.0.0.0:8080/healthz"
+          ports:
+            - name: health
+              containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 10
+          env:
+            - name: WATCH_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            runAsNonRoot: true
+            # Safe to set here, unlike on a scan pod: this container runs one
+            # Python process that writes nothing outside /tmp. On a scan pod the
+            # same flag was measured to make scanners come back MISSING, which
+            # merges into a report that reads as a complete scan.
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+# The operator serves nothing but its health endpoint, and only the kubelet reads
+# that. Kubernetes always admits traffic from a pod's own node, so this denies every
+# other ingress without touching the probes. Egress is left alone: the operator
+# has to reach the API server, whose address varies by cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ash-operator-ingress
+  namespace: ash-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ash-operator
+  policyTypes: ["Ingress"]

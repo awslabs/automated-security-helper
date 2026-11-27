@@ -31,9 +31,6 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
 from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
     OpengrepScanner,
 )
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
     SyftScanner,
 )
@@ -69,7 +66,6 @@ def test_no_scanner_is_unknown():
         GrypeScanner,
         NpmAuditScanner,
         OpengrepScanner,
-        SemgrepScanner,
         SyftScanner,
         TrivyRepoScanner,
         SnykCodeScanner,
@@ -92,7 +88,6 @@ _EXPECTED_STRATEGIES = {
     # offline: its dependency check says no there, as snyk-code's does.
     NpmAuditScanner: OfflineStrategy.SKIP_OFFLINE,
     OpengrepScanner: OfflineStrategy.CACHE_FLAGS,
-    SemgrepScanner: OfflineStrategy.CACHE_FLAGS,
     SyftScanner: OfflineStrategy.CACHE_FLAGS,
     TrivyRepoScanner: OfflineStrategy.CACHE_FLAGS,
     SnykCodeScanner: OfflineStrategy.SKIP_OFFLINE,

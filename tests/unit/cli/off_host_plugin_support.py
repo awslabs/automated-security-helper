@@ -268,7 +268,7 @@ def run_report(
         encoding="utf-8",
     )
     outside_every_checkout(operator)
-    args = ["report", "--format", reporter, "--config", str(operator)]
+    args = ["results", "report", "--format", reporter, "--config", str(operator)]
     args += ["--output-dir", str(output)]
     for override in [f"ash_plugin_modules=[{plugin}]", *overrides]:
         args += ["--config-overrides", override]
@@ -327,7 +327,7 @@ def run_merge(
     collector.mkdir()
     outside_every_checkout(collector)
     output = tmp_path / "merged"
-    args = ["merge", "--no-color", "--output-dir", str(output)]
+    args = ["results", "merge", "--no-color", "--output-dir", str(output)]
     for shard in shards:
         args += ["--results", shard]
     args += ["--config", str(operator)]

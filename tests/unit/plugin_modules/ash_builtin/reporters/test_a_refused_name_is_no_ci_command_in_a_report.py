@@ -225,6 +225,7 @@ def test_ash_report_yaml_prints_no_command(tmp_path):
     result = CliRunner().invoke(
         app,
         [
+            "results",
             "report",
             "--format",
             "yaml",

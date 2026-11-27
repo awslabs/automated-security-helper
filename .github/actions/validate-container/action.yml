@@ -20,17 +20,19 @@ runs:
     - name: Create test fixture
       shell: bash
       run: |
-        mkdir -p /tmp/ash-selftest
-        echo 'print("hello")' > /tmp/ash-selftest/test_sample.py
+        # RUNNER_TEMP, not /tmp: the runner empties it after every job, so nothing
+        # here outlives the job on a self-hosted or reused host.
+        mkdir -p "${RUNNER_TEMP}/ash-selftest"
+        echo 'print("hello")' > "${RUNNER_TEMP}/ash-selftest/test_sample.py"
 
     # WHY A SCAN LEG EXISTS AT ALL
     #
-    # This action used to end at `ash container build --force`. `container build` proves the
+    # This action used to end at `ashx container build --force`. `container build` proves the
     # Dockerfile still builds under a given runtime; it says nothing about whether ASH
     # can scan with the result, which is the only reason the image is built. So podman
     # and finch were the two runtimes in the matrix whose image nobody ever ran, while
     # the five methods that do scan (pip, pipx, uvx, mcp, nix) all exercise
-    # `ash scan --source-dir /tmp/ash-selftest ... --phases scan --phases report`.
+    # `ashx scan --source-dir "${RUNNER_TEMP}/ash-selftest" ... --phases scan --phases report`.
     #
     # A runtime with a build leg and no scan leg is precisely that defect, so the
     # runtimes carrying one are named here rather than assumed. Adding a runtime to the
@@ -52,7 +54,7 @@ runs:
 
     # WHY EVERY BUILD STEP PASSES --no-run
     #
-    # `ash container build` defaults to building AND scanning: cli/image.py passes
+    # `ashx container build` defaults to building AND scanning: cli/image.py passes
     # `run=not no_run`, and it never passes `source_dir`, so run_ash_scan.py resolves
     # the source to `Path.cwd()` -- this checkout. A build step written as a plain
     # `run:` therefore scanned ASH's own repository and exited with that scan's status,
@@ -64,7 +66,7 @@ runs:
     # the build step now reports only the build.
     #
     # No coverage is lost. The scan below is the deliberate one: it targets
-    # /tmp/ash-selftest, a fixture that is a single print statement, precisely so that
+    # $RUNNER_TEMP/ash-selftest, a fixture that is a single print statement, precisely so that
     # only exit 0 is acceptable. A checkout scan cannot be held to that bar -- its
     # status depends on what happens to be committed -- so it was never the thing
     # proving the image can scan.
@@ -93,9 +95,9 @@ runs:
         #
         # So the shape test is "the command is the first thing on the line, after an
         # optional `run:`", which catches both forms. Four kinds of line in this file
-        # name `ash container build` without being an invocation of it, and all four must
+        # name `ashx container build` without being an invocation of it, and all four must
         # stay excluded: the prose at the top, the two comment blocks, this check's own
-        # source, and the `echo "::error::ash container build ..."` in the retry loop.
+        # source, and the `echo "::error::ashx container build ..."` in the retry loop.
         #
         # The count is asserted too. Without it a future edit that hides an invocation
         # from the shape test would leave this passing on whatever it still sees, which
@@ -105,7 +107,7 @@ runs:
         for line in lines:
             stripped = line.strip()
             command = stripped[4:].strip() if stripped.startswith("run:") else stripped
-            if not command.startswith("ash container build"):
+            if not command.startswith("ashx container build"):
                 continue
             runtime = next((r for r in expected if f"--oci-runner {r}" in command), None)
             found.setdefault(runtime, []).append(command)
@@ -172,7 +174,7 @@ runs:
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override }}
-      run: ash container build --oci-runner podman --build-target ci --force --no-run
+      run: ashx container build --oci-runner podman --build-target ci --force --no-run
 
     # === finch ===
     - name: "finch: install (macOS)"
@@ -203,7 +205,7 @@ runs:
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-finch.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-finch.outputs.base-image-override }}
-      run: ash container build --oci-runner finch --build-target ci --force --no-run
+      run: ashx container build --oci-runner finch --build-target ci --force --no-run
 
     # === nerdctl ===
     #
@@ -363,7 +365,7 @@ runs:
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-nerdctl.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-nerdctl.outputs.base-image-override }}
-        # The tag ash container build applies for --build-target ci, which every build
+        # The tag ashx container build applies for --build-target ci, which every build
         # and scan in this action passes, so this is the image the load above would
         # have created. CI variables do not choose the stage, so it is named
         # explicitly rather than left to the default (non-root).
@@ -388,7 +390,7 @@ runs:
           # reporting a build break that never happened. Flag order matches those
           # two legs on attempt 1: --oci-runner nerdctl --build-target ci --force
           # --no-run.
-          ash container build --oci-runner nerdctl --build-target ci "${force_args[@]}" --no-run 2>&1 | tee "${log}"
+          ashx container build --oci-runner nerdctl --build-target ci "${force_args[@]}" --no-run 2>&1 | tee "${log}"
           rc="${PIPESTATUS[0]}"
           set -e
 
@@ -427,7 +429,7 @@ runs:
           # wrapper rather than the race itself, and the match should survive
           # nerdctl rewording its wrapper while the upstream race is still open.
           if ! grep -qE 'parent snapshot.*does not exist' "${log}"; then
-            echo "::error::ash container build --oci-runner nerdctl exited ${rc} for a reason other than the containerd snapshot GC race. Not retried."
+            echo "::error::ashx container build --oci-runner nerdctl exited ${rc} for a reason other than the containerd snapshot GC race. Not retried."
             exit "${rc}"
           fi
 
@@ -454,6 +456,26 @@ runs:
           sleep 10
         done
         exit "${rc}"
+
+    # === the built image's commands ===
+    #
+    # The image keeps the deprecated `ash` console script next to `ashx`, as pip and
+    # Homebrew do, so a container caller that still types `ash` keeps working. This
+    # runs the same check validate-install runs after pip and pipx, inside the image
+    # the scan below uses: `ash` returns `ashx`'s exit code and --version output and
+    # prints exactly one deprecation line on stderr. The script is mounted read-only
+    # rather than copied into the image, so the image under test is the one that
+    # was built. ENTRYPOINT is empty in the Dockerfile, so `bash` here is the
+    # command and not an argument to something else.
+    - name: "The image's ashx works and its deprecated ash alias warns once"
+      shell: bash
+      env:
+        RUNTIME: ${{ inputs.runtime }}
+        IMAGE: automated-security-helper:ci
+      run: |
+        ${OCI_RUNNER_WRAPPER:-} "${RUNTIME}" run --rm \
+          -v "${GITHUB_ACTION_PATH}/../validate-install/assert-deprecated-alias.sh:/tmp/assert-deprecated-alias.sh:ro" \
+          "${IMAGE}" bash /tmp/assert-deprecated-alias.sh
 
     # A value printed in a workflow command that this action does not set itself
     # goes through one_line, the helper run-ash-security-scan.yml writes the same
@@ -604,7 +626,7 @@ runs:
     - name: "Scan with the built image"
       shell: bash
       env:
-        # `ash scan --mode container` rebuilds the image (from cache), so it gets the
+        # `ashx scan --mode container` rebuilds the image (from cache), so it gets the
         # same base-image hand-off as the build; only one runtime's pre-pull ran.
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout || steps.prepull-finch.outputs.oci-layout || steps.prepull-nerdctl.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override || steps.prepull-finch.outputs.base-image-override || steps.prepull-nerdctl.outputs.base-image-override }}
@@ -643,12 +665,12 @@ runs:
         mapfile -t alpha_args < <(python3 .github/scripts/alpha-scanner-legs.py args)
         test "${#alpha_args[@]}" -gt 0
         set +e
-        ash scan \
+        ashx scan \
           --mode container \
           --oci-runner "${RUNTIME}" \
           --build-target ci \
-          --source-dir /tmp/ash-selftest \
-          --output-dir /tmp/ash-selftest/output \
+          --source-dir "${RUNNER_TEMP}/ash-selftest" \
+          --output-dir "${RUNNER_TEMP}/ash-selftest/output" \
           --simple \
           --fail-on-incomplete-scanners \
           "${alpha_args[@]}" \
@@ -657,7 +679,7 @@ runs:
         rc=$?
         set -e
         if [ "$rc" -ne 0 ]; then
-          echo "::error::ash scan --mode container --oci-runner ${RUNTIME} exited $rc; this fixture and these flags exit 0 when the scan works."
+          echo "::error::ashx scan --mode container --oci-runner ${RUNTIME} exited $rc; this fixture and these flags exit 0 when the scan works."
           case "$rc" in
             1) echo "::error::1 is ASH's 'error during execution', which --fail-on-incomplete-scanners also uses for a scan where a selected scanner reported ERROR or MISSING. Read the per-scanner table below." ;;
             2) echo "::error::2 means actionable findings on a fixture that is one print statement." ;;
@@ -665,7 +687,7 @@ runs:
           esac
           # The end of each scanner's stderr log, where a tool says why it failed. This
           # job uploads no artifacts, so without it the reason is only in the runner.
-          find /tmp/ash-selftest/output/scanners -name '*.stderr.log' -size +0 2>/dev/null |
+          find "${RUNNER_TEMP}/ash-selftest/output/scanners" -name '*.stderr.log' -size +0 2>/dev/null |
             sort | while read -r log; do
               echo "::group::last 4000 bytes of $(one_line "${log}")"
               tail -c 4000 "$log"
@@ -716,11 +738,12 @@ runs:
       run: |
         python3 <<'PY'
         import json
+        import os
         import pathlib
         import subprocess
         import sys
 
-        results = pathlib.Path("/tmp/ash-selftest/output/ash_aggregated_results.json")
+        results = pathlib.Path(os.environ["RUNNER_TEMP"], "ash-selftest", "output", "ash_aggregated_results.json")
         if not results.exists() or results.stat().st_size == 0:
             listing = sorted(p.name for p in results.parent.glob("*")) if results.parent.is_dir() else "(no output directory)"
             sys.exit(f"FAIL: no usable results at {results}; the container scan did not complete even though it exited 0. Output dir holds: {listing}")
@@ -775,7 +798,6 @@ runs:
             "grype",
             "npm-audit",
             "opengrep",
-            "semgrep",
             "syft",
             "trivy",
             "zizmor",
@@ -833,6 +855,147 @@ runs:
         print(f"PASS: all {len(image_supplied)} image-supplied scanners participated")
         PY
 
+    # === the built image has to FIND something ===
+    #
+    # WHY PARTICIPATION IS NOT DETECTION, AND WHY BOTH STEPS EXIST
+    #
+    # Everything above this point proves the image can run a scan. None of it proves
+    # the image can find anything. The scan above targets `print("hello")` and accepts
+    # only exit 0, and the assertion above reads per-scanner STATUS -- so a scanner
+    # that loads, runs, reports PASSED and is incapable of matching anything satisfies
+    # both. An empty ruleset, a config that filters every rule, a detection engine
+    # that silently no-ops: each of those keeps every status out of MISSING and ERROR
+    # while the image detects nothing, and each would have gone green here.
+    #
+    # So this leg scans a fixture with defects planted in it and requires them back.
+    # Together the two legs bracket the question: the clean fixture proves no false
+    # positive on trivial input, this one proves no false negative on known-bad input.
+    # Neither alone is sufficient and neither should be deleted as duplicate.
+    #
+    # WHY IT IS A SECOND FIXTURE RATHER THAN A CHANGE TO THE FIRST
+    #
+    # Making the existing fixture flawed would flip its accepted status from 0 to 2
+    # and destroy what it measures -- a clean fixture is the only thing that can catch
+    # a scanner flagging a one-line print statement. Two fixtures, two assertions, two
+    # different failures.
+    - name: "Create the detection fixture"
+      shell: bash
+      run: |
+        mkdir -p "${RUNNER_TEMP}/ash-detect"
+        # Two defects, from two independent scanners, at a path of its own so the
+        # clean scan's report above is not overwritten. They are the same kinds of
+        # plant validate-nix uses, for the same reason: they are unambiguous, they need
+        # no dependency resolution, and neither is a rule anyone is likely to retire.
+        #
+        # WHY THE CREDENTIAL IS DERIVED HERE INSTEAD OF WRITTEN INTO THIS FILE
+        #
+        # This file is part of the repository, and ASH scans the repository on every
+        # pull request (ash-repo-scan.yml) with detect-secrets enabled. A 40-character
+        # secret-access-key literal in the heredoc is a high-entropy string in this
+        # YAML, so the repository scan reports it as SECRET-BASE64-HIGH-ENTROPY-STRING
+        # against this file and fails. Measured: the same .ash config over this file
+        # with the literal exits 2 with that one finding, and exits 0 without it.
+        #
+        # So the value is computed at run time: a SHA-256 digest of a fixed label,
+        # truncated to 30 bytes and base64-encoded, which gives 40 characters from
+        # [A-Za-z0-9+/] -- the shape of a secret access key -- and the same value on
+        # every run. The fixture the image scans is unchanged in substance: it still
+        # assigns a high-entropy, key-shaped string to AWS_SECRET_ACCESS_KEY, which is
+        # what detect-secrets is required to flag below. Only this file stops carrying
+        # a literal, so the repository scan is not weakened and nothing is suppressed.
+        python3 <<'PY'
+        import base64
+        import hashlib
+        import os
+        import pathlib
+
+        digest = hashlib.sha256(b"ash validate-container detection fixture").digest()
+        key = base64.b64encode(digest[:30]).decode("ascii")
+        assert len(key) == 40, key
+
+        pathlib.Path(os.environ["RUNNER_TEMP"], "ash-detect", "vulnerable_sample.py").write_text(
+            "import subprocess\n"
+            "\n"
+            f'AWS_SECRET_ACCESS_KEY = "{key}"\n'
+            "\n"
+            "\n"
+            "def run(cmd):\n"
+            "    return subprocess.call(cmd, shell=True)\n"
+        )
+        PY
+        echo "--- fixture ---"
+        cat "${RUNNER_TEMP}/ash-detect/vulnerable_sample.py"
+
+    # WHY THE EXIT CODE IS CAPTURED AND THEN LARGELY IGNORED
+    #
+    # This scan is expected to exit 2, and 2 is exactly the status that must NOT be
+    # the verdict. click raises UsageError with exit_code 2, so renaming any flag
+    # below exits 2 with the scan never having started -- indistinguishable, from the
+    # status alone, from the findings this step wants. The verdict therefore comes
+    # from the report in the next step, and the only statuses rejected here are the
+    # ones that mean the scan could not have produced a report at all.
+    #
+    # Measured rather than assumed, with cdk_nag present so the numbers are the real
+    # ones: this fixture exits 2 with 6 actionable findings -- bandit 3, detect-secrets
+    # 3 -- and the clean fixture above exits 0 with 0 findings and no scanner MISSING.
+    # Both measured locally by direct invocation of these same flags.
+    - name: "Scan the detection fixture with the built image"
+      shell: bash
+      env:
+        # Rebuilds like the scan above, so it gets the same base-image hand-off.
+        ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout || steps.prepull-finch.outputs.oci-layout || steps.prepull-nerdctl.outputs.oci-layout }}
+        ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override || steps.prepull-finch.outputs.base-image-override || steps.prepull-nerdctl.outputs.base-image-override }}
+        RUNTIME: ${{ inputs.runtime }}
+      run: |
+        set +e
+        ashx scan \
+          --mode container \
+          --oci-runner "${RUNTIME}" \
+          --build-target ci \
+          --source-dir "${RUNNER_TEMP}/ash-detect" \
+          --output-dir "${RUNNER_TEMP}/ash-detect/output" \
+          --simple \
+          --fail-on-incomplete-scanners \
+          --phases scan \
+          --phases report
+        rc=$?
+        set -e
+        echo "detection scan exited ${rc}"
+        case "${rc}" in
+          0)
+            echo "::error::ashx scan exited 0 on a fixture carrying a hardcoded credential and a shell=True call. The image ran a scan and detected neither. That is a false negative in the image, not a passing gate."
+            exit 1
+            ;;
+          1)
+            echo "::error::ashx scan exited 1, ASH's 'error during execution' -- which --fail-on-incomplete-scanners also uses when a selected scanner reported ERROR or MISSING. The scan did not complete; read the per-scanner table from the step above."
+            exit 1
+            ;;
+          2)
+            echo "exit 2 is the expected status here (actionable findings). It is NOT the verdict -- click also exits 2 on a bad flag. The next step reads the report."
+            ;;
+          *)
+            echo "::error::ashx scan exited ${rc}, which is neither the expected 2 nor a status this step knows how to explain."
+            exit "${rc}"
+            ;;
+        esac
+
+    # WHY THIS REQUIRES RULE IDS AND NOT JUST A COUNT PER SCANNER
+    #
+    # A total above zero can be satisfied by one scanner while the other silently
+    # stops matching, so each named scanner is checked on its own. A count per
+    # scanner is still not enough: with shell=True removed from the fixture, bandit
+    # reports B404, B105 and B603 and a floor of one finding stays green while the
+    # plant it claims to require is gone. So bandit must report B602 and
+    # detect-secrets must report a SECRET-* rule, read from the SARIF in the report.
+    # The script's docstring has the measurements and what it does not cover.
+    - name: "Assert the image detected the planted defects"
+      shell: bash
+      env:
+        ASSERT_DETECTION: ${{ github.action_path }}/assert_detection.py
+      run: |
+        python3 "${ASSERT_DETECTION}" \
+          "${RUNNER_TEMP}/ash-detect/output/ash_aggregated_results.json"
+
     # === zizmor, on its own ===
     #
     # zizmor also runs in the scan above, whose participation check says only that
@@ -843,13 +1006,13 @@ runs:
     - name: "container: zizmor runs and reports"
       shell: bash
       env:
-        # `ash scan --mode container` rebuilds the image, so it gets the build's
+        # `ashx scan --mode container` rebuilds the image, so it gets the build's
         # base-image hand-off, as "Scan with the built image" does.
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout || steps.prepull-finch.outputs.oci-layout || steps.prepull-nerdctl.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override || steps.prepull-finch.outputs.base-image-override || steps.prepull-nerdctl.outputs.base-image-override }}
         RUNTIME: ${{ inputs.runtime }}
       run: |
-        mkdir -p /tmp/ash-zizmor-selftest/.github/workflows
+        mkdir -p "${RUNNER_TEMP}/ash-zizmor-selftest/.github/workflows"
         # The expression is assembled from two halves so this action file never
         # contains a literal one: GitHub would expand it here, in this step.
         open='$''{{'
@@ -861,15 +1024,15 @@ runs:
           '    runs-on: ubuntu-latest' \
           '    steps:' \
           "      - run: echo \"${open} github.event.issue.title }}\"" \
-          > /tmp/ash-zizmor-selftest/.github/workflows/selftest.yml
-        cat /tmp/ash-zizmor-selftest/.github/workflows/selftest.yml
+          > "${RUNNER_TEMP}/ash-zizmor-selftest/.github/workflows/selftest.yml"
+        cat "${RUNNER_TEMP}/ash-zizmor-selftest/.github/workflows/selftest.yml"
         set +e
-        ash scan \
+        ashx scan \
           --mode container \
           --oci-runner "${RUNTIME}" \
           --build-target ci \
-          --source-dir /tmp/ash-zizmor-selftest \
-          --output-dir /tmp/ash-zizmor-selftest/output \
+          --source-dir "${RUNNER_TEMP}/ash-zizmor-selftest" \
+          --output-dir "${RUNNER_TEMP}/ash-zizmor-selftest/output" \
           --scanners zizmor \
           --no-fail-on-findings \
           --fail-on-incomplete-scanners \
@@ -877,15 +1040,16 @@ runs:
         rc=$?
         set -e
         if [ "$rc" -ne 0 ]; then
-          echo "::error::ash scan --scanners zizmor exited $rc; with --no-fail-on-findings only an incomplete or broken scan exits non-zero."
+          echo "::error::ashx scan --scanners zizmor exited $rc; with --no-fail-on-findings only an incomplete or broken scan exits non-zero."
           exit "$rc"
         fi
         python3 <<'PY'
         import json
+        import os
         import pathlib
         import sys
 
-        data = json.loads(pathlib.Path("/tmp/ash-zizmor-selftest/output/ash_aggregated_results.json").read_text())
+        data = json.loads(pathlib.Path(os.environ["RUNNER_TEMP"], "ash-zizmor-selftest", "output", "ash_aggregated_results.json").read_text())
         status = str((data.get("scanner_results") or {}).get("zizmor", {}).get("status", "absent"))
         rules = [
             result.get("ruleId")
@@ -905,7 +1069,7 @@ runs:
     # ran and reported it -- not merely that it was not MISSING.
     #
     # The scan asks for the `ci` stage, like every other build and container scan in
-    # this action. `ash scan --mode container` rebuilds the image first, and without
+    # this action. `ashx scan --mode container` rebuilds the image first, and without
     # `--build-target` it builds `non-root`, whose user has the runner's UID. Under
     # rootless podman that UID is not the owner of the host output directory inside
     # the container, so the scan cannot create ash.log there and exits 1 before any
@@ -914,7 +1078,7 @@ runs:
     - name: "Scan with the image's hadolint (alpha plugin)"
       shell: bash
       env:
-        # `ash scan --mode container` rebuilds the image, so it gets the build's
+        # `ashx scan --mode container` rebuilds the image, so it gets the build's
         # base-image hand-off, as "Scan with the built image" does.
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout || steps.prepull-finch.outputs.oci-layout || steps.prepull-nerdctl.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override || steps.prepull-finch.outputs.base-image-override || steps.prepull-nerdctl.outputs.base-image-override }}
@@ -923,7 +1087,7 @@ runs:
         mkdir -p /tmp/ash-selftest-hadolint
         printf 'FROM ubuntu:latest\nRUN echo fixture\n' > /tmp/ash-selftest-hadolint/Dockerfile
         set +e
-        ash scan \
+        ashx scan \
           --mode container \
           --oci-runner "${RUNTIME}" \
           --build-target ci \
@@ -982,7 +1146,7 @@ runs:
         mkdir -p /tmp/ash-selftest-betterleaks
         printf 'token = "%s%s"\n' ghp_ x7Kq9ZmP2vLw4RtYb8NcD3sFh6JgA1eUoW5i > /tmp/ash-selftest-betterleaks/settings.py
         set +e
-        ash scan \
+        ashx scan \
           --mode container \
           --oci-runner "${RUNTIME}" \
           --build-target ci \
@@ -1024,22 +1188,22 @@ runs:
     - name: "Scan with the image's CloudFormation scanners"
       shell: bash
       env:
-        # `ash scan --mode container` rebuilds the image, so it gets the build's
+        # `ashx scan --mode container` rebuilds the image, so it gets the build's
         # base-image hand-off, as "Scan with the built image" does.
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout || steps.prepull-finch.outputs.oci-layout || steps.prepull-nerdctl.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override || steps.prepull-finch.outputs.base-image-override || steps.prepull-nerdctl.outputs.base-image-override }}
         RUNTIME: ${{ inputs.runtime }}
       run: |
-        rm -rf /tmp/ash-cfn-selftest
-        mkdir -p /tmp/ash-cfn-selftest
-        cp tests/test_data/scanners/cfn_lint_guard/repo/templates/compliant.yaml /tmp/ash-cfn-selftest/
+        rm -rf "${RUNNER_TEMP:?}/ash-cfn-selftest"
+        mkdir -p "${RUNNER_TEMP}/ash-cfn-selftest"
+        cp tests/test_data/scanners/cfn_lint_guard/repo/templates/compliant.yaml "${RUNNER_TEMP}/ash-cfn-selftest/"
         set +e
-        ash scan \
+        ashx scan \
           --mode container \
           --oci-runner "${RUNTIME}" \
           --build-target ci \
-          --source-dir /tmp/ash-cfn-selftest \
-          --output-dir /tmp/ash-cfn-selftest/output \
+          --source-dir "${RUNNER_TEMP}/ash-cfn-selftest" \
+          --output-dir "${RUNNER_TEMP}/ash-cfn-selftest/output" \
           --scanners cfn-lint,cfn-guard \
           --simple \
           --fail-on-incomplete-scanners \
@@ -1049,10 +1213,11 @@ runs:
         set -e
         python3 - <<'PY'
         import json
+        import os
         import pathlib
         import sys
 
-        results = pathlib.Path("/tmp/ash-cfn-selftest/output/ash_aggregated_results.json")
+        results = pathlib.Path(os.environ["RUNNER_TEMP"], "ash-cfn-selftest", "output", "ash_aggregated_results.json")
         if not results.exists():
             sys.exit(f"FAIL: no results at {results}")
         rows = json.loads(results.read_text()).get("scanner_results") or {}

@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import fnmatch
-import warnings
 from typing import (
     Any,
     ClassVar,
@@ -21,7 +20,6 @@ from typing import (
     TYPE_CHECKING,
 )
 from pydantic import (
-    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -41,9 +39,9 @@ from automated_security_helper.utils import suppression_frame
 from automated_security_helper.utils.redacted_model import RedactedSection
 from automated_security_helper.utils.symbol_spans import is_valid_symbol
 from automated_security_helper.utils.unknown_keys import (
+    READ_STORED_EXPIRATION,
     refuse_unknown_keys,
     tolerated_notes,
-    warned_notes,
 )
 
 if TYPE_CHECKING:
@@ -51,31 +49,12 @@ if TYPE_CHECKING:
     from automated_security_helper.utils.symbol_spans import SymbolResolver
 
 
-#: What an entry setting both expiration spellings to different values records
-#: under TOLERATE_STORED_CONFIG (IgnorePathWithReason._one_expiration_spelling).
+#: What a stored entry holding ``expires`` and ``expiration`` with different
+#: values records under TOLERATE_STORED_CONFIG (``_read_stored_expiration``).
+#: ASH versions before the rename wrote ``expiration`` into results files
+#: themselves, and ASH 4.0 removed the spelling from configs but still reads it
+#: there.
 BOTH_EXPIRATION_SPELLINGS_NOTE = "both expiration spellings, disagreeing"
-
-#: The deprecation a config read under the ``expiration`` spelling gets.
-#: ``expires`` is the canonical spelling; ``expiration`` is the accepted
-#: alternative until ASH v4 removes it.
-EXPIRATION_SPELLING_DEPRECATION = (
-    "The 'expiration' key is a deprecated spelling of 'expires' and will be "
-    "removed in ASH v4; write 'expires'."
-)
-
-
-def _warn_expiration_spelling() -> None:
-    """One ``DeprecationWarning`` per read of the ``expiration`` spelling.
-
-    A Python warning, not an ``ASH_LOGGER`` line: entries are validated
-    wherever a config or an override is read, so a logger line would land in
-    every command's output (and in the committed CLI snapshots) for a spelling
-    that still works. The schema, the reference docs and the validator wording
-    all name the deprecation too; the v4 removal turns the alias into the
-    ordinary unknown-key refusal. ``stacklevel`` is left at the default: the
-    caller is pydantic's validator machinery, so no user frame is nearer.
-    """
-    warnings.warn(EXPIRATION_SPELLING_DEPRECATION, DeprecationWarning)
 
 
 #: What an entry's expiration that is not a YYYY-MM-DD date records under
@@ -229,31 +208,55 @@ def value_at(container: Any, keys: Tuple[str, ...]) -> Any:
     return value
 
 
-def _entry_schema_admits_expiration(schema: Dict[str, Any]) -> None:
-    """The entry models' published schema: closed, and with the ``expiration`` alias.
+def _close_entry_schema(schema: Dict[str, Any]) -> None:
+    """The entry models' published schema: closed.
 
     ``additionalProperties: false`` says what a config file may contain (the
     results schema reopens it for the stored-config tolerance,
-    ``schemas/generate_schemas.py``). The loader also accepts ``expiration`` as
-    a deprecated alias of ``expires`` (``AliasChoices`` on the field, removed in
-    ASH v4), which pydantic publishes nowhere in the schema, so a
-    schema-validating surface (an editor bound to the published schema, a CI
-    check, an MCP client reading the served copy) would flag the documented
-    alias as an unknown property while ASH loaded it. The alias is published
-    here as its own property, mirroring ``expires``'s shape, with a description
-    that names it deprecated and its removal.
+    ``schemas/generate_schemas.py``). ASH 4.0 removed the ``expiration``
+    spelling of ``expires``, so no ``expiration`` property is published.
     """
     schema["additionalProperties"] = False
-    properties = schema.get("properties")
-    if isinstance(properties, dict) and "expires" in properties:
-        expiration = dict(properties["expires"])
-        expiration["title"] = "Expiration"
-        expiration["description"] = (
-            "(Optional) Deprecated alias of 'expires', accepted when a config "
-            "is read and removed in ASH v4; the entry is written and stored "
-            "as 'expires'."
-        )
-        properties["expiration"] = expiration
+
+
+def _read_stored_expiration(data: Any, info: ValidationInfo) -> Any:
+    """Read the ``expiration`` spelling of a results file as ``expires``.
+
+    ASH versions before the rename wrote ``expiration`` into results files
+    themselves. Those files are data read by ``results diff``, ``trend``,
+    ``merge`` and ``report``, not configs an author can fix, so under
+    TOLERATE_STORED_CONFIG the key is read as ``expires``: renamed when
+    ``expires`` is absent, dropped when it equals ``expires``. When the two
+    disagree the data is returned unchanged and
+    ``BOTH_EXPIRATION_SPELLINGS_NOTE`` is recorded; the leftover ``expiration``
+    key is then an unknown key, which marks the entry as one never applied.
+
+    The stored-results date locator (``READ_STORED_EXPIRATION`` in the context,
+    without the tolerance) gets the same reading, so its strict re-validation
+    meets the entry's date; no note is recorded there, since there is no list.
+
+    A config an author wrote gets nothing here: ``refuse_unknown_keys`` refuses
+    ``expiration`` as an unknown key, with ``expires`` as the did-you-mean.
+    """
+    notes = tolerated_notes(info)
+    locating = bool(info is not None and info.context) and bool(
+        info.context.get(READ_STORED_EXPIRATION)
+    )
+    if (
+        (notes is None and not locating)
+        or not isinstance(data, dict)
+        or "expiration" not in data
+    ):
+        return data
+    if "expires" not in data:
+        renamed = {k: v for k, v in data.items() if k != "expiration"}
+        renamed["expires"] = data["expiration"]
+        return renamed
+    if data["expiration"] == data["expires"]:
+        return {k: v for k, v in data.items() if k != "expiration"}
+    if notes is not None:
+        notes.append(BOTH_EXPIRATION_SPELLINGS_NOTE)
+    return data
 
 
 # ``expires`` means the same here and on ``AshSuppression``, which inherits
@@ -268,12 +271,12 @@ class IgnorePathWithReason(RedactedSection):
     # be a secret, and an error's text goes wherever the error is shown.
     # Unknown keys are refused by _refuse_unknown_keys below. Extras are allowed
     # only so that a results file holding one (utils/unknown_keys.py) keeps it,
-    # and the schema says what a config file may contain -- including the
-    # deprecated ``expiration`` alias (_entry_schema_admits_expiration).
+    # and the schema says what a config file may contain: no other key,
+    # ``expiration`` included (_close_entry_schema).
     model_config = ConfigDict(
         extra="allow",
         hide_input_in_errors=True,
-        json_schema_extra=_entry_schema_admits_expiration,
+        json_schema_extra=_close_entry_schema,
     )
 
     # How errors and warnings name an entry of this kind.
@@ -285,17 +288,12 @@ class IgnorePathWithReason(RedactedSection):
         str | None,
         Field(
             None,
-            # "expires" is the canonical spelling (the one written, stored and
-            # documented); "expiration", the field's earlier name, is accepted
-            # as a deprecated alias until ASH v4 removes it
-            # (_warn_expiration_spelling). The name itself is the first choice,
-            # so no populate_by_name is needed.
-            validation_alias=AliasChoices("expires", "expiration"),
+            # "expires" is the one spelling a config accepts. ASH 4.0 removed
+            # the field's earlier name, "expiration"; a results file an earlier
+            # version wrote still reads it (_read_stored_expiration).
             description=(
                 "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying "
-                "on this date, by the local clock of the host running the scan. "
-                "'expiration' is accepted as a deprecated alias when a config is "
-                "read; the alias is removed in ASH v4."
+                "on this date, by the local clock of the host running the scan."
             ),
         ),
     ] = None
@@ -320,55 +318,13 @@ class IgnorePathWithReason(RedactedSection):
         suppression with no rule covers every rule in its path; a misspelled
         ``expiration`` made an entry permanent. See utils/unknown_keys.py for the
         message and for the results-file exception.
+
+        The stored-results reader runs first, so the order is deterministic: a
+        results file's ``expiration`` is read as ``expires`` before the check
+        sees it, and a config's is refused as an unknown key.
         """
+        data = _read_stored_expiration(data, info)
         return refuse_unknown_keys(cls, data, info, cls.ENTRY_KIND)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _one_expiration_spelling(cls, data: Any, info: ValidationInfo) -> Any:
-        """An entry sets ``expires`` or its deprecated alias ``expiration``, not both.
-
-        Both set, pydantic would take ``expires`` and keep ``expiration`` as an
-        extra, so a shorter ``expiration`` the author meant would be silently
-        ignored or the entry silently inert. A disagreement is refused with
-        which key to keep (as resource_id / scope.resource_id disagreements
-        are); an equal duplicate is accepted, with the alias dropped so it does
-        not land in the extras. Under TOLERATE_STORED_CONFIG a disagreement is
-        recorded and kept; the extra then marks the entry as one never applied.
-
-        Reading the ``expiration`` spelling at all is deprecated
-        (``_warn_expiration_spelling``): ``expires`` is canonical and the alias
-        is removed in ASH v4.
-        """
-        if not isinstance(data, dict) or "expiration" not in data:
-            return data
-        if tolerated_notes(info) is None:
-            # A config an author wrote, not a stored results file (which this
-            # version and earlier ones wrote under the old spelling themselves).
-            _warn_expiration_spelling()
-            # The Python warning is dropped by the default filters outside
-            # __main__, so an `ash` run never showed it. A config load binds
-            # the warn-unknown-keys list (resolve_config), whose contents land
-            # on the config's _resolution_warnings and are printed at scan
-            # start, so the operator sees the deprecation once per entry; the
-            # rebuild-after-overrides dedup subtracts repeats by count there.
-            warned = warned_notes(info)
-            if warned is not None:
-                warned.append(f"In {cls.ENTRY_KIND}: {EXPIRATION_SPELLING_DEPRECATION}")
-        if "expires" not in data:
-            return data
-        if data["expiration"] == data["expires"]:
-            kept = dict(data)
-            del kept["expiration"]
-            return kept
-        notes = tolerated_notes(info)
-        if notes is not None:
-            notes.append(BOTH_EXPIRATION_SPELLINGS_NOTE)
-            return data
-        raise ValueError(
-            "expires and expiration are two spellings of one field and "
-            "disagree; keep one"
-        )
 
     @field_validator("expires", mode="before")
     @classmethod
@@ -417,30 +373,6 @@ class IgnorePathWithReason(RedactedSection):
         would cover every rule in its path.
         """
         return bool(self.model_extra)
-
-    @property
-    def expiration(self) -> Optional[str]:
-        """``expires`` under its deprecated name, for code written against it.
-
-        The configuration spelling ``expiration`` is deprecated and removed in
-        ASH v4; this attribute keeps a caller that still reads
-        ``entry.expiration`` (a plugin, a script over results models) working
-        until then. New code reads ``expires``.
-        """
-        return self.expires
-
-    @expiration.setter
-    def expiration(self, value: Optional[str]) -> None:
-        """Assignment under the deprecated name writes the ``expires`` field.
-
-        Before the rename, ``entry.expiration = x`` set the field; a read-only
-        property turned that into ``AttributeError``. Note that
-        ``model_copy(update={"expiration": ...})`` does NOT go through this
-        setter: pydantic writes update keys directly, and with ``extra="allow"``
-        an ``expiration`` update key lands as an extra (marking the entry
-        ``has_unknown_keys``); such callers pass ``expires`` instead.
-        """
-        self.expires = value
 
     @property
     def is_expired(self) -> bool:
@@ -510,7 +442,8 @@ class IgnoreFileExclusions(BaseModel):
                 "Whether the scanned repository's .gitignore and .ignore files "
                 "decided which files were scanned. False when the operator set "
                 "honor_ignore_files: false or passed --no-honor-ignore-files. In "
-                "merged results (a workspace scan's, or ash merge's), True only "
+                "merged results (a workspace scan's, or ashx results merge's), True "
+                "only "
                 "when every merged scan honored them; see honored_scan_count."
             )
         ),
@@ -568,7 +501,8 @@ class IgnoreFileExclusions(BaseModel):
             ge=0,
             exclude_if=lambda value: value is None,
             description=(
-                "In merged results (a workspace scan's, or ash merge's) whose "
+                "In merged results (a workspace scan's, or ashx results merge's) "
+                "whose "
                 "scans did not agree, how many of the scan_count merged scans "
                 "honored the ignore files; honored is then False. Absent for a "
                 "single scan, and when every merged scan agreed."

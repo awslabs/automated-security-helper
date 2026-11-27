@@ -204,7 +204,7 @@ def test_both_lists_at_once_are_refused() -> None:
         "A nonempty `scanners` argument of the MCP workspace tool limits every project to those scanners and does not add to the default.",
         "Container mode needs an image built from this ASH release",
         "A trusted config that `extends` a file inside a checkout keeps the selection its own files write, and ignores the one that file writes.",
-        "`ash config lint` warns about a `default_scanners` in a config inside the scanned tree, a key that is not `only` or `add` included, and still exits 0.",
+        "`ashx config lint` warns about a `default_scanners` in a config inside the scanned tree, a key that is not `only` or `add` included, and still exits 0.",
         "A selection the host cannot resolve also ends the run with exit 3, before the container starts",
     ],
 )

@@ -21,24 +21,26 @@ Use Python 3.11 to 3.14 and [pipx](https://pipx.pypa.io/).
 For container mode, also install an OCI-compatible runtime such as Docker,
 Finch, or Podman.
 
+> **Command name:** the command is `ashx`. In v4, `ash` is a deprecated alias for pip-based installs, Homebrew and the container: it prints one warning line on stderr and keeps the same exit codes. The deb and rpm packages ship only `ashx`, because `ash` is the Almquist shell on many distributions.
+
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network and starts a container scan" -->
 ```bash
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.8.0
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 
 # Run from the project you want to scan
-ash --mode container
+ashx --mode container
 ```
 
 The first container run builds the image and prepares scanner dependencies.
-Open `.ash/ash_output/reports/ash.html` or run `ash inspect findings`.
+Open `.ash/ash_output/reports/ash.html` or run `ashx results inspect findings`.
 
 ### Execution modes
 
 | Mode | Command | Requirements |
 | --- | --- | --- |
-| Container | `ash --mode container` | OCI-compatible runtime |
-| Local | `ash --mode local` | Local scanner dependencies |
-| Pre-commit | `ash --mode precommit` | Python-based scanners with simplified output |
+| Container | `ashx --mode container` | OCI-compatible runtime |
+| Local | `ashx --mode local` | Local scanner dependencies |
+| Pre-commit | `ashx --mode precommit` | Python-based scanners with simplified output |
 
 Local and pre-commit workflows use [uv](https://docs.astral.sh/uv/getting-started/installation/)
 for managed tool installation. The [installation guide](docs/content/how-to/install.md)
@@ -51,15 +53,15 @@ Run with uv:
 
 <!-- doctest: illustrative reason="runs ASH from GitHub over the network" -->
 ```bash
-uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.8.0 ash --help
-uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.8.0 ash --mode container
+uvx --from git+https://github.com/awslabs/automated-security-helper.git@v4.0.0 ashx --help
+uvx --from git+https://github.com/awslabs/automated-security-helper.git@v4.0.0 ashx --mode container
 ```
 
 Install in a Python environment:
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.8.0
+pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 ```
 
 Install with Homebrew:
@@ -69,22 +71,25 @@ Install with Homebrew:
 brew tap awslabs/automated-security-helper https://github.com/awslabs/automated-security-helper.git
 brew trust awslabs/automated-security-helper
 brew install ash
+
+# The formula is named ash; the command it installs is ashx
+ashx --version
 ```
 
-Homebrew refuses to load a formula by its short name, as in `brew install ash`, from a tap you have not trusted, so the second line trusts this one; on a Homebrew without `brew trust`, skip that line. Naming the formula in full needs no `brew trust`: `brew install awslabs/automated-security-helper/ash` trusts that one formula as it installs it. The formula builds the tagged release on Homebrew's Python 3.12, with ASH's `cdk` extra, and installs the dependency versions locked in that release's `uv.lock`. It downloads them from PyPI during the install, so the install needs network access, and building with `HOMEBREW_FORMULA_BUILD_NETWORK=deny` is not supported. The formula also installs Node.js, which cdk-nag and npm-audit run on. grype, syft, opengrep and cfn-nag are separate programs that the formula does not install: `ash dependencies install` adds grype, syft and opengrep, and cfn-nag needs Ruby (`gem install cfn-nag`). Until they are installed, a default scan reports them MISSING and exits 1. In container mode, a Homebrew install builds its image from the commit the formula built, or, when Homebrew built it from a source tarball with no git metadata, from the release tag of its version, with a warning that this is a guess.
+Homebrew refuses to load a formula by its short name, as in `brew install ash`, from a tap you have not trusted, so the second line trusts this one; on a Homebrew without `brew trust`, skip that line. Naming the formula in full needs no `brew trust`: `brew install awslabs/automated-security-helper/ash` trusts that one formula as it installs it. The formula builds the tagged release on Homebrew's Python 3.12, with ASH's `cdk` extra, and installs the dependency versions locked in that release's `uv.lock`. It downloads them from PyPI during the install, so the install needs network access, and building with `HOMEBREW_FORMULA_BUILD_NETWORK=deny` is not supported. The formula also installs Node.js, which cdk-nag and npm-audit run on. grype, syft, opengrep and cfn-nag are separate programs that the formula does not install: `ashx dependencies install` adds grype, syft and opengrep, and cfn-nag needs Ruby (`gem install cfn-nag`). Until they are installed, a default scan reports them MISSING and exits 1. In container mode, a Homebrew install builds its image from the commit the formula built, or, when Homebrew built it from a source tarball with no git metadata, from the release tag of its version, with a warning that this is a guess.
 
 Install from source:
 
 <!-- doctest: illustrative reason="clones this repository and installs it over the network" -->
 ```bash
-git clone --branch v3.8.0 https://github.com/awslabs/automated-security-helper.git
+git clone --branch v4.0.0 https://github.com/awslabs/automated-security-helper.git
 cd automated-security-helper
 pip install .
 ```
 
-Pin `@v3.8.0` for a reproducible install. The floating `@v3` tag is frozen at
-v3.8.0 and no longer follows releases, so pin a release tag instead. See the
-[installation guide](docs/content/how-to/install.md)
+Pin `@v4.0.0` for a reproducible install. Floating major tags such as
+`@v4` do not follow releases (the `v3` tag is frozen at v3.8.0), so pin a
+release tag instead. See the [installation guide](docs/content/how-to/install.md)
 for Windows and offline environments.
 
 </details>
@@ -109,8 +114,8 @@ Offline HTML reports include search, filters, finding details, and printing.
 
 <!-- doctest: illustrative reason="opens an interactive explorer on the results of an earlier scan" -->
 ```bash
-ash inspect findings    # Open the terminal findings explorer
-ash report              # Read the text summary of the latest scan
+ashx results inspect findings    # Open the terminal findings explorer
+ashx results report              # Read the text summary of the latest scan
 ```
 
 <details>
@@ -160,9 +165,18 @@ Filters change the view; configured thresholds determine the scan gate.
 | MCP client | [Connect a client](docs/content/getting-started/agents.md) |
 | Multiple projects | [Scan a workspace over MCP](docs/content/how-to/scale-large-repos.md) |
 | AWS reporting | [Choose an AWS destination](docs/content/plugins/aws.md) |
+| ASH as a service in your AWS account | [Deploy ASH on AWS](deploy/README.md) |
 | A custom scanner or report | [Build an ASH plugin](docs/content/plugins/index.md) |
 
 See [integration options](docs/content/integrations.md).
+
+To run ASH as a service in your own AWS account rather than as a CLI, see
+[deploy/README.md](deploy/README.md). It covers four deployment targets (the MCP
+server on Bedrock AgentCore, scheduled scans on ECS Fargate, a CodeCommit push gate
+on Lambda, and a sharded CodePipeline executor), each as a CDK stack with a
+committed CloudFormation template and as a Terraform module. ASH hosts no bucket
+for those templates, so [deploy/quick-create-links.md](deploy/quick-create-links.md)
+explains how to render one-click CloudFormation launch links against a bucket you own.
 
 <a id="ai-integration-with-mcp"></a>
 <a id="installing-ash-into-an-ai-coding-agent"></a>
@@ -177,7 +191,7 @@ After installing ASH, add this server to your MCP client's configuration:
 {
   "mcpServers": {
     "ash": {
-      "command": "ash",
+      "command": "ashx",
       "args": ["mcp"]
     }
   }
@@ -244,7 +258,7 @@ Add to `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.8.0
+    rev: v4.0.0
     hooks:
       - id: ash
 ```
@@ -262,7 +276,7 @@ The `ash` hook runs precommit mode (bandit, detect-secrets, checkov, cdk-nag and
 Create `.ash.yaml` at the project root to name the project, set the severity
 gate, and choose scanner and reporter options (configs at older locations, such
 as `.ash/.ash.yaml` or `.ashrc.yaml`, still load with a deprecation warning until
-ASH 4.0). The schema provides editor validation.
+ASH 4.1). The schema provides editor validation.
 
 ```yaml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
@@ -294,8 +308,7 @@ for new capabilities.
 | Scanner | Coverage | Local setup |
 | --- | --- | --- |
 | [Bandit](https://github.com/PyCQA/bandit) | Python code | Managed through uv tool isolation |
-| [Semgrep](https://github.com/semgrep/semgrep) | Application code across multiple languages | Managed through uv tool isolation |
-| [Opengrep](https://github.com/opengrep/opengrep) | Application code with Semgrep-compatible rules | Managed through uv tool isolation |
+| [Opengrep](https://github.com/opengrep/opengrep) | Application code across multiple languages | Pinned binary installed and SHA256-verified by ASH; serves the retired `semgrep` scanner name |
 | [detect-secrets](https://github.com/Yelp/detect-secrets) | Secrets in text files | Included with ASH |
 | [Checkov](https://github.com/bridgecrewio/checkov) | Infrastructure and configuration | Managed through uv tool isolation |
 | [cfn-nag](https://github.com/stelligent/cfn_nag) | CloudFormation | Ruby and cfn-nag |
@@ -303,11 +316,11 @@ for new capabilities.
 | [npm-audit](https://docs.npmjs.com/cli/commands/npm-audit) | Node.js dependencies | Node.js and npm |
 | [Grype](https://github.com/anchore/grype) | Dependency vulnerabilities | Grype |
 | [Syft](https://github.com/anchore/syft) | Software bill of materials | Syft |
-| [gitleaks](https://github.com/gitleaks/gitleaks) | Secrets in text files | `ash dependencies install` (pinned release binary) |
+| [gitleaks](https://github.com/gitleaks/gitleaks) | Secrets in text files | `ashx dependencies install` (pinned release binary) |
 | [cfn-lint](https://github.com/aws-cloudformation/cfn-lint) | CloudFormation | Managed through uv tool isolation |
-| [cfn-guard](https://github.com/aws-cloudformation/cloudformation-guard) | CloudFormation (AWS Guard Rules Registry rules) | `ash dependencies install` (pinned binary and rules) |
-| [Trivy](https://github.com/aquasecurity/trivy) (`trivy fs`) | Dependency vulnerabilities | `ash dependencies install` (pinned release binary) |
-| [actionlint](https://github.com/rhysd/actionlint) | GitHub Actions workflows | `ash dependencies install` (pinned release binary) |
+| [cfn-guard](https://github.com/aws-cloudformation/cloudformation-guard) | CloudFormation (AWS Guard Rules Registry rules) | `ashx dependencies install` (pinned binary and rules) |
+| [Trivy](https://github.com/aquasecurity/trivy) (`trivy fs`) | Dependency vulnerabilities | `ashx dependencies install` (pinned release binary) |
+| [actionlint](https://github.com/rhysd/actionlint) | GitHub Actions workflows | `ashx dependencies install` (pinned release binary) |
 | [zizmor](https://github.com/zizmorcore/zizmor) | GitHub Actions workflows and composite actions | Managed through uv tool isolation |
 
 Six more scanners ship as alpha plugin modules (Betterleaks, Ferret Scan,

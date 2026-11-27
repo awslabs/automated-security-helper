@@ -201,13 +201,13 @@ def _finding(scanner: str, level: str, issue_severity: str) -> dict:
 
 def _results_with_two_findings(tmp_path):
     """A MEDIUM bandit finding the scanner's own CRITICAL threshold makes
-    non-actionable, and a LOW semgrep finding the global LOW threshold makes
+    non-actionable, and a LOW opengrep finding the global LOW threshold makes
     actionable; the same two in the model and in the SARIF file the run
     recorded as written (the helper below makes both the way the report phase
     does)."""
     findings = [
         _finding("bandit", "warning", "MEDIUM"),
-        _finding("semgrep", "note", "LOW"),
+        _finding("opengrep", "note", "LOW"),
     ]
     return _results_with_the_file_apart_from_the_model(
         tmp_path, in_model=findings, in_file=findings
@@ -240,10 +240,10 @@ def test_an_actionable_finding_at_the_minimum_still_fails_the_scan(tmp_path):
 
 def test_the_actionability_check_reads_the_scanners_own_threshold(tmp_path):
     results = _results_with_two_findings(tmp_path)
-    bandit, semgrep = results.sarif.runs[0].results
+    bandit, opengrep = results.sarif.runs[0].results
 
     assert ras._actionable_under_its_scanner_threshold(bandit, results) is False
-    assert ras._actionable_under_its_scanner_threshold(semgrep, results) is True
+    assert ras._actionable_under_its_scanner_threshold(opengrep, results) is True
 
 
 def _results_whose_scanner_is_named_by_its_run(tmp_path, run_tool_name):
@@ -307,7 +307,7 @@ def test_a_result_named_by_a_run_with_no_threshold_of_its_own_is_still_judged_gl
     """Control: the run's tool has no threshold of its own, so the global LOW
     one applies, INFO is not actionable and nothing qualifies."""
     _metrics_counting_one_actionable_finding(monkeypatch)
-    results = _results_whose_scanner_is_named_by_its_run(tmp_path, "semgrep")
+    results = _results_whose_scanner_is_named_by_its_run(tmp_path, "opengrep")
     opts = _opts(tmp_path, "low")
 
     assert ras._gating_actionable_count(results, opts, False) == 0
@@ -372,14 +372,14 @@ def _results_with_the_report_named_apart_from_ash_sarif(tmp_path, monkeypatch):
     from automated_security_helper.core.unified_metrics import ScannerMetrics
 
     results = _results_with_the_file_apart_from_the_model(
-        tmp_path, in_model=[], in_file=[_finding("semgrep", "error", "HIGH")]
+        tmp_path, in_model=[], in_file=[_finding("opengrep", "error", "HIGH")]
     )
     results.validation_checkpoints = []
     record_reports_written(results, [("custom.sarif", "sarif")])
     reports = tmp_path / "out" / "reports"
     (reports / "ash.sarif").rename(reports / "custom.sarif")
     metric = ScannerMetrics(
-        scanner_name="semgrep",
+        scanner_name="opengrep",
         status="PASSED",
         actionable=0,
         targets_attempted=1,
@@ -430,7 +430,7 @@ def _results_with_the_file_apart_from_the_model(
     results, and of a container's or a shell's inner run writing the file.
 
     *scanner_thresholds* names each scanner's own ``severity_threshold``; the
-    default tightens bandit to CRITICAL and leaves semgrep at the global LOW."""
+    default tightens bandit to CRITICAL and leaves opengrep at the global LOW."""
     if scanner_thresholds is None:
         scanner_thresholds = {"bandit": "CRITICAL"}
     from automated_security_helper.config.ash_config import AshConfig
@@ -469,7 +469,7 @@ def _results_with_the_file_apart_from_the_model(
         ],
     )
     results.scanner_results["bandit"] = ScannerStatusInfo()
-    results.scanner_results["semgrep"] = ScannerStatusInfo()
+    results.scanner_results["opengrep"] = ScannerStatusInfo()
     # The exit code reads reports/ash.sarif only when the results record it as a
     # file this run's SARIF reporter wrote (report_file_written_as); a file in
     # reports/ that nothing recorded is an earlier run's. The report phase makes
@@ -497,14 +497,14 @@ def _results_with_the_file_apart_from_the_model(
 def test_a_count_taken_from_the_written_report_is_judged_on_that_report(tmp_path):
     """The model holds only a MEDIUM bandit finding its scanner's CRITICAL
     threshold makes non-actionable; the report this run wrote holds an
-    actionable HIGH semgrep finding. The count (1) comes from the file, so the
+    actionable HIGH opengrep finding. The count (1) comes from the file, so the
     --min-severity question is answered on the file too: exit 2. Judging the
     model's results against the file's count read the run as having no
     qualifying finding and exited 0."""
     results = _results_with_the_file_apart_from_the_model(
         tmp_path,
         in_model=[_finding("bandit", "warning", "MEDIUM")],
-        in_file=[_finding("semgrep", "error", "HIGH")],
+        in_file=[_finding("opengrep", "error", "HIGH")],
     )
 
     assert (
@@ -519,7 +519,7 @@ def test_a_written_report_with_no_actionable_finding_still_exits_0(tmp_path):
     """Control: the file decides, and it holds only the non-actionable finding."""
     results = _results_with_the_file_apart_from_the_model(
         tmp_path,
-        in_model=[_finding("semgrep", "error", "HIGH")],
+        in_model=[_finding("opengrep", "error", "HIGH")],
         in_file=[_finding("bandit", "warning", "MEDIUM")],
     )
 
@@ -537,7 +537,7 @@ def test_the_minimum_is_read_on_the_written_report_too(tmp_path):
     results = _results_with_the_file_apart_from_the_model(
         tmp_path,
         in_model=[],
-        in_file=[_finding("semgrep", "note", "LOW")],
+        in_file=[_finding("opengrep", "note", "LOW")],
     )
 
     assert (
@@ -564,8 +564,8 @@ def test_the_exit_code_read_asks_each_scanners_threshold_once(tmp_path, monkeypa
         _finding("bandit", "warning", "MEDIUM"),
         _finding("bandit", "warning", "MEDIUM"),
         _finding("bandit", "warning", "MEDIUM"),
-        _finding("semgrep", "note", "LOW"),
-        _finding("semgrep", "note", "LOW"),
+        _finding("opengrep", "note", "LOW"),
+        _finding("opengrep", "note", "LOW"),
     ]
     results = _results_with_the_file_apart_from_the_model(
         tmp_path, in_model=findings, in_file=findings
@@ -583,10 +583,10 @@ def test_the_exit_code_read_asks_each_scanners_threshold_once(tmp_path, monkeypa
     # The written report is not this run's, so the count comes from the model's
     # metrics (a real metrics row, not a mock whose every unset attribute reads
     # as truthy) and the filter judges the model's results: three bandit MEDIUMs
-    # at the minimum, each asking bandit's threshold; the two semgrep LOWs are
+    # at the minimum, each asking bandit's threshold; the two opengrep LOWs are
     # below the minimum and never asked. One scanner, so one resolver call.
     metric = ScannerMetrics(
-        scanner_name="semgrep",
+        scanner_name="opengrep",
         status="PASSED",
         actionable=2,
         targets_attempted=1,
@@ -608,7 +608,7 @@ def test_the_exit_code_read_asks_each_scanners_threshold_once(tmp_path, monkeypa
     # The written report is this run's: the count over its five results and the
     # filter over them share the one lookup, so each of the two scanners is asked
     # once. Nothing counted is at the minimum (bandit's MEDIUMs fail its CRITICAL
-    # threshold, semgrep's LOWs are below medium), so exit 0 again.
+    # threshold, opengrep's LOWs are below medium), so exit 0 again.
     asked.clear()
 
     exit_code = ras._compute_exit_code(
@@ -616,14 +616,14 @@ def test_the_exit_code_read_asks_each_scanners_threshold_once(tmp_path, monkeypa
     )
 
     assert exit_code == 0
-    assert sorted(asked) == ["bandit", "semgrep"], asked
+    assert sorted(asked) == ["bandit", "opengrep"], asked
 
 
 @pytest.mark.parametrize(
     ("level", "fails", "exit_code"),
     [
         # The ladder reads a level-only `error` as CRITICAL, which alone meets
-        # semgrep's CRITICAL threshold here: counted on the written report, read
+        # opengrep's CRITICAL threshold here: counted on the written report, read
         # as qualifying by the --min-severity critical filter, exit 2.
         pytest.param("error", True, 2, id="error-is-critical"),
         # Control: `warning` is MEDIUM, below the same threshold on both sides, so
@@ -640,13 +640,13 @@ def test_the_count_and_the_filter_read_a_level_only_result_alike(
     `error` passes on both sides, and a MEDIUM `warning` passes on neither."""
     from automated_security_helper.schemas.sarif_schema_model import Result
 
-    level_only = _finding("semgrep", level, "")
+    level_only = _finding("opengrep", level, "")
     del level_only["properties"]["issue_severity"]
     results = _results_with_the_file_apart_from_the_model(
         tmp_path,
         in_model=[level_only],
         in_file=[level_only],
-        scanner_thresholds={"bandit": "CRITICAL", "semgrep": "CRITICAL"},
+        scanner_thresholds={"bandit": "CRITICAL", "opengrep": "CRITICAL"},
     )
     threshold_for = ras._scanner_threshold_lookup(results)
 

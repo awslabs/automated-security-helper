@@ -170,9 +170,9 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
     always sets (to the second, in UTC) when the results model is built, and
     which nothing reassigns afterwards. Because it is stored in
     ``ash_aggregated_results.json``, re-reporting a finished scan with
-    ``ash report --format s3`` computes the same key the scan did and replaces
+    ``ashx report --format s3`` computes the same key the scan did and replaces
     that object rather than minting a second one. ``summary_stats.start`` is only
-    a fallback: preferring it would give the scan and a later ``ash report`` two
+    a fallback: preferring it would give the scan and a later ``ashx report`` two
     different keys, since it is unset during the first and set in the second.
     Moving when ``summary_stats.start`` is assigned was rejected: more than this
     reporter reads it.
@@ -314,7 +314,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             self._plugin_log(
                 "s3 uploads one project's results at a time, and these are a "
                 "workspace's unified results, which each project's own scan "
-                "already uploaded. Run ash report with --output-dir set to a "
+                "already uploaded. Run ashx results report with --output-dir set to a "
                 "project's directory under the workspace output.",
                 level=logging.ERROR,
                 append_to_stream="stderr",
@@ -322,7 +322,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             return None
 
         # Create a key for the S3 object. generated_at is set when the model is
-        # built and is the same during the scan and in a later `ash report`;
+        # built and is the same during the scan and in a later `ashx report`;
         # summary_stats.start is unset during a scan. See the class docstring.
         # The project segment keeps workspace projects apart.
         timestamp = (

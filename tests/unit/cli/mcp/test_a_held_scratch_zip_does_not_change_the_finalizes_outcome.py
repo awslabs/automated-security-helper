@@ -36,7 +36,7 @@ from automated_security_helper.cli.mcp import source_delivery as sd
 
 pytestmark = pytest.mark.unit
 
-_SESSION = "session-held-zip"
+_CLIENT_ID = "session-held-zip"
 
 
 @pytest.fixture
@@ -48,7 +48,7 @@ def workspace(tmp_path):
     """
 
     yield tmp_path
-    sd.clear_source(_SESSION, workspace_root=tmp_path)
+    sd.clear_source(_CLIENT_ID, workspace_root=tmp_path)
 
 
 def _zip_with(name: str) -> bytes:
@@ -67,9 +67,9 @@ def _upload(payload: bytes, upload_id: str, workspace_root: Path) -> Path:
         data_b64=base64.b64encode(payload).decode("ascii"),
         last=True,
         workspace_root=workspace_root,
-        session_id=_SESSION,
+        session_id=_CLIENT_ID,
     )
-    assembled = workspace_root / _SESSION / "incoming" / f"{upload_id}.zip"
+    assembled = workspace_root / _CLIENT_ID / "incoming" / f"{upload_id}.zip"
     assert assembled.is_file()
     return assembled
 
@@ -121,7 +121,7 @@ def test_a_checksum_refusal_surfaces_when_the_zips_unlink_is_refused(
                 upload_id="held-bad",
                 expected_sha256="0" * 64,
                 workspace_root=workspace,
-                session_id=_SESSION,
+                session_id=_CLIENT_ID,
             )
 
     assert len(refused) == 2, "the planted unlink refusal was not reached each time"
@@ -146,7 +146,7 @@ def test_a_size_refusal_surfaces_when_the_zips_unlink_is_refused(
             upload_id="held-big",
             expected_sha256=hashlib.sha256(payload).hexdigest(),
             workspace_root=workspace,
-            session_id=_SESSION,
+            session_id=_CLIENT_ID,
         )
 
     assert refused, "the planted unlink refusal was never reached"
@@ -170,9 +170,9 @@ def test_a_delivery_that_took_effect_succeeds_when_the_zips_unlink_is_refused(
         upload_id="held-good",
         expected_sha256=hashlib.sha256(payload).hexdigest(),
         workspace_root=workspace,
-        session_id=_SESSION,
+        session_id=_CLIENT_ID,
     )
 
     assert (source / "app" / "held-good.txt").is_file()
-    assert sd.get_session_source_dir(_SESSION) == source
+    assert sd.get_session_source_dir(_CLIENT_ID) == source
     assert refused, "the planted unlink refusal was never reached"

@@ -1,0 +1,8 @@
+progress:
+  Looking for the ASH executable
+  Running <BIN>/missing-ash scan
+
+notification group=ASH type=ERROR
+title: ASH scan failed
+body:
+Could not start '<BIN>/missing-ash': ProcessNotCreatedException: Cannot run program "<BIN>/missing-ash": error=2, No such file or directory. Install ASH, or set the full path to it in Settings | Tools | ASH.

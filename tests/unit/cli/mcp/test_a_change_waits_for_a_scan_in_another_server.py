@@ -135,9 +135,9 @@ def test_a_change_is_refused_while_a_replicas_scan_of_the_session_runs(
             with sd._no_scan_running(REPLICATED, removes_workspace=removes_workspace):
                 pytest.fail("the change began under the replica's scan")
         # The refused change holds nothing: a scan of this process may start.
-        session = sessions.get_default_registry().session_for(REPLICATED)
-        assert session.try_claim_scan(), "the refused change kept the session"
-        session.release_scan()
+        entry = sessions.get_default_registry().session_for(REPLICATED)
+        assert entry.try_claim_scan(), "the refused change kept the session"
+        entry.release_scan()
     with sd._no_scan_running(REPLICATED, removes_workspace=removes_workspace):
         pass  # the change goes on once the scan elsewhere is over
 
@@ -320,9 +320,9 @@ def test_a_change_is_refused_as_busy_while_another_server_holds_the_lock(
 
     assert not changing.is_alive(), "the change was still waiting for the lock"
     assert isinstance(result.get("error"), sd.SourceDeliveryBusyError), result
-    session = sessions.get_default_registry().session_for(REPLICATED)
-    assert session.try_claim_scan(), "the refused change kept the session"
-    session.release_scan()
+    entry = sessions.get_default_registry().session_for(REPLICATED)
+    assert entry.try_claim_scan(), "the refused change kept the session"
+    entry.release_scan()
     another_servers_lock.close()
     with sd._no_scan_running(REPLICATED):
         pass  # the change goes on once the lock is free

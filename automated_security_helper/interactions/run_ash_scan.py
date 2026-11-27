@@ -28,7 +28,14 @@ from typing import (
 )
 
 import typer
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+)
 from rich.text import Text
 
 from automated_security_helper.models.vocab import Severity
@@ -165,9 +172,11 @@ from automated_security_helper.utils.scan_completeness import (  # noqa: F401
     _listed_only_for_a_stale_database as _listed_only_for_a_stale_database,
     _partial_coverage as _partial_coverage,
     _result_rule_id as _result_rule_id,
+    _row_is_missing as _row_is_missing,
     incomplete_converters as incomplete_converters,
     incomplete_scanner_reason as incomplete_scanner_reason,
     incomplete_scanners as incomplete_scanners,
+    missing_on_some_files as missing_on_some_files,
     scan_incompleteness as scan_incompleteness,
     scanner_statuses as scanner_statuses,
     scanners_that_could_not_stop as scanners_that_could_not_stop,
@@ -241,7 +250,11 @@ if TYPE_CHECKING:
 class ScanOptions(BaseModel):
     """All parameters for a single run_ash_scan invocation."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    # populate_by_name: ``offline_rulesets`` carries a validation_alias of two
+    # spellings, which the pydantic mypy plugin reads as a dynamic alias. Accepting
+    # the field name by name is what lets the plugin build the constructor
+    # signature from it; both spellings still bind through the AliasChoices.
+    model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
 
     # Core paths
     source_dir: Path
@@ -382,7 +395,12 @@ class ScanOptions(BaseModel):
     force: bool = False
     oci_runner: Optional[str] = None
     build_target: Optional[BuildTarget] = None
-    offline_semgrep_rulesets: str = "p/ci"
+    # Rulesets baked into the opengrep offline cache. ``offline_semgrep_rulesets``
+    # is the deprecated spelling of this field and is still accepted on input.
+    offline_rulesets: str = Field(
+        "p/ci",
+        validation_alias=AliasChoices("offline_rulesets", "offline_semgrep_rulesets"),
+    )
     container_uid: Optional[str] = None
     container_gid: Optional[str] = None
     ash_revision_to_install: Optional[str] = None
@@ -408,7 +426,9 @@ class ScanOptions(BaseModel):
                 f"min_severity must be one of {', '.join(accepted)} (any case), "
                 f"not {v!r}"
             )
-        return value
+        # Lowercased: the value is forwarded to the container and Nix CLIs, whose
+        # option is a case-sensitive choice, so "HIGH" would be a usage error there.
+        return value.lower()
 
     @field_validator(
         "scanners",
@@ -723,7 +743,7 @@ def print_incompleteness_message(
         missing_rows = [
             _name
             for _name, _status in incomplete_scanner_rows
-            if _status.split(" (", 1)[0] == ScannerStatus.MISSING.value
+            if _row_is_missing(_status)
         ]
         # The warning that a relative ASH_BIN_PATH was skipped goes to ash.log,
         # which a reader of this advice may never open.
@@ -930,7 +950,7 @@ def _resolve_fail_on_incomplete_scanners(
        whatever object the caller supplied, and a partially-built model or a test
        double would otherwise contribute a truthy non-answer.
     3. *config_value* -- read from the config file before the scan, which is what
-       container mode has to fall back on and what ``ash merge`` passes from the
+       container mode has to fall back on and what ``ashx merge`` passes from the
        config carried in the shard results.
     4. On, matching ``AshConfig.fail_on_incomplete_scanners``.
 
@@ -1039,6 +1059,28 @@ def _record_inner_refusal(
         )
 
 
+def _open_a_regular_file_for_text(path: Path):
+    """Open *path* as UTF-8 text only if it is itself a regular file, checked on
+    the descriptor that is read.
+
+    The earlier lstat checks (``not_a_regular_file``, ``_is_a_regular_report_file``)
+    leave a window in which a tool still writing can swap in a link or a pipe, so
+    the open refuses a link (``O_NOFOLLOW``), does not block on a pipe
+    (``O_NONBLOCK``), and ``fstat`` confirms the file. Both flags are absent on
+    Windows, where the open is the plain one and the lstat checks stand.
+    Raises OSError when the path is not a regular file.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    fd = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"{path} is not a regular file")
+        return os.fdopen(fd, mode="r", encoding="utf-8")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 def _refuse_an_inner_file_that_is_not_regular(path: Path, what: str) -> None:
     """Exit 1, without reading it, when a file the inner run left is not a regular file.
 
@@ -1062,7 +1104,7 @@ def discard_history_record(results: Any, output_dir: Path) -> None:
 
     The orchestrator appends the record right after it writes the results file
     (``_record_history``), so a cancel that lands after that left a record
-    saying the run completed, and ``ash trend`` showed the taken-back run as a
+    saying the run completed, and ``ashx results trend`` showed the taken-back run as a
     point. Three paths remove it: the cancel check before this module's final
     rewrite, ``execute_scan``'s arm for a cancel that escapes the write step
     after the record (core/orchestrator.py), and the MCP runner's settle, which
@@ -1085,7 +1127,7 @@ def discard_history_record(results: Any, output_dir: Path) -> None:
         discard_run_record(output_dir, report_id)
     except Exception as exc:  # noqa: BLE001 - the cancel is what the caller must see
         # At debug, not swallowed without a word: when a cancelled run still
-        # shows in ``ash trend``, this line is the trace of why its record stayed.
+        # shows in ``ashx results trend``, this line traces why its record stayed.
         ASH_LOGGER.debug(
             f"Could not discard the taken-back run's record in {output_dir}: {exc}"
         )
@@ -1110,7 +1152,7 @@ def _read_back_inner_results(
     if not output_file.exists():
         return None
     try:
-        with open(output_file, mode="r", encoding="utf-8") as f:
+        with _open_a_regular_file_for_text(output_file) as f:
             content = f.read()
         return AshAggregatedResults.model_validate_json(content)
     except (ValidationError, ValueError) as e:
@@ -3000,7 +3042,7 @@ def _outer_mode_config_load(opts: ScanOptions) -> _OuterModeConfigLoad:
     )
 
 
-# The values click's boolean type (typer's vendored copy included) reads as true. `ash scan` declares ASH_DEBUG and
+# The values click's boolean type (typer's vendored copy included) reads as true. `ashx scan` declares ASH_DEBUG and
 # ASH_VERBOSE as envvars of --debug/--verbose, so click parses them first and
 # rejects anything outside its set; this has to agree with click about what turns
 # them on, or `ASH_DEBUG=on` would pass the CLI and then do nothing. It is a
@@ -4033,8 +4075,10 @@ def _names_the_output_directorys_own_results(opts: ScanOptions) -> bool:
     """
     if not opts.existing_results:
         return False
-    named = Path(opts.existing_results).resolve()
-    own = (Path(opts.output_dir) / "ash_aggregated_results.json").resolve()
+    # realpath, not Path.resolve(): before Python 3.13 resolve() raises
+    # RuntimeError for a symbolic link loop, and a loop is just another file here.
+    named = Path(os.path.realpath(opts.existing_results))
+    own = Path(os.path.realpath(Path(opts.output_dir) / "ash_aggregated_results.json"))
     return named == own
 
 
@@ -4488,7 +4532,7 @@ def _run_container_mode(
         force=opts.force,
         oci_runner=opts.oci_runner,
         build_target=opts.build_target,
-        offline_semgrep_rulesets=opts.offline_semgrep_rulesets,
+        offline_semgrep_rulesets=opts.offline_rulesets,
         container_uid=opts.container_uid,
         container_gid=opts.container_gid,
         # The host path: run_ash_container mounts the file read-only and hands
@@ -4531,7 +4575,7 @@ def _run_container_mode(
         # Applied inside only in workspace mode, whose exit code the host
         # returns as the container computed it (below); a one-directory scan's
         # exit code is recomputed on the host, where --min-severity is applied.
-        min_severity=opts.min_severity,
+        min_severity=_forwarded_min_severity(opts),
         # The policy the host resolved into the plan, mounted for the workspace
         # scan inside as --config is (_host_file_in_container).
         workspace_config=workspace_config,
@@ -4766,8 +4810,9 @@ def _refuse_a_results_file_the_shell_cannot_be_handed(
     """
     if not opts.existing_results:
         return
-    named = Path(opts.existing_results).resolve()
-    own = (Path(opts.output_dir) / "ash_aggregated_results.json").resolve()
+    # realpath for the same reason as _names_the_output_directorys_own_results.
+    named = Path(os.path.realpath(opts.existing_results))
+    own = Path(os.path.realpath(Path(opts.output_dir) / "ash_aggregated_results.json"))
     if named == own:
         return
     _logged_refusal(
@@ -4779,6 +4824,15 @@ def _refuse_a_results_file_the_shell_cannot_be_handed(
         f"{named}, is another file. Pass the output "
         "directory that holds the file, or run the report phase with --mode local.",
     )
+
+
+def _forwarded_min_severity(opts: ScanOptions) -> str:
+    """``opts.min_severity`` as the inner CLI's case-sensitive choice spells it.
+
+    The field validator lowercases it, but ``model_copy(update=...)`` and
+    ``model_construct`` skip validators, so the forward points lowercase too.
+    """
+    return str(getattr(opts.min_severity, "value", opts.min_severity)).lower()
 
 
 def _nix_inner_argv(opts: ScanOptions) -> List[str]:
@@ -4870,8 +4924,8 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
     argv.extend(["--strategy", value_of(opts.strategy)])
     if opts.offline:
         argv.append("--offline")
-    if opts.offline_semgrep_rulesets != "p/ci":
-        argv.extend(["--offline-semgrep-rulesets", opts.offline_semgrep_rulesets])
+    if opts.offline_rulesets != "p/ci":
+        argv.extend(["--offline-rulesets", opts.offline_rulesets])
     if not opts.progress:
         argv.append("--no-progress")
     if not opts.color:
@@ -4903,8 +4957,8 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
             if opts.fail_on_incomplete_scanners
             else "--no-fail-on-incomplete-scanners"
         )
-    if opts.min_severity.lower() != MinSeverity.LOW.value:
-        argv.extend(["--min-severity", opts.min_severity])
+    if _forwarded_min_severity(opts) != MinSeverity.LOW.value:
+        argv.extend(["--min-severity", _forwarded_min_severity(opts)])
     if opts.changed_files_only:
         argv.extend(["--changed-files-only", "--base-ref", opts.base_ref])
     if opts.existing_results:
@@ -5047,6 +5101,18 @@ def _run_nix_mode(
         kept_on_purpose=bool(opts.existing_results),
     )
     output_file = opts.output_dir / "ash_aggregated_results.json"
+    if shell_code == 2 and not output_file.exists():
+        # As in container mode: the scan inside exits 2 for findings only after
+        # writing the results file, and for a usage error without one. The
+        # shell's checkout may be an older ASH that rejects an option this ASH
+        # passes it.
+        logger.error(
+            "The scan inside the Nix shell exited 2 without writing a results "
+            "file, which is how the ASH command line rejects its arguments: the "
+            "ASH the shell runs may be older than this one and not accept an "
+            "option this ASH passes it. Run it from the same checkout as this ASH."
+        )
+        sys.exit(AshExitCode.INVALID_CONFIG)
     results = _read_back_inner_results(output_file, logger)
     if results is not None:
         _refuse_an_inner_run_that_did_not_complete(
@@ -6469,7 +6535,7 @@ def _compute_exit_code(
     # during execution" code, and an incomplete scan is that: the findings that
     # were reported are real but the set is known to be partial. Reporting 2 would
     # tell a reviewer that clearing the listed findings clears the scan, when some
-    # scanners contributed nothing. `ash merge` already uses 1 for its coverage
+    # scanners contributed nothing. `ashx merge` already uses 1 for its coverage
     # refusals on the same reasoning -- the findings are unknown, which is not the
     # same as "no findings".
     #
@@ -6551,19 +6617,24 @@ def _compute_exit_code(
         # is SKIPPED clears the loop above having measured nothing.
         #
         # Reachable without any sharding and without any operator error beyond a
-        # single word. Measured on this tree with the repository's own
-        # .ash.yaml, which sets `semgrep: enabled: true`:
-        # `ash scan --scanners semgrep` on Windows resolves semgrep against the
-        # registered names, so ScannerSelectionError does not fire; semgrep then
-        # declares the platform unsupported and is recorded SKIPPED; the other nine
-        # are not selected and are SKIPPED too; findings are 0; exit 0. A scan that
-        # ran no scanner reported the tree clean.
+        # single word. Measured, when the semgrep scanner still shipped, on a tree
+        # whose own .ash.yaml set `semgrep: enabled: true`:
+        # `ashx scan --scanners semgrep` on Windows resolved semgrep against the
+        # registered names, so ScannerSelectionError did not fire; semgrep then
+        # declared the platform unsupported and was recorded SKIPPED; the other nine
+        # were not selected and were SKIPPED too; findings were 0; exit 0. A scan
+        # that ran no scanner reported the tree clean. No builtin declares a
+        # platform unsupported today (opengrep, which serves the semgrep alias,
+        # ships a windows/amd64 build and is merely disabled by default on
+        # Windows through its config default, a different mechanism), but the
+        # shape returns with any future scanner that overrides
+        # unsupported_platform_reason, so the guard stays.
         #
         # .github/scripts/assert_scanners_completed.py already asserted this and
         # caught that case in CI, which is the reason it has to be here as well:
         # its docstring says that reading the JSON status rather than the rendered
         # report means the guard and ASH's own exit code "read the same field", and
-        # on this exact input they did not agree. An operator running `ash scan` got
+        # on this exact input they did not agree. An operator running `ashx scan` got
         # 0 from the same results file the CI gate exits 1 on.
         #
         # Inside the fail_on_incomplete_scanners gate rather than beside it. The
@@ -6692,7 +6763,7 @@ def _compute_exit_code(
     # the block above states: an operator who turned findings-gating off said "do not
     # fail me for what you find", not "do not tell me part of the scan never ran".
     #
-    # 1 rather than 2, matching the gate above and `ash merge`'s coverage refusals.
+    # 1 rather than 2, matching the gate above and `ashx merge`'s coverage refusals.
     # 2 means "clearing the listed findings clears the scan", which is exactly what
     # is not true here -- the reported set is known to be missing whatever these rules
     # would have said.
@@ -6742,7 +6813,7 @@ def _compute_exit_code(
     #
     # Read from the SARIF notification's level, which the scan set from the policy it ran
     # under, rather than re-resolving the policy here. That keeps the decision with the
-    # results: container mode's host and `ash merge` both arrive here with a results
+    # results: container mode's host and `ashx merge` both arrive here with a results
     # model and no reliable view of the config the inner scan used. The opt-out is
     # `--allow-stale-content-db` or `content_db_staleness: warn`, which writes the same
     # notification at level warning so it reaches the reports without failing the scan.
@@ -6925,7 +6996,7 @@ def _gating_actionable_count(
         and report_sarif_written_this_run is not False
     ):
         try:
-            with open(sarif_file, encoding="utf-8") as f:
+            with _open_a_regular_file_for_text(sarif_file) as f:
                 sarif_json = json.load(f)  # nosec
 
             sarif_active = 0
@@ -7102,10 +7173,10 @@ def _print_summary(
         _print_text(f"    - Markdown summary: '{out_dir_alias}/reports/ash.summary.md'")
         _print_text(f"    - Text summary: '{out_dir_alias}/reports/ash.summary.txt'")
         print(
-            "  2. Use [magenta]ash report[/magenta] to view a short text summary of the scan in your terminal"
+            "  2. Use [magenta]ashx results report[/magenta] to view a short text summary of the scan in your terminal"
         )
         print(
-            "  3. Use [magenta]ash inspect findings[/magenta] to explore the findings interactively"
+            "  3. Use [magenta]ashx results inspect findings[/magenta] to explore the findings interactively"
         )
         _print_text(
             f"  4. Review scanner-specific reports and outputs in the '{out_dir_alias}/scanners' directory"
@@ -7587,7 +7658,7 @@ def run_ash_scan(
         force=force,
         oci_runner=oci_runner,
         build_target=build_target,
-        offline_semgrep_rulesets=offline_semgrep_rulesets,
+        offline_rulesets=offline_semgrep_rulesets,
         container_uid=container_uid,
         container_gid=container_gid,
         ash_revision_to_install=ash_revision_to_install,
@@ -7870,23 +7941,29 @@ def _run_with_options(
         and outer_load.document is not _NOT_LOADED
     ):
         reads.selected_document = (outer_load.document,)
+    # A local scan reads neither exit-code field from the file before it runs: the
+    # orchestrator's own resolved config decides fail_on_findings (below), and
+    # fail_on_incomplete_scanners is read from the run's results, so a pre-read
+    # here (a full unchecked load of the file) would only be thrown away.
     shared = _NOT_LOADED
-    if outer_load is not None and outer_load.loaded:
-        shared = outer_load.selected
-    if shared is _NOT_LOADED:
-        # The image-schema branch of the gate parsed the file, built the model
-        # from that document and asked about the image; this read takes all
-        # three answers, so the file is resolved once and the image's source is
-        # named once.
-        shared = _load_config_file_or_its_exit_fields(
-            opts,
-            document=outer_load.document if outer_load is not None else _NOT_LOADED,
-            image_may_differ=gate_image_answer,
-            model=outer_load.model if outer_load is not None else _NOT_LOADED,
-        )
-    config_fail_on_findings: Optional[bool] = _resolve_config_fail_on_findings(
-        opts, loaded=shared
-    )
+    config_fail_on_findings: Optional[bool] = None
+    if opts.mode != RunMode.local:
+        if outer_load is not None and outer_load.loaded:
+            shared = outer_load.selected
+        if shared is _NOT_LOADED:
+            # The image-schema branch of the gate parsed the file, built the model
+            # from that document and asked about the image; this read takes all
+            # three answers, so the file is resolved once and the image's source
+            # is named once.
+            shared = _load_config_file_or_its_exit_fields(
+                opts,
+                document=(
+                    outer_load.document if outer_load is not None else _NOT_LOADED
+                ),
+                image_may_differ=gate_image_answer,
+                model=outer_load.model if outer_load is not None else _NOT_LOADED,
+            )
+        config_fail_on_findings = _resolve_config_fail_on_findings(opts, loaded=shared)
     # Read from the file before the scan only where the answer cannot wait for the
     # orchestrator's resolution. A local scan's results carry the config it
     # actually resolved, which a client-delivered file is checked in; a pre-read
@@ -7921,14 +7998,15 @@ def _run_with_options(
         results = _run_nix_mode(opts, logger, image_may_differ=gate_image_answer)
     else:
         results, _local_config_fof = _run_local_mode(opts, logger)
-        # _run_local_mode resolves config via the live orchestrator; prefer that
-        # value over the file-based pre-read when it differs (e.g. config_overrides
-        # applied by the orchestrator may alter fail_on_findings).
+        # _run_local_mode resolves config via the live orchestrator (config_overrides
+        # applied by the orchestrator may alter fail_on_findings), and no file
+        # pre-read stands behind it: when it answers None the results' recorded
+        # config decides, in _compute_exit_code.
         if _local_config_fof is not None:
             config_fail_on_findings = _local_config_fof
 
     if opts.workspace_plan is not None:
-        # Container mode ran `ash --workspace` inside the container, so the
+        # Container mode ran `ashx --workspace` inside the container, so the
         # verdict was already computed there by the same code. Re-deriving it on
         # the host from a merged model would answer a different question.
         workspace_payload = getattr(results, "workspace", None)

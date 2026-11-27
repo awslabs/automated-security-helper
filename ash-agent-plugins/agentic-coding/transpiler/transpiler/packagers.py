@@ -12,10 +12,39 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import zipfile
 from pathlib import Path
 
 from .core import Manifest
+
+
+# `v4.0.0` -> `4.0.0`. ash_version is a release tag; a bundle version is semver.
+_ASH_TAG = re.compile(r"^v(\d+\.\d+\.\d+)$")
+
+
+def mcpb_bundle_version(ash_version: str) -> str:
+    """The .mcpb bundle's own `version`: the ASH release the bundle launches.
+
+    A desktop MCP host decides whether a downloaded bundle replaces the installed one
+    by comparing this field, so it has to move when the bundle moves. It used to be the
+    plugin version from _base/manifest.json, which is 1.0.0 and never changes, so a host
+    holding the bundle for one ASH release saw the next one as the same version. The
+    bundle's mcp_config launches `uvx --from=git+...@<ash_version>`, so the ASH release
+    is what the bundle installs, and it is the version a host should compare.
+
+    Derived from ash_version rather than given its own key: pyproject.toml's
+    [tool.commitizen] version_files already rewrites `_base/manifest.json:ash_version`
+    on every bump, so the bundle version moves with it and with nothing else, and the
+    plugin `version` key keeps meaning the plugin version for every other backend.
+    """
+    match = _ASH_TAG.match(ash_version)
+    if not match:
+        raise ValueError(
+            f"ash_version {ash_version!r} in _base/manifest.json is not a release tag "
+            "of the form vMAJOR.MINOR.PATCH, so no bundle version can be derived from it"
+        )
+    return match.group(1)
 
 
 def mcpb_manifest(
@@ -34,7 +63,7 @@ def mcpb_manifest(
     return {
         "manifest_version": manifest_version,
         "name": m.name,
-        "version": m.version,
+        "version": mcpb_bundle_version(m.ash_version),
         "description": m.description,
         "long_description": long_description or m.description,
         "author": {"name": m.author_name, "url": m.author_url},

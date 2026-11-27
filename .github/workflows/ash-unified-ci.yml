@@ -30,17 +30,17 @@ on:
   #
   # WHAT THIS COSTS, AND WHAT WAS REJECTED
   #
-  # Sized off a count rather than a guess: this workflow expands to 383 jobs on a push
-  # to main, 381 on a merge-queue run, where warm-image-layers does not run, and 159 on a
+  # Sized off a count rather than a guess: this workflow expands to 378 jobs on a push
+  # to main, 376 on a merge-queue run, where warm-image-layers does not run, and 154 on a
   # pull request, where the matrices run the pull-request cover (the note on ensure-cache),
-  # and ash-iac-drift.yml to 6, so a queued merge that also pushes to main is
+  # and ash-iac-drift.yml to 11, so a queued merge that also pushes to main is
   # ~776 runner jobs instead of ~387. The duplicate result on a queued merge is the
   # price of covering the bypassed one, and it was accepted deliberately. With
   # install-validation's five cheap install methods each as its own leg -- 4 methods x
   # 20 cells + uvx x 5 OS = 85 legs in place of the 20 bundled cells (uvx ran on 3.12
   # only), 65 more legs on each of the two runs -- it would be ~906 against ~452, so
   # running them as one leg per combination cuts a large share of what this deliberate
-  # duplication costs. Most of the 383 is the
+  # duplication costs. Most of the 378 is the
   # unit-test and integration-test families, which are 288 legs since the suite was split
   # by tier and the slow pools took eight shards: the unit tier is 144 legs (2 Linux
   # images x 4 Python versions x 6 shards, plus 2 macOS images and 1 Windows image x 4 x
@@ -56,7 +56,7 @@ on:
   # longest pull-request leg near the ~10.5-minute floor the longest scan leg sets. Each
   # integration shard
   # repeats the checkout and dependency install, so the job
-  # count rises faster than the test time does. The 383-job push figure is
+  # count rises faster than the test time does. The 378-job push figure is
   # derived from a census rather than being one -- see the note on the required-checks job for
   # which link in that chain was actually measured, and
   # tests/unit/test_unified_ci_job_counts.py, which recounts both figures from the
@@ -530,6 +530,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - id: setup
         uses: ./.github/actions/setup-ash
         with:
@@ -864,6 +866,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: ${{ matrix.python-version }}
@@ -910,6 +914,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: ${{ matrix.python-version }}
@@ -993,6 +999,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: ${{ matrix.python-version }}
@@ -1058,6 +1066,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -1169,6 +1179,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: ${{ matrix.python-version }}
@@ -1213,6 +1224,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: ${{ matrix.python-version }}
@@ -1254,6 +1266,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: ${{ matrix.python-version }}
@@ -1297,6 +1310,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -1330,6 +1344,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -1359,6 +1374,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -1410,6 +1426,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.13"
@@ -1541,7 +1558,7 @@ jobs:
           ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
         run: |
           start=$(date +%s)
-          ash container build --oci-runner docker --build-target ci --ash-revision-to-install LOCAL --no-run --verbose 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
+          ashx container build --oci-runner docker --build-target ci --ash-revision-to-install LOCAL --no-run --verbose 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
           echo "image build took $(( $(date +%s) - start ))s" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: "Cache report: image-layers"
         if: ${{ !cancelled() }}
@@ -1589,6 +1606,12 @@ jobs:
       # and the caps are deliberately not lowered here.
       max-parallel: 29
       matrix:
+        # WHY THERE ARE NO `method: bash` CELLS
+        #
+        # They went with the root `ash` bash script the Python CLI absorbed. They cost no
+        # platform coverage: each one paired with a `python-container` cell on the same os and
+        # oci-runner, so the pair ran the same container build from two entrypoints.
+        #
         # WHY THERE IS NO `platform` KEY HERE ANY MORE
         #
         # Every row used to carry one -- `platform: linux/amd64` and so on -- and it was a pure
@@ -1623,16 +1646,13 @@ jobs:
         # directions.
         include:
           # Linux x86 -- Docker
-          - { os: ubuntu-latest, method: bash, config-file: default, oci-runner: docker }
           - { os: ubuntu-latest, method: powershell, config-file: default, oci-runner: docker }
           - { os: ubuntu-latest, method: python-container, config-file: default, oci-runner: docker }
           - { os: ubuntu-latest, method: python-local, config-file: default }
           # Linux x86 -- Podman
-          - { os: ubuntu-latest, method: bash, config-file: default, oci-runner: podman }
           - { os: ubuntu-latest, method: powershell, config-file: default, oci-runner: podman }
           - { os: ubuntu-latest, method: python-container, config-file: default, oci-runner: podman }
           # Linux x86 -- Finch
-          - { os: ubuntu-latest, method: bash, config-file: default, oci-runner: finch }
           - { os: ubuntu-latest, method: powershell, config-file: default, oci-runner: finch }
           - { os: ubuntu-latest, method: python-container, config-file: default, oci-runner: finch }
           # Linux x86 -- the sh helper (". utils/ash_helpers.sh && invoke-ash", the form its
@@ -1642,12 +1662,10 @@ jobs:
           - { os: ubuntu-latest, method: sh-helper, config-file: default, oci-runner: finch }
 
           # Linux ARM -- Docker
-          - { os: ubuntu-24.04-arm, method: bash, config-file: default, oci-runner: docker }
           - { os: ubuntu-24.04-arm, method: powershell, config-file: default, oci-runner: docker }
           - { os: ubuntu-24.04-arm, method: python-container, config-file: default, oci-runner: docker }
           - { os: ubuntu-24.04-arm, method: python-local, config-file: default }
           # Linux ARM -- Podman
-          - { os: ubuntu-24.04-arm, method: bash, config-file: default, oci-runner: podman }
           - { os: ubuntu-24.04-arm, method: powershell, config-file: default, oci-runner: podman }
           - { os: ubuntu-24.04-arm, method: python-container, config-file: default, oci-runner: podman }
           # Linux ARM -- Finch (x86_64 only, skip ARM)
@@ -1662,7 +1680,7 @@ jobs:
           # Windows -- python-local only (Docker disabled on hosted Windows)
           - { os: windows-latest, method: python-local, config-file: default }
 
-          # Offline mode -- validates OFFLINE=YES Docker build (grype db + semgrep rulesets cached at build time)
+          # Offline mode -- validates OFFLINE=YES Docker build (grype db + opengrep rulesets cached at build time)
           - { os: ubuntu-latest, method: python-container, config-file: default, oci-runner: docker, offline: true }
 
           # Alpha plugins -- python-local on all platforms
@@ -1727,6 +1745,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -1742,7 +1762,7 @@ jobs:
         env:
           ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
           ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
-        run: ash container build --oci-runner docker --ash-revision-to-install LOCAL --no-run --verbose
+        run: ashx container build --oci-runner docker --ash-revision-to-install LOCAL --no-run --verbose
       - name: Check who can write to the image
         shell: bash
         env:
@@ -1837,7 +1857,7 @@ jobs:
         shell: bash
         env:
           ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
-        run: ash dependencies install --tool bandit --tool checkov
+        run: ashx dependencies install --tool bandit --tool checkov
       - uses: ./.github/actions/tool-download-cache
         with:
           mode: save
@@ -2023,20 +2043,20 @@ jobs:
           BETTERLEAKS: ${{ matrix.betterleaks }}
         run: |
           pip install ".[cdk]"
-          ash dependencies install
+          ashx dependencies install
           # hadolint and GuardDog are alpha scanners: their names are tools only
           # once their module is loaded, hence the alpha config.
-          ash dependencies install --config .ash/.ash_alpha_plugins.yaml \
+          ashx dependencies install --config .ash/.ash_alpha_plugins.yaml \
             --tool hadolint --tool guarddog
           # betterleaks is an alpha scanner too, and its module is not in that
           # file, so its install loads the module with an override as trivy-repo's
           # does below. Only the legs that compare it install it.
           if [ "$BETTERLEAKS" = "true" ]; then
-            ash dependencies install --tool betterleaks \
+            ashx dependencies install --tool betterleaks \
               --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_betterleaks_plugins]"
           fi
       # trivy-repo is a plugin scanner, so ASH knows its name only once its module is
-      # loaded (`ash dependencies install --tool trivy-repo` without it exits 2,
+      # loaded (`ashx dependencies install --tool trivy-repo` without it exits 2,
       # "Unknown tool(s)"): the install loads it with an override, and the config
       # written here loads it for the parity runs. Its database and checks bundle are
       # then fetched into
@@ -2064,7 +2084,7 @@ jobs:
             'scanners:' \
             '  trivy-repo:' \
             '    enabled: true' > "$PARITY_CONFIG"
-          ash dependencies install --tool trivy-repo \
+          ashx dependencies install --tool trivy-repo \
             --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_trivy_plugins]"
           trivy="$(python -c 'from automated_security_helper.utils.subprocess_utils import find_executable; print(find_executable("trivy") or "")')"
           test -n "$trivy" || { echo "::error::trivy was not installed"; exit 1; }
@@ -2107,12 +2127,12 @@ jobs:
           SANDBOX: ${{ matrix.sandbox }}
           BETTERLEAKS: ${{ matrix.betterleaks }}
         run: |
-          required=bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft,actionlint,cfn-lint,cfn-guard,gitleaks,zizmor,trivy,trivy-repo,hadolint,guarddog
+          required=bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,syft,actionlint,cfn-lint,cfn-guard,gitleaks,zizmor,trivy,trivy-repo,hadolint,guarddog
           if [ "$BETTERLEAKS" = "true" ]; then
             required="$required,betterleaks"
           fi
           python scripts/verify_sandbox_scanner_parity.py \
-            --sandbox "$SANDBOX" --online --ash ash \
+            --sandbox "$SANDBOX" --online --ash ashx \
             --config "$PARITY_CONFIG" \
             --require "$required" \
             --require-offline trivy-repo \
@@ -2126,7 +2146,7 @@ jobs:
           WORK: ${{ runner.temp }}
         run: |
           sudo log show --last 60m --predicate 'sender == "Sandbox"' --style compact \
-            | grep -E 'Sandbox: (Python|python3?[.0-9]*|uv|node|npm|grype|syft|trivy|semgrep-core|pysemgrep|opengrep|opengrep\.bin|opengrep-core|ruby|bash|sh|git|security|env)\([0-9]+\) deny' \
+            | grep -E 'Sandbox: (Python|python3?[.0-9]*|uv|node|npm|grype|syft|trivy|opengrep|opengrep\.bin|opengrep-core|ruby|bash|sh|git|security|env)\([0-9]+\) deny' \
             | sed -E 's/^.*Sandbox: //; s/\([0-9]+\) / /' | sort | uniq -c | sort -rn | head -n 150 || true
           for log in "$WORK"/ash-sandbox-parity-*/out-*-sandbox-exec/ash.log; do
             echo "::group::$log (errors and warnings)"
@@ -2216,7 +2236,7 @@ jobs:
         shell: bash
         env:
           ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
-        run: ash dependencies install --tool bandit --tool checkov
+        run: ashx dependencies install --tool bandit --tool checkov
       - uses: ./.github/actions/tool-download-cache
         with:
           mode: save
@@ -2483,6 +2503,21 @@ jobs:
         run: |
           uv sync --extra cdk --extra symbols
           uv pip install 'cfn-lint[sarif]>=1.43.3,<2.0.0'
+      # ferret-scan is not a Python dependency of ASH. The operator-auth pin scan in
+      # tests/integration/test_operator_auth_ferret_pins_scan.py runs it, so install it
+      # at the version its plugin recommends, read from the plugin as run-scan-test
+      # does rather than repeated here. The supported range's newest release is not
+      # the version the pinned lines were measured on: ferret-scan 2.6.0 does not
+      # report the operator auth module's line at all.
+      - name: Install ferret-scan
+        run: |
+          FERRET_VERSION="$(uv run python -c 'from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import RECOMMENDED_VERSION as v; print(v)')"
+          if [ -z "$FERRET_VERSION" ]; then
+            echo "::error::Could not read ferret-scan's recommended version from its ASH plugin."
+            exit 1
+          fi
+          uv pip install "ferret-scan==${FERRET_VERSION}"
+          uv run ferret-scan --version
       # The integration suite runs bandit, actionlint, cfn-lint, cfn-guard and gitleaks
       # for real, and nothing else in this job installs them: the first test that
       # needed bandit ran `uv tool install` from inside the suite. This is the
@@ -2493,13 +2528,13 @@ jobs:
       # both tests in test_repo_tool_configs_are_not_read.py skipped.
       # tests/unit/test_integration_job_installs_required_tools.py holds this list.
       #
-      # checkov, semgrep and zizmor are installed here too. The links-leaving-the-tree
+      # checkov and zizmor are installed here too. The links-leaving-the-tree
       # scan runs every scanner with a home of its own, so a uv tool a test installed
       # under the suite's private home is invisible to it and the scanner records
-      # MISSING; a tool on PATH is seen by both. Without these three that test cannot
+      # MISSING; a tool on PATH is seen by both. Without these two that test cannot
       # tell a scanner that could not run from one that should have.
       - name: Install the scanners the integration suite runs for real
-        run: uv run ash dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks --tool checkov --tool semgrep --tool zizmor
+        run: uv run ashx dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks --tool checkov --tool zizmor
       # hadolint is an alpha scanner, so nothing else in this job provisions it. The
       # pinned, digest-verified release asset, through the same installer the image uses,
       # into ~/.ash/bin, which the suite step below puts on its own PATH.
@@ -2511,6 +2546,7 @@ jobs:
       # ASH_REQUIRE_CDK_EXTRA turns a missing cdk extra into a hard failure rather than a
       # skip, so this job cannot quietly stop testing the cdk-nag path if the install above
       # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan,
+      # ASH_REQUIRE_FERRET_SCAN for the operator-auth pin scan,
       # ASH_REQUIRE_ACTIONLINT for the actionlint tests, and ASH_REQUIRE_GITLEAKS for the
       # tests that run gitleaks from PATH. ASH_REQUIRE_PREINSTALLED_TOOLS names every
       # tool the step above installed: the suite fails at start if it cannot find one the
@@ -2537,7 +2573,8 @@ jobs:
           ASH_REQUIRE_CFN_TOOLS: "1"
           ASH_REQUIRE_GITLEAKS: "1"
           ASH_REQUIRE_SYMBOLS_EXTRA: "1"
-          ASH_REQUIRE_PREINSTALLED_TOOLS: bandit,actionlint,cfn-lint,cfn-guard,gitleaks,checkov,semgrep,zizmor
+          ASH_REQUIRE_FERRET_SCAN: "1"
+          ASH_REQUIRE_PREINSTALLED_TOOLS: bandit,actionlint,cfn-lint,cfn-guard,gitleaks,checkov,zizmor
           ASH_REQUIRE_HADOLINT: "1"
         run: |
           export PATH="$HOME/.ash/bin:$HOME/.local/bin:$PATH"
@@ -2599,6 +2636,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -2610,7 +2649,7 @@ jobs:
           uv sync --extra cdk --extra symbols
           uv pip install 'cfn-lint[sarif]>=1.43.3,<2.0.0'
       - name: Install the scanners the docs examples run for real
-        run: uv run ash dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks --tool checkov --tool semgrep --tool zizmor
+        run: uv run ashx dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks --tool checkov --tool zizmor
       # PATH gains the two install directories for this step only, as on integration-test.
       #
       # ASH_REQUIRE_PREINSTALLED_TOOLS and ASH_CFN_GUARD_RULES_DIR, which
@@ -2721,6 +2760,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -2806,10 +2847,11 @@ jobs:
   #    report. A failed method step also fails the job on its own; the verdict step
   #    is what names all of them at once.
   #
-  # 2. Which install each method's `ash` actually is. Five methods in one job share
-  #    a PATH, and pip and pipx both put an `ash` on it. The step order below is
-  #    load-bearing for that reason: pipx runs FIRST, while its shim is the only
-  #    `ash` on the machine, so `pipx: verify` cannot be answered by pip's copy.
+  # 2. Which install each method's `ashx` actually is. Five methods in one job share
+  #    a PATH, and pip and pipx both put an `ashx` (and the deprecated `ash` alias)
+  #    on it. The step order below is load-bearing for that reason: pipx runs FIRST,
+  #    while its shim is the only `ashx` on the machine, so `pipx: verify` cannot be
+  #    answered by pip's copy.
   #    pip runs second, and setup-python writes its own bin directory to
   #    GITHUB_PATH, which prepends ahead of the image's default PATH -- so pip's
   #    entry point wins the lookup for every later step. Reordering these two
@@ -3135,8 +3177,8 @@ jobs:
   # One check name that can actually be required
   # ---------------------------------------------------------------------------
   #
-  # Most jobs above name themselves from their matrix, so this workflow contributes 250 check
-  # runs to a pull request (674 to a merge-queue run, which runs the full matrices) and few of
+  # Most jobs above name themselves from their matrix, so this workflow contributes 245 check
+  # runs to a pull request (669 to a merge-queue run, which runs the full matrices) and few of
   # their names are stable. A ruleset's
   # required_status_checks list holds literal context strings with no wildcard, so requiring
   # `unit-test` and the integration and e2e families means enumerating all 293 of their names -- and then any matrix edit either orphans
@@ -3146,16 +3188,16 @@ jobs:
   # moves with the trigger set, as the 186 below explains.
   #
   # Those two numbers count different populations, which is how the previous pair of them went
-  # stale unnoticed. The 186 was measured on pull request 599, the 674 is derived
+  # stale unnoticed. The 186 was measured on pull request 599, the 669 is derived
   # below, and both are re-derivable:
   #
   #   gh api repos/<owner>/<repo>/actions/runs/<run>/jobs --paginate --jq '.jobs[].name'
   #   gh api repos/<owner>/<repo>/commits/<sha>/check-runs --paginate --jq '.check_runs[].name'
   #
-  # 250 is this workflow's own contribution to a pull request: the 159 jobs that run there,
+  # 245 is this workflow's own contribution to a pull request: the 154 jobs that run there,
   # plus the 91 `PyTest - ...` check runs that mikepenz/action-junit-report publishes from
   # inside the unit, integration and e2e legs -- one per leg. A merge-queue run, which runs
-  # the full matrices, is 674: the 381 jobs that run there plus 293 check runs.
+  # the full matrices, is 669: the 376 jobs that run there plus 293 check runs.
   # warm-image-layers runs only on a push to main and is in neither; whether GitHub still
   # lists it as skipped on a pull request was not checked. The check runs are not jobs and
   # land in a separate check suite, so a job census alone undercounts what this file puts on
@@ -3220,27 +3262,30 @@ jobs:
   # utils/ash_helpers.sh (+5 on every event): 460 on a push, 458 on a merge-queue run, and
   # 206 on a pull request. Then Python 3.10 left the matrices when requires-python rose to
   # 3.11 (-77 on a push, -77 on a merge-queue run, -47 on a pull request): 383, 381 and 159.
+  # Then the `method: bash` cells left scan-validation when the CLI absorbed the root
+  # bash script (29 legs to 24, -5 on every event): 378 on a push, 376 on a merge-queue
+  # run, and 154 on a pull request.
   # tests/unit/test_unified_ci_job_counts.py recounts the list below from the matrices, so
   # these figures can drift from GitHub's census but not from this file. The 293 `PyTest - ...`
   # runs are derived from the leg count of the unit, integration and e2e jobs by the
   # one-per-leg rule #602 measured at 20 legs, not counted again, and the collapse does not
   # touch them.
   #
-  # Where 383 comes from, per job, on a push to main: lint 1, ensure-cache 6, actionlint 1,
+  # Where 378 comes from, per job, on a push to main: lint 1, ensure-cache 6, actionlint 1,
   # snapshot-trailers 1, unit-test 144, unit-coverage 1,
   # integration-test-linux 48, integration-test-macos 64, integration-test-windows 32,
   # e2e-test-linux 2, e2e-test-macos 2, e2e-test-windows 1, e2e-express 2, warm-image-layers 2,
-  # scan-validation 29, non-root-image-permissions 1, external-target-scan 2, sandbox 2,
+  # scan-validation 24, non-root-image-permissions 1, external-target-scan 2, sandbox 2,
   # sandbox-scanner-parity 2, multi-project-attribution 2, deploy-aws-helpers 1,
   # integration-test 4, docs-examples 1, build-docs 1, converter-integration 2, install-validation 27, homebrew-macos 1,
   # required-checks 1.
   #
-  # Where 159 comes from, per job, on a pull request (the pull-request cover, the note on
+  # Where 154 comes from, per job, on a pull request (the pull-request cover, the note on
   # ensure-cache): lint 1, ensure-cache 2, actionlint 1, snapshot-trailers 1, unit-test 44,
   # unit-coverage 1, integration-test-linux 12, integration-test-macos 16,
   # integration-test-windows 16, e2e-test-linux 1, e2e-test-macos 1, e2e-test-windows 1,
   # e2e-express 2,
-  # scan-validation 29, non-root-image-permissions 1, external-target-scan 2, sandbox 2,
+  # scan-validation 24, non-root-image-permissions 1, external-target-scan 2, sandbox 2,
   # sandbox-scanner-parity 2, multi-project-attribution 2, deploy-aws-helpers 1,
   # integration-test 4, docs-examples 1, build-docs 1, converter-integration 2, install-validation 11,
   # homebrew-macos 1, required-checks 1. warm-image-layers is push-only and absent. The
@@ -3290,7 +3335,7 @@ jobs:
   # job for integration-test, 80 fewer for the install-validation collapse, one more for
   # snapshot-trailers and one more for homebrew-macos, so a comparable CI-plumbing commit would
   # see 139 rather than 186. That 139 predates the tier split and the jobs added after
-  # it; the 674 above is the current merge-queue figure and 250 the pull-request one. That
+  # it; the 669 above is the current merge-queue figure and 245 the pull-request one. That
   # is arithmetic on a measured baseline,
   # not a count anyone has taken, and it is why the 186 keeps its own commit's name.
   #

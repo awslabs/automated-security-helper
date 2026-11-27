@@ -23,8 +23,8 @@ import pytest
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.uv_tool_mixin import deferred_tool_version_probes
 from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
+from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
+    CheckovScanner,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
@@ -38,7 +38,7 @@ EMPTY_SARIF = {
     "version": "2.1.0",
     "runs": [
         {
-            "tool": {"driver": {"name": "semgrep", "version": "1.0.0", "rules": []}},
+            "tool": {"driver": {"name": "checkov", "version": "1.0.0", "rules": []}},
             "results": [],
         }
     ],
@@ -60,13 +60,13 @@ def test_inject_invocation_resolves_the_deferred_version(tmp_path, monkeypatch):
     output.mkdir()
     context = PluginContext(source_dir=source, output_dir=output, config=AshConfig())
     with deferred_tool_version_probes():
-        scanner = SemgrepScanner(context=context)
+        scanner = CheckovScanner(context=context)
     assert scanner.tool_version is None, "construction must defer, not probe"
     assert asked == [], "construction under the deferral asks uv nothing"
 
     sarif = SarifReport.model_validate(EMPTY_SARIF)
-    scanner._inject_invocation(sarif, ["semgrep", "scan"], Path(source))
+    scanner._inject_invocation(sarif, ["checkov", "-d", "."], Path(source))
 
-    assert asked == ["semgrep"], "the injection runs the deferred probe once"
+    assert asked == ["checkov"], "the injection runs the deferred probe once"
     assert scanner.tool_version == "9.9.9"
     assert sarif.runs[0].invocations, "the invocation record is still written"

@@ -5,8 +5,8 @@
 
 The defect
 ----------
-bandit, checkov and semgrep ran ``uv tool run --from <spec> <tool> --version`` from
-``model_post_init``, which resolves the tool and downloads it when uv's cache lacks
+bandit, checkov and semgrep (since retired) ran ``uv tool run --from <spec> <tool>
+--version`` from ``model_post_init``, which resolves the tool and downloads it when uv's cache lacks
 it. The scan phase constructs every registered scanner before it applies
 ``--scanners`` (scan_phase.py), and ``ash plugin list`` constructs them all as well,
 so a scan of one scanner probed all three, online unless ASH_OFFLINE was set, and so
@@ -127,7 +127,6 @@ sys.addaudithook(_refuse_process_starts)
 PROBED = {
     "BanditScanner": "bandit",
     "CheckovScanner": "checkov",
-    "SemgrepScanner": "semgrep",
 }
 
 

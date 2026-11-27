@@ -3140,7 +3140,7 @@ async def _run_scan(
                 # A run taken back here may have recorded itself in history/
                 # before the cancel landed (after run_ash_scan's last check, or
                 # during its final rewrite): a scan settled as one without
-                # results keeps no record either, or ``ash trend`` shows the
+                # results keeps no record either, or ``ashx results trend`` shows the
                 # cancelled run as a completed one. The results carry the
                 # record's id; ``ScanIncompleteExit`` carries them on the exit,
                 # and an ending with neither names no record, so nothing is
@@ -4839,7 +4839,7 @@ def mcp_diff_scan_results(
 # The probe logic that describes each scanner -- its detected version, whether
 # its dependencies are satisfied, its offline strategy, and whether it is enabled
 # -- now lives in ``automated_security_helper.core.scanner_inventory`` so the MCP
-# ``list_scanners`` tool and the ``ash plugin list`` CLI command call one path and
+# ``list_scanners`` tool and the ``ashx plugin list`` CLI command call one path and
 # cannot drift (the drift risk #626 calls out). These names are re-exported here
 # because existing tests import them from this module and monkeypatch
 # ``mcp_tools._loaded_scanner_classes`` by name; keeping them as module attributes

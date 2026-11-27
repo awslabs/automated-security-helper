@@ -20,14 +20,14 @@ class TestSuppression:
             line_start=10,
             line_end=15,
             reason="False positive due to test mock",
-            expiration="2099-12-31",
+            expires="2099-12-31",
         )
         assert suppression.rule_id == "RULE-123"
         assert suppression.path == "src/example.py"
         assert suppression.line_start == 10
         assert suppression.line_end == 15
         assert suppression.reason == "False positive due to test mock"
-        assert suppression.expiration == "2099-12-31"
+        assert suppression.expires == "2099-12-31"
 
     def test_suppression_model_minimal(self):
         """Test that a minimal suppression model can be created."""
@@ -41,7 +41,7 @@ class TestSuppression:
         assert suppression.line_start is None
         assert suppression.line_end is None
         assert suppression.reason == "Test suppression"
-        assert suppression.expiration is None
+        assert suppression.expires is None
 
     def test_suppression_model_invalid_line_range(self):
         """Test that a suppression model with invalid line range raises an error."""
@@ -64,7 +64,7 @@ class TestSuppression:
                 reason="Test suppression",
                 rule_id="RULE-123",
                 path="src/example.py",
-                expiration="invalid-date",
+                expires="invalid-date",
             )
         assert "Invalid expiration date format. Use YYYY-MM-DD" in str(excinfo.value)
 
@@ -75,9 +75,9 @@ class TestSuppression:
             reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
-            expiration=yesterday,
+            expires=yesterday,
         )
-        assert s.expiration == yesterday
+        assert s.expires == yesterday
         assert s.is_expired is True
 
     def test_suppression_model_future_date(self):
@@ -87,6 +87,6 @@ class TestSuppression:
             reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
-            expiration=tomorrow,
+            expires=tomorrow,
         )
-        assert suppression.expiration == tomorrow
+        assert suppression.expires == tomorrow

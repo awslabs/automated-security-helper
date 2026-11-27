@@ -15,7 +15,7 @@ Symptom: a row in the summary table has the result MISSING, and the scan ends wi
 ERROR (1) Exiting because the scan was incomplete: 1 selected scanner(s) did not
 evaluate everything they were given
   grype: MISSING
-    its tool grype was not found on PATH or in /home/me/.ash/bin, /home/me/.local/share/uv/tools/automated-security-helper/bin, /usr/local/bin; install it with `ash dependencies install` or exclude grype with --exclude-scanners
+    its tool grype was not found on PATH or in /home/me/.ash/bin, /home/me/.local/share/uv/tools/automated-security-helper/bin, /usr/local/bin; install it with `ashx dependencies install` or exclude grype with --exclude-scanners
 ```
 
 Cause: ASH could not find the scanner's tool, or could not install it. The line under
@@ -35,13 +35,13 @@ UV tool execution is required but UV is not available for checkov
 A scanner with nothing to scan in the project, such as cdk-nag with no CloudFormation
 template, npm-audit with no lockfile beside a `package.json`, or actionlint with no
 workflows, shows SKIPPED instead, whether or not its tool is installed. Scanners that
-have no such check, such as grype and semgrep, show MISSING whenever their tool is
+have no such check, such as grype and opengrep, show MISSING whenever their tool is
 missing.
 
-Fix: install the tool, usually with `ash dependencies install --tool grype` (using the
+Fix: install the tool, usually with `ashx dependencies install --tool grype` (using the
 scanner's name). [When a scanner shows MISSING](../docs/advanced-usage.md#when-a-scanner-shows-missing)
 lists the exceptions: detect-secrets, cdk-nag, npm-audit, and cfn-nag. If you do not need the scanner,
-leave it out with `ash --exclude-scanners grype`, which records it as SKIPPED.
+leave it out with `ashx --exclude-scanners grype`, which records it as SKIPPED.
 
 ### A tool inside the scanned directory is not run {#a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree}
 
@@ -68,8 +68,8 @@ The usual case is a scanner installed in the project's virtual environment or
 `node_modules`, which `uv run` or `npm run` put first on `PATH`.
 
 Fix: install the tool outside the repository, for example with
-`ash dependencies install` or `uv tool install`. To use the in-tree copies for one
-scan, pass `--allow-in-tree-tools` or set `ASH_ALLOW_IN_TREE_TOOLS=1`. `ash mcp`
+`ashx dependencies install` or `uv tool install`. To use the in-tree copies for one
+scan, pass `--allow-in-tree-tools` or set `ASH_ALLOW_IN_TREE_TOOLS=1`. `ashx mcp`
 ignores both. See
 [Tools inside the scanned directory](../docs/advanced-usage.md#tools-inside-the-scanned-directory).
 
@@ -78,12 +78,12 @@ ignores both. See
 Symptom: a scanner's row is `ERROR`, and its error names the tool's exit code:
 
 ```text
-Failed to execute semgrep scanner on source: SemgrepScanner scan failed: its tool exited with code 7, which this scanner does not accept as a completed run, so its results file is not graded (exit code 7: not an accepted exit code; success_exit_codes=[0, 1]). No stderr captured; checked .ash/ash_output/scanners/semgrep/source/SemgrepScanner.stderr.log, which the tool did not write. .ash/ash_output/scanners/semgrep/source/results_sarif.sarif reports: Invalid YAML file ...
+Failed to execute opengrep scanner on source: OpengrepScanner scan failed: its tool exited with code 7, which this scanner does not accept as a completed run, so its results file is not graded (exit code 7: not an accepted exit code; success_exit_codes=[0, 1]). No stderr captured; checked .ash/ash_output/scanners/opengrep/source/OpengrepScanner.stderr.log, which the tool did not write. .ash/ash_output/scanners/opengrep/source/results_sarif.sarif reports: Invalid YAML file ...
 ```
 
 Cause: the tool reported that it failed. Each scanner accepts the exit codes its tool uses
 for a run that completed, with or without findings, and nothing else. A failed tool
-can still leave a results file (semgrep exits 7 and writes SARIF holding only error
+can still leave a results file (opengrep exits 7 and writes SARIF holding only error
 notifications when it cannot read a rule configuration; grype exits 1 and writes a
 zero-byte report when it cannot load its database), so ASH does not read the file of
 a run with any other code: an empty or error-only file would otherwise be graded
@@ -96,8 +96,7 @@ a run ASH itself failed to carry out (the scanner's errors name ASH's error).
 | bandit | 0, 1 (issues found) | 2: any error (`bandit/cli/main.py`) |
 | checkov | 0, 1 (failed checks) | 2: the run crashed (`checkov/main.py`) |
 | grype | 0, 2 (a match at or above `grype --fail-on`) | 1: any error, such as a database it cannot load (grype's `cmd/grype/cli` package) |
-| semgrep | 0, 1 (findings) | 2: fatal; 3 and up: specific failures, 7 for a rule configuration it cannot read (`semgrep/error.py`) |
-| opengrep | 0, 1 | the same values as semgrep (`src/osemgrep/core/Exit_code.ml`) |
+| opengrep | 0, 1 (findings) | 2: fatal; 3 and up: specific failures, 7 for a rule configuration it cannot read (`src/osemgrep/core/Exit_code.ml`) |
 | trivy, trivy-repo | 0 | 1: any error (trivy's `cmd/trivy` package) |
 | syft | 0 | 1: any error (syft's `cmd/syft` package) |
 | ferret-scan | 0, 3 (coverage cut short under `fail_on_incomplete`: the findings are reported and the row is `ERROR`, as its target counts as failed) | 1: any error |
@@ -121,13 +120,13 @@ both for advisories and for errors and is judged by whether it wrote a report;
 detect-secrets and cdk-nag run in ASH's own worker processes.
 
 Fix: read what the message quotes, and fix what the tool reported: its stderr, or, when
-it wrote none (semgrep and opengrep report a rule file they cannot read only in
-their SARIF), the error-level notifications from its results file, which the
+it wrote none (opengrep reports a rule file it cannot read only in
+its SARIF), the error-level notifications from its results file, which the
 message names. The full text is in the `<Scanner>.stderr.log`, the
 `<Scanner>.stdout.log` and the results file under `scanners/<name>/<target>/` in the
 output directory; the message names the ones the tool wrote.
-For semgrep and opengrep under `--offline`, see
-[Seeding the semgrep and opengrep rule cache](../docs/advanced-usage.md#seeding-the-semgrep-and-opengrep-rule-cache).
+For opengrep under `--offline`, see
+[Seeding the opengrep rule cache](../docs/advanced-usage.md#seeding-the-opengrep-rule-cache).
 For grype, see [What each scanner does offline](run-offline.md#scanners).
 
 The scan exits 1 for an `ERROR` scanner while `fail_on_incomplete_scanners` is on,
@@ -166,13 +165,13 @@ rejection anyway, the process is not in a user namespace (or `/proc` is not
 mounted), and the directory really is another account's: pick a `TMPDIR` under a
 path your account owns.
 
-### semgrep and opengrep show SKIPPED on Windows
+### opengrep shows SKIPPED on Windows
 
-Cause: both are off by default on Windows, and semgrep publishes no Windows build, so
-it is SKIPPED even when you turn it on. A SKIPPED scanner does not fail the scan, so
-the scan passes without them, as long as another selected scanner runs.
+Cause: opengrep is off by default on Windows, including when a config or
+`--scanners` names it as `semgrep`. A SKIPPED scanner does not fail the scan, so
+the scan passes without it, as long as another selected scanner runs.
 
-Fix: to run them, scan from WSL or in a container. See
+Fix: to run it, scan from WSL or in a container. See
 [Platform limits](../docs/advanced-usage.md#platform-limits).
 
 ## Exit codes
@@ -235,8 +234,8 @@ Cause: each selected scanner had nothing to read, so the scan shows nothing abou
 code. A scanner that reads only some files, such as cfn-nag with no CloudFormation
 template or bandit with no Python file, has nothing to read in a project without them,
 and no scanner has anything to read when the scan set is empty. Two cases are ERROR
-instead, and the error gives a count. semgrep and opengrep are ERROR when their own
-exclusions, rather than `ignore_paths`, left out every file they found. bandit is ERROR
+instead, and the error gives a count. opengrep is ERROR when its own
+exclusions, rather than `ignore_paths`, left out every file it found. bandit is ERROR
 when it scanned no file although Python files that nothing excludes are there; when
 `ignore_paths` or bandit's own `excluded_paths` leave out every Python file, bandit is
 SKIPPED.
@@ -245,7 +244,7 @@ Fix: check that `--source-dir` names the project, that `ignore_paths`, and the
 repository's `.gitignore` and `.ignore` files, leave the files you mean to scan, and that
 the scanners you selected read them; [Scanner coverage](../reference/coverage.md) lists
 what each scanner reads. To accept such a scan, pass `--no-fail-on-incomplete-scanners`
-or set `fail_on_incomplete_scanners: false`; it then exits 0. `ash merge` gives the same
+or set `fail_on_incomplete_scanners: false`; it then exits 0. `ashx results merge` gives the same
 verdict over the shards.
 
 ### The scan exits 1 because conversion was incomplete {#the-scan-exits-1-because-conversion-was-incomplete}
@@ -274,7 +273,7 @@ A notebook in an offline scan with no nbconvert installed gives
 nbconvert offline.
 
 Fix: for notebooks, install nbconvert ahead of time with
-`ash dependencies install --tool jupyter`, or let ASH install it during an online scan.
+`ashx dependencies install --tool jupyter`, or let ASH install it during an online scan.
 To see nbconvert's own error output, run the scan again with `--debug`. For a corrupt
 archive, fix or remove the file. To skip a file, add it to `global_settings.ignore_paths`
 with a reason; see [Suppress findings](suppress-findings.md).
@@ -297,36 +296,36 @@ Symptom: the command stops before anything runs and writes no report. A mistyped
 prints an `Error` box:
 
 ```text
-Usage: ash scan [OPTIONS]
-Try 'ash scan --help' for help.
+Usage: ashx scan [OPTIONS]
+Try 'ashx scan --help' for help.
 ╭─ Error ──────────────────────────────────────────────────────────────────────╮
 │ No such option: --fail-on-finding (Possible options: --fail-on-findings,     │
 │ --no-fail-on-findings)                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
-Cause: a usage error. Every `ash` command exits 5 when its command line is wrong: an
+Cause: a usage error. Every `ashx` command exits 5 when its command line is wrong: an
 option or argument the command does not take, a value an option does not accept (such
 as an invalid `--output-formats`, `--mode`, `--strategy`, or `--min-severity`), a
 `--scanners` list that names no scanner, a `--source-dir` that does not exist or
 cannot be entered, an `--output-dir` that ASH cannot create, enter, or write in,
-`--use-existing` with no results to use, or an `ash report --format` that no reporter
+`--use-existing` with no results to use, or an `ashx results report --format` that no reporter
 answers to. The code is not 2, so a CI gate does not read a mistyped flag as a scan
-with findings. Two selections exit 2 instead: an `ash dependencies install --tool` name
+with findings. Two selections exit 2 instead: an `ashx dependencies install --tool` name
 that it has no plugin for, and a `--plugin-type` other than `converter`, `scanner`, or
 `reporter` ([Exit codes](../reference/exit-codes.md#other)).
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash scan --output-formats nosuch
+ashx scan --output-formats nosuch
 ```
 
-`ash report` with a format no reporter answers to lists the ones it has, whether or not
+`ashx results report` with a format no reporter answers to lists the ones it has, whether or not
 there are results to report:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash report --format nosuch
+ashx results report --format nosuch
 ```
 
 ```text
@@ -338,8 +337,8 @@ Available reporter formats:
   ...
 ```
 
-Fix: correct the command line; `ash <command> --help` lists each command's options.
-Scanner and reporter names use hyphens, as `ash plugin list` shows them. A single
+Fix: correct the command line; `ashx <command> --help` lists each command's options.
+Scanner and reporter names use hyphens, as `ashx plugin list` shows them. A single
 misspelled name among valid ones in `--scanners` is not a usage error: ASH logs
 `No registered scanner matches ...` and runs the others.
 
@@ -348,39 +347,39 @@ misspelled name among valid ones in `--scanners` is not a usage error: ASH logs
 Symptom:
 
 ```text
-ERROR (3) Invalid configuration: Configuration validation failed for '/home/me/repo/.ash.yaml': Invalid value at 'global_settings.fail_on_findings': Extra inputs are not permitted. Run: ash config lint --config /home/me/repo/.ash.yaml
+ERROR (3) Invalid configuration: Configuration validation failed for '/home/me/repo/.ash.yaml': Invalid value at 'global_settings.fail_on_findings': Extra inputs are not permitted. Run: ashx config lint --config /home/me/repo/.ash.yaml
 ```
 
 Cause: the configuration file has a key ASH does not know below the top level, or a
 value of the wrong type anywhere, top level included. A plugin's options with a key ASH
-does not know is refused too. In a suppression or an ignore path an unknown key warns
-by default and the entry suppresses nothing until it is fixed; with
-`fail_on_unknown_keys: true` (the default from ASH v4) it is refused the same way, and
-the message lists the keys the entry accepts:
+does not know is refused too. An unknown key in a suppression or an ignore path is
+refused the same way since ASH 4.0 (`fail_on_unknown_keys: true` is the default), and the
+message lists the keys the entry accepts. With `fail_on_unknown_keys: false`, which keeps
+the 3.x behavior, it warns and the entry suppresses nothing until the key is fixed:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
 cat > .ash.yaml <<'EOF'
-fail_on_unknown_keys: true
 global_settings:
   suppressions:
     - rule: B602
       path: app.py
       reason: Commands come from a fixed allowlist
 EOF
-ash config validate
+ashx config validate
 ```
 
 ```text
 ❌ 1 error(s); a scan refuses the configuration because of these:
-  1. Invalid value at 'global_settings.suppressions[0]': Value error, Unknown key 'rule' (did you mean 'rule_id'?) in a suppression. Accepted keys: expiration, expires, line_end, line_start, package_name, package_path, package_version, path, reason, resource_id, rule_id, scope, symbol.
+  1. Invalid value at 'global_settings.suppressions[0]': Value error, Unknown key 'rule' (did you mean 'rule_id'?) in a suppression. Accepted keys: expires, line_end, line_start, package_name, package_path, package_version, path, reason, resource_id, rule_id, scope, symbol.
 ```
 
-A common case is an unquoted `expiration` date in a suppression: YAML reads it as a
-date, and ASH expects text. Quote it, as in `"2027-04-30"`.
+A common case is an unquoted `expires` date in a suppression: YAML reads it as a
+date, and ASH expects text. Quote it, as in `"2027-04-30"`. Another is a config from ASH
+3.x that still writes `expiration`: ASH 4.0 removed that spelling, so write `expires`.
 
-Fix: correct the key or value that the message names. `ash config validate` and
-`ash config lint` check the file the way a scan does and report the same errors, with
+Fix: correct the key or value that the message names. `ashx config validate` and
+`ashx config lint` check the file the way a scan does and report the same errors, with
 exit code 3; `lint` marks each one `[blocks the scan]`. See
 [Configure ASH](configure.md).
 
@@ -394,9 +393,9 @@ the scan refuses it with exit 3.
 
 - A top-level key is misspelled, such as `fail_on_finding`. ASH ignores unknown keys at
   the top level.
-- ASH found a different file first. `ash config get` prints the configuration a scan
+- ASH found a different file first. `ashx config get` prints the configuration a scan
   would use.
-- A suppression's or an ignore path's `expiration` date has passed. The entry then
+- A suppression's or an ignore path's `expires` date has passed. The entry then
   stops applying, and the scan starts with a warning that names it (see below).
 - The setting is one a repository's file may not set; see the next entry.
 
@@ -410,9 +409,9 @@ global_settings:
   ignore_paths:
     - path: app.py
       reason: Generated file, scanned upstream
-      expiration: "2026-01-31"
+      expires: "2026-01-31"
 EOF
-ash scan --scanners detect-secrets --no-progress
+ashx scan --scanners detect-secrets --no-progress
 ```
 
 ```text
@@ -421,9 +420,9 @@ The following ignore paths and suppressions have expired and no longer apply:
 Remove them, or move their expiration dates, in your ASH configuration file.
 ```
 
-Fix: run `ash config validate`, which checks the file the way a scan does and warns
-about unknown top-level keys and a missing `project_name`, and `ash config get`, which
-prints the configuration a scan would use. `ash config lint` also lists expired
+Fix: run `ashx config validate`, which checks the file the way a scan does and warns
+about unknown top-level keys and a missing `project_name`, and `ashx config get`, which
+prints the configuration a scan would use. `ashx config lint` also lists expired
 suppressions and ignore paths.
 
 ### A setting in the repository's config file is ignored
@@ -447,7 +446,7 @@ found inside a git checkout or the scanned directory, it also gives where Python
 module and which checkout or directory that is. For other modules, it says that the module
 is not importable, or what ASH's AWS or Snyk plugin package would send off the host.
 
-Under `ash mcp`, a config file that an MCP client names as a scan's `config_path`, outside
+Under `ashx mcp`, a config file that an MCP client names as a scan's `config_path`, outside
 the directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names, is held to the same limits. Under the
 default policy, a config file an MCP client delivered is refused instead when its own `sandbox`
 section gives a scanner a network or an `extra_read_paths` entry the server's settings do
@@ -495,7 +494,7 @@ ERROR (3) /home/me/out/reports is a symlink. ...
 Cause: the output directory, a directory on the way to it inside the scanned
 directory, or something ASH writes inside it, such as `reports`, is a symbolic link.
 ASH clears and writes its output directory, so it does not do that through a link. This
-check applies whether or not the sandbox is on. In an `ash --workspace` scan, a link at
+check applies whether or not the sandbox is on. In an `ashx --workspace` scan, a link at
 `projects/<project>` fails only that project, and a link at `projects` or
 `.workspace-spool` stops the whole run. [Output files](../reference/output-files.md#links)
 lists every path ASH checks.
@@ -505,7 +504,7 @@ replace the link with a directory. Turning the sandbox off does not change this.
 
 ### The scan stops because a report file is a link
 
-Symptom: the run exits 1 before any reporter writes, with this message (`ash merge`
+Symptom: the run exits 1 before any reporter writes, with this message (`ashx results merge`
 prints the same text after `Refusing to write reports:`):
 
 ```text
@@ -514,7 +513,7 @@ ERROR (1) /home/me/out/reports/ash.sarif is a symlink. ASH does not write a repo
 
 Cause: a file a reporter is about to write in `reports/` is a symbolic link or a
 directory junction. A scan clears `reports/` first, so this usually comes from
-`ash scan --use-existing` or `ash merge` writing into an output directory that already
+`ashx scan --use-existing` or `ashx results merge` writing into an output directory that already
 holds the link.
 
 Fix: remove the link and run the command again, or write to a new output directory.
@@ -527,18 +526,18 @@ Symptom:
 
 ```text
 ERROR (1) Exiting because 1 content database(s) are past their declared age bound
-  Content database semgrep-offline-rules (semgrep) is stale: downloaded 2026-08-31T22:43:12Z, 40d 0h old, past its 720h bound ...
+  Content database opengrep-offline-rules (opengrep) is stale: downloaded 2026-08-31T22:43:12Z, 40d 0h old, past its 720h bound ...
 ```
 
-Cause: grype, trivy, and offline semgrep and opengrep read databases that go out of
+Cause: grype, trivy, and offline opengrep read databases that go out of
 date. ASH fails a scan whose database is past its age bound, or whose age it cannot
 read; [Content databases](../concepts/content-databases.md) lists the bounds. Online
 scans keep grype's and trivy's databases current, so this usually happens offline or
 with an old image.
 
 Fix: refresh the database. For an offline image, rebuild it with
-`ash container build --offline`. For offline rules on your machine, download them again
-([Seeding the semgrep and opengrep rule cache](../docs/advanced-usage.md#seeding-the-semgrep-and-opengrep-rule-cache)).
+`ashx container build --offline`. For offline rules on your machine, download them again
+([Seeding the opengrep rule cache](../docs/advanced-usage.md#seeding-the-opengrep-rule-cache)).
 To scan with the old database anyway, pass `--allow-stale-content-db` or set
 `content_db_staleness: warn`: the stale database then no longer fails the scan, and
 every report names it. With `warn`, a scan passes even when a database is missing, so its
@@ -554,7 +553,7 @@ Cause: the first scan downloads grype's vulnerability database, which can take a
 minute or more, and installs any uv-based scanner that is not installed yet. Later
 scans reuse both.
 
-Fix: run `ash dependencies install` ahead of time. In CI, cache the scanners' cache
+Fix: run `ashx dependencies install` ahead of time. In CI, cache the scanners' cache
 directories, such as `~/.cache/grype` and `~/.cache/trivy`, between runs.
 
 ### A scanner hangs
@@ -579,10 +578,10 @@ There is no limit on the scan as a whole.
 Fix: find the scanner in the "still running" lines or in `ash.log`, and look at its
 stderr log under `scanners/<scanner>/` in the output directory. Then do one of these:
 
-- Exclude it for now: `ash --exclude-scanners bandit`.
-- Lower or raise its limit: `ash --config-overrides 'scanners.bandit.options.scan_timeout=600'`.
-- Run scanners one at a time to see where time goes: `ash --strategy sequential`.
-- Get more detail with `ash --verbose` or `ash --debug`.
+- Exclude it for now: `ashx --exclude-scanners bandit`.
+- Lower or raise its limit: `ashx --config-overrides 'scanners.bandit.options.scan_timeout=600'`.
+- Run scanners one at a time to see where time goes: `ashx --strategy sequential`.
+- Get more detail with `ashx --verbose` or `ashx --debug`.
 
 ## Installing and running ASH
 
@@ -621,14 +620,14 @@ or `pipx ensurepath` (for pipx), then open a new terminal.
 ### `ash` runs a different program on Windows
 
 Symptom: in Git Bash or an MSYS2 shell, `ash --version` prints an error such as
-`ash: 0: Illegal option --`, and `ash dependencies install` reports
-`cannot open dependencies`.
+`ash: 0: Illegal option --`, and `ash` followed by a subcommand such as
+`dependencies install` reports `cannot open dependencies`.
 
 Cause: Git for Windows and MSYS2 ship an unrelated shell named `ash`, and it comes first
 on your `PATH`.
 
-Fix: use `ashv3` or `automated-security-helper`, which are the same program as ASH's
-`ash`.
+Fix: use `ashx`, `ashv3` or `automated-security-helper`, which are the same program as
+ASH's `ash`.
 
 ### Results differ between your machine and CI
 
@@ -637,12 +636,12 @@ Cause: the two runs differ in something ASH does not control:
 - Scanner versions. A scanner on your `PATH` is used if its version is in range, so
   your machine and CI can run different versions.
 - Database age. grype's and trivy's databases change daily.
-- Platform. On Windows, semgrep and opengrep are SKIPPED.
+- Platform. On Windows, opengrep is SKIPPED.
 - Diff scans. With `--changed-files-only`, ASH reports findings in every file when git
   cannot list the changes: the base ref does not exist, as in a shallow clone, the
   directory is not in a git repository, or git is not installed. The log says which,
   such as `git diff against origin/main failed (rc=128); falling back to full scan`.
-- Mode. `ash --mode precommit` runs a smaller set of scanners.
+- Mode. `ashx --mode precommit` runs a smaller set of scanners.
 
 Fix: run the same scanner versions in both places, for example with the same container
 image, and fetch enough history in CI for the diff.
@@ -672,7 +671,7 @@ Run container mode from a directory other than the project you scan, and name th
 project with `--source-dir`.
 
 To scan offline with an image you already built, add `--no-build`, as in
-`ash scan --mode container --offline --no-build`. Without it, container mode builds the
+`ashx scan --mode container --offline --no-build`. Without it, container mode builds the
 image first, and the first offline build of a UTC day downloads the databases again,
 which needs network access. See [Run ASH offline](run-offline.md).
 

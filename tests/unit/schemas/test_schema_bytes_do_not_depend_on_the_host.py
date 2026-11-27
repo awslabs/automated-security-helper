@@ -7,8 +7,8 @@ Why this file exists
 --------------------
 Three defaults come from the process that imports the models, not from the
 models: ``project_name`` reads ``ASH_PROJECT_NAME``, ``global_settings
-.severity_threshold`` reads ``ASH_DEFAULT_SEVERITY_LEVEL``, and opengrep and
-semgrep are on unless the operating system is Windows. ``generate_schemas`` wrote
+.severity_threshold`` reads ``ASH_DEFAULT_SEVERITY_LEVEL``, and opengrep is on
+unless the operating system is Windows. ``generate_schemas`` wrote
 those values into the committed schemas, at the field and again wherever a whole
 section is the default of a field above it (``global_settings``, ``scanners``),
 and the severity threshold also into a description. A schema regenerated from a
@@ -25,8 +25,7 @@ beside it is not two runs of the same environment.
 
 Each run is a child process, because the defaults are fixed when the models are
 imported. The child makes ``platform.system`` answer the given name to the opengrep
-and semgrep modules, which is what their defaults read, and the real answer to
-every other caller.
+module, which is what its default reads, and the real answer to every other caller.
 """
 
 from __future__ import annotations
@@ -58,7 +57,7 @@ real_system = platform.system
 
 def system_as_the_scanner_modules_see_it():
     caller = sys._getframe(1).f_globals.get("__name__", "")
-    if caller.endswith(("opengrep_scanner", "semgrep_scanner")):
+    if caller.endswith("opengrep_scanner"):
         return system
     return real_system()
 
@@ -171,9 +170,12 @@ def test_the_config_schema_says_the_shipped_defaults(odd_host):
     )
     # A section that is the default of a field above it is written whole.
     assert config["global_settings"]["default"]["severity_threshold"] == "MEDIUM"
-    for scanner in ("OpengrepScannerConfig", "SemgrepScannerConfig"):
-        assert definitions[scanner]["properties"]["enabled"]["default"] is True, scanner
+    assert (
+        definitions["OpengrepScannerConfig"]["properties"]["enabled"]["default"] is True
+    )
     segment = definitions["ScannerConfigSegment"]["properties"]
-    for name in ("opengrep", "semgrep"):
-        assert segment[name]["default"]["enabled"] is True, name
-        assert config["scanners"]["default"][name]["enabled"] is True, name
+    # `semgrep` is an alias of opengrep, not a scanner with a schema of its own.
+    assert "SemgrepScannerConfig" not in definitions
+    assert "semgrep" not in segment
+    assert segment["opengrep"]["default"]["enabled"] is True
+    assert config["scanners"]["default"]["opengrep"]["enabled"] is True

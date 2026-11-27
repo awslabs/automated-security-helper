@@ -1,8 +1,29 @@
 """MCPB backend.
 
-Emits a .mcpb ZIP archive (manifest.json + bundled assets) for one-click
-install in Claude Desktop. The archive is committed; the release phase
-copies it into dist/ for GitHub release attachment.
+Emits a .mcpb ZIP archive for one-click install in Claude Desktop. The archive
+is committed; the release phase copies it into dist/ for GitHub release
+attachment.
+
+WHAT IS ACTUALLY IN THE ARCHIVE
+
+Exactly one member: manifest.json, authored here from _base/manifest.json and
+_base/mcp.json. No assets are bundled, and that is the correct shape rather than
+an unfinished one -- the manifest's mcp_config invokes uvx against a pinned git
+ref, so the server is fetched at run time by the user's own uvx. There is
+nothing to vendor, and nothing has been left out.
+
+This docstring used to say "manifest.json + bundled assets". That describes an
+archive that has never existed, and the direction of the error is the dangerous
+one: it reads as an invitation to add the assets somebody assumed were missing.
+packaging/README.md draws the line those additions would cross -- ASH's own code
+may ship in a published artifact, third-party code never may. One ASH-authored
+manifest sits on the permitted side.
+
+It stays there only while the member count is one, which is why the release path
+asserts that count rather than trusting this comment. That is the same one-file
+invariant the .deb and .rpm are held to by counting bundled wheels: cheap to
+check, hard to get wrong by accident, and it turns "did anyone vendor a scanner"
+from a per-file judgment into arithmetic.
 """
 
 from __future__ import annotations
@@ -12,6 +33,7 @@ from pathlib import Path
 import json
 import shutil
 import zipfile
+import zlib
 
 from ...core import (
     BaseBackend,
@@ -54,9 +76,28 @@ class MCPBBackend(BaseBackend):
     def phase_copy_archive(self, ctx: BuildContext) -> None:
         """Copy the deterministic .mcpb archive to the dist directory.
 
-        Stamps the filename with the manifest version (e.g. dist/ash-1.0.0.mcpb).
+        Stamps the filename with the bundle's version (e.g. dist/ash-4.0.0.mcpb).
         The plain ash.mcpb in plugins/mcpb/ stays as the canonical, committed
-        artifact; dist/ is the staging area for release uploads."""
+        artifact; dist/ is the staging area for release uploads.
+
+        WHICH VERSION THAT IS
+
+        The bundle's version is the ASH release it launches, derived from
+        `_base/manifest.json:ash_version` by packagers.mcpb_bundle_version, and
+        read back here out of the committed archive's own manifest so the file
+        name and the version a host compares cannot disagree. It used to be the
+        plugin `version` key, which is 1.0.0 for every release, so the asset was
+        ash-1.0.0.mcpb forever and a host could not tell one bundle from the next.
+        Deriving it from ash_version needs no new [tool.commitizen] version_files
+        entry, and the entry that exists (`_base/manifest.json:ash_version`) still
+        never touches the plugin `version` key the other backends use.
+
+        This copy is a plain copy2 of a committed file, so it proves nothing
+        about the archive's contents on its own. What establishes that the
+        attached asset matches _base/ is `agentic-plugins check`, which rebuilds
+        every backend into a sandbox and byte-compares, ash.mcpb included. The
+        release workflow runs that check before calling this phase for exactly
+        that reason; without it, release would publish a hand-edited archive."""
         if ctx.dist_dir is None:
             return
         src = ctx.out / self.MCPB_BUNDLE.archive_path
@@ -64,17 +105,32 @@ class MCPBBackend(BaseBackend):
             raise FileNotFoundError(
                 f"{src} missing — run `agentic-plugins build mcpb` before release"
             )
+        with zipfile.ZipFile(src) as zf:
+            bundle_version = json.loads(zf.read("manifest.json").decode("utf-8"))[
+                "version"
+            ]
         ctx.dist_dir.mkdir(parents=True, exist_ok=True)
-        dest = ctx.dist_dir / f"ash-{ctx.manifest.version}.mcpb"
+        dest = ctx.dist_dir / f"ash-{bundle_version}.mcpb"
         shutil.copy2(src, dest)
 
     def smoke_test(self, ctx: BuildContext) -> dict | None:
         """Validate ash.mcpb archive contains a parseable manifest.json.
 
-        The MCPB spec mandates manifest.json at the archive root with at
-        least `name`, `version`, and `dxt_version` fields. We reach into
-        the ZIP and parse the manifest to confirm Claude Desktop will
-        accept it."""
+        The MCPB spec mandates manifest.json at the archive root. The three
+        fields required below -- `name`, `version`, `manifest_version` -- are
+        the ones this check enforces. `manifest_version` and not
+        `dxt_version`: MCPB was renamed from DXT (Desktop Extensions), and the
+        version key was renamed with it.
+
+        A damaged archive is reported, not raised. zipfile validates the
+        container from the central directory, so a corrupt deflate stream gets
+        past BadZipFile and surfaces from the member read as zlib.error, and a
+        manifest that is not valid UTF-8 raises UnicodeDecodeError, which is not
+        a json.JSONDecodeError. An unsupported compression method
+        (NotImplementedError, a RuntimeError subclass) and a set encryption bit
+        (RuntimeError) also fail only at the member read; catching RuntimeError
+        reports both as an invalid ZIP.
+        validate.validate_mcpb_archive handles the same cases the same way."""
         archive = ctx.out / "ash.mcpb"
         if not archive.exists():
             return {"ok": False, "reason": "ash.mcpb archive missing"}
@@ -89,9 +145,9 @@ class MCPBBackend(BaseBackend):
                     }
                 with zf.open("manifest.json") as f:
                     manifest = json.loads(f.read().decode("utf-8"))
-        except zipfile.BadZipFile as e:
+        except (zipfile.BadZipFile, zlib.error, RuntimeError) as e:
             return {"ok": False, "reason": f"ash.mcpb is not a valid ZIP: {e}"}
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
             return {"ok": False, "reason": f"manifest.json inside archive invalid: {e}"}
 
         for required in ("name", "version", "manifest_version"):

@@ -114,7 +114,7 @@ def _suppression(written: dict, expiration: str) -> str:
         f"    - rule_id: {written['rule']}\n"
         f"      path: {written['path']}\n"
         f"      reason: {written['reason']}\n"
-        f"      expiration: {_expiration(expiration)}\n"
+        f"      expires: {_expiration(expiration)}\n"
     )
 
 
@@ -123,7 +123,7 @@ def _ignore_path(written: dict, expiration: str) -> str:
         "  ignore_paths:\n"
         f"    - path: {written['path']}\n"
         f"      reason: {written['reason']}\n"
-        f"      expiration: {_expiration(expiration)}\n"
+        f"      expires: {_expiration(expiration)}\n"
     )
 
 

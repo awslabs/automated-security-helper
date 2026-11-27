@@ -304,7 +304,6 @@ def _package_sites() -> Counter:
 _ASH = "automated_security_helper"
 _INSTALLER = f"{_ASH}/assets/install-pinned-tool.py"
 _INSTALLS = "the standalone tool installer: the install and staging directories"
-_CONFIG = "the config file the operator names or ASH resolved"
 _DOWNLOADS = "tool installs, download staging and the asset cache under ASH's home"
 _RULES_INSTALLS = (
     "the cfn-guard rules directory beside the tool installs (rules_bundles.rules_root): "
@@ -431,8 +430,6 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
             "directory, which is empty and outside every output directory"
         ),
     ),
-    (f"{_ASH}/config/ash_config.py", "AshConfig.save", "open"): (1, _CONFIG),
-    (f"{_ASH}/config/ash_config.py", "AshConfig.save", "write_text"): (1, _CONFIG),
     (f"{_ASH}/config/ash_config.py", "_staged_beside", "os.open"): (
         1,
         _CONFIG_STAGED,
@@ -442,6 +439,14 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         _CONFIG_STAGED,
     ),
     (f"{_ASH}/config/ash_config.py", "_write_checked", "os.replace"): (
+        1,
+        _CONFIG_STAGED,
+    ),
+    (f"{_ASH}/config/ash_config.py", "_replace_with_staged", "os.fdopen"): (
+        1,
+        _CONFIG_STAGED,
+    ),
+    (f"{_ASH}/config/ash_config.py", "_replace_with_staged", "os.replace"): (
         1,
         _CONFIG_STAGED,
     ),

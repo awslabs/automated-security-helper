@@ -136,7 +136,7 @@ class TestAdd:
         config_before = (repo / ".ash.yaml").read_bytes()
         result = _add(repo, symbol="other")
         assert result.exit_code == 1
-        assert "ash suppress refresh" in result.output
+        assert "ashx suppress refresh" in result.output
         assert (repo / ".ash.yaml").read_bytes() == config_before
 
     @pytest.mark.parametrize(
@@ -228,7 +228,7 @@ class TestRoundTrip:
     def test_refresh_of_a_file_that_is_not_locked_is_refused(self, repo):
         result = _run("refresh", "src/app.py")
         assert result.exit_code == 1
-        assert "ash suppress add" in result.output
+        assert "ashx suppress add" in result.output
 
     def test_a_locked_file_that_is_gone_fails_verify_and_refresh(self, repo):
         assert _add(repo).exit_code == 0
@@ -262,7 +262,9 @@ class TestRoundTrip:
         result = _run("verify")
         assert result.exit_code == 1
         assert "unlocked: src/app.py" in result.output
-        assert "ash suppress add B602 --symbol risky --file src/app.py" in result.output
+        assert (
+            "ashx suppress add B602 --symbol risky --file src/app.py" in result.output
+        )
 
     def test_verify_lists_a_scope_the_locked_file_does_not_record(self, repo):
         # The file's entry alone is not enough: a suppression hand-added to an
@@ -279,7 +281,7 @@ class TestRoundTrip:
         result = _run("verify")
         assert result.exit_code == 1
         assert "unlocked: src/app.py" in result.output
-        assert "ash suppress add B605" in result.output
+        assert "ashx suppress add B605" in result.output
 
     def test_verify_names_the_configs_it_checked(self, repo):
         assert _add(repo).exit_code == 0

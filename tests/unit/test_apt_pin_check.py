@@ -380,12 +380,18 @@ class TestMain:
         monkeypatch.setattr(
             checker, "APT_INDEX_FETCHER", lambda url: recorded(url, overrides)
         )
+        # main() checks the tool pins and REPO_PINS before the apt pins, so every one
+        # of them is answered with its own value, keeping the exit code the apt pins'
+        # alone. Answering only the module's pins left each REPO_PINS lookup failing,
+        # which exits 2 whatever the apt pins say.
+        pinned_versions = {
+            p.project: p.version
+            for p in checker.enumerate_pins(checker.load_pins_module())
+            + checker.enumerate_repo_pins()
+        }
 
         def pinned(project: str) -> str:
-            return {
-                p.project: p.version
-                for p in checker.enumerate_pins(checker.load_pins_module())
-            }[project]
+            return pinned_versions[project]
 
         def gem_releases(project: str) -> "list[dict[str, object]]":
             # A RubyGems versions answer listing only the pinned release.
@@ -398,15 +404,12 @@ class TestMain:
                 }
             ]
 
-        monkeypatch.setattr(
-            checker,
-            "DEFAULT_FETCHERS",
-            {
-                checker.GITHUB: pinned,
-                checker.PYPI: pinned,
-                checker.RUBYGEMS: gem_releases,
-            },
-        )
+        # Every ecosystem the checker has a fetcher for is answered, so a fetcher
+        # added later cannot fall through to the network; RubyGems is the one whose
+        # answer is a list of releases rather than a single version.
+        fetchers = dict.fromkeys(checker.DEFAULT_FETCHERS, pinned)
+        fetchers[checker.RUBYGEMS] = gem_releases
+        monkeypatch.setattr(checker, "DEFAULT_FETCHERS", fetchers)
         code = checker.main(list(argv))
         return code, capsys.readouterr().out
 

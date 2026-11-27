@@ -379,7 +379,7 @@ def test_ash_report_without_results_names_the_output_dir_on_one_line(tmp_path):
     out = tmp_path / _FORGED
     out.mkdir()
 
-    result = _cli(tmp_path, "report", "--output-dir", str(out))
+    result = _cli(tmp_path, "results", "report", "--output-dir", str(out))
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "No scan results found" in result.stderr, result.stderr
@@ -393,7 +393,7 @@ def test_ash_report_that_cannot_read_its_results_names_them_on_one_line(tmp_path
     out.mkdir()
     (out / "ash_aggregated_results.json").write_text("{", encoding="utf-8")
 
-    result = _cli(tmp_path, "report", "--output-dir", str(out))
+    result = _cli(tmp_path, "results", "report", "--output-dir", str(out))
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "Could not read the scan results in" in result.stderr, result.stderr
@@ -506,6 +506,10 @@ def test_a_config_command_refuses_a_source_dir_that_cannot_be_entered(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="./ash is a bash script")
+@pytest.mark.skipif(
+    not _ASH_SCRIPT.is_file(),
+    reason="root ./ash script removed by a533dd6531a (absorbed into the ash CLI)",
+)
 @pytest.mark.parametrize("case", _SOURCE_CASES)
 def test_the_bash_wrapper_refuses_a_source_dir(tmp_path, case):
     given, text = _cases(tmp_path)[case]
@@ -514,6 +518,10 @@ def test_the_bash_wrapper_refuses_a_source_dir(tmp_path, case):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="./ash is a bash script")
+@pytest.mark.skipif(
+    not _ASH_SCRIPT.is_file(),
+    reason="root ./ash script removed by a533dd6531a (absorbed into the ash CLI)",
+)
 def test_the_bash_wrapper_refuses_a_source_dir_that_cannot_be_entered(
     tmp_path, unenterable
 ):
@@ -523,6 +531,10 @@ def test_the_bash_wrapper_refuses_a_source_dir_that_cannot_be_entered(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="./ash is a bash script")
+@pytest.mark.skipif(
+    not _ASH_SCRIPT.is_file(),
+    reason="root ./ash script removed by a533dd6531a (absorbed into the ash CLI)",
+)
 def test_the_bash_wrapper_refuses_an_output_dir_that_is_a_file(tmp_path):
     (tmp_path / "src").mkdir()
     blocker = tmp_path / "out-file"
@@ -535,6 +547,10 @@ def test_the_bash_wrapper_refuses_an_output_dir_that_is_a_file(tmp_path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="./ash is a bash script")
+@pytest.mark.skipif(
+    not _ASH_SCRIPT.is_file(),
+    reason="root ./ash script removed by a533dd6531a (absorbed into the ash CLI)",
+)
 def test_the_bash_wrapper_refuses_an_output_dir_that_cannot_be_created(
     tmp_path, unmakeable
 ):
@@ -549,6 +565,10 @@ def test_the_bash_wrapper_refuses_an_output_dir_that_cannot_be_created(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="./ash is a bash script")
+@pytest.mark.skipif(
+    not _ASH_SCRIPT.is_file(),
+    reason="root ./ash script removed by a533dd6531a (absorbed into the ash CLI)",
+)
 def test_the_bash_wrapper_refuses_an_output_dir_that_cannot_be_entered(
     tmp_path, unenterable_output
 ):
@@ -561,6 +581,10 @@ def test_the_bash_wrapper_refuses_an_output_dir_that_cannot_be_entered(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="./ash is a bash script")
+@pytest.mark.skipif(
+    not _ASH_SCRIPT.is_file(),
+    reason="root ./ash script removed by a533dd6531a (absorbed into the ash CLI)",
+)
 def test_the_bash_wrapper_refuses_an_output_dir_that_cannot_be_written(
     tmp_path, unwritable_output
 ):
@@ -575,6 +599,10 @@ def test_the_bash_wrapper_refuses_an_output_dir_that_cannot_be_written(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="./ash is a bash script")
+@pytest.mark.skipif(
+    not _ASH_SCRIPT.is_file(),
+    reason="root ./ash script removed by a533dd6531a (absorbed into the ash CLI)",
+)
 def test_the_bash_wrapper_leaves_nothing_in_a_writable_output_dir(tmp_path):
     """The control: one that can be written is not refused, and the file the check
     makes there is gone."""
@@ -589,6 +617,10 @@ def test_the_bash_wrapper_leaves_nothing_in_a_writable_output_dir(tmp_path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="./ash is a bash script")
+@pytest.mark.skipif(
+    not _ASH_SCRIPT.is_file(),
+    reason="root ./ash script removed by a533dd6531a (absorbed into the ash CLI)",
+)
 def test_the_bash_wrapper_still_makes_a_missing_output_dir(tmp_path):
     """The control: a missing --output-dir, parents and all, is made, not refused."""
     (tmp_path / "src").mkdir()

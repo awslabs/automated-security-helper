@@ -39,6 +39,17 @@ kept somewhere this script does not read. The same test file builds the steps fo
 every real pin and fails when one leaves out a value a bump changes, read
 independently from the module's tables, the Dockerfile and the tracked files.
 
+Tools that CI, the packaging harnesses and the editor test images pin outside that
+module (kind, kubectl, cfn-guard, winget-cli, VS Code, the harness uv, actionlint,
+shellcheck, the digest-pinned gradle, node, python and kind node images, and the
+dated Debian and Ubuntu package snapshots) are listed in ``REPO_PINS``. That table
+names where each pin is written and how to read it, not its value: the value is
+read from the file every run, so it cannot drift from what CI uses. Each site must
+match the number of times it says, and every site of one tool must agree, so a
+moved line or a half-applied bump is refused rather than skipped. The same test file
+runs a census of version and image pins under ``.github/workflows``,
+``.github/actions``, ``packaging``, ``editors`` and ``deploy``, and fails on one that
+neither ``REPO_PINS`` nor its short list of reasoned exemptions accounts for.
 The Dockerfile's apt pins
 -------------------------
 Every ``apt-get install`` in the root ``Dockerfile`` names ``package=version``
@@ -106,8 +117,22 @@ What was rejected
 Known limitations
 -----------------
 * "Latest" is each upstream's own notion: GitHub's ``releases/latest`` (which
-  skips drafts and pre-releases) and PyPI's ``info.version``. A project that marks a
-  release "latest" out of version order is reported as it marks it.
+  skips drafts and pre-releases), PyPI's ``info.version``, for a gem the newest
+  release the image's Ruby can run (next bullet but one) and, for an image pinned as
+  ``name:tag@sha256:...``, the digest Docker Hub reports for that tag today. A
+  project that marks a release "latest" out of version order is reported as it marks
+  it.
+* An image digest is compared for equality only. A changed digest means the tag
+  was rebuilt (usually a base-image security update), and is reported as
+  ``outdated``; it says nothing about whether a newer tag exists.
+* A dated package snapshot has no "latest". It is ``outdated`` once it is older
+  than ``SNAPSHOT_MAX_AGE_DAYS``, because past that its packages miss the security
+  updates published since.
+* The uv the packaging harnesses install is held to the floor ``pyproject.toml``
+  declares, deliberately, so the harness proves the oldest supported uv works. It is
+  compared with that floor, not with uv's latest release.
+* An image pinned by digest with no tag (``debian@sha256:...``) names no tag to
+  look up, so it is not checked; the census exempts those by shape.
 * A gem is compared with the newest final release for the ``ruby`` platform whose
   required Ruby version admits the Ruby the image installs, read from the
   Dockerfile's ``ruby=`` apt pin, so ``--fail-on-outdated`` fails only when the image
@@ -181,6 +206,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from http.client import HTTPMessage
 from typing import IO, Any, Callable, Iterable
@@ -216,6 +242,9 @@ GEM = "gem"  # GEM_PINS: a RubyGems release
 # THIRD_PARTY_LICENSES with bundled_in: a library another pinned wheel carries, whose
 # version is that wheel's. Listed and held, never looked up (see BUNDLED below).
 BUNDLED_LIBRARY = "bundled-library"
+# A REPO_PINS pin: a tool pinned in CI, the packaging harnesses or the editor images
+# rather than in the pins module, written at the ``path:line`` sites REPO_PINS names.
+REPO_PIN = "repo-pin"
 # THIRD_PARTY_LICENSES with none of the above, held to one version by a Dockerfile
 # ``ARG <TOOL>_VERSION=``: a dependency of a uv tool, such as the pygit2 GuardDog needs
 DOCKERFILE_ARG = "dockerfile-arg"
@@ -225,6 +254,7 @@ PIN_KINDS = (
     RULES_BUNDLE,
     GEM,
     BUNDLED_LIBRARY,
+    REPO_PIN,
     DOCKERFILE_ARG,
 )
 
@@ -239,6 +269,14 @@ GEM_PINS = {CFN_NAG_GEM: "CFN_NAG_GEM_VERSION", BUNDLER_GEM: "BUNDLER_VERSION"}
 GITHUB = "github-release"
 PYPI = "pypi"
 RUBYGEMS = "rubygems"
+DOCKER_HUB = "docker-hub-tag"
+SNAPSHOT = "dated-snapshot"
+PYPROJECT_FLOOR = "pyproject-floor"
+
+# How old a dated package snapshot may get before it is reported as outdated.
+SNAPSHOT_MAX_AGE_DAYS = 180
+_SNAPSHOT_FORMAT = "%Y%m%dT%H%M%SZ"
+
 # A library another pinned distribution bundles (a shared library auditwheel grafted
 # into a wheel). Its version is whatever that wheel carries and cannot be bumped on its
 # own, so it is listed but never looked up: comparing it with its project's latest
@@ -248,9 +286,10 @@ BUNDLED = "bundled"
 _GITHUB_PREFIX = "https://github.com/"
 _TIMEOUT_SECONDS = 30
 
-# The only hosts _get_bytes may contact: the GitHub releases API, PyPI's JSON API and
-# RubyGems' API, the three upstreams the tool pins are compared against, and the Debian
-# and NodeSource archives the Dockerfile's apt pins are looked up in. Every URL is built
+# The only hosts _get_bytes may contact: the GitHub releases API, PyPI's JSON API,
+# RubyGems' API and Docker Hub's tag API, the upstreams the tool pins are compared
+# against, and the Debian and NodeSource archives the Dockerfile's apt pins are looked
+# up in. Every URL is built
 # from a fixed https prefix today; this check makes that a property of the function
 # rather than of its callers, so a later caller cannot point it at a file:// path, a
 # plain-http mirror or an arbitrary host. A redirect cannot either: _CheckedRedirects
@@ -260,6 +299,7 @@ _ALLOWED_HOSTS = frozenset(
         "api.github.com",
         "pypi.org",
         "rubygems.org",
+        "hub.docker.com",
         # The archives the Dockerfile's apt pins are looked up in.
         "deb.debian.org",
         "deb.nodesource.com",
@@ -279,9 +319,11 @@ class PinEnumerationError(Exception):
 class Pin:
     """One pinned tool and where its upstream publishes releases.
 
-    ``version`` is spelled exactly as the module spells it, leading ``v`` and all.
-    ``project`` is ``owner/repo`` for a GitHub release, the distribution name for
-    PyPI and the gem name for RubyGems. ``pinned_in`` names the module tables that
+    ``version`` is spelled exactly as the module spells it, leading ``v`` and all
+    (an image digest for a Docker Hub pin, a timestamp for a snapshot). ``project``
+    is ``owner/repo`` for a GitHub release, the distribution name for PyPI and for
+    a pyproject floor, the gem name for RubyGems, ``name:tag`` for an image and the
+    archive for a snapshot. ``pinned_in`` names the module tables that
     carry this tool's version, which is what a bump has to edit. ``kind`` is one of
     ``PIN_KINDS``, and decides which steps ``bump_steps`` gives.
     """
@@ -292,6 +334,8 @@ class Pin:
     project: str
     pinned_in: tuple[str, ...]
     kind: str
+    # ``path:line`` of every place a REPO_PINS pin is written. Empty for module pins.
+    sites: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -549,6 +593,245 @@ def held_pins(pins: Any) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Pins outside tool_downloads.py
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PinSite:
+    """One place a pin is written: a file, a regex whose group 1 is the value, and
+    how many times it must match there."""
+
+    path: str
+    pattern: str
+    count: int = 1
+
+
+@dataclass(frozen=True)
+class RepoPin:
+    tool: str
+    ecosystem: str
+    # The upstream to compare with. Empty for a Docker Hub pin, whose ``name:tag``
+    # is read from the pinned reference itself.
+    project: str
+    sites: tuple[PinSite, ...]
+
+
+def _image_ref(name: str) -> str:
+    """A regex for ``<name>:<tag>@sha256:<digest>``, the whole reference as group 1."""
+    return rf"(?<![\w./-])({re.escape(name)}:[A-Za-z0-9._-]+@sha256:[0-9a-f]{{64}})"
+
+
+_K8S_WORKFLOW = ".github/workflows/ash-kubernetes-operator.yml"
+_VSCODE_VISUAL = "editors/vscode/test/visual/Dockerfile"
+_JETBRAINS_UI = "editors/jetbrains/ui-test/Dockerfile"
+
+REPO_PINS: tuple[RepoPin, ...] = (
+    RepoPin(
+        "kind",
+        GITHUB,
+        "kubernetes-sigs/kind",
+        (PinSite(_K8S_WORKFLOW, r"^  KIND_VERSION: (v[0-9][0-9.]*)$"),),
+    ),
+    RepoPin(
+        "kubectl",
+        GITHUB,
+        "kubernetes/kubernetes",
+        (PinSite(_K8S_WORKFLOW, r"^  KUBECTL_VERSION: (v[0-9][0-9.]*)$"),),
+    ),
+    RepoPin(
+        "cfn-guard",
+        GITHUB,
+        "aws-cloudformation/cloudformation-guard",
+        (
+            PinSite(
+                ".github/workflows/ash-iac-drift.yml",
+                r'^\s+CFN_GUARD_VERSION: "([0-9][0-9.]*)"$',
+            ),
+        ),
+    ),
+    RepoPin(
+        "winget-cli",
+        GITHUB,
+        "microsoft/winget-cli",
+        (
+            PinSite(
+                "packaging/winget/verify-on-windows.ps1",
+                r"^\$WingetReleaseTag = '(v[0-9][0-9.]*)'$",
+            ),
+        ),
+    ),
+    RepoPin(
+        "vscode",
+        GITHUB,
+        "microsoft/vscode",
+        (
+            PinSite(_VSCODE_VISUAL, r"^ARG VSCODE_VERSION=([0-9][0-9.]*)$"),
+            PinSite(
+                ".github/workflows/ash-vscode-extension.yml",
+                r'^\s+ASH_IT_VSCODE_VERSION: "([0-9][0-9.]*)"$',
+                count=2,
+            ),
+        ),
+    ),
+    RepoPin(
+        "actionlint",
+        GITHUB,
+        "rhysd/actionlint",
+        (
+            PinSite(
+                ".github/workflows/ash-unified-ci.yml",
+                r'^\s+ACTIONLINT_VERSION: "([0-9][0-9.]*)"$',
+            ),
+        ),
+    ),
+    RepoPin(
+        "shellcheck",
+        GITHUB,
+        "koalaman/shellcheck",
+        (
+            PinSite(
+                ".github/workflows/ash-unified-ci.yml",
+                r'^\s+SHELLCHECK_VERSION: "([0-9][0-9.]*)"$',
+            ),
+        ),
+    ),
+    RepoPin(
+        "uv (packaging harnesses)",
+        PYPROJECT_FLOOR,
+        "uv",
+        (
+            PinSite("packaging/verify-lib.sh", r"^UV_VERSION=([0-9][0-9.]*)$"),
+            PinSite(
+                ".github/workflows/ash-native-packages.yml",
+                r'^          version: "([0-9][0-9.]*)"$',
+            ),
+        ),
+    ),
+    RepoPin(
+        "gradle image",
+        DOCKER_HUB,
+        "",
+        (
+            PinSite(
+                ".github/workflows/ash-jetbrains-ci.yml", _image_ref("gradle"), count=3
+            ),
+            # The release build of the plugin zip uses the same image, so it moves with
+            # the three above.
+            PinSite(".github/workflows/ash-release-assets.yml", _image_ref("gradle")),
+            PinSite(_JETBRAINS_UI, _image_ref("gradle")),
+        ),
+    ),
+    RepoPin(
+        "node image",
+        DOCKER_HUB,
+        "",
+        (PinSite(_VSCODE_VISUAL, _image_ref("node")),),
+    ),
+    RepoPin(
+        "python image",
+        DOCKER_HUB,
+        "",
+        (
+            # Two stages, the wheel build and the runtime, on the same digest.
+            PinSite(
+                "deploy/kubernetes-operator/Dockerfile", _image_ref("python"), count=2
+            ),
+            PinSite(
+                "deploy/kubernetes-operator/tests/e2e/Dockerfile.ash",
+                _image_ref("python"),
+                count=2,
+            ),
+        ),
+    ),
+    RepoPin(
+        "kind node image",
+        DOCKER_HUB,
+        "",
+        (
+            PinSite(
+                "deploy/kubernetes-operator/tests/e2e/conftest.py",
+                _image_ref("kindest/node"),
+            ),
+        ),
+    ),
+    RepoPin(
+        "debian snapshot",
+        SNAPSHOT,
+        "snapshot.debian.org",
+        (PinSite(_VSCODE_VISUAL, r"^ARG DEBIAN_SNAPSHOT=([0-9]{8}T[0-9]{6}Z)$"),),
+    ),
+    RepoPin(
+        "ubuntu snapshot",
+        SNAPSHOT,
+        "snapshot.ubuntu.com",
+        (PinSite(_JETBRAINS_UI, r"^ARG UBUNTU_SNAPSHOT=([0-9]{8}T[0-9]{6}Z)$"),),
+    ),
+)
+
+
+def _read_site(repo_root: Path, tool: str, site: PinSite) -> list[tuple[str, str]]:
+    """``(value, "path:line")`` for each match of ``site``, exactly ``site.count``."""
+    path = repo_root / site.path
+    if not path.is_file():
+        raise PinEnumerationError(f"{tool}: {site.path} does not exist")
+    pattern = re.compile(site.pattern, re.MULTILINE)
+    text = path.read_text(encoding="utf-8")
+    found = [
+        (m.group(1), f"{site.path}:{text.count(chr(10), 0, m.start(1)) + 1}")
+        for m in pattern.finditer(text)
+    ]
+    if len(found) != site.count:
+        raise PinEnumerationError(
+            f"{tool}: expected {site.count} pin(s) in {site.path} matching "
+            f"{site.pattern!r}, found {len(found)}. The line moved or changed shape; "
+            f"update REPO_PINS in {Path(__file__).name} with it."
+        )
+    return found
+
+
+def enumerate_repo_pins(
+    repo_root: Path = REPO_ROOT, table: Iterable[RepoPin] = REPO_PINS
+) -> list[Pin]:
+    """Every ``REPO_PINS`` pin, its value read from the files that carry it.
+
+    Raises:
+        PinEnumerationError: when a site matches other than its count, or when the
+            sites of one tool disagree, which is a half-applied bump.
+    """
+    result = []
+    for repo_pin in table:
+        found = [
+            hit
+            for site in repo_pin.sites
+            for hit in _read_site(repo_root, repo_pin.tool, site)
+        ]
+        values = sorted({value for value, _ in found})
+        if len(values) != 1:
+            raise PinEnumerationError(
+                f"{repo_pin.tool} is pinned to {len(values)} different values "
+                f"({', '.join(where + ' ' + v for v, where in found)}); a bump is "
+                f"half-applied."
+            )
+        value = values[0]
+        project, version = repo_pin.project, value
+        if repo_pin.ecosystem == DOCKER_HUB:
+            project, version = value.split("@", 1)
+        result.append(
+            Pin(
+                tool=repo_pin.tool,
+                version=version,
+                ecosystem=repo_pin.ecosystem,
+                project=project,
+                pinned_in=tuple(dict.fromkeys(s.path for s in repo_pin.sites)),
+                kind=REPO_PIN,
+                sites=tuple(where for _, where in found),
+            )
+        )
+    return sorted(result, key=lambda p: p.tool)
+
+
+# ---------------------------------------------------------------------------
 # Version comparison
 # ---------------------------------------------------------------------------
 
@@ -606,6 +889,25 @@ def compare(pinned: str, latest: str) -> str:
     if a == b:
         return "current"
     return "outdated" if a < b else "ahead"
+
+
+def snapshot_age_days(pinned: str, now: str) -> float:
+    """Days from a ``YYYYMMDDTHHMMSSZ`` snapshot to ``now``, in the same format."""
+    then = datetime.strptime(pinned, _SNAPSHOT_FORMAT).replace(tzinfo=timezone.utc)
+    later = datetime.strptime(now, _SNAPSHOT_FORMAT).replace(tzinfo=timezone.utc)
+    return (later - then).total_seconds() / 86400
+
+
+def compare_pin(pin: Pin, latest: str) -> str:
+    """``compare`` for version pins; equality for digests; age for snapshots."""
+    if pin.ecosystem == DOCKER_HUB:
+        return "current" if pin.version == latest else "outdated"
+    if pin.ecosystem == SNAPSHOT:
+        age = snapshot_age_days(pin.version, latest)
+        if age < 0:
+            return "ahead"
+        return "outdated" if age > SNAPSHOT_MAX_AGE_DAYS else "current"
+    return compare(pin.version, latest)
 
 
 # ---------------------------------------------------------------------------
@@ -834,6 +1136,47 @@ def rubygems_admits(
     )
 
 
+def latest_docker_hub_digest(reference: str) -> str:
+    """The digest Docker Hub reports today for ``name:tag`` (``library/`` implied)."""
+    name, tag = reference.rsplit(":", 1)
+    namespace, _, repository = name.rpartition("/")
+    namespace, repository, tag = (
+        urllib.parse.quote(part, safe="")
+        for part in (namespace or "library", repository, tag)
+    )
+    data = _get_json(
+        f"https://hub.docker.com/v2/namespaces/{namespace}/repositories/"
+        f"{repository}/tags/{tag}"
+    )
+    return str(data["digest"])
+
+
+def snapshot_now(_archive: str) -> str:
+    """The current time in snapshot format; a snapshot is compared with its age."""
+    return datetime.now(timezone.utc).strftime(_SNAPSHOT_FORMAT)
+
+
+def pyproject_floor(distribution: str, pyproject: Path | None = None) -> str:
+    """The ``>=`` floor a quoted ``pyproject.toml`` requirement declares for ``distribution``.
+
+    Read as text, not with tomllib, so the script still runs on the bare interpreters
+    the rest of it supports. Only a requirement string that starts with the name, as
+    a dependency list entry does, is read.
+    """
+    path = pyproject or REPO_ROOT / "pyproject.toml"
+    pattern = re.compile(
+        rf'^\s*"{re.escape(distribution)}\s*>=\s*([0-9][0-9.]*)[,"]',
+        re.MULTILINE | re.IGNORECASE,
+    )
+    floors = sorted(set(pattern.findall(path.read_text(encoding="utf-8"))))
+    if len(floors) != 1:
+        raise LookupError(
+            f"pyproject.toml declares {len(floors)} >= floors for {distribution} "
+            f"({', '.join(floors) or 'none'}); expected exactly one"
+        )
+    return floors[0]
+
+
 def _requirement_admits(
     requirement: object, version: tuple[int, ...], what: str
 ) -> bool:
@@ -945,6 +1288,9 @@ DEFAULT_FETCHERS: Fetchers = {
     GITHUB: latest_github_release,
     PYPI: latest_pypi_release,
     RUBYGEMS: rubygems_releases,
+    DOCKER_HUB: latest_docker_hub_digest,
+    SNAPSHOT: snapshot_now,
+    PYPROJECT_FLOOR: pyproject_floor,
 }
 
 
@@ -986,7 +1332,7 @@ def check(
                 latest, note = newest_installable(answer, ruby, pin.version)
             else:
                 latest = answer
-            status = compare(pin.version, latest)
+            status = compare_pin(pin, latest)
         except Exception as exc:  # reported per pin, and it fails the run
             results.append(Result(pin, None, "error", f"{type(exc).__name__}: {exc}"))
             continue
@@ -1313,6 +1659,22 @@ def _bundled_library_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
     return steps
 
 
+def _repo_pin_steps(_pins: Any, pin: Pin, latest: str) -> list[str]:
+    """A ``REPO_PINS`` pin is written at its sites, not in the pins module.
+
+    Its steps are those lines and the digests recorded beside them. It has no
+    Dockerfile ARG or tracked-file digest copies of its own for ``bump_steps`` to add,
+    which is why that function returns these steps as they are.
+    """
+    new_value = "a recent instant" if pin.ecosystem == SNAPSHOT else latest
+    steps = [f"{site}: {pin.version} -> {new_value}" for site in pin.sites]
+    steps.append(
+        "re-take every digest recorded beside those lines (release checksums, "
+        "image digests) from the new value's own published files"
+    )
+    return steps
+
+
 # One function per kind in PIN_KINDS; a test keeps the two in step.
 _KIND_STEPS: dict[str, Callable[[Any, Pin, str], list[str]]] = {
     RELEASE_BINARY: _release_binary_steps,
@@ -1320,6 +1682,7 @@ _KIND_STEPS: dict[str, Callable[[Any, Pin, str], list[str]]] = {
     RULES_BUNDLE: _rules_bundle_steps,
     GEM: _gem_steps,
     BUNDLED_LIBRARY: _bundled_library_steps,
+    REPO_PIN: _repo_pin_steps,
     DOCKERFILE_ARG: _dockerfile_arg_steps,
 }
 
@@ -1437,6 +1800,8 @@ def bump_steps(
             "to it or past it, delete the entry, and if the hold's reason still "
             "applies, update its acknowledged version, reason and until"
         )
+    if pin.kind == REPO_PIN:
+        return steps
     args = _dockerfile_args(pin.tool, dockerfile)
     if args:
         steps.append(f"ARG {_arg_stem(pin.tool)}_VERSION in {', '.join(args)}")
@@ -2908,7 +3273,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         pins = load_pins_module()
-        pin_list = enumerate_pins(pins)
+        pin_list = enumerate_pins(pins) + enumerate_repo_pins()
         apt_pins = enumerate_apt_pins()
         indexes = apt_indexes()
         ruby = image_ruby(apt_pins)

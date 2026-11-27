@@ -8,7 +8,7 @@ and every other location ASH has accepted (``.ash/.ash.yaml``, ``.ash.yml``,
 keeps loading as a legacy location that warns once, naming the file and the
 canonical path. When both a canonical file and a legacy one exist the canonical
 one is read and the warning names the shadowed file. An explicit config path
-reads its file and warns nothing. The legacy locations are removed in ASH 4.0.
+reads its file and warns nothing. The legacy locations are removed in ASH 4.1.
 """
 
 from __future__ import annotations
@@ -153,7 +153,7 @@ class TestWarnings:
         assert "deprecated" in warnings[0]
         assert found.as_posix() in warnings[0]
         assert ".ash.yaml" in warnings[0]
-        assert "4.0" in warnings[0]
+        assert "4.1" in warnings[0]
 
     @pytest.mark.parametrize("legacy", LEGACY_LOCATIONS)
     def test_the_canonical_file_over_a_legacy_one_warns_once_naming_the_shadowed_file(

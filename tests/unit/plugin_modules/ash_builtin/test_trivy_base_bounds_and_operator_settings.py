@@ -405,13 +405,13 @@ def test_ignored_paths_past_the_argument_budget_are_left_out_with_a_warning(
     messages, logging_patch = _logged(scanner)
 
     with logging_patch:
-        tokens = scanner._link_skip_args(source, [])
+        skip_args = scanner._link_skip_args(source, [])
 
-    assert 0 < len(tokens) < len(many)
-    assert sum(len(os.fsencode(token)) + 1 for token in tokens) <= _SKIP_ARGS_BUDGET
-    assert all(token.startswith("--skip-files=") for token in tokens)
+    assert 0 < len(skip_args) < len(many)
+    assert sum(len(os.fsencode(token)) + 1 for token in skip_args) <= _SKIP_ARGS_BUDGET
+    assert all(token.startswith("--skip-files=") for token in skip_args)
     (warning,) = [m for m in messages if "not given to trivy" in m]
-    assert str(len(many) - len(tokens)) in warning
+    assert str(len(many) - len(skip_args)) in warning
 
 
 def test_control_a_few_ignored_paths_are_all_passed_directories_first(
@@ -427,9 +427,9 @@ def test_control_a_few_ignored_paths_are_all_passed_directories_first(
     messages, logging_patch = _logged(scanner)
 
     with logging_patch:
-        tokens = scanner._link_skip_args(Path(scanner.context.source_dir), [])
+        skip_args = scanner._link_skip_args(Path(scanner.context.source_dir), [])
 
-    assert tokens == [
+    assert skip_args == [
         "--skip-dirs=vendor/",
         "--skip-files=a.txt",
         "--skip-files=b/c.txt",
@@ -446,9 +446,9 @@ def test_under_a_small_budget_the_directory_tokens_survive_the_file_tokens(
     monkeypatch.setattr(trivy_base, "skip_args_budget", lambda environment: 25)
 
     with patch.object(scanner, "_plugin_log"):
-        tokens = scanner._link_skip_args(Path(scanner.context.source_dir), [])
+        skip_args = scanner._link_skip_args(Path(scanner.context.source_dir), [])
 
-    assert tokens == ["--skip-dirs=vendor/"]
+    assert skip_args == ["--skip-dirs=vendor/"]
 
 
 def test_skip_tokens_at_the_windows_budget_keep_the_whole_command_line_in_limit(
@@ -467,7 +467,7 @@ def test_skip_tokens_at_the_windows_budget_keep_the_whole_command_line_in_limit(
     messages, logging_patch = _logged(scanner)
 
     with logging_patch:
-        tokens = scanner._link_skip_args(source, [])
+        skip_args = scanner._link_skip_args(source, [])
 
     command = [
         "trivy",
@@ -476,11 +476,11 @@ def test_skip_tokens_at_the_windows_budget_keep_the_whole_command_line_in_limit(
         "sarif",
         "--output",
         "C:\\Users\\scanner\\output\\" + "o" * 200,
-        *tokens,
+        *skip_args,
         "C:\\Users\\scanner\\source\\" + "s" * 200,
     ]
     line = subprocess.list2cmdline(command)
-    assert 0 < len(tokens) < len(many)
+    assert 0 < len(skip_args) < len(many)
     assert len(line.encode("utf-16-le")) // 2 <= 32_767
 
 
@@ -543,9 +543,13 @@ def test_the_operators_skip_variables_are_given_back_beside_ashs_skip_flags(tmp_
         "TRIVY_SKIP_FILES": "k.pem",
     }
 
-    tokens = scanner._operator_skip_args(["--skip-dirs=.ash/ash_output"])
+    skip_args = scanner._operator_skip_args(["--skip-dirs=.ash/ash_output"])
 
-    assert tokens == ["--skip-dirs=vendor", "--skip-dirs=build", "--skip-files=k.pem"]
+    assert skip_args == [
+        "--skip-dirs=vendor",
+        "--skip-dirs=build",
+        "--skip-files=k.pem",
+    ]
 
 
 def test_an_empty_operator_skip_entry_is_nothing(tmp_path):
@@ -605,11 +609,11 @@ def test_the_operators_config_file_skip_lists_are_given_back_too(tmp_path):
         encoding="utf-8",
     )
 
-    tokens = scanner._operator_skip_args(
+    skip_args = scanner._operator_skip_args(
         [f"--config={operator.as_posix()}", "--skip-dirs=.ash/ash_output"]
     )
 
-    assert tokens == ["--skip-dirs=a", "--skip-dirs=b", "--skip-files=secrets.txt"]
+    assert skip_args == ["--skip-dirs=a", "--skip-dirs=b", "--skip-files=secrets.txt"]
 
 
 def test_the_environment_beats_the_config_file_and_a_present_token_is_not_doubled(
@@ -621,11 +625,11 @@ def test_the_environment_beats_the_config_file_and_a_present_token_is_not_double
     operator.parent.mkdir()
     operator.write_text("scan:\n  skip-dirs: [from-config]\n", encoding="utf-8")
 
-    tokens = scanner._operator_skip_args(
+    skip_args = scanner._operator_skip_args(
         [f"--config={operator.as_posix()}", "--skip-dirs=vendor", "--skip-files=x"]
     )
 
-    assert tokens == []
+    assert skip_args == []
 
 
 def test_control_with_no_skip_flag_of_ashs_trivy_reads_the_operators_lists_itself(
@@ -643,9 +647,9 @@ def test_an_operator_entry_holding_a_quote_is_passed_as_a_csv_field(tmp_path):
     scanner = _repo_scanner(tmp_path)
     scanner.extra_env = {"TRIVY_SKIP_DIRS": 'a"b'}
 
-    tokens = scanner._operator_skip_args(["--skip-dirs=.ash/ash_output"])
+    skip_args = scanner._operator_skip_args(["--skip-dirs=.ash/ash_output"])
 
-    assert tokens == ['--skip-dirs="a""b"']
+    assert skip_args == ['--skip-dirs="a""b"']
 
 
 def test_an_operator_config_entry_holding_a_comma_is_passed_as_one_field(tmp_path):
@@ -654,11 +658,11 @@ def test_an_operator_config_entry_holding_a_comma_is_passed_as_one_field(tmp_pat
     operator.parent.mkdir()
     operator.write_text("scan:\n  skip-dirs:\n    - 'x,y'\n", encoding="utf-8")
 
-    tokens = scanner._operator_skip_args(
+    skip_args = scanner._operator_skip_args(
         [f"--config={operator.as_posix()}", "--skip-dirs=.ash/ash_output"]
     )
 
-    assert tokens == ['--skip-dirs="x,y"']
+    assert skip_args == ['--skip-dirs="x,y"']
 
 
 def test_an_operator_config_entry_holding_a_line_break_is_left_out_without_its_text(
@@ -677,11 +681,11 @@ def test_an_operator_config_entry_holding_a_line_break_is_left_out_without_its_t
     messages, logging_patch = _logged(scanner)
 
     with logging_patch:
-        tokens = scanner._operator_skip_args(
+        skip_args = scanner._operator_skip_args(
             [f"--config={operator.as_posix()}", "--skip-dirs=.ash/ash_output"]
         )
 
-    assert tokens == ["--skip-dirs=vendor"]
+    assert skip_args == ["--skip-dirs=vendor"]
     (warning,) = messages
     assert "entry 1 of scan.skip-dirs" in warning
     assert "zz-line" not in warning and "\n" not in warning
@@ -1820,9 +1824,9 @@ def test_the_operators_skip_entries_are_held_to_what_is_left_of_the_budget(
     messages, logging_patch = _logged(scanner)
 
     with logging_patch:
-        tokens = scanner._operator_skip_args([ashs_own])
+        skip_args = scanner._operator_skip_args([ashs_own])
 
-    assert tokens == ["--skip-dirs=aaaa"], tokens
+    assert skip_args == ["--skip-dirs=aaaa"], skip_args
     (warning,) = [m for m in messages if "exceed the size" in m]
     assert warning.startswith("3 entries"), warning
     # Where the overflow starts: the variable and the first entry left out, never
@@ -1843,9 +1847,9 @@ def test_a_single_entry_over_the_budget_is_reported_in_the_singular(
     messages, logging_patch = _logged(scanner)
 
     with logging_patch:
-        tokens = scanner._operator_skip_args([ashs_own])
+        skip_args = scanner._operator_skip_args([ashs_own])
 
-    assert tokens == []
+    assert skip_args == []
     (warning,) = _operator_warnings(messages)
     assert warning.startswith("1 entry of the operator's"), warning
     assert "from entry 1 of TRIVY_SKIP_DIRS on, is not given" in warning, warning
@@ -1887,9 +1891,9 @@ def test_control_the_operators_skip_entries_all_fit_a_budget_that_holds_them(
     messages, logging_patch = _logged(scanner)
 
     with logging_patch:
-        tokens = scanner._operator_skip_args(["--skip-dirs=x"])
+        skip_args = scanner._operator_skip_args(["--skip-dirs=x"])
 
-    assert tokens == ["--skip-dirs=aaaa", "--skip-dirs=bbbb"], tokens
+    assert skip_args == ["--skip-dirs=aaaa", "--skip-dirs=bbbb"], skip_args
     assert not [m for m in messages if "exceed the size" in m], messages
 
 
@@ -2206,18 +2210,18 @@ def test_an_operator_list_left_to_trivy_says_nothing_where_ash_builds_no_skip_to
 
     with logging_patch:
         monkeypatch.setattr(link_exclusions.os, "sep", "\\")
-        tokens = scanner._ashs_skip_args(
+        skip_args = scanner._ashs_skip_args(
             target, _IGNORED_PATHS, plan, target_type="source"
         )
-        assert tokens == [], tokens
+        assert skip_args == [], skip_args
         assert not messages, messages
 
         monkeypatch.setattr(link_exclusions.os, "sep", "/")
-        tokens = scanner._ashs_skip_args(
+        skip_args = scanner._ashs_skip_args(
             target, _IGNORED_PATHS, plan, target_type="source"
         )
 
-    assert tokens == [], tokens
+    assert skip_args == [], skip_args
     assert walks == [], walks
     (deferred_warning,) = [m for m in messages if "ignored path(s)" in m]
     _assert_the_warning_blames_the_operators_list(deferred_warning)
@@ -2543,10 +2547,10 @@ def test_operator_entries_with_spaces_are_counted_as_the_windows_line_builds_the
     ashs_own = "--skip-dirs=.ash/ash_output"
 
     with patch.object(scanner, "_plugin_log"):
-        tokens = scanner._operator_skip_args([ashs_own])
+        skip_args = scanner._operator_skip_args([ashs_own])
 
-    line = subprocess.list2cmdline([ashs_own, *tokens])
-    assert 0 < len(tokens) < 2000
+    line = subprocess.list2cmdline([ashs_own, *skip_args])
+    assert 0 < len(skip_args) < 2000
     assert len(line.encode("utf-16-le")) // 2 < trivy_base._WINDOWS_SKIP_ARGS_BUDGET
 
 
@@ -2558,6 +2562,6 @@ def test_control_operator_skip_entries_without_spaces_count_as_their_bytes(
     _platform(monkeypatch, "win32")
 
     with patch.object(scanner, "_plugin_log"):
-        tokens = scanner._operator_skip_args(["--skip-dirs=.ash/ash_output"])
+        skip_args = scanner._operator_skip_args(["--skip-dirs=.ash/ash_output"])
 
-    assert tokens == ["--skip-dirs=vendor", "--skip-dirs=build"]
+    assert skip_args == ["--skip-dirs=vendor", "--skip-dirs=build"]

@@ -1,0 +1,12 @@
+
+ Usage: ashx dependencies [OPTIONS] COMMAND [ARGS]...
+
+ Check or install dependencies for ASH plugins
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help  -h        Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ check    Check Grype and Trivy cache metadata without running or downloading tools.              │
+│ install  Install dependencies for ASH plugins.                                                   │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

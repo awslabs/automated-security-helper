@@ -4,7 +4,7 @@
 
 ## Enabling it
 
-Betterleaks is an alpha plugin that ships with ASH. Its plugin module is loaded only when you list it, so an `ash scan` that does not list it is unchanged: no row in the results, the summary, the reports or the SARIF.
+Betterleaks is an alpha plugin that ships with ASH. Its plugin module is loaded only when you list it, so an `ashx scan` that does not list it is unchanged: no row in the results, the summary, the reports or the SARIF.
 
 ```yaml
 # .ash.yaml
@@ -15,7 +15,7 @@ ash_plugin_modules:
 <!-- doctest: illustrative reason="runs a full scan, which needs every scanner installed" -->
 ```bash
 # For one run
-ash scan --ash-plugin-modules automated_security_helper.plugin_modules.ash_betterleaks_plugins
+ashx scan --ash-plugin-modules automated_security_helper.plugin_modules.ash_betterleaks_plugins
 ```
 
 With the module listed, `betterleaks` runs by default, like every other scanner. `scanners.betterleaks.enabled: false` turns it off again, and `--scanners` and `--exclude-scanners` select it as they select any scanner. `--scanners betterleaks` without the module listed is refused, with a message naming the module to add. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate).
@@ -25,14 +25,14 @@ Betterleaks runs beside the builtin `gitleaks` scanner, not instead of it, so a 
 ## Installing Betterleaks
 
 - **Container mode:** the ASH image includes Betterleaks v1.10.1.
-- **Local mode:** `ash dependencies install` (or `ash dependencies install --tool betterleaks`),
+- **Local mode:** `ashx dependencies install` (or `ashx dependencies install --tool betterleaks`),
   with the module listed in `ash_plugin_modules` (or added with
   `--config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_betterleaks_plugins"]'`),
   downloads the pinned v1.10.1 release archive from GitHub and verifies it against
   the SHA256 digest pinned in ASH, and the executable inside it against a second
   pinned digest, before installing it. Linux, macOS and Windows on x86_64 and arm64
   are supported.
-- **Nix mode:** the flake does not supply Betterleaks. Install it with `ash dependencies install`, or have it on `PATH`.
+- **Nix mode:** the flake does not supply Betterleaks. Install it with `ashx dependencies install`, or have it on `PATH`.
 - Any `betterleaks` already on `PATH` is also used.
 
 ## What is scanned

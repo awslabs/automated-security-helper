@@ -621,11 +621,35 @@ class TestScanValidationValuesAreDerived:
         )
 
         # Every log line that used to read the input must read the derived value, or the
-        # removal above would have left them expanding to nothing.
-        referenced = text.count("steps.platform.outputs.platform")
-        assert referenced >= 5, (
-            f"only {referenced} reference(s) to the derived platform were found; the "
-            "five log lines that named the old input should each read it now."
+        # removal above would have left them expanding to nothing. Asserted per line
+        # rather than as a total: there were five such lines, one per scan method, and
+        # the `bash` method's went with the root ./ash script the Python CLI absorbed,
+        # so a fixed count would be stale the next time a method is added or removed.
+        #
+        # #724 moved every `${{ ... }}` out of these `run:` scripts and into the step's
+        # `env:`, so a line reads the derived value either directly or through an
+        # environment variable whose step maps it from steps.platform.outputs.platform.
+        derived = "${{ steps.platform.outputs.platform }}"
+        log_lines = []
+        unreferenced = []
+        for step in action["runs"]["steps"]:
+            env = step.get("env") or {}
+            via_env = [name for name, value in env.items() if value == derived]
+            for line in str(step.get("run", "")).splitlines():
+                if "Testing ASH using" not in line:
+                    continue
+                log_lines.append(line)
+                if "steps.platform.outputs.platform" in line:
+                    continue
+                if not any(name in line for name in via_env):
+                    unreferenced.append(line.strip())
+        assert len(log_lines) >= 4, (
+            f"only {len(log_lines)} 'Testing ASH using' log line(s) were found; one per "
+            "scan method (python-container, python-local on each os family, powershell) "
+            "is expected, so the census below would be checking too little."
+        )
+        assert not unreferenced, (
+            "these log lines do not read the derived platform: " + repr(unreferenced)
         )
 
 

@@ -24,7 +24,7 @@ pinned ASH with uv instead
 The same page covers the part that ages: grype and trivy read vulnerability
 databases with age bounds, and ASH fails a scan whose database is stale, so
 image rebuilds go on a schedule rather than waiting for the first failed scan.
-`ash dependencies check --offline` reads the age of the cached databases against
+`ashx dependencies check --offline` reads the age of the cached databases against
 those bounds without running a scan
 ([Check cached database ages](../how-to/run-offline.md#check-caches)).
 
@@ -50,7 +50,7 @@ reporters are on by default, and each writes its own file
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan --source-dir . --scanners detect-secrets --offline --no-progress --output-formats sarif,junitxml
+ashx scan --source-dir . --scanners detect-secrets --offline --no-progress --output-formats sarif,junitxml
 ```
 
 Suppressed findings ride along in the data formats with their reasons, so your
@@ -64,7 +64,7 @@ else is a [reporter plugin](../plugins/write-a-reporter.md) away.
 
 Two built-in combiners produce one result from several scans:
 
-- `ash merge` recombines the shards of one scan that ran across several
+- `ashx results merge` recombines the shards of one scan that ran across several
   runners, recomputing the verdict and every report over all of them, and
   refuses mismatched shards rather than merging a hole into the results
   ([Split a scan across runners](../how-to/scale-large-repos.md#sharding)).
@@ -81,7 +81,7 @@ Across repositories, the aggregation is yours: each scan's
 stable places to build from, and `ash.flat.json` is the one-record-per-finding
 file for quick scripts.
 
-For trend questions, compare results files directly: `ash diff` lists the new,
+For trend questions, compare results files directly: `ashx results diff` lists the new,
 absent, moved, severity-changed, and suppression-changed findings between two scans
 ([Compare two saved scans](../how-to/export-reports.md#compare-scans)), and over MCP
 `diff_scan_results` returns the resolved, new, and severity-changed findings
@@ -91,7 +91,7 @@ fleet's history is a directory listing.
 
 ## AI-assisted triage over MCP
 
-`ash mcp` exposes scans and results to any MCP client, which turns triage from
+`ashx mcp` exposes scans and results to any MCP client, which turns triage from
 file-reading into a conversation: an agent runs or re-runs a scan, pulls the
 findings, explains one with its code context (`explain_finding`), drafts a
 suppression with a reason and a default 90-day expiration
@@ -103,7 +103,7 @@ The server is built to be operated, not just started:
 
 - `ASH_MCP_ALLOWED_ROOTS` limits which directories it will scan and read.
 - Config profiles are registered by the operator at startup
-  (`ash mcp --profile NAME=path/to/ash.yaml`), so a client picks a policy by
+  (`ashx mcp --profile NAME=path/to/ash.yaml`), so a client picks a policy by
   name instead of shipping its own
   ([Config profiles](../how-to/mcp-server.md#config-profiles)).
 - A config file a client delivers cannot loosen the server's gate: the server

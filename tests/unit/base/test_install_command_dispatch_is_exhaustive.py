@@ -6,7 +6,7 @@ members and ended without an ``else``. ``PackageManager.CONDA`` had no branch --
 it appeared exactly once in the whole repository, at its own declaration -- so a
 plugin declaring ``package_manager: conda`` produced an empty command list.
 
-Nothing raised and nothing warned. ``ash dependencies install`` printed
+Nothing raised and nothing warned. ``ashx dependencies install`` printed
 "Installing dependencies for ..." with no command under it, and its verdict only
 fails a run when *nothing at all* was attempted and a needed tool is still
 missing, so a plugin declaring one pip dependency alongside one conda dependency

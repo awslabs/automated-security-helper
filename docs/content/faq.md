@@ -1,7 +1,7 @@
 # Frequently asked questions
 
 Short answers, each with a link to the page that has the details. The config examples are
-keys to add to your ASH config file. `ash config init` writes one, `.ash.yaml`, in the
+keys to add to your ASH config file. `ashx config init` writes one, `.ash.yaml`, in the
 current directory.
 
 ## Why does my first scan exit 1?
@@ -10,12 +10,12 @@ At least one scanner is MISSING: its tool is not installed, or ASH found the too
 inside the scanned directory, such as in the project's `.venv`, and did not run it (see
 [Tools inside the scanned directory](docs/advanced-usage.md#tools-inside-the-scanned-directory)).
 A scan with a MISSING scanner is incomplete, and an incomplete scan exits 1 even when it
-also found something. Run `ash dependencies install` to install the tools it can install.
+also found something. Run `ashx dependencies install` to install the tools it can install.
 A scanner with nothing to scan shows as SKIPPED whether or not its tool is installed, so
 npm-audit and cdk-nag need Node.js, and cfn-nag needs Ruby with a C compiler, only in a
 project they have something to scan in: CloudFormation templates for cdk-nag and cfn-nag,
 and a lockfile beside a `package.json` for npm-audit. To scan without a tool you cannot install, leave its scanner out with
-`ash --exclude-scanners cdk-nag,npm-audit`. See
+`ashx --exclude-scanners cdk-nag,npm-audit`. See
 [A scanner shows MISSING](how-to/troubleshoot.md#a-scanner-shows-missing) and
 [Exit codes](reference/exit-codes.md).
 
@@ -24,7 +24,7 @@ with or without Node.js, so the exit code is detect-secrets' verdict alone:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash --scanners cdk-nag,detect-secrets --no-progress
+ashx --scanners cdk-nag,detect-secrets --no-progress
 ```
 
 ## How do I install ASH, and which version should I pin?
@@ -32,17 +32,17 @@ ash --scanners cdk-nag,detect-secrets --no-progress
 Install from GitHub, with a git URL or with Homebrew from the repository's tap;
 [Install ASH](how-to/install.md) shows each method. ASH is not published on PyPI. The
 PyPI project named `automated-security-helper` is not published by this project, so do not
-install ASH by that name. Pin an exact release tag or a commit. The floating `v3` tag is
-frozen at v3.8.0 and no longer moves to new releases; take release tags from the GitHub
-releases page. A pin fixes ASH's own
+install ASH by that name. Pin an exact release tag or a commit. Floating major tags such
+as `v4` do not move to new releases (the `v3` tag is frozen at v3.8.0); take release tags
+from the GitHub releases page. A pin fixes ASH's own
 code, not every dependency: uv, pipx, and pip resolve ASH's dependencies again when they
 install it. Homebrew installs the release its formula names, the latest one, with the
 dependency versions locked in that release's `uv.lock`.
 
 ## Is there a container image?
 
-ASH publishes no image. `ash container build` builds one from a release tag, and
-`ash --mode container` builds one and runs the scan in it. ASH uses the first of finch,
+ASH publishes no image. `ashx container build` builds one from a release tag, and
+`ashx --mode container` builds one and runs the scan in it. ASH uses the first of finch,
 docker, nerdctl, and podman that it finds on your `PATH`, or the one you name with
 `--oci-runner`. The default image runs as a non-root user whose UID and GID you can set;
 `--build-target ci` builds the image that runs as root, which a job running as root
@@ -72,7 +72,7 @@ read:
 mkdir -p cdk.out
 echo '{"Resources": {"Bucket": {"Type": "AWS::S3::Bucket"}}}' > cdk.out/App.template.json
 echo cdk.out >> .gitignore
-ash --scanners detect-secrets --offline --no-progress
+ashx --scanners detect-secrets --offline --no-progress
 ```
 
 ```bash
@@ -97,9 +97,9 @@ global_settings:
       reason: The command is a constant string; no user input reaches it.
 ```
 
-`ash report` shows each finding's rule ID. You can add `expires` with a date in quotes,
+`ashx results report` shows each finding's rule ID. You can add `expires` with a date in quotes,
 such as `"2027-06-30"`; from that date the suppression stops applying, and
-`ash config lint` reports it as expired. ASH also honors inline `ash-ignore` comments, and
+`ashx config lint` reports it as expired. ASH also honors inline `ash-ignore` comments, and
 scanners honor their own, such as bandit's `# nosec`. See
 [Suppress findings](how-to/suppress-findings.md).
 
@@ -144,21 +144,19 @@ ruleset past its age bound, still exits 1. See [Set the gate](how-to/set-the-gat
 
 ## Why do two scanners report the same problem?
 
-ASH runs scanners whose checks overlap and does not deduplicate their findings: semgrep and
-opengrep run the same ruleset, grype and trivy both check dependencies, and detect-secrets
+ASH runs scanners whose checks overlap and does not deduplicate their findings: grype and trivy both check dependencies, and detect-secrets
 and gitleaks both look for secrets. Each finding carries its scanner's own rule ID, so a
 suppression for one does not cover the other. To keep one of a pair, turn the other off
-by setting `scanners.opengrep.enabled` to `false` in the config or by passing
-`--exclude-scanners opengrep`. See
+by setting `scanners.gitleaks.enabled` to `false` in the config or by passing
+`--exclude-scanners gitleaks`. See
 [Choose scanners](how-to/choose-scanners.md).
 
 ## Does ASH work on Windows?
 
-Local mode installs and runs on Windows, but semgrep and opengrep are off there and show as
-SKIPPED, and there is no scanner sandbox. If another program named `ash` comes first on
-your `PATH` (Git for Windows and MSYS2 ship a shell by that name), run ASH as `ashv3`, which
-is the same command. Container mode is not tested on Windows. See
-[Install ASH](how-to/install.md).
+Local mode installs and runs on Windows, but opengrep is off there and shows as
+SKIPPED, and there is no scanner sandbox. ASH's command is `ashx`, so the shell that Git for
+Windows and MSYS2 ship as `ash` does not shadow it. Container mode is not tested on Windows.
+See [Install ASH](how-to/install.md).
 
 ## Which GitHub Actions permissions does ASH need?
 
@@ -175,7 +173,7 @@ See [Run ASH in GitHub Actions](how-to/ci/github-actions.md).
 Yes. With `--offline`, ASH runs every scanner in its offline mode and installs nothing,
 except npm-audit, which does not run offline. Some scanners still make requests; only the
 scanner sandbox, or container mode with `--offline`, removes the network itself. The rules and vulnerability databases must be in
-place first; an image built with `ash container build --offline` contains them. Each database
+place first; an image built with `ashx container build --offline` contains them. Each database
 has an age bound, from a day to a month, and by default a scan fails when one is past it
 (an image built with `OFFLINE=YES` only warns for trivy's database), so plan to rebuild
 offline images often. See [Run ASH offline](how-to/run-offline.md) and
@@ -190,14 +188,14 @@ add `--exclude-scanners npm-audit`:
 ```bash
 echo '{"name": "demo", "version": "1.0.0"}' > package.json
 echo '{"name": "demo", "version": "1.0.0", "lockfileVersion": 3, "packages": {}}' > package-lock.json
-ash --offline --scanners npm-audit,detect-secrets --no-progress
+ashx --offline --scanners npm-audit,detect-secrets --no-progress
 ```
 
 ## What does a scan send over the network?
 
 ASH itself sends no telemetry. The scanners download rules and vulnerability databases, and
-some send data to their own services: for example, semgrep sends usage metrics to Semgrep
-when it uses registry rules, and npm-audit sends your dependency tree to the npm registry.
+some send data to their own services: for example, npm-audit sends your dependency tree
+to the npm registry.
 See [what leaves the machine during a scan](concepts/scanning-untrusted-code.md#what-leaves-the-machine-during-a-scan).
 
 ## Can I use ASH programmatically?
@@ -220,6 +218,6 @@ print(f"{results.metadata.summary_stats.actionable} actionable findings")
 ```
 
 It returns the results only when the scan's exit code is 0. Otherwise it raises
-`SystemExit` with that code, as `ash scan` exits with it, which is why the example passes
+`SystemExit` with that code, as `ashx scan` exits with it, which is why the example passes
 `fail_on_findings=False`. An incomplete scan still raises. A keyword that `run_ash_scan`
 does not take raises `TypeError`. See [Python API](reference/python-api.md).

@@ -146,11 +146,13 @@ def test_the_templates_default_one_release_and_terraform_has_no_default():
         "`ash_version` variable has no default, and the Terraform examples pin the "
         "same release.",
     )
+    # The EKS operator template (AshEksOperator) installs the operator chart and takes
+    # no image ref, so it has no AshVersion; the five targets the page names do.
     defaults = {
-        template.name: _template_parameters(template.name.split(".")[0])["AshVersion"][
-            "Default"
-        ]
+        template.name: parameters["AshVersion"]["Default"]
         for template in CDK_TEMPLATES.glob("*.template.json")
+        if "AshVersion"
+        in (parameters := _template_parameters(template.name.split(".")[0]))
     }
     assert len(defaults) == 5, defaults
     assert len(set(defaults.values())) == 1, defaults
@@ -214,7 +216,7 @@ def test_the_stateless_mcp_option_the_page_relies_on_exists():
     assert_on_page(
         DEPLOY_PAGE,
         "The targets need options that no release up to 3.7.1 has: stateless MCP "
-        "(`ash mcp --stateless-http`)",
+        "(`ashx mcp --stateless-http`)",
     )
     assert "--stateless-http" in _options(_click_commands().commands["mcp"])
 
@@ -291,7 +293,7 @@ def test_plugin_modules_are_named_by_a_config_key_an_option_and_an_environment_v
     )
     assert_on_page(
         INTEGRATIONS_PAGE,
-        "the `ASH_PLUGIN_MODULES` environment variable, which `ash scan` reads as the "
+        "the `ASH_PLUGIN_MODULES` environment variable, which `ashx scan` reads as the "
         "option's default.",
     )
     from automated_security_helper.config.ash_config import AshConfig
@@ -341,7 +343,7 @@ def test_the_plugin_runs_the_two_scans_at_the_two_checkpoints_the_page_names():
     )
     assert_on_page(
         AIDLC_PAGE,
-        "the quality agent runs a full `ash scan --no-progress`, copies the scanner "
+        "the quality agent runs a full `ashx scan --no-progress`, copies the scanner "
         "table into the stage summary for the approval gate, and does not proceed "
         "while the scan exits 1 or 2.",
     )
@@ -402,7 +404,7 @@ def test_the_daemon_idles_out_after_30_minutes_and_two_settings_change_that():
     assert_on_page(
         EXPRESS_PAGE,
         "The daemon retires itself after 30 minutes without a request (configure "
-        "with the `--idle-seconds` option of `ash express start`, or the "
+        "with the `--idle-seconds` option of `ashx express start`, or the "
         "`ASH_EXPRESS_IDLE_SECONDS` environment variable)",
     )
     from automated_security_helper.express import runtime

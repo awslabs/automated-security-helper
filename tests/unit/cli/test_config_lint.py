@@ -142,7 +142,7 @@ def config_with_suppression_issues(tmp_path):
                     "line_start": 10,
                     "line_end": 10,
                     "reason": "Safe usage",
-                    "expiration": "2020-01-01",  # Expired
+                    "expires": "2020-01-01",  # Expired
                 },
                 {
                     "path": "src/valid.py",
@@ -846,7 +846,7 @@ scanners:
         assert len(suppressions) == 2
         # Verify the expired one is gone
         for supp in suppressions:
-            assert supp.get("expiration") != "2020-01-01"
+            assert supp.get("expires") != "2020-01-01"
 
     def test_fix_multiple_expired_suppressions(self, tmp_path):
         """Fix should correctly remove multiple expired suppressions (index shifting)."""
@@ -860,7 +860,7 @@ scanners:
                         "path": "src/a.py",
                         "rule_id": "B101",
                         "reason": "expired 1",
-                        "expiration": "2020-01-01",
+                        "expires": "2020-01-01",
                     },
                     {
                         "path": "src/b.py",
@@ -871,7 +871,7 @@ scanners:
                         "path": "src/c.py",
                         "rule_id": "B301",
                         "reason": "expired 2",
-                        "expiration": "2021-06-15",
+                        "expires": "2021-06-15",
                     },
                     {
                         "path": "src/d.py",
@@ -1259,7 +1259,7 @@ FIXABLE_ONLY_CONFIGS = {
 
 
 class TestConfigLintCLI:
-    """Integration tests for the `ash config lint` CLI command."""
+    """Integration tests for the `ashx config lint` CLI command."""
 
     def test_lint_valid_config_exits_zero(self, cli_runner, valid_config):
         """Linting a valid config should exit with code 0."""

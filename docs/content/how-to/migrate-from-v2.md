@@ -8,7 +8,7 @@ lists what changes for a v2 user and what to do about each.
 | | v2 | v3 |
 |---|---|---|
 | Install | clone the repository and add it to `PATH` | install from GitHub with uv, pipx, pip, or Homebrew ([Install ASH](install.md)) |
-| Where scanners run | always in a container built on each run | on your machine, or in a container with `ash --mode container` |
+| Where scanners run | always in a container built on each run | on your machine, or in a container with `ashx --mode container` |
 | Configuration | none | a config file, `.ash.yaml` at the project root, with ignore paths, suppressions, thresholds, and scanner settings |
 | Output | `ash_output/aggregated_results.txt` | `.ash/ash_output/`, with a JSON results file and a `reports/` directory |
 | Exit code | the highest exit code of any scanner | 0, 1, 2, 3, 4, or 5, each with one meaning |
@@ -21,14 +21,14 @@ lists what changes for a v2 user and what to do about each.
 2. Install v3 as described in [Install ASH](install.md).
 3. Choose where the scanners run:
    - To run them on your machine, as v3 does by default, install them with
-     `ash dependencies install`. See [Manage scanner tools](../docs/advanced-usage.md).
+     `ashx dependencies install`. See [Manage scanner tools](../docs/advanced-usage.md).
    - To keep v2's behavior of running everything in a container, run
-     `ash --mode container`. See [Run ASH in a container](run-in-a-container.md).
+     `ashx --mode container`. See [Run ASH in a container](run-in-a-container.md).
 
 ## Command-line options
 
-v2's options were parsed by its shell scripts. In v3, `ash` with no subcommand is the
-same as `ash scan`.
+v2's options were parsed by its shell scripts. In v3, `ashx` with no subcommand is the
+same as `ashx scan`.
 
 | v2 option | v3 |
 |---|---|
@@ -37,11 +37,11 @@ same as `ash scan`.
 | --ext, -extension | removed. Choose scanners with `--scanners` and `--exclude-scanners`, or turn them on and off in the configuration. |
 | --format text, --format json | changed. `--format` is now an alias of `--output-formats`, which takes reporter names such as `sarif` or `html`. `json` is not one of them, so a v2 `--format json` exits 5, a usage error, with `'json' is not a valid format`. `text` is the text reporter, so a v2 `--format text` keeps only `ash.summary.txt` in `reports/`. v3 always writes its JSON results file. |
 | --offline | `--offline`. In local mode the scanners then need their databases and rules already on the machine; see [Run ASH offline](run-offline.md). |
-| --offline-semgrep-rulesets | `--offline-semgrep-rulesets`, changed. In v2 it also turned on offline mode. In v3 it only chooses the rulesets an offline container image is built with, and does nothing in local mode; pass `--offline` as well. |
+| --offline-semgrep-rulesets | `--offline-rulesets`, changed. In v2 it also turned on offline mode. In v3 it only chooses the rulesets an offline container image is built with, and does nothing in local mode; pass `--offline` as well. The v2 spelling `--offline-semgrep-rulesets` is deprecated: it still works, prints a warning on stderr, and is scheduled for removal. |
 | --build-target, --no-build, --no-run, --force | unchanged, for container mode |
 | --no-cleanup | accepted. v3 keeps its working files by default; `--cleanup` removes them. |
 | -c, --no-color | `--no-color`. `-c` now means `--config`. |
-| -s, --single-process | `ash --strategy sequential` |
+| -s, --single-process | `ashx --strategy sequential` |
 | -o, --oci-runner | `--oci-runner` and `-o`, unchanged. The `OCI_RUNNER` variable also works. |
 | -p, --preserve-report | removed. Use a different `--output-dir` for each run. `-p` now means `--progress`. |
 | -d, --debug | `--debug` and `-d`, unchanged |
@@ -49,15 +49,15 @@ same as `ash scan`.
 | -v, --version | `--version` only. `-v` now means `--verbose`. |
 | -h, --help | `--help` only |
 | --container-uid -u, --container-gid | `--container-uid` (`-u`) and `--container-gid` (`-g`) |
-| --finch, -f | removed; use `ash --mode container --oci-runner finch`. `-f` now means `--output-formats`. |
+| --finch, -f | removed; use `ashx --mode container --oci-runner finch`. `-f` now means `--output-formats`. |
 
-Remove v2 options from your scripts. `ash` and `ash scan` reject an option they do not
+Remove v2 options from your scripts. `ashx` and `ashx scan` reject an option they do not
 know, or a value an option does not accept, with a usage error, exit code 5, so a stale
 command line fails before it scans. A v2 `--format json` fails this way:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash --format json
+ashx --format json
 ```
 
 ## Configuration
@@ -70,12 +70,12 @@ v3 also honors `.gitignore` and `.ignore`, but it scans the working tree, so
 uncommitted and untracked files that are not ignored are scanned too. Expect findings in
 files v2 never saw. Neither version reads a `.ashignore` file.
 
-Everything else is set in a configuration file. `ash config init` writes a starting
+Everything else is set in a configuration file. `ashx config init` writes a starting
 file, `.ash.yaml`, in the current directory:
 
 <!-- doctest: run -->
 ```bash
-ash config init
+ashx config init
 head -n 3 .ash.yaml
 ```
 
@@ -102,7 +102,7 @@ scanner's text output. v3 writes `.ash/ash_output/` in the scanned directory:
 - `scanners/`: each scanner's raw output.
 - `ash.log`: the scan's log.
 
-`ash report` prints a summary of the latest results in the terminal. See
+`ashx results report` prints a summary of the latest results in the terminal. See
 [Output files](../reference/output-files.md).
 
 ## Exit codes
@@ -135,12 +135,15 @@ See [Set the gate](set-the-gate.md) and [Exit codes](../reference/exit-codes.md)
 v2 ran git-secrets, bandit, semgrep, checkov, cfn_nag, cdk-nag, npm audit, grype, and
 syft, choosing them by the file types it found. v3 runs actionlint, bandit, cdk-nag,
 cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit,
-opengrep, semgrep, syft, trivy, and zizmor. A scanner shows as SKIPPED when the project
+opengrep, syft, trivy, and zizmor. A scanner shows as SKIPPED when the project
 has nothing for it to scan, whether or not its tool is installed: for example cdk-nag
 and cfn-nag in a project without CloudFormation templates.
 
 - git-secrets is gone. detect-secrets and gitleaks look for secrets.
-- semgrep runs the `p/ci` ruleset by default. v2 ran `--config=auto`.
+- opengrep, a fork of semgrep with the same rule syntax, replaces semgrep and runs the
+  `p/ci` ruleset by default. v2 ran semgrep with `--config=auto`. The name `semgrep` is an
+  alias for opengrep, so a semgrep config section and `--scanners semgrep` still
+  work.
 - More scanners can report the same problem, because v3 does not merge findings from
   different scanners.
 

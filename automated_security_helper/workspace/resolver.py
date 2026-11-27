@@ -1494,7 +1494,7 @@ def _validate_plugin_modules(
 
     * project-without-the-plugin first -- the project that declared the plugin
       keeps it. A memo keyed on the plugin kind alone would make that project
-      lose it: a silent false negative, fewer findings than ``ash --source-dir``
+      lose it: a silent false negative, fewer findings than ``ashx --source-dir``
       would report, with no warning anywhere.
     * project-with-the-plugin first -- the other project gains a scanner it never
       declared, because the registry holds every module any project loaded.

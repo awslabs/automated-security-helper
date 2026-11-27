@@ -1,0 +1,489 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: ASH - VS Code Extension
+# Builds editors/vscode into a .vsix and opens the archive to check what is inside.
+#
+# WHY THIS IS A SEPARATE WORKFLOW FROM ash-typescript-ci.yml
+#
+# That one holds a coverage number, and editors/vscode joins its matrix for exactly
+# that. This one answers a different question -- what bytes end up in the artifact --
+# and it needs a step no other package in that matrix has. Adding a conditional
+# packaging step to a uniform matrix would make every entry carry an `if:` about a
+# format only one of them builds.
+#
+# It is also the shape the rest of this repository's packaging already has: each
+# directory under packaging/ has a verification that builds the artifact and then
+# exercises it, rather than a shared job that special-cases each format.
+#
+# WHAT IS DELIBERATELY NOT HERE
+#
+# Publishing. There is no `vsce publish`, no personal access token, no marketplace
+# submission, and no secret is referenced anywhere in this file. The extension is a
+# GitHub Release asset, the same as every other artifact packaging/README.md
+# describes, and a workflow that could publish would be the wrong place to find that
+# out.
+#
+# WHY THE CONTENTS CHECK IS THE POINT OF THE JOB
+#
+# packaging/README.md draws the line: ASH's own code may ship in a published
+# artifact, third-party code never may. `vsce package` bundles the `dependencies`
+# tree from node_modules into the .vsix by DEFAULT, so the packaging tool's own
+# default behaviour is what would cross that line, and it would cross it quietly --
+# a working extension with someone else's code inside it looks exactly like a
+# working extension.
+#
+# So the archive gets opened. editors/vscode/src/vsix-contents.ts walks the ZIP
+# central directory and requires every member to match an allowlist derived from
+# this package's own build output, plus a required-present check so an empty or
+# truncated archive cannot satisfy a subset test by carrying nothing. That is the
+# same mechanical shape as packaging/README.md's "exactly one bundled wheel", and it
+# is phrased as an allowlist for the reason given there: a denylist needs a judgment
+# call per dependency.
+on:
+  push:
+    # "**" and not "*": GitHub branch filters treat "*" as matching any character
+    # except "/", so it matches none of the ci/..., fix/... or feat/... branches
+    # this repository actually uses. Three other workflows here carry the same note.
+    branches:
+      - "**"
+    # No paths filter, here or on pull_request. All six jobs are required checks, and
+    # a required check whose workflow a paths filter skipped never reports, so its rule
+    # is never satisfied. Every push runs them. A paths filter added back fails
+    # tests/unit/test_required_checks_run_on_every_push.py.
+  pull_request:
+    branches:
+      - "**"
+  # merge_group takes no paths filter either -- GitHub scopes paths to push,
+  # pull_request and pull_request_target only -- so a queue entry is judged on the
+  # merged result whatever it touched.
+  #
+  # Omitting merge_group would be worse. A required check with no merge_group
+  # trigger never reports for a queue entry, and a required check that cannot report
+  # does not fail the merge, it blocks it silently.
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  # Same keying as ash-typescript-ci.yml, and for the same measured reason: on push
+  # github.ref is a plain branch name that every push to that branch shares, and
+  # GitHub allows one pending run per group -- so a third run queuing into an
+  # occupied group evicts the second before it starts a job. Appending the sha on
+  # push only gives every pushed commit its own group.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  package:
+    name: build and inspect the .vsix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    defaults:
+      run:
+        working-directory: editors/vscode
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      # npm's download cache, restored here and saved after `npm ci` from main only,
+      # as ash-typescript-ci.yml does and for its reason: setup-node's `cache: npm`
+      # saved from every ref, so each pull request kept a copy no other pull request
+      # could read. The key is the one ash-typescript-ci.yml computes for
+      # editors/vscode, so the two workflows share one entry.
+      - name: Restore the npm cache
+        id: npm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('editors/vscode/package-lock.json') }}
+
+      - name: "Cache report: npm"
+        if: ${{ !cancelled() && steps.npm-cache.outcome == 'success' }}
+        shell: bash
+        env:
+          CACHE_NAME: npm
+          CACHE_HIT: ${{ steps.npm-cache.outputs.cache-hit }}
+          CACHE_MATCHED: ${{ steps.npm-cache.outputs.cache-matched-key }}
+        run: |
+          if [ "${CACHE_HIT}" = "true" ]; then result=hit
+          elif [ -n "${CACHE_MATCHED:-}" ]; then result="partial (${CACHE_MATCHED})"
+          else result=miss; fi
+          echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Save the npm cache (main only)
+        if: >-
+          steps.npm-cache.outputs.cache-hit != 'true'
+          && github.event_name == 'push'
+          && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('editors/vscode/package-lock.json') }}
+
+      # Type-aware, so a floating promise -- a failure that lands in the extension
+      # host's log while the command reports success -- fails here.
+      - name: Lint
+        run: npm run lint
+
+      # The one assertion about the package manifest rather than the archive, and it
+      # is here because it is cheap and because the archive check cannot make it: an
+      # archive with no third-party members is what a correct .vscodeignore produces
+      # from a package that HAS runtime dependencies, so passing the contents check
+      # is not evidence there are none. This says there are none.
+      - name: Assert the extension declares no runtime dependencies
+        run: |
+          count="$(node -e 'process.stdout.write(String(Object.keys(require("./package.json").dependencies || {}).length))')"
+          echo "runtime dependencies declared: $count"
+          if [ "$count" -ne 0 ]; then
+            echo "::error::editors/vscode declares $count runtime dependency/dependencies. vsce bundles them into the .vsix, which would put third-party code in a published artifact. See packaging/README.md."
+            exit 1
+          fi
+
+      # Compiles via the vscode:prepublish script, so a type error fails here rather
+      # than shipping an archive built from stale out/.
+      - name: Build the .vsix
+        run: npm run package
+
+      - name: Assert the archive carries nothing but this extension's own output
+        run: npm run verify:vsix
+
+      # A second reader over the same bytes, and not redundancy. The check above uses
+      # this package's own ZIP central-directory walk; if that walk under-reported
+      # members -- a Zip64 archive it mis-parsed, an entry count it read short -- it
+      # would report a clean subset of a dirty archive, and nothing in its own output
+      # could reveal it. Python's zipfile is an independent implementation, so the
+      # two disagreeing is the signal.
+      - name: Cross-check the member list with an independent ZIP reader
+        run: |
+          python3 - ash-vscode.vsix <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as archive:
+              members = archive.namelist()
+          print(f"{len(members)} member(s):")
+          for member in members:
+              print(f"  {member}")
+          if not members:
+              raise SystemExit("FAIL: the archive has no members, so any subset check over it is vacuous")
+          bundled = [m for m in members if "/node_modules/" in m]
+          if bundled:
+              raise SystemExit(
+                  f"FAIL: {len(bundled)} member(s) under node_modules/, e.g. {bundled[0]}. "
+                  "That is third-party code in a published artifact; see packaging/README.md."
+              )
+          if "extension/out/extension.js" not in members:
+              raise SystemExit(
+                  "FAIL: extension/out/extension.js is absent. The manifest's `main` points at it, "
+                  "so this archive would install and activate nothing."
+              )
+          print("OK: independent reader agrees -- no bundled modules, entry point present")
+          PY
+
+      # run_attempt in the name because artifact names are immutable within a run:
+      # with a fixed name, re-running this job after it uploaded failed the upload. The
+      # integration-real job takes this upload's artifact-id through needs rather than
+      # recomputing the name.
+      - name: Upload the .vsix
+        if: always()
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ash-vscode-extension-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: editors/vscode/ash-vscode.vsix
+          retention-days: 7
+          # `error` and not `warn`: this job's whole output is the archive, so a run
+          # that uploaded nothing did not do its job, and a warning would leave a
+          # green check saying otherwise.
+          if-no-files-found: error
+
+  # The extension inside a real VS Code. jest (ash-typescript-ci.yml) drives the
+  # same code through a stub of the `vscode` module; this drives it through the
+  # real one: command dispatch, the diagnostics API, settings, globalState, and a
+  # child process on a PATH the test controls. The CLI is
+  # test/integration/ash-stub.ts replaying scans captured from real `ash scan`
+  # runs, so the extension reads bytes ASH wrote. See test/integration/run.ts.
+  integration:
+    name: integration tests in a real VS Code
+    # Pinned rather than ubuntu-latest because the apt package names below are
+    # release-specific: libasound2t64 is the 24.04 name.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: editors/vscode
+    env:
+      # The build these tests were last run against. A floating `stable` would let
+      # an upstream release change the result of an unchanged commit.
+      ASH_IT_VSCODE_VERSION: "1.141.0"
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # No `cache:` here, unlike the package job: an Actions cache is readable by
+      # anyone on a public repository, so each one is a recorded decision in
+      # .github/scripts/assert-publish-surfaces.py, and this job does not need one.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install dependencies
+        run: npm ci
+
+      # VS Code is an Electron app: it needs an X server, and these shared
+      # libraries, which a headless runner does not promise.
+      - name: Install a virtual display and Electron's runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb libnss3 libgbm1 libasound2t64
+
+      - name: Run the integration suite under Xvfb
+        run: xvfb-run -a npm run test:integration
+
+  # The VS Code channel end to end, against a real ASH built from this commit:
+  # the .vsix the package job built and inspected, installed into a real VS Code
+  # with its own CLI, then the integration suite in real mode against that
+  # installed copy. Every scan is one of the shared e2e cases
+  # (tests/e2e/fixtures/cases.json) and is judged by scripts/e2e/assert_outcome.py:
+  # exit 2 with 3 findings, exit 0 clean, exit 1 with opengrep MISSING. The first
+  # scans run with only `ash` on PATH (the ashx -> ash fallback), a later one with
+  # `ashx`. Then uninstall, and an upgrade from an N-1 .vsix to N. Negative
+  # controls: a truncated .vsix must be refused, the suite against a cases file
+  # expecting one finding too many must fail through assert_outcome, and the
+  # post-uninstall absence check must fail while the extension is installed. See
+  # editors/vscode/test/integration/vsix-e2e.ts.
+  integration-real:
+    name: "e2e: .vsix install, real ashx scans, upgrade, uninstall"
+    needs: package
+    # Pinned for the same apt package names as the integration job.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      ASH_IT_VSCODE_VERSION: "1.141.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # No caches: an e2e leg is a fresh install by definition, and each Actions
+      # cache is a publish surface (.github/scripts/assert-publish-surfaces.py).
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      # From a `git archive` export, so the build never writes into the checkout,
+      # into a venv that has never held ASH. The installed version must be this
+      # commit's, or the scans below would be judging some other build.
+      - name: Build the head wheel and install it into a fresh venv
+        id: real-ash
+        env:
+          WORK: ${{ runner.temp }}/ash-e2e-vscode
+        run: |
+          set -euo pipefail
+          . packaging/cli-name.sh
+          mkdir -p "$WORK/src" "$WORK/dist"
+          git archive HEAD | tar -x -C "$WORK/src"
+          (cd "$WORK/src" && uv build --wheel --out-dir "$WORK/dist")
+          wheels=("$WORK"/dist/*.whl)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one wheel, found ${#wheels[@]}"
+            exit 1
+          fi
+          uv venv --python 3.12 "$WORK/venv"
+          uv pip install --python "$WORK/venv/bin/python" --no-cache "${wheels[0]}"
+          want="$(uv run --no-project --python 3.12 python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          got="$("$WORK/venv/bin/$ASH_CLI_NAME" --version)"
+          echo "$ASH_CLI_NAME --version: $got (want $want)"
+          case "$got" in
+            *"v$want") ;;
+            *) echo "::error::the installed $ASH_CLI_NAME reports '$got', not version $want"; exit 1 ;;
+          esac
+          for name in "$ASH_CLI_NAME" ash; do
+            test -x "$WORK/venv/bin/$name" || { echo "::error::the venv has no $name entry point"; exit 1; }
+          done
+          echo "dir=$WORK/venv/bin" >> "$GITHUB_OUTPUT"
+
+      # download-artifact reads an empty artifact-ids as no filter and downloads every
+      # artifact of the run, so the ID the package job handed over is held to a number first.
+      - name: Check the .vsix artifact ID
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ needs.package.outputs.artifact-id }}
+        run: |
+          if [[ ! "$ARTIFACT_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::the package job's artifact-id output is '${ARTIFACT_ID}', not an artifact ID. Without one, download-artifact would fetch every artifact in the run."
+            exit 1
+          fi
+          echo ".vsix artifact: ${ARTIFACT_ID}"
+
+      - name: Download the .vsix the package job built and inspected
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.package.outputs.artifact-id }}
+          path: ${{ runner.temp }}/ash-e2e-vscode/vsix
+
+      - name: Install dependencies
+        working-directory: editors/vscode
+        run: npm ci
+
+      - name: Install a virtual display and Electron's runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb libnss3 libgbm1 libasound2t64
+
+      - name: Install, scan, uninstall, upgrade, negative controls
+        working-directory: editors/vscode
+        env:
+          ASH_IT_VSIX: ${{ runner.temp }}/ash-e2e-vscode/vsix/ash-vscode.vsix
+          # From the wheel step's output rather than GITHUB_ENV, so it reaches only
+          # this step (zizmor's github-env audit).
+          ASH_IT_REAL_ASH_DIR: ${{ steps.real-ash.outputs.dir }}
+        run: xvfb-run -a npm run test:e2e-vsix
+
+  # ASH's own coverage rule over the cases src/coverage.ts is tested against.
+  # coverage_complete is not a field of ash_aggregated_results.json, so the
+  # extension re-derives it, and this is what keeps the re-derivation honest: the
+  # jest suite holds coverage.ts to test/fixtures/coverage-cases/cases.json, and
+  # this holds ASH to the same file. Run here, and not only in the unified unit
+  # matrix, so a push that touches either side runs both on the same commit.
+  coverage-parity:
+    name: coverage verdicts agree with ASH
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Cache off for the same reason as the integration job's setup-node.
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Run the parity test
+        run: uv run --group dev pytest tests/unit/test_vscode_coverage_parity.py -q --no-cov -p no:cacheprovider
+
+  # Structural snapshots of what the extension shows a user, and the rules that make
+  # changing one a decision: a changed or new snapshot fails (jest runs with --ci),
+  # an obsolete one fails (jest --ci exits 1 on an unchecked snapshot or an
+  # obsolete .snap file, measured), a snapshot or PNG no test owns fails (--orphans),
+  # and a commit in this push or pull request that changed one without a
+  # `Snapshot-Update: <reason>` trailer fails. Nothing here passes an update flag;
+  # test/snapshot-policy.test.ts fails if anything under .github/ does. See
+  # editors/vscode/test/visual/README.md.
+  #
+  # The trailer range is the event's: before..after on a push, fork point..head on a
+  # pull request. A push that creates a branch, or force-pushes over a tip the clone
+  # does not have, is checked from its merge base with the default branch.
+  # fetch-depth: 0 because both ends have to be in the clone.
+  editor-snapshots:
+    name: "snapshots: structural, Snapshot-Update trailers, orphans"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # Cache off for the same reason as the integration job's setup-node.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      # --self-test first: a checker that has degenerated into finding nothing exits
+      # 0 and reads as a clean range. `set -e` so a failing self-test stops the step.
+      - name: Assert every editor snapshot change carries a Snapshot-Update trailer
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/check-snapshot-trailers.py --self-test
+          python3 .github/scripts/check-snapshot-trailers.py --golden-root editors
+
+      - name: Assert every editor snapshot and PNG baseline belongs to a test
+        run: python3 .github/scripts/check-snapshot-trailers.py --orphans
+
+      - name: Install dependencies
+        working-directory: editors/vscode
+        run: npm ci
+
+      # The whole jest suite and not only the snapshot files: jest reports an obsolete
+      # .snap file only on a run that could have collected its test.
+      - name: Structural snapshots
+        working-directory: editors/vscode
+        run: npm run snapshots -- structural
+
+  # Pixel snapshots of the extension's UI in a real VS Code: the Problems panel with
+  # ASH diagnostics, the hover over a finding, the incomplete-scan (exit 1) warning and
+  # the ashx -> ash fallback notice, each compared with its PNG baseline in
+  # test/visual/__snapshots__/ at zero differing pixels. Rendered inside the image
+  # test/visual/Dockerfile builds, which pins the base image by digest, Debian packages
+  # (Xvfb, fonts, FreeType) to one snapshot.debian.org instant, and VS Code 1.141.0 by
+  # SHA-256; test/visual/run.ts pins the screen, DPI, scale factor, theme, font and
+  # settings. The image is built here and never pushed. On a mismatch the captures
+  # and a diff image per scenario are uploaded.
+  visual-snapshots:
+    name: "snapshots: pixels in a pinned VS Code"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Cache off for the same reason as the integration job's setup-node.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install dependencies
+        working-directory: editors/vscode
+        run: npm ci
+
+      - name: Pixel snapshots
+        working-directory: editors/vscode
+        run: npm run snapshots -- visual --artifacts "$RUNNER_TEMP/visual-snapshots"
+
+      - name: Upload the captures and diffs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vscode-visual-snapshots-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/visual-snapshots/
+          retention-days: 7
+          if-no-files-found: warn

@@ -1,0 +1,8 @@
+progress:
+  Looking for the ASH executable
+  Running <BIN>/ashx scan
+
+notification group=ASH type=ERROR
+title: ASH scan failed
+body:
+'<BIN>/ashx' is not ASH: its --version output does not contain 'awslabs/automated-security-helper'. The output looks like a shell rejecting an option, which is what happens when MSYS2's Almquist shell, also called ash, comes first on PATH. Set the executable in Settings | Tools | ASH to 'automated-security-helper', which is ASH's unambiguous entry point, or to the full path of ASH. It printed: ash: Illegal option --version

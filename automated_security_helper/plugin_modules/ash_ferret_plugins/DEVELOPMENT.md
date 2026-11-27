@@ -550,7 +550,7 @@ with no findings, current versions (v2.3.1+) emit `results: []` (an empty array,
 older `null`); `SarifReport.model_validate` accepts both. ASH completes with 0 actionable
 findings. No crash, no error — graceful skip.
 
-**Missing directory**: ASH itself throws `FileNotFoundError` before any plugin is invoked (the framework calls `os.chdir(source_dir)` in `run_ash_scan.py`). This is an ASH-level issue, not a plugin concern. The plugin's own `scan()` method also guards against this by returning `True` (skip) for non-existent paths, but that code path is never reached when running through `ash scan`.
+**Missing directory**: ASH itself throws `FileNotFoundError` before any plugin is invoked (the framework calls `os.chdir(source_dir)` in `run_ash_scan.py`). This is an ASH-level issue, not a plugin concern. The plugin's own `scan()` method also guards against this by returning `True` (skip) for non-existent paths, but that code path is never reached when running through `ashx scan`.
 
 ### 7. Pydantic Model Validator Timing
 
@@ -711,7 +711,7 @@ detection (AWS keys, GitHub tokens, entropy hits), which is unacceptable.
 |--------|---------|-----|
 | **1. Disable the generic type in the bundled `ferret-config.yaml`** (`validators.secrets.disabled_types`) | ❌ Not viable | The knob does not exist for `secrets` — silently ignored (proof above). This was the originally-requested approach; it cannot be implemented. |
 | **2. Plugin-level post-filter** — drop `API_KEY_OR_SECRET` results from the SARIF in the plugin, default-on | ❌ Rejected | Works, but silently discards a whole finding type for *every* consumer of the plugin, including real generic-secret hits an entropy/keyword match would otherwise catch. Too blunt, and hides signal in the plugin where users can't see the filtering. |
-| **3. Keep the detector enabled; suppress/exclude the false positives** | ✅ Chosen | Real secrets are still detected. False positives are handled with ASH's existing, visible, per-path suppression + `exclude_patterns` mechanism — the same one already used for the CycloneDX schema and `pyproject.toml`. Each suppression carries a reason and shows up in `ash config validate` / the unused-suppressions report. |
+| **3. Keep the detector enabled; suppress/exclude the false positives** | ✅ Chosen | Real secrets are still detected. False positives are handled with ASH's existing, visible, per-path suppression + `exclude_patterns` mechanism — the same one already used for the CycloneDX schema and `pyproject.toml`. Each suppression carries a reason and shows up in `ashx config validate` / the unused-suppressions report. |
 
 **The policy (chosen 2026-09-13).** Keep `API_KEY_OR_SECRET` **enabled** and manage its
 false positives with ASH's own controls:
@@ -747,7 +747,7 @@ reason itself a new `API_KEY_OR_SECRET` finding. Paraphrase instead (e.g. "a log
 object field") — the existing entries do this deliberately.
 
 **Verification (must stay true).** With the suppressions in place:
-`ash scan --scanners ferret-scan --config .ash/.ash_alpha_plugins.yaml` reports
+`ashx scan --scanners ferret-scan --config .ash/.ash_alpha_plugins.yaml` reports
 ferret-scan **PASSED with 0 actionable findings** (8 total: 2 PASSPORT + 6
 API_KEY_OR_SECRET, all suppressed). If a future ferret-scan version changes which lines
 trip the detector, re-run that scan, read the new hits, and add/adjust suppressions —
@@ -1035,7 +1035,7 @@ ash_plugin_modules:
 <!-- doctest: illustrative reason="runs in a checkout of this repository with ferret-scan installed" -->
 ```bash
 # Verify plugin is discovered by ASH
-uv run ash plugin list | grep -i ferret
+uv run ashx plugin list | grep -i ferret
 # Expected: ferret-scan should appear in the list
 ```
 
@@ -1044,7 +1044,7 @@ uv run ash plugin list | grep -i ferret
 <!-- doctest: illustrative reason="runs in a checkout of this repository with ferret-scan installed" -->
 ```bash
 # Run a basic scan using the project's test data
-uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan
+uv run ashx scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan
 
 # Check output
 ls -la .ash/ash_output/scanners/ferret-scan/source/
@@ -1073,7 +1073,7 @@ cat .ash/ash_output/scanners/ferret-scan/source/ferret-scan.sarif | jq '[.runs[0
 <!-- doctest: illustrative reason="runs in a checkout of this repository with ferret-scan installed" -->
 ```bash
 # Enable ferret-scan's own debug output (independent of ASH logging)
-uv run ash scan --source-dir tests/test_data/scanners/ferret-scan \
+uv run ashx scan --source-dir tests/test_data/scanners/ferret-scan \
     --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins \
     --config-overrides 'scanners.ferret-scan.options.ferret_debug=true' 2>&1
 # Expected: ferret-scan debug output showing preprocessing and validation flow
@@ -1084,7 +1084,7 @@ uv run ash scan --source-dir tests/test_data/scanners/ferret-scan \
 <!-- doctest: illustrative reason="runs in a checkout of this repository with ferret-scan installed" -->
 ```bash
 # Enable ferret-scan's own verbose output (independent of ASH logging)
-uv run ash scan --source-dir tests/test_data/scanners/ferret-scan \
+uv run ashx scan --source-dir tests/test_data/scanners/ferret-scan \
     --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins \
     --config-overrides 'scanners.ferret-scan.options.ferret_verbose=true' 2>&1
 # Expected: ferret-scan verbose output with detailed finding info
@@ -1095,12 +1095,12 @@ uv run ash scan --source-dir tests/test_data/scanners/ferret-scan \
 <!-- doctest: illustrative reason="runs in a checkout of this repository with ferret-scan installed" -->
 ```bash
 # Test with high confidence only
-uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan \
+uv run ashx scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan \
     --config-overrides "scanners.ferret-scan.options.confidence_levels=high"
 # Expected: Should only show high-confidence findings (fewer results)
 
 # Test with specific checks
-uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan \
+uv run ashx scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan \
     --config-overrides "scanners.ferret-scan.options.checks=CREDIT_CARD"
 # Expected: Should only show credit card findings
 ```
@@ -1110,7 +1110,7 @@ uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners fer
 <!-- doctest: illustrative reason="runs in a checkout of this repository with ferret-scan installed" -->
 ```bash
 # If you have an incompatible version installed, verify warning is shown
-uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan 2>&1 | grep -i "version"
+uv run ashx scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan 2>&1 | grep -i "version"
 ```
 
 #### 8. Unsupported Option Error
@@ -1128,7 +1128,7 @@ scanners:
       debug: true  # This should fail — use ferret_debug instead
 EOF
 
-uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --config /tmp/test-ash-config.yaml 2>&1
+uv run ashx scan --source-dir tests/test_data/scanners/ferret-scan --config /tmp/test-ash-config.yaml 2>&1
 echo "exit=$?"
 # Expected: exit=3, before any scanner runs, with
 #   scanners.ferret-scan.options (scanner 'ferret-scan'): Value error, Unsupported
@@ -1142,7 +1142,7 @@ rm /tmp/test-ash-config.yaml
 <!-- doctest: illustrative reason="runs in a checkout of this repository with ferret-scan installed" -->
 ```bash
 mkdir -p /tmp/empty-test-dir
-uv run ash scan --source-dir /tmp/empty-test-dir --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins 2>&1
+uv run ashx scan --source-dir /tmp/empty-test-dir --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins 2>&1
 # Expected: ferret-scan completes with 0 findings, SARIF has results: [] (empty array), no crash
 rmdir /tmp/empty-test-dir
 ```
@@ -1151,7 +1151,7 @@ rmdir /tmp/empty-test-dir
 
 <!-- doctest: illustrative reason="runs in a checkout of this repository with ferret-scan installed" -->
 ```bash
-uv run ash scan --source-dir /tmp/this-does-not-exist --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins 2>&1
+uv run ashx scan --source-dir /tmp/this-does-not-exist --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins 2>&1
 # Expected: ASH refuses before any plugin runs: "Source directory does not exist",
 # exit 5 (a usage error). This is an ASH-level check, not a plugin concern
 ```
@@ -1163,7 +1163,7 @@ uv run ash scan --source-dir /tmp/this-does-not-exist --ash-plugin-modules autom
 # Temporarily rename ferret-scan binary
 FERRET_PATH=$(which ferret-scan)
 # Rename it, then run:
-uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan 2>&1
+uv run ashx scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan 2>&1
 # Expected: Clear error about missing ferret-scan binary
 # Remember to restore the binary!
 ```
@@ -1173,7 +1173,7 @@ uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners fer
 <!-- doctest: illustrative reason="runs in a checkout of this repository with ferret-scan installed" -->
 ```bash
 # Test using a profile from the default config
-uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan \
+uv run ashx scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan \
     --config-overrides "scanners.ferret-scan.options.profile=quick"
 # Expected: Should use the 'quick' profile settings (high confidence only)
 ```
@@ -1183,7 +1183,7 @@ uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners fer
 <!-- doctest: illustrative reason="runs in a checkout of this repository with ferret-scan installed" -->
 ```bash
 # Verify ferret-scan results are included in aggregated ASH report
-uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan
+uv run ashx scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan
 cat .ash/ash_output/reports/ash.sarif | jq '.runs[] | select(.tool.driver.name == "ferret-scan")'
 # Expected: ferret-scan run should be present in aggregated report
 ```
@@ -1193,7 +1193,7 @@ cat .ash/ash_output/reports/ash.sarif | jq '.runs[] | select(.tool.driver.name =
 <!-- doctest: illustrative reason="runs in a checkout of this repository with ferret-scan installed" -->
 ```bash
 # Run ferret-scan alongside other scanners
-uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan,bandit
+uv run ashx scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan,bandit
 # Expected: Both scanners should run and results should be aggregated
 ```
 
@@ -1202,7 +1202,7 @@ uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners fer
 <!-- doctest: illustrative reason="runs in a checkout of this repository with ferret-scan installed" -->
 ```bash
 # Test text extraction from Office documents
-uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan \
+uv run ashx scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan \
     --config-overrides "scanners.ferret-scan.options.enable_preprocessors=true"
 # Expected: Should scan both sample.txt and extract text from synthetic-pii-test.docx
 ```
@@ -1230,7 +1230,7 @@ rm -rf "$OUTPUT_DIR"
 
 # Run scan
 echo "Running ASH scan..."
-uv run ash scan --source-dir "$TEST_DIR" --scanners ferret-scan
+uv run ashx scan --source-dir "$TEST_DIR" --scanners ferret-scan
 
 # Verify output
 if [ -f "$OUTPUT_DIR/scanners/ferret-scan/source/ferret-scan.sarif" ]; then

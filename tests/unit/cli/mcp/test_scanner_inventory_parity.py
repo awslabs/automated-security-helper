@@ -3,7 +3,7 @@
 
 """Parity guard: the MCP tool and the CLI describe scanners through one helper.
 
-Issue #626 asked that ``ash plugin list`` and the MCP ``list_scanners`` tool not
+Issue #626 asked that ``ashx plugin list`` and the MCP ``list_scanners`` tool not
 drift. What these tests pin is the parity that actually holds: given the same
 scanner, both surfaces describe it identically, because both reach it through
 ``automated_security_helper.core.scanner_inventory.describe_scanner``. They also

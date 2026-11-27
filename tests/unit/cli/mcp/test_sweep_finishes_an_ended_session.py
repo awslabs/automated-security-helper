@@ -60,14 +60,14 @@ def test_a_sweep_that_finds_the_session_fresh_finishes_its_end(root) -> None:
 
 def test_a_sweep_stepping_back_for_a_write_leaves_the_end_pending(root) -> None:
     sandbox = _pending_workspace(root)
-    session = sessions.get_default_registry().session_for(SESSION_ID)
-    assert session.try_begin_write() is None
+    entry = sessions.get_default_registry().session_for(SESSION_ID)
+    assert entry.try_begin_write() is None
     try:
         removed = sessions._remove_if_still_stale(
             root, SESSION_ID, sandbox, time.time() + 3600
         )
     finally:
-        session.end_write()
+        entry.end_write()
 
     assert removed is False
     assert sandbox.is_dir(), "the tree went away under a write in progress"

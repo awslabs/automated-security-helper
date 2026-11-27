@@ -1,0 +1,8 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  A minimal CloudFormation template so cfn-nag has in-scope work. With cfn-nag's
+  tool absent from the e2e image, the partial-scan case then reads MISSING for
+  it instead of the nothing-to-scan SKIPPED arm.
+Resources:
+  FixtureTopic:
+    Type: AWS::SNS::Topic

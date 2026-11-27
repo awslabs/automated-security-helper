@@ -43,12 +43,10 @@ def _in_days(days: int) -> str:
 def _context(ignore_suppressions: bool):
     config = AshConfig(project_name="expiry")
     config.global_settings.ignore_paths = [
-        IgnorePathWithReason(
-            path="vendor/", reason="third party", expiration=_in_days(5)
-        )
+        IgnorePathWithReason(path="vendor/", reason="third party", expires=_in_days(5))
     ]
     config.global_settings.suppressions = [
-        AshSuppression(path="src/app.py", reason="accepted", expiration=_in_days(5))
+        AshSuppression(path="src/app.py", reason="accepted", expires=_in_days(5))
     ]
     return SimpleNamespace(config=config, ignore_suppressions=ignore_suppressions)
 

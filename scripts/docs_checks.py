@@ -154,7 +154,13 @@ HISTORICAL_DOCS = frozenset({"CHANGELOG.md"})
 #: the code at that release and of the programs ASH wraps. They are held to the same
 #: checks as the changelog they came from: the 3.8.0 bump moved them out of a skipped
 #: file into an unskipped one and failed lint on text that had not changed.
-HISTORICAL_DOC_DIRS = (".github/release-notes/",)
+#: The gate regression's observed cases are the comments the CodeCommit gate posted on
+#: 2026-08-28, kept as recorded: their scanner tables name the scanners of that day
+#: (semgrep among them), which is the data, not a claim about today's registry.
+HISTORICAL_DOC_DIRS = (
+    ".github/release-notes/",
+    "tests/integration/codecommit_gate_regression/cases/observed-2026-08-28/",
+)
 
 
 def is_historical_doc(rel: str) -> bool:
@@ -1993,7 +1999,7 @@ def check_session_variables(
 # ---------------------------------------------------------------------------
 
 ASH_PROGRAMS = frozenset(
-    {"ash", "ashv3", "automated-security-helper", "agentic-security-harness"}
+    {"ash", "ashx", "ashv3", "automated-security-helper", "agentic-security-harness"}
 )
 ASH_PACKAGE = "automated-security-helper"
 ASH_MODULE = "automated_security_helper"
@@ -2066,6 +2072,13 @@ def _command_from_click(cmd: Any, path: tuple[str, ...]) -> CliCommand:
     )
 
 
+#: The name the docs call the command tree by: the first word of every command path
+#: below, which is how the docs' code blocks spell the command they run. It is a
+#: label for matching those blocks, not the program a Python driver starts (that is
+#: CANONICAL_CLI_NAME).
+DOCS_ROOT = "ash"
+
+
 @functools.lru_cache(maxsize=1)
 def load_cli() -> CliCommand:
     """The real command tree, from typer's own conversion of the ASH app."""
@@ -2073,7 +2086,7 @@ def load_cli() -> CliCommand:
 
     from automated_security_helper.cli.main import app
 
-    return _command_from_click(typer.main.get_command(app), ("ash",))
+    return _command_from_click(typer.main.get_command(app), (DOCS_ROOT,))
 
 
 def all_option_names(command: CliCommand) -> set[str]:
@@ -2224,15 +2237,15 @@ def _match_option(
 
 #: (command path, the option's first name) -> the kind of name its value is.
 REGISTRY_OPTIONS = {
-    (("ash",), "--scanners"): "scanner",
-    (("ash",), "--exclude-scanners"): "scanner",
-    (("ash",), "--output-formats"): "output format",
-    (("ash", "scan"), "--scanners"): "scanner",
-    (("ash", "scan"), "--exclude-scanners"): "scanner",
-    (("ash", "scan"), "--output-formats"): "output format",
-    (("ash", "merge"), "--output-formats"): "output format",
-    (("ash", "report"), "--format"): "reporter",
-    (("ash", "dependencies", "install"), "--tool"): "tool",
+    ((DOCS_ROOT,), "--scanners"): "scanner",
+    ((DOCS_ROOT,), "--exclude-scanners"): "scanner",
+    ((DOCS_ROOT,), "--output-formats"): "output format",
+    ((DOCS_ROOT, "scan"), "--scanners"): "scanner",
+    ((DOCS_ROOT, "scan"), "--exclude-scanners"): "scanner",
+    ((DOCS_ROOT, "scan"), "--output-formats"): "output format",
+    ((DOCS_ROOT, "results", "merge"), "--output-formats"): "output format",
+    ((DOCS_ROOT, "results", "report"), "--format"): "reporter",
+    ((DOCS_ROOT, "dependencies", "install"), "--tool"): "tool",
 }
 PLUGIN_KINDS = ("converter", "scanner", "reporter")
 
@@ -6083,6 +6096,21 @@ UNREAD_RESPONSE_EXPLAINED = (
             " already lists; the copy changes only the could_not_stop reasons."
         ),
     ),
+    # The helper adds exit_code and its meaning to a refusal the tool already
+    # built. The refusal is a parameter the reader cannot follow back to the
+    # caller's dict literal, which carries the error_type the pages document.
+    (
+        "run_ash_scan",
+        "automated_security_helper/cli/mcp_tools.py",
+        "with_exit_code",
+        "def with_exit_code(",
+        "2026-12-31",
+        (
+            "adds exit_code and exit_code_meaning to a refusal the caller built;"
+            " the caller's dict literal holds the error_type, and the helper"
+            " adds no other key."
+        ),
+    ),
 )
 
 
@@ -8411,6 +8439,29 @@ def documented_plugin_files(page: Page, plugins: dict[str, set[str]]) -> set[str
     return found
 
 
+#: The VS Code extension's manifest and the pages that document its settings. A setting
+#: is spelled ``ash.<name>``, which reads like a report file, but it is a key the
+#: extension's manifest contributes; the pages of the extension's project may name them.
+VSCODE_MANIFEST = "editors/vscode/package.json"
+VSCODE_PROJECT = "editors/vscode/"
+
+
+def vscode_setting_names(code: Path) -> set[str]:
+    """The ``ash.<name>`` settings the VS Code extension's manifest contributes."""
+    try:
+        manifest = json.loads((code / VSCODE_MANIFEST).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    configuration = (manifest.get("contributes") or {}).get("configuration") or []
+    sections = [configuration] if isinstance(configuration, dict) else configuration
+    return {
+        str(key)
+        for section in sections
+        if isinstance(section, dict)
+        for key in (section.get("properties") or {})
+    }
+
+
 def output_files(code: Path, models: ConfigModels) -> OutputFiles:
     tracked = _tracked_paths(code)
     return OutputFiles(
@@ -8481,17 +8532,22 @@ def check_report_files(
     reporter's options default to, a string a file-name constant of the package
     holds (OUTPUT_LOG_FILES, SESSION_CONFIG_FILENAME), a reporter a python block on
     the same page declares, a report of a plugin package the page documents (the
-    example plugin package), or a file the repository ships (Formula/ash.rb).
+    example plugin package), a file the repository ships (Formula/ash.rb), or, on
+    a page of the VS Code extension's project, a setting the extension's manifest
+    contributes (``ash.executablePath``).
     ``reports/<name>`` must be a report or a file a reporter writes beside it.
     """
     models = models or load_config_models()
     code = code or code_root(root)
     known = output_files(code, models)
+    vscode_settings = vscode_setting_names(code)
     findings: list[Finding] = []
     for page in load_pages(files, root):
         if is_historical_doc(page.rel):
             continue
         own = page_reporter_files(page) | documented_plugin_files(page, known.plugins)
+        if page.rel.startswith(VSCODE_PROJECT):
+            own |= vscode_settings
         for number, line in page.prose:
             for span in inline_code_spans(line):
                 for token in re.split(r"[\s,;]+", span.strip()):

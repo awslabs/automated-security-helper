@@ -15,6 +15,7 @@ from automated_security_helper.utils.ui_theme import rich_theme
 from rich.table import Table
 
 from automated_security_helper.base.plugin_config import plugin_config_key
+from automated_security_helper.cli.params import ColorOption
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import off_host_reporter_refused
 from automated_security_helper.base.uv_tool_mixin import (
@@ -152,7 +153,7 @@ def list_plugins(
             ),
         ),
     ] = False,
-    color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
+    color: ColorOption = True,
 ):
     """
     List the plugins a scan with this configuration runs: the built-in plugins

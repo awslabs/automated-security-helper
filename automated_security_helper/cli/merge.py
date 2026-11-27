@@ -5,7 +5,7 @@
 
 Why this exists
 ---------------
-``ash scan --shard-index k --shard-count n`` splits one scan across n CI
+``ashx scan --shard-index k --shard-count n`` splits one scan across n CI
 executors by partitioning the *scanner* set (see
 :mod:`automated_security_helper.core.sharding` for why scanners and not files).
 Each executor writes its own ``ash_aggregated_results.json`` holding the results
@@ -17,7 +17,7 @@ reviewer cannot tell the difference by looking at it.
 The verdict is the sharpest version of this. A shard that happened to own only
 syft and grype finds nothing and exits 0. Five such shards mean five green CI
 jobs and a repository full of critical findings that nobody was told about.
-``ash merge`` therefore owns the real verdict for a sharded run, computed over
+``ashx merge`` therefore owns the real verdict for a sharded run, computed over
 the union, and CI must gate on this command rather than on per-shard success.
 
 Why one collapsed SARIF run, unlike workspace mode
@@ -65,7 +65,7 @@ whose paths only become matchable after merge and normalization. This command
 originally went from ``merge_sarif_report`` straight to metrics and reports, so
 nothing applied suppressions to the cross-shard product: a suppression that only
 matched post-merge applied in an unsharded scan and not in a sharded one, and
-``ash merge`` exited 2 where ``ash scan`` exited 0 on the same tree.
+``ashx merge`` exited 2 where ``ashx scan`` exited 0 on the same tree.
 :func:`apply_aggregated_suppressions` closes that, and ``--ignore-suppressions``
 makes the other half of the contract expressible.
 
@@ -96,7 +96,7 @@ way the scan side lands it. :func:`stamp_shard_assignment` writes the
 
 A results file with no provenance is refused rather than guessed at. The
 alternative -- treating an unstamped file as "probably the only shard" -- would
-make ``ash merge`` silently accept a single unsharded scan as a complete merge
+make ``ashx merge`` silently accept a single unsharded scan as a complete merge
 of a five-way split.
 
 Why the merged report drops its own shard key
@@ -104,7 +104,7 @@ Why the merged report drops its own shard key
 The merged output deliberately does *not* carry a ``shard`` key. It records
 ``merged_shard_count`` and ``merged_shard_indices`` instead. Copying the base
 shard's assignment through would make the merged file look like shard 0 of n, so
-a second ``ash merge`` over an output directory would accept it and report a
+a second ``ashx merge`` over an output directory would accept it and report a
 whole scan as one fifth of itself.
 
 The recorded configuration is the repository's
@@ -235,6 +235,7 @@ from rich.text import Text
 from automated_security_helper.utils.console import print  # noqa: A004
 
 from automated_security_helper.base.plugin_config import plugin_config_key
+from automated_security_helper.cli.params import ColorOption
 from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import (
@@ -248,7 +249,7 @@ from automated_security_helper.base.reporter_plugin import (
 # because importing this module is what calls AshAggregatedResults.model_rebuild().
 # AshAggregatedResults declares ash_config as a forward reference to AshConfig, so
 # until that rebuild runs the model has no validator at all and
-# model_validate_json raises PydanticUserError. ``ash report`` gets the same
+# model_validate_json raises PydanticUserError. ``ashx report`` gets the same
 # rebuild by side effect of importing resolve_config; relying on an import made
 # for another purpose is what makes this fragile, so the dependency is named here.
 from automated_security_helper.config.ash_config import AshConfig, reduced_plugin_name
@@ -374,8 +375,8 @@ MERGED_SHARD_COUNT_KEY = "merged_shard_count"
 MERGED_SHARD_INDICES_KEY = "merged_shard_indices"
 
 #: Relative locations searched, in order, when ``--results`` names a directory.
-#: These mirror the candidates ``ash report`` already probes, so an operator who
-#: can point ``ash report`` at a directory can point ``ash merge`` at the same one.
+#: These mirror the candidates ``ashx report`` already probes, so an operator who
+#: can point ``ashx report`` at a directory can point ``ashx merge`` at the same one.
 _RESULTS_DIR_CANDIDATES = (
     Path(RESULTS_FILE_NAME),
     Path("ash_output") / RESULTS_FILE_NAME,
@@ -424,7 +425,7 @@ def _normalized(name: str) -> str:
 def stamp_shard_assignment(
     results: AshAggregatedResults, assignment: ShardAssignment
 ) -> None:
-    """Record *assignment* on *results* so ``ash merge`` can verify coverage.
+    """Record *assignment* on *results* so ``ashx merge`` can verify coverage.
 
     This is what the scan side should call once a shard's results are final.
 
@@ -1149,14 +1150,14 @@ def _completed(entry: Any) -> bool:
     version has never heard of.
 
     Membership of the *complete* set, not absence from the incomplete one, and that
-    matters most here of all the readers. ``ash merge`` consumes results files written
+    matters most here of all the readers. ``ashx merge`` consumes results files written
     by whatever ASH produced each shard, so a fan-out whose runners are mid-upgrade can
     hand this an unfamiliar status string. Asking "is it one of the two bad ones"
     answers no for such a status and merges the shard as complete, putting scanners
     whose outcome nobody knows inside a report that reads as a whole scan.
 
     The status set is imported from ``run_ash_scan`` rather than re-listed, so this and
-    ``ash scan``'s gate cannot drift apart. Imported inside the function for the same
+    ``ashx scan``'s gate cannot drift apart. Imported inside the function for the same
     reason :func:`_merged_exit_code` imports from there lazily: ``run_ash_scan`` pulls
     in ``run_ash_container`` at module scope, and there is no reason for a command that
     does not scan to carry that import graph. There is no cycle between the two modules
@@ -2326,7 +2327,7 @@ def apply_aggregated_suppressions(
     plugin_context: PluginContext,
     converter_acceptance_ids: Optional[Set[str]] = None,
 ) -> AshAggregatedResults:
-    """Run the aggregated suppression pass ``ash scan`` runs, over the merged SARIF.
+    """Run the aggregated suppression pass ``ashx scan`` runs, over the merged SARIF.
 
     Why this has to exist here
     --------------------------
@@ -2336,10 +2337,10 @@ def apply_aggregated_suppressions(
     post-suppression state. Its stated reason is that the per-scanner passes miss
     findings whose paths only become matchable after merge and normalization.
 
-    ``ash merge`` folded n shard SARIFs and went straight to metrics and reports,
+    ``ashx merge`` folded n shard SARIFs and went straight to metrics and reports,
     so nothing ever applied suppressions to the cross-shard product. A suppression
     that only matches post-merge therefore applied in an unsharded scan and not in
-    a sharded one: ``ash merge`` exited 2 where ``ash scan`` exited 0 on identical
+    a sharded one: ``ashx merge`` exited 2 where ``ashx scan`` exited 0 on identical
     inputs. That is precisely the divergence ``_merged_exit_code``'s own docstring
     argues must not exist, and it is worse than an ordinary bug because the two
     commands are supposed to be interchangeable -- CI gates on the sharded one.
@@ -2360,7 +2361,7 @@ def apply_aggregated_suppressions(
     the function, the ignore-path branch is gated on ``not ignore_suppressions``
     combined with a path match, so a config that sets ``ignore_paths`` could
     behave differently between "skipped" and "called with the flag set". Skipping
-    the call is what ``ash scan`` does, so skipping it is what keeps the verdicts
+    the call is what ``ashx scan`` does, so skipping it is what keeps the verdicts
     equal in the configurations no fixture here exercises.
 
     Under the flag ``apply_suppressions_to_sarif`` is skipped, and the
@@ -2407,7 +2408,7 @@ def apply_aggregated_suppressions(
     if merged is not None and merged.sarif is not None:
         # Imported here, matching the engine, which imports it inside the report
         # branch. sarif_utils pulls in the SARIF model and the config tree, and
-        # ``ash merge`` reaches this point only after a successful merge.
+        # ``ashx merge`` reaches this point only after a successful merge.
         from automated_security_helper.utils.sarif_utils import (
             apply_suppressions_to_sarif,
         )
@@ -2982,7 +2983,8 @@ def verify_verdict_settings_agree(
     raise ShardSettingsDisagreeError(
         "the shards' recorded configurations disagree on settings that decide the "
         "merged verdict:\n  " + "\n  ".join(lines) + "\nOne verdict covers the "
-        "merged scan, so ash merge does not take one shard's value for the others. "
+        "merged scan, so ashx results merge does not take one shard's value for the "
+        "others. "
         "Run every shard with the same configuration, or set the value for all of "
         "them with --config-overrides"
         + (f", or with {', '.join(flags)}" if flags else "")
@@ -3056,7 +3058,8 @@ def warn_on_ignored_operator_verdict_settings(
         # the line quotes the setting's value, which can hold one (an ignore
         # path's reason read with !ENV, say).
         message = (
-            f"ash merge's --config sets {key} to {_shown_setting(value)}, and the "
+            f"ashx results merge's --config sets {key} to {_shown_setting(value)}, "
+            "and the "
             f"shards recorded {_shown_setting(shards.get(key))}. The verdict "
             "follows the shards' own configuration, so their value applies. To "
             "apply yours, pass "
@@ -3133,7 +3136,8 @@ def warn_on_unapplied_operator_settings(
             # option's value, which the operator's config can have read from
             # the environment.
             message = (
-                f"ash merge's --config sets {key}, which does not apply: the shards "
+                f"ashx results merge's --config sets {key}, which does not apply: "
+                "the shards "
                 f"recorded no {section_key} section to take it, and --config supplies "
                 "values for what the shards recorded without adding to it. To apply "
                 f"it, {_apply_hint(key, value)}."
@@ -3151,7 +3155,7 @@ def warn_on_unapplied_operator_settings(
 def _parse_output_formats(raw: Optional[List[str]]) -> List[str]:
     """Split and validate comma-separated ``--output-formats`` values.
 
-    Validated against ``ExportFormat`` the same way ``ash scan`` validates it, so
+    Validated against ``ExportFormat`` the same way ``ashx scan`` validates it, so
     a typo fails immediately with the list of valid formats rather than silently
     producing no report of that kind.
     """
@@ -3242,7 +3246,7 @@ def merge_command(
             "--ignore-suppressions",
             help=(
                 "Ignore all suppression rules and report every finding regardless "
-                "of suppression status. Mirrors 'ash scan --ignore-suppressions', "
+                "of suppression status. Mirrors 'ashx scan --ignore-suppressions', "
                 "so the same tree gives the same verdict sharded or not."
             ),
         ),
@@ -3284,11 +3288,11 @@ def merge_command(
     debug: Annotated[
         bool, typer.Option("--debug", "-d", help="Enable debug logging")
     ] = False,
-    color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
+    color: ColorOption = True,
 ):
     """Merge the shard results of a sharded scan into one unified report.
 
-    Each executor of ``ash scan --shard-index k --shard-count n`` writes its own
+    Each executor of ``ashx scan --shard-index k --shard-count n`` writes its own
     results file. This command checks that the shards given reconstruct exactly
     one whole scan, merges them, writes the unified
     ``ash_aggregated_results.json`` and every requested report format, and exits
@@ -3932,10 +3936,10 @@ def select_merge_reporters(
 def _relocate_colliding_output_dir(output_dir: Path) -> Path:
     """Move *output_dir* out of the way when it contains the directory being reported on.
 
-    ``ash scan`` has done this for its own ``--output-dir`` since before this command
-    existed, and says so loudly (``cli/scan.py``). ``ash merge`` took the operator's
+    ``ashx scan`` has done this for its own ``--output-dir`` since before this command
+    existed, and says so loudly (``cli/scan.py``). ``ashx merge`` took the operator's
     value verbatim, and it builds its ``PluginContext`` with
-    ``source_dir=Path.cwd()``, so ``ash merge --output-dir .`` made the two the same
+    ``source_dir=Path.cwd()``, so ``ashx merge --output-dir .`` made the two the same
     directory and ASH wrote its reports into the tree it was treating as the source.
 
     The consequence is not untidiness. ``utils.sarif_utils.apply_suppressions_to_sarif``
@@ -3952,12 +3956,12 @@ def _relocate_colliding_output_dir(output_dir: Path) -> Path:
     :func:`apply_aggregated_suppressions`). Relocating keeps the merge's
     reports out of the directory it treats as the source.
 
-    Equal-to OR an ancestor-of, where ``ash scan`` checks only equality.
+    Equal-to OR an ancestor-of, where ``ashx scan`` checks only equality.
     ``--output-dir ..`` from a subdirectory reaches the same state without the paths
     ever being equal, and an ancestor is worse than equality rather than milder.
 
     Relocated to ``<given>/.ash/ash_output``, the same move and the same subpath
-    ``ash scan`` uses, which lands strictly inside the given directory and so is an
+    ``ashx scan`` uses, which lands strictly inside the given directory and so is an
     ancestor of nothing. Relocated rather than refused because the operator's intent
     is unambiguous and recoverable -- they wanted the artifacts here -- and a refusal
     would fail a pipeline over a path choice.
@@ -4109,7 +4113,7 @@ def _record_merge_history(merged: AshAggregatedResults, output_dir: Path) -> Non
       global_settings.history.enabled=...``; ``--config`` does not flip it, as
       it replaces only what a shard's recorded config cannot choose.
     * The owning output directory is the merge's own ``--output-dir``, where the
-      merged results file was just written, so ``ash trend --history`` over a
+      merged results file was just written, so ``ashx results trend --history`` over a
       reused collector output directory reads the merged series beside the file
       each record describes.
     * One record per merge: the merged report is one run under its own
@@ -4139,8 +4143,8 @@ def _merged_exit_code(
 
     Delegates to ``run_ash_scan._compute_exit_code`` rather than re-deriving the
     severity tables. Those tables were duplicated once already, which is why
-    ``utils/severity_ladder.py`` exists; a third copy here would let ``ash merge``
-    and ``ash scan`` disagree about the same findings, and the disagreement would
+    ``utils/severity_ladder.py`` exists; a third copy here would let ``ashx merge``
+    and ``ashx scan`` disagree about the same findings, and the disagreement would
     only show up as a CI job that passes when it should fail.
 
     Called after the report phase because ``_compute_exit_code`` reads

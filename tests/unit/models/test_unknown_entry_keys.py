@@ -13,9 +13,9 @@ Every entry built on ``IgnorePathWithReason`` refuses a key it does not
 declare, with "did you mean" when one is close: global suppressions and ignore
 paths, a workspace policy's, and the scanner options of the same type (bandit
 ``excluded_paths``, checkov ``skip_path``, syft ``exclude``). Constructing a
-model directly refuses. A config file loads by default, warns, and leaves the
-entry inert; with ``fail_on_unknown_keys: true`` it exits 3. A workspace policy
-with one exits 4.
+model directly refuses. A config file is refused by default (exit 3, since ASH
+4.0); with ``fail_on_unknown_keys: false`` it loads, warns, and leaves the
+entry inert (the 3.x behavior). A workspace policy with one exits 4.
 
 A results file is a record of a past scan, not a config to apply, so one that
 holds such a key still loads: the key is kept, a warning names it, and an entry
@@ -147,13 +147,13 @@ class TestEveryEntryKind:
             reason="r",
             line_start=1,
             line_end=2,
-            expiration="2099-01-01",
+            expires="2099-01-01",
             package_name="p",
             package_version="1",
             package_path="x",
             symbol="A.b",
         )
-        IgnorePathWithReason(path="vendor/**", reason="r", expiration="2099-01-01")
+        IgnorePathWithReason(path="vendor/**", reason="r", expires="2099-01-01")
 
 
 class TestConfigFiles:
@@ -188,8 +188,19 @@ class TestConfigFiles:
             f"      {key}: '2099-01-01'\n"
         )
 
-    def test_a_misspelled_rule_id_warns_and_is_inert_by_default(self, tmp_path):
+    def test_a_misspelled_rule_id_is_refused_by_default(self, tmp_path):
         source = self._source(tmp_path, self._suppression_config())
+        with pytest.raises(ASHConfigValidationError) as excinfo:
+            resolve_config(source_dir=source)
+        message = str(excinfo.value)
+        assert "ruleId" in message and "did you mean 'rule_id'" in message
+
+    def test_a_misspelled_rule_id_warns_and_is_inert_when_the_flag_is_false(
+        self, tmp_path
+    ):
+        source = self._source(
+            tmp_path, self._suppression_config(header="fail_on_unknown_keys: false\n")
+        )
         config = resolve_config(source_dir=source)
         # The warning is recorded on the config for the orchestrator to log,
         # not emitted by a logging call here, so it is read from the config.
@@ -217,7 +228,10 @@ class TestConfigFiles:
         )
         assert suppressed is True and matched is entry
 
-    def test_a_misspelled_rule_id_raises_under_fail_on_unknown_keys(self, tmp_path):
+    def test_a_misspelled_rule_id_raises_under_fail_on_unknown_keys_true(
+        self, tmp_path
+    ):
+        """The explicit spelling of the default (true since ASH 4.0)."""
         source = self._source(
             tmp_path, self._suppression_config(header="fail_on_unknown_keys: true\n")
         )
@@ -231,12 +245,26 @@ class TestConfigFiles:
             "the error should say which entry"
         )
 
-    def test_a_misspelled_ignore_path_key_warns_and_is_inert_by_default(self, tmp_path):
+    def test_a_misspelled_ignore_path_key_is_refused_by_default(self, tmp_path):
         source = self._source(tmp_path, self._ignore_path_config("expiraton"))
+        with pytest.raises(ASHConfigValidationError) as excinfo:
+            resolve_config(source_dir=source)
+        assert "expiraton" in str(excinfo.value)
+        assert "did you mean 'expires'" in str(excinfo.value)
+
+    def test_a_misspelled_ignore_path_key_warns_and_is_inert_when_the_flag_is_false(
+        self, tmp_path
+    ):
+        source = self._source(
+            tmp_path,
+            self._ignore_path_config(
+                "expiraton", header="fail_on_unknown_keys: false\n"
+            ),
+        )
         config = resolve_config(source_dir=source)
         warnings = [w for w in config._resolution_warnings if "expiraton" in w]
         assert len(warnings) == 1, config._resolution_warnings
-        # The canonical spelling, never the deprecated "expiration" alias.
+        # The only spelling; ASH 4.0 removed the "expiration" alias.
         assert "did you mean 'expires'" in warnings[0]
         (entry,) = [
             p for p in config.global_settings.ignore_paths if p.path == "vendor/**"
@@ -244,9 +272,10 @@ class TestConfigFiles:
         assert entry.has_unknown_keys
         assert entry not in active_ignore_paths([entry])
 
-    def test_a_misspelled_ignore_path_key_raises_under_fail_on_unknown_keys(
+    def test_a_misspelled_ignore_path_key_raises_under_fail_on_unknown_keys_true(
         self, tmp_path
     ):
+        """The explicit spelling of the default (true since ASH 4.0)."""
         source = self._source(
             tmp_path,
             self._ignore_path_config(

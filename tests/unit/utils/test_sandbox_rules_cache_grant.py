@@ -1,8 +1,8 @@
 """Under a scanner sandbox, the operator's offline rule cache is readable.
 
-An offline semgrep or opengrep scan reads its rules from ``$SEMGREP_RULES_CACHE_DIR`` or
-``$OPENGREP_RULES_CACHE_DIR``. ASH checks that directory in its own process before the
-scan, so a sandbox that does not mount it leaves the tool without rules: semgrep exits 7
+An offline opengrep scan reads its rules from ``$OPENGREP_RULES_CACHE_DIR``. ASH checks
+that directory in its own process before the
+scan, so a sandbox that does not mount it leaves the tool without rules: opengrep exits 7
 ("unable to find a config") behind a check that already passed. The documented setup
 puts the cache under ``$HOME/.cache/ash`` (and the nix shell under
 ``$HOME/.cache/ash/semgrep-rules``), which every backend hides by default.
@@ -30,9 +30,6 @@ from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
     OpengrepScanner,
 )
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-)
 from automated_security_helper.utils.sandbox import backends as backends_module
 from automated_security_helper.utils.sandbox import policy as policy_module
 from automated_security_helper.utils.sandbox import scope as scope_module
@@ -52,7 +49,6 @@ rules:
 """
 
 SCANNERS = {
-    "semgrep": (SemgrepScanner, "SEMGREP_RULES_CACHE_DIR"),
     "opengrep": (OpengrepScanner, "OPENGREP_RULES_CACHE_DIR"),
 }
 
@@ -167,10 +163,10 @@ def test_the_operators_rule_cache_is_readable(
 def test_a_directory_in_extra_read_paths_is_readable(layout, backend, monkeypatch):
     """Control: an operator grant of the same directory reaches the recorded policy."""
     tmp, _home, _source, _output = layout
-    rules = _rules_dir(tmp / "rule-cache" / "semgrep")
-    monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", str(rules))
+    rules = _rules_dir(tmp / "rule-cache" / "opengrep")
+    monkeypatch.setenv("OPENGREP_RULES_CACHE_DIR", str(rules))
 
-    policy = _policy(layout, backend, "semgrep", extra_read_paths=[str(rules)])
+    policy = _policy(layout, backend, "opengrep", extra_read_paths=[str(rules)])
 
     assert _covers(_readable(policy), rules)
 
@@ -185,12 +181,12 @@ def test_a_rules_path_in_the_scanner_options_is_not_granted(
     tmp, _home, _source, _output = layout
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     monkeypatch.setenv(
-        "SEMGREP_RULES_CACHE_DIR", str(_rules_dir(tmp / "rule-cache" / "semgrep"))
+        "OPENGREP_RULES_CACHE_DIR", str(_rules_dir(tmp / "rule-cache" / "opengrep"))
     )
     named_by_options = _rules_dir(tmp / "elsewhere" / "rules")
 
     policy = _policy(
-        layout, backend, "semgrep", options={"config": str(named_by_options)}
+        layout, backend, "opengrep", options={"config": str(named_by_options)}
     )
 
     assert not _covers(_readable(policy), named_by_options), (
@@ -204,9 +200,9 @@ def test_an_empty_variable_grants_nothing(layout, backend, monkeypatch):
     working = tmp / "working"
     working.mkdir()
     monkeypatch.chdir(working)
-    monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", "")
+    monkeypatch.setenv("OPENGREP_RULES_CACHE_DIR", "")
 
-    policy = _policy(layout, backend, "semgrep")
+    policy = _policy(layout, backend, "opengrep")
 
     readable = _readable(policy)
     assert _real(working) not in readable
@@ -230,9 +226,9 @@ def test_a_variable_naming_a_root_or_the_home_directory_grants_nothing(
         "home": home,
         "holding-home": home.parent,
     }[value]
-    monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", str(named))
+    monkeypatch.setenv("OPENGREP_RULES_CACHE_DIR", str(named))
 
-    policy = _policy(layout, backend, "semgrep")
+    policy = _policy(layout, backend, "opengrep")
 
     assert _real(named) not in _readable(policy)
 
@@ -254,9 +250,9 @@ def test_a_variable_naming_the_passwd_home_grants_nothing(
     for module in (policy_module, backends_module):
         monkeypatch.setattr(module, "_passwd_home", lambda: passwd_home, raising=False)
     named = passwd_home if value == "passwd-home" else passwd_home.parent
-    monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", str(named))
+    monkeypatch.setenv("OPENGREP_RULES_CACHE_DIR", str(named))
 
-    policy = _policy(layout, backend, "semgrep")
+    policy = _policy(layout, backend, "opengrep")
 
     assert _real(named) not in _readable(policy)
 
@@ -264,10 +260,10 @@ def test_a_variable_naming_the_passwd_home_grants_nothing(
 def test_the_rule_cache_is_not_a_program_directory(layout, backend, monkeypatch):
     """It is data the tool reads: readable, and not among the executable paths."""
     tmp, _home, _source, _output = layout
-    rules = _rules_dir(tmp / "rule-cache" / "semgrep")
-    monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", str(rules))
+    rules = _rules_dir(tmp / "rule-cache" / "opengrep")
+    monkeypatch.setenv("OPENGREP_RULES_CACHE_DIR", str(rules))
 
-    policy = _policy(layout, backend, "semgrep")
+    policy = _policy(layout, backend, "opengrep")
 
     assert _covers(_readable(policy), rules)
     assert _real(rules) not in {_real(p) for p in policy.executable}
@@ -290,10 +286,10 @@ def test_sandbox_exec_runs_no_program_from_the_rule_cache(layout, backend, monke
 
     tmp, _home, _source, _output = layout
     root = tmp / "tools-root"
-    rules = _rules_dir(root / "rules" / "semgrep")
-    monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", str(rules))
+    rules = _rules_dir(root / "rules" / "opengrep")
+    monkeypatch.setenv("OPENGREP_RULES_CACHE_DIR", str(rules))
 
-    policy = _policy(layout, backend, "semgrep", extra_read_paths=[str(root)])
+    policy = _policy(layout, backend, "opengrep", extra_read_paths=[str(root)])
     rules_text = "\n".join(_exec_rules(policy, tmp / "private-tmp"))
 
     denied = [line for line in rules_text.splitlines() if line.startswith("(deny")]
@@ -310,9 +306,9 @@ def test_a_variable_naming_a_file_grants_nothing(layout, backend, monkeypatch):
     named = home / "settings" / "notes.txt"
     named.parent.mkdir(parents=True)
     named.write_text("notes\n")
-    monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", str(named))
+    monkeypatch.setenv("OPENGREP_RULES_CACHE_DIR", str(named))
 
-    policy = _policy(layout, backend, "semgrep")
+    policy = _policy(layout, backend, "opengrep")
 
     assert not _covers(_readable(policy), named), (
         f"a file named by the variable was mounted: {named}"
@@ -325,8 +321,8 @@ def test_a_relative_value_grants_nothing(layout, backend, monkeypatch):
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     rules = _rules_dir(tmp / "working" / "rules")
     monkeypatch.chdir(tmp / "working")
-    monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", "rules")
+    monkeypatch.setenv("OPENGREP_RULES_CACHE_DIR", "rules")
 
-    policy = _policy(layout, backend, "semgrep")
+    policy = _policy(layout, backend, "opengrep")
 
     assert not _covers(_readable(policy), rules)

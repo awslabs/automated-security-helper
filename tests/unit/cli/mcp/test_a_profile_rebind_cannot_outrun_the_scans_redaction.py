@@ -254,9 +254,9 @@ class _ARebindOnLockAcquire:
 def _a_lock_that_rebinds_on_acquire(monkeypatch, session_id, rebind):
     from automated_security_helper.cli.mcp.sessions import get_default_registry
 
-    session = get_default_registry().get_or_create(session_id)
-    hook = _ARebindOnLockAcquire(session.lock, rebind)
-    monkeypatch.setattr(session, "_lock", hook)
+    entry = get_default_registry().get_or_create(session_id)
+    hook = _ARebindOnLockAcquire(entry.lock, rebind)
+    monkeypatch.setattr(entry, "_lock", hook)
     assert get_default_registry().get_or_create(session_id).lock is hook
     return hook
 

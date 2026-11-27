@@ -10,9 +10,9 @@ Consumes the `image_uri` output of `ash-image-pipeline`.
 ```text
 Source  ->  CodeCommit (existing repository, read only)
 Scan    ->  N CodeBuild actions, all at run_order 1 (parallel)
-            each: ash scan --shard-index <i> --shard-count <n>
+            each: ashx scan --shard-index <i> --shard-count <n>
 Merge   ->  one CodeBuild action
-            ash merge --results <shard-0> ... --results <shard-n-1> --output-dir merged
+            ashx results merge --results <shard-0> ... --results <shard-n-1> --output-dir merged
 ```
 
 ## The shard contract
@@ -38,7 +38,7 @@ A shard *does* fail on a real crash: with that flag in effect a non-zero exit me
 a genuine failure rather than findings, so it is safe to propagate, and failing
 there stops the pipeline before anything forms a verdict from incomplete data.
 
-The verdict is `ash merge`'s exit code, propagated unchanged:
+The verdict is `ashx results merge`'s exit code, propagated unchanged:
 
 | Exit | Meaning |
 |---|---|
@@ -52,14 +52,14 @@ merge`, and report that as exit 2.
 
 **Nothing in this module re-derives that judgment**, and that is deliberate. ASH
 routes the merged verdict through `_compute_exit_code`, the same function
-`ash scan` uses, specifically so a merged verdict and a scanned verdict cannot
+`ashx scan` uses, specifically so a merged verdict and a scanned verdict cannot
 disagree about the same findings. A severity comparison written into a buildspec
 would be a third copy of a table that has already drifted once in this codebase —
 `automated_security_helper/utils/severity_ladder.py` exists because of that
 drift — and the next time it drifted, this pipeline would silently report a
-different verdict than `ash scan` for identical findings.
+different verdict than `ashx scan` for identical findings.
 
-`min_severity` maps directly onto `ash merge --min-severity` for the same reason:
+`min_severity` maps directly onto `ashx results merge --min-severity` for the same reason:
 one implementation of "does this breach".
 
 ### `min_severity` is a floor, so lower is stricter
@@ -128,7 +128,7 @@ reading each other's shards.
 ## The ASH image is the build environment
 
 Both projects set `image = container_image_uri` with
-`image_pull_credentials_type = "SERVICE_ROLE"`, so `ash` is on PATH directly. No
+`image_pull_credentials_type = "SERVICE_ROLE"`, so `ashx` is on PATH directly. No
 Docker-in-Docker, no `privileged_mode`.
 
 Two consequences follow, and both are easy to get wrong:
@@ -145,18 +145,18 @@ execute here. Both buildspecs therefore invoke it explicitly:
 
 <!-- doctest: illustrative reason="excerpt of the two buildspecs; runs inside the ASH image in CodeBuild" -->
 ```bash
-/usr/local/bin/ash-container-init ash scan --source-dir . --output-dir ash_output \
+/usr/local/bin/ash-container-init ashx scan --source-dir . --output-dir ash_output \
   --shard-index "$SHARD_INDEX" --shard-count "$SHARD_COUNT" --no-fail-on-findings
 # The merge passes one --results per shard, and --fail-on-findings when
 # fail_on_findings is true.
-/usr/local/bin/ash-container-init ash merge --output-dir merged \
+/usr/local/bin/ash-container-init ashx results merge --output-dir merged \
   --min-severity "$MIN_SEVERITY" --fail-on-findings --results shard-results/shard-0
 ```
 
 Without that, `ASH_CONFIG` would not be set, and each shard would use the
 repository's own config file if it has one, or ASH's defaults, instead of the
 configuration you supplied: a wrong result with no error. With it, every shard uses
-the base config and never reads the repository's own `.ash.yaml`. `ash merge` takes
+the base config and never reads the repository's own `.ash.yaml`. `ashx results merge` takes
 the scan config from the shard results rather than from a file. Invoking it
 explicitly is also correct if a future CodeBuild release did run the entrypoint,
 since the work it does is idempotent.
@@ -182,7 +182,7 @@ tree (bandit's `.bandit`, grype's `.grype.yaml`).
 | `base_config_ssm_parameter_arn` | — | `string` | `null` | Scopes `ssm:GetParameter`. |
 | `name_prefix` | — | `string` | `"ash-scan"` | |
 | `source_branch` | — | `string` | `"main"` | |
-| `min_severity` | — | `string` | `"low"` | Passed to `ash merge --min-severity`, lower-cased. One of `critical`, `high`, `medium` or `low`, in any case; any other value fails at plan time. A floor, so lower is stricter, applied after `global_settings.severity_threshold`; see above. |
+| `min_severity` | — | `string` | `"low"` | Passed to `ashx results merge --min-severity`, lower-cased. One of `critical`, `high`, `medium` or `low`, in any case; any other value fails at plan time. A floor, so lower is stricter, applied after `global_settings.severity_threshold`; see above. |
 | `fail_on_findings` | — | `bool` | `true` | Passed explicitly so a base config cannot disable the gate. |
 | `enable_eventbridge_trigger` | — | `bool` | `true` | Preferred over polling. |
 | `build_compute_type` | — | `string` | `BUILD_GENERAL1_LARGE` | Scanners are CPU-bound. |
@@ -249,10 +249,10 @@ makes sense if the shards agreed on what to scan. Both projects therefore receiv
 the same `base_config_ssm_parameter_name`. Overriding the configuration per shard
 would make the merged verdict meaningless.
 
-**`ash merge` and the shard CLI flags are a dependency on work landing elsewhere.** At the commit
+**`ashx results merge` and the shard CLI flags are a dependency on work landing elsewhere.** At the commit
 this module was written against, `automated_security_helper/core/sharding.py` and
 the scan-phase shard selection exist, but `--shard-index` / `--shard-count` are
-not yet wired onto `ash scan`, and there is no `ash merge` command or `--results`
+not yet wired onto `ashx scan`, and there is no `ashx results merge` command or `--results`
 flag. This module is written against the stated contract for both. It will plan
 and apply against an image that lacks them; the shard and merge actions will fail
 at run time until the image is built from a revision that has them.

@@ -22,7 +22,7 @@ nothing.
 
 Every location in 2 and 3 is a legacy one: it keeps loading, and a scan that
 reads one says so once, in a warning that names the file as deprecated and the
-canonical path to move it to. They are removed in ASH 4.0. When the canonical
+canonical path to move it to. They are removed in ASH 4.1. When the canonical
 file and a legacy one both exist, the canonical file is read and the warning
 names the legacy file it shadowed. A ``pyproject.toml`` table is a different
 kind of source, not a file location, and is not deprecated.
@@ -360,7 +360,7 @@ SOURCE_KIND_EXPLICIT = "explicit"
 SOURCE_KIND_CANONICAL = "canonical"
 #: A dedicated name at a legacy location (every name of
 #: ``ASH_CONFIG_FILE_NAMES`` at the root or in ``.ash/`` except the canonical
-#: file): deprecated, removed in ASH 4.0.
+#: file): deprecated, removed in ASH 4.1.
 SOURCE_KIND_DEDICATED = "dedicated"
 SOURCE_KIND_ASHRC = "ashrc"
 SOURCE_KIND_PYPROJECT = "pyproject"
@@ -2077,7 +2077,7 @@ def discovery_warnings(discovery: ConfigDiscovery) -> List[str]:
         )
         if selected.kind == SOURCE_KIND_CANONICAL and _is_a_legacy_location(other):
             message += (
-                f" {other.label} is a deprecated location, removed in ASH 4.0: "
+                f" {other.label} is a deprecated location, removed in ASH 4.1: "
                 f"move any setting it holds into {selected.label} and delete it."
             )
         warnings.append(message)
@@ -2086,7 +2086,7 @@ def discovery_warnings(discovery: ConfigDiscovery) -> List[str]:
 
 
 def _is_a_legacy_location(source: ConfigSource) -> bool:
-    """Whether ``source`` is a location ASH 4.0 stops reading: a dedicated name
+    """Whether ``source`` is a location ASH 4.1 stops reading: a dedicated name
     other than the canonical file, or an ashrc name. A ``pyproject.toml`` table
     is not a file location of that kind and is not deprecated."""
     return source.kind in (SOURCE_KIND_DEDICATED, SOURCE_KIND_ASHRC)
@@ -2106,7 +2106,7 @@ def canonical_path_for(source: ConfigSource) -> Path:
 def _legacy_location_warning(source: ConfigSource) -> str:
     return (
         f"ASH is reading its configuration from {source.label}, a deprecated "
-        f"location that ASH 4.0 stops reading. The canonical config file is "
+        f"location that ASH 4.1 stops reading. The canonical config file is "
         f"{ASH_CANONICAL_CONFIG_FILE_NAME} at the scan root: move this file to "
         f"{describe_config_path(canonical_path_for(source))}."
     )

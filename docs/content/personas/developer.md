@@ -21,7 +21,7 @@ no other tools and answers in seconds:
 ash --source-dir . --scanners detect-secrets --offline --no-progress
 ```
 
-`ash inspect findings` opens the last scan's findings in the terminal, and
+`ashx results inspect findings` opens the last scan's findings in the terminal, and
 pressing `x` on one writes a suppression entry, with your reason and an
 optional expiration, into the project's config
 ([Add a suppression while you review findings](../how-to/suppress-findings.md#inspect)).
@@ -122,7 +122,7 @@ if its instructions let it. Three adjustments:
   agent starts scans itself, polls them, reads the findings, explains one, and
   drafts a suppression for your review, so the scan happens at the end of a
   task instead of being bolted to every one of dozens of commits.
-- Give the agent the ASH instructions file: `ash get-genai-guide` writes the
+- Give the agent the ASH instructions file: `ashx get-genai-guide` writes the
   [GenAI integration guide](../docs/genai-steering-guide.md) for your installed
   version, and the [agent plugins](../how-to/agent-plugins.md) package the
   server and the instructions per client.

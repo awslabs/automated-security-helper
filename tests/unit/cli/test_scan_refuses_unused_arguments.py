@@ -263,7 +263,8 @@ class TestOptionsBeforeASubcommand:
         assert got == expected
 
     def test_report_reads_the_output_dir_given_before_it(self, in_tmp):
-        """``ash --output-dir <dir> report`` reads <dir>, with no ASH_OUTPUT_DIR set.
+        """``ash --output-dir <dir> results report`` reads <dir>, with no
+        ASH_OUTPUT_DIR set.
 
         It read the default output directory, which under in_tmp holds no results,
         so the command exited 1.
@@ -271,7 +272,14 @@ class TestOptionsBeforeASubcommand:
         _write_results(in_tmp / "elsewhere-out")
 
         result = _invoke(
-            ["--output-dir", "elsewhere-out", "report", "--format", "flat-json"]
+            [
+                "--output-dir",
+                "elsewhere-out",
+                "results",
+                "report",
+                "--format",
+                "flat-json",
+            ]
         )
 
         assert result.exit_code == 0, result.output
@@ -279,12 +287,12 @@ class TestOptionsBeforeASubcommand:
     @pytest.mark.parametrize(
         "args, flag",
         [
-            pytest.param(["--source-dir", "src", "report"], "--source-dir"),
-            pytest.param(["--no-progress", "report"], "--no-progress"),
+            pytest.param(["--source-dir", "src", "results", "report"], "--source-dir"),
+            pytest.param(["--no-progress", "results", "report"], "--no-progress"),
             pytest.param(["--scanners", "bandit", "config", "get"], "--scanners"),
-            pytest.param(["--version", "merge"], "--version"),
+            pytest.param(["--version", "results", "merge"], "--version"),
             pytest.param(
-                ["-f", "sarif", "build-image", "--no-run"],
+                ["-f", "sarif", "container", "build", "--no-run"],
                 "takes -f as --force",
             ),
         ],
@@ -300,7 +308,7 @@ class TestOptionsBeforeASubcommand:
         self, in_tmp, args, flag
     ):
         """A short alias the subcommand spells differently (`-f` is --force on
-        build-image, a flag, where the root's -f takes a value) is refused as
+        container build, a flag, where the root's -f takes a value) is refused as
         taken differently, not as not taken: the subcommand does take `-f`."""
         with patch("automated_security_helper.cli.image.run_ash_scan") as run:
             result = _invoke(args)
@@ -312,10 +320,16 @@ class TestOptionsBeforeASubcommand:
     @pytest.mark.parametrize(
         "args, typed",
         [
-            pytest.param(["--scanners", "bandit", "report"], "--scanners", id="long"),
-            pytest.param(["--scanners=bandit", "report"], "--scanners", id="equals"),
             pytest.param(
-                ["--scanners", "--offline", "report"], "--scanners", id="value-token"
+                ["--scanners", "bandit", "results", "report"], "--scanners", id="long"
+            ),
+            pytest.param(
+                ["--scanners=bandit", "results", "report"], "--scanners", id="equals"
+            ),
+            pytest.param(
+                ["--scanners", "--offline", "results", "report"],
+                "--scanners",
+                id="value-token",
             ),
         ],
     )
@@ -325,14 +339,14 @@ class TestOptionsBeforeASubcommand:
         result = _invoke(args)
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
-        assert f"'ash report' does not take {typed}," in _plain(result.output)
+        assert f"'ashx results report' does not take {typed}," in _plain(result.output)
 
     @pytest.mark.parametrize(
         "args",
         [
-            pytest.param(["--format", "text", "report"], id="long-alias"),
-            pytest.param(["-f", "text", "report"], id="short-alias"),
-            pytest.param(["--formats=text", "report"], id="equals-form"),
+            pytest.param(["--format", "text", "results", "report"], id="long-alias"),
+            pytest.param(["-f", "text", "results", "report"], id="short-alias"),
+            pytest.param(["--formats=text", "results", "report"], id="equals-form"),
         ],
     )
     def test_a_root_option_reaches_the_subcommand_option_spelled_the_same(
@@ -351,13 +365,13 @@ class TestOptionsBeforeASubcommand:
         assert "ASH SECURITY SCAN REPORT" in result.stdout, result.stdout[:400]
 
     def test_the_subcommands_help_is_shown(self, in_tmp):
-        result = _invoke(["--source-dir", "src", "report", "--help"])
+        result = _invoke(["--source-dir", "src", "results", "report", "--help"])
 
         assert result.exit_code == 0, result.output
-        assert "Usage: ash report" in _plain(result.output)
+        assert "Usage: ashx results report" in _plain(result.output)
 
     def test_names_every_option_the_subcommand_does_not_take(self, in_tmp):
-        result = _invoke(["--offline", "--scanners", "bandit", "report"])
+        result = _invoke(["--offline", "--scanners", "bandit", "results", "report"])
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
         text = _plain(result.output)
@@ -375,7 +389,14 @@ class TestOptionsBeforeASubcommand:
         monkeypatch.setenv("ASH_SOURCE_DIR", str(in_tmp / "src"))
 
         result = _invoke(
-            ["report", "--output-dir", "elsewhere-out", "--format", "flat-json"]
+            [
+                "results",
+                "report",
+                "--output-dir",
+                "elsewhere-out",
+                "--format",
+                "flat-json",
+            ]
         )
 
         assert "does not take" not in _plain(result.output)
@@ -390,7 +411,7 @@ class TestOptionsBeforeASubcommand:
         assert probe.source_dirs == ["src"]
 
 
-class TestBuildImageRefusesWhatItDoesNotDeclare:
+class TestContainerBuildRefusesWhatItDoesNotDeclare:
     @pytest.mark.parametrize(
         "args",
         [["--scanners", "bandit"], ["--fail-on-finding"], ["extra"]],
@@ -398,14 +419,16 @@ class TestBuildImageRefusesWhatItDoesNotDeclare:
     )
     def test_is_a_usage_error(self, in_tmp, args):
         with patch("automated_security_helper.cli.image.run_ash_scan") as run:
-            result = _invoke(["build-image", "--no-build", "--no-run", *args])
+            result = _invoke(["container", "build", "--no-build", "--no-run", *args])
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
         run.assert_not_called()
 
     def test_its_own_options_work(self, in_tmp):
         with patch("automated_security_helper.cli.image.run_ash_scan") as run:
-            result = _invoke(["build-image", "--no-build", "--no-run", "--offline"])
+            result = _invoke(
+                ["container", "build", "--no-build", "--no-run", "--offline"]
+            )
 
         assert result.exit_code == 0, result.output
         assert run.call_args.kwargs["offline"] is True

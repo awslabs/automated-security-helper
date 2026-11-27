@@ -56,7 +56,7 @@ from tests.utils.bounded_wait import finishes_within
 
 pytestmark = pytest.mark.unit
 
-SESSION = "bound-then-orphaned"
+CLIENT_ID = "bound-then-orphaned"
 #: How long a call that could wait on a lock is given before the test fails.
 WAIT_SECONDS = 30.0
 
@@ -103,10 +103,10 @@ def _project(tmp_path: Path) -> Path:
 def test_the_refusal_is_a_registry_error_and_a_runtime_error() -> None:
     """The type the workspace tools' handler catches (RuntimeError) and the
     registry's own (ProfileRegistryError) are one error here."""
-    _bind_then_orphan(SESSION)
+    _bind_then_orphan(CLIENT_ID)
 
     with pytest.raises(BoundProfileUnavailableError) as refused:
-        resolve_session_config_path(SESSION)
+        resolve_session_config_path(CLIENT_ID)
 
     assert isinstance(refused.value, ProfileRegistryError)
     assert isinstance(refused.value, RuntimeError)
@@ -123,7 +123,7 @@ def test_a_workspace_that_cannot_be_written_is_the_same_refusal(
     it instead of the catch-all reporting an internal error."""
     from automated_security_helper.cli.mcp import profile_registry
 
-    _bind_then_remove_the_copy(SESSION)
+    _bind_then_remove_the_copy(CLIENT_ID)
 
     def cannot_write(sid, config, patched):
         raise PermissionError(13, "Permission denied", "config")
@@ -131,7 +131,7 @@ def test_a_workspace_that_cannot_be_written_is_the_same_refusal(
     monkeypatch.setattr(profile_registry, "materialize_session_binding", cannot_write)
 
     with pytest.raises(BoundProfileUnavailableError) as refused:
-        resolve_session_config_path(SESSION)
+        resolve_session_config_path(CLIENT_ID)
 
     assert isinstance(refused.value, ProfileRegistryError)
     assert isinstance(refused.value, RuntimeError)
@@ -149,7 +149,7 @@ def test_the_scan_runner_records_the_refusal_instead_of_leaving_the_entry_pendin
     )
     from automated_security_helper.interactions import run_ash_scan as ras
 
-    _bind_then_orphan(SESSION)
+    _bind_then_orphan(CLIENT_ID)
     source = _project(tmp_path)
     output = source / ".ash" / "ash_output"
     output.mkdir(parents=True)
@@ -172,7 +172,7 @@ def test_the_scan_runner_records_the_refusal_instead_of_leaving_the_entry_pendin
                 output_dir=str(output),
                 severity_threshold="MEDIUM",
                 config_path=None,
-                session_id=SESSION,
+                session_id=CLIENT_ID,
             )
         )
 
@@ -266,14 +266,14 @@ class _Held:
     def __init__(self, session_id: str) -> None:
         from automated_security_helper.cli.mcp.sessions import get_default_registry
 
-        self._session = get_default_registry().session_for(session_id)
+        self._entry = get_default_registry().session_for(session_id)
 
     def __enter__(self) -> Self:
-        assert self._session.try_begin_change() is None
+        assert self._entry.try_begin_change() is None
         return self
 
     def __exit__(self, *exc_info: object) -> None:
-        self._session.end_change()
+        self._entry.end_change()
 
 
 def test_the_rewrite_is_refused_while_the_sessions_workspace_is_being_removed(
@@ -287,17 +287,17 @@ def test_the_rewrite_is_refused_while_the_sessions_workspace_is_being_removed(
     hold's own error, never a profile that "could not be written"."""
     from automated_security_helper.cli.mcp.sessions import SessionWorkspaceBusyError
 
-    gone = _bind_then_remove_the_copy(SESSION)
+    gone = _bind_then_remove_the_copy(CLIENT_ID)
 
-    with _Held(SESSION):
+    with _Held(CLIENT_ID):
         with pytest.raises(SessionWorkspaceBusyError):
-            resolve_session_config_path(SESSION)
+            resolve_session_config_path(CLIENT_ID)
         assert not gone.exists(), "the profile was written under the removal"
 
     # The hold ended without removing anything here: the next ask writes it.
     # Compared as paths: the resolver spells a Windows path with forward
     # slashes, str() of the Path with backslashes.
-    assert Path(resolve_session_config_path(SESSION)) == gone
+    assert Path(resolve_session_config_path(CLIENT_ID)) == gone
     assert gone.is_file()
 
 
@@ -310,7 +310,7 @@ def test_the_new_paths_land_on_the_binding_that_was_read_not_on_a_rebind(
     profile name, the two bindings looked the same."""
     from automated_security_helper.cli.mcp import profile_registry
 
-    _bind_then_remove_the_copy(SESSION)
+    _bind_then_remove_the_copy(CLIENT_ID)
     real_write = profile_registry.materialize_session_binding
     rebound: Dict[str, Any] = {}
     rebinding: List[str] = []
@@ -339,11 +339,11 @@ def test_the_new_paths_land_on_the_binding_that_was_read_not_on_a_rebind(
     # lock, which is taken twice by the thread that holds it: bounded, because
     # a lock that waited on itself would hold the run instead of failing.
     rewritten = finishes_within(
-        WAIT_SECONDS, lambda: resolve_session_config_path(SESSION)
+        WAIT_SECONDS, lambda: resolve_session_config_path(CLIENT_ID)
     )
 
     assert rebound.get("success") is True, rebound
-    recorded = profile_registry.resolve_session_config_path(SESSION)
+    recorded = profile_registry.resolve_session_config_path(CLIENT_ID)
     assert recorded == rebound["config_path"], (recorded, rebound["config_path"])
     assert rewritten != rebound["config_path"], "the rebind's own path was overwritten"
 
@@ -381,7 +381,7 @@ def test_the_scan_runner_records_the_hold_instead_of_leaving_the_entry_pending(
     )
     from automated_security_helper.interactions import run_ash_scan as ras
 
-    _bind_then_remove_the_copy(SESSION)
+    _bind_then_remove_the_copy(CLIENT_ID)
     source = _project(tmp_path)
     output = source / ".ash" / "ash_output"
     output.mkdir(parents=True)
@@ -399,7 +399,7 @@ def test_the_scan_runner_records_the_hold_instead_of_leaving_the_entry_pending(
 
     def run_beside_the_hold() -> None:
         with (
-            _Held(SESSION),
+            _Held(CLIENT_ID),
             patch.object(mcp_tools, "get_scan_registry", return_value=registry),
         ):
             asyncio.run(
@@ -409,7 +409,7 @@ def test_the_scan_runner_records_the_hold_instead_of_leaving_the_entry_pending(
                     output_dir=str(output),
                     severity_threshold="MEDIUM",
                     config_path=None,
-                    session_id=SESSION,
+                    session_id=CLIENT_ID,
                 )
             )
 

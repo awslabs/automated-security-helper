@@ -13,7 +13,7 @@
 # USAGE
 #   ./run_regression.sh <image-ref> [workdir]
 #
-# The image must be an ASH image with the `ash` CLI on PATH. To test the gate as
+# The image must be an ASH image with the `ashx` CLI on PATH. To test the gate as
 # deployed, use the image the gate's Lambda actually runs:
 #   aws ecr list-images --region <region> --repository-name <gate-ecr-repo>
 #
@@ -85,7 +85,7 @@ run_scan() {
   docker run --rm --entrypoint /bin/sh \
     -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
     -v "$repo:/work/src" -v "$out:/work/out" \
-    "$IMAGE" -c "cd /work/src && ash scan --source-dir /work/src --output-dir /work/out \
+    "$IMAGE" -c "cd /work/src && ashx scan --source-dir /work/src --output-dir /work/out \
 --no-progress --simple --compact-report --changed-files-only --base-ref $dest \
 --min-severity medium; echo \"ASH_EXIT=\$?\"" > "$log" 2>&1 || true
   sed -n 's/^ASH_EXIT=\([0-9]\+\).*/\1/p' "$log" | tail -1
@@ -107,7 +107,7 @@ for spec in "vulnerable:feat/unsafe-subprocess" "clean:feat/safe-math"; do
 
   code="$(run_scan "$repo" "$out" "$dest" "$log")"
   if [ -z "$code" ]; then
-    echo "FAIL: the container produced no ASH_EXIT marker; ash never ran."
+    echo "FAIL: the container produced no ASH_EXIT marker; ashx never ran."
     echo "      last lines of $log:"
     tail -15 "$log" | sed 's/^/        /'
     OVERALL=1

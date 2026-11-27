@@ -108,7 +108,7 @@ class TestCoverage:
         assert _missing_entries(bumped, THIRD_PARTY_LICENSES) == ["syft"]
 
     def test_opengrep_matches_the_version_the_scanner_installs(self):
-        """opengrep reaches the image through `ash dependencies install`, which
+        """opengrep reaches the image through `ashx dependencies install`, which
         installs the scanner's configured default -- not through TOOL_VERSIONS on
         every branch. The build checks `opengrep --version` too; this catches a
         default bump before an image is built."""
@@ -363,14 +363,14 @@ class TestTheDockerfileInstallsEveryEntry:
         assert f'ARG PYGIT2_VERSION="{version}"' in core
         assert 'ENV UV_CONSTRAINT="/etc/ash/uv-constraints.txt"' in core
         assert core.index("ENV UV_CONSTRAINT=") < core.index(
-            'ash dependencies install --bin-path "${ASH_BIN_PATH}"'
+            'ashx dependencies install --bin-path "${ASH_BIN_PATH}"'
         ), "the constraint must be in place before GuardDog is installed"
 
     def test_every_uv_install_leaves_no_cache_in_its_layer(self):
         """uv's cache is only useful to a later install on the same machine.
 
         In an image layer it is dead weight, so every RUN that installs with uv
-        or runs `ash dependencies install` (which installs uv tools) sets
+        or runs `ashx dependencies install` (which installs uv tools) sets
         UV_NO_CACHE in that same RUN.
         """
         # One logical line per RUN: continuations joined, so a pinned install
@@ -380,13 +380,17 @@ class TestTheDockerfileInstallsEveryEntry:
             line
             for line in dockerfile.splitlines()
             if line.startswith("RUN ")
-            and ("ash dependencies install" in line or "uv pip install" in line)
+            and (
+                "ashx dependencies install" in line
+                or "ashx dependencies install" in line
+                or "uv pip install" in line
+            )
         ]
         assert len(installs) >= 3, installs
         for line in installs:
             if line.startswith('RUN pins="$(install-pinned-tool --uv-tool-pins)"'):
                 # uv keeps its no-cache cache in a temporary directory, which
-                # `ash dependencies install` left behind in /tmp (about 437 MB a
+                # `ashx dependencies install` left behind in /tmp (about 437 MB a
                 # stage), so these RUNs give it a TMPDIR they remove themselves.
                 assert 'uv_tmp="$(mktemp -d)"' in line, line
                 assert 'TMPDIR="${uv_tmp}" UV_NO_CACHE=1 ' in line, line
@@ -407,10 +411,10 @@ class TestTheDockerfileInstallsEveryEntry:
                 assert not entry.executables, tool
 
     def test_verification_runs_after_ash_dependencies_install(self):
-        """opengrep only exists once `ash dependencies install` has run."""
+        """opengrep only exists once `ashx dependencies install` has run."""
         core = _core_stage(DOCKERFILE.read_text())
         assert core.index("RUN install-pinned-tool --verify-third-party") > core.index(
-            'ash dependencies install --bin-path "${ASH_BIN_PATH}"'
+            'ashx dependencies install --bin-path "${ASH_BIN_PATH}"'
         )
 
 
@@ -435,16 +439,17 @@ def _uv_tool_scanners() -> list:
 
 
 class TestThePythonTools:
-    """bandit, checkov and semgrep: installed by `uv tool install`, licensed from
+    """bandit and checkov: installed by `uv tool install`, licensed from
     their wheels, and pinned so the entry describes the release in the image."""
 
     def test_the_scanner_list_is_read_from_the_modules(self):
         """Negative control for the helper the next test depends on."""
-        assert {"bandit", "checkov", "semgrep"} <= set(_uv_tool_scanners())
+        assert {"bandit", "checkov"} <= set(_uv_tool_scanners())
 
     def test_every_uv_tool_scanner_has_a_license_entry(self):
-        """semgrep is LGPL and its wheel ships no license file, so without an entry
-        the image carried it with no license text and no pointer to its source."""
+        """The retired semgrep scanner was LGPL and its wheel shipped no license
+        file, so without an entry the image carried it with no license text and
+        no pointer to its source; the rule is kept for every uv-tool scanner."""
         missing = [
             tool
             for tool in _uv_tool_scanners()
@@ -456,13 +461,15 @@ class TestThePythonTools:
             "entry naming its distribution"
         )
 
-    def test_semgrep_is_copyleft_and_points_at_its_source_at_the_pinned_tag(self):
-        entry = THIRD_PARTY_LICENSES["semgrep"]
+    def test_opengrep_is_copyleft_and_points_at_its_source_at_the_pinned_tag(self):
+        """The copyleft contract, carried by opengrep since the semgrep entry
+        retired: a tool whose files are URL-pinned must point at its source."""
+        entry = THIRD_PARTY_LICENSES["opengrep"]
         assert entry.copyleft
-        assert entry.repository == "https://github.com/semgrep/semgrep"
+        assert entry.repository == "https://github.com/opengrep/opengrep"
         assert {f.name for f in entry.files} == {"LICENSE", "COPYRIGHT"}
         assert all(f.url and f.sha256 for f in entry.files), (
-            "semgrep's wheel ships no license file; both must be fetched, pinned"
+            "opengrep publishes a bare executable; both files must be fetched, pinned"
         )
         notice = entry.source_notice()
         assert "Corresponding source" in notice
@@ -491,7 +498,6 @@ class TestThePythonTools:
         from automated_security_helper.plugin_modules.ash_builtin.scanners import (
             bandit_scanner,
             checkov_scanner,
-            semgrep_scanner,
         )
 
         from automated_security_helper.plugin_modules.ash_builtin.scanners import (
@@ -516,9 +522,6 @@ class TestThePythonTools:
             "checkov": lambda: _classic(
                 checkov_scanner.CheckovScanner, checkov_scanner.CheckovScannerConfig
             ),
-            "semgrep": lambda: _classic(
-                semgrep_scanner.SemgrepScanner, semgrep_scanner.SemgrepScannerConfig
-            ),
             "cfn-lint": lambda: (
                 cfn_lint_scanner.CfnLintScannerConfigOptions().tool_version
             ),
@@ -537,14 +540,14 @@ class TestThePythonTools:
         lines = [
             line
             for line in DOCKERFILE.read_text().splitlines()
-            if "ash dependencies install --bin-path" in line
+            if "ashx dependencies install --bin-path" in line
             and not line.lstrip().startswith("#")
         ]
         assert len(lines) == 2, lines
         text = DOCKERFILE.read_text()
         for line in lines:
             assert line.strip() == (
-                'ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins} \\'
+                'ashx dependencies install --bin-path "${ASH_BIN_PATH}" ${pins} \\'
             ), line
         assert (
             text.count('RUN pins="$(install-pinned-tool --uv-tool-pins)" && \\\n') == 2
@@ -580,9 +583,9 @@ class TestThePythonTools:
     def test_their_licenses_are_staged_between_install_and_verification(self):
         core = _core_stage(DOCKERFILE.read_text())
         staged = core.index(
-            "install-pinned-tool --licenses-only bandit cfn-lint checkov guarddog semgrep zizmor"
+            "install-pinned-tool --licenses-only bandit cfn-lint checkov guarddog zizmor"
         )
-        assert core.index('ash dependencies install --bin-path "${ASH_BIN_PATH}"') < (
+        assert core.index('ashx dependencies install --bin-path "${ASH_BIN_PATH}"') < (
             staged
         )
         assert staged < core.index("RUN install-pinned-tool --verify-third-party")

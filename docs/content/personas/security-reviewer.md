@@ -53,7 +53,7 @@ be, or does a pattern cover files the reason does not? Does the `reason` state
 a fact you can check, or restate the rule? Is there an `expires` date, so the
 question is re-asked instead of settled forever? On its date the suppression
 stops matching and the finding fails the next scan; ASH warns about
-suppressions expiring within 30 days, and `ash config lint --fix` removes the
+suppressions expiring within 30 days, and `ashx config lint --fix` removes the
 expired ones ([Expiration](../how-to/suppress-findings.md#expiration)).
 
 Two companion tools keep the ledger honest. The `unused-suppressions` reporter,
@@ -118,7 +118,7 @@ Three options sharpen what a pull request is judged on:
   ([Add ASH to CI](../getting-started/ci.md)).
 
 For comparing two scans directly, run
-[`ash diff`](../how-to/export-reports.md#compare-scans) on the two results files.
+[`ashx results diff`](../how-to/export-reports.md#compare-scans) on the two results files.
 Over the [MCP server](../reference/mcp-tools.md#diff_scan_results),
 `diff_scan_results` returns the resolved, new, and severity-changed findings between
 the same two files.

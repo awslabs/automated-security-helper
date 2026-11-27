@@ -70,11 +70,11 @@ JEST_TESTS_ON_THE_FALLBACK = (
     ),
     (
         "deploy/cdk/test/ash-container-scripts.test.ts: 'the AgentCore stack ships a "
-        "default combination that starts'"
+        "default combination that starts stateless'"
     ),
     (
-        "deploy/cdk/test/ash-container-scripts.test.ts: 'an ASH without the "
-        "stateless flag still exits 65 on the shipped defaults'"
+        "deploy/cdk/test/ash-container-scripts.test.ts: 'the same environment on "
+        "an ASH without the option refuses with 65'"
     ),
 )
 

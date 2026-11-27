@@ -69,14 +69,11 @@ OFF_HOST: Dict[Plugin, str] = {
         "each package's dependency list, to the registry's advisory service, by "
         "`npm/pnpm/yarn audit` (npm_audit_scanner.py:1309, :1338)"
     ),
-    ("scanners", "semgrep"): (
-        "usage metrics about the run, to the Semgrep server: `--metrics auto` online "
-        "by default and `on` when the option says so (_grep_scanner_base.py:79, "
-        ":270; semgrep_scanner.py:60)"
-    ),
     ("scanners", "opengrep"): (
-        "the same usage metrics, with an opengrep older than 1.7.0, set by its "
-        "`metrics` option (opengrep_scanner.py:69, :277)"
+        "usage metrics about the run, with an opengrep older than 1.7.0: "
+        "`--metrics auto` online by default and `on` when the `metrics` option "
+        "says so (_grep_scanner_base.py:79, :270; opengrep_scanner.py:69, :277). "
+        "`semgrep` is an alias of this plugin, not a plugin of its own"
     ),
     ("scanners", "trivy-repo"): (
         "usage data to Aqua when `disable_telemetry` is false "

@@ -825,12 +825,12 @@ def test_bytes_mode_passes_no_encoding_and_no_error_handler(monkeypatch):
 
 def test_a_shell_command_refused_under_a_scope_is_counted():
     scope = sandbox_scope.RefusingScope(scanner_name="x", reason="no sandbox")
-    token = sandbox_scope._ACTIVE.set(scope)
+    reset_handle = sandbox_scope._ACTIVE.set(scope)
     try:
         with pytest.raises(sandbox_scope.SandboxUnavailable):
             spu._prepare_spawn("tool --x", None, None, shell=True)  # nosec B604
     finally:
-        sandbox_scope._ACTIVE.reset(token)
+        sandbox_scope._ACTIVE.reset(reset_handle)
     assert scope.refused_spawns == 1
     assert "shell" in (scope.last_refusal or "")
 

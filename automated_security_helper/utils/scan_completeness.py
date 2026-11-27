@@ -80,7 +80,7 @@ def bind_scanner_metrics_reader(reader: Callable[..., Any]) -> None:
 #
 # That direction is the point. The classification used to be a two-member denylist,
 # which meant every status it did not name -- including one this version has never
-# heard of -- counted as complete. Reachable rather than hypothetical: `ash merge`
+# heard of -- counted as complete. Reachable rather than hypothetical: `ashx merge`
 # reads results files written by whatever ASH produced each shard, so a fan-out whose
 # runners are mid-upgrade can hand this code a status string that is not in this
 # enum, and a denylist reports that shard as a scanner that ran. An allowlist fails
@@ -238,7 +238,7 @@ def no_scanner_ran(
     roster means the scan phase ran; no roster and no scanners means it never did.
 
     Defaults to None so a results file written by a version that recorded no roster
-    -- which ``ash merge`` reads, from whatever ASH produced each shard -- keeps the
+    -- which ``ashx merge`` reads, from whatever ASH produced each shard -- keeps the
     old benign reading rather than becoming a failure on upgrade.
 
     *ran_against_a_stale_database* names scanners recorded ERROR because their clean
@@ -269,7 +269,7 @@ def _partial_coverage(metric: Any) -> tuple[int, int] | None:
 
     The tri-state on ``targets_attempted`` is the whole content of this function.
     ``None`` means the scanner does not track per-target outcomes and is making no
-    claim -- bandit, checkov, semgrep, grype, syft, detect-secrets and opengrep
+    claim -- bandit, checkov, grype, syft, detect-secrets and opengrep
     are all in that state (cdk-nag, cfn-nag and npm-audit track targets). Reading
     absence as "attempted 0,
     therefore lost everything" would fail every scan on every repository the
@@ -429,7 +429,7 @@ def incomplete_scanners(
 
     Filtering here against ``opts.scanners`` was the alternative and is rejected:
     it would make the exit code disagree with the status the report prints for the
-    same scanner, and it has no counterpart in ``ash merge``, which has no scanner
+    same scanner, and it has no counterpart in ``ashx merge``, which has no scanner
     selection to consult. Fixing the recorded status instead makes both agree.
 
     Tested against ``_COMPLETE_SCANNER_STATUSES`` and not against
@@ -455,7 +455,7 @@ def incomplete_scanners(
     # default `content_db_staleness: fail`, is incomplete in the sense this function
     # means: its findings are real, and its silence about anything published since the
     # database was built is not. Listed here so the callers that read only this list --
-    # the workspace layer and `ash merge` -- name it. Under `warn` the record is not
+    # the workspace layer and `ashx merge` -- name it. Under `warn` the record is not
     # enforced and is not listed.
     #
     # The exit code does NOT come from this arm. A stale database fails the scan
@@ -479,7 +479,7 @@ def incomplete_scanners(
         # Against the allowlist, not against _INCOMPLETE_SCANNER_STATUSES, and the
         # two are not interchangeable here even though they partition the enum.
         # `metric.status` is a plain string that may have come from a results file
-        # this version did not write -- `ash merge` reads shard results from
+        # this version did not write -- `ashx merge` reads shard results from
         # whatever ASH produced each one -- and only the allowlist form treats a
         # status outside the enum entirely as incomplete rather than as a scanner
         # that ran. This arm arrived from one side of a merge spelled as
@@ -643,7 +643,7 @@ def incomplete_converters(
     run that turns conversion off, which is a supported configuration.
 
     Read with ``getattr`` because a results file written by an older version carries
-    rows without ``failure`` or ``failed_inputs``, and ``ash merge`` reads shard
+    rows without ``failure`` or ``failed_inputs``, and ``ashx merge`` reads shard
     results from whatever ASH produced each one.
 
     Args:
@@ -920,7 +920,29 @@ _INCOMPLETE_SCANNER_REASONS = {
 }
 
 
-def incomplete_scanner_reason(status: str, partial: bool = False) -> str:
+def missing_on_some_files(display_status: str) -> bool:
+    """Whether an ``incomplete_scanners`` display status is a ``FAILED (MISSING on
+    some files)`` row.
+
+    The one test behind the payload's ``missing_dependencies`` reason, shared by
+    :func:`scan_incompleteness` and the workspace surface's coverage (which has only
+    the display status the outcome stored), so the two cannot read it differently.
+    """
+    return f"({_MISSING_ON_SOME_FILES})" in display_status
+
+
+def _row_is_missing(status: str) -> bool:
+    """Whether an ``incomplete_scanners`` display status is a MISSING row: the
+    scanner could not run for lack of a dependency, on every file (``MISSING``) or
+    on one tree (``FAILED (MISSING on some files)``)."""
+    return status.split(" (", 1)[
+        0
+    ] == ScannerStatus.MISSING.value or missing_on_some_files(status)
+
+
+def incomplete_scanner_reason(
+    status: str, partial: bool = False, missing_dependencies: bool = False
+) -> str:
     """The reason token for a scanner ``incomplete_scanners`` listed, from its status.
 
     A scanner listed with a status the per-scanner pass accepts (PASSED, FAILED,
@@ -934,7 +956,13 @@ def incomplete_scanner_reason(status: str, partial: bool = False) -> str:
     telling "the tool never ran" apart from "the tool ran and lost some
     targets" is this token's whole job, and keying it on the status alone made
     every current scan's partial loss read ``error``.
+
+    ``missing_dependencies`` says the row is a ``FAILED (MISSING on some files)``
+    one: the scanner could not run on one tree for lack of its dependencies, which
+    is not a scanner that ran and lost targets, so it outranks ``partial``.
     """
+    if missing_dependencies:
+        return "missing_dependencies"
     if partial:
         return "partial_coverage"
     if status in _INCOMPLETE_SCANNER_REASONS:
@@ -966,6 +994,9 @@ class ScanIncompleteness:
     #: payload's reason token reads ``partial_coverage`` for these; see
     #: :func:`incomplete_scanner_reason`.
     partial_coverage: Tuple[str, ...] = ()
+    #: Names from ``scanners`` listed as ``FAILED (MISSING on some files)``: the
+    #: payload's reason token reads ``missing_dependencies`` for these.
+    missing_dependencies: Tuple[str, ...] = ()
     #: Every scanner's recorded status, the raw token rather than the display
     #: string, so a payload can say MISSING or ERROR without parsing prose.
     observed: Tuple[Tuple[str, str], ...] = ()
@@ -1012,7 +1043,9 @@ class ScanIncompleteness:
                     "scanner": name,
                     "status": status,
                     "reason": incomplete_scanner_reason(
-                        status, partial=name in self.partial_coverage
+                        status,
+                        partial=name in self.partial_coverage,
+                        missing_dependencies=name in self.missing_dependencies,
                     ),
                     "detail": detail,
                 }
@@ -1095,7 +1128,7 @@ def scan_incompleteness(
 
     A stale content database is reported in ``stale_content_databases`` whatever the
     gate says, and ONLY there. ``incomplete_scanners`` also lists its scanner, with
-    the database named in the status, so that the workspace layer and ``ash merge``
+    the database named in the status, so that the workspace layer and ``ashx merge``
     see it; a row that is there for nothing else is dropped from ``scanners`` here.
     Otherwise the one condition would be reported twice with the gate on -- once as
     an incomplete scanner whose advice is to install a tool that ran, and once as a
@@ -1134,10 +1167,7 @@ def scan_incompleteness(
     )
     missing_reasons = []
     for name, status in rows:
-        if (
-            status.split(" (", 1)[0] != ScannerStatus.MISSING.value
-            and f"({_MISSING_ON_SOME_FILES})" not in status
-        ):
+        if not _row_is_missing(status):
             continue
         reason = recorded_reason(results, name, "missing_reason")
         if reason and reason != NO_MISSING_REASON_RECORDED:
@@ -1167,9 +1197,13 @@ def scan_incompleteness(
         for name, metric in partial_audits.items()
         if metric.status == ScannerStatus.ERROR.value
     }
+    missing_dependencies = tuple(
+        name for name, status in rows if missing_on_some_files(status)
+    )
     return ScanIncompleteness(
         scanners=rows,
         partial_coverage=partial_coverage,
+        missing_dependencies=missing_dependencies,
         missing_reasons=tuple(missing_reasons),
         observed=tuple(observed),
         no_scanner_ran=(

@@ -376,11 +376,11 @@ def test_an_empty_label_is_passed_for_a_submodule(tmp_path, _git_stops_at_tmp):
 
 @pytest.mark.unit
 def test_assemble_run_command_image_argument_position():
-    """Image name appears before the 'ash' subcommand."""
+    """Image name appears before the 'ashx' command."""
     image = "automated-security-helper:non-root"
     cmd = _assemble_run_command(**_base_assemble_kwargs(image_name=image))
     img_idx = cmd.index(image)
-    ash_idx = cmd.index("ash")
+    ash_idx = cmd.index("ashx")
     assert img_idx < ash_idx
 
 

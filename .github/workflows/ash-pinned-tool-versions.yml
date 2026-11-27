@@ -7,6 +7,10 @@
 # license files fetched at each tool's release commit, and the cfn-nag gem. Dependabot
 # cannot see any of them: they live in a Python dict, not a manifest. Before this
 # workflow nothing reported a pin falling behind, so each stayed where it was set.
+# The script also follows the tools CI, the packaging harnesses and the editor test
+# images pin outside that module (its REPO_PINS table): kind, kubectl, cfn-guard,
+# winget-cli, VS Code, actionlint, shellcheck, the harness uv, the digest-pinned
+# images and the dated Debian and Ubuntu snapshots.
 #
 # scripts/check_pinned_tool_versions.py reads the pins from the module, asks GitHub,
 # PyPI and RubyGems for each upstream's latest release, writes the comparison to the

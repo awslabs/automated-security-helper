@@ -44,7 +44,7 @@ def test_a_foreign_runs_handler_is_no_delivery(monkeypatch, capsys):
     resort. ``delivers`` must say so, or the work is skipped while the
     record it would have built had a reader."""
     logger = _fresh_logger("ash.test_delivers_foreign_run")
-    scope, token = log_module.open_run_log_scope()
+    scope, reset_handle = log_module.open_run_log_scope()
     handler = logging.StreamHandler(io.StringIO())
     handler.setLevel(logging.INFO)
     log_module.run_handler(handler)
@@ -52,7 +52,7 @@ def test_a_foreign_runs_handler_is_no_delivery(monkeypatch, capsys):
     # The server's own context: the scan's scope stays active and hosted,
     # but this context belongs to no run, as the MCP tool's does after it
     # hands the scope to the runner.
-    log_module.disown_run_log_scope(token)
+    log_module.disown_run_log_scope(reset_handle)
     monkeypatch.setattr(log_module._LAST_RESORT, "level", logging.DEBUG)
     try:
         predicted = log_module.delivers(logger, logging.DEBUG)

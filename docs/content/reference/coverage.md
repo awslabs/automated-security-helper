@@ -13,14 +13,14 @@ Alpha plugins run only when you load their module with `ash_plugin_modules` or
 
 | What your repository has | Built-in scanners | Alpha plugins |
 |---|---|---|
-| Python code | bandit, semgrep, opengrep | snyk-code |
-| JavaScript and TypeScript code | semgrep, opengrep | snyk-code |
-| Java, Go, Ruby, C#, PHP, and other languages | semgrep, opengrep (as far as their rules cover the language) | snyk-code |
+| Python code | bandit, opengrep | snyk-code |
+| JavaScript and TypeScript code | opengrep | snyk-code |
+| Java, Go, Ruby, C#, PHP, and other languages | opengrep (as far as its rules cover the language) | snyk-code |
 | Python dependencies (`requirements.txt`, lockfiles) | grype, trivy, syft | guarddog, trivy-repo |
 | npm, Yarn, and pnpm dependencies | npm-audit, grype, trivy, syft | guarddog, trivy-repo |
 | Other dependency manifests and lockfiles (`go.mod`, `pom.xml`, and the others grype and trivy recognize) | grype, trivy, syft | guarddog, trivy-repo |
 | CloudFormation templates | cfn-nag, cfn-lint, cfn-guard, cdk-nag, checkov | trivy-repo |
-| AWS CDK apps | cfn-nag, cfn-lint, cfn-guard, cdk-nag, checkov (on the templates `cdk synth` writes to `cdk.out`); bandit, semgrep, opengrep (on the app code; bandit reads only Python) | trivy-repo |
+| AWS CDK apps | cfn-nag, cfn-lint, cfn-guard, cdk-nag, checkov (on the templates `cdk synth` writes to `cdk.out`); bandit, opengrep (on the app code; bandit reads only Python) | trivy-repo |
 | Terraform | checkov | trivy-repo |
 | Terraform plans as JSON (`terraform show -json`) | checkov | |
 | Terragrunt units (`terragrunt.hcl`) | detect-secrets, gitleaks (secrets only; see below) | |
@@ -30,12 +30,12 @@ Alpha plugins run only when you load their module with `ash_plugin_modules` or
 | Composite actions (`action.yml`) | zizmor | guarddog |
 | Secrets, in any file | detect-secrets, gitleaks | betterleaks, ferret-scan (sensitive data), trivy-repo |
 | A software bill of materials | syft | |
-| MCP server config files (`.mcp.json`, `.cursor/mcp.json`, `.codex/config.toml` and the others the [MCP config page](../docs/plugins/builtin/mcp-config.md) lists) | mcp-config, semgrep, opengrep (semgrep and opengrep on the shell scripts the converter writes for them) | |
+| MCP server config files (`.mcp.json`, `.cursor/mcp.json`, `.codex/config.toml` and the others the [MCP config page](../docs/plugins/builtin/mcp-config.md) lists) | mcp-config, opengrep (opengrep on the shell scripts the converter writes for them) | |
 | Jupyter notebooks | bandit, detect-secrets, gitleaks (on the converted script, bandit only for a Python notebook; see [Converted files](#converted-files)) | |
 | `.zip`, `.tar`, and `.gz` archives | detect-secrets, gitleaks (on every extracted file; see [Converted files](#converted-files)) | |
 
 The other scanners read converted scripts and extracted files of the kinds they cover, as
-they do in the source directory, except that semgrep and opengrep leave scripts converted
+they do in the source directory, except that opengrep leaves scripts converted
 from Python notebooks out by default.
 
 For a CDK app, synthesize before you scan, so that `cdk.out` holds the templates. ASH
@@ -72,7 +72,6 @@ them to the tool.
 | mcp-config | SAST | Selected files: the repo-local MCP server config files (`.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `.codex/config.toml` and the others the [MCP config page](../docs/plugins/builtin/mcp-config.md) lists), read in process | yes | no |
 | npm-audit | SCA | Selected files: each `package.json` that has a lockfile beside it | no | yes |
 | opengrep | SAST | Whole directory, with ASH's bundled rules and the `p/ci` ruleset | no | no |
-| semgrep | SAST | Whole directory, with ASH's bundled rules and the `p/ci` ruleset | yes | no |
 | syft | SBOM | Whole directory: builds an SBOM and reports no findings | no | no |
 | trivy | SCA | Whole directory: `trivy fs` with the vulnerability scanner only, by default | no | no |
 | zizmor | SAST | Selected files: GitHub Actions workflows and composite actions | yes | no |
@@ -149,12 +148,11 @@ the files on disk and not the git history.
 
 ### Source code
 
-bandit, semgrep, opengrep, checkov, and snyk-code read the source directory themselves.
-semgrep and opengrep always use ASH's bundled rules. Online they add the ruleset in
-their `config` option, `p/ci` by default (`scanners.semgrep.options.config`); offline
-they add the rules cached in the directory `SEMGREP_RULES_CACHE_DIR` or
-`OPENGREP_RULES_CACHE_DIR` names. The languages they cover are the languages those
-rules cover.
+bandit, opengrep, checkov, and snyk-code read the source directory themselves.
+opengrep always uses ASH's bundled rules. Online it adds the ruleset in
+its `config` option, `p/ci` by default (`scanners.opengrep.options.config`); offline
+it adds the rules cached in the directory `OPENGREP_RULES_CACHE_DIR` names. The
+languages it covers are the languages those rules cover.
 
 ## What decides the files {#what-decides-the-files}
 
@@ -186,7 +184,7 @@ Before the scan, ASH lists the files to scan, the scan set, and writes it to
 
 The scanners marked "Selected files" above read only the scan set. The scanners that
 walk the directory themselves do not use it, so they can report files your `.gitignore`
-excludes; bandit, checkov, gitleaks, grype, and trivy do. bandit, checkov, semgrep,
+excludes; bandit, checkov, gitleaks, grype, and trivy do. bandit, checkov,
 opengrep, grype, syft, and ferret-scan skip ASH's output directories that hold no file
 git tracks. checkov gets each of them as a `checkov --skip-path` value, unless
 `scanners.checkov.options.skip_ash_output_dir` is `false`. On Windows, ASH passes none,
@@ -213,7 +211,7 @@ mkdir -p .ash/ash_output/keep
 printf 'DATABASE_PASSWORD = "correct-horse-battery-staple-1234"\n' > .ash/ash_output/keep/tracked.py
 git add -f .ash/ash_output/keep/tracked.py
 git commit -q -m "Commit a file under the default output directory"
-ash scan --scanners detect-secrets
+ashx scan --scanners detect-secrets
 ```
 
 detect-secrets reports the password in `.ash/ash_output/keep/tracked.py`, and the scan
@@ -249,10 +247,10 @@ output in `converted/` as a second target:
   replaced, and ends in `-converted.py`, or in `-converted` plus the notebook's plain
   extension, such as `-converted.r`, for a notebook in another language.
 
-semgrep and opengrep scan the converted files. Their default `exclude` option lists
+opengrep scans the converted files. Its default `exclude` option lists
 `*-converted.py`, but that entry applies only to the scan of the source tree, where it
 keeps a converted copy inside the tree from being scanned twice; on the scan of the
-converted files it is left out, and both scanners read files the repository's `.gitignore`
+converted files it is left out, and opengrep reads files the repository's `.gitignore`
 matches there, because the output directory that holds them is ignored by git. An
 `exclude` pattern you add yourself applies to both scans. Findings in converted files
 point into the output directory, not into the original archive or notebook.

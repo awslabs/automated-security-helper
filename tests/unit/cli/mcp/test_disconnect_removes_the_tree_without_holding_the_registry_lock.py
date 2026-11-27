@@ -65,10 +65,10 @@ def test_a_concurrent_get_or_create_during_the_removal_gets_a_fresh_empty_direct
         gate(self, workspace)
 
     monkeypatch.setattr(MCPSessionRegistry, "_remove_workspace", _gated)
-    session = registry.get_or_create("racing")
-    workspace = session.workspace_root
+    entry = registry.get_or_create("racing")
+    workspace = entry.workspace_root
     (workspace / "doomed.txt").write_text("x", encoding="utf-8")
-    del session
+    del entry
 
     worker = threading.Thread(target=registry.disconnect, args=("racing",))
     worker.start()
@@ -101,10 +101,10 @@ def test_a_disconnect_with_no_concurrent_caller_leaves_no_renamed_sibling(
     registry: MCPSessionRegistry,
 ) -> None:
     """Control: the ordinary path still removes the tree, and nothing is left behind."""
-    session = registry.get_or_create("plain")
-    workspace = session.workspace_root
+    entry = registry.get_or_create("plain")
+    workspace = entry.workspace_root
     (workspace / "note.txt").write_text("x", encoding="utf-8")
-    del session
+    del entry
 
     registry.disconnect("plain")
 
@@ -122,10 +122,10 @@ def test_a_disconnect_whose_rename_fails_still_removes_the_tree(
     it, the best-effort rmtree still runs at the original name."""
     from automated_security_helper.cli.mcp import sessions as sessions_module
 
-    session = registry.get_or_create("refused")
-    workspace = session.workspace_root
+    entry = registry.get_or_create("refused")
+    workspace = entry.workspace_root
     (workspace / "note.txt").write_text("x", encoding="utf-8")
-    del session
+    del entry
 
     def a_rename_the_filesystem_refuses(*args: object, **kwargs: object) -> None:
         raise PermissionError("a planted refusal of the rename")

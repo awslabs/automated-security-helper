@@ -238,7 +238,7 @@ from automated_security_helper.utils.log import (
 
 
 def test_aa_closes_its_own_scope_by_value():
-    scope, _token = open_run_log_scope()
+    scope, _reset_handle = open_run_log_scope()
     # By value, on the test's own thread: no scope is left open, so the
     # suite's guard sees nothing leaked, but the context variable stays set.
     close_run_log_scope(scope)
@@ -749,9 +749,9 @@ from automated_security_helper.utils.log import end_run_log_scope, open_run_log_
 
 @pytest.fixture(scope={scope!r})
 def _a_scope_for_the_run():
-    scope, token = open_run_log_scope()
+    scope, reset_handle = open_run_log_scope()
     yield
-    end_run_log_scope(scope, token)
+    end_run_log_scope(scope, reset_handle)
 
 
 def test_aa_uses_the_wide_fixture(_a_scope_for_the_run):
@@ -802,9 +802,9 @@ from automated_security_helper.utils.log import end_run_log_scope, open_run_log_
 
 @pytest.fixture(scope="package", autouse=True)
 def _a_scope_for_the_package():
-    scope, token = open_run_log_scope()
+    scope, reset_handle = open_run_log_scope()
     yield
-    end_run_log_scope(scope, token)
+    end_run_log_scope(scope, reset_handle)
     pathlib.Path(os.environ["TMPDIR"], "package-torn-down").write_text("done")
 """
 
@@ -948,10 +948,10 @@ def test_the_writes_reporter_hides_an_environment_value_in_a_path(
             lines.append(message)
 
     pm = types.SimpleNamespace(get_plugin=lambda name: _Reporter())
-    session = types.SimpleNamespace(
+    run_stub = types.SimpleNamespace(
         config=types.SimpleNamespace(pluginmanager=pm), exitstatus=0
     )
-    root_conftest._report_real_home_writes(session)
+    root_conftest._report_real_home_writes(run_stub)
     assert len(lines) == 1, lines
     shown = {
         "the value": value in lines[0],
@@ -963,7 +963,7 @@ def test_the_writes_reporter_hides_an_environment_value_in_a_path(
         "the marker": True,
         "the event and the path's tail": True,
     }, lines
-    assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+    assert run_stub.exitstatus == pytest.ExitCode.TESTS_FAILED
 
 
 @pytest.mark.unit
@@ -993,17 +993,17 @@ def test_the_writes_reporter_replaces_a_message_it_cannot_redact(
             lines.append(message)
 
     pm = types.SimpleNamespace(get_plugin=lambda name: _Reporter())
-    session = types.SimpleNamespace(
+    run_stub = types.SimpleNamespace(
         config=types.SimpleNamespace(pluginmanager=pm), exitstatus=0
     )
-    root_conftest._report_real_home_writes(session)
+    root_conftest._report_real_home_writes(run_stub)
     assert len(lines) == 1, lines
     shown = {
         "the notice": "could not be redacted, so they are not shown" in lines[0],
         "any path piece": "/somewhere" in lines[0] or "planted" in lines[0],
     }
     assert shown == {"the notice": True, "any path piece": False}, lines
-    assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+    assert run_stub.exitstatus == pytest.ExitCode.TESTS_FAILED
 
 
 _A_CONFTEST_WHOSE_SESSIONFINISH_RAISES = """\
@@ -1069,10 +1069,10 @@ def test_the_worker_sends_a_notice_for_a_path_it_cannot_redact(
         lambda: [("open", f"/somewhere/{value}/planted")],
     )
     workeroutput: dict = {}
-    session = types.SimpleNamespace(
+    run_stub = types.SimpleNamespace(
         config=types.SimpleNamespace(workeroutput=workeroutput), exitstatus=0
     )
-    root_conftest._report_real_home_writes(session)
+    root_conftest._report_real_home_writes(run_stub)
     assert calls == [1], "the worker's redaction was not reached"
     sent = workeroutput.get(root_conftest._WORKER_WRITES_KEY)
     shown = {
@@ -1116,17 +1116,17 @@ def test_the_controller_pass_hides_a_value_a_worker_sent_raw(
             lines.append(message)
 
     pm = types.SimpleNamespace(get_plugin=lambda name: _Reporter())
-    session = types.SimpleNamespace(
+    run_stub = types.SimpleNamespace(
         config=types.SimpleNamespace(pluginmanager=pm), exitstatus=0
     )
-    root_conftest._report_real_home_writes(session)
+    root_conftest._report_real_home_writes(run_stub)
     assert len(lines) == 1, lines
     shown = {
         "the value": value in lines[0],
         "the masked worker line": "gw7: open: /elsewhere/<value>/planted" in lines[0],
     }
     assert shown == {"the value": False, "the masked worker line": True}, lines
-    assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+    assert run_stub.exitstatus == pytest.ExitCode.TESTS_FAILED
 
 
 @pytest.mark.unit
@@ -1158,10 +1158,10 @@ def test_the_scopes_reporters_composed_message_hides_a_value_in_a_label(
             lines.append(message)
 
     pm = types.SimpleNamespace(get_plugin=lambda name: _Reporter())
-    session = types.SimpleNamespace(
+    run_stub = types.SimpleNamespace(
         config=types.SimpleNamespace(pluginmanager=pm), exitstatus=0
     )
-    root_conftest._report_run_log_scopes_still_open(session)
+    root_conftest._report_run_log_scopes_still_open(run_stub)
     assert len(lines) == 1, lines
     shown = {
         "the value": value in lines[0],
@@ -1173,7 +1173,7 @@ def test_the_scopes_reporters_composed_message_hides_a_value_in_a_label(
         "the masked label": True,
         "the leak named": True,
     }, lines
-    assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+    assert run_stub.exitstatus == pytest.ExitCode.TESTS_FAILED
 
 
 @pytest.mark.unit
@@ -1204,10 +1204,10 @@ def test_the_scopes_reporters_unreadable_notice_hides_a_value(
             lines.append(message)
 
     pm = types.SimpleNamespace(get_plugin=lambda name: _Reporter())
-    session = types.SimpleNamespace(
+    run_stub = types.SimpleNamespace(
         config=types.SimpleNamespace(pluginmanager=pm), exitstatus=0
     )
-    root_conftest._report_run_log_scopes_still_open(session)
+    root_conftest._report_run_log_scopes_still_open(run_stub)
     assert len(lines) == 1, lines
     shown = {
         "the value": value in lines[0],
@@ -1220,4 +1220,4 @@ def test_the_scopes_reporters_unreadable_notice_hides_a_value(
         "the marker": True,
         "the type name and the notice": True,
     }, lines
-    assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+    assert run_stub.exitstatus == pytest.ExitCode.TESTS_FAILED

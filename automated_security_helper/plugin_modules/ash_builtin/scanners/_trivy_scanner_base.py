@@ -2549,20 +2549,31 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
 
     @staticmethod
     def _package_from_message(message: str | None) -> tuple[str | None, str | None]:
-        """Name and version from trivy's vulnerability message.
+        """Name and version from trivy's vulnerability or license message.
 
         trivy writes ``Package: <name>`` as the FIRST line of a vulnerability
         message and ``Installed Version: <version>`` as the second (its SARIF
         writer's fixed template); a misconfiguration, secret or license message
-        starts with ``Artifact:`` instead and is not about a package. Read by
-        position, not by scanning every line: the file path in an ``Artifact:``
-        line can hold a line break, and a later line it supplied that starts with
-        ``Package:`` would otherwise give a misconfiguration or secret result a
-        package identity. Split on ``\\n`` alone, the separator trivy writes, for
-        the reason ``trivy_severity`` gives.
+        starts with ``Artifact:`` instead. A license message's fixed template is
+        ``Artifact:``, then ``License <id>``, then ``PkgName: <name>``, with no
+        version; reading that name gives license findings a ``package_name``, so
+        a package-scoped license approval can name the package it covers rather
+        than the whole file. Read by position, not by scanning every line: the
+        file path in an ``Artifact:`` line can hold a line break, and a later
+        line it supplied that starts with ``Package:`` or ``PkgName:`` would
+        otherwise give a misconfiguration or secret result a package identity.
+        Split on ``\\n`` alone, the separator trivy writes, for the reason
+        ``trivy_severity`` gives.
         """
         lines = (message or "").split("\n")
         if not lines or not lines[0].startswith("Package: "):
+            if (
+                len(lines) > 2
+                and lines[0].startswith("Artifact: ")
+                and lines[1].startswith("License ")
+                and lines[2].startswith("PkgName: ")
+            ):
+                return lines[2][len("PkgName: ") :].strip() or None, None
             return None, None
         name = lines[0][len("Package: ") :].strip() or None
         version = None

@@ -913,7 +913,7 @@ jobs:
           # is its value, so a `--mode` there (`--output-dir --mode`) is not the
           # mode. A bare word, or anything after `--`, is Run ASH's to refuse.
           read -r -a args <<< "${ASH_ARGS}"
-          ASH_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --baseline --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --image --image-archive --image-layout --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
+          ASH_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision --ash-revision-to-install --baseline --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --image --image-archive --image-layout --log-level --min-severity --mode --oci --oci-runner --offline-rulesets --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
           mode="${ASH_MODE}"
           value_of=""
           for word in ${args[@]+"${args[@]}"}; do
@@ -927,6 +927,10 @@ jobs:
             case "${word}" in
               --) break ;;
               --mode=*) mode="${word#--mode=}" ;;
+              -rev)
+                echo "::error::ash-args word $(one_line "${position}") is -rev, a deprecated spelling that click reads as one option and this step reads letter by letter, so a word after it could run as an ash subcommand. Use --ash-revision-to-install."
+                exit 1
+                ;;
               --*=*) ;;
               --*)
                 if [[ " ${ASH_VALUE_OPTIONS} " == *" ${word} "* ]]; then
@@ -2216,7 +2220,7 @@ jobs:
           # reads every word as bare. ASH_VALUE_OPTIONS is the ash group's options
           # that take a value; tests/unit/test_reusable_workflow_ash_args.py holds
           # it to the CLI's. The refusals name the word by position, not by value.
-          ASH_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --baseline --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --image --image-archive --image-layout --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
+          ASH_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision --ash-revision-to-install --baseline --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --image --image-archive --image-layout --log-level --min-severity --mode --oci --oci-runner --offline-rulesets --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
           takes_value=""
           position=0
           for word in "${ASH_ARGS_LIST[@]}"; do
@@ -2228,6 +2232,10 @@ jobs:
             case "${word}" in
               --)
                 echo "::error::ash-args word $(one_line "${position}") is --, after which click reads the next word as an ash subcommand, whatever it looks like, and runs it without this workflow's options. ash-args takes options of ash scan only."
+                exit 1
+                ;;
+              -rev)
+                echo "::error::ash-args word $(one_line "${position}") is -rev, a deprecated spelling that click reads as one option and this step reads letter by letter, so a word after it could run as an ash subcommand. Use --ash-revision-to-install."
                 exit 1
                 ;;
               --*=*) ;;
@@ -2313,7 +2321,7 @@ jobs:
         shell: bash
         env:
           ASH_REPO_CLONE_URL: https://github.com/${{ github.repository }}.git
-          # The same config the scan used. `ash report` resolves a config too, and
+          # The same config the scan used. `ash results report` resolves a config too, and
           # loads the plugin modules it names, so without this it would discover the
           # checkout's.
           ASH_CONFIG: ${{ steps.config-ref-files.outputs.path || steps.inputs.outputs.config }}
@@ -2325,7 +2333,7 @@ jobs:
           # (merge_group queue branches are deleted mid-run) that fetch is what
           # fails, after the scan itself has already succeeded.
           uvx --from "${ASH_UVX_SOURCE}" ash \
-            --output-dir "${ASH_OUTPUT_DIR}" report ${ASH_CONFIG:+--config "${ASH_CONFIG}"}
+            --output-dir "${ASH_OUTPUT_DIR}" results report ${ASH_CONFIG:+--config "${ASH_CONFIG}"}
 
       # The listing holds names the scanned repository chose: an extracted archive
       # member keeps the name it had in the archive. The runner reads a line as a

@@ -114,8 +114,7 @@ CATEGORY_LABELS = (
 #: when it is not in the strip.
 SCANNER_DOCS: dict[str, dict[str, str]] = {
     "bandit": {"icon": "language-python", "strip": "plain"},
-    "semgrep": {"icon": "code-braces", "strip": "plain"},
-    "opengrep": {"icon": "code-tags-check"},
+    "opengrep": {"icon": "code-tags-check", "strip": "plain"},
     "checkov": {"icon": "check-decagram-outline", "strip": "icon"},
     "cdk-nag": {"icon": "cloud-check-outline"},
     "cfn-nag": {"icon": "cloud-outline"},
@@ -155,7 +154,6 @@ NOT_MANAGED = (
     "detect-secrets",
     "mcp-config",
     "npm-audit",
-    "semgrep",
     "zizmor",
 )
 
@@ -168,7 +166,7 @@ TRACKS: tuple[dict[str, Any], ...] = (
         "label": "Code",
         "file": "app.py",
         "icon": "code-braces",
-        "engines": (("bandit",), ("semgrep",)),
+        "engines": (("bandit",), ("opengrep",)),
         "finding": "Shell command",
         "severity": "High",
     },

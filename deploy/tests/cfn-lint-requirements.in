@@ -1,0 +1,4 @@
+# The cfn-lint the IaC drift workflow runs. Edit this file, then regenerate the
+# hash-pinned lock next to it with:
+#   uv pip compile --universal --python-version 3.12 --generate-hashes deploy/tests/cfn-lint-requirements.in -o deploy/tests/cfn-lint-requirements.txt
+cfn-lint==1.57.1

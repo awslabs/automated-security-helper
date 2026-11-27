@@ -311,7 +311,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     # ---------------------------------------------------------------
 
     def cache_dir_env_var(self) -> str:
-        """Env var pointing at the offline rule cache (e.g. SEMGREP_RULES_CACHE_DIR).
+        """Env var pointing at the offline rule cache (e.g. OPENGREP_RULES_CACHE_DIR).
 
         Subclasses MUST override.
         """
@@ -350,8 +350,9 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     def extra_subprocess_env(self) -> Optional[dict]:
         """Extra env vars merged with os.environ for the scan subprocess.
 
-        Default: inherit the parent env. Semgrep overrides this to set
-        `SEMGREP_RULES` from the cache dir.
+        Default: inherit the parent env. A subclass may override this to export
+        rule-cache variables for the subprocess (the retired semgrep scanner set
+        `SEMGREP_RULES` from its cache dir this way).
         """
         return None
 
@@ -726,10 +727,10 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             self.dependency_unavailable_reason = (
                 f"{scanner_label} is running in offline mode but no rule cache was found. "
                 f"Set ${cache_env} to a directory containing .yaml/.yml rule files. "
-                "Run `ash container build --offline` to pre-warm the cache in the image, "
+                "Run `ashx container build --offline` to pre-warm the cache in the image, "
                 "or, while online, download each ruleset from "
                 "https://semgrep.dev/c/<ruleset> into that directory and record the "
-                "time in .ash-rules-fetched-at. See 'Seeding the semgrep and opengrep "
+                "time in .ash-rules-fetched-at. See 'Seeding the opengrep "
                 "rule cache' in docs/content/docs/advanced-usage.md."
             )
             ASH_LOGGER.warning(self.dependency_unavailable_reason)

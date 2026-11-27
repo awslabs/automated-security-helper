@@ -30,7 +30,7 @@ import { ASHInstallMode, ASHSeverityThreshold } from './types';
  * CodeBuild start per surplus shard. This bound exists so a typo like
  * `shardCount: 300` fails loudly instead of billing for 300 empty builds.
  *
- * The value is load-bearing outside this package: `ash merge` has a regression
+ * The value is load-bearing outside this package: `ashx merge` has a regression
  * test (`test_a_shard_count_far_above_the_scanner_count_still_merges`) pinned at
  * this exact ceiling, guarding against a future coverage check deciding an empty
  * assignment is suspicious and refusing it. Raising this bound breaks nothing on
@@ -137,7 +137,7 @@ export interface ASHScanStepProps {
   readonly environmentVariables?: { [name: string]: string };
 
   /**
-   * Extra arguments appended to each `ash scan` invocation.
+   * Extra arguments appended to each `ashx scan` invocation.
    *
    * Escape hatch for ASH options this construct does not model. Arguments are
    * passed through verbatim, so quote anything containing whitespace yourself.

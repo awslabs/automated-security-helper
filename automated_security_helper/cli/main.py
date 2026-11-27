@@ -15,11 +15,12 @@ from typer._click.exceptions import UsageError
 
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.core.enums import AshExitCode
+from automated_security_helper.cli.deprecations import warn_deprecated_command_alias
+from automated_security_helper.cli.params import color_option
 from automated_security_helper.cli.json_input import (
     CliJsonInputCommand,
     usage_error_text,
 )
-from automated_security_helper.cli.deprecation import deprecated_command_message
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
 from automated_security_helper.core.enums import (
     DEFAULT_TRANSPORT,
@@ -84,11 +85,11 @@ def _option_tokens(given: Any, target: Any, value: Any) -> list[str] | None:
     None when *target* cannot take it the same way: it is not an option, it counts,
     takes several values per use, or differs from *given* in being a flag. A
     repeatable root option whose one value goes to a target that takes one value
-    is spelled as that one value (``ash --format text report``: the root's
+    is spelled as that one value (``ashx --format text results report``: the root's
     ``--format`` collects, report's takes one); with several values it is None.
     The target's own first long spelling is used, so a short alias that means
     something else on the subcommand (``-f`` is ``--output-formats`` on scan and
-    ``--force`` on build-image) never decides what the token means.
+    ``--force`` on ``container build``) never decides what the token means.
     """
     if (
         getattr(target, "param_type_name", None) != "option"
@@ -211,90 +212,35 @@ def _asks_for_help(command: Any, ctx: Any, args: list[str]) -> bool:
 #: tests/unit/cli/test_version_startup_budget.py pins that none of these modules
 #: is imported by ``import automated_security_helper.cli.main``.
 _LAZY_SUBCOMMANDS: dict[str, tuple[str, str]] = {
-    # The 3.8 spelling of `ash container build`: the same command, deprecated
-    # through DEPRECATED_SPELLINGS like the results spellings.
-    "build-image": (
-        "automated_security_helper.cli.image",
-        "build_ash_image_cli_command",
-    ),
     "container": ("automated_security_helper.cli.container", "container_app"),
-    "report": ("automated_security_helper.cli.report", "report_command"),
-    "diff": ("automated_security_helper.cli.diff", "diff_command"),
-    "trend": ("automated_security_helper.cli.trend", "trend_command"),
-    "merge": ("automated_security_helper.cli.merge", "merge_command"),
     "results": ("automated_security_helper.cli.results", "results_app"),
     "config": ("automated_security_helper.cli.config", "config_app"),
     "dependencies": (
         "automated_security_helper.cli.dependencies",
         "dependencies_cli_app",
     ),
-    "inspect": ("automated_security_helper.cli.inspect", "inspect_app"),
     "plugin": ("automated_security_helper.cli.plugin", "plugin_group"),
     "suppress": ("automated_security_helper.cli.suppress", "suppress_app"),
     "express": ("automated_security_helper.cli.express", "express_app"),
 }
 
-#: The top-level spellings that moved under ``ash results`` (``ash report`` is now
-#: ``ash results report``). They keep working through the deprecation window: each
-#: prints one DeprecationWarning on stderr (3.9) and is removed in 4.0. They are
-#: hidden from the root ``--help`` so the listing shows the new tree, but stay in
-#: the command mapping, so the docs generator, the wrapper tables and the help
-#: snapshots still walk them.
-DEPRECATED_RESULTS_SPELLINGS: frozenset[str] = frozenset(
-    {"report", "diff", "trend", "merge", "inspect"}
-)
-
-#: Every top-level spelling deprecated in 3.9, mapped to the spelling that replaces
-#: it: the results commands that moved under ``ash results``, and ``ash build-image``,
-#: which is ``ash container build``. All of them deprecate the same way: hidden from
-#: the root ``--help``, one warning on stderr per invocation, removed in 4.0.
-DEPRECATED_SPELLINGS: dict[str, str] = {
-    **{name: f"results {name}" for name in sorted(DEPRECATED_RESULTS_SPELLINGS)},
-    "build-image": "container build",
-}
-
-#: The merge command's help, shared by ``ash merge`` and ``ash results merge``.
+#: The merge command's help, for ``ashx results merge``.
 MERGE_COMMAND_HELP = """Merges the results of a sharded scan into one unified report.
 
 Pass one --results per shard. The command refuses to merge a set of shards that does not reconstruct exactly one whole scan, and its exit code is the verdict for the union — a shard that owned no failing scanner exits 0, so CI must gate on this command rather than on per-shard success.
 """
-
-#: The keyword arguments the eager ``app.command(...)`` registration passed for
-#: each lazily-built command function; a sub-Typer needs none (its own module
-#: carries its help and settings, as it did under ``app.add_typer``).
-_LAZY_COMMAND_KWARGS: dict[str, dict[str, Any]] = {
-    "build-image": {
-        "no_args_is_help": False,
-        "help": """Deprecated: use `ash container build`, which takes the same options.
-
-Builds the ASH container image, then scans the current directory with it unless --no-run is given.
-
-It takes only the options below. To scan with scan options, run `ash scan --mode container`, which builds the image the same way and accepts every scan option.
-""",
-    },
-    "report": {},
-    "diff": {},
-    "trend": {},
-    "merge": {"help": MERGE_COMMAND_HELP},
-}
 
 #: Root listing order, as the eager registrations produced it: commands in
 #: registration order, then the sub-apps in their add_typer order. Help output
 #: and generated CLI docs are pinned to it (tests/snapshot/cli).
 _COMMAND_ORDER: tuple[str, ...] = (
     "scan",
-    "build-image",
-    "report",
-    "diff",
-    "trend",
-    "merge",
     "results",
     "mcp",
     "get-genai-guide",
     "container",
     "config",
     "dependencies",
-    "inspect",
     "plugin",
     "suppress",
     "express",
@@ -302,15 +248,15 @@ _COMMAND_ORDER: tuple[str, ...] = (
 
 
 def _built_lazy_command(name: str) -> Any:
-    """Import the module behind lazy subcommand *name* and build its click command.
+    """Import the module behind lazy subcommand *name* and build its click group.
 
-    Built exactly as the eager registration built it: a sub-Typer goes through
+    Built exactly as the eager registration built it: the sub-Typer goes through
     ``typer.main.get_group_from_info`` with a ``TyperInfo`` naming it, which is
-    what ``get_group_from_info`` does for every ``add_typer`` entry, and a command
-    function is registered on a throwaway Typer with the kwargs the eager
-    ``app.command(...)`` call passed, then built with ``get_command_from_info``
-    as ``get_group_from_info`` builds each registered command. Both take the root
-    app's rendering settings, which is where the eager path read them too.
+    what ``get_group_from_info`` does for every ``add_typer`` entry, with the root
+    app's rendering settings, which is where the eager path read them too. Every
+    lazy subcommand is a sub-Typer: the command functions that were registered
+    here (``build-image`` and the top-level results spellings) were removed in
+    4.0.
     """
     import importlib
 
@@ -319,25 +265,11 @@ def _built_lazy_command(name: str) -> Any:
 
     module_path, attribute = _LAZY_SUBCOMMANDS[name]
     target = getattr(importlib.import_module(module_path), attribute)
-    hidden = name in DEPRECATED_SPELLINGS
-    if isinstance(target, typer.Typer):
-        return typer.main.get_group_from_info(
-            TyperInfo(typer_instance=target, name=name, hidden=hidden),
-            pretty_exceptions_short=app.pretty_exceptions_short,
-            rich_markup_mode=app.rich_markup_mode,
-            suggest_commands=app.suggest_commands,
-        )
-    holder = typer.Typer()
-    holder.command(
-        name=name,
-        cls=CliJsonInputCommand,
-        hidden=hidden,
-        **_LAZY_COMMAND_KWARGS[name],
-    )(target)
-    return typer.main.get_command_from_info(
-        holder.registered_commands[0],
+    return typer.main.get_group_from_info(
+        TyperInfo(typer_instance=target, name=name),
         pretty_exceptions_short=app.pretty_exceptions_short,
         rich_markup_mode=app.rich_markup_mode,
+        suggest_commands=app.suggest_commands,
     )
 
 
@@ -412,7 +344,8 @@ class AshTyperGroup(TyperGroup):
     subcommand. The root takes the scan's options so that a bare ``ash`` scans; with
     a subcommand, its callback returns without scanning, and the options were parsed
     and then dropped: ``ash --source-dir /elsewhere scan`` scanned the working
-    directory, and ``ash --output-dir out report`` read the default output directory.
+    directory, and ``ash --output-dir out results report`` read the default output
+    directory. Under a group the options go to the command the group's words name.
 
     This class carries the error-code and option-forwarding behavior only. The
     lazy subcommand resolution lives on ``AshRootTyperGroup`` below, which is the
@@ -501,8 +434,9 @@ class AshTyperGroup(TyperGroup):
                 # an option the subcommand is also given directly resolves to that
                 # later value, and a repeatable one collects both.
                 spelled = self._options_for_subcommand(ctx)
-                # Under a nested group (`ash container build`) the options go
-                # after the leaf's name, where the leaf parses them.
+                # Under a nested group (`ash container build`, `ash results
+                # inspect findings`) the options go after the leaf's name, past
+                # every group's word, where the leaf parses them.
                 skip = ctx.meta.pop("ash.leaf_name_tokens", 0)
                 ctx.args = [*ctx.args[:skip], *spelled, *ctx.args[skip:]]
             return super().invoke(ctx)
@@ -536,16 +470,22 @@ class AshTyperGroup(TyperGroup):
             # Not a command; super().invoke reports it as one.
             return []
         leaf_args = ctx.args
-        if hasattr(command, "get_command") and ctx.args:
-            # A nested group: the options belong to the leaf it names.
-            leaf = command.get_command(ctx, ctx.args[0])
-            if leaf is not None:
-                # The refusal below names what the operator would type: the
-                # group takes no options, so 'ash container --force' is itself a
-                # usage error and its help does not list the leaf's options.
-                name = f"{name} {ctx.args[0]}"
-                command, leaf_args = leaf, ctx.args[1:]
-                ctx.meta["ash.leaf_name_tokens"] = 1
+        depth = 0
+        while hasattr(command, "get_command") and leaf_args:
+            # A nested group: the options belong to the command its words name,
+            # however many groups deep: `ash --config c.yaml results inspect
+            # findings` hands --config to findings, under inspect under results.
+            leaf = command.get_command(ctx, leaf_args[0])
+            if leaf is None:
+                break
+            # The refusal below names what the operator would type: a group takes
+            # no options, so 'ash container --force' is itself a usage error and
+            # its help does not list the leaf's options.
+            name = f"{name} {leaf_args[0]}"
+            command, leaf_args = leaf, leaf_args[1:]
+            depth += 1
+        if depth:
+            ctx.meta["ash.leaf_name_tokens"] = depth
         if _asks_for_help(command, ctx, leaf_args):
             # The subcommand prints its help and exits; nothing given here is used.
             return []
@@ -578,8 +518,8 @@ class AshTyperGroup(TyperGroup):
                     None,
                 )
             if target is None:
-                # By a short spelling too: `-f` is --force on build-image, so
-                # the refusal says the subcommand takes it differently.
+                # By a short spelling too: `-f` is --force on `container build`,
+                # so the refusal says the subcommand takes it differently.
                 target = next(
                     (
                         candidate
@@ -607,8 +547,8 @@ class AshTyperGroup(TyperGroup):
                 )
                 them = "it" if len(not_taken) == 1 else "them"
                 clauses.append(
-                    f"'ash {name}' does not take {spellings}, given before it (see "
-                    f"'ash {name} --help'). Options given before a subcommand are "
+                    f"'ashx {name}' does not take {spellings}, given before it (see "
+                    f"'ashx {name} --help'). Options given before a subcommand are "
                     f"passed to it only when it takes them: drop {them}, give {them} "
                     f"after a subcommand that takes {them}, or leave out '{name}' to "
                     f"scan with {them}."
@@ -619,9 +559,9 @@ class AshTyperGroup(TyperGroup):
                     (opt for opt in target.opts if opt.startswith("--")), target.opts[0]
                 )
                 clauses.append(
-                    f"'ash {name}' takes {typed} as {own}, which means something "
+                    f"'ashx {name}' takes {typed} as {own}, which means something "
                     f"else than it does before the subcommand: give it after "
-                    f"'{name}', as 'ash {name} {own} ...'."
+                    f"'{name}', as 'ashx {name} {own} ...'."
                 )
             ctx.fail(" ".join(clauses))
         return tokens
@@ -649,62 +589,41 @@ class AshRootTyperGroup(AshTyperGroup):
         super().__init__(*args, **kwargs)
         self.commands = _LazyCommands(self.commands)
 
-    def invoke(self, ctx: Any) -> Any:
-        self._warn_deprecated_spelling(ctx)
-        return super().invoke(ctx)
-
-    def _warn_deprecated_spelling(self, ctx: Any) -> None:
-        """Say, on stderr and on every invocation, that a top-level command moved.
-
-        ``ash report``, ``ash build-image`` and the other spellings in
-        ``DEPRECATED_SPELLINGS`` still run unchanged through the 3.9 window; this
-        is the only thing the old spelling adds. A help request and ``--generate-cli-skeleton`` only
-        print what the command takes, which is not a use of it, and shell
-        completion (``resilient_parsing``) must print nothing, so none of them warns.
-        """
-        if ctx.resilient_parsing or not ctx._protected_args:
-            return
-        name = ctx._protected_args[0]
-        replacement = DEPRECATED_SPELLINGS.get(name)
-        if replacement is None:
-            return
-        command = self.get_command(ctx, name)
-        if (
-            command is None
-            or _asks_for_help(command, ctx, ctx.args)
-            or "--generate-cli-skeleton" in ctx.args
-        ):
-            return
-        echo(deprecated_command_message(name, replacement), err=True)
-
 
 app = typer.Typer(
-    name="ash",
+    name="ashx",
     cls=AshRootTyperGroup,
     help="Automated Security Helper, the agentic security harness · one workflow for your scanners.",
     pretty_exceptions_enable=True,
     pretty_exceptions_short=True,
     # Not on a CI runner: locals can hold secrets (utils/log.py).
     pretty_exceptions_show_locals=show_debug_locals(),
+    # click injects --help and nothing else, so -h has to be asked for. Set on
+    # the app rather than per command: click's Context inherits
+    # help_option_names from its parent, so every subcommand picks it up from
+    # the root group. -h came from the deleted root bash script.
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 
-# Neither `scan` nor `build-image` sets click's ignore_unknown_options or
+# Neither `scan` nor `container build` sets click's ignore_unknown_options or
 # allow_extra_args, so every argument is one the command declares or a usage
 # error. Nothing hands the context to the container runner, so with them a
 # misspelled option or a stray argument would be collected into ctx.args and
 # dropped, and the command would run as though it had not been given.
 app.callback(invoke_without_command=True)(run_ash_scan_cli_command)
+# No allow_extra_args/ignore_unknown_options here. `scan` used to swallow any
+# unrecognized flag and run a full scan regardless, so a typo in CI scanned the
+# wrong thing and exited 0. Nothing read ctx.args on this path, so the swallowed
+# arguments were discarded rather than forwarded -- dropping the pass-through
+# removes a silent failure without removing a feature.
 app.command(
     name="scan",
     cls=CliJsonInputCommand,
     no_args_is_help=False,
 )(run_ash_scan_cli_command)
 
-# build-image, report, merge, config, dependencies, inspect and plugin are
-# registered lazily: see _LAZY_SUBCOMMANDS above. Their registration kwargs
-# (the build-image and merge help text, CliJsonInputCommand) live in
-# _LAZY_COMMAND_KWARGS so _built_lazy_command registers each exactly as the
-# app.command(...) call here used to.
+# container, results, config, dependencies, plugin, suppress and express are
+# registered lazily: see _LAZY_SUBCOMMANDS above.
 
 
 @app.command(name="mcp", help="Start the ASH MCP server (Model Context Protocol)")
@@ -722,7 +641,11 @@ def _mcp_wrapper(
     debug: bool = typer.Option(
         False, "--debug/--no-debug", "-d", help="Enable debug logging"
     ),
-    color: bool = typer.Option(True, help="Enable/disable colorized output"),
+    # The same shared option definition the other commands use (cli.params), as a
+    # default-style declaration because this wrapper declares its own params and
+    # delegates to mcp_command by keyword. Flags, default and help match
+    # mcp_command's declaration, which the parity test compares.
+    color: bool = color_option(True),
     quiet: bool = typer.Option(False, help="Hide all log output"),
     transport: str = typer.Option(
         DEFAULT_TRANSPORT.value,
@@ -1026,7 +949,7 @@ def _echo_encodable(text: str) -> None:
         echo(text.encode(encoding, "backslashreplace").decode(encoding))
 
 
-# The config, dependencies, inspect, plugin and express sub-apps are resolved
+# The config, dependencies, results, plugin and express sub-apps are resolved
 # lazily on first access (_LAZY_SUBCOMMANDS above), not add_typer'd here:
 # importing their modules is most of what `ash --version` used to spend its
 # time on.
@@ -1057,6 +980,44 @@ def run_app():
 
     # Run the application
     app()
+
+
+def _run_deprecated_alias(alias):
+    """Announce that ``alias`` is deprecated, then run the app unchanged.
+
+    The notice is one stderr line and nothing else changes: the arguments, the
+    output and the exit code are exactly what ``ashx`` would produce, because
+    ``app()`` raises its ``SystemExit`` straight through this function.
+
+    The warning lives here, in a dedicated entry point per alias, rather than in a
+    Typer callback. A callback would fire for the ``ashx`` name too, and group
+    callbacks can run more than once for a single command line.
+    """
+    reset_logging_config()
+    warn_deprecated_command_alias(alias)
+    app()
+
+
+def run_ash_alias():
+    """Entry point for the deprecated ``ash`` console script.
+
+    ``ash`` was the v3 command. v4 renamed it to ``ashx`` because ``ash`` is also
+    the Almquist shell's name on Alpine, BusyBox and MSYS2, so a bare ``ash`` on
+    PATH often is not ASH. The alias keeps v3 scripts working through v4.
+    """
+    _run_deprecated_alias("ash")
+
+
+def run_ashv3():
+    """Entry point for the deprecated ``ashv3`` console script.
+
+    ``ashv3`` names a version, so it ages badly now that v4 exists -- that is
+    the reason it is deprecated rather than any problem with the alias itself.
+    ``automated-security-helper`` is deliberately NOT deprecated alongside it: it
+    is the escape hatch for environments where a short name resolves to
+    something else.
+    """
+    _run_deprecated_alias("ashv3")
 
 
 def _run_as_main(module: Any) -> None:

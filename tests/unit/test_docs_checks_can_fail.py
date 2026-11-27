@@ -297,12 +297,12 @@ CLEAN_CLI = f"""# Commands
 ash --source-dir . --output-dir out --scanners detect-secrets --offline
 ash scan --offline \\
   --log-level INFO
-ash config init --force && ash report --format text | tee report.txt
-uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.8.0 ash --mode local
-uvx git+https://github.com/awslabs/automated-security-helper.git@v3.8.0 --version
+ash config init --force && ash results report --format text | tee report.txt
+uvx --from git+https://github.com/awslabs/automated-security-helper.git@v4.0.0 ash --mode local
+uvx git+https://github.com/awslabs/automated-security-helper.git@v4.0.0 --version
 docker run --rm -v "$(pwd):/src" ghcr.io/example/ash:latest ash --source-dir /src
 ASH_LOG=1 sudo -E ash -vd --version
-result=$(ash report --format text)
+result=$(ash results report --format text)
 which ash
 cat > notes.txt <<EOF
 ash --not-a-command, just text in a here-document
@@ -331,7 +331,7 @@ jobs:
 {FENCE}yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.8.0
+    rev: v4.0.0
     hooks:
       - id: ash-simple-scan
 {FENCE}
@@ -340,7 +340,7 @@ repos:
 RUN ash --version
 {FENCE}
 
-Use `ash report --format text`, pass `--offline`, or `--fail-on-findings/--no-fail-on-findings`,
+Use `ash results report --format text`, pass `--offline`, or `--fail-on-findings/--no-fail-on-findings`,
 and for another tool write `trivy fs --cache-backend memory`. The file `ash.yaml` is not a command.
 """
 
@@ -422,8 +422,8 @@ CLI_DEFECTS = [
     ),
     (
         "substitution",
-        f"{FENCE}bash\nout=$(ash report --bogus)\n{FENCE}\n",
-        "--bogus is not an option of 'ash report'",
+        f"{FENCE}bash\nout=$(ash results report --bogus)\n{FENCE}\n",
+        "--bogus is not an option of 'ash results report'",
         2,
     ),
     (
@@ -2374,7 +2374,7 @@ RELEASE_DEFECTS = [
     ),
     (
         "--ash-revision-to-install",
-        f"{FENCE}bash\nash build-image --ash-revision-to-install v{{{{RELEASE}}}}\n{FENCE}\n",
+        f"{FENCE}bash\nash container build --ash-revision-to-install v{{{{RELEASE}}}}\n{FENCE}\n",
     ),
     (
         "ash-version:",
@@ -3596,15 +3596,15 @@ def test_a_plugin_module_that_does_not_import_is_reported_as_skipped(
 ):
     """A broken optional extra is not a finding, and the checks say they skipped it.
 
-    The module that declares the semgrep scanner config is made to raise on import.
-    load_config_models records it instead of dropping it, the semgrep config class is
+    The module that declares the opengrep scanner config is made to raise on import.
+    load_config_models records it instead of dropping it, the opengrep config class is
     missing from the models, the option-tables and config-blocks checks put a note
     in ``notes`` and report no finding for it, and the gate prints the note as a
     ``skipped:`` line under the check, with or without --verbose.
     """
     dc.load_config_models.cache_clear()
     try:
-        broken = dc.load_config_models().plugin_configs["scanners"]["semgrep"]
+        broken = dc.load_config_models().plugin_configs["scanners"]["opengrep"]
         broken_module = broken.__module__
         real_import = dc.importlib.import_module
 
@@ -3619,7 +3619,7 @@ def test_a_plugin_module_that_does_not_import_is_reported_as_skipped(
         assert models.unloaded == {
             broken_module: "ImportError: planted: an optional extra is not installed"
         }
-        assert "semgrep" not in models.plugin_configs["scanners"]
+        assert "opengrep" not in models.plugin_configs["scanners"]
         expected = (
             f"plugin module {broken_module} did not import (ImportError: planted: "
             "an optional extra is not installed), so its plugins' config classes "
@@ -3661,7 +3661,8 @@ def test_every_plugin_module_imports_here():
         models = dc.load_config_models()
         assert models.unloaded == {}
         assert models.skipped_notes() == []
-        assert "semgrep" in models.plugin_configs["scanners"]
+        assert "opengrep" in models.plugin_configs["scanners"]
+        assert "semgrep" not in models.plugin_configs["scanners"]
     finally:
         dc.load_config_models.cache_clear()
 

@@ -327,7 +327,7 @@ def test_a_committed_results_file_reports_its_scanner_names_shown(
     )
     monkeypatch.chdir(tmp_path)
 
-    printed = _through_a_pipe(["report", "--format", fmt], monkeypatch)
+    printed = _through_a_pipe(["results", "report", "--format", fmt], monkeypatch)
 
     # The control: the committed file is the one rendered.
     assert "SCAN-" in printed, printed[:400]

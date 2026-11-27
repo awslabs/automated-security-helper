@@ -288,7 +288,7 @@ _INNER_ENTRY_POINT = (
     f"outer = os.environ.pop({OUTER_PYTHONPATH_ENV_VAR!r}, ''); "
     "sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] "
     "if outer else []; "
-    "sys.argv[0] = 'ash'; "
+    "sys.argv[0] = 'ashx'; "
     "from automated_security_helper.cli.entrypoint import main; main()"
 )
 

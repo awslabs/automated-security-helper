@@ -631,7 +631,7 @@ def test_offline_mode_runs_no_audit_and_records_the_lockfile(
 def test_offline_mode_set_after_config_built_still_skips_the_audit(
     plugin_context, npm_on_path, node_project, subprocess_double, monkeypatch
 ):
-    """``ash scan --offline`` in local mode sets ASH_OFFLINE after configs exist.
+    """``ashx scan --offline`` in local mode sets ASH_OFFLINE after configs exist.
 
     The option used to default to ``is_offline_mode()`` at construction, and
     ``ScannerConfigSegment`` constructs its defaults at import, so this order once

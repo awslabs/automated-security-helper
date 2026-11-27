@@ -324,7 +324,15 @@ def shard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _report(shard: Path, *extra: str):
     return CliRunner().invoke(
         app,
-        ["report", "--format", "markdown", "--output-dir", str(shard), *extra],
+        [
+            "results",
+            "report",
+            "--format",
+            "markdown",
+            "--output-dir",
+            str(shard),
+            *extra,
+        ],
         env={"COLUMNS": "300"},
     )
 
@@ -366,6 +374,7 @@ def test_merge_refuses_though_the_operator_config_sets_other_fields(shard, tmp_p
     result = CliRunner().invoke(
         app,
         [
+            "results",
             "merge",
             "--results",
             str(shard),

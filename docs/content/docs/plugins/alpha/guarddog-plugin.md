@@ -10,7 +10,7 @@ local source needs no network.
 
 ## Enabling it
 
-GuardDog is an alpha plugin that ships with ASH. Its plugin module is loaded only when you list it, so an `ash scan` that does not list it is unchanged: no row in the results, the summary, the reports or the SARIF.
+GuardDog is an alpha plugin that ships with ASH. Its plugin module is loaded only when you list it, so an `ashx scan` that does not list it is unchanged: no row in the results, the summary, the reports or the SARIF.
 
 ```yaml
 # .ash.yaml
@@ -21,7 +21,7 @@ ash_plugin_modules:
 <!-- doctest: illustrative reason="runs a full scan, which needs every scanner installed" -->
 ```bash
 # For one run
-ash scan --ash-plugin-modules automated_security_helper.plugin_modules.ash_guarddog_plugins
+ashx scan --ash-plugin-modules automated_security_helper.plugin_modules.ash_guarddog_plugins
 ```
 
 With the module listed, `guarddog` runs by default, like every other scanner. `scanners.guarddog.enabled: false` turns it off again, and `--scanners` and `--exclude-scanners` select it as they select any scanner. `--scanners guarddog` without the module listed is refused, with a message naming the module to add. If GuardDog is not installed, an online scan installs it with `uv tool install` before running it; offline, in nix mode, or when that install fails, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate).
@@ -159,7 +159,7 @@ which GuardDog logged an error is also a failed target: when the registry cannot
 reached, GuardDog prints an empty result and exits 0, which would otherwise read as a
 clean scan.
 
-GuardDog is not packaged in nixpkgs, so `ash scan --mode nix` does not provide it.
+GuardDog is not packaged in nixpkgs, so `ashx scan --mode nix` does not provide it.
 Enabled under Nix without a separately installed GuardDog, the scanner is `MISSING`.
 
 ## Failures
@@ -199,7 +199,7 @@ ASH installs GuardDog with `uv tool install`, pinned to the release its result p
 was tested against (`guarddog==3.2.0`) and to a Python interpreter between 3.10 and
 3.13: pygit2 and yara-python, two of GuardDog's dependencies, publish no CPython 3.14
 wheels at that version, so an install on 3.14 would have to compile them from source.
-`ash dependencies install` (with the module listed in `ash_plugin_modules`) and the
+`ashx dependencies install` (with the module listed in `ash_plugin_modules`) and the
 container image do this for you, and an online scan that finds no GuardDog installs
 it the same way before running it, within `options.install_timeout`. To install it
 yourself:
@@ -217,7 +217,7 @@ container. It changes nothing for an install that does not pull pygit2 in; unset
 `UV_CONSTRAINT` to drop it.
 
 GuardDog 3.2.0 cannot be installed on Windows: its dependency nono-py publishes no
-Windows build and does not compile there. On Windows, `ash dependencies install` does not
+Windows build and does not compile there. On Windows, `ashx dependencies install` does not
 try, and an enabled GuardDog is reported `SKIPPED` with that reason.
 
 `options.tool_version` overrides the version constraint. It must be a PEP 440 version

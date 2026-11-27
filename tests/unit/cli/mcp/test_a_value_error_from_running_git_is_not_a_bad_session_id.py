@@ -38,7 +38,7 @@ from automated_security_helper.cli.mcp.sessions import reset_default_registry_fo
 from automated_security_helper.cli.mcp_tools import mcp_set_source_git
 
 URL = "https://git.example.invalid/team/repo.git"
-SESSION = "session-giterror"
+CLIENT_ID = "session-giterror"
 
 #: The session ids the workspace cannot be made for: a path, the id of a caller
 #: the server could not identify, and none at all.
@@ -87,12 +87,12 @@ def _steps_run(delivery: Dict[str, Any]) -> List[str]:
 
 
 def _deliver(url: str = URL, **arguments: Any) -> Dict[str, Any]:
-    return mcp_set_source_git(url=url, session_id=SESSION, **arguments)
+    return mcp_set_source_git(url=url, session_id=CLIENT_ID, **arguments)
 
 
 def _source_tree(delivery: Dict[str, Any]) -> Path:
     """Where the session's clone lives while a delivery is in flight or done."""
-    return delivery["workspace"] / SESSION / "source"
+    return delivery["workspace"] / CLIENT_ID / "source"
 
 
 def _subcommand(cmd: List[str]) -> str:
@@ -180,7 +180,7 @@ def test_a_second_delivery_git_cannot_run_for_leaves_the_first_tree_to_scan(
     assert result.get("success") is False, result
     assert result.get("error_type") == "git_clone_failed", result
     assert _source_tree(delivery).is_dir(), "the failed delivery took the first tree"
-    assert sd.get_session_source_dir(SESSION) == _source_tree(delivery)
+    assert sd.get_session_source_dir(CLIENT_ID) == _source_tree(delivery)
     session_dir = _source_tree(delivery).parent
     left = [p.name for p in session_dir.iterdir() if p.name.startswith(".source.")]
     assert left == [], f"the failed delivery left {left} beside source/"
@@ -239,4 +239,4 @@ def test_a_delivery_git_can_run_for_is_delivered(delivery) -> None:
 
     assert result.get("success") is True, result
     assert _steps_run(delivery) == ["clone", "fetch", "checkout"]
-    assert sd.get_session_source_dir(SESSION) is not None
+    assert sd.get_session_source_dir(CLIENT_ID) is not None

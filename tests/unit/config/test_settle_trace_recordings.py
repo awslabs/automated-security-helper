@@ -107,7 +107,7 @@ BAD_EXPIRY = (
     "    - rule_id: B101\n"
     "      path: 'tests/**'\n"
     "      reason: asserts in tests\n"
-    f"      expiration: '{EXPIRY_CANARY}'\n"
+    f"      expires: '{EXPIRY_CANARY}'\n"
 )
 KEY_CANARY = "canary-key-9d1e"
 UNKNOWN_KEY = (

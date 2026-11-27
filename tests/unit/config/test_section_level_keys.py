@@ -104,7 +104,6 @@ class TestBuiltInSections:
             ("scanners", "bandit", "tool_version", "a version constraint"),
             ("scanners", "bandit", "install_timeout", "an install timeout"),
             ("scanners", "checkov", "tool_version", "a version constraint"),
-            ("scanners", "semgrep", "tool_version", "a version constraint"),
             ("converters", "jupyter", "tool_version", "a version constraint"),
         ],
     )

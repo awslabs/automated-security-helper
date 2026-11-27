@@ -32,6 +32,7 @@ from automated_security_helper.cli.dependencies import (
     EXIT_OK,
     dependencies_app,
 )
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 
 runner = CliRunner()
 
@@ -195,10 +196,14 @@ def test_the_warning_reaches_a_real_stderr(tmp_path, monkeypatch):
     The in-process tests pin both consoles to buffers, which proves what was
     printed but not where it went.
     """
-    ash = shutil.which("ash")
+    # The canonical name, not the deprecated `ash`, whose own deprecation line would
+    # share stderr with the warning under test.
+    ash = shutil.which(CANONICAL_CLI_NAME)
     if ash is None:
-        pytest.skip("the `ash` console script is not on PATH in this environment")
-    # `ash dependencies install` writes install receipts under its HOME, which a child
+        pytest.skip(
+            f"the `{CANONICAL_CLI_NAME}` console script is not on PATH in this environment"
+        )
+    # `ashx dependencies install` writes install receipts under its HOME, which a child
     # inherits; tests/conftest.py refuses to start one with the developer's.
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))

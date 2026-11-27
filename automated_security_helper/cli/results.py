@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ash results``: the commands that read, compare and combine saved scan results.
+"""``ashx results``: the commands that read, compare and combine saved scan results.
 
 ``report``, ``diff``, ``trend``, ``merge`` and ``inspect`` each work on results a
 scan already wrote and run no scan, so they sit under one noun instead of beside
@@ -9,9 +9,9 @@ scan already wrote and run no scan, so they sit under one noun instead of beside
 (``report_command``, ``diff_command``, ``trend_command``, ``merge_command`` and
 ``inspect_app``); no command body lives here.
 
-The old top-level spellings (``ash report`` and the rest) keep working through
-3.9 with a stderr deprecation warning and are removed in 4.0; the warning is
-emitted by ``AshRootTyperGroup`` in :mod:`automated_security_helper.cli.main`.
+The old top-level spellings (``ash report`` and the rest) were deprecated in 3.9
+and are removed in 4.0: ``ashx report`` is a usage error, as any command the root
+does not have is.
 """
 
 import typer

@@ -163,12 +163,12 @@ CASES = [
                 - rule_id: B101
                   path: tests/**
                   reason: asserts in tests
-                  expiration: 2099-01-31
+                  expires: 2099-01-31
             """
         ),
         scan_accepts=False,
         validate_mentions=[
-            "global_settings.suppressions[0].expiration",
+            "global_settings.suppressions[0].expires",
             "put it in quotes",
         ],
     ),
@@ -182,11 +182,11 @@ CASES = [
                 - rule_id: B101
                   path: tests/**
                   reason: asserts in tests
-                  expiration: "2099-13-45"
+                  expires: "2099-13-45"
             """
         ),
         scan_accepts=False,
-        validate_mentions=["global_settings.suppressions[0].expiration"],
+        validate_mentions=["global_settings.suppressions[0].expires"],
     ),
     Case(
         id="ignore-path-unquoted-date-expiration",
@@ -197,12 +197,12 @@ CASES = [
               ignore_paths:
                 - path: vendor/**
                   reason: third-party code
-                  expiration: 2099-01-31
+                  expires: 2099-01-31
             """
         ),
         scan_accepts=False,
         validate_mentions=[
-            "global_settings.ignore_paths[0].expiration",
+            "global_settings.ignore_paths[0].expires",
             "put it in quotes",
         ],
     ),
@@ -215,11 +215,11 @@ CASES = [
               ignore_paths:
                 - path: vendor/**
                   reason: third-party code
-                  expiration: "31/01/2099"
+                  expires: "31/01/2099"
             """
         ),
         scan_accepts=False,
-        validate_mentions=["global_settings.ignore_paths[0].expiration"],
+        validate_mentions=["global_settings.ignore_paths[0].expires"],
     ),
     Case(
         id="symbol-not-a-qualified-name",
@@ -669,7 +669,7 @@ def _scan_refusal(output: str) -> Tuple[List[str], str]:
     flat = _flat(output)
     marker = "ERROR (3) Invalid configuration: "
     assert marker in flat, flat
-    refusal = flat.split(marker, 1)[1].split(" Run: ash config lint", 1)[0]
+    refusal = flat.split(marker, 1)[1].split(" Run: ashx config lint", 1)[0]
     if refusal.startswith("Configuration validation failed for '"):
         messages = refusal.split("': ", 1)[1]
         # The period the refusal puts before "Run:".
@@ -763,7 +763,7 @@ def test_a_refusal_ending_in_a_period_reads_as_one_sentence_before_the_hint(
 
     assert not accepted
     flat = _flat(scan.output)
-    assert "move severity_threshold under options. Run: ash config lint" in flat, flat
+    assert "move severity_threshold under options. Run: ashx config lint" in flat, flat
     assert ".. Run:" not in flat, flat
 
 
@@ -1415,10 +1415,10 @@ def test_a_refusal_names_a_command_that_explains_it(
         pytest.skip("the temporary directory's path is not one lint_hint prints")
     # The command comes last, on its own, not inside quotes of the message, so
     # it can be pasted as it is; the console prints it.
-    match = re.search(r"Run: (ash config lint --config [^<>]+)$", raised[-1])
+    match = re.search(r"Run: (ashx config lint --config [^<>]+)$", raised[-1])
     assert match, raised[-1]
     flat = " ".join(re.sub(r"\x1b\[[0-9;]*m", "", refused.output).split())
-    assert "Run: ash config lint --config" in flat, flat
+    assert "Run: ashx config lint --config" in flat, flat
     named = shlex.split(match.group(1))
     lint = runner.invoke(app, named[1:])
     assert lint.exit_code == INVALID_CONFIG_EXIT, (named, lint.output)
@@ -1432,32 +1432,32 @@ def test_a_refusal_names_a_command_that_explains_it(
         pytest.param(
             "configs/ash.yaml",
             None,
-            "Run: ash config lint --config configs/ash.yaml",
+            "Run: ashx config lint --config configs/ash.yaml",
             id="plain",
         ),
         pytest.param(
             "/srv/repo/.ash.yaml",
             "/srv/repo",
-            "Run: ash config lint --config /srv/repo/.ash.yaml --source-dir /srv/repo",
+            "Run: ashx config lint --config /srv/repo/.ash.yaml --source-dir /srv/repo",
             id="source-dir",
         ),
         pytest.param(
             "/srv/my repo/.ash.yaml",
             None,
-            "Run: ash config lint --config <the file named above>",
+            "Run: ashx config lint --config <the file named above>",
             id="space",
         ),
         pytest.param(
             "/srv/x & calc & y/.ash.yaml",
             "/srv/x & calc & y",
-            "Run: ash config lint --config <the file named above> "
+            "Run: ashx config lint --config <the file named above> "
             "--source-dir <the directory the scan scanned>",
             id="cmd-metacharacters",
         ),
         pytest.param(
             "/srv/x;rm -rf ~/.ashrc.yaml",
             None,
-            "Run: ash config lint --config <the file named above>",
+            "Run: ashx config lint --config <the file named above>",
             id="posix-metacharacters",
         ),
         # Only the config path needs the placeholder. Printing the source dir
@@ -1466,14 +1466,14 @@ def test_a_refusal_names_a_command_that_explains_it(
         pytest.param(
             "/srv/repo/configs/my config.yaml",
             "/srv/repo",
-            "Run: ash config lint --config <the file named above> "
+            "Run: ashx config lint --config <the file named above> "
             "--source-dir <the directory the scan scanned>",
             id="config-path-only",
         ),
         pytest.param(
             "/srv/repo/configs/ash.yaml",
             "/srv/my repo",
-            "Run: ash config lint --config <the file named above> "
+            "Run: ashx config lint --config <the file named above> "
             "--source-dir <the directory the scan scanned>",
             id="source-dir-only",
         ),
@@ -1491,8 +1491,8 @@ def test_lint_hint_prints_only_paths_safe_to_paste(path, source_dir, expected):
 def test_lint_hint_leaves_out_the_working_directory(project: Path):
     from automated_security_helper.config.resolve_config import lint_hint
 
-    assert lint_hint("ash.yaml", project) == "Run: ash config lint --config ash.yaml"
-    assert lint_hint("ash.yaml", ".") == "Run: ash config lint --config ash.yaml"
+    assert lint_hint("ash.yaml", project) == "Run: ashx config lint --config ash.yaml"
+    assert lint_hint("ash.yaml", ".") == "Run: ashx config lint --config ash.yaml"
 
 
 @pytest.mark.parametrize("given_as", ["option", "env"])

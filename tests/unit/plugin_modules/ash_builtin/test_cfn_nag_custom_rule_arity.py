@@ -83,3 +83,24 @@ def test_the_two_resource_policy_rules_are_covered_by_the_check_above():
         f"the parse-call pattern matched {sorted(matched)}; the two rules that call "
         "PolicyDocumentParser must be among them or this module checks nothing"
     )
+
+
+@pytest.mark.parametrize(
+    "rule_name",
+    ["StarResourceAccessPolicyRule.rb", "ResourcePolicyStarAccessVerbPolicyRule.rb"],
+)
+def test_the_resource_policy_rules_skip_a_property_that_is_not_a_policy_document(
+    rule_name: str,
+):
+    """A rule gates on ``policy_resource?``, not on ``accessPolicies`` being non-nil.
+
+    ``AWS::EKS::AccessEntry`` has an ``AccessPolicies`` property that is a list of
+    ``{PolicyArn, AccessScope}`` entries. Reading it as a policy document raised in both
+    rules on the AshEksOperator template, which cfn-nag then reported as a template it
+    did not evaluate, and ASH as a scanner that did not complete.
+    """
+    source = RULE_DIR.joinpath(rule_name).read_text(encoding="utf-8")
+    assert "AccessPolicyReading.policy_resource?(resource)" in source
+    assert "unless (resource.accessPolicies.nil?)" not in source
+    helper = RULE_DIR.joinpath("AccessPolicyReading.rb").read_text(encoding="utf-8")
+    assert "policies.is_a?(Array)" in helper

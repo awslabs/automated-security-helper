@@ -597,7 +597,7 @@ class ASHScanOrchestrator(BaseModel):
     # _record_history appends one. Read by _discard_recorded_history when a
     # cancel escapes the write step after the record: the record says the run
     # completed, and a run a cancel takes back must not stay a point in
-    # ``ash trend``.
+    # ``ashx results trend``.
     _recorded_history_id: Optional[str] = PrivateAttr(default=None)
 
     @model_validator(mode="after")
@@ -1837,7 +1837,7 @@ class ASHScanOrchestrator(BaseModel):
         """Remove the history record this scan appended, if any. Never raises.
 
         For a cancel that lands after ``_record_history``: the record says the
-        run completed, and ``ash trend`` would show the taken-back run as a
+        run completed, and ``ashx results trend`` would show the taken-back run as a
         point. A scan that recorded nothing (history off, a shard) has nothing
         to remove, and the id is cleared so the record of one run is never
         removed twice.

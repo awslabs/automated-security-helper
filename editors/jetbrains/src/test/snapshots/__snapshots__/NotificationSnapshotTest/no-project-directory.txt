@@ -1,0 +1,7 @@
+progress:
+  (none)
+
+notification group=ASH type=ERROR
+title: ASH scan not started
+body:
+This project has no base directory on disk, so there is nothing to scan.

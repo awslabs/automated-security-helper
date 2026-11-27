@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Annotated, Any, Callable, Dict, List, Optional
 import typer
 
+from automated_security_helper.cli.params import ColorOption
 from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.cli.mcp.http_sessions import (
     DEFAULT_SESSION_WORKSPACE_TTL_SECONDS,
@@ -1381,8 +1382,8 @@ def mcp_command(
         bool,
         typer.Option("--debug/--no-debug", "-d", help="Enable debug logging"),
     ] = False,
-    color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
-    # Off by default, as on `ash mcp` (the wrapper in cli/main.py). On by default,
+    color: ColorOption = True,
+    # Off by default, as on `ashx mcp` (the wrapper in cli/main.py). On by default,
     # -v and -d would fail the --quiet check below unless --no-quiet was also
     # given.
     quiet: Annotated[bool, typer.Option(help="Hide all log output")] = False,

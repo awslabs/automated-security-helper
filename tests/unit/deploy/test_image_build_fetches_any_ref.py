@@ -73,9 +73,14 @@ def _image_builds() -> dict[str, list[str]]:
 
 @pytest.mark.unit
 def test_the_reader_finds_the_image_builds():
-    """Positive control: every committed stack builds its image from the ASH repository."""
+    """Positive control: every committed stack that builds an image builds it from the
+    ASH repository. AshEksOperator builds none: it installs an operator image the
+    adopter supplies in `OperatorImageUri` (f27a11d5c38)."""
     templates = {name.split(" #")[0] for name in _image_builds()}
-    assert templates == {path.name for path in all_template_paths()}, sorted(templates)
+    expected = {path.name for path in all_template_paths()} - {
+        "AshEksOperator.template.json"
+    }
+    assert templates == expected, sorted(templates)
 
 
 #: The fixture's git reads no user or system config, so a developer's own settings

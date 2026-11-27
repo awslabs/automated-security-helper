@@ -78,10 +78,6 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scan
     OpengrepScanner,
     OpengrepScannerConfig,
 )
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-    SemgrepScannerConfig,
-)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
     SyftScanner,
     SyftScannerConfig,
@@ -390,74 +386,6 @@ class TestTrivyRepoOffline:
 # ---------------------------------------------------------------------------
 # semgrep and opengrep
 # ---------------------------------------------------------------------------
-
-
-def _semgrep_version_check_off(spawn: Spawn) -> bool:
-    return spawn.has_flag("--disable-version-check") or spawn.env_is(
-        "SEMGREP_ENABLE_VERSION_CHECK", _FALSE
-    )
-
-
-class TestSemgrepOffline:
-    @TARGET_TYPES
-    def test_version_check_is_off(self, offline, rules_cache, context, target_type):
-        scanner = SemgrepScanner(context=context, config=SemgrepScannerConfig())
-        spawn = _record_scan(scanner, context, target_type, offline)
-
-        assert _semgrep_version_check_off(spawn), (
-            "offline semgrep checks semgrep.dev for a newer version: "
-            f"argv={spawn.command}, "
-            f"SEMGREP_ENABLE_VERSION_CHECK={spawn.env.get('SEMGREP_ENABLE_VERSION_CHECK')!r}"
-        )
-
-    @TARGET_TYPES
-    def test_control_metrics_are_off(self, offline, rules_cache, context, target_type):
-        scanner = SemgrepScanner(context=context, config=SemgrepScannerConfig())
-        spawn = _record_scan(scanner, context, target_type, offline)
-
-        assert spawn.flag_values("--metrics") == ["off"], spawn.command
-
-
-@pytest.mark.usefixtures("no_tool_probes")
-class TestSemgrepOnline:
-    """The version check is off online too: it reads a cache file under the home.
-
-    semgrep's version check opens ``~/.cache/semgrep_version`` after the scan has
-    finished. Where the home is read-only or sandboxed that open raises, semgrep
-    exits 2, and ASH records a scan that had produced its findings as failed. The
-    check only shows upgrade banners, which ASH never reads.
-    """
-
-    @TARGET_TYPES
-    def test_version_check_is_off(self, online, context, target_type):
-        online.delenv("SEMGREP_ENABLE_VERSION_CHECK", raising=False)
-        scanner = SemgrepScanner(context=context, config=SemgrepScannerConfig())
-        spawn = _record_scan(scanner, context, target_type, online)
-
-        assert _semgrep_version_check_off(spawn), (
-            "online semgrep runs its version check, which reads ~/.cache/semgrep_version: "
-            f"argv={spawn.command}, "
-            f"SEMGREP_ENABLE_VERSION_CHECK={spawn.env.get('SEMGREP_ENABLE_VERSION_CHECK')!r}"
-        )
-
-    @TARGET_TYPES
-    def test_an_exported_switch_does_not_turn_it_back_on(
-        self, online, context, target_type
-    ):
-        online.setenv("SEMGREP_ENABLE_VERSION_CHECK", "1")
-        scanner = SemgrepScanner(context=context, config=SemgrepScannerConfig())
-        spawn = _record_scan(scanner, context, target_type, online)
-
-        assert _semgrep_version_check_off(spawn), spawn.env.get(
-            "SEMGREP_ENABLE_VERSION_CHECK"
-        )
-
-    @TARGET_TYPES
-    def test_control_metrics_option_is_unchanged(self, online, context, target_type):
-        scanner = SemgrepScanner(context=context, config=SemgrepScannerConfig())
-        spawn = _record_scan(scanner, context, target_type, online)
-
-        assert spawn.flag_values("--metrics") == ["auto"], spawn.command
 
 
 class TestOpengrepOffline:
@@ -777,10 +705,9 @@ class _FakeToolHost:
 @pytest.mark.parametrize(
     "scanner_cls, config_cls, tool, check_off",
     [
-        (SemgrepScanner, SemgrepScannerConfig, "semgrep", _semgrep_version_check_off),
         (CheckovScanner, CheckovScannerConfig, "checkov", _checkov_update_check_off),
     ],
-    ids=["semgrep", "checkov"],
+    ids=["checkov"],
 )
 def test_every_tool_process_runs_with_its_update_check_off(
     offline,
@@ -793,8 +720,8 @@ def test_every_tool_process_runs_with_its_update_check_off(
     tool,
     check_off,
 ):
-    """``semgrep --version`` and ``checkov --version`` run the same network check
-    as their scans (measured), and ASH runs them while checking dependencies."""
+    """``checkov --version`` runs the same network check as its scan (measured), and
+    ASH runs it while checking dependencies."""
     host = _FakeToolHost(tmp_path, tool)
     monkeypatch.setenv(
         "PATH", f"{Path(host.tool_path).parent}{os.pathsep}{os.environ['PATH']}"

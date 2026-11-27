@@ -27,6 +27,7 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli import scan as scan_cli
 from automated_security_helper.cli.main import app
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.core.enums import ExecutionPhase, ExecutionStrategy
 from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.interactions.run_ash_container import (
@@ -144,7 +145,7 @@ def scan_inside(
     def inside(arg: str) -> str:
         return str(fs / arg.lstrip("/")) if under_a_root(arg) else arg
 
-    handed = cmd[cmd.index("ash") + 1 :]
+    handed = cmd[cmd.index(CANONICAL_CLI_NAME) + 1 :]
     # Every absolute path handed to the scan inside names a container mount. A host
     # path on the command line would resolve here, on the host the harness runs on,
     # and the comparison would then measure the wrong boundary.

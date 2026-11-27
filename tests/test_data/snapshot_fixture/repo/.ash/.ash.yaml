@@ -16,4 +16,4 @@ global_settings:
     - rule_id: "CKV_AWS_999"
       path: "infra/main.tf"
       reason: "Stale suppression for a check that no longer exists"
-      expiration: "2099-12-31"
+      expires: "2099-12-31"

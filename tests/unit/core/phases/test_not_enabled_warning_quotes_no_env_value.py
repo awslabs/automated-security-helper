@@ -127,6 +127,7 @@ def runs(tmp_path_factory: pytest.TempPathFactory):
     )
     report = _ash(
         root,
+        "results",
         "report",
         "--format",
         "s3",

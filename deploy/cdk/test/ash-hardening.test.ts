@@ -127,9 +127,9 @@ describe('every secret specifies a KmsKeyId', () => {
   const secrets = everyResource('AWS::SecretsManager::Secret');
 
   test('there are secrets to check', () => {
-    // One per stack that declares the MCP auth surface plus the two that create it
-    // unconditionally for one class shape: four, which is the W77 count.
-    expect(secrets.length).toBe(4);
+    // One per stack that serves MCP (AgentCore, Fargate). The gate and the sharded
+    // executor create none; ash-mcp-secret-scope.test.ts pins that side.
+    expect(secrets.length).toBe(2);
   });
 
   test.each(secrets.map(([name, props]) => [name, props] as const))(
@@ -170,6 +170,109 @@ describe('the image-build bootstrap starter is concurrency-bounded', () => {
       // resource serially, so 1 caps the function without throttling anything the
       // design does.
       expect(props.ReservedConcurrentExecutions).toBe(1);
+    },
+  );
+});
+
+/**
+ * The bootstrap starter takes the project name from the custom resource, not from
+ * a Lambda environment variable.
+ *
+ * checkov's CKV_AWS_45 ("no hard-coded secrets in Lambda environment") fired on
+ * this function in CI on some runs and not others, although its only variable was
+ * a `Ref` to the CodeBuild project. With no `Environment` block there is nothing
+ * for that check, or any other environment-variable check, to evaluate, so the
+ * template needs no entry for it. The custom resource's `ProjectName` property
+ * carries the name instead, and CloudFormation hands it to the handler as
+ * `ResourceProperties`. tests/unit/test_image_bootstrap_starter.py runs the
+ * inline handler against each committed template to prove it reads it from there.
+ */
+describe('the image-build bootstrap starter has no environment', () => {
+  const functions = everyResource('AWS::Lambda::Function').filter(([name]) =>
+    name.includes('BootstrapStarter'),
+  );
+
+  test('there are bootstrap starters to check', () => {
+    expect(functions.length).toBe(3);
+  });
+
+  test.each(functions.map(([name, props]) => [name, props] as const))(
+    '%s declares no environment variables and no environment key',
+    (_name, props) => {
+      expect(props.Environment).toBeUndefined();
+      // KmsKeyArn only encrypts environment variables. With none, a key there
+      // would be configuration that does nothing.
+      expect(props.KmsKeyArn).toBeUndefined();
+    },
+  );
+
+  // The same on the committed templates, which are what checkov scans. synth
+  // --check keeps them equal to the synthesized stacks above; this reads them
+  // directly so the property under test is checked on the scanned artifact too.
+  const templatesDir = path.join(__dirname, '..', 'templates');
+  const committedStarters = fs
+    .readdirSync(templatesDir)
+    .filter((file) => file.endsWith('.template.json'))
+    .sort()
+    .flatMap((file) => {
+      const resources = JSON.parse(fs.readFileSync(path.join(templatesDir, file), 'utf8'))
+        .Resources as Record<string, any>;
+      return Object.entries(resources)
+        .filter(
+          ([logicalId, r]) =>
+            r.Type === 'AWS::Lambda::Function' && logicalId.includes('BootstrapStarter'),
+        )
+        .map(([logicalId, r]) => [file, logicalId, r.Properties ?? {}] as const);
+    });
+
+  test('every committed template with a bootstrap starter is checked', () => {
+    expect(committedStarters.map(([file]) => file)).toEqual([
+      'AshAgentCore.template.json',
+      'AshCodeCommitGate.template.json',
+      'AshFargate.template.json',
+    ]);
+  });
+
+  test.each(committedStarters)(
+    '%s %s has no Environment property',
+    (_file, _logicalId, props) => {
+      expect(Object.keys(props)).not.toContain('Environment');
+      expect(Object.keys(props)).not.toContain('KmsKeyArn');
+    },
+  );
+
+  const withBootstrap = CASES.filter(
+    ([, t]) => Object.keys(t.findResources('Custom::AshImageBootstrap')).length > 0,
+  );
+
+  test('there are bootstrap custom resources to check', () => {
+    expect(withBootstrap.map(([stack]) => stack)).toEqual([
+      'AshAgentCore',
+      'AshFargate',
+      'AshCodeCommitGate',
+    ]);
+  });
+
+  test.each(withBootstrap)(
+    '%s passes the project the starter may start as ProjectName',
+    (_stack, template) => {
+      const [bootstrap] = Object.values<any>(template.findResources('Custom::AshImageBootstrap'));
+      const starterId: string = bootstrap.Properties.ServiceToken['Fn::GetAtt'][0];
+      const projectRef = bootstrap.Properties.ProjectName;
+      expect(projectRef).toEqual({ Ref: expect.any(String) });
+      expect(template.findResources('AWS::CodeBuild::Project')[projectRef.Ref]).toBeDefined();
+
+      // The one project the starter's role may StartBuild is the one named here, so
+      // the handler cannot be pointed at a project its role cannot start.
+      const starter = template.findResources('AWS::Lambda::Function')[starterId];
+      const roleId: string = starter.Properties.Role['Fn::GetAtt'][0];
+      const startBuild = Object.values<any>(template.findResources('AWS::IAM::Policy'))
+        .filter((p) => (p.Properties.Roles ?? []).some((r: any) => r.Ref === roleId))
+        .flatMap((p) => p.Properties.PolicyDocument.Statement)
+        .filter((s: any) => [].concat(s.Action).includes('codebuild:StartBuild' as never));
+      expect(startBuild.map((s: any) => s.Resource)).toEqual([
+        { 'Fn::GetAtt': [projectRef.Ref, 'Arn'] },
+      ]);
     },
   );
 });
@@ -331,7 +434,7 @@ describe('no IAM policy grants the same thing twice', () => {
   );
 
   test('there are policies to check in every stack', () => {
-    // 89 across the five stacks, in the order STACKS declares them. Exact and
+    // 90 across the five stacks, in the order STACKS declares them. Exact and
     // per-stack, so one stack losing its policies to a rename cannot leave the loop
     // for that stack iterating over nothing while the others carry the assertion.
     //
@@ -339,10 +442,15 @@ describe('no IAM policy grants the same thing twice', () => {
     // ash-policy-split.ts, which files each role's statements into one
     // AWS::IAM::Policy per AWS service so that no single document trips cfn-nag's
     // W76 ceiling. The counts rose; the statements did not change, which the
-    // duplicate check below is a second witness to -- it passes over all 91.
+    // duplicate check below is a second witness to -- it passes over all 86.
     //
-    // 88 of the 90 come from the split. The other two are AshAgentCore's and
-    // AshFargate's `ConfigKeyAccess`, which AshRuntimeConfig authors directly so
+    // AshDistributedPipeline was 50 until the MCP auth secret left the two stacks
+    // that do not serve MCP: its five shard and merge roles each lost their
+    // `SecretsmanagerAccess` policy. AshCodeCommitGate's grant lived in a policy
+    // that still has other statements, so its count did not move.
+    //
+    // 83 of the 86 come from the split. Two of the other three are AshAgentCore's
+    // and AshFargate's `ConfigKeyAccess`, which AshRuntimeConfig authors directly so
     // the `kms:Decrypt` grant on an adopter-supplied key can be made conditional.
     // That is why those two stacks are one higher than the split alone produces.
     //

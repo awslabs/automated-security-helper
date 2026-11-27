@@ -109,7 +109,7 @@ project_name: operator
 sandbox:
   extra_read_paths: [/data]
 scanners:
-  semgrep:
+  opengrep:
     options:
       metrics: "off"
 """
@@ -117,13 +117,13 @@ NETWORK_FILE = """\
 project_name: operator
 sandbox:
   extra_read_paths: [/data]
-  network_scanners: [semgrep]
+  network_scanners: [opengrep]
 """
 WHOLE_FILE = """\
 project_name: operator
 sandbox:
   extra_read_paths: [/data]
-  network_scanners: [semgrep]
+  network_scanners: [opengrep]
   read_path_scanners: [zizmor]
   env_scanners: [zizmor]
 converters:
@@ -131,7 +131,7 @@ converters:
     options:
       max_members: 10
 scanners:
-  semgrep:
+  opengrep:
     options:
       metrics: "off"
 """
@@ -139,7 +139,7 @@ scanners:
 BASE_FILE = """\
 project_name: base
 sandbox:
-  network_scanners: [semgrep]
+  network_scanners: [opengrep]
   read_path_scanners: [zizmor]
   env_scanners: [zizmor]
 """
@@ -192,7 +192,7 @@ def _facts(config) -> Dict[str, Any]:
     sandbox = config.sandbox
     return {
         "max_members": config.converters.archive.options.max_members,
-        "semgrep.metrics": config.get_plugin_config("scanner", "semgrep")["options"][
+        "opengrep.metrics": config.get_plugin_config("scanner", "opengrep")["options"][
             "metrics"
         ],
         "sandbox.extra_read_paths": list(sandbox.extra_read_paths),
@@ -267,9 +267,9 @@ def test_a_no_usage_data_option_in_an_ash_config_in_another_checkout_still_appli
     )
 
     assert in_any_checkout(path)
-    assert host["semgrep.metrics"] == "off"
+    assert host["opengrep.metrics"] == "off"
     assert host["sandbox.extra_read_paths"] == []
-    assert inside["semgrep.metrics"] == host["semgrep.metrics"]
+    assert inside["opengrep.metrics"] == host["opengrep.metrics"]
     assert inside == host
 
 
@@ -282,7 +282,7 @@ def test_a_network_list_in_an_ash_config_in_another_checkout_still_narrows_insid
 
     assert in_any_checkout(path)
     # A limit, never a list: the list would replace the scanners' declared needs.
-    assert host["sandbox.network_limit"] == ["semgrep"]
+    assert host["sandbox.network_limit"] == ["opengrep"]
     assert host["sandbox.network_scanners"] is None
     assert host["sandbox.extra_read_paths"] == []
     assert inside["sandbox.network_scanners"] is None
@@ -296,8 +296,8 @@ def test_the_whole_file_is_limited_inside_as_on_the_host(monkeypatch, container,
 
     assert in_any_checkout(path)
     assert host["max_members"] == 10
-    assert host["semgrep.metrics"] == "off"
-    assert host["sandbox.network_limit"] == ["semgrep"]
+    assert host["opengrep.metrics"] == "off"
+    assert host["sandbox.network_limit"] == ["opengrep"]
     assert host["sandbox.network_scanners"] is None
     # All four grant lists the file wrote are gone.
     assert host["sandbox.extra_read_paths"] == []
@@ -420,9 +420,9 @@ def test_control_the_operators_own_file_outside_every_checkout_is_unchanged_insi
     assert not in_any_checkout(path)
     # The operator's own file is the trusted base whole, grants included.
     assert host["max_members"] == 10
-    assert host["semgrep.metrics"] == "off"
+    assert host["opengrep.metrics"] == "off"
     assert host["sandbox.extra_read_paths"] == ["/data"]
-    assert host["sandbox.network_scanners"] == ["semgrep"]
+    assert host["sandbox.network_scanners"] == ["opengrep"]
     assert host["sandbox.read_path_scanners"] == ["zizmor"]
     assert host["sandbox.env_scanners"] == ["zizmor"]
     assert inside == host
@@ -441,7 +441,7 @@ def test_control_a_file_in_the_scanned_checkout_keeps_nothing_inside(
     assert in_any_checkout(path)
     # The scanned repository's own file: the base is the defaults.
     assert host["max_members"] == 5000
-    assert host["semgrep.metrics"] == "auto"
+    assert host["opengrep.metrics"] == "auto"
     assert host["sandbox.network_limit"] is None
     assert host["sandbox.extra_read_paths"] == []
     assert host["sandbox.read_path_scanners"] == []
@@ -1214,8 +1214,8 @@ def test_a_stopped_walk_keeps_the_limits_of_an_ash_config_file_inside(
     assert FLAG in cmd
     assert RETIRED_FLAG not in cmd
     assert host["max_members"] == 10
-    assert host["semgrep.metrics"] == "off"
-    assert host["sandbox.network_limit"] == ["semgrep"]
+    assert host["opengrep.metrics"] == "off"
+    assert host["sandbox.network_limit"] == ["opengrep"]
     assert host["sandbox.network_scanners"] is None
     assert host["sandbox.extra_read_paths"] == []
     assert host["sandbox.read_path_scanners"] == []

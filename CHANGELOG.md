@@ -46,6 +46,53 @@
 
 ## Unreleased
 
+### Breaking changes
+
+- **A config no longer accepts `expiration` as a spelling of `expires`.** A suppression,
+  an exclusion or an ignore path that writes `expiration` is refused as an unknown key,
+  with `expires` as the did-you-mean (`Unknown key 'expiration' (did you mean
+  'expires'?)`); with `fail_on_unknown_keys: false` it loads with a warning and the entry
+  applies to nothing. 3.x accepted the spelling with a deprecation warning. The
+  `expiration` attribute of the entry models is gone (read `expires`), the published
+  JSON schemas and the operator CRDs no longer list an `expiration` property, and
+  `ashx config lint` no longer reports a `deprecated-spelling` issue: it reports the
+  refusal as a schema error. Results files that earlier ASH versions wrote still read
+  `expiration` as `expires` without a warning (`results diff`, `trend`, `merge` and
+  `report` are unaffected).
+- **`fail_on_unknown_keys` defaults to `true`.** An unknown key in a suppression or an
+  ignore-path entry now refuses the config at load (exit 3), naming the key with a
+  did-you-mean. Set `fail_on_unknown_keys: false` for the 3.x behavior: the config loads,
+  a warning names the key, and the entry applies to nothing until the key is fixed. The
+  warning no longer ends with `This will become an error in ASH v4.` The same default
+  now refuses a scan whose suppression has a `scope.engines` block that names a scanner
+  no plugin of the run registers, or that the named scanner refuses; 3.x warned about
+  both. Either way such a block suppresses nothing.
+- **The spellings deprecated for removal in 4.0 are removed.** Each now fails the way
+  any unknown command or value does:
+  - `build-image` is no longer a command; `ashx container build` takes the same options.
+  - `report`, `diff`, `trend`, `merge` and `inspect` are no longer top-level commands;
+    `ashx results report`, `results diff`, `results trend`, `results merge` and
+    `results inspect` take the same options. A removed word is a usage error (exit 5,
+    `No such command`) and runs nothing.
+  - A plugin manifest whose `tier` is `community` or `community_optin` is refused like any
+    other unknown tier; write `alpha` or `alpha_optin`. The image build no longer reads
+    the `ASH_COMMUNITY_PLUGIN_MODULES` build argument; pass `ASH_ALPHA_PLUGIN_MODULES`.
+    The `#community` anchor ids are gone from the docs; the redirects of the moved plugin
+    pages stay.
+- **Messages that named a removed spelling now name the `ashx` command that works**: the
+  scan summary's next steps, the scan help, the shard and merge refusals and warnings,
+  the off-host reporter refusals, the workspace reporter errors, the Markdown report's
+  truncation note, the diff refusal for sharded results, the run-history warning, and
+  the model descriptions the JSON schemas are generated from. `Invoke-ASH`'s
+  `ASH_OCI_RUNNER` deprecation names the `ashx` CLI.
+- **The deployment targets in this repository run the new spellings.** The CDK
+  constructs' merge step, the CDK app's distributed merge project, the Terraform
+  CodePipeline executor's merge buildspec and the Kubernetes operator's collector run
+  `ashx results merge`; the reusable `run-ash-security-scan.yml` workflow runs
+  `results report`. An ASH older than 3.9 has neither, so a deployment or a workflow
+  call pinned to one fails with a usage error. `Invoke-ASH` no longer routes the removed
+  words.
+
 ### Behavior changes
 
 - **`ash merge` records the merged run in the scan history.** With
@@ -70,7 +117,7 @@
   before). Every location that worked before still loads: `.ash/.ash.yaml`, `.ash.yml`,
   `ash.yaml` and the other names of the old list, each also under `.ash/`, and the
   `ashrc` names. A scan that reads one of them prints one warning that names the file
-  as deprecated and gives the path to move it to, and ASH 4.0 stops reading them. When
+  as deprecated and gives the path to move it to, and ASH 4.1 stops reading them. When
   `.ash.yaml` and an older file both exist, `.ash.yaml` is read and the warning names the
   file it shadowed; for a project that has `.ash.yml` beside `.ash.yaml`, this reverses
   which of the two is read. `--config` and `ASH_CONFIG` are unchanged and print no
@@ -159,12 +206,12 @@
   the name says maturity, not provenance. Behavior is unchanged. The plugin pages moved
   from `docs/plugins/community/` to `docs/plugins/alpha/` (the old URLs redirect), the
   repository's own scan config is now `.ash/.ash_alpha_plugins.yaml`, the register's
-  tier value is `alpha_optin`, and the CI config variant is `alpha`. Two old spellings
-  are accepted for one release: the register tier value `community_optin` (it warns)
-  and the Dockerfile build argument `ASH_COMMUNITY_PLUGIN_MODULES`, now
-  `ASH_ALPHA_PLUGIN_MODULES` (a value given for the old name wins). The docs checks
-  refuse the old `Community plugins` / `Community scanners` column headings and name
-  the new one. ASH 3.9.0 stops accepting the old spellings.
+  tier value is `alpha_optin`, and the CI config variant is `alpha`. The old spellings,
+  which 3.x accepted with a warning, are not accepted from 4.0: the register tier values
+  `community` and `community_optin` are refused, and the Dockerfile build argument
+  `ASH_COMMUNITY_PLUGIN_MODULES` is not read (pass `ASH_ALPHA_PLUGIN_MODULES`); see
+  Breaking changes. The docs checks refuse the old `Community plugins` /
+  `Community scanners` column headings and name the new one.
 
 ### Fixes
 
@@ -263,7 +310,7 @@
   removes the entry of a locked file that is gone. Line-range suppressions are
   unchanged. This repository's own symbol suppressions are locked in the same change.
   The lock is the root dotfile `.ash.lock`; a lock still at `.ash/ash.lock` is read
-  with a deprecation warning (deprecated in v3.9, removed in v4.0) that advises
+  with a deprecation warning (deprecated in v3.9, removed in v4.1) that advises
   `git mv`. See
   [Lock a symbol suppression to its file](docs/content/how-to/suppress-findings.md#lock).
 - **ASFF findings of one secret carry one `ash/correlationId`.** ASH does not

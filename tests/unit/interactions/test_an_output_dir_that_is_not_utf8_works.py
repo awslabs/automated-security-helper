@@ -258,7 +258,7 @@ def test_a_merge_into_it_reports_as_into_a_utf8_one(tmp_path):
     assert sharded.returncode == 2, _outcome(sharded)
     plain = tmp_path / "plain-out"
     odd = _not_utf8(tmp_path) / "out"
-    merge = ["merge", "--results", str(shard), "--no-color"]
+    merge = ["results", "merge", "--results", str(shard), "--no-color"]
 
     plain_child = _ash(tmp_path, [*merge, "--output-dir", str(plain)])
     odd_child = _ash(tmp_path, [*merge, "--output-dir", str(odd)])

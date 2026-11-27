@@ -24,7 +24,7 @@ The buildspec's `env.variables` block sets four variables:
 
 | Name                 | Description                                | Set to                                                     |
 |----------------------|--------------------------------------------|------------------------------------------------------------|
-| `RELEASE_TAG`        | The ASH release tag (or commit) to install | `v3.8.0`                                                   |
+| `RELEASE_TAG`        | The ASH release tag (or commit) to install | `v4.0.0`                                                   |
 | `ASH_MODE`           | The execution mode for ASH                 | `container`                                                |
 | `ASH_REPO_CLONE_URL` | The URL to clone the ASH repository        | `https://github.com/awslabs/automated-security-helper.git` |
 | `COLUMNS`            | Terminal width for better formatting       | `140`                                                      |
@@ -40,7 +40,7 @@ The buildspec's `env.variables` block sets four variables:
 - ASH exits non-zero when it finds actionable findings, which fails the build
 
 ### Post-Build
-- Prints the Markdown summary of the scan's results to the build log with `ash report`. CodeBuild runs this phase even when the build phase failed.
+- Prints the Markdown summary of the scan's results to the build log with `ash results report`. CodeBuild runs this phase even when the build phase failed.
 
 ## Artifacts
 
@@ -65,7 +65,7 @@ You can customize the ASH execution by modifying the `ash` command in the build 
 ```yaml
 build:
   commands:
-    - ash --mode container --build-target ci --no-progress --output-dir .ash/ash_output --scanners bandit,semgrep
+    - ash --mode container --build-target ci --no-progress --output-dir .ash/ash_output --scanners bandit,opengrep
 ```
 
 CodeBuild runs the build as root, so the example asks for the `ci` image stage, which

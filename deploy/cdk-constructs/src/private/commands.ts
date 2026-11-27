@@ -57,7 +57,7 @@ export interface CommonCommandOptions {
   readonly outputDirectory: string;
   /** Lowest severity that produces a non-zero exit code. */
   readonly severityThreshold: ASHSeverityThreshold;
-  /** Extra arguments appended verbatim to the `ash scan` invocation. */
+  /** Extra arguments appended verbatim to the `ashx scan` invocation. */
   readonly extraScanArguments: string[];
 }
 
@@ -92,11 +92,26 @@ export interface InstallOptions {
  * with the same ASH. It names the release this tree is: `cz bump` rewrites it at
  * every release, together with the generated `buildspec*.yml` files, so the
  * buildspec drift gate stays green on the release commit ([tool.commitizen]
- * version_files in pyproject.toml). The sharded commands need `ash merge` and the
+ * version_files in pyproject.toml). The sharded commands need `ashx merge` and the
  * shard options, which v3.7.0 and v3.7.1 predate, so this has to move with the
  * release.
  */
-export const DEFAULT_ASH_REF = 'v3.8.0';
+export const DEFAULT_ASH_REF = 'v4.0.0';
+
+/** The canonical ASH command. */
+export const ASH_CLI = 'ashx';
+
+/**
+ * ASH's deprecated alias, and the only name a v3 release provides.
+ *
+ * A caller can still pin a v3 ref, so the unsharded scan, which v3 can run,
+ * falls back to this name rather than fail on an `ashx` the release never had.
+ * Shard and merge need a v4 ref anyway (v3 has neither `--shard-index` nor
+ * `merge`), so they use `ASH_CLI` directly. Under `UVX` the fallback applies
+ * only to refs that are not a v4-or-later release tag (see `ashInvocation`), so
+ * with `DEFAULT_ASH_REF` at a v4 tag the default command is `ashx`.
+ */
+export const ASH_CLI_V3 = 'ash';
 
 /** Default repository ASH is installed from. */
 export const DEFAULT_ASH_REPOSITORY =
@@ -115,11 +130,11 @@ function gitRequirement(sourceRepository: string, ref: string): string {
 }
 
 /**
- * Render the commands that put an `ash` executable on `PATH`.
+ * Render the commands that put an `ashx` executable on `PATH`.
  *
  * Nothing here installs by distribution name. ASH is not published to PyPI, and
  * the name `automated-security-helper` there is an unrelated placeholder
- * package, so a name-based install would silently succeed, leave no `ash` on
+ * package, so a name-based install would silently succeed, leave no `ashx` on
  * `PATH`, and put a third party's code in the scan container. Installing from
  * the git repository at a pinned ref is what this repository documents for CI.
  *
@@ -252,22 +267,62 @@ function refCheckCommands(ref: string): string[] {
 }
 
 /**
- * Render the command that invokes `ash` itself, honouring the install mode.
+ * Render the command that invokes ASH itself, honouring the install mode.
  *
  * `UVX` has no installed executable, so its scan resolves the repository through
  * `uvx --from`. The explicit `--from` form is used rather than `uvx <spec>`
- * because the executable is named `ash` while the distribution is named
+ * because the executable is named `ashx` while the distribution is named
  * `automated-security-helper`, and `--from` is what states that difference.
+ *
+ * With `v3Compatible`, the command must also run on a v3 ref (see `ASH_CLI_V3`).
+ * An installed executable is resolved at run time, `ashx` first. `uvx` cannot be
+ * probed that way: it reports a missing executable with exit code 1, which is
+ * also ASH's scanner-error code, so try-`ashx`-then-retry could not tell a
+ * missing name from a failed scan. So the name is chosen from the ref at synth
+ * time: `ashx` for a release tag of v4 or later (a full version, a PEP 440
+ * prerelease such as `v4.0.0rc1`, or the floating `v4`), and otherwise the deprecated
+ * `ash`, which both majors provide. A branch, a commit or an `$ENV_VAR` could be
+ * either major, so it gets `ash` too.
  */
-function ashInvocation(install: InstallOptions): string {
+function ashInvocation(install: InstallOptions, v3Compatible = false): string {
   if (install.mode !== ASHInstallMode.UVX) {
-    return 'ash';
+    return v3Compatible
+      ? `"$(command -v ${ASH_CLI} || echo ${ASH_CLI_V3})"`
+      : ASH_CLI;
   }
-  const requirement = gitRequirement(
-    install.sourceRepository,
-    install.version ?? DEFAULT_ASH_REF,
-  );
-  return `uvx --from ${requirement} ash`;
+  const ref = install.version ?? DEFAULT_ASH_REF;
+  const requirement = gitRequirement(install.sourceRepository, ref);
+  const cli = v3Compatible && !refProvidesAshx(ref) ? ASH_CLI_V3 : ASH_CLI;
+  return `uvx --from ${requirement} ${cli}`;
+}
+
+/**
+ * A release tag: either a full version or a floating major tag.
+ *
+ * The full version follows commitizen's default PEP 440 scheme with
+ * `tag_format = "v$version"`, so `cz bump --prerelease rc` writes `v4.0.0rc1`,
+ * with no separator before the suffix. The trailing `-`/`+` tail keeps the
+ * semver-shaped tags this repository has released before (`v3.0.0-beta-*`).
+ *
+ * The floating major tag (`v4`) is the one ash-tag-on-merge moves to each
+ * release of that major. It needs the `v`: without one, an all-digit short
+ * commit hash would read as a major version.
+ */
+const RELEASE_TAG =
+  /^(?:v?(\d+)\.\d+\.\d+(?:(?:a|b|rc)\d+)?(?:\.post\d+)?(?:\.dev\d+)?(?:[-+][0-9A-Za-z.-]*)?|v(\d+))$/;
+
+/**
+ * Whether `ref` is a release tag of v4 or later, which ships `ashx`.
+ *
+ * The major is compared as a number, so `v10.0.0` counts. A floating `v4` tag
+ * only exists once a v4 release has been made, so it is as safe as a full tag.
+ */
+export function refProvidesAshx(ref: string): boolean {
+  const match = RELEASE_TAG.exec(ref);
+  if (match === null) {
+    return false;
+  }
+  return Number(match[1] ?? match[2]) >= 4;
 }
 
 /**
@@ -283,7 +338,7 @@ export function scanCommands(
   install: InstallOptions,
 ): string[] {
   const argv = [
-    ashInvocation(install),
+    ashInvocation(install, true),
     'scan',
     '--source-dir',
     shellArg(options.sourceDirectory),
@@ -307,7 +362,7 @@ export function scanCommands(
  * merge from ever running, which would replace the aggregate verdict with a
  * partial one. The merge step is the only step allowed to fail on findings.
  *
- * No `--min-severity` here, deliberately. On `ash scan` that option changes only
+ * No `--min-severity` here, deliberately. On `ashx scan` that option changes only
  * that scan's exit code, and a shard's exit code is discarded by design, so
  * passing it would read as if it set the severity floor while having no effect
  * on anything. The floor belongs on the command that owns the verdict, which is
@@ -339,7 +394,7 @@ export function shardScanCommands(
  * and one exit code.
  *
  * One `--results` per shard, each a directory. Passing a single parent directory
- * holding every shard is refused by `ash merge`, on the grounds that it would
+ * holding every shard is refused by `ashx merge`, on the grounds that it would
  * make the merged set depend on whatever else happens to be in the tree,
  * including a previous merged report.
  *
@@ -358,7 +413,7 @@ export function mergeCommands(
   if (resultsPaths.length === 0) {
     throw new Error('mergeCommands requires at least one results path.');
   }
-  const argv = [ashInvocation(install), 'merge'];
+  const argv = [ashInvocation(install), 'results', 'merge'];
   for (const results of resultsPaths) {
     argv.push('--results', shellArg(results));
   }

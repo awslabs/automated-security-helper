@@ -554,10 +554,10 @@ class TestMatching:
         yesterday = (date.today() - timedelta(days=1)).isoformat()
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         finding = _finding("src/app.py", inside)
-        assert _suppression(symbol="module_function", expiration=tomorrow).matches(
+        assert _suppression(symbol="module_function", expires=tomorrow).matches(
             finding, resolver
         )
-        assert not _suppression(symbol="module_function", expiration=yesterday).matches(
+        assert not _suppression(symbol="module_function", expires=yesterday).matches(
             finding, resolver
         )
 
@@ -1030,7 +1030,7 @@ class TestApplyToSarif:
             }
         ]
         # The linter rebuilds the same id from that report entry, so
-        # `ash config lint --fix-unused` comments out the right entry.
+        # `ashx config lint --fix-unused` comments out the right entry.
         assert (
             ConfigLinter._make_suppression_id(reporter._suppression_to_dict(gone))
             == gone.id

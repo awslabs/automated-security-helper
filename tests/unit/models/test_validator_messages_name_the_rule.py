@@ -81,14 +81,12 @@ def _assert_refused_with(error: dict, message: str) -> None:
     [
         pytest.param(
             lambda: AshSuppression(
-                rule_id="B101", path="a.py", reason="r", expiration=CANARY
+                rule_id="B101", path="a.py", reason="r", expires=CANARY
             ),
             id="suppression",
         ),
         pytest.param(
-            lambda: IgnorePathWithReason(
-                path="vendor/**", reason="r", expiration=CANARY
-            ),
+            lambda: IgnorePathWithReason(path="vendor/**", reason="r", expires=CANARY),
             id="ignore-path",
         ),
         pytest.param(

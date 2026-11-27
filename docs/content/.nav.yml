@@ -14,6 +14,12 @@ nav:
       - Roll out across repositories: getting-started/platform-teams.md
   - How-to guides:
       - Install ASH: how-to/install.md
+      - Native packages:
+          - Overview: docs/native-packages/index.md
+          - MSIX (Windows): docs/native-packages/msix.md
+          - winget (Windows): docs/native-packages/winget.md
+          - Chocolatey (Windows): docs/native-packages/chocolatey.md
+          - Flatpak (Linux): docs/native-packages/flatpak.md
       - Manage scanner tools: docs/advanced-usage.md
       - Configure ASH: how-to/configure.md
       - Choose scanners: how-to/choose-scanners.md

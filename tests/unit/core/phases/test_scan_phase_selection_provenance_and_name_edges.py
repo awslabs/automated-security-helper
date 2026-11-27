@@ -625,17 +625,17 @@ class TestEveryRecorderOfAScannerThatDidNotRunGuardsItsWrite:
 
 class TestSelectionRefusals:
     def test_a_self_cancelling_selection_is_refused_by_the_phase(self, ctx):
-        phase = _phase(ctx, [_scanner_class("bandit"), _scanner_class("semgrep")])
+        phase = _phase(ctx, [_scanner_class("bandit"), _scanner_class("checkov")])
 
         # Red at the base: zero scanners ran and the run read clean.
         with pytest.raises(ScannerSelectionError, match="cancels itself"):
             _run(phase, enabled_scanners=["bandit"], excluded_scanners=["Bandit"])
 
     def test_the_control_an_engine_subtracted_allowlist_is_unchanged(self, ctx):
-        phase = _phase(ctx, [_scanner_class("bandit"), _scanner_class("semgrep")])
+        phase = _phase(ctx, [_scanner_class("bandit"), _scanner_class("checkov")])
 
         results = _run(
-            phase, enabled_scanners=["semgrep"], excluded_scanners=["bandit"]
+            phase, enabled_scanners=["checkov"], excluded_scanners=["bandit"]
         )
 
         assert results.scanner_results["bandit"].excluded is True

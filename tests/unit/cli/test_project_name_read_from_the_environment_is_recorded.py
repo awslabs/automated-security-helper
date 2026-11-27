@@ -213,7 +213,13 @@ def runs(tmp_path_factory):
             before = len(bodies)
             steps[f"scan{index}"] = ash(*scan_argv, *(overrides if index == 0 else []))
             sent_by += [f"scan{index}"] * (len(bodies) - before)
-        merge_argv = ["merge", "--output-dir", "merged", "--no-fail-on-findings"]
+        merge_argv = [
+            "results",
+            "merge",
+            "--output-dir",
+            "merged",
+            "--no-fail-on-findings",
+        ]
         for index in (0, 1):
             merge_argv += [
                 "--results",
@@ -225,6 +231,7 @@ def runs(tmp_path_factory):
         for fmt in ("s3", "cloudwatch-logs"):
             before = len(bodies)
             steps[f"report-{fmt}"] = ash(
+                "results",
                 "report",
                 "--format",
                 fmt,

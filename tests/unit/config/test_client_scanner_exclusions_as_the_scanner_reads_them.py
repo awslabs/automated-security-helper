@@ -240,7 +240,7 @@ def _bandit_paths(config) -> list[str]:
 def test_an_expired_client_entry_is_neither_kept_nor_recorded(tmp_path):
     config = AshConfig()
     config.scanners.bandit.options.excluded_paths = [
-        IgnorePathWithReason(path="old", reason="r", expiration="2000-01-01"),
+        IgnorePathWithReason(path="old", reason="r", expires="2000-01-01"),
         IgnorePathWithReason(path="new", reason="r"),
     ]
 
@@ -264,7 +264,7 @@ def test_a_client_copy_of_an_operator_entry_takes_the_operators_expiration(tmp_p
         IgnorePathWithReason(path="shared", reason="client says"),
     ]
     operator = _operator_bandit(
-        {"path": "shared", "reason": "op", "expiration": "2099-01-01"}
+        {"path": "shared", "reason": "op", "expires": "2099-01-01"}
     )
 
     _strip(config, {}, operator, tmp_path)
@@ -272,7 +272,7 @@ def test_a_client_copy_of_an_operator_entry_takes_the_operators_expiration(tmp_p
     kept = config.scanners.bandit.options.excluded_paths
     assert [entry.path for entry in kept] == ["shared"]
     assert isinstance(kept[0], IgnorePathWithReason)
-    assert kept[0].expiration == "2099-01-01"
+    assert kept[0].expires == "2099-01-01"
     assert kept[0].reason == "op"
     assert config._client_scanner_exclusions == []
 
@@ -281,9 +281,7 @@ def test_a_client_copy_of_an_operator_entry_takes_the_operators_expiration(tmp_p
     "client_entry",
     [
         IgnorePathWithReason(path="shared", reason="client says"),
-        IgnorePathWithReason(
-            path="shared", reason="client says", expiration="2099-01-01"
-        ),
+        IgnorePathWithReason(path="shared", reason="client says", expires="2099-01-01"),
     ],
     ids=["no-expiration", "a-later-expiration"],
 )
@@ -294,7 +292,7 @@ def test_a_client_copy_of_an_expired_operator_entry_is_dropped(tmp_path, client_
     config = AshConfig()
     config.scanners.bandit.options.excluded_paths = [client_entry]
     operator = _operator_bandit(
-        {"path": "shared", "reason": "op", "expiration": "2000-01-01"}
+        {"path": "shared", "reason": "op", "expires": "2000-01-01"}
     )
 
     _strip(config, {}, operator, tmp_path)
@@ -316,11 +314,11 @@ def test_an_expired_operator_entry_is_blamed_on_the_client_only_when_a_delivered
     file touched the option. Dropped either way (the scanner would not apply
     it), but blamed only on the files that wrote it."""
     operator = _operator_bandit(
-        {"path": "legacy", "reason": "op", "expiration": "2000-01-01"}
+        {"path": "legacy", "reason": "op", "expires": "2000-01-01"}
     )
     untouched = AshConfig()
     untouched.scanners.bandit.options.excluded_paths = [
-        IgnorePathWithReason(path="legacy", reason="op", expiration="2000-01-01"),
+        IgnorePathWithReason(path="legacy", reason="op", expires="2000-01-01"),
     ]
 
     _strip(untouched, {}, operator, tmp_path)
@@ -337,10 +335,10 @@ def test_an_expired_operator_entry_is_blamed_on_the_client_only_when_a_delivered
     # The control: a delivered file that writes the same pattern is blamed.
     written = AshConfig()
     written.scanners.bandit.options.excluded_paths = [
-        IgnorePathWithReason(path="legacy", reason="client", expiration="2099-01-01"),
+        IgnorePathWithReason(path="legacy", reason="client", expires="2099-01-01"),
     ]
     delivered = _operator_bandit(
-        {"path": "legacy", "reason": "client", "expiration": "2099-01-01"}
+        {"path": "legacy", "reason": "client", "expires": "2099-01-01"}
     )
 
     _strip(written, delivered, operator, tmp_path)
@@ -362,11 +360,11 @@ def test_an_override_repeating_an_expired_operator_path_is_blamed_on_the_client(
     the operator did not write that value, so the warning names the client. An
     entry that matches the operator's expired day stays the operator's."""
     operator = _operator_bandit(
-        {"path": "legacy", "reason": "op", "expiration": "2000-01-01"}
+        {"path": "legacy", "reason": "op", "expires": "2000-01-01"}
     )
     override = AshConfig()
     override.scanners.bandit.options.excluded_paths = [
-        IgnorePathWithReason(path="legacy", reason="client", expiration="2099-01-01"),
+        IgnorePathWithReason(path="legacy", reason="client", expires="2099-01-01"),
     ]
 
     _strip(override, {}, operator, tmp_path)
@@ -382,7 +380,7 @@ def test_an_override_repeating_an_expired_operator_path_is_blamed_on_the_client(
 
     same_day = AshConfig()
     same_day.scanners.bandit.options.excluded_paths = [
-        IgnorePathWithReason(path="legacy", reason="op", expiration="2000-01-01"),
+        IgnorePathWithReason(path="legacy", reason="op", expires="2000-01-01"),
     ]
 
     _strip(same_day, {}, operator, tmp_path)
@@ -405,14 +403,14 @@ def test_an_operator_file_respelling_a_trusted_expired_path_is_not_blamed_on_the
     with a day no operator file wrote stays the client's."""
     base = AshConfig()
     base.scanners.bandit.options.excluded_paths = [
-        IgnorePathWithReason(path="legacy", reason="op", expiration="2000-01-01"),
+        IgnorePathWithReason(path="legacy", reason="op", expires="2000-01-01"),
     ]
     operator = _operator_bandit(
-        {"path": "legacy", "reason": "op2", "expiration": "2099-01-01"}
+        {"path": "legacy", "reason": "op2", "expires": "2099-01-01"}
     )
     merged = AshConfig()
     merged.scanners.bandit.options.excluded_paths = [
-        IgnorePathWithReason(path="legacy", reason="op2", expiration="2099-01-01"),
+        IgnorePathWithReason(path="legacy", reason="op2", expires="2099-01-01"),
     ]
 
     _strip(merged, {}, operator, tmp_path, base=base)
@@ -430,7 +428,7 @@ def test_an_operator_file_respelling_a_trusted_expired_path_is_not_blamed_on_the
     # operator file holds is still the client's.
     override = AshConfig()
     override.scanners.bandit.options.excluded_paths = [
-        IgnorePathWithReason(path="legacy", reason="client", expiration="2088-01-01"),
+        IgnorePathWithReason(path="legacy", reason="client", expires="2088-01-01"),
     ]
 
     _strip(override, {}, operator, tmp_path, base=base)
@@ -453,10 +451,10 @@ def test_a_day_an_earlier_operator_file_wrote_and_a_later_one_wiped_is_not_the_o
     operator's."""
     base = AshConfig()
     base.scanners.bandit.options.excluded_paths = [
-        IgnorePathWithReason(path="legacy", reason="op", expiration="2000-01-01"),
+        IgnorePathWithReason(path="legacy", reason="op", expires="2000-01-01"),
     ]
     first = _operator_bandit(
-        {"path": "legacy", "reason": "op2", "expiration": "2088-01-01"}
+        {"path": "legacy", "reason": "op2", "expires": "2088-01-01"}
     )
     second = _operator_bandit({"path": "other", "reason": "op3"})
 
@@ -478,9 +476,7 @@ def test_a_day_an_earlier_operator_file_wrote_and_a_later_one_wiped_is_not_the_o
     def override():
         config = AshConfig()
         config.scanners.bandit.options.excluded_paths = [
-            IgnorePathWithReason(
-                path="legacy", reason="client", expiration="2088-01-01"
-            ),
+            IgnorePathWithReason(path="legacy", reason="client", expires="2088-01-01"),
         ]
         return config
 
@@ -518,13 +514,13 @@ def test_a_client_string_copy_of_an_operator_entry_follows_the_operators_expirat
     expired applied again, for good. Expired, the copy is dropped; unexpired,
     the operator's path stays as the string the option holds."""
     config = AshConfig()
-    config.scanners.semgrep.options.exclude = ["shared"]
+    config.scanners.opengrep.options.exclude = ["shared"]
     operator = {
         "scanners": {
-            "semgrep": {
+            "opengrep": {
                 "options": {
                     "exclude": [
-                        {"path": "shared", "reason": "op", "expiration": expiration}
+                        {"path": "shared", "reason": "op", "expires": expiration}
                     ]
                 }
             }
@@ -533,7 +529,7 @@ def test_a_client_string_copy_of_an_operator_entry_follows_the_operators_expirat
 
     _strip(config, {}, operator, tmp_path)
 
-    assert config.scanners.semgrep.options.exclude == kept
+    assert config.scanners.opengrep.options.exclude == kept
     assert config._client_scanner_exclusions == []
 
 
@@ -546,9 +542,7 @@ def test_a_client_model_copy_of_an_operator_string_is_the_operators_path_alone(
     set it."""
     config = AshConfig()
     config.scanners.bandit.options.excluded_paths = [
-        IgnorePathWithReason(
-            path="shared", reason="client says", expiration="2099-01-01"
-        ),
+        IgnorePathWithReason(path="shared", reason="client says", expires="2099-01-01"),
     ]
 
     _strip(config, {}, _operator_bandit("shared"), tmp_path)
@@ -556,11 +550,11 @@ def test_a_client_model_copy_of_an_operator_string_is_the_operators_path_alone(
     kept = config.scanners.bandit.options.excluded_paths
     assert [entry.path for entry in kept] == ["shared"]
     assert isinstance(kept[0], IgnorePathWithReason)
-    assert kept[0].expiration is None
+    assert kept[0].expires is None
     assert config._client_scanner_exclusions == []
 
 
-_SHARED_OPERATOR_ENTRY = {"path": "shared", "reason": "op", "expiration": "2099-01-01"}
+_SHARED_OPERATOR_ENTRY = {"path": "shared", "reason": "op", "expires": "2099-01-01"}
 
 
 @pytest.mark.parametrize(
@@ -593,7 +587,7 @@ def test_an_operator_entry_patched_in_above_the_option_is_the_operators(
 
     kept = config.scanners.bandit.options.excluded_paths
     assert [entry.path for entry in kept] == ["shared"]
-    assert kept[0].expiration == "2099-01-01"
+    assert kept[0].expires == "2099-01-01"
     assert kept[0].reason == "op"
     assert config._client_scanner_exclusions == []
 

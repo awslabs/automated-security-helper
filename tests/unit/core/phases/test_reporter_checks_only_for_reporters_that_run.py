@@ -605,7 +605,7 @@ def _merge(tmp_path: Path, shard_paths: List[str], *extra: str):
 
     from automated_security_helper.cli.main import app
 
-    args = ["merge"]
+    args = ["results", "merge"]
     for path in shard_paths:
         args += ["--results", path]
     args += ["--output-dir", str(tmp_path / "merged"), *extra]
@@ -652,6 +652,7 @@ def _report(tmp_path: Path, report_format: str, *extra: str):
     return CliRunner().invoke(
         app,
         [
+            "results",
             "report",
             "--format",
             report_format,

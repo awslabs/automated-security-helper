@@ -125,7 +125,7 @@ class TestAshSuppressionMatches:
             path="src/file.py",
             rule_id="TEST-001",
             reason="r",
-            expiration=past,
+            expires=past,
         )
         finding = _make_finding(rule_id="TEST-001", line_start=10, line_end=10)
         assert suppression.matches(finding) is False
@@ -187,7 +187,7 @@ class TestAshSuppressionIsExpired:
             path="src/file.py",
             rule_id="TEST-001",
             reason="r",
-            expiration=past,
+            expires=past,
         )
         assert suppression.is_expired is True
 
@@ -197,7 +197,7 @@ class TestAshSuppressionIsExpired:
             path="src/file.py",
             rule_id="TEST-001",
             reason="r",
-            expiration=future,
+            expires=future,
         )
         assert suppression.is_expired is False
 
@@ -222,7 +222,7 @@ class TestAshSuppressionDaysUntilExpiry:
             path="src/file.py",
             rule_id="TEST-001",
             reason="r",
-            expiration=future,
+            expires=future,
         )
         assert suppression.days_until_expiry == 30
 
@@ -240,7 +240,7 @@ class TestAshSuppressionDaysUntilExpiry:
             path="src/file.py",
             rule_id="TEST-001",
             reason="r",
-            expiration=past,
+            expires=past,
         )
         # Past date yields a negative count (e.g., -5). Callers that only care
         # about "is it already expired" should use is_expired.

@@ -21,7 +21,7 @@ What the plugin adds once it is composed in:
   records suppressions with reasons and expiration dates, before the Unit's
   completion handoff.
 - At Build and Test, once per intent, the quality agent runs a full
-  `ash scan --no-progress`, copies the scanner table into the stage summary
+  `ashx scan --no-progress`, copies the scanner table into the stage summary
   for the approval gate, and does not proceed while the scan exits 1 or 2.
 - In every stage, a short rules file keeps the ASH habits in front of the
   agent: read the exit code, never loosen the gate to pass, never commit
@@ -50,7 +50,7 @@ aidlc doctor
 The project also needs ASH itself, with `ash` on the `PATH` the agent uses,
 because the plugin's steps run ordinary local scans there; see
 [Install ASH](install.md). Installing the scanner tools up front with
-`ash dependencies install` saves the first scan the downloads.
+`ashx dependencies install` saves the first scan the downloads.
 
 ## 2. Get the plugin
 

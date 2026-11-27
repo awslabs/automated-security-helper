@@ -63,7 +63,7 @@ ASH's own exit code read the same field. Both assertions above have a counterpar
 ``run_ash_scan._compute_exit_code``: ``incomplete_scanners`` for the per-scanner one
 and ``no_scanner_ran`` for the set-level one. The set-level pair was added later than
 this script, and until it existed the two did disagree -- on a Windows run of this
-repository's own config, ``ash scan --scanners semgrep`` recorded ten SKIPPED and
+repository's own config, ``ashx scan --scanners semgrep`` recorded ten SKIPPED and
 exited 0 while this script exited 1 on the same file.
 
 The set-level questions differ in one way, on purpose. ASH's ``no_scanner_ran`` counts
@@ -283,7 +283,7 @@ def main() -> int:
     # shards own, and how --exclude-scanners records an operator's choice. So a
     # results file in which *every* scanner is SKIPPED passes the per-scanner loop
     # while having measured nothing, and that is reachable from a typo -- measured
-    # on this tree, `ash scan --scanners detect_secrets` (the name is
+    # on this tree, `ashx scan --scanners detect_secrets` (the name is
     # detect-secrets) matched no scanner, recorded ten SKIPPED, and this script
     # returned 0.
     #

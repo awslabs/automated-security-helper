@@ -32,7 +32,7 @@ What this module deliberately ignores, and why
   severity threshold or suppression list there, and it would work. It would also
   put ASH policy in a file owned by another tool, whose schema ASH does not
   control and whose keys VS Code may repurpose. ASH policy lives in ASH's own
-  config file, where ``ash config lint`` can see it.
+  config file, where ``ashx config lint`` can see it.
 * A folder entry's ``name`` -- also entirely. VS Code uses it as a display name
   in the sidebar, and reading it would make ASH's per-project attribution label
   depend on an editor preference. The resolver derives labels from

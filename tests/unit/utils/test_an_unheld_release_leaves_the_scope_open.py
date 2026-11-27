@@ -18,7 +18,7 @@ pytestmark = pytest.mark.unit
 
 
 def test_an_unheld_release_leaves_a_live_scope_open():
-    scope, token = ash_log.open_run_log_scope()
+    scope, reset_handle = ash_log.open_run_log_scope()
     try:
         ash_log.release_run_log_scope(scope)
         assert scope in ash_log._ACTIVE_RUN_LOG_SCOPES, (
@@ -31,5 +31,5 @@ def test_an_unheld_release_leaves_a_live_scope_open():
             "the last real holder's release did not close the scope"
         )
     finally:
-        ash_log.disown_run_log_scope(token)
+        ash_log.disown_run_log_scope(reset_handle)
         ash_log.close_run_log_scope(scope)

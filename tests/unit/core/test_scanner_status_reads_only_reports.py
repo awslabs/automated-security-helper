@@ -138,6 +138,7 @@ def _merge_the_sample_results_as_one_shard(tmp_path, *flags):
         return CliRunner().invoke(
             app,
             [
+                "results",
                 "merge",
                 "--results",
                 str(shard),

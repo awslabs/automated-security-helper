@@ -41,7 +41,6 @@ E12_GRADE_SCOPE = (
     _SCANNERS + "grype_scanner.py",
     _SCANNERS + "npm_audit_scanner.py",
     _SCANNERS + "opengrep_scanner.py",
-    _SCANNERS + "semgrep_scanner.py",
     _SCANNERS + "zizmor_scanner.py",
     "plugin_modules/ash_betterleaks_plugins/betterleaks_scanner.py",
     "plugin_modules/ash_guarddog_plugins/guarddog_scanner.py",

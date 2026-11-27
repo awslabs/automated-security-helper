@@ -34,13 +34,13 @@ def test_an_image_submission_is_a_scan_invocation(argv):
     assert is_scan_invocation(argv)
 
 
-@pytest.mark.parametrize("value", ["report", "build-image", "merge"])
+@pytest.mark.parametrize("value", ["results", "container", "config"])
 def test_a_bare_invocation_whose_image_value_spells_a_subcommand_runs_cold(value):
     assert not is_scan_invocation(["--image", value])
 
 
 def test_a_scan_subcommand_keeps_an_image_value_that_spells_a_subcommand():
-    assert is_scan_invocation(["scan", "--image", "report"])
+    assert is_scan_invocation(["scan", "--image", "results"])
 
 
 def test_no_express_wins_over_an_image_option():

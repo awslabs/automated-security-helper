@@ -120,13 +120,13 @@ ash --sandbox AUTO --phases convert --phases scan
 ash --log-level=DEBUG --mode=precommit
 ash scan --scanners {SCANNER} --exclude-scanners {SCANNER},{SCANNER}
 ash --scanners {SCANNER.upper()} --output-formats sarif,junitxml -f html --format text
-ash merge --results a --results b --output-formats sarif
-ash report --format {REPORTER}
-ash report --format {REPORTER.upper()}
+ash results merge --results a --results b --output-formats sarif
+ash results report --format {REPORTER}
+ash results report --format {REPORTER.upper()}
 ash dependencies install --tool {SCANNER} --tool {REPORTER} -T {CONVERTER}
 ash --mode "$MODE" --scanners "${{SCANNERS}}"
 ash scan --ash-plugin-modules acme_plugins --scanners acme-scanner
-ash report --format acme-format --config-overrides 'ash_plugin_modules+=[acme_plugins]'
+ash results report --format acme-format --config-overrides 'ash_plugin_modules+=[acme_plugins]'
 ash scan --ash-plugin-modules automated_security_helper.plugin_modules.x --scanners {SCANNER}
 {FENCE}
 
@@ -135,7 +135,7 @@ ash scan --ash-plugin-modules automated_security_helper.plugin_modules.x --scann
 ash --log-level <level> --mode <mode>
 {FENCE}
 
-Run `ash --mode container` or `ash --mode <mode>`, and `ash report --format {REPORTER}`.
+Run `ash --mode container` or `ash --mode <mode>`, and `ash results report --format {REPORTER}`.
 """
 
 VALUE_DEFECTS = [
@@ -183,7 +183,7 @@ VALUE_DEFECTS = [
     ),
     (
         "merge output format",
-        f"{FENCE}bash\nash merge --results a --output-formats sarf\n{FENCE}\n",
+        f"{FENCE}bash\nash results merge --results a --output-formats sarf\n{FENCE}\n",
         "'sarf' is not an output format",
         2,
     ),
@@ -201,7 +201,7 @@ VALUE_DEFECTS = [
     ),
     (
         "reporter",
-        f"{FENCE}bash\nash report --format not-a-reporter\n{FENCE}\n",
+        f"{FENCE}bash\nash results report --format not-a-reporter\n{FENCE}\n",
         "ASH has no reporter named 'not-a-reporter'",
         2,
     ),
@@ -308,7 +308,8 @@ def test_the_registries_match_the_inventories_the_reference_checks_read():
 def test_output_formats_are_the_export_formats():
     from automated_security_helper.core.enums import ExportFormat
 
-    for command in (("ash",), ("ash", "scan"), ("ash", "merge")):
+    root = dc.DOCS_ROOT
+    for command in ((root,), (root, "scan"), (root, "results", "merge")):
         values = dc.option_value_set(command, "--output-formats")
         assert values is not None, command
         assert values.names == frozenset(f.value for f in ExportFormat)
@@ -428,7 +429,7 @@ pipeline {{
             --fail-on-findings
         '''
         sh "ash --version"
-        sh(script: 'ash report --format {REPORTER}', returnStatus: true)
+        sh(script: 'ash results report --format {REPORTER}', returnStatus: true)
       }}
     }}
   }}

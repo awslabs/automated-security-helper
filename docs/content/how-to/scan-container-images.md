@@ -15,15 +15,15 @@ with `--source-dir` and with the others:
 <!-- doctest: illustrative reason="needs a container runtime, network access and a registry that holds the image, and grype, syft and trivy installed on the host" -->
 ```bash
 # An indirect reference: resolved by an engine or the tools' own registry clients.
-ash scan --image registry.example.com/team/app:1.2.3
+ashx scan --image registry.example.com/team/app:1.2.3
 
 # A saved image you already hold: an uncompressed `docker save` or
 # `podman save` tarball (either archive format; ASH reads which it is).
 docker save registry.example.com/team/app:1.2.3 -o app.tar
-ash scan --image-archive app.tar
+ashx scan --image-archive app.tar
 
 # An OCI image-layout directory (the directory holding the oci-layout marker file).
-ash scan --image-layout ./app-layout/
+ashx scan --image-layout ./app-layout/
 ```
 
 Naming two of them in one call is refused before anything runs, with exit code 5 (a
@@ -31,7 +31,7 @@ usage error):
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash scan --image registry.example.com/team/app:1.2.3 --image-archive app.tar
+ashx scan --image registry.example.com/team/app:1.2.3 --image-archive app.tar
 ```
 
 Prefer a digest-pinned reference (`repo@sha256:...`): two scans of the same pinned
@@ -77,8 +77,8 @@ images in one call, repeat `--image` or give a comma-separated list (the two for
 
 <!-- doctest: illustrative reason="scans two images from a registry, which needs network access and grype, syft and trivy installed on the host" -->
 ```bash
-ash scan --image registry.example.com/team/app:1.2.3 --image registry.example.com/team/db:4.5
-ash scan --image registry.example.com/team/app:1.2.3,registry.example.com/team/db:4.5
+ashx scan --image registry.example.com/team/app:1.2.3 --image registry.example.com/team/db:4.5
+ashx scan --image registry.example.com/team/app:1.2.3,registry.example.com/team/db:4.5
 ```
 
 ASH then runs one single-image scan per reference, in the order given, each in its own
@@ -129,9 +129,9 @@ declared daemons -- else the platform's default socket), then podman (`CONTAINER
 then its sockets), then none. Docker *contexts* are not read: a daemon reachable only
 through one (Colima, OrbStack, Docker Desktop without the default socket) counts once
 `DOCKER_HOST` names it. With a daemon present, one pull serves every scanner -- the
-engine's content store is the dedup; trivy is told
-`--image-src=<engine>,remote`, so an image the daemon does not hold still scans from
-the registry. For a daemon that is only *declared* (no local socket), grype and syft
+engine's content store is the dedup; trivy runs as
+`trivy image --image-src=<engine>,remote`, so an image the daemon does not hold still
+scans from the registry. For a daemon that is only *declared* (no local socket), grype and syft
 get the reference without a scheme and with its sources named
 (`--from <engine> --from registry`): their client honors the declaration, the registry
 is still reached when the declaration is stale, and no local file or directory that
@@ -149,8 +149,8 @@ offline hosts use.
 
 containerd is reached only through a tool's own options and is never probed by ASH.
 
-trivy reads an OCI image-layout directory directly through the same `--input` flag
-that reads a saved archive (the pinned trivy's own container-image target
+trivy reads an OCI image-layout directory directly through the same
+`trivy image --input` flag that reads a saved archive (the pinned trivy's own container-image target
 documentation, its OCI Layout section), so every submission shape reaches every image
 scanner without re-packing.
 

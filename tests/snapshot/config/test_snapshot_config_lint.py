@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""`ash config lint`: every kind of lint issue, the fixes, and the file left behind.
+"""`ashx config lint`: every kind of lint issue, the fixes, and the file left behind.
 
 The fixtures between them trigger every ``LintCategory``. Which categories exist is
 read from the enum itself, not copied here, so adding a lint rule without a fixture
@@ -70,7 +70,7 @@ global_settings:
         so this check never runs there.
     - path: src/app.py
       rule_id: B105
-      expiration: "2020-01-31"
+      expires: "2020-01-31"
       reason: Temporary test credential
     - path: src/app.py
       rule_id: B106
@@ -78,7 +78,7 @@ global_settings:
       reason: Not a qualified name
     - path: src/app.py
       rule_id: B107
-      expiration: "31/01/2099"
+      expires: "31/01/2099"
       reason: Wrong date format
     - path: src/app.rb
       rule_id: B108

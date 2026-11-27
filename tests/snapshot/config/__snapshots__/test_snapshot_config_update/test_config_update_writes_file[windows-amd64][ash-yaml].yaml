@@ -139,7 +139,7 @@ global_settings:
     keep_runs: 50
 fail_on_findings: true
 fail_on_incomplete_scanners: true
-fail_on_unknown_keys: false
+fail_on_unknown_keys: true
 honor_ignore_files: true
 sandbox:
   mode: 'off'
@@ -329,21 +329,6 @@ scanners:
       patterns: []
       version: v2.0.0
       sha256: {}
-  semgrep:
-    enabled: false
-    options:
-      severity_threshold: null
-      scan_timeout: 1800
-      offline: false
-      config: p/ci
-      exclude:
-      - '*-converted.py'
-      - '*_report_result.txt'
-      exclude_rule: []
-      severity: []
-      metrics: auto
-      tool_version: null
-      install_timeout: 300
   syft:
     enabled: true
     options:

@@ -261,12 +261,23 @@ def test_the_sandbox_does_not_leak_the_private_hand_over_name(
 
 
 def test_only_opengrep_asks_for_the_git_safe_directory():
-    from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-        SemgrepScanner,
+    # Every builtin scanner, so a new one that also runs git on the scanned
+    # directory has to be added here on purpose. (The semgrep scanner this once
+    # named beside opengrep was removed in v4; opengrep serves its name.)
+    from automated_security_helper.plugin_modules.ash_builtin import scanners
+
+    asking = sorted(
+        name
+        for name in scanners.__all__
+        if getattr(
+            getattr(getattr(scanners, name), "sandbox_requirements", None),
+            "git_safe_directory",
+            False,
+        )
     )
 
-    assert getattr(OpengrepScanner.sandbox_requirements, "git_safe_directory", False)
-    assert not getattr(SemgrepScanner.sandbox_requirements, "git_safe_directory", False)
+    assert len(scanners.__all__) > 10
+    assert asking == ["OpengrepScanner"]
 
 
 @pytest.mark.skipif(

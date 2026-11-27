@@ -41,7 +41,9 @@ def check_comparable(results: AshAggregatedResults) -> None:
             "use the per-project results instead of a workspace aggregate"
         )
     if results.metadata.shard is not None:
-        raise ComparabilityRefusal("use ash merge before comparing sharded results")
+        raise ComparabilityRefusal(
+            "use ashx results merge before comparing sharded results"
+        )
     changed_files_only = getattr(results.metadata, "changed_files_only", None)
     if changed_files_only is True:
         raise ComparabilityRefusal(

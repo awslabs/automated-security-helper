@@ -20,7 +20,7 @@ The single SARIF run that every scanner's results are merged into, written as `r
 
 ## Alpha plugin
 
-One of the opt-in scanner packages (`ash_*_plugins`) that ships with ASH but is not built in, such as the trivy-repo, snyk-code, and ferret-scan scanners. Alpha is a maturity label: ASH ships these scanners but does not yet promote them as supported. The `ash_aws_plugins` reporters load the same opt-in way but are not alpha plugins. `ash scan` loads one only when a plugin module list names it; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do). See [Alpha plugins](../docs/plugins/alpha/index.md).
+One of the opt-in scanner packages (`ash_*_plugins`) that ships with ASH but is not built in, such as the trivy-repo, snyk-code, and ferret-scan scanners. Alpha is a maturity label: ASH ships these scanners but does not yet promote them as supported. The `ash_aws_plugins` reporters load the same opt-in way but are not alpha plugins. `ashx scan` loads one only when a plugin module list names it; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do). See [Alpha plugins](../docs/plugins/alpha/index.md).
 
 ## AWS plugins
 
@@ -32,7 +32,7 @@ The mark ASH puts on a suppression or ignore path set by a config file an MCP cl
 
 ## Content database
 
-Data a scanner downloads and matches code against: grype's and trivy's vulnerability databases, and the rulesets semgrep and opengrep use offline. Each has an age bound, and by default a scan fails when one is older than its bound. See [Content databases](content-databases.md).
+Data a scanner downloads and matches code against: grype's and trivy's vulnerability databases, and the rulesets opengrep uses offline. Each has an age bound, and by default a scan fails when one is older than its bound. See [Content databases](content-databases.md).
 
 ## Converter
 
@@ -48,7 +48,7 @@ A plugin that runs code when a scan event happens, such as a phase starting or a
 
 ## Exit code
 
-The number `ash scan` returns: 0 for success, 1 for an incomplete or failed scan, 2 for actionable findings, 3 for a configuration it cannot use or an input it refuses before scanning, such as a linked output directory, 4 for a workspace error, and 5 for a usage error, such as an unknown option. See [Exit codes](../reference/exit-codes.md).
+The number `ashx scan` returns: 0 for success, 1 for an incomplete or failed scan, 2 for actionable findings, 3 for a configuration it cannot use or an input it refuses before scanning, such as a linked output directory, 4 for a workspace error, and 5 for a usage error, such as an unknown option. See [Exit codes](../reference/exit-codes.md).
 
 ## Finding
 
@@ -64,7 +64,7 @@ An entry in `global_settings.ignore_paths`. Findings located in matching files a
 
 ## In-tree tool
 
-A program found inside the scanned directory, for example in an in-repo `.venv/bin` or `node_modules/.bin`. ASH does not run in-tree tools unless the operator passes `--allow-in-tree-tools`, sets `ASH_ALLOW_IN_TREE_TOOLS`, or sets `allow_in_tree_tools` in the `--cli-json-input` document. `ash mcp` never runs them. See [Manage scanner tools](../docs/advanced-usage.md#tools-inside-the-scanned-directory).
+A program found inside the scanned directory, for example in an in-repo `.venv/bin` or `node_modules/.bin`. ASH does not run in-tree tools unless the operator passes `--allow-in-tree-tools`, sets `ASH_ALLOW_IN_TREE_TOOLS`, or sets `allow_in_tree_tools` in the `--cli-json-input` document. `ashx mcp` never runs them. See [Manage scanner tools](../docs/advanced-usage.md#tools-inside-the-scanned-directory).
 
 ## Incomplete scan
 
@@ -152,7 +152,7 @@ The least severe level that counts as actionable: `global_settings.severity_thre
 
 ## Shard
 
-One of several scans of the same repository that each run a share of the scanners, combined afterward with `ash merge`. See [Scale to large repositories](../how-to/scale-large-repos.md).
+One of several scans of the same repository that each run a share of the scanners, combined afterward with `ashx results merge`. See [Scale to large repositories](../how-to/scale-large-repos.md).
 
 ## Suppression
 

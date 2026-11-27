@@ -33,6 +33,7 @@ from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
     ScannerSelectionError,
 )
+from automated_security_helper.utils.scanner_names import selection_key
 
 #: Who made the scanner selection: the CLI's ``--scanners`` and
 #: ``--exclude-scanners``, or the MCP workspace tool's ``scanners`` and
@@ -192,8 +193,12 @@ def selection_after_exclusions(
     excluded = [name for name in excluded if name.strip()]
     if not enabled or not excluded:
         return list(enabled)
-    excluded_keys = {name.lower().strip() for name in excluded}
-    remaining = [name for name in enabled if name.lower().strip() not in excluded_keys]
+    # Compared by the name a retired spelling resolves to, so
+    # ``--scanners opengrep --exclude-scanners semgrep`` is the cancelled selection
+    # it is: the scan phase serves ``semgrep`` with opengrep and would otherwise
+    # run nothing for an allowlist this check let through.
+    excluded_keys = {selection_key(name) for name in excluded}
+    remaining = [name for name in enabled if selection_key(name) not in excluded_keys]
     if remaining:
         return remaining
     names = selection_names(origin)
@@ -226,10 +231,10 @@ def refuse_selection_matching_no_scanner(
         origin: Who made the selection; the refusal names that caller's own
             input, the flag or the parameter.
     """
-    registered = sorted({name.lower().strip() for name in registered_names})
+    registered = sorted({selection_key(name) for name in registered_names})
     if not requested or not registered:
         return
-    if any(name.lower().strip() in registered for name in requested):
+    if any(selection_key(name) in registered for name in requested):
         return
     shown = sorted(name for name in requested if name.strip()) or ["(an empty name)"]
     raise ScannerSelectionError(
@@ -267,12 +272,12 @@ def exclusions_matching_no_scanner(
             ``excluded_scanners``.
         registered_names: The registered scanners' selectable names.
     """
-    registered = {name.lower().strip() for name in registered_names}
+    registered = {selection_key(name) for name in registered_names}
     if not registered:
         return []
     unmatched: Dict[str, str] = {}
     for name in excluded:
-        key = name.lower().strip()
+        key = selection_key(name)
         if key and key not in registered:
             unmatched.setdefault(key, name.strip())
     return list(unmatched.values())

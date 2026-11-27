@@ -12,7 +12,7 @@
 
 In this tutorial you add a workflow that scans every pull request with ASH, fails the check
 when ASH finds something, and shows the findings on the pull request and in GitHub code
-scanning. It uses the reusable workflows that ASH ships, pinned to `v3.8.0`.
+scanning. It uses the reusable workflows that ASH ships, pinned to `v4.0.0`.
 
 ## Before you start
 
@@ -20,7 +20,7 @@ scanning. It uses the reusable workflows that ASH ships, pinned to `v3.8.0`.
   request.
 - For step 4, code scanning: any public repository, or a private one with a GitHub Code
   Security license. Without it, skip step 4; the other steps work the same.
-- git, to look up the commit of `v3.8.0` in step 1.
+- git, to look up the commit of `v4.0.0` in step 1.
 
 Nothing else has to be installed on your machine. Using another CI service? See
 [Run ASH in GitLab CI](../how-to/ci/gitlab-ci.md) or
@@ -42,19 +42,19 @@ permissions:
   contents: read
 jobs:
   ash:
-    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.8.0
+    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v4.0.0
     permissions:
       contents: read
       checks: write
       pull-requests: write
     with:
-      ash-version: v3.8.0
+      ash-version: v4.0.0
       collect-sarif-report: false
 ```
 
 What the parts do:
 
-- `uses: ...@v3.8.0` selects the workflow file, and `ash-version: v3.8.0` selects the ASH
+- `uses: ...@v4.0.0` selects the workflow file, and `ash-version: v4.0.0` selects the ASH
   it installs. Without `ash-version`, the workflow installs ASH from `main`, so give both
   the same release to run the ASH that the workflow's steps were written for.
 - The three permissions let the job read the code, publish a check run, and comment on the
@@ -74,17 +74,17 @@ If your default branch is not `main`, change the branch name.
 Now pin the `uses:` line to a commit. ASH's zizmor scanner reports a `uses:` line that names
 a tag as `zizmor/unpinned-uses` at HIGH, because a tag can be moved and a commit cannot, so
 until you pin it every scan of this repository fails on this file. Look up the commit that
-`v3.8.0` points to:
+`v4.0.0` points to:
 
 <!-- doctest: illustrative reason="queries GitHub over the network" -->
 ```bash
-git ls-remote https://github.com/awslabs/automated-security-helper refs/tags/v3.8.0
+git ls-remote https://github.com/awslabs/automated-security-helper refs/tags/v4.0.0
 ```
 
-In the `uses:` line, replace the `v3.8.0` after the `@` with the 40-character SHA that
-the command prints, and add the comment `# v3.8.0` at the end of the line. Set
+In the `uses:` line, replace the `v4.0.0` after the `@` with the 40-character SHA that
+the command prints, and add the comment `# v4.0.0` at the end of the line. Set
 `ash-version` to the same SHA, so the workflow file and the ASH it installs both come from
-the commit of the `v3.8.0` release.
+the commit of the `v4.0.0` release.
 
 ## 2. Open a pull request and watch the scan
 
@@ -161,13 +161,13 @@ Add a second job under `jobs:`, at the same indentation as `ash`:
   sarif:
     needs: ash
     if: ${{ !cancelled() && needs.ash.outputs.artifact-id != '' }}
-    uses: awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@v3.8.0
+    uses: awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@v4.0.0
     permissions:
       contents: read
       security-events: write
 ```
 
-Pin its `uses:` line to the same commit as the first one, with the same `# v3.8.0`
+Pin its `uses:` line to the same commit as the first one, with the same `# v4.0.0`
 comment.
 
 This job downloads the `ash_output` artifact and uploads `ash.ghas.sarif` to code scanning.

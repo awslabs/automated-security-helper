@@ -1,0 +1,4 @@
+{
+  "cli_name": "ashx",
+  "comment": "The v4 CLI command name for the PowerShell and Python e2e scripts. Kept equal to ASH_CLI_NAME in packaging/cli-name.sh by tests/unit/test_e2e_assert_outcome.py."
+}

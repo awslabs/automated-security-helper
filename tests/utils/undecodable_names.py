@@ -166,11 +166,19 @@ class Ran(NamedTuple):
 
 
 def report_of(cwd: Path, output: Path, reporter: str) -> "Ran":
-    """``ash report`` of *output*'s saved results with *reporter*, uncolored, so the
-    report on stdout is the reporter's own text."""
+    """``ashx results report`` of *output*'s saved results with *reporter*,
+    uncolored, so the report on stdout is the reporter's own text."""
     return ash(
         cwd,
-        ["report", "--output-dir", str(output), "--format", reporter, "--no-color"],
+        [
+            "results",
+            "report",
+            "--output-dir",
+            str(output),
+            "--format",
+            reporter,
+            "--no-color",
+        ],
     )
 
 

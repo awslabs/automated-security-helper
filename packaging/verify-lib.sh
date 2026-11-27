@@ -1,0 +1,869 @@
+# shellcheck shell=bash
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Shared by packaging/deb/verify-in-container.sh and packaging/rpm/verify-in-container.sh.
+# Sourced, never executed. Everything that does not depend on the package format lives
+# here, so the two verifications cannot drift apart on what "a working scan" means:
+# the fixture, the scan invocation, the exit-code check, the report checks, the payload
+# gate and the negative controls that prove each of those can fail.
+#
+# WHAT A PASSING SCAN MEANS HERE
+#
+# Each install and each upgrade runs the three shared e2e cases from
+# tests/e2e/fixtures/cases.json and judges them with scripts/e2e/assert_outcome.py:
+# the planted secret must exit exactly 2 with exactly three results attributed to
+# detect-secrets, the clean tree must exit exactly 0, and the incomplete case must exit
+# exactly 1 with opengrep named incomplete in ash_aggregated_results.json. Both report
+# files must exist at their exact paths. Each of those is a separate check because each
+# one has failed independently of the others somewhere in this repository's history:
+# an earlier version of these scripts captured the exit code into SCAN_RC and never
+# compared it to anything, and a later one checked only that a clean scan was "not 2".
+#
+# Callers must set REPO (the repository root) before sourcing.
+
+: "${REPO:?verify-lib.sh: REPO must be set before sourcing}"
+
+# shellcheck source=packaging/cli-name.sh
+. "$REPO/packaging/cli-name.sh"
+: "${ASH_CLI_NAME:?packaging/cli-name.sh did not set ASH_CLI_NAME}"
+: "${ASH_PKG_NAME:?packaging/cli-name.sh did not set ASH_PKG_NAME}"
+
+ASH_LIB="/usr/lib/$ASH_PKG_NAME"
+ASH_VENV="$ASH_LIB/venv"
+FIXTURE_DIR=/opt/ash-fixture
+SCAN_OUT=/tmp/ash-scan-out
+SCAN_USER=ashscan
+# Pinned to the floor pyproject.toml declares for uv (uv>=0.13.4,<0.14), so the tool
+# is one ASH itself supports. Installed from the GitHub release tarball and checked
+# against the SHA-256 digests below before it is unpacked; the digests were measured
+# from the downloaded tarballs and match the .sha256 files published beside them. No
+# environment override: a different version needs different digests, so changing it
+# is an edit to these three lines together.
+UV_VERSION=0.13.4
+UV_SHA256_X86_64=2b428396f12572d4429cf210ca234dd599a33b3af0958a4d5ed569d63e3f344f
+UV_SHA256_AARCH64=1ae72b4718729e2ccc4f1ae2c6d1e531ca8467800e0546e9130b3886023a60ab
+# The interpreter the gates run under. uv downloads its own, so nothing installed here
+# satisfies a dependency of the package under test.
+GATE_PYTHON="${GATE_PYTHON:-3.12}"
+
+vl_say() { printf '%s\n' "$*"; }
+vl_fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+
+# --------------------------------------------------------------------------
+# Harness prerequisites. None of these is a dependency of the package.
+# --------------------------------------------------------------------------
+
+# useradd and su run the scan as an unprivileged user; uv runs the two gate scripts.
+# Installed before the package so the package manager's output for the package itself
+# lists only what the package pulled in.
+vl_install_harness_tools() {
+  local missing=()
+  command -v useradd >/dev/null 2>&1 || missing+=(useradd)
+  command -v su >/dev/null 2>&1 || missing+=(su)
+  if command -v dnf >/dev/null 2>&1; then
+    # tar and gzip for the uv installer, findutils for build.sh, git for
+    # build-test-wheels.sh. curl-minimal is in
+    # both EL base images already.
+    dnf -q -y install rpm-build findutils tar gzip git >/dev/null
+    if [ "${#missing[@]}" -gt 0 ]; then
+      dnf -q -y install shadow-utils util-linux >/dev/null
+    fi
+  else
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get -qq update >/dev/null
+    # curl for the uv installer. It pulls ca-certificates, which IS one of the .deb's
+    # dependencies, so that one dependency is pre-satisfied on these legs and is not
+    # evidence of anything. python3, python3-venv and python3-pip are deliberately NOT
+    # installed: the package has to pull them in itself.
+    apt-get -qq install -y --no-install-recommends curl ca-certificates git passwd util-linux >/dev/null
+  fi
+  local tool
+  for tool in useradd su curl; do
+    command -v "$tool" >/dev/null 2>&1 || vl_fail "harness tool $tool is still absent after installing it"
+  done
+  if ! command -v uv >/dev/null 2>&1; then
+    vl_install_uv
+  fi
+  case "$(uv --version)" in *" $UV_VERSION"*) ;; *) vl_fail "uv reports '$(uv --version)', not the pinned $UV_VERSION" ;; esac
+  vl_say "   harness: uv $UV_VERSION, useradd, su (none of them a package dependency)"
+}
+
+# Downloads the pinned uv release tarball, refuses it unless its SHA-256 matches the
+# digest pinned above, and installs the binary to /usr/local/bin. Replaces piping the
+# upstream install script into sh, which ran whatever that URL served.
+vl_install_uv() {
+  local triple sha tmp
+  case "$(uname -m)" in
+    x86_64) triple=x86_64-unknown-linux-gnu sha="$UV_SHA256_X86_64" ;;
+    aarch64 | arm64) triple=aarch64-unknown-linux-gnu sha="$UV_SHA256_AARCH64" ;;
+    *) vl_fail "no pinned uv checksum for architecture $(uname -m)" ;;
+  esac
+  tmp="$(mktemp -d)"
+  curl -fsSL -o "$tmp/uv.tar.gz" \
+    "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${triple}.tar.gz" \
+    || vl_fail "could not download uv $UV_VERSION for $triple"
+  if ! printf '%s  %s\n' "$sha" "$tmp/uv.tar.gz" | sha256sum -c --quiet - >/dev/null 2>&1; then
+    vl_fail "uv-${triple}.tar.gz has SHA-256 $(sha256sum "$tmp/uv.tar.gz" | cut -d' ' -f1), not the pinned $sha"
+  fi
+  tar -xzf "$tmp/uv.tar.gz" -C "$tmp"
+  install -m 0755 "$tmp/uv-${triple}/uv" /usr/local/bin/uv
+  rm -rf "$tmp"
+}
+
+vl_gate_python() {
+  uv run --quiet --no-project --python "$GATE_PYTHON" python "$@"
+}
+
+# --------------------------------------------------------------------------
+# The payload gate.
+# --------------------------------------------------------------------------
+vl_payload_gate() {
+  vl_gate_python "$REPO/packaging/assert-package-payload.py" \
+    --artifact-gate "$REPO/.github/scripts/assert-artifact-contents.py" "$1"
+}
+
+# --------------------------------------------------------------------------
+# The command the package puts on PATH, and the one it must not.
+# --------------------------------------------------------------------------
+#
+# The package ships exactly one command, /usr/bin/$ASH_CLI_NAME, and never /usr/bin/ash.
+# `ash` is the Almquist shell's name: Debian's `ash` package owns /bin/ash, and on a
+# merged-/usr host that is the same file as /usr/bin/ash, so dpkg does not see a second
+# package's /usr/bin/ash as a conflict. A package that installed it would replace the
+# shell. See packaging/cli-name.sh.
+#
+# Reads a package's file list on stdin, one path per line, absolute or `./`-relative,
+# as `dpkg -L`, `rpm -ql`, `rpm -qlp` and the last column of `dpkg-deb -c` print them.
+# $1 labels the list in messages. Returns non-zero rather than exiting, so the negative
+# control can observe it firing.
+vl_check_command_paths() {
+  local label="$1" paths bin_entries rc=0
+  paths="$(sed -e 's|^\./|/|' -e 's|/$||' | grep -v '^\.\?$' || true)"
+  if [ -z "$paths" ]; then
+    printf 'FAIL: %s: the file list is empty, so nothing below could be checked\n' "$label" >&2
+    return 1
+  fi
+  if grep -qxF "/usr/bin/$ASH_CLI_NAME" <<<"$paths"; then :; else
+    printf 'FAIL: %s does not list /usr/bin/%s\n' "$label" "$ASH_CLI_NAME" >&2
+    rc=1
+  fi
+  if grep -xE '/(usr/)?bin/ash' <<<"$paths" >&2; then
+    printf 'FAIL: %s lists the path above; /usr/bin/ash and /bin/ash belong to the Almquist shell\n' "$label" >&2
+    rc=1
+  fi
+  # Exactly one command: anything else under a bin directory is a second name on PATH.
+  bin_entries="$(grep -E '^/(usr/)?s?bin/.' <<<"$paths" | grep -vxF "/usr/bin/$ASH_CLI_NAME" || true)"
+  if [ -n "$bin_entries" ]; then
+    printf 'FAIL: %s puts more than /usr/bin/%s on PATH:\n%s\n' "$label" "$ASH_CLI_NAME" "$bin_entries" >&2
+    rc=1
+  fi
+  [ "$rc" -eq 0 ] && vl_say "   $label: /usr/bin/$ASH_CLI_NAME is the only command; no /usr/bin/ash"
+  return "$rc"
+}
+
+# The distribution's `ash` shell must still be what /usr/bin/ash is: a working shell
+# that runs POSIX arithmetic, not the package's wrapper, and what `ash` on PATH
+# resolves to. $1 names the package that owns the shell. Returns non-zero rather than
+# exiting, so the negative control can observe it firing.
+vl_assert_shell_intact() {
+  local owner="$1" resolved out found
+  [ -e /usr/bin/ash ] || { printf 'FAIL: /usr/bin/ash is missing; %s should have installed it\n' "$owner" >&2; return 1; }
+  resolved="$(readlink -f /usr/bin/ash)"
+  if grep -qF "/usr/lib/$ASH_PKG_NAME" "$resolved"; then
+    printf 'FAIL: /usr/bin/ash (%s) is the %s wrapper, not the %s shell\n' "$resolved" "$ASH_PKG_NAME" "$owner" >&2
+    return 1
+  fi
+  out="$(/usr/bin/ash -c 'x=$((6 * 7)); echo "shell:$x"' 2>&1)" || true
+  if [ "$out" != "shell:42" ]; then
+    printf "FAIL: /usr/bin/ash -c 'echo \$((6 * 7))' printed '%s', so it is not a working shell\n" "$out" >&2
+    return 1
+  fi
+  found="$(command -v ash || true)"
+  case "$found" in
+    /usr/bin/ash | /bin/ash) ;;
+    *) printf 'FAIL: ash on PATH resolves to [%s], not the shell\n' "$found" >&2; return 1 ;;
+  esac
+  vl_say "   /usr/bin/ash -> $resolved ($owner) runs \$((6 * 7)) = 42; ash on PATH is $found"
+}
+
+# --------------------------------------------------------------------------
+# No alternatives, no diversions.
+# --------------------------------------------------------------------------
+#
+# The file-list check above sees only files the package ships. A maintainer script can
+# still put a second name on PATH, or take /usr/bin/ash, without shipping either path:
+# `update-alternatives --install /usr/bin/ash ash /usr/bin/ashx 100` in a postinst, or
+# `dpkg-divert --rename /usr/bin/ash`. The package carries neither, so both are refused
+# twice: statically in the built package's scripts, and on the installed host.
+#
+# The host check is the guard. The static check is a grep, a pre-filter that names the
+# offending line early: a script that builds the command name from pieces
+# (`"${UA}natives"`, `eval`), or code the postinst reaches through the payload it
+# installs, gets past it. The host check reads the result after every install and
+# upgrade, so an alternative or a diversion is caught however it was made. It covers
+# those two mechanisms only: a script that writes /usr/bin/ash directly, as a file or a
+# symlink, is caught by vl_assert_shell_intact and, for a shipped path, by
+# vl_check_command_paths.
+VL_FORBIDDEN_SCRIPT_COMMANDS='update-alternatives|alternatives|dpkg-divert'
+
+# Reads a package's maintainer scripts on stdin, as `rpm -qp --scripts` prints them or
+# as the concatenated files from `dpkg-deb -e`, and fails on any command word above.
+# Comment lines are skipped, so a script may explain why it does not do this. $1
+# labels the scripts in messages. Returns non-zero rather than exiting, so the
+# negative control can observe it firing.
+vl_check_maintainer_scripts() {
+  local label="$1" text hits
+  text="$(cat)"
+  if [ -z "$text" ]; then
+    printf 'FAIL: %s: no maintainer scripts were read, so nothing could be checked\n' "$label" >&2
+    return 1
+  fi
+  hits="$(grep -vE '^[[:space:]]*#' <<<"$text" \
+    | grep -nE "(^|[^A-Za-z0-9_.-])(${VL_FORBIDDEN_SCRIPT_COMMANDS})([^A-Za-z0-9_.-]|\$)" || true)"
+  if [ -n "$hits" ]; then
+    printf 'FAIL: %s call a command that registers an alternative or a diversion:\n%s\n' "$label" "$hits" >&2
+    return 1
+  fi
+  vl_say "   $label: no update-alternatives, alternatives or dpkg-divert call"
+}
+
+# The same property on the host: no alternative anywhere resolves into this package,
+# no alternatives database entry names its files, and (on dpkg) no diversion belongs to
+# it. Read from the databases rather than through the tools, so a host whose tools
+# were never installed is still read. Returns non-zero rather than exiting.
+vl_assert_no_alternatives() {
+  local rc=0 link target db hits diversions
+  for link in /etc/alternatives/*; do
+    [ -L "$link" ] || continue
+    target="$(readlink -f "$link")"
+    case "$target" in
+      "/usr/bin/$ASH_CLI_NAME" | "$ASH_LIB"/*)
+        printf 'FAIL: the alternative %s resolves to %s, a file of %s\n' "$link" "$target" "$ASH_PKG_NAME" >&2
+        rc=1
+        ;;
+    esac
+  done
+  for db in /var/lib/dpkg/alternatives /var/lib/alternatives; do
+    [ -d "$db" ] || continue
+    hits="$(grep -rlF -e "/usr/bin/$ASH_CLI_NAME" -e "$ASH_LIB/" "$db" 2>/dev/null || true)"
+    if [ -n "$hits" ]; then
+      printf 'FAIL: the alternatives database names a file of %s in:\n%s\n' "$ASH_PKG_NAME" "$hits" >&2
+      rc=1
+    fi
+  done
+  if command -v dpkg-divert >/dev/null 2>&1; then
+    # Any diversion this package makes, and any diversion at all of /bin/ash or
+    # /usr/bin/ash, whoever made it: a `dpkg-divert --local` names no package.
+    diversions="$(dpkg-divert --list 2>/dev/null \
+      | grep -E -e "by ${ASH_PKG_NAME}\$" -e "diversion of /(usr/)?bin/ash " || true)"
+    if [ -n "$diversions" ]; then
+      printf 'FAIL: dpkg records a diversion this package must not make:\n%s\n' "$diversions" >&2
+      rc=1
+    fi
+  fi
+  [ "$rc" -eq 0 ] && vl_say "   no alternative, alternatives entry or diversion points into $ASH_PKG_NAME"
+  return "$rc"
+}
+
+# The coexistence check: the shell intact AND the package's command working beside it.
+vl_assert_shell_coexists() {
+  vl_assert_shell_intact "$1" || return 1
+  "$ASH_CLI_NAME" --version >/dev/null 2>&1 \
+    || { printf 'FAIL: %s --version failed with the %s shell installed\n' "$ASH_CLI_NAME" "$1" >&2; return 1; }
+  vl_say "   coexistence: $ASH_CLI_NAME --version works with the $1 shell installed"
+}
+
+# --------------------------------------------------------------------------
+# Version checks.
+# --------------------------------------------------------------------------
+
+# The version the installed CLI reports AND the version of the distribution inside the
+# venv must both be the one expected. The two are checked separately because the rpm
+# upgrade defect this exists for had the package manager reporting the new version
+# while the venv still ran the old one.
+vl_assert_installed_version() {
+  local expected="$1" reported venv_version
+  command -v "$ASH_CLI_NAME" >/dev/null || vl_fail "$ASH_CLI_NAME is not on PATH"
+  [ "$(command -v "$ASH_CLI_NAME")" = "/usr/bin/$ASH_CLI_NAME" ] \
+    || vl_fail "$ASH_CLI_NAME resolves to $(command -v "$ASH_CLI_NAME"), not the packaged /usr/bin/$ASH_CLI_NAME"
+  reported="$("$ASH_CLI_NAME" --version)" || vl_fail "$ASH_CLI_NAME --version exited non-zero"
+  vl_say "   $ASH_CLI_NAME --version: $reported"
+  case "$reported" in
+    *"v$expected") ;;
+    *) vl_fail "$ASH_CLI_NAME --version reports '$reported', expected v$expected" ;;
+  esac
+  venv_version="$("$ASH_VENV/bin/python" -c \
+    'import importlib.metadata as m; print(m.version("automated-security-helper"))')"
+  vl_say "   venv distribution: automated-security-helper $venv_version"
+  [ "$venv_version" = "$expected" ] \
+    || vl_fail "the venv holds automated-security-helper $venv_version, expected $expected"
+}
+
+# --------------------------------------------------------------------------
+# The scans: the shared e2e cases, judged by the shared e2e verdict.
+# --------------------------------------------------------------------------
+#
+# The fixtures, the scanner selection, the per-case arguments and environment, and the
+# expected outcome of each case all come from tests/e2e/fixtures/cases.json, and the
+# verdict is scripts/e2e/assert_outcome.py, the one every other install channel uses.
+# Nothing about what a passing scan means is restated here, so this channel cannot
+# come to check less than its siblings. The three cases are:
+#
+#   findings    exit exactly 2, exactly 3 actionable results, attributed to
+#               detect-secrets
+#   clean       exit exactly 0, no results
+#   incomplete  exit exactly 1, with opengrep MISSING or ERROR in the aggregated
+#               results (the measured trigger in tests/e2e/README.md), so a crash
+#               cannot pass as "incomplete"
+#
+# assert_outcome.py is standard-library Python. It runs under the harness interpreter
+# uv provides, never under the package's venv, so a broken venv cannot judge itself.
+
+VL_CASES="$REPO/tests/e2e/fixtures/cases.json"
+VL_ASSERT_OUTCOME="$REPO/scripts/e2e/assert_outcome.py"
+SCAN_LOG=/tmp/ash-scan.log
+
+# Prints one field of case $1, read through assert_outcome.load_case so a case that
+# does not exist fails here the same way it fails the verdict:
+#   source     the fixture directory name under tests/e2e/fixtures
+#   scan-args  --scanners and the case's own args, shell-quoted
+#   env        the case's environment as shell-quoted NAME=VALUE words
+vl_case_field() {
+  vl_gate_python - "$REPO/scripts/e2e" "$VL_CASES" "$1" "$2" <<'PY'
+import shlex
+import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+import assert_outcome  # noqa: E402
+
+case = assert_outcome.load_case(Path(sys.argv[2]), sys.argv[3])
+field = sys.argv[4]
+args = case.get("args") or []
+env = case.get("env") or {}
+if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+    sys.exit(f"the case's args must be a list of strings, not {args!r}")
+if not isinstance(env, dict):
+    sys.exit(f"the case's env must be an object, not {env!r}")
+if field == "source":
+    print(case["source"])
+elif field == "scan-args":
+    words = ["--scanners", ",".join(case["scanners"]), *args]
+    print(" ".join(shlex.quote(w) for w in words))
+elif field == "env":
+    print(" ".join(shlex.quote(f"{k}={v}") for k, v in sorted(env.items())))
+else:
+    sys.exit(f"unknown case field {field}")
+PY
+}
+
+# Copies case $1's fixture to $FIXTURE_DIR, root-owned and unwritable by the scanning
+# user. ASH's default output directory is inside the scanned tree, so a scan of a
+# checkout the user does not own fails while writing reports; scanning as root, or a
+# tree the user owns, would hide that.
+vl_make_fixture() {
+  local source
+  source="$(vl_case_field "$1" source)" || vl_fail "cannot read case $1 from $VL_CASES"
+  [ -d "$REPO/tests/e2e/fixtures/$source" ] || vl_fail "case $1 names fixture $source, which does not exist"
+  rm -rf "$FIXTURE_DIR"
+  cp -R "$REPO/tests/e2e/fixtures/$source" "$FIXTURE_DIR"
+  chown -R 0:0 "$FIXTURE_DIR"
+  chmod -R u=rwX,go=rX "$FIXTURE_DIR"
+  id -u "$SCAN_USER" >/dev/null 2>&1 || useradd --create-home "$SCAN_USER"
+  # A read must succeed before a failed write means anything: `su ... test -w` also
+  # fails when su itself is broken.
+  su -s /bin/sh "$SCAN_USER" -c "ls -A $FIXTURE_DIR | grep -q . && test -r $FIXTURE_DIR" \
+    || vl_fail "$SCAN_USER cannot list a non-empty $FIXTURE_DIR, so su or the fixture is broken"
+  if su -s /bin/sh "$SCAN_USER" -c "test -w $FIXTURE_DIR"; then
+    vl_fail "$FIXTURE_DIR is writable by $SCAN_USER, so the read-only-source case is not exercised"
+  fi
+}
+
+# Runs case $1 over $FIXTURE_DIR as $SCAN_USER, with the case's scanners, args and
+# environment, and sets SCAN_RC and SCAN_CASE. Further arguments are appended to
+# `ashx scan` after the case's own; the negative controls use that.
+vl_scan() {
+  local case="$1" scan_args env_words extra="" cli="${VL_SCAN_CLI:-$ASH_CLI_NAME}"
+  # VL_SCAN_CLI and VL_SCAN_PATH run the scan with another command on another PATH:
+  # the release user's own `ash` in vl_from_release. Unset, the packaged command.
+  local path_word="${VL_SCAN_PATH:+PATH=$VL_SCAN_PATH }"
+  shift
+  scan_args="$(vl_case_field "$case" scan-args)" || vl_fail "cannot read case $case's scan arguments"
+  env_words="$(vl_case_field "$case" env)" || vl_fail "cannot read case $case's environment"
+  if [ "$#" -gt 0 ]; then
+    extra="$(printf ' %q' "$@")"
+  fi
+  rm -rf "$SCAN_OUT"
+  install -d -o "$SCAN_USER" -g "$SCAN_USER" -m 0755 "$SCAN_OUT"
+  vl_say "   [$case] ${env_words:+$env_words }$cli scan --source-dir $FIXTURE_DIR --output-dir $SCAN_OUT --no-progress $scan_args$extra"
+  set +e
+  su -s /bin/bash "$SCAN_USER" -c \
+    "cd /tmp && env $path_word$env_words $cli scan --source-dir '$FIXTURE_DIR' --output-dir '$SCAN_OUT' \
+       --no-progress $scan_args$extra" >"$SCAN_LOG" 2>&1
+  SCAN_RC=$?
+  set -e
+  SCAN_CASE="$case"
+  tail -n 3 "$SCAN_LOG"
+  vl_say "   [$case] $cli scan rc=$SCAN_RC"
+}
+
+# Judges the last scan's exit code and output directory as case $1 with
+# assert_outcome.py; further arguments override the case's expectations. Returns the
+# verdict's exit code (0 match, 1 mismatch, 3 usage error) rather than exiting, so a
+# negative control can observe a rejection.
+vl_assert_case() {
+  local case="$1"
+  shift
+  vl_gate_python "$VL_ASSERT_OUTCOME" --cases "$VL_CASES" --case "$case" \
+    --rc "$SCAN_RC" --output-dir "$SCAN_OUT" "$@"
+}
+
+# One case end to end: fixture, scan, verdict. Exits on a mismatch.
+vl_scan_and_assert_case() {
+  vl_make_fixture "$1"
+  vl_scan "$1"
+  if ! vl_assert_case "$1"; then
+    tail -n 40 "$SCAN_LOG" >&2
+    vl_fail "the $1 case did not produce its expected outcome"
+  fi
+}
+
+# The full positive check: all three cases, so every install and every upgrade is
+# shown producing exit 2, exit 0 and exit 1, each for its own reason.
+vl_scan_and_assert() {
+  local case
+  for case in findings clean incomplete; do
+    vl_scan_and_assert_case "$case"
+  done
+}
+
+# --------------------------------------------------------------------------
+# Scanner selection after install.
+# --------------------------------------------------------------------------
+#
+# The package ships ASH and no third-party scanner (the payload gate above enforces
+# that). A user selects scanners after installing, with
+# `ashx dependencies install --tool NAME`, which downloads the tool's pinned release
+# and refuses it unless its SHA-256 matches the digest ASH carries. That is the v4
+# meaning of "optional components selected at install time" (packaging/README.md), so
+# it is exercised here from the installed package, as the unprivileged user, the way a
+# user runs it:
+#
+#   1. `--tool grype` exits 0, the summary names grype as verified on PATH, and the
+#      binary it installed runs and reports the version ASH pins.
+#   2. The same command again runs nothing and reports grype "already present,
+#      verified against the pinned digest": the digest check, read back.
+#   3. `--tool nonexistent` exits EXIT_BAD_SELECTION, read from the installed CLI's own
+#      module rather than restated, and names the unknown tool.
+#
+# Step 1 downloads from GitHub, so a failed attempt is retried twice; the retry lives
+# here in the harness, never in the product. A corrupted digest is covered by
+# tests/unit/utils/test_pinned_tool_downloads.py, not by planting one here.
+
+# Runs `ashx dependencies install ARGS...` as $SCAN_USER, sets DEPS_RC, writes $DEPS_LOG.
+# COLUMNS is wide so rich does not wrap the summary lines read below.
+DEPS_LOG=/tmp/ash-deps.log
+vl_deps_install() {
+  local args
+  args="$(printf ' %q' "$@")"
+  set +e
+  su -s /bin/bash "$SCAN_USER" -c \
+    "cd /tmp && COLUMNS=200 $ASH_CLI_NAME dependencies install --no-color$args" >"$DEPS_LOG" 2>&1
+  DEPS_RC=$?
+  set -e
+  vl_say "   $ASH_CLI_NAME dependencies install$args: rc=$DEPS_RC"
+}
+
+# Python from the installed venv, for facts the installed CLI defines.
+vl_venv_python() {
+  "$ASH_VENV/bin/python" -c "$1"
+}
+
+vl_assert_dependency_selection() {
+  local attempt bad_selection pinned bin out
+  id -u "$SCAN_USER" >/dev/null 2>&1 || useradd --create-home "$SCAN_USER"
+  bad_selection="$(vl_venv_python 'from automated_security_helper.cli.dependencies import EXIT_BAD_SELECTION as e; print(e)')" \
+    || vl_fail "cannot read EXIT_BAD_SELECTION from the installed CLI"
+  pinned="$(vl_venv_python 'from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS as v; print(v["grype"].lstrip("v"))')" \
+    || vl_fail "cannot read grype's pinned version from the installed CLI"
+
+  for attempt in 1 2 3; do
+    vl_deps_install --tool grype
+    [ "$DEPS_RC" -ne 0 ] || break
+    tail -n 15 "$DEPS_LOG" >&2
+    vl_say "   attempt $attempt of 3 failed"
+  done
+  [ "$DEPS_RC" -eq 0 ] || vl_fail "$ASH_CLI_NAME dependencies install --tool grype exited $DEPS_RC three times"
+  # Tested with -q, then printed: a `grep | sed` pipeline takes sed's status.
+  grep -qE 'Tools verified on PATH: *1 -- grype' "$DEPS_LOG" \
+    || { cat "$DEPS_LOG" >&2; vl_fail "the install exited 0 without naming grype as verified on PATH"; }
+  grep -E 'Tools verified on PATH' "$DEPS_LOG" | sed 's/^[^A-Za-z]*/   /'
+  bin="$(su -s /bin/sh "$SCAN_USER" -c 'printf %s "$HOME/.ash/bin/grype"')"
+  [ -x "$bin" ] || vl_fail "grype is not at $bin after the install"
+  out="$(su -s /bin/sh "$SCAN_USER" -c "'$bin' version" 2>&1)" || vl_fail "$bin version failed: $out"
+  grep -qE "^Version: *$pinned\$" <<<"$out" \
+    || vl_fail "$bin reports '$(grep -m1 '^Version' <<<"$out")', not the pinned $pinned"
+  vl_say "   $bin runs and reports the pinned version $pinned"
+
+  vl_deps_install --tool grype
+  [ "$DEPS_RC" -eq 0 ] || { cat "$DEPS_LOG" >&2; vl_fail "the second --tool grype exited $DEPS_RC"; }
+  grep -qE 'Already present, verified against the pinned digest: *1 -- grype' "$DEPS_LOG" \
+    || { cat "$DEPS_LOG" >&2; vl_fail "the second run did not verify grype against its pinned digest"; }
+  grep -E 'Already present' "$DEPS_LOG" | sed 's/^[^A-Za-z]*/   /'
+  grep -qE 'Commands run: *0 ' "$DEPS_LOG" \
+    || { cat "$DEPS_LOG" >&2; vl_fail "the second run downloaded again instead of verifying what is installed"; }
+
+  vl_deps_install --tool nonexistent
+  [ "$DEPS_RC" -eq "$bad_selection" ] \
+    || { cat "$DEPS_LOG" >&2; vl_fail "--tool nonexistent exited $DEPS_RC, not EXIT_BAD_SELECTION ($bad_selection)"; }
+  grep -qF 'Unknown tool(s): nonexistent' "$DEPS_LOG" \
+    || { cat "$DEPS_LOG" >&2; vl_fail "--tool nonexistent exited $bad_selection without naming the unknown tool"; }
+  vl_say "   OK: --tool nonexistent was refused with EXIT_BAD_SELECTION ($bad_selection)"
+}
+
+# --------------------------------------------------------------------------
+# Negative controls: each check above must be seen failing on a real install.
+# --------------------------------------------------------------------------
+
+# Requires the verdict to REJECT the last scan judged as case $1: exit 1, not 0 and not
+# 3 (a usage error proves nothing about the scan). $2 is the exact number of problems
+# it must report, or `any`; each further argument is a problem text the rejection
+# must contain, so the control shows the check it is aimed at firing, not some other.
+vl_require_rejection() {
+  local case="$1" want_count="$2" out rc=0 count text
+  shift 2
+  out="$(vl_assert_case "$case" 2>&1)" || rc=$?
+  printf '%s\n' "$out" | sed 's/^/   | /'
+  [ "$rc" -eq 1 ] \
+    || vl_fail "NEGATIVE CONTROL: the verdict exited $rc judging the $SCAN_CASE scan as the $case case; 1 (rejected) was required"
+  count="$(grep -c '^::error::' <<<"$out" || true)"
+  if [ "$want_count" != any ] && [ "$count" -ne "$want_count" ]; then
+    vl_fail "NEGATIVE CONTROL: the verdict reported $count problems; exactly $want_count was required, so a check other than the one under test fired"
+  fi
+  for text in "$@"; do
+    grep -qF -- "$text" <<<"$out" \
+      || vl_fail "NEGATIVE CONTROL: the rejection does not name the problem under test: $text"
+  done
+  vl_say "   OK: the verdict rejected the $SCAN_CASE scan judged as $case ($count problem(s))"
+}
+
+# The finding removed from the fixture. The clean scan must itself be exactly right
+# (exit 0, nothing found), and the same real output judged as the findings case must
+# be rejected on both the exit code and the finding count.
+vl_negative_findings() {
+  vl_scan_and_assert_case clean
+  vl_require_rejection findings any \
+    "exit code 0 (nothing actionable), expected exactly 2" \
+    "0 actionable SARIF results, expected exactly 3"
+}
+
+# The secret is still there and still reported, but the scan is told not to fail on
+# findings, so it exits 0 with a populated report. The count and attribution checks
+# pass, so the exit-code check is the only thing that can catch this: the rejection
+# must name it and nothing else.
+vl_negative_scan_rc() {
+  vl_make_fixture findings
+  vl_scan findings --no-fail-on-findings
+  [ "$SCAN_RC" -eq 0 ] || vl_fail "NEGATIVE CONTROL setup: --no-fail-on-findings exited $SCAN_RC, not 0"
+  vl_require_rejection findings 1 "exit code 0 (nothing actionable), expected exactly 2"
+}
+
+# Exit 1 must be told apart from exit 2 in both directions. The real incomplete output
+# judged as the findings case must be rejected for the incomplete scanner; the real
+# findings output judged as the incomplete case must be rejected because the trigger
+# did not fire. A verdict that ignored scanner status would accept either.
+vl_negative_incomplete() {
+  vl_scan_and_assert_case incomplete
+  vl_require_rejection findings any \
+    "exit code 1 (scan incomplete or crashed), expected exactly 2" \
+    "scanners did not complete: opengrep="
+  vl_scan_and_assert_case findings
+  vl_require_rejection incomplete any \
+    "exit code 2 (actionable findings), expected exactly 1" \
+    "the incomplete trigger did not fire"
+}
+
+# --------------------------------------------------------------------------
+# Upgrade helpers.
+# --------------------------------------------------------------------------
+
+# Points the Python package index at nothing, so the maintainer script's dependency
+# resolve fails the way an outage does. /etc/hosts rather than a pip environment
+# variable, so nothing about the maintainer script's own pip invocation is changed.
+vl_blackhole_index() {
+  cp /etc/hosts /tmp/hosts.verify-backup
+  printf '127.0.0.1 pypi.org files.pythonhosted.org\n' >> /etc/hosts
+}
+vl_restore_index() {
+  cp /tmp/hosts.verify-backup /etc/hosts
+  rm -f /tmp/hosts.verify-backup
+}
+
+# The N-1 tree packaging/build-test-wheels.sh exported, and the record of where it came
+# from. The upgrade legs build N-1's package with N-1's OWN packaging scripts from that
+# tree and gate it with N-1's own payload checker, so an upgrade runs N's maintainer
+# scripts over an install an older package's scripts made. Sets PREV_SRC and prints the
+# two commits, which must differ.
+vl_load_n1() {
+  local root
+  root="$(cd "$(dirname "$PREV_DIST")" && pwd)"
+  PREV_SRC="${PREV_SRC:-$root/prev/src}"
+  local env_file="${N1_ENV:-$root/n1.env}"
+  [ -f "$env_file" ] || vl_fail "no $env_file: build the wheels with packaging/build-test-wheels.sh"
+  # Read field by field rather than sourced: it is data, not a script.
+  N1_SHA="$(sed -n 's/^N1_SHA=//p' "$env_file")"
+  N1_REF="$(sed -n 's/^N1_REF=//p' "$env_file")"
+  N1_HEAD="$(sed -n 's/^N1_HEAD=//p' "$env_file")"
+  N1_VERSION="$(sed -n 's/^N1_VERSION=//p' "$env_file")"
+  [ -n "$N1_SHA" ] && [ -n "$N1_HEAD" ] || vl_fail "$env_file names no N1_SHA or no N1_HEAD"
+  [ "$N1_HEAD" = "$(git -c safe.directory="$REPO" -C "$REPO" rev-parse HEAD)" ] \
+    || vl_fail "$env_file was written for HEAD $N1_HEAD, not for this checkout"
+  [ "$N1_SHA" != "$N1_HEAD" ] || vl_fail "N-1 and N are the same commit ($N1_SHA)"
+  [ -d "$PREV_SRC/packaging" ] || vl_fail "no N-1 packaging tree at $PREV_SRC"
+  vl_say "   N-1: $N1_SHA ($N1_REF), version $N1_VERSION, packaged by its own $PREV_SRC/packaging"
+  vl_say "   N:   $N1_HEAD"
+}
+
+# Says what the upgrade crosses in the maintainer scripts. N-1 always differs from N in
+# its tree, not necessarily in these files; when they are byte-identical the leg still
+# proves the upgrade works, but not that changed scripts meet an older install. Each
+# argument is a path relative to the repository root. Informational: it fails only when
+# it cannot hash a file (see vl_sha256), never on what the comparison finds.
+vl_report_script_delta() {
+  local rel prev_sum head_sum changed=()
+  for rel in "$@"; do
+    # A file missing on either side reads as a difference.
+    if [ ! -f "$PREV_SRC/$rel" ] || [ ! -f "$REPO/$rel" ]; then
+      changed+=("$rel")
+      continue
+    fi
+    prev_sum="$(vl_sha256 "$PREV_SRC/$rel")" || exit 1
+    head_sum="$(vl_sha256 "$REPO/$rel")" || exit 1
+    [ "$prev_sum" = "$head_sum" ] || changed+=("$rel")
+  done
+  if [ "${#changed[@]}" -gt 0 ]; then
+    vl_say "   maintainer scripts that differ between N-1 and N: ${changed[*]}"
+  else
+    vl_say "   maintainer scripts are byte-identical in N-1 and N ($*): this upgrade crosses a code change, not a script change"
+  fi
+}
+
+# The SHA-256 of a file, as hex. sha256sum rather than cmp: coreutils is in every image
+# these legs use, diffutils is not. macOS has no sha256sum before 15 but ships shasum.
+# A host with neither fails here: a fallback string in place of a digest would make two
+# identical files read as different and hide why.
+vl_sha256() {
+  local out
+  if command -v sha256sum >/dev/null 2>&1; then
+    out="$(sha256sum <"$1")" || vl_fail "sha256sum could not read $1"
+  elif command -v shasum >/dev/null 2>&1; then
+    out="$(shasum -a 256 <"$1")" || vl_fail "shasum could not read $1"
+  else
+    vl_fail "neither sha256sum nor shasum is on PATH, so $1 cannot be compared"
+  fi
+  printf '%s\n' "${out%% *}"
+}
+
+# The payload gate as N-1's tree defines it, for the N-1 package.
+vl_payload_gate_n1() {
+  vl_gate_python "$PREV_SRC/packaging/assert-package-payload.py" \
+    --artifact-gate "$PREV_SRC/.github/scripts/assert-artifact-contents.py" "$1"
+}
+
+# The lower version for the N-1 package: the last non-zero component of N decremented
+# and everything after it zeroed (3.7.0 -> 3.6.0, 4.0.0 -> 3.0.0).
+vl_lower_version() {
+  printf '%s\n' "$1" | awk -F. '{
+    n = NF; while (n > 0 && $n == 0) n--;
+    if (n == 0) { exit 1 }
+    $n = $n - 1; for (i = n + 1; i <= NF; i++) $i = 0;
+    out = $1; for (i = 2; i <= NF; i++) out = out "." $i; print out }'
+}
+
+# The venv layout: $ASH_VENV is a symlink to exactly one venv-<id>
+# directory, and nothing an interrupted install would leave is present.
+vl_assert_venv_layout() {
+  [ -L "$ASH_VENV" ] || vl_fail "$ASH_VENV is not a symlink"
+  local dirs=() d
+  for d in "$ASH_LIB"/venv-*; do
+    if [ -d "$d" ]; then
+      dirs+=("$d")
+    fi
+  done
+  [ "${#dirs[@]}" -eq 1 ] || vl_fail "expected exactly one $ASH_LIB/venv-* directory, found ${#dirs[@]}: ${dirs[*]}"
+  [ "$(readlink -f "$ASH_VENV")" = "${dirs[0]}" ] || vl_fail "$ASH_VENV does not point at ${dirs[0]}"
+  for d in "$ASH_LIB"/venv.previous "$ASH_LIB"/venv.swap-*; do
+    if [ -e "$d" ] || [ -L "$d" ]; then
+      vl_fail "left behind by the install: $d"
+    fi
+  done
+  vl_say "   venv layout: $ASH_VENV -> $(readlink "$ASH_VENV"), no other venv present"
+}
+
+# Puts the host back on the layout the packages used before the symlink swap: the live
+# venv as a real directory AT $ASH_VENV, built from the wheel the package
+# installed, with the interpreter the current venv uses. The next install has to migrate
+# it, which is the one path through the post-install step that moves a directory.
+vl_make_directory_layout() {
+  local wheel="$1" py
+  py="$(readlink -f "$ASH_VENV/bin/python3")"
+  [ -x "$py" ] || vl_fail "cannot find the interpreter behind $ASH_VENV"
+  rm -rf "$ASH_VENV" "$ASH_LIB"/venv-*
+  "$py" -m venv "$ASH_VENV"
+  "$ASH_VENV/bin/pip" install --quiet --disable-pip-version-check "$wheel"
+  if [ -L "$ASH_VENV" ] || [ ! -d "$ASH_VENV" ]; then
+    vl_fail "$ASH_VENV is not a plain directory, so the migration is not exercised"
+  fi
+  "$ASH_VENV/bin/$ASH_CLI_NAME" --version >/dev/null || vl_fail "the directory-layout venv does not run"
+  vl_say "   directory layout in place: $ASH_VENV is a real directory built with $py"
+}
+
+# Samples, every 50 ms for as long as an install runs, whether the command and the
+# interpreter behind $ASH_VENV exist. Any miss is a moment in which the
+# installed CLI could not have started.
+vl_probe_start() {
+  rm -f /tmp/venv-probe.log /tmp/venv-probe.stop
+  (
+    while [ ! -e /tmp/venv-probe.stop ]; do
+      if [ -x "$ASH_VENV/bin/$ASH_CLI_NAME" ] && [ -x "$ASH_VENV/bin/python3" ]; then
+        echo ok
+      else
+        echo miss
+      fi
+      sleep 0.05
+    done
+  ) >/tmp/venv-probe.log 2>&1 &
+  VL_PROBE_PID=$!
+}
+
+vl_probe_stop_and_assert() {
+  touch /tmp/venv-probe.stop
+  wait "$VL_PROBE_PID"
+  local samples misses
+  samples="$(awk 'END { print NR }' /tmp/venv-probe.log)"
+  misses="$(awk '$0 == "miss" { n++ } END { print n + 0 }' /tmp/venv-probe.log)"
+  vl_say "   availability probe: $samples samples, $misses with no usable $ASH_VENV"
+  # A floor on the sample count, so a probe that never ran cannot pass.
+  [ "$samples" -ge 20 ] || vl_fail "the availability probe took only $samples samples"
+  [ "$misses" -eq 0 ] || vl_fail "$ASH_VENV was unusable in $misses of $samples samples during the install"
+}
+
+# --------------------------------------------------------------------------
+# Removal.
+# --------------------------------------------------------------------------
+vl_assert_nothing_left() {
+  local leftover=()
+  local path
+  for path in "$ASH_LIB" "/usr/bin/$ASH_CLI_NAME" "/usr/share/doc/$ASH_PKG_NAME" "/usr/share/licenses/$ASH_PKG_NAME"; do
+    if [ -e "$path" ]; then
+      leftover+=("$path")
+    fi
+  done
+  if [ "${#leftover[@]}" -gt 0 ]; then
+    ls -la "${leftover[@]}" >&2
+    vl_fail "left behind after removal: ${leftover[*]}"
+  fi
+  vl_say "   OK: $ASH_LIB, /usr/bin/$ASH_CLI_NAME and the package's doc and license directories are gone"
+}
+
+
+# --------------------------------------------------------------------------
+# From the latest release: a user of it installs this package.
+# --------------------------------------------------------------------------
+#
+#   vl_from_release INSTALL_FN REMOVE_FN
+#
+# The latest published release (v3.7.1 today) shipped no native package, so nobody
+# upgrades from its .deb or .rpm. A user of it has the CLI from its README instead:
+# `uv tool install git+https://github.com/awslabs/automated-security-helper@<tag>`,
+# which puts `ash` in ~/.local/bin, and uv's installer puts ~/.local/bin first on PATH.
+# The tag's wheel, built by packaging/build-test-wheels.sh with N1_BUILD_RELEASE=1 into
+# $RELEASE_DIST, is that same build, installed here from the file so the leg needs no
+# second network fetch. A v3 release reports every scanner whose tool is absent as
+# MISSING, even scanners the scan was not told to run (v4 reports them SKIPPED), so its
+# own scans alone are judged with --allow-unselected-missing; every scan by the package
+# keeps the full contract.
+#
+# That user then installs this package (INSTALL_FN), and what is ASSERTED, as that user,
+# on that user's PATH:
+#
+#   1. Before: `ash` is the release's, in ~/.local/bin, and passes the findings case.
+#      There is no `ashx`.
+#   2. After the install: `ashx` is the package's /usr/bin/ashx at N, and `ash` is
+#      still the user's release, in ~/.local/bin. The package must not take over a
+#      command the user installed, and ships no `ash` of its own.
+#   3. `ashx` passes all three cases with the release still installed, and the
+#      release's `ash` still passes the findings case beside it.
+#   4. REMOVE_FN removes the package: `ashx` is gone and the user's `ash` still works.
+#      `uv tool uninstall` then removes that too.
+vl_from_release() {
+  local install_fn="$1" remove_fn="$2" wheels rel_wheel rel_version home bin user_path
+  shopt -s nullglob
+  wheels=("${RELEASE_DIST:?RELEASE_DIST must name the directory of the release wheel}"/*.whl)
+  shopt -u nullglob
+  [ "${#wheels[@]}" -eq 1 ] || vl_fail "expected exactly one release wheel in $RELEASE_DIST, found ${#wheels[@]}"
+  rel_wheel="${wheels[0]}"
+  rel_version="$(basename "$rel_wheel" | sed -n 's/^automated_security_helper-\([^-]*\)-py3-none-any\.whl$/\1/p')"
+  [ -n "$rel_version" ] || vl_fail "cannot read a version from $(basename "$rel_wheel")"
+  id -u "$SCAN_USER" >/dev/null 2>&1 || useradd --create-home "$SCAN_USER"
+  home="$(getent passwd "$SCAN_USER" | cut -d: -f6)"
+  bin="$home/.local/bin"
+  user_path="$bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  vl_as_release_user() {
+    # Exported rather than passed through env(1), so shell builtins (`command -v`) run.
+    su -s /bin/bash "$SCAN_USER" -c "cd /tmp && export HOME='$home' PATH='$user_path' && $1"
+  }
+  vl_user_resolves() {
+    local cmd="$1" want_path="$2" want_version="$3" got reported
+    got="$(vl_as_release_user "command -v $cmd" || true)"
+    [ "$got" = "$want_path" ] \
+      || vl_fail "as $SCAN_USER, $cmd resolves to '${got:-nothing}', expected $want_path"
+    reported="$(vl_as_release_user "$cmd --version")" || vl_fail "as $SCAN_USER, $cmd --version exited non-zero"
+    case "$reported" in
+      *"v$want_version") vl_say "   as $SCAN_USER: $cmd is $got, $reported" ;;
+      *) vl_fail "as $SCAN_USER, $cmd --version reports '$reported', expected v$want_version" ;;
+    esac
+  }
+  vl_release_scan_findings() {
+    vl_make_fixture findings
+    VL_SCAN_CLI=ash VL_SCAN_PATH="$user_path" vl_scan findings
+    if ! vl_assert_case findings --allow-unselected-missing; then
+      tail -n 40 "$SCAN_LOG" >&2
+      vl_fail "the release's ash did not produce the findings case's outcome"
+    fi
+  }
+  vl_user_lacks() {
+    local got
+    got="$(vl_as_release_user "command -v $1" || true)"
+    [ -z "$got" ] || vl_fail "as $SCAN_USER, $1 resolves to $got, expected no such command"
+  }
+
+  vl_say "== 1. a user of the release ($rel_version) has it from uv tool install, as its README says"
+  vl_as_release_user "uv tool install --quiet --python 3.12 '$rel_wheel'" \
+    >/tmp/release-install.log 2>&1 \
+    || { tail -n 20 /tmp/release-install.log >&2; vl_fail "uv tool install of the $rel_version wheel failed"; }
+  vl_user_resolves ash "$bin/ash" "$rel_version"
+  vl_user_lacks "$ASH_CLI_NAME"
+  vl_release_scan_findings
+
+  vl_say "== 2. that user installs this package ($VERSION)"
+  "$install_fn"
+  vl_assert_installed_version "$VERSION"
+  vl_user_resolves "$ASH_CLI_NAME" "/usr/bin/$ASH_CLI_NAME" "$VERSION"
+  # The package took nothing the user had: their `ash` is still theirs, first on PATH.
+  vl_user_resolves ash "$bin/ash" "$rel_version"
+
+  vl_say "== 3. $ASH_CLI_NAME passes the three cases beside the release, and the release still scans"
+  VL_SCAN_PATH="$user_path" vl_scan_and_assert
+  vl_release_scan_findings
+
+  vl_say "== 4. removing the package leaves the user's release working"
+  "$remove_fn"
+  vl_user_lacks "$ASH_CLI_NAME"
+  vl_user_resolves ash "$bin/ash" "$rel_version"
+  vl_as_release_user "uv tool uninstall automated-security-helper" >/tmp/release-uninstall.log 2>&1 \
+    || { tail -n 20 /tmp/release-uninstall.log >&2; vl_fail "uv tool uninstall failed"; }
+  vl_user_lacks ash
+  vl_say "   OK: release $rel_version user -> $ASH_CLI_NAME $VERSION and back, each command where it belongs"
+}

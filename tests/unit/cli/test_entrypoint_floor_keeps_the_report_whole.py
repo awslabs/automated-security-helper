@@ -617,7 +617,7 @@ def test_an_exception_whose_text_cannot_be_read_is_still_reported(monkeypatch):
     entrypoint._report_failure(Unspeakable())
 
     assert len(raw) == 1
-    assert raw[0].startswith("ash: fatal error: Unspeakable: <Unspeakable")
+    assert raw[0].startswith(f"{entrypoint._BANNER}: Unspeakable: <Unspeakable")
 
 
 # --- the shown streams ---

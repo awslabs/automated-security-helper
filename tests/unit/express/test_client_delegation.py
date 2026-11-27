@@ -42,7 +42,8 @@ class TestClassification:
     @pytest.mark.parametrize(
         "argv",
         [
-            ["report"],
+            ["results", "report"],
+            ["container", "build"],
             ["express", "start"],
             ["config", "validate"],
             ["mcp"],
@@ -53,7 +54,7 @@ class TestClassification:
             # A token that merely looks like a subcommand classifies the whole
             # invocation as not-a-scan: the cold run parses the truth, so the
             # mistake costs warmth, never correctness.
-            ["--scanners", "report"],
+            ["--scanners", "results"],
         ],
     )
     def test_everything_else_runs_cold(self, argv):

@@ -661,7 +661,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     subcommands: Annotated[
         List[str],
         Field(
-            description="Subcommands to include when invoking the scanner, e.g. ['scan'] is needed as the subcommand for 'semgrep' as Semgrep supports multiple subcommands, but we are specifically interested in running a scan."
+            description="Subcommands to include when invoking the scanner, e.g. ['scan'] is needed as the subcommand for 'opengrep' as Opengrep supports multiple subcommands, but we are specifically interested in running a scan."
         ),
     ] = []
     args: Annotated[
@@ -755,7 +755,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
            offline while the rest of the run stays online.
 
         ``options.offline: false``, the default, means "follow ASH". It does not
-        re-enable the network under ``--offline``: ``ash config init`` and the
+        re-enable the network under ``--offline``: ``ashx config init`` and the
         documented examples write ``offline: false`` for every scanner that has the
         option, so letting it win would put those configurations online during an
         air-gapped run.
@@ -764,7 +764,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         used to default to ``is_offline_mode()``, evaluated when the config object
         was built. ``ScannerConfigSegment`` builds its default scanner configs when
         ``ash_config`` is imported, which in local mode is before ``--offline`` sets
-        ``ASH_OFFLINE``, so ``ash scan --offline`` left checkov, grype, syft and the
+        ``ASH_OFFLINE``, so ``ashx scan --offline`` left checkov, grype, syft and the
         rest with ``offline=False`` and they went to the network. Config round-trips
         through ``model_dump`` and ``model_validate`` carry that stale value forward,
         so the only reliable reading is one taken when the scanner uses it.
@@ -1028,7 +1028,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
         Defaults to every entry in ``utils/content_databases.py`` that this scanner's config
         name reads: the entry's ``scanner``, or one of its ``also_read_by``. A scanner that reads its database only in some modes -- the
-        semgrep and opengrep offline rulesets -- overrides this to say so. The executor
+        opengrep offline rulesets -- overrides this to say so. The executor
         holds each one to its declared age bound after the scan; see
         ``utils/content_db_staleness.py``.
         """

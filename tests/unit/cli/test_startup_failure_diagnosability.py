@@ -76,14 +76,14 @@ sys.modules["automated_security_helper.cli.main"] = _BrokenCLI()
 
 
 def _console_script_target() -> tuple[str, str]:
-    """Return the (module, attribute) the ``ash`` console script points at.
+    """Return the (module, attribute) the ``ashx`` console script points at.
 
     pip's generated stub imports that attribute and calls it, so this is the
     first ASH code any invocation reaches.
     """
     scripts = _load_toml(REPO_ROOT / "pyproject.toml")["project"]["scripts"]
-    module, _, attr = scripts["ash"].partition(":")
-    assert module and attr, f"unparseable console script target: {scripts['ash']!r}"
+    module, _, attr = scripts["ashx"].partition(":")
+    assert module and attr, f"unparseable console script target: {scripts['ashx']!r}"
     return module, attr
 
 
@@ -239,7 +239,7 @@ def test_version_prints_when_stdout_is_none(tmp_path):
             """
             import sys
 
-            sys.argv = ["ash", "--version"]
+            sys.argv = ["ashx", "--version"]
             sys.stdout = None
             sys.stderr = None
             """
@@ -248,7 +248,7 @@ def test_version_prints_when_stdout_is_none(tmp_path):
     )
 
     assert result.returncode == 0, (
-        f"ash --version exited {result.returncode}. "
+        f"ashx --version exited {result.returncode}. "
         f"stdout={result.stdout!r} stderr={result.stderr!r}"
     )
     assert "automated-security-helper v" in result.stdout, (
@@ -481,7 +481,7 @@ def test_a_wrapper_of_richs_hook_is_called(monkeypatch, capsys):
         reported.append(exc)
         printer(exc_type, exc, tb)
 
-    sys.excepthook = reporter
+    monkeypatch.setattr(sys, "excepthook", reporter)
     reports: list = []
     real = entrypoint._ash_traceback
 
@@ -819,8 +819,10 @@ def test_an_installed_hook_runs_and_what_it_writes_is_shown(
         # As install() makes its console on a terminal: color chosen once, now.
         rich.traceback.install(console=Console(stderr=True, force_terminal=True))
     else:
-        sys.excepthook = _raw_printing_hook(
-            hook_calls, raises=installed == "hook-that-raises"
+        monkeypatch.setattr(
+            sys,
+            "excepthook",
+            _raw_printing_hook(hook_calls, raises=installed == "hook-that-raises"),
         )
     reports: list = []
     real = entrypoint._ash_traceback

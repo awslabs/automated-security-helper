@@ -60,6 +60,7 @@ from automated_security_helper.core.enums import (
     ExecutionStrategy,
     ExportFormat,
 )
+from automated_security_helper.utils.cli_name import CANONICAL_CLI_NAME
 from automated_security_helper.core.cancellation import (
     CancelEvent,
     ScanCancelled,
@@ -399,7 +400,7 @@ def get_ash_revision(quiet: bool = False) -> str | None:
     # package build recorded: the commit it was built from, or a placeholder when it
     # could not tell. A record of the wrong shape leaves nothing at all.
     if return_val is None or not _names_a_ref(return_val):
-        return _release_revision()
+        return _release_revision(quiet=quiet)
     if return_val == ASH_REPO_LATEST_REVISION and not _COMMIT_ID_PATTERN.fullmatch(
         return_val
     ):
@@ -467,7 +468,7 @@ def _names_a_ref(revision: str) -> bool:
     return revision not in _UNRECORDED_REVISIONS and not revision.startswith("ERROR")
 
 
-def _release_revision() -> str | None:
+def _release_revision(quiet: bool = False) -> str | None:
     """A guess at the revision: the release tag of the installed version, or None.
 
     The last fallback, when neither direct_url.json nor the package build names a
@@ -493,12 +494,13 @@ def _release_revision() -> str | None:
     if parsed.is_prerelease or parsed.is_postrelease or parsed.local is not None:
         return None
     tag = f"v{parsed}"
-    ASH_LOGGER.warning(
-        f"This installation of ASH recorded no source revision, so the image installs "
-        f"{tag}, the release tag of its version {version}. That is a guess: a build "
-        f"of an unreleased commit carries the version of the release before it. Pass "
-        f"--ash-revision-to-install to choose the revision."
-    )
+    if not quiet:
+        ASH_LOGGER.warning(
+            f"This installation of ASH recorded no source revision, so the image installs "
+            f"{tag}, the release tag of its version {version}. That is a guess: a build "
+            f"of an unreleased commit carries the version of the release before it. Pass "
+            f"--ash-revision-to-install to choose the revision."
+        )
     return tag
 
 
@@ -1888,7 +1890,7 @@ def _build_image(
             "--build-arg",
             f"OFFLINE={'YES' if offline else 'NO'}",
             "--build-arg",
-            f"OFFLINE_SEMGREP_RULESETS={offline_semgrep_rulesets}",
+            f"OFFLINE_RULESETS={offline_semgrep_rulesets}",
             # A new value re-runs the Dockerfile's core stage from its apt-get
             # upgrade step down, offline download included; see ARG BUILD_DATE_EPOCH
             # there. One value per UTC day, so rebuilds on the same day come from the
@@ -5022,9 +5024,11 @@ def _assemble_run_command(
     # the command line cannot take has already been refused, before any build.
     cmd.extend(_runner_marker_args(oci_command_prefix, snapshot_environ()))
 
-    # Image name then ash subcommand
+    # Image name, then the ASH command inside it. The image is built from this
+    # same tree (or from the revision it was installed from), so it carries the
+    # canonical console script.
     cmd.append(image_name)
-    cmd.append("ash")
+    cmd.append(CANONICAL_CLI_NAME)
 
     # Core ASH path arguments. In workspace mode --source-dir is omitted, because
     # it is mutually exclusive with --workspace and the workspace root is already
@@ -5398,7 +5402,9 @@ def run_ash_container(
         build_target: The image stage to build and run. None means ``non-root``;
             CI environment variables do not change it (see _resolve_build_target).
         offline: Build ASH for offline execution
-        offline_semgrep_rulesets: Specify Semgrep rulesets for use in ASH offline mode
+        offline_semgrep_rulesets: Rulesets baked into the opengrep offline cache
+            (the parameter keeps its historical name; the semgrep scanner is
+            served by the opengrep plugin)
         container_uid: UID to use for the container user
         container_gid: GID to use for the container user
         verbose: Enable verbose logging

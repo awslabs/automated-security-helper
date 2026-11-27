@@ -5,8 +5,8 @@
 
 Why this module exists
 ----------------------
-ASH ships ten scanners but, until this module, could only *install* three of them
-(bandit, checkov and semgrep, via ``uv tool install``) plus opengrep by binary
+ASH ships nine scanners but, until this module, could only *install* two of them
+(bandit and checkov, via ``uv tool install``) plus opengrep by binary
 download. grype, syft and trivy had no install path inside ASH at all, so a
 machine without them scanned with those scanners absent. That state was invisible
 from the outside: the scan reported them as not having run and still exited 0.
@@ -163,7 +163,7 @@ class ToolAsset:
 #
 # Versions are deliberately the same pins the container image already builds with (see the
 # ARG lines in Dockerfile), so a scan run from a container, from nix and from a bare
-# `ash dependencies install` all execute the same tool versions.
+# `ashx dependencies install` all execute the same tool versions.
 TOOL_VERSIONS: dict[str, str] = _declared_tool_versions()
 
 # The gem version cfn-nag installs at, kept beside the binary pins so there is one
@@ -358,7 +358,7 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # the SHA256 of the executable inside it (the member ``member_name`` selects). The
 # archive digest says nothing about a binary already on disk, because that binary was
 # extracted from the archive and is not the archive. The executable digest is what
-# lets ``ash dependencies install`` recognize a copy that is already present -- the
+# lets ``ashx dependencies install`` recognize a copy that is already present -- the
 # container image installs every pinned tool into /usr/local/bin before ASH runs --
 # and leave it alone, instead of writing a second copy of every binary into
 # ASH_BIN_PATH. trivy alone is 162 MB uncompressed.
@@ -686,8 +686,8 @@ def get_rules_bundle(name: str) -> RulesBundle:
 # Why this exists
 # ---------------
 # The image redistributes upstream release binaries -- every tool in TOOL_VERSIONS,
-# plus opengrep and uv -- and the Python scanners bandit, checkov and semgrep, which
-# ``ash dependencies install`` puts in place with ``uv tool install``. Every one of
+# plus opengrep and uv -- and the Python scanners bandit and checkov, which
+# ``ashx dependencies install`` puts in place with ``uv tool install``. Every one of
 # those licenses makes redistribution conditional on shipping something with the
 # binary: Apache-2.0 section 4(a) and (d) a copy of the license and the upstream
 # NOTICE, MIT the copyright and permission notice, LGPL and GPL the license and a
@@ -712,9 +712,9 @@ def get_rules_bundle(name: str) -> RulesBundle:
 #   install`` -- the wheel is the archive: a file with no ``url`` is read from the
 #   installed wheel's dist-info, checked against the hash its RECORD lists, and the
 #   installed version must be the entry's. A file with a ``url`` is the fallback for
-#   a wheel that does not carry it: semgrep's wheel declares
-#   ``License-Expression: LGPL-2.1-or-later`` in its METADATA and ships no license
-#   file at all, so its LICENSE and COPYRIGHT are fetched from its repository. Were
+#   a wheel that does not carry it (the retired semgrep entry's wheel declared a
+#   license expression in METADATA and shipped no license file, so its LICENSE and
+#   COPYRIGHT were fetched from its repository). Were
 #   a later wheel to carry the file, the dist-info copy is used instead and must
 #   still hash to the pin, so the image's bytes are the same either way. These
 #   entries are staged by ``install-pinned-tool --licenses-only`` after ``ash
@@ -768,7 +768,7 @@ def get_rules_bundle(name: str) -> RulesBundle:
 # For a Python tool installed with ``uv tool install``, set ``distribution`` to its
 # PyPI name and ``version`` to its release tag, list the wheel's dist-info (``unzip
 # -l``; PEP 639 wheels keep license files under ``licenses/``), and add the tool to
-# the ``--licenses-only`` line that follows ``ash dependencies install``. A license
+# the ``--licenses-only`` line that follows ``ashx dependencies install``. A license
 # file the wheel lacks is URL-pinned as in step 3. The entry's ``tool`` must be the
 # scanner's name, because it is also the key ``--uv-tool-pins`` overrides.
 #
@@ -876,7 +876,7 @@ class ThirdPartyLicense:
     running this argv, whose output must report ``version``. ``{uv_tool_dir}`` in
     an argument is replaced with what ``uv tool dir`` prints.
 
-    ``distribution`` is set for a tool ``ash dependencies install`` installs with
+    ``distribution`` is set for a tool ``ashx dependencies install`` installs with
     ``uv tool install``: the PyPI name of the distribution, whose installed
     dist-info the license files are read from. ``version`` is still the upstream
     release tag; without its leading ``v`` it is the version installed.
@@ -1023,8 +1023,7 @@ def _source_file(repository: str, commit: str, path: str) -> str:
 # SHA256 of that file downloaded from its URL in the entry. Archive-member files
 # have no digest here: the archive digest in _DIGESTS covers them. For grype, syft
 # and trivy the archive's LICENSE was also checked byte-identical to the
-# repository's at the same commit. semgrep's two files are byte-identical to
-# opengrep's, which forked it, so they share digests.
+# repository's at the same commit.
 _THIRD_PARTY_HASHES: dict[str, str] = {
     "actionlint commit": "914e7df21a07ef503a81201c76d2b11c789d3fca",  # pragma: allowlist secret
     "aws-guard-rules-registry commit": "72352d1e5414e496ab75fae216119e65d8e61d53",  # pragma: allowlist secret
@@ -1061,9 +1060,6 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "pygit2 commit": "d88fa3dcbab21a7eb33ff354222c4ec8e5ff6ece",  # pragma: allowlist secret
     "pygit2/AUTHORS.md": "4ecad3164600b3c7a216cdd636288d1434afd6307737cfeba8fc1372dc04ba20",  # pragma: allowlist secret
     "pygit2/COPYING": "3f2a642de5f24ed216404873b875e9d1c5dd112a4e0ae27a42f7303583f69683",  # pragma: allowlist secret
-    "semgrep commit": "a5844e7c2d9d04548f86048f525d467a00742656",  # pragma: allowlist secret
-    "semgrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
-    "semgrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
     "syft commit": "1a72047fd46c72e0a12ee77e24b23d2316753d08",  # pragma: allowlist secret
     "trivy commit": "3f6334d223b52188324af3b9923b4249cd206652",  # pragma: allowlist secret
     "trivy/NOTICE": "aed9bc6dab87c6f6567d20bf0f5c0433a8ccd3ad7873322cf79b9244eb720a1f",  # pragma: allowlist secret
@@ -1336,7 +1332,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             "libssh2-*", rb"SSH-2\.0-libssh2_([0-9.]+)", "libssh2-"
         ),
     ),
-    # Installed by `ash dependencies install`, which publishes a bare executable
+    # Installed by `ashx dependencies install`, which publishes a bare executable
     # with no archive around it, so both files come from the repository.
     "opengrep": ThirdPartyLicense(
         tool="opengrep",
@@ -1439,22 +1435,6 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             "-c",
             "import pygit2; print(pygit2.__version__)",
         ),
-    ),
-    # The wheel's dist-info holds no license file, only METADATA's
-    # `License-Expression: LGPL-2.1-or-later`, so both files come from the
-    # repository. COPYRIGHT grants "version 2.1" with no "or later", the narrower
-    # of the two readings, and the one opengrep's entry takes from the same text.
-    "semgrep": ThirdPartyLicense(
-        tool="semgrep",
-        version="v1.186.0",
-        license="LGPL-2.1-only",
-        repository="https://github.com/semgrep/semgrep",
-        commit=_THIRD_PARTY_HASHES["semgrep commit"],
-        files=(
-            _from_source("semgrep", "https://github.com/semgrep/semgrep", "LICENSE"),
-            _from_source("semgrep", "https://github.com/semgrep/semgrep", "COPYRIGHT"),
-        ),
-        distribution="semgrep",
     ),
     "syft": ThirdPartyLicense(
         tool="syft",

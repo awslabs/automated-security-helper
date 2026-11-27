@@ -63,10 +63,10 @@ UPLOADS = re.compile(
     r"actions/upload-artifact@|github/codeql-action/upload-sarif@|"
     r"mikepenz/action-junit-report@|mshick/add-pr-comment@"
 )
-# A step that runs ASH: the `ash` command (directly, or through uv/uvx), Invoke-ASH, the
-# sh helper's invoke-ash, or this repository's scan action.
+# A step that runs ASH: the `ash` or `ashx` command (directly, or through uv/uvx),
+# Invoke-ASH, an invoke-ash helper, or this repository's scan action.
 RUNS_ASH = re.compile(
-    r"(?<![\w./-])ash(?=\s|$)|\bInvoke-ASH\b|\binvoke[-_]ash\b|/run-scan-test\b"
+    r"(?<![\w./-])ashx?(?=\s|$)|\bInvoke-ASH\b|\binvoke[-_]ash\b|/run-scan-test\b"
 )
 
 

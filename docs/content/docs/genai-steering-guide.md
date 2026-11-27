@@ -5,7 +5,7 @@ and propose suppressions without hiding real problems. Give it to your agent as 
 for example as a rules file or a steering file. To save a copy in the current directory:
 
 ```bash
-ash get-genai-guide --output ash-genai-guide.md
+ashx get-genai-guide --output ash-genai-guide.md
 ```
 
 The guide ships with every installation of ASH (a wheel or sdist, an install from a
@@ -22,7 +22,7 @@ lists the platforms and what each one installs, and
 [Connect an AI agent to ASH](../getting-started/agents.md) covers adding the server by hand.
 Use this file when your agent has no plugin, or when you want to put the guide where the
 agent reads project context, for example a rules or steering directory of your editor. Save
-the copy there with `ash get-genai-guide --output <path>`, and run the command again after
+the copy there with `ashx get-genai-guide --output <path>`, and run the command again after
 you update ASH to refresh it.
 
 The rest of this file is written for the agent.
@@ -49,7 +49,7 @@ The rest of this file is written for the agent.
   to write through one.
 - Do not repeat a detected secret's value in your answers. Refer to the file and line.
 - If a tool, option, or field named here does not exist, the installed ASH is older than this
-  guide. Tell the user, and use what the installed version reports (`ash --help`, the MCP
+  guide. Tell the user, and use what the installed version reports (`ashx --help`, the MCP
   server's tool list).
 
 ## Run a scan with the MCP tools
@@ -233,7 +233,7 @@ else:
     ├── bandit/
     │   └── source/
     │       └── ASH.ScanResults.json
-    ├── semgrep/
+    ├── opengrep/
     │   └── source/
     │       └── ASH.ScanResults.json
     └── [other scanners]/
@@ -834,7 +834,7 @@ grep -c '"id": "CVE-' reports/ash.cdx.json
 ## Configuration File Schema
 
 ### Location
-- Default: the first config file discovery finds; `ash config init` creates `.ash.yaml` in the project root
+- Default: the first config file discovery finds; `ashx config init` creates `.ash.yaml` in the project root
 - Custom: Specify with `--config` flag or `ASH_CONFIG` environment variable
 
 ### Schema Structure
@@ -870,10 +870,10 @@ scanners:
       ignore_nosec: false
       config_file: .ash/bandit.yaml
   
-  semgrep:
+  opengrep:
     enabled: true
     options:
-      config: auto  # or specific ruleset like 'p/security-audit'
+      config: p/ci  # or another ruleset like 'p/security-audit'
   
   checkov:
     enabled: true
@@ -913,7 +913,7 @@ Array of suppression rules to mark findings as false positives or accepted risks
 - `line_start`: Optional - specific line number
 - `line_end`: Optional - end line for multi-line suppressions
 - `reason`: Required - explanation for suppression
-- `expires`: Optional - ISO date when suppression expires (`expiration` is accepted as a deprecated alias when a config is read; the alias is removed in ASH v4)
+- `expires`: Optional - ISO date when suppression expires (ASH 4.0 removed the `expiration` spelling; a config that writes it is refused as an unknown key)
 - `resource_id`: Optional - only suppress findings about this resource identity (for cdk-nag, the CDK construct path); sugar for `scope.resource_id`
 - `scope`: Optional - narrow the entry to a resource identity, a resource type, or named engines' findings:
 
@@ -931,7 +931,7 @@ suppressions:
           applies_to: 'Action::logs:*'
 ```
 
-An unknown key in a suppression warns and disables the entry (it suppresses nothing until fixed); `fail_on_unknown_keys: true` makes it an error at config load, which becomes the default at ASH v4.
+Since ASH 4.0 an unknown key in a suppression is an error at config load (`fail_on_unknown_keys: true` is the default); `fail_on_unknown_keys: false` keeps the 3.x behavior, where it warns and disables the entry (it suppresses nothing until fixed).
 
 #### global_settings.exclusions
 Array of rule+path exclusions, which DROP the matching results from SARIF instead of keeping them marked suppressed: for finding classes that are always benign in a known place, such as bandit B101 (`assert`) under `tests/`. Other rules under the path are still reported, which an `ignore_paths` entry would drop too.
@@ -1040,7 +1040,7 @@ suppressions:
 4. **Re-run Scan to Verify**:
    <!-- doctest: illustrative reason="runs every enabled scanner, which needs each scanner's tool" -->
    ```bash
-   ash --mode local
+   ashx --mode local
    ```
 
 5. **Confirm Suppression Applied**:
@@ -1370,7 +1370,7 @@ will install its tool, and `missing_dependencies` names those scanners. It does 
 project's config, and it installs and downloads nothing. When the tool of a scanner that ASH
 installs with uv is missing, the first scan installs it if the server is online and has uv;
 such a scanner is listed in `installs_on_first_scan` and counts toward `ready`, and otherwise
-it is in `missing_dependencies`. Offline, semgrep is also missing when it has no rules cache.
+it is in `missing_dependencies`. Offline, opengrep is also missing when it has no rules cache.
 
 The [MCP tools reference](https://github.com/awslabs/automated-security-helper/blob/main/docs/content/reference/mcp-tools.md)
 lists every tool and its parameters.
@@ -1454,14 +1454,14 @@ actionable_critical = await get_scan_results(
 
 # Specific scanners
 sast_results = await get_scan_results(
-    output_dir=".ash/ash_output", scanners="bandit,semgrep"
+    output_dir=".ash/ash_output", scanners="bandit,opengrep"
 )
 
 # Combined filtering - actionable high-priority SAST findings
 high_priority_sast = await get_scan_results(
     output_dir=".ash/ash_output",
     filter_level="summary",
-    scanners="bandit,semgrep",
+    scanners="bandit,opengrep",
     severities="critical,high",
     actionable_only=True,
 )
@@ -1533,10 +1533,10 @@ From the project's root directory:
 
 <!-- doctest: illustrative reason="runs every scanner, which needs the scanner tools and network access" -->
 ```bash
-ash --source-dir . --no-progress
+ashx --source-dir . --no-progress
 ```
 
-`ash` and `ash scan` are the same command. The scan runs on this machine and writes its
+`ashx` and `ashx scan` are the same command. The scan runs on this machine and writes its
 output to `.ash/ash_output` under the scanned directory unless you pass `--output-dir`.
 `--scanners` runs only the named scanners and `--exclude-scanners` skips them; use them only
 when the user asks for a narrower scan. This scan runs detect-secrets alone, without network
@@ -1544,7 +1544,7 @@ access:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress
+ashx --source-dir . --scanners detect-secrets --offline --no-progress
 ```
 
 | Exit code | Meaning |
@@ -1560,13 +1560,13 @@ A value ASH does not accept is a usage error, and no scanner runs:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --min-severity urgent --offline --no-progress
+ashx --source-dir . --scanners detect-secrets --min-severity urgent --offline --no-progress
 ```
 
 To print a summary of the last scan:
 
 ```bash
-ash report --output-dir .ash/ash_output
+ashx results report --output-dir .ash/ash_output
 ```
 
 ## Read the results
@@ -1707,11 +1707,11 @@ directory: `.ash.yaml` at the root, then the deprecated locations `.ash.yml`, `.
 `.ashrc.json`, `ashrc.toml`, `ashrc.yaml`, `ashrc.yml`, and `ashrc.json` in the directory,
 then the `[tool.ash]` table of `pyproject.toml`. A config at a deprecated location still
 loads, with one warning that names `.ash.yaml` as the path to move it to; support is removed
-in ASH 4.0. If the config has an `extends` key, its own
+in ASH 4.1. If the config has an `extends` key, its own
 `suppressions` list replaces the base config's list instead of adding to it; keep the base's
 entries by adding yours with a `patch` operation `add` at `/global_settings/suppressions/-`.
 
-Check the edited config before you scan. `ash config validate`, run in the scanned directory,
+Check the edited config before you scan. `ashx config validate`, run in the scanned directory,
 checks the config a scan there would use the way the scan loads it: it names each field the
 scan would refuse, such as a suppression without a `reason` or with a misspelled key, and
 exits with code 3 when there is one. `--config` names another file. Over MCP,
@@ -1724,7 +1724,7 @@ there are no errors.
 jq '.sarif.runs[].results[] | select((.suppressions // []) | length == 0) | {file: .locations[0].physicalLocation.artifactLocation.uri, rule: .ruleId, line: .locations[0].physicalLocation.region.startLine, end_line: .locations[0].physicalLocation.region.endLine}' .ash/ash_output/ash_aggregated_results.json
 
 # Verify suppression syntax
-ash config validate
+ashx config validate
 ```
 
 After the next scan, the finding has `is_suppressed` true and the scan's suppressed count
@@ -1752,9 +1752,9 @@ return an `error_category`. The names below appear in one of those two fields.
 
 | You see | Do this |
 |---------|---------|
-| Exit code 1, or status `incomplete`, with MISSING scanners | Tell the user. `ash dependencies install` installs the scanner tools for the user that runs ASH. A tool installed only inside the project does not count. |
-| Exit code 3 | Run `ash config validate` in the scanned directory to see each invalid field, and fix it. |
-| Exit code 5 | The command line is wrong. Check the option names and values with `ash --help`. |
+| Exit code 1, or status `incomplete`, with MISSING scanners | Tell the user. `ashx dependencies install` installs the scanner tools for the user that runs ASH. A tool installed only inside the project does not count. |
+| Exit code 3 | Run `ashx config validate` in the scanned directory to see each invalid field, and fix it. |
+| Exit code 5 | The command line is wrong. Check the option names and values with `ashx --help`. |
 | `scan_target_not_permitted`, or `invalid_path` from a results tool | The MCP server does not allow that directory. Ask the user to add it to the server's `ASH_MCP_ALLOWED_ROOTS`, or deliver the source. |
 | `config_input_not_permitted` | The server does not allow reading that config file. Use the project's own config, or ask the user. |
 | `config_field_denied` | A delivered config sets a field the server does not let clients set. Remove the field it names. |

@@ -8,7 +8,7 @@ WHY THIS EXISTS
 ``.github/actions/validate-mcp/tool_surface.golden.json`` pins the server's
 ``tools/list``, ``resources/list``, ``resources/templates/list`` and
 ``prompts/list`` replies. The check that compares it against a live server,
-``compare_tool_surface.py``, drives ``ash mcp`` through the MCP Inspector, and the
+``compare_tool_surface.py``, drives ``ashx mcp`` through the MCP Inspector, and the
 CI step that runs it is skipped on Windows (the inspector install and the stdio
 spawn are POSIX-only in that action). So on a Windows leg nothing compared the
 surface to the golden at all: a Windows-only change to a tool schema, a resource

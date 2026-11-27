@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What ``ash dependencies install`` prints, and exits with, for an unknown ``--tool``.
+"""What ``ashx dependencies install`` prints, and exits with, for an unknown ``--tool``.
 
 The refusal comes after the command has announced the host platform, so the platform
 is pinned. Each platform the installer names is rendered on every OS, so a change to

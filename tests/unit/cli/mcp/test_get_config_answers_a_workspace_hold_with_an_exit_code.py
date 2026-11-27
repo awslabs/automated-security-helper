@@ -21,7 +21,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-SESSION = "session-held"
+CLIENT_ID = "session-held"
 
 
 @pytest.fixture(autouse=True)
@@ -43,7 +43,7 @@ def _isolated_session_state(monkeypatch, tmp_path):
 
 @pytest.fixture
 def delivered(tmp_path) -> Path:
-    """A registered profile bound to SESSION with its copy removed, and a
+    """A registered profile bound to CLIENT_ID with its copy removed, and a
     config the client delivered. Returns the delivered config."""
     from automated_security_helper.cli.mcp.profile_registry import (
         register_profiles,
@@ -56,11 +56,11 @@ def delivered(tmp_path) -> Path:
     profile = operator_dir / "strict.ash.yaml"
     profile.write_text("project_name: strict-profile\n", encoding="utf-8")
     set_profile_registry(register_profiles([f"strict={profile}"]))
-    selected = mcp_select_profile("strict", session_id=SESSION)
+    selected = mcp_select_profile("strict", session_id=CLIENT_ID)
     assert selected["success"] is True, selected
     Path(selected["config_path"]).unlink()
 
-    source = tmp_path / "mcp-workspaces" / SESSION / "source"
+    source = tmp_path / "mcp-workspaces" / CLIENT_ID / "source"
     source.mkdir(parents=True)
     config = source / ".ash.yaml"
     config.write_text("project_name: delivered\n", encoding="utf-8")
@@ -72,12 +72,12 @@ def test_the_hold_is_refused_with_the_internal_refusal_exit_code(delivered) -> N
     from automated_security_helper.cli.mcp.sessions import get_default_registry
     from automated_security_helper.cli.mcp_tools import mcp_get_config
 
-    session = get_default_registry().session_for(SESSION)
-    assert session.try_begin_change() is None
+    entry = get_default_registry().session_for(CLIENT_ID)
+    assert entry.try_begin_change() is None
     try:
-        result = mcp_get_config(config_path=str(delivered), session_id=SESSION)
+        result = mcp_get_config(config_path=str(delivered), session_id=CLIENT_ID)
     finally:
-        session.end_change()
+        entry.end_change()
 
     assert result["success"] is False, result
     assert result["error_type"] == "session_workspace_busy", result

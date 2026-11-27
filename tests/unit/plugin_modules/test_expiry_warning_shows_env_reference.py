@@ -11,9 +11,9 @@ wrote the value at. After the field's rename the shown key was still
 ``expiration`` while the documented config spelling is ``expires``, so an entry
 written ``expires: ${VAR}`` found no position in the record and the 30-day and
 expired-entries warnings printed the RESOLVED environment value, which this
-record exists to prevent. The shown key is now ``expires``, and the record
-covers the deprecated ``expiration`` alias spelling too, so either spelling in
-the file keeps the reference in the warning.
+record exists to prevent. The shown key is now ``expires``. ASH 4.0 removed the
+``expiration`` spelling, so a config file that writes it is refused and has no
+reference to keep.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ def _config_from(tmp_path, spelling: str, reference: str):
         encoding="utf-8",
     )
     with _warnings.catch_warnings():
-        # The deprecated spelling case warns by design; the test reads the log.
+        # Keep the test's own output free of unrelated deprecation noise.
         _warnings.simplefilter("ignore", DeprecationWarning)
         return resolve_config(source_dir=source)
 
@@ -70,14 +70,11 @@ def _warnings_logged(config) -> str:
     return " ".join(str(call.args[0]) for call in logger.warning.call_args_list)
 
 
-@pytest.mark.parametrize("spelling", ["expires", "expiration"])
-def test_an_expiring_env_read_date_is_shown_as_its_reference(
-    tmp_path, monkeypatch, spelling
-):
+def test_an_expiring_env_read_date_is_shown_as_its_reference(tmp_path, monkeypatch):
     """Red before the fix for ``expires``: the warning held the resolved date."""
     resolved = _in_days(5)
     monkeypatch.setenv("ASH_TEST_Q2_EXPIRY", resolved)
-    config = _config_from(tmp_path, spelling, "${ASH_TEST_Q2_EXPIRY}")
+    config = _config_from(tmp_path, "expires", "${ASH_TEST_Q2_EXPIRY}")
 
     logged = _warnings_logged(config)
 
@@ -86,13 +83,10 @@ def test_an_expiring_env_read_date_is_shown_as_its_reference(
     assert resolved not in logged, logged
 
 
-@pytest.mark.parametrize("spelling", ["expires", "expiration"])
-def test_an_expired_env_read_date_is_shown_as_its_reference(
-    tmp_path, monkeypatch, spelling
-):
+def test_an_expired_env_read_date_is_shown_as_its_reference(tmp_path, monkeypatch):
     resolved = _in_days(-5)
     monkeypatch.setenv("ASH_TEST_Q2_EXPIRY", resolved)
-    config = _config_from(tmp_path, spelling, "${ASH_TEST_Q2_EXPIRY}")
+    config = _config_from(tmp_path, "expires", "${ASH_TEST_Q2_EXPIRY}")
 
     logged = _warnings_logged(config)
 

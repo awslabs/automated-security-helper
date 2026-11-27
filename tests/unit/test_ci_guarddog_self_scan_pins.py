@@ -149,6 +149,7 @@ _RULE_LINE_MARKERS = {
         "Buffer.from",
     ),
     "threat-runtime-environment-read": ("os.environ",),
+    "threat-network-exfiltration": ("https://",),  # a URL built from a made-up host
 }
 
 

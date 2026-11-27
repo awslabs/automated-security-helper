@@ -613,7 +613,7 @@ def test_a_plain_scan_is_comparable():
         ),
         (
             {"metadata": {"shard": object()}},
-            "use ash merge before comparing sharded results",
+            "use ashx results merge before comparing sharded results",
         ),
         (
             {"metadata": {"changed_files_only": True}},

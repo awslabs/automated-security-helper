@@ -24,6 +24,7 @@ from typing import List
 
 import pytest
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.interactions import run_ash_scan as ras
 from automated_security_helper.utils.subprocess_utils import create_completed_process
@@ -92,6 +93,19 @@ def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def _link(link: Path, target: Path, *, directory: bool = False) -> None:
+    """``link.symlink_to(target)``, skipping where this runner cannot make links.
+
+    An unprivileged Windows runner (no developer mode, not elevated) refuses
+    ``symlink_to`` with WinError 1314, which would read as a failure of the
+    code under test. The attempt is the probe: a refusal here is a skip with
+    the platform's own words, and every other platform links as before."""
+    try:
+        link.symlink_to(target, target_is_directory=directory)
+    except (OSError, NotImplementedError) as refused:
+        pytest.skip(f"this runner cannot create symbolic links: {refused}")
 
 
 @pytest.mark.unit
@@ -497,7 +511,7 @@ def test_a_discoverable_source_config_wins_over_ash_config_in_the_container(
         pass  # the stubbed runner writes no results; only the command matters
 
     (run,) = [cmd for cmd in commands if len(cmd) > 1 and cmd[1] == "run"]
-    inner = run[run.index("ash") + 1 :]
+    inner = run[run.index(CANONICAL_CLI_NAME) + 1 :]
     assert "--ash-config-from-host" in inner, run
     # Nothing is named as the scan's config: the scan inside discovers /src's
     # own file. A fallback that handed back ASH_CONFIG's file would put it here
@@ -545,7 +559,7 @@ def _run_command(source: Path, out: Path, **kwargs) -> List[str]:
 
 
 def _inner_arguments(cmd: List[str]) -> List[str]:
-    return cmd[cmd.index("ash") + 1 :]
+    return cmd[cmd.index(CANONICAL_CLI_NAME) + 1 :]
 
 
 def _value_after(arguments: List[str], flag: str):
@@ -796,7 +810,7 @@ def _discovery_layouts():
         return build
 
     def dangling_link(source: Path) -> None:
-        (source / ASH_CONFIG_FILE_NAMES[0]).symlink_to(source / "missing.yaml")
+        _link(source / ASH_CONFIG_FILE_NAMES[0], source / "missing.yaml")
 
     def directory_named_like_a_config(source: Path) -> None:
         (source / ASH_CONFIG_FILE_NAMES[0]).mkdir()
@@ -1133,7 +1147,7 @@ def test_an_unmountable_env_chosen_container_path_shows_no_value(layout, monkeyp
     value = "chainlnk,dir"
     monkeypatch.setenv("ASH_CHAIN_C", value)
     _write(layout["w"] / "clean" / "base.yaml", "project_name: b\n")
-    (layout["w"] / value).symlink_to(layout["w"] / "clean")
+    _link(layout["w"] / value, layout["w"] / "clean")
     config = _write(layout["w"] / "ash.yaml", "extends: ${ASH_CHAIN_C}/base.yaml\n")
 
     refusal = rac.container_input_refusal(layout["source"], layout["out"], str(config))
@@ -1155,7 +1169,7 @@ def _one_base_at_two_container_paths(layout, monkeypatch, link_name: str) -> Pat
     what its path contains."""
     w = layout["w"]
     _write(w / "real" / "base.yaml", "project_name: b\n")
-    (w / link_name).symlink_to(w / "real", target_is_directory=True)
+    _link(w / link_name, w / "real", directory=True)
     monkeypatch.setenv("ASH_CHAIN_X", link_name)
     return _write(
         w / "ash.yaml",
@@ -1287,7 +1301,7 @@ def _base_reached_literally_and_through_the_environment(
     w = layout["w"]
     _write(w / shape["directory"] / "base.yaml", "project_name: b\n")
     if shape["link"] is not None:
-        (w / shape["link"]).symlink_to(w / shape["directory"], target_is_directory=True)
+        _link(w / shape["link"], w / shape["directory"], directory=True)
     monkeypatch.setenv("ASH_CHAIN_X", shape["env_value"])
     # The environment entry is a plain scalar: YAML's implicit resolvers skip
     # quoted strings, so a quoted entry would stay literal.
@@ -1501,7 +1515,7 @@ def test_a_chain_of_literal_entries_is_named_as_written(layout):
     environment chose."""
     w = layout["w"]
     _write(w / "real" / "base.yaml", "project_name: b\n")
-    (w / "lnk").symlink_to(w / "real", target_is_directory=True)
+    _link(w / "lnk", w / "real", directory=True)
     config = _write(w / "ash.yaml", "extends:\n  - lnk/base.yaml\n  - real/base.yaml\n")
     root = rac.CONTAINER_CONFIG_ROOT
     resolved = rac._real_path(config)
@@ -2187,7 +2201,7 @@ def test_an_unset_key_reference_with_a_default_reads_nothing_and_is_not_named(
 
 @pytest.mark.unit
 def test_the_empty_valued_key_refusal_shows_no_value_the_chain_read(
-    layout, monkeypatch, caplog
+    layout, monkeypatch
 ):
     """The must-not-flag side of the naming: the refusal names variables,
     never what they hold. Distinctive values planted in the two variables the
@@ -2207,15 +2221,37 @@ def test_the_empty_valued_key_refusal_shows_no_value_the_chain_read(
         "extends: ${" + BASE_VAR + "}\n",
     )
 
-    with caplog.at_level(logging.WARNING, logger="ash"):
+    # Capture on the product's own logger at DEBUG, the way the neighboring
+    # log tests do, not through caplog: caplog reads the root logger, which sees
+    # nothing when ASH_LOGGER does not propagate to it, and an at-WARNING cut
+    # drops the DEBUG and INFO levels where values would most likely be written.
+    lines: list = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            lines.append(record.getMessage())
+
+    handler = _Capture(level=logging.DEBUG)
+    old_level = rac.ASH_LOGGER.level
+    rac.ASH_LOGGER.addHandler(handler)
+    rac.ASH_LOGGER.setLevel(logging.DEBUG)
+    try:
+        # The positive control: a record written at the lowest level reaches
+        # the capture, so an empty capture below cannot be a dead one.
+        rac.ASH_LOGGER.debug("capture-control-record")
         with pytest.raises(rac.ContainerInputError) as refused:
             rac.operator_environment_names(str(config), None, layout["source"])
+    finally:
+        rac.ASH_LOGGER.removeHandler(handler)
+        rac.ASH_LOGGER.setLevel(old_level)
 
+    text = "\n".join(lines)
+    assert "capture-control-record" in lines, lines
     message = str(refused.value)
     assert planted_base not in message, message
     assert planted_value not in message, message
-    assert planted_base not in caplog.text, caplog.text
-    assert planted_value not in caplog.text, caplog.text
+    assert planted_base not in text, text
+    assert planted_value not in text, text
 
 
 @pytest.mark.unit
@@ -2460,7 +2496,12 @@ def test_the_runtimes_stderr_hides_a_bare_short_value_in_the_scan_report_run(cap
             check=False,
         )
 
-    assert "HIGH" not in capsys.readouterr().err
+    err = capsys.readouterr().err
+    # The presence control: the line did reach this stream, so the absence below
+    # is the hiding at work and not a capture that saw nothing (a child writing
+    # to the descriptor directly would leave ``err`` empty and pass vacuously).
+    assert "invalid mount config" in err, err
+    assert "HIGH" not in err
 
 
 @pytest.mark.integration
@@ -2857,7 +2898,7 @@ def _standing_below_a_checkout_link(layout, monkeypatch):
     target = layout["w"] / "elsewhere" / "dir"
     (target / "sub").mkdir(parents=True)
     _write(target / "cfg.yaml", "project_name: p\n")
-    (layout["repo"] / "lnk").symlink_to(target, target_is_directory=True)
+    _link(layout["repo"] / "lnk", target, directory=True)
     standing = layout["repo"] / "lnk" / "sub"
     monkeypatch.chdir(standing)
     return standing

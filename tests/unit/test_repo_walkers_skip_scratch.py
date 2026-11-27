@@ -126,6 +126,24 @@ _EXEMPT = {
         "One per-module directory inside a __snapshots__ directory that "
         "_snapshot_dirs returned, so never an ignored one."
     ),
+    (".github/scripts/check-snapshot-trailers.py", "_editor_snapshot_dirs", "base"): (
+        "Walks one editor root (EDITOR_ROOTS, editors/vscode) and removes "
+        "node_modules, out and out-integration from dirnames before os.walk "
+        "descends, so the installed packages and build output are never entered. "
+        "The editor roots hold no other per-run directory."
+    ),
+    ("scripts/verify_docs_freshness.py", "_python_files", "base"): (
+        "Removes every _EXCLUDED_MD_DIRS name (node_modules, .venv, venv, __pycache__ "
+        "and the build and cache directories) from dirnames before os.walk descends, "
+        "so no per-run directory is entered. Not a git listing, because the freshness "
+        "tests point it at planted trees that are not repositories."
+    ),
+    (".github/scripts/assert-no-aws-deploy.py", "scan_repo_detailed", "base"): (
+        "Walks SCAN_DIRS, .github/workflows and .github/actions, under the root the "
+        "caller gave. No tracked package.json sits under .github, so no node_modules "
+        "does, and the tests' scratch tree, the scan output and the venv are not "
+        "there either."
+    ),
     (
         "scripts/verify_multi_project_attribution.py",
         "find_scanner_error_logs",

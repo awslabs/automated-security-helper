@@ -25,6 +25,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.core.enums import (
     AshLogLevel,
     ExecutionPhase,
@@ -116,7 +117,9 @@ def test_a_json_input_flag_on_the_command_line_does_not_reach_the_inner_scan(
     """The document was read into the options already; the shell's standard
     input is empty, so a forwarded ``--cli-json-input -`` made the inner scan
     read an empty document and refuse."""
-    monkeypatch.setattr(sys, "argv", ["ash", "scan", "--cli-json-input", "-"])
+    monkeypatch.setattr(
+        sys, "argv", [CANONICAL_CLI_NAME, "scan", "--cli-json-input", "-"]
+    )
 
     _run(tmp_path)
 
@@ -248,7 +251,9 @@ def test_every_forwarded_option_is_spelled_as_the_scan_cli_reads_it(tmp_path):
     assert _after_flag(argv, "--phases") == [ExecutionPhase.SCAN.value]
     assert _after_flag(argv, "--strategy") == [ExecutionStrategy.SEQUENTIAL.value]
     assert _after_flag(argv, "--log-level") == [AshLogLevel.DEBUG.value]
-    assert _after_flag(argv, "--offline-semgrep-rulesets") == ["p/custom"]
+    assert _after_flag(argv, "--offline-rulesets") == ["p/custom"]
+    # The deprecated spelling is not re-emitted: the inner scan would warn about it.
+    assert _after_flag(argv, "--offline-semgrep-rulesets") == []
     assert _after_flag(argv, "--min-severity") == ["high"]
     assert _after_flag(argv, "--base-ref") == ["origin/trunk"]
     assert _after_flag(argv, "--shard-index") == ["1"]
@@ -489,7 +494,7 @@ _FORWARDED = {
     "phases",
     "strategy",
     "offline",
-    "offline_semgrep_rulesets",
+    "offline_rulesets",
     "progress",
     "color",
     "show_summary",
@@ -600,7 +605,7 @@ _VARIED = {
     "phases": ({}, [ExecutionPhase.SCAN]),
     "strategy": ({}, ExecutionStrategy.SEQUENTIAL),
     "offline": ({}, True),
-    "offline_semgrep_rulesets": ({}, "p/custom"),
+    "offline_rulesets": ({}, "p/custom"),
     "progress": ({}, False),
     "color": ({}, False),
     "show_summary": ({}, False),

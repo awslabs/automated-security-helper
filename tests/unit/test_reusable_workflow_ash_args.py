@@ -305,6 +305,11 @@ def _value_option_lists() -> dict[str, set[str]]:
     return lists
 
 
+#: The deprecated single-dash spellings longer than one letter; the CLI keeps them so
+#: callers of the deleted root script do not break, and the step refuses them.
+_DEPRECATED_MULTI_LETTER_SPELLINGS = {"-rev"}
+
+
 def _value_options_in_the_step() -> set[str]:
     lists = _value_option_lists()
     assert set(lists) == {"Run ASH", "Resolve the base for changed-files-only"}, lists
@@ -321,6 +326,11 @@ def test_the_options_that_take_a_value_are_the_ash_groups():
         for option in options
         if not option.is_flag and not option.count
         for spelling in option.opts
+        # `-rev` is a deprecated multi-letter compatibility spelling (see
+        # cli/deprecations.py). The step reads a single-dash word letter by letter,
+        # so it reads `-rev` as three flags and refuses the value after it as a bare
+        # word: it fails closed, and the one-letter test below exempts it too.
+        if spelling not in _DEPRECATED_MULTI_LETTER_SPELLINGS
     }
 
     assert _value_options_in_the_step() == takes_a_value
@@ -384,7 +394,11 @@ def test_every_short_option_is_one_letter():
     ]
 
     assert spellings, "the ash group has no short options to check"
-    longer = sorted(spelling for spelling in spellings if len(spelling) != 2)
+    longer = sorted(
+        spelling
+        for spelling in spellings
+        if len(spelling) != 2 and spelling not in _DEPRECATED_MULTI_LETTER_SPELLINGS
+    )
     assert not longer, f"short options longer than one letter: {longer}"
 
 

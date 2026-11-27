@@ -1,0 +1,7 @@
+progress:
+  Looking for the ASH executable
+
+notification group=ASH type=ERROR
+title: ASH CLI not found
+body:
+PATH is empty or unset, so there was nowhere to look for 'ashx' or 'ash'. Set the full path to ASH in Settings | Tools | ASH.

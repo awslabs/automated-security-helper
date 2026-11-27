@@ -46,7 +46,7 @@ from automated_security_helper.core.resource_management.scan_registry import (
 
 pytestmark = pytest.mark.unit
 
-SECRET = "a-value-read-from-the-environment"  # pragma: allowlist secret
+MADE_UP_VALUE = "a-value-read-from-the-environment"  # pragma: allowlist secret
 
 
 def _project(tmp_path: Path, name: str) -> Path:
@@ -293,18 +293,18 @@ class TestCheckScanProgressWithoutAnOutputDirectory:
         self, tmp_path
     ):
         registry = ScanRegistry()
-        project = _project(tmp_path, SECRET)
+        project = _project(tmp_path, MADE_UP_VALUE)
         output = project / ".ash" / "ash_output"
         output.mkdir(parents=True)
         (output / "ash_aggregated_results.json").write_text("{ not json", "utf-8")
-        scan_id = _register(registry, project, environment_values=(SECRET,))
+        scan_id = _register(registry, project, environment_values=(MADE_UP_VALUE,))
 
         progress = registry.check_scan_progress(scan_id)
 
         entry = registry.get_scan(scan_id)
         assert entry.status is MCScanStatus.FAILED
         assert entry.error_message
-        assert SECRET not in entry.error_message
+        assert MADE_UP_VALUE not in entry.error_message
         assert progress["status"] == "failed"
 
     def test_a_file_derived_message_on_an_ended_scan_is_redacted_too(self, tmp_path):
@@ -314,11 +314,11 @@ class TestCheckScanProgressWithoutAnOutputDirectory:
         redaction every applied message gets. The file's text names the results
         path, which here carries the value."""
         registry = ScanRegistry()
-        project = _project(tmp_path, SECRET)
+        project = _project(tmp_path, MADE_UP_VALUE)
         output = project / ".ash" / "ash_output"
         output.mkdir(parents=True)
         (output / "ash_aggregated_results.json").write_text("{ not json", "utf-8")
-        scan_id = _register(registry, project, environment_values=(SECRET,))
+        scan_id = _register(registry, project, environment_values=(MADE_UP_VALUE,))
         registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
         registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
 
@@ -332,7 +332,7 @@ class TestCheckScanProgressWithoutAnOutputDirectory:
         # too; with one of them present and the value absent, the value was in the
         # path and was removed, and not never there.
         assert "ash_output" in progress["error_message"]
-        assert SECRET not in progress["error_message"]
+        assert MADE_UP_VALUE not in progress["error_message"]
 
 
 class TestScanStatisticsAreOneRead:

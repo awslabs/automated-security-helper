@@ -47,7 +47,8 @@ runs:
     - name: "nix: create test fixture"
       shell: bash
       run: |
-        mkdir -p /tmp/ash-nix-selftest
+        # RUNNER_TEMP, not /tmp: the runner empties it after every job.
+        mkdir -p "${RUNNER_TEMP}/ash-nix-selftest"
         # Deliberately flawed inputs so scanners have something to report. A fixture that
         # triggers nothing would let this job pass while every scanner sat idle -- which is
         # the exact failure mode Nix mode exists to prevent, so it must not be the shape of
@@ -55,13 +56,13 @@ runs:
         #
         # These are scanner FIXTURES, never executed: the shell=True call and the
         # hardcoded credential are the patterns bandit and detect-secrets should flag.
-        cat > /tmp/ash-nix-selftest/app.py <<'PY'
+        cat > "${RUNNER_TEMP}/ash-nix-selftest/app.py" <<'PY'
         import subprocess
         PASSWORD = "hunter2"
         def run(cmd):
             subprocess.call(cmd, shell=True)
         PY
-        cat > /tmp/ash-nix-selftest/template.yaml <<'YAML'
+        cat > "${RUNNER_TEMP}/ash-nix-selftest/template.yaml" <<'YAML'
         Resources:
           Bucket:
             Type: AWS::S3::Bucket
@@ -69,10 +70,10 @@ runs:
               BucketName: ash-nix-selftest-bucket
         YAML
         printf '{ "name": "ash-nix-selftest", "version": "1.0.0", "dependencies": {} }\n' \
-          > /tmp/ash-nix-selftest/package.json
+          > "${RUNNER_TEMP}/ash-nix-selftest/package.json"
         # For hadolint, an alpha scanner whose module the scan below lists. Unpinned base
         # image tag, so DL3007 fires and the scanner has something to report.
-        printf 'FROM ubuntu:latest\nRUN echo fixture\n' > /tmp/ash-nix-selftest/Dockerfile
+        printf 'FROM ubuntu:latest\nRUN echo fixture\n' > "${RUNNER_TEMP}/ash-nix-selftest/Dockerfile"
 
     - name: "nix: scan"
       shell: bash
@@ -97,17 +98,17 @@ runs:
       # reports a symptom and hides the cause, which cost a full CI round trip to diagnose.
       run: |
         set +e
-        ash scan \
+        ashx scan \
           --mode nix \
-          --source-dir /tmp/ash-nix-selftest \
-          --output-dir /tmp/ash-nix-selftest/output \
+          --source-dir "${RUNNER_TEMP}/ash-nix-selftest" \
+          --output-dir "${RUNNER_TEMP}/ash-nix-selftest/output" \
           --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins \
           --ash-plugin-modules automated_security_helper.plugin_modules.ash_betterleaks_plugins \
           --simple
         rc=$?
         set -e
         if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
-          echo "::error::ash scan --mode nix exited $rc (expected 0, or 2 for findings)"
+          echo "::error::ashx scan --mode nix exited $rc (expected 0, or 2 for findings)"
           exit "$rc"
         fi
         echo "scan exited $rc"
@@ -117,10 +118,11 @@ runs:
       run: |
         python3 <<'PY'
         import json
+        import os
         import pathlib
         import sys
 
-        results = pathlib.Path("/tmp/ash-nix-selftest/output/ash_aggregated_results.json")
+        results = pathlib.Path(os.environ["RUNNER_TEMP"], "ash-nix-selftest", "output", "ash_aggregated_results.json")
         if not results.exists():
             sys.exit(f"FAIL: no results at {results}; the scan did not complete")
 
@@ -175,7 +177,6 @@ runs:
             "hadolint",
             "npm-audit",
             "opengrep",
-            "semgrep",
             "syft",
             "trivy",
             "zizmor",
@@ -213,7 +214,7 @@ runs:
         # The flake under review, for the reason given on the scan step above.
         ASH_NIX_FLAKE_REF: "path:${{ github.workspace }}"
       run: |
-        mkdir -p /tmp/ash-zizmor-selftest/.github/workflows
+        mkdir -p "${RUNNER_TEMP}/ash-zizmor-selftest/.github/workflows"
         # The expression is assembled from two halves so this action file never
         # contains a literal one: GitHub would expand it here, in this step.
         open='$''{{'
@@ -225,13 +226,13 @@ runs:
           '    runs-on: ubuntu-latest' \
           '    steps:' \
           "      - run: echo \"${open} github.event.issue.title }}\"" \
-          > /tmp/ash-zizmor-selftest/.github/workflows/selftest.yml
-        cat /tmp/ash-zizmor-selftest/.github/workflows/selftest.yml
+          > "${RUNNER_TEMP}/ash-zizmor-selftest/.github/workflows/selftest.yml"
+        cat "${RUNNER_TEMP}/ash-zizmor-selftest/.github/workflows/selftest.yml"
         set +e
-        ash scan \
+        ashx scan \
           --mode nix \
-          --source-dir /tmp/ash-zizmor-selftest \
-          --output-dir /tmp/ash-zizmor-selftest/output \
+          --source-dir "${RUNNER_TEMP}/ash-zizmor-selftest" \
+          --output-dir "${RUNNER_TEMP}/ash-zizmor-selftest/output" \
           --scanners zizmor \
           --no-fail-on-findings \
           --fail-on-incomplete-scanners \
@@ -239,15 +240,16 @@ runs:
         rc=$?
         set -e
         if [ "$rc" -ne 0 ]; then
-          echo "::error::ash scan --scanners zizmor exited $rc; with --no-fail-on-findings only an incomplete or broken scan exits non-zero."
+          echo "::error::ashx scan --scanners zizmor exited $rc; with --no-fail-on-findings only an incomplete or broken scan exits non-zero."
           exit "$rc"
         fi
         python3 <<'PY'
         import json
+        import os
         import pathlib
         import sys
 
-        data = json.loads(pathlib.Path("/tmp/ash-zizmor-selftest/output/ash_aggregated_results.json").read_text())
+        data = json.loads(pathlib.Path(os.environ["RUNNER_TEMP"], "ash-zizmor-selftest", "output", "ash_aggregated_results.json").read_text())
         status = str((data.get("scanner_results") or {}).get("zizmor", {}).get("status", "absent"))
         rules = [
             result.get("ruleId")
@@ -259,7 +261,8 @@ runs:
             sys.exit("FAIL: zizmor did not report the fixture's template injection")
         print("PASS: zizmor ran and reported the fixture's template injection")
         PY
-    # The snapshot tests run under uv, from this checkout, so their `ash` is the code under
+
+    # The snapshot tests run under uv, from this checkout, so their `ashx` is the code under
     # review. Same uv pin as .github/actions/setup-ash, which this job does not use. Its
     # cache is off: the Actions cache of a public repository is readable by anyone, and
     # .github/scripts/assert-publish-surfaces.py admits only the caches already reviewed.
@@ -269,7 +272,7 @@ runs:
         version: "0.11.4"
         enable-cache: false
 
-    # What `ash scan --mode nix` prints around the shell and exits with, against syrupy
+    # What `ashx scan --mode nix` prints around the shell and exits with, against syrupy
     # snapshots. tests/conftest.py deselects the module everywhere else, because only a leg
     # with Nix can enter the shell. After the scan above on purpose: that scan's first entry
     # into the shell already seeded the grype and rule caches, so this one downloads nothing.

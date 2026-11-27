@@ -3,8 +3,8 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       Error: Invalid value: 'pdf' is not a valid format. Valid formats are: aggregated, text, flat-json, yaml, csv, html, dict, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, custom, github-ghas, gitlab-sast, gitlab-cyclonedx, unused-suppressions, aws-security-hub, bedrock-summary-reporter, cloudwatch-logs, s3
   
     ''',
@@ -15,8 +15,8 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       Error: No such option: --sourc-dir (Possible options: --oci, --output-dir, --source-dir)
   
     ''',
@@ -37,10 +37,9 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      DeprecationWarning: 'ash report' is deprecated and is removed in 4.0. Use 'ash results report' instead; 'ash report' keeps its current behavior until then.
-      Usage: ash [OPTIONS] COMMAND [ARGS]...
-      Try 'ash --help' for help.
-      Error: 'ash report' does not take --source-dir, given before it (see 'ash report --help'). Options given before a subcommand are passed to it only when it takes them: drop it, give it after a subcommand that takes it, or leave out 'report' to scan with it.
+      Usage: ashx [OPTIONS] COMMAND [ARGS]...
+      Try 'ashx -h' for help.
+      Error: 'ashx results report' does not take --source-dir, given before it (see 'ashx results report --help'). Options given before a subcommand are passed to it only when it takes them: drop it, give it after a subcommand that takes it, or leave out 'results report' to scan with it.
   
     ''',
     'stdout': '',
@@ -60,8 +59,8 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      Usage: ash [OPTIONS] COMMAND [ARGS]...
-      Try 'ash --help' for help.
+      Usage: ashx [OPTIONS] COMMAND [ARGS]...
+      Try 'ashx -h' for help.
       Error: No such command 'scna'. Did you mean 'scan'?
   
     ''',
@@ -82,8 +81,8 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       Error: --cli-json-input: params.json is not valid JSON: key 'output_dir' appears more than once
   
     ''',
@@ -94,8 +93,8 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       Error: --cli-json-input: params.json is not valid JSON: Expecting ',' delimiter: line 1 column 22 (char 21)
   
     ''',
@@ -106,8 +105,8 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       Error: --cli-json-input: cannot read nowhere.json: [Errno 2] No such file or directory
   
     ''',
@@ -118,8 +117,8 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       Error: --cli-json-input: invalid value for key 'min_severity' in params.json: a JSON boolean is only accepted for a true/false parameter
   
     ''',
@@ -130,8 +129,8 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       Error: --cli-json-input: params.json must contain a JSON object whose keys are parameter names, not a list
   
     ''',
@@ -142,8 +141,8 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       Error: --cli-json-input: invalid value for key 'shard_index' in params.json: Invalid value for '--shard-index' (env var: 'ASH_SHARD_INDEX'): 'first' is not a valid int.
   
     ''',
@@ -154,8 +153,8 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       Error: --cli-json-input: invalid value for key 'scanners' in params.json: expected a JSON array, because this parameter takes a list
   
     ''',
@@ -166,8 +165,8 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       Error: --cli-json-input: invalid value for key 'source_dir' in params.json: expected a string, number or boolean
   
     ''',
@@ -178,8 +177,8 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       Error: --cli-json-input: keys 'output_dir' and '--output-dir' in params.json both set the parameter 'output_dir'.
   
     ''',
@@ -190,8 +189,8 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       Error: --cli-json-input: invalid value for key 'output_dir' in params.json: expected a single value, not a JSON array
   
     ''',
@@ -202,8 +201,8 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       Error: --cli-json-input: unknown key 'output_dirr' in params.json. Valid keys are the parameter names source_dir, output_dir, scanners, exclude_scanners, only_scanners, add_scanners, ash_plugin_modules, config_overrides, offline, sandbox, offline_semgrep_rulesets, strategy, progress, output_formats, cleanup, phases, inspect, use_existing, version, mode, python_based_plugins_only, show_summary, quiet, log_level, config, verbose, debug, color, fail_on_findings, fail_on_incomplete_scanners, allow_stale_content_db, simple, ignore_suppressions, honor_ignore_files, min_severity, compact_report, annotate_duplicates, fold_duplicates, changed_files_only, base_ref, staged, allow_in_tree_tools, shard_index, shard_count, workspace, workspace_config, allow_missing_projects, dry_run, build, run, force, oci_runner, build_target, container_uid, container_gid, ash_revision_to_install, custom_containerfile, custom_build_arg, baseline, image, image_archive, image_layout; each option's long flag spelling is accepted as well. Run with --generate-cli-skeleton for a template.
   
     ''',
@@ -317,7 +316,7 @@
       INFO     Initializing ASH v<ASH_VERSION>
       ERROR    Configuration validation failed: Invalid value at 'fail_on_findings': Input should be a
                valid boolean
-      ERROR (3) Invalid configuration: Configuration validation failed for 'bad.yaml': Invalid value at 'fail_on_findings': Input should be a valid boolean. Run: ash config lint --config bad.yaml
+      ERROR (3) Invalid configuration: Configuration validation failed for 'bad.yaml': Invalid value at 'fail_on_findings': Input should be a valid boolean. Run: ashx config lint --config bad.yaml
   
     ''',
   })
@@ -361,7 +360,7 @@
     'stdout': '''
       INFO     Initializing ASH v<ASH_VERSION>
       INFO     Initializing execution engine
-      ERROR (5) None of the requested scanners exist: not-a-scanner. Registered scanners: actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, mcp-config, npm-audit, opengrep, semgrep, syft, trivy, zizmor. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
+      ERROR (5) None of the requested scanners exist: not-a-scanner. Registered scanners: actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, mcp-config, npm-audit, opengrep, syft, trivy, zizmor. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
   
     ''',
   })
@@ -370,7 +369,7 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      --shard-index/--shard-count cannot be combined with --workspace. Both spread one scan over more compute, but along different axes, and only sharding is recombinable: it partitions the scanners and stamps the partition onto the results so 'ash merge' can prove the shards reconstruct exactly one whole scan. Workspace mode's unified results file is assembled from the per-project payloads and carries none of each project's scan metadata, so a sharded workspace run would write results that merge has no provenance to verify coverage from -- and an unverifiable partial scan reads as a clean one. Either scan the workspace whole on one executor, or give each CI job one project via --source-dir and shard that.
+      --shard-index/--shard-count cannot be combined with --workspace. Both spread one scan over more compute, but along different axes, and only sharding is recombinable: it partitions the scanners and stamps the partition onto the results so 'ashx results merge' can prove the shards reconstruct exactly one whole scan. Workspace mode's unified results file is assembled from the per-project payloads and carries none of each project's scan metadata, so a sharded workspace run would write results that merge has no provenance to verify coverage from -- and an unverifiable partial scan reads as a clean one. Either scan the workspace whole on one executor, or give each CI job one project via --source-dir and shard that.
   
     ''',
     'stdout': '',
@@ -421,7 +420,7 @@
     'exit_code': 3,
     'stderr': '''
       Configuration validation failed: Invalid value at 'fail_on_findings': Input should be a valid boolean
-      Project 'service-a' at '<TMP>/service-a' has an invalid configuration: Configuration validation failed for '<TMP>/service-a/.ash.yaml': Invalid value at 'fail_on_findings': Input should be a valid boolean. Run: ash config lint --config <TMP>/service-a/.ash.yaml --source-dir <TMP>/service-a
+      Project 'service-a' at '<TMP>/service-a' has an invalid configuration: Configuration validation failed for '<TMP>/service-a/.ash.yaml': Invalid value at 'fail_on_findings': Input should be a valid boolean. Run: ashx config lint --config <TMP>/service-a/.ash.yaml --source-dir <TMP>/service-a
   
     ''',
     'stdout': '',

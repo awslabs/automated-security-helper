@@ -33,10 +33,6 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scann
     CheckovScanner,
     CheckovScannerConfig,
 )
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-    SemgrepScannerConfig,
-)
 from automated_security_helper.utils import subprocess_utils, uv_tool_runner
 from automated_security_helper.utils.pre_installed_tool import (
     reset_pre_installed_tool_cache,
@@ -223,6 +219,7 @@ def test_offline_pre_installed_bandit_without_sarif_is_missing_with_a_named_reas
     assert reason is not None
     assert "missing extra: sarif" in reason
     assert "uv tool install 'bandit[sarif,toml]>=1.7.8,<2.0.0'" in reason
+    assert "ashx container build --offline" in reason
 
 
 def test_online_pre_installed_bandit_without_sarif_keeps_uv(
@@ -242,17 +239,12 @@ def test_online_pre_installed_bandit_without_sarif_keeps_uv(
     [
         (BanditScanner, BanditScannerConfig, "bandit"),
         (CheckovScanner, CheckovScannerConfig, "checkov"),
-        (SemgrepScanner, SemgrepScannerConfig, "semgrep"),
     ],
 )
 def test_every_uv_backed_scanner_runs_a_verified_pre_installed_tool_directly(
     offline_host, plugin_context, tmp_path, monkeypatch, scanner_cls, config_cls, tool
 ):
-    """The class, not the instance: all three shared the same branch."""
-    rules = tmp_path / "semgrep-rules"
-    rules.mkdir()
-    (rules / "p-ci.yaml").write_text("rules: []\n")
-    monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", str(rules))
+    """The class, not the instance: the uv-backed scanners shared the same branch."""
     offline_host(tool)
     scanner = scanner_cls(context=plugin_context, config=config_cls())
 

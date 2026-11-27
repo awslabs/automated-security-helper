@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for the workspace-mode CLI surface of ``ash scan``.
+"""Unit tests for the workspace-mode CLI surface of ``ashx scan``.
 
 Resolution failures never reach the scan, and these tests assert that from the
 outside -- by checking that the scan entry point is not reached and that no
@@ -272,12 +272,12 @@ def test_project_pins_are_ignored_rather_than_a_workspace_error(tmp_path, no_sca
     _project(
         tmp_path,
         "api",
-        'project_name: api\nscanners:\n  semgrep:\n    options:\n      tool_version: ">=1.125.0,<2.0.0"\n',
+        'project_name: api\nscanners:\n  bandit:\n    options:\n      tool_version: ">=1.7.0,<2.0.0"\n',
     )
     _project(
         tmp_path,
         "web",
-        'project_name: web\nscanners:\n  semgrep:\n    options:\n      tool_version: ">=2.0.0"\n',
+        'project_name: web\nscanners:\n  bandit:\n    options:\n      tool_version: ">=2.0.0"\n',
     )
     workspace = _workspace(tmp_path, ["api", "web"])
 
@@ -349,7 +349,7 @@ def test_dry_run_invokes_no_scanner(tmp_path, no_scan):
 
 
 def test_dry_run_works_through_the_default_callback_too(tmp_path, no_scan):
-    """``ash --workspace ... --dry-run`` with no subcommand takes the callback
+    """``ashx --workspace ... --dry-run`` with no subcommand takes the callback
     path, which is a separate registration in cli/main.py."""
     _project(tmp_path, "api")
     workspace = _workspace(tmp_path, ["api"])

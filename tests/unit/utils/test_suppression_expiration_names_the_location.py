@@ -72,7 +72,7 @@ def _logged(log) -> str:
 
 def _kept_ignore_path(**fields) -> IgnorePathWithReason:
     """An entry as a stored configuration keeps it: not validated again."""
-    values = {"path": "vendor/**", "reason": "vendored", "expiration": CANARY}
+    values = {"path": "vendor/**", "reason": "vendored", "expires": CANARY}
     values.update(fields)
     return IgnorePathWithReason.model_construct(**values)
 
@@ -82,7 +82,7 @@ def _kept_suppression(**fields) -> AshSuppression:
         "rule_id": "B101",
         "path": "src/app.py",
         "reason": "accepted",
-        "expiration": CANARY,
+        "expires": CANARY,
     }
     values.update(fields)
     return AshSuppression.model_construct(**values)
@@ -113,7 +113,7 @@ def test_an_ignore_path_s_date_that_does_not_parse(where, named):
 
 def test_an_expired_ignore_path_is_named_by_location_not_path():
     entry = IgnorePathWithReason(
-        path=f"{CANARY}/**", reason="vendored", expiration="2000-01-01"
+        path=f"{CANARY}/**", reason="vendored", expires="2000-01-01"
     )
     with patch.object(matcher, "ASH_LOGGER") as log:
         assert matcher.active_ignore_paths([entry]) == []
@@ -176,7 +176,7 @@ def _shard_record(expiration: str) -> str:
     )
     data = json.loads(model.model_dump_json(by_alias=True))
     data["ash_config"]["global_settings"]["ignore_paths"] = [
-        {"path": "vendor/**", "reason": "vendored", "expiration": expiration}
+        {"path": "vendor/**", "reason": "vendored", "expires": expiration}
     ]
     return json.dumps(data)
 
@@ -203,7 +203,7 @@ def test_merge_names_the_entry_by_location(tmp_path, monkeypatch, expiration, de
         _shard_record(expiration), encoding="utf-8"
     )
     merged = tmp_path / "merged"
-    args = ["merge", "--results", str(shard), "--output-dir", str(merged)]
+    args = ["results", "merge", "--results", str(shard), "--output-dir", str(merged)]
     with patch.object(matcher, "ASH_LOGGER", wraps=matcher.ASH_LOGGER) as log:
         result = CliRunner().invoke(
             app, [*args, *(["--debug"] if debug else [])], env={"COLUMNS": "300"}

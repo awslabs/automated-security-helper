@@ -30,18 +30,16 @@ pytestmark = pytest.mark.unit
 
 
 def test_subcommands():
+    # 4.0 removed the top-level build-image, report, diff, trend, merge and inspect
+    # spellings; `results` and `container` are the commands that hold them.
     assert contract().subcommands == (
         "scan",
-        "build-image",
-        "report",
-        "diff",
-        "trend",
-        "merge",
+        "results",
         "mcp",
         "get-genai-guide",
+        "container",
         "config",
         "dependencies",
-        "inspect",
         "plugin",
         "suppress",
         "express",
@@ -53,10 +51,15 @@ def test_only_scan_takes_sandbox():
 
 
 def test_root_value_options():
+    # --ash-revision and -rev are the spellings the removed root ./ash script took for
+    # --ash-revision-to-install, and --offline-semgrep-rulesets the old one for
+    # --offline-rulesets; each still binds its value and warns
+    # (cli/deprecations.py DEPRECATED_OPTION_SPELLINGS), so each takes a value.
     assert contract().root_value_options == (
         "--add-scanners",
         "--ash-config-from-host",
         "--ash-plugin-modules",
+        "--ash-revision",
         "--ash-revision-to-install",
         "--base-ref",
         "--baseline",
@@ -80,6 +83,7 @@ def test_root_value_options():
         "--mode",
         "--oci",
         "--oci-runner",
+        "--offline-rulesets",
         "--offline-semgrep-rulesets",
         "--only-scanners",
         "--output-dir",
@@ -100,26 +104,49 @@ def test_root_value_options():
         "-f",
         "-g",
         "-o",
+        "-rev",
         "-u",
     )
 
 
+# A command under `results` or `container` is named by its words: the group takes none
+# of these options itself, so a wrapper hands them to the command the group's words
+# name. 4.0 removed the top-level report and merge, so these rows are where a wrapper's
+# -Config, -Verbose and the rest reach them now.
 EXPECTED_OPTION_SUBCOMMANDS = {
-    "--quiet": ("scan", "build-image", "mcp"),
-    "--no-color": ("scan", "build-image", "report", "merge", "mcp"),
+    "--quiet": ("scan", "mcp", "container build"),
+    "--no-color": (
+        "scan",
+        "results report",
+        "results merge",
+        "mcp",
+        "container build",
+    ),
     "--progress": ("scan",),
     "--no-progress": ("scan",),
     "--show-summary": ("scan",),
     "--no-show-summary": ("scan",),
-    "--fail-on-findings": ("scan", "merge"),
-    "--no-fail-on-findings": ("scan", "merge"),
-    "--verbose": ("scan", "build-image", "report", "merge", "mcp"),
-    "--debug": ("scan", "build-image", "report", "merge", "mcp"),
-    "--offline": ("scan", "build-image"),
-    "--config": ("scan", "build-image", "report", "merge"),
+    "--fail-on-findings": ("scan", "results merge"),
+    "--no-fail-on-findings": ("scan", "results merge"),
+    "--verbose": (
+        "scan",
+        "results report",
+        "results merge",
+        "mcp",
+        "container build",
+    ),
+    "--debug": ("scan", "results report", "results merge", "mcp", "container build"),
+    "--offline": ("scan", "container build"),
+    "--config": (
+        "scan",
+        "results report",
+        "results merge",
+        "results inspect findings",
+        "container build",
+    ),
     "--scanners": ("scan",),
     "--exclude-scanners": ("scan",),
-    "--ignore-suppressions": ("scan", "merge"),
+    "--ignore-suppressions": ("scan", "results merge"),
 }
 
 
@@ -127,15 +154,21 @@ def test_which_subcommands_take_each_forwarded_option():
     assert dict(contract().option_subcommands) == EXPECTED_OPTION_SUBCOMMANDS
 
 
+def test_the_routed_groups_and_their_commands():
+    # Each group the options go through, with its own commands in the CLI's order:
+    # how far a wrapper reads a command's words (`results inspect findings`).
+    assert contract().routed_groups == (
+        ("results", ("report", "diff", "trend", "merge", "inspect")),
+        ("results inspect", ("sarif-fields", "findings")),
+        ("container", ("build",)),
+    )
+
+
 def test_the_forwarded_option_list_is_in_the_table_order():
     assert [name for name, _ in contract().option_subcommands] == list(
         WRAPPER_FORWARDED_OPTIONS
     )
     assert set(WRAPPER_FORWARDED_OPTIONS) == set(EXPECTED_OPTION_SUBCOMMANDS)
-
-
-def test_the_subcommands_whose_own_dash_o_is_forwarded():
-    assert contract().dash_o_subcommands == ("get-genai-guide", "config")
 
 
 def test_runner_order_image_pattern_and_build_targets():
@@ -223,3 +256,4 @@ def test_takers_names_an_unknown_option():
     with pytest.raises(KeyError):
         contract().takers("--not-an-option")
     assert contract().takers("--progress") == ("scan",)
+    assert "results report" in contract().takers("--config")

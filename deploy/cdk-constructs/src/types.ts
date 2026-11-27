@@ -8,7 +8,7 @@
  * already contains ASH. None installs by distribution name, because ASH is not
  * distributed on PyPI: the name `automated-security-helper` there belongs to an
  * unrelated single-release placeholder package, so installing it would both fail
- * to provide an `ash` executable and pull a third party's code into a security
+ * to provide an `ashx` executable and pull a third party's code into a security
  * pipeline. If ASH is published to PyPI under a name the project controls, a
  * mode that installs by name becomes worth adding; until then there isn't one.
  *
@@ -36,7 +36,7 @@ export enum ASHInstallMode {
 
   /**
    * Emit no install commands at all, because the build image already provides
-   * an `ash` executable on `PATH`.
+   * an `ashx` executable on `PATH`.
    *
    * This is the mode to pair with an image built from the ASH `Dockerfile` in
    * this repository. ASH ships no public image, so an image used here has to be

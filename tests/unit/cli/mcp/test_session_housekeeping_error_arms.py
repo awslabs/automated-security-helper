@@ -146,15 +146,15 @@ def test_a_state_write_for_an_id_that_names_no_directory_runs_unheld(
 
 def test_a_state_write_for_a_real_session_is_held() -> None:
     registry = sessions.get_default_registry()
-    session = registry.session_for("real-1")
-    assert session.try_begin_sweep() is True
-    session.end_sweep()
+    entry = registry.session_for("real-1")
+    assert entry.try_begin_sweep() is True
+    entry.end_sweep()
 
     with sessions.writing_session_state("real-1"):
         # While the write runs, the sweep cannot take the session.
-        assert session.try_begin_sweep() is False
-    assert session.try_begin_sweep() is True
-    session.end_sweep()
+        assert entry.try_begin_sweep() is False
+    assert entry.try_begin_sweep() is True
+    entry.end_sweep()
 
 
 # -- the stdio servers' registry -----------------------------------------------------

@@ -32,7 +32,7 @@ workspace aggregate, an un-merged shard, a ``--changed-files-only`` run and a
 baseline-filtered run are left out, so a series never contains a point a trend
 would have to refuse. A scan with no usable ``report_id`` is left out too: the
 record is named by it, and the name is what orders the series and what pruning
-reads. ``ash merge`` records the merged run the same way
+reads. ``ashx results merge`` records the merged run the same way
 (``cli/merge._record_merge_history``): its history configuration is the merge's
 config of record (the shards' recorded configuration with ``--config-overrides``
 applied), its owning output directory is the merge's own ``--output-dir``, and
@@ -413,7 +413,7 @@ def record_run(
         ASH_LOGGER.warning(
             "This run is not recorded in the history: it is a shard, a workspace "
             "aggregate, or filtered by --changed-files-only or --baseline. "
-            "``ash merge`` records the merged run under the same rules, so a "
+            "``ashx results merge`` records the merged run under the same rules, so a "
             "sharded CI's history comes from the merge; a filtered run is not "
             "recorded, merged or not."
         )

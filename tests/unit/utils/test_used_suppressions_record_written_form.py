@@ -380,7 +380,7 @@ def test_a_complete_id_list_marks_only_the_granting_entries(tmp_path):
         "    - path: notes/*.ipynb\n"
         "      rule_id: ash-unconverted-input\n"
         "      reason: granted the acceptance, expired since\n"
-        f"      expiration: '{yesterday}'\n"
+        f"      expires: '{yesterday}'\n"
         "    - path: '**/*.ipynb'\n"
         "      rule_id: ash-unconverted-input\n"
         "      reason: broader entry nothing used\n",

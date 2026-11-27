@@ -22,7 +22,7 @@ and the output in separate directory trees:
 <!-- doctest: illustrative reason="needs a container runtime and network access to build the image" -->
 ```bash
 cd ~/work
-ash scan --mode container --source-dir src/my-app --output-dir ash-output/my-app
+ashx scan --mode container --source-dir src/my-app --output-dir ash-output/my-app
 ```
 
 ASH builds the image (several minutes the first time; later builds reuse the layer
@@ -30,7 +30,7 @@ cache), runs the scan inside it, reads the results back from the output director
 exits with the same [exit codes](../reference/exit-codes.md) as a local scan. A container
 that fails to start, and a build that fails, exit with the runtime's own status instead.
 
-These `ash scan` options control the image:
+These `ashx scan` options control the image:
 
 <!-- doctest: options of=cli.scan -->
 | Option | Effect |
@@ -40,15 +40,15 @@ These `ash scan` options control the image:
 | `--no-run` | Build the image and stop. |
 | `--build-target ci` | Build the root image instead of the non-root one. |
 
-`ash container build` builds the image and then scans the current directory with it, writing
+`ashx container build` builds the image and then scans the current directory with it, writing
 to `.ash/ash_output` there. Add `--no-run` to build only. It takes no `--source-dir`,
 `--output-dir`, or other scan option: an argument its help does not list stops it with
-exit code 5 before anything is built, so use `ash scan --mode container` to choose the
+exit code 5 before anything is built, so use `ashx scan --mode container` to choose the
 directories. Every option of both commands is in the
 [CLI reference](../reference/cli.md#container-build).
 
-Spell options out in full: the short flags differ between the two commands. On `ash scan`,
-`-o` is `--oci-runner` and `-r` is `--run`; on `ash container build`, `-r` is `--oci-runner`.
+Spell options out in full: the short flags differ between the two commands. On `ashx scan`,
+`-o` is `--oci-runner` and `-r` is `--run`; on `ashx container build`, `-r` is `--oci-runner`.
 
 ## Choose the container runtime {#runtime}
 
@@ -78,7 +78,7 @@ or you can spell the path out. A scan in local mode reads neither variable.
 
 The Dockerfile has two final stages:
 
-- `non-root`, the default, runs as `ash-user`. `ash container build` and container-mode scans
+- `non-root`, the default, runs as `ash-user`. `ashx container build` and container-mode scans
   give that user the UID and GID of the user running ASH, so the scan can write to the
   mounted output directory. Pass `--container-uid` and `--container-gid` to choose other
   values.
@@ -106,15 +106,15 @@ The image installs ASH from source, chosen from how ASH was installed on the hos
 
 | Host install | Source of the image |
 |---|---|
-| From a git URL with a tag, such as `@v3.8.0` | That tag, cloned from GitHub when the image builds. |
+| From a git URL with a tag, such as `@v4.0.0` | That tag, cloned from GitHub when the image builds. |
 | From a git URL with a branch, such as `@main` | The tip of that branch when the image builds, which can differ from the commit installed on the host. |
 | From a git URL with no ref | The installed commit, fetched from GitHub by its commit ID. |
 | A clone of the ASH repository, an editable install of one, or `pip install <directory>` | That source tree, built with its own `Dockerfile`, so the image holds the same ASH as the host. |
-| Any other install, such as Homebrew, a wheel or sdist file, or an archive URL | The commit the package was built from, fetched by its commit ID. A package built outside a git checkout of ASH, such as from a source tarball, records no commit: the image then installs the release tag of the installed version, such as `v3.8.0`, and ASH logs a warning that this is a guess. A development or pre-release version has no release tag, so the build stops before it starts and asks for `--ash-revision-to-install`. |
+| Any other install, such as Homebrew, a wheel or sdist file, or an archive URL | The commit the package was built from, fetched by its commit ID. A package built outside a git checkout of ASH, such as from a source tarball, records no commit: the image then installs the release tag of the installed version, such as `v4.0.0`, and ASH logs a warning that this is a guess. A development or pre-release version has no release tag, so the build stops before it starts and asks for `--ash-revision-to-install`. |
 
 `--ash-revision-to-install` overrides the table with a tag, a branch, or a full
 40-character commit ID. It accepts letters, digits, dots, hyphens, underscores, and
-slashes. Run from the top directory of a checkout of ASH, `ash container build` and
+slashes. Run from the top directory of a checkout of ASH, `ashx container build` and
 container-mode scans build that checkout whatever the revision says; to build another
 revision, run them from another directory.
 
@@ -141,13 +141,13 @@ the same source directory, output directory, and config file, with the same exit
 
 A source or output directory that a local scan refuses, such as a source directory that
 does not exist or an output directory that cannot be created, stops
-`ash scan --mode container` with exit code 5, also with `--no-run`, and with the line a
+`ashx scan --mode container` with exit code 5, also with `--no-run`, and with the line a
 local scan prints ([Exit codes](../reference/exit-codes.md#scan)). `./ash` refuses them
 as well: it prints the line after `ERROR: ` and exits 5.
 
 An output directory that is a symlink, or that a symlink below the source directory leads
 to, such as a committed `.ash` link for the default `.ash/ash_output`, stops
-`ash scan --mode container` and `ash container build` with exit code 3
+`ashx scan --mode container` and `ashx container build` with exit code 3
 ([Exit codes](../reference/exit-codes.md#container)), because the scan inside the
 container would write wherever the link points. The refusal comes before a container
 runtime is looked up, with `--no-run` too, so nothing is built, created, or mounted.
@@ -173,7 +173,7 @@ stays out of the results ([See every finding](suppress-findings.md#ignore-suppre
 
 The container uses the runtime's default bridge network. `--offline` runs it with no
 network and builds an offline image ([Run ASH offline](run-offline.md)).
-`ash container build --container-network` takes another network mode, such as `none` or a
+`ashx container build --container-network` takes another network mode, such as `none` or a
 named network.
 
 ### The config file {#config}
@@ -181,12 +181,12 @@ named network.
 `--config` names the config file, or `ASH_CONFIG` when no `--config` is given. With
 neither, the scan inside the container finds the repository's own config file under
 `/src` the way a local scan does. ASH checks a file you name on the host before it builds
-or runs anything, in `ash scan --mode container`, `ash --mode container`, `./ash`, and
+or runs anything, in `ashx scan --mode container`, `ash --mode container`, `./ash`, and
 `Invoke-ASH`. A path that names no file stops the scan with exit code 3:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ash scan --mode container --config missing.yaml
+ashx scan --mode container --config missing.yaml
 ```
 
 <!-- doctest: output -->
@@ -201,7 +201,7 @@ Beside a `--config`, the file `ASH_CONFIG` names is still the trusted base, as i
 scan: ASH reads it first, and when the config is a repository's, takes from it the
 settings a repository may not choose
 ([Configuration trust model](../concepts/trust-model.md#how-the-tier-is-decided)).
-`ash scan --mode container` and `ash --mode container` mount that file, and each file it
+`ashx scan --mode container` and `ash --mode container` mount that file, and each file it
 `extends`, read-only under `/ash-env-config`, and the scan inside reads it as its
 `ASH_CONFIG`. Each file of that chain is marked for the scan inside on its own, by where
 it sits. A file in the scanned checkout is marked as the scanned repository's and is
@@ -237,7 +237,7 @@ repository being scanned choose a host file to mount:
   that is a symbolic link, or is reached through one, out of the workspace's tree. A
   policy outside the workspace root is mounted read-only under `/ash-workspace-config`.
 
-`ash scan --mode container` and `ash --mode container` also refuse, with exit code 3, a
+`ashx scan --mode container` and `ash --mode container` also refuse, with exit code 3, a
 chain they cannot place in the container where the host reads it, such as an `extends`
 entry that names its base by an absolute path. Write each base relative to the file that
 extends it.
@@ -298,7 +298,7 @@ mode but `off` stops the scan with exit code 5 before anything is built or run:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash scan --mode container --sandbox bwrap
+ashx scan --mode container --sandbox bwrap
 ```
 
 <!-- doctest: output -->
@@ -311,7 +311,7 @@ To sandbox each scanner, scan with `--mode local --sandbox <mode>`. `./ash` refu
 
 A `sandbox.mode` from a config file or `--config-overrides` is not refused, so one config
 file serves local and container scans. The scan inside the container gets
-`sandbox.mode=off` as its last override, and `ash scan --mode container` logs a warning
+`sandbox.mode=off` as its last override, and `ashx scan --mode container` logs a warning
 that names the mode, such as `The scanner sandbox (bwrap, from sandbox.mode in a config
 file, --config-overrides or the operator's config) is not applied in container mode`.
 The mode can come from `--config-overrides`, the config file, a workspace project's
@@ -325,19 +325,19 @@ with `--no-run`, it logs no warning. `./ash` and `Invoke-ASH` also give the scan
 ## Build and host your own image {#own-image}
 
 Build the image once, push it to a registry your organization controls, and run that
-image in CI instead of building per run. With `ASH_IMAGE_NAME` set, `ash container build` tags
+image in CI instead of building per run. With `ASH_IMAGE_NAME` set, `ashx container build` tags
 the image with your registry's name:
 
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
 ```bash
-export ASH_IMAGE_NAME=registry.example.com/security/ash:3.8.0
-ash container build --no-run --oci-runner docker --ash-revision-to-install v3.8.0 \
+export ASH_IMAGE_NAME=registry.example.com/security/ash:4.0.0
+ashx container build --no-run --oci-runner docker --ash-revision-to-install v4.0.0 \
   --container-uid 1001 --container-gid 1001
 docker push "$ASH_IMAGE_NAME"
 ```
 
 Set the UID and GID to the user your CI jobs run as. Hosts that have `ASH_IMAGE_NAME`
-set run that image with `ash scan --mode container --no-build`, and the runtime pulls it
+set run that image with `ashx scan --mode container --no-build`, and the runtime pulls it
 when it is not present.
 
 To build without ASH installed, build the Dockerfile from a clone. The clone is the build
@@ -345,10 +345,10 @@ context, so the image contains exactly the ref it cloned:
 
 <!-- doctest: illustrative reason="needs a container runtime and network access" -->
 ```bash
-git clone --depth 1 --branch v3.8.0 https://github.com/awslabs/automated-security-helper.git
+git clone --depth 1 --branch v4.0.0 https://github.com/awslabs/automated-security-helper.git
 cd automated-security-helper
 docker build --target non-root --build-arg UID=1001 --build-arg GID=1001 \
-  --tag registry.example.com/security/ash:3.8.0 .
+  --tag registry.example.com/security/ash:4.0.0 .
 ```
 
 Build arguments:
@@ -358,9 +358,9 @@ Build arguments:
 |---|---|---|
 | `BASE_IMAGE` | `public.ecr.aws/docker/library/python:3.12-slim-bookworm` | Base image for every stage. Point it at a mirror of the same image. |
 | `INSTALL_ASH_REVISION` | `LOCAL` | `LOCAL` builds the build context. Any other value is a tag or branch cloned from GitHub, or a full commit ID fetched from it, unless the build context is ASH's own source tree, which is then built instead. |
-| `OFFLINE` | `NO` | `YES` downloads the grype and trivy databases and the semgrep and opengrep rulesets into the image, and makes every scan in it offline. |
+| `OFFLINE` | `NO` | `YES` downloads the grype and trivy databases and the opengrep rulesets into the image, and makes every scan in it offline. |
 | `BUILD_DATE_EPOCH` | `-1` | A new value makes an offline build download the databases and rulesets again; with the same value, that step comes from the build cache. ASH passes UTC midnight of the current day, in epoch seconds, for offline builds. |
-| `OFFLINE_SEMGREP_RULESETS` | `p/ci` | Space-separated semgrep registry rulesets an offline image downloads. |
+| `OFFLINE_SEMGREP_RULESETS` | `p/ci` | Space-separated registry rulesets an offline image downloads for opengrep. The variable name keeps its historical `SEMGREP` spelling. |
 | `UID`, `GID` | `500`, `100` | UID and GID of the `non-root` user. |
 
 Scanner tool versions are pinned in
@@ -411,8 +411,8 @@ Go and Rust programs, are not reproduced.
 
 ASH's own CI tests container mode on Linux only, with docker, podman, finch, and nerdctl.
 
-- On Windows, `ash container build` always builds the root `ci` image, because the non-root
-  user cannot write to the bind-mounted output directory there. `ash scan --mode container`
+- On Windows, `ashx container build` always builds the root `ci` image, because the non-root
+  user cannot write to the bind-mounted output directory there. `ashx scan --mode container`
   does not force it. If `ash` runs a different program, such as the `ash` shell that ships
   with Git for Windows, run `ashv3`, which is the same command.
 - On macOS, the image builds for the host's architecture; the Dockerfile supports amd64

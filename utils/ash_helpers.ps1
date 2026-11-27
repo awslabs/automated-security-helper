@@ -120,30 +120,33 @@ function Invoke-ASH {
     `--quiet`, and `-c` or `--no-color` passes `--no-color`. Every other argument is
     passed through unchanged. ASH's source and output directories reach the
     container as `ASH_SOURCE_DIR` and `ASH_OUTPUT_DIR`, so a subcommand such as
-    `report` can come first. That is also why `--workspace` and `--workspace-config`
-    are refused with exit 3, before anything is built: the scan inside refuses a
-    workspace next to a source directory. Run `ash --mode container --workspace
-    <file>` for a workspace scan.
+    `results report` can come first. That is also why `--workspace` and
+    `--workspace-config` are refused with exit 3, before anything is built: the scan
+    inside refuses a workspace next to a source directory. Run `ash --mode container
+    --workspace <file>` for a workspace scan.
 
     The first argument that names an ash subcommand is the subcommand, unless it is
     the value of an ash option that takes one (`--phases report` names no
     subcommand). The options Invoke-ASH adds from its own parameters (-Config,
     -Scanners, -Offline, -Verbose, and the rest, and --quiet and --no-color from the
-    arguments above) go right after it, and only those it takes. Invoke-ASH does not
-    pass the others, and warns about each except --quiet and --no-color, which have
-    already quieted the build and kept the container off a terminal. With no
-    subcommand, ash scans and takes them all.
+    arguments above) go right after it, and only those it takes. Under `results` and
+    `container`, which take none of them themselves, the command is the words after
+    the group that name one of its commands, `results report`, `results inspect
+    findings` or `container build`, and the options go right after its last word.
+    Invoke-ASH does not pass the others, and warns about each except --quiet and
+    --no-color, which have already quieted the build and kept the container off a
+    terminal. With no subcommand, ash scans and takes them all.
 
     .PARAMETER RemainingAshArgs
     Arguments after Invoke-ASH's own parameters, handled like those in -AshArgs. Each
     is passed to ASH as one argument. The first of them is -SourceDir, which takes
-    position 0, unless -SourceDir is given: `Invoke-ASH report` takes report as
-    -SourceDir, so it scans a directory named report, and is refused with 5 when
-    there is none. `Invoke-ASH -SourceDir . report` runs `ash report`. PowerShell reads
-    them before Invoke-ASH does: a comma list such as `sarif,html` is rejoined with
-    commas, but a bare `-c` is an ambiguous prefix of -Config, -ContainerUID, and
-    -ContainerGID and is refused by PowerShell, so write it as '-c' or put it in
-    -AshArgs.
+    position 0, unless -SourceDir is given: `Invoke-ASH results` takes results as
+    -SourceDir, so it scans a directory named results, and is refused with 5 when
+    there is none. `Invoke-ASH -SourceDir . results report` runs
+    `ash results report`. PowerShell reads them before Invoke-ASH does: a comma list
+    such as `sarif,html` is rejoined with commas, but a bare `-c` is an ambiguous
+    prefix of -Config, -ContainerUID, and -ContainerGID and is refused by PowerShell,
+    so write it as '-c' or put it in -AshArgs.
 
     .PARAMETER OCIRunner
     Preferred OCI runner CLI tool to use, e.g. `docker`, `finch`, `nerdctl`, or `podman`.
@@ -895,46 +898,57 @@ function Invoke-ASH {
         }
 
         # ash takes an option given before a subcommand only when the subcommand
-        # declares it, and refuses it otherwise (`ash --quiet report` exits 5). So the
-        # options above go after the subcommand, and only to one that takes them, as
-        # ./ash does for --quiet and --no-color; with no subcommand ash scans, and takes
-        # all of them. The subcommand is the first argument that names one and is not a
-        # root option's value, which can be a command's name (`--phases inspect`,
-        # `--config config`). The command groups (config, dependencies, inspect, plugin)
-        # take none of them ahead of their own subcommand. The caller's own arguments
-        # stay in the order written. tests/unit/test_powershell_wrapper_tables.py checks
-        # the tables against the real commands, and
+        # declares it, and refuses it otherwise (`ash --quiet results report` exits 5).
+        # So the options above go after the subcommand, and only to one that takes
+        # them, as ./ash does for --quiet and --no-color; with no subcommand ash scans,
+        # and takes all of them. The subcommand is the first argument that names one
+        # and is not a root option's value, which can be a command's name (`--phases
+        # inspect`, `--config config`). Under `results` and `container`, which take
+        # none of them themselves, they go to the command the group's words name
+        # ($ashRoutedGroups), after its last word: `results report`, `results inspect
+        # findings`, `container build`. The other command groups (config, dependencies,
+        # plugin, suppress, express) take none of them ahead of their own subcommand.
+        # The caller's own arguments stay in the order written.
+        # tests/unit/test_powershell_wrapper_tables.py checks the tables against the
+        # real commands, and
         # tests/unit/test_sandbox_refused_by_every_container_entrypoint.py checks these
         # lists against ./ash's and the real commands and options.
         # BEGIN generated: ps1-subcommands (scripts/generate_wrapper_tables.py)
-        $ashSubcommands = @('scan', 'build-image', 'report', 'diff', 'trend', 'merge', 'results', 'mcp', 'get-genai-guide', 'container', 'config', 'dependencies', 'inspect', 'plugin', 'suppress', 'express')
+        $ashSubcommands = @('scan', 'results', 'mcp', 'get-genai-guide', 'container', 'config', 'dependencies', 'plugin', 'suppress', 'express')
         $ashTakesSandbox = @('scan')
         # END generated: ps1-subcommands
         # The root ash options that take a value, ASH_ROOT_VALUE_OPTIONS in ./ash. A value
         # can be a subcommand's name (`--phases report`, `--source-dir report`), so the
         # word after one of these is the option's value, not the subcommand.
         # BEGIN generated: ps1-root-value-options (scripts/generate_wrapper_tables.py)
-        $ashRootValueOptions = @('--add-scanners', '--ash-config-from-host', '--ash-plugin-modules', '--ash-revision-to-install', '--base-ref', '--baseline', '--build-target', '--config', '--config-file-from-another-checkout', '--config-file-from-scanned-repository', '--config-overrides', '--container-gid', '--container-uid', '--custom-build-arg', '--custom-containerfile', '--exclude-scanners', '--format', '--formats', '--image', '--image-archive', '--image-layout', '--log-level', '--min-severity', '--mode', '--oci', '--oci-runner', '--offline-semgrep-rulesets', '--only-scanners', '--output-dir', '--output-format', '--output-formats', '--phases', '--require-scanner-selection', '--runner', '--sandbox', '--scanners', '--shard-count', '--shard-index', '--source-dir', '--strategy', '--workspace', '--workspace-config', '-c', '-f', '-g', '-o', '-u')
+        $ashRootValueOptions = @('--add-scanners', '--ash-config-from-host', '--ash-plugin-modules', '--ash-revision', '--ash-revision-to-install', '--base-ref', '--baseline', '--build-target', '--config', '--config-file-from-another-checkout', '--config-file-from-scanned-repository', '--config-overrides', '--container-gid', '--container-uid', '--custom-build-arg', '--custom-containerfile', '--exclude-scanners', '--format', '--formats', '--image', '--image-archive', '--image-layout', '--log-level', '--min-severity', '--mode', '--oci', '--oci-runner', '--offline-rulesets', '--offline-semgrep-rulesets', '--only-scanners', '--output-dir', '--output-format', '--output-formats', '--phases', '--require-scanner-selection', '--runner', '--sandbox', '--scanners', '--shard-count', '--shard-index', '--source-dir', '--strategy', '--workspace', '--workspace-config', '-c', '-f', '-g', '-o', '-rev', '-u')
         # END generated: ps1-root-value-options
         # BEGIN generated: ps1-option-subcommands (scripts/generate_wrapper_tables.py)
         $ashOptionSubcommands = @{
-            '--quiet'                = 'scan build-image mcp container'
-            '--no-color'             = 'scan build-image report merge mcp container'
-            '--progress'             = 'scan'
-            '--no-progress'          = 'scan'
-            '--show-summary'         = 'scan'
-            '--no-show-summary'      = 'scan'
-            '--fail-on-findings'     = 'scan merge'
-            '--no-fail-on-findings'  = 'scan merge'
-            '--verbose'              = 'scan build-image report merge mcp container'
-            '--debug'                = 'scan build-image report merge mcp container'
-            '--offline'              = 'scan build-image container'
-            '--config'               = 'scan build-image report merge container'
-            '--scanners'             = 'scan'
-            '--exclude-scanners'     = 'scan'
-            '--ignore-suppressions'  = 'scan merge'
+            '--quiet'                = @('scan', 'mcp', 'container build')
+            '--no-color'             = @('scan', 'results report', 'results merge', 'mcp', 'container build')
+            '--progress'             = @('scan')
+            '--no-progress'          = @('scan')
+            '--show-summary'         = @('scan')
+            '--no-show-summary'      = @('scan')
+            '--fail-on-findings'     = @('scan', 'results merge')
+            '--no-fail-on-findings'  = @('scan', 'results merge')
+            '--verbose'              = @('scan', 'results report', 'results merge', 'mcp', 'container build')
+            '--debug'                = @('scan', 'results report', 'results merge', 'mcp', 'container build')
+            '--offline'              = @('scan', 'container build')
+            '--config'               = @('scan', 'results report', 'results merge', 'results inspect findings', 'container build')
+            '--scanners'             = @('scan')
+            '--exclude-scanners'     = @('scan')
+            '--ignore-suppressions'  = @('scan', 'results merge')
         }
         # END generated: ps1-option-subcommands
+        # BEGIN generated: ps1-routed-groups (scripts/generate_wrapper_tables.py)
+        $ashRoutedGroups = @{
+            'results'          = @('report', 'diff', 'trend', 'merge', 'inspect')
+            'results inspect'  = @('sarif-fields', 'findings')
+            'container'        = @('build')
+        }
+        # END generated: ps1-routed-groups
         $subcommandAt = -1
         $subcommand = ''
         $skipValue = $false
@@ -965,6 +979,17 @@ function Invoke-ASH {
                     }
                 }
             }
+        }
+        # The command the options go to, and the place of its last word: the
+        # subcommand, or under a group in $ashRoutedGroups the words after it as far as
+        # each names one of the group's own commands (`results inspect findings`). A
+        # group's own word takes none of them: `ash container --quiet build` is a usage
+        # error.
+        $ashCommand = $subcommand
+        $ashCommandEnd = $subcommandAt
+        while ($ashCommandEnd -ge 0 -and $ashRoutedGroups.ContainsKey($ashCommand) -and ($ashCommandEnd + 1) -lt $forwardedAshArgs.Count -and ($forwardedAshArgs[$ashCommandEnd + 1] -cin $ashRoutedGroups[$ashCommand])) {
+            $ashCommandEnd++
+            $ashCommand = "$ashCommand $($forwardedAshArgs[$ashCommandEnd])"
         }
         # Helpers for the ASH_CONFIG carry below, ports of ./ash's resolve_file and
         # TREES. A link is anything with a LinkType but a hard link, which names no
@@ -1756,7 +1781,7 @@ function Invoke-ASH {
             }
         }
         else {
-            for ($i = 0; $i -le $subcommandAt; $i++) {
+            for ($i = 0; $i -le $ashCommandEnd; $i++) {
                 $ashArguments.Add($forwardedAshArgs[$i])
             }
             foreach ($group in $ashCmdArgs) {
@@ -1765,28 +1790,28 @@ function Invoke-ASH {
                     # The ASH_CONFIG words exist only for a scan, which takes them all.
                     $ashArguments.AddRange([string[]]$group)
                 }
-                elseif (@($ashOptionSubcommands[$option] -split ' ') -ccontains $subcommand) {
+                elseif (@($ashOptionSubcommands[$option]) -ccontains $ashCommand) {
                     $ashArguments.AddRange([string[]]$group)
                 }
                 elseif ($option -cnotin @('--quiet', '--no-color')) {
                     # --quiet and --no-color have quieted the build and chosen the
                     # terminal already, so only the others are worth a warning.
-                    Write-Warning "ash $subcommand does not take $option, so it is not passed."
+                    Write-Warning "ash $ashCommand does not take $option, so it is not passed."
                 }
             }
-            for ($i = $subcommandAt + 1; $i -lt $forwardedAshArgs.Count; $i++) {
+            for ($i = $ashCommandEnd + 1; $i -lt $forwardedAshArgs.Count; $i++) {
                 $ashArguments.Add($forwardedAshArgs[$i])
             }
         }
 
-        # OCI_RUNNER is what ./ash and the ash CLI read. ASH_OCI_RUNNER, a deprecated name
+        # OCI_RUNNER is what the ashx CLI reads. ASH_OCI_RUNNER, a deprecated name
         # only this function reads, applies when OCI_RUNNER is unset and no -OCIRunner
         # was passed, so a profile that sets it keeps the runner it chose.
         # $ociRunnerSource names the variable the value came from, for the refusal of a
         # relative path below.
         $ociRunnerSource = 'OCI_RUNNER'
         if (-not $PSBoundParameters.ContainsKey('OCIRunner') -and [string]::IsNullOrEmpty($OCIRunner) -and -not [string]::IsNullOrEmpty($env:ASH_OCI_RUNNER)) {
-            Write-Warning "ASH_OCI_RUNNER is deprecated; set OCI_RUNNER instead, which ./ash and the ash CLI also read."
+            Write-Warning "ASH_OCI_RUNNER is deprecated; set OCI_RUNNER instead, which the ashx CLI also reads."
             $OCIRunner = $env:ASH_OCI_RUNNER
             $ociRunnerSource = 'ASH_OCI_RUNNER'
         }
@@ -2183,7 +2208,7 @@ function Invoke-ASH {
                         "--target", $BuildTarget
                         "--file", $dockerfilePath
                         "--build-arg", "OFFLINE=$(if ($Offline) {'YES'} else {'NO'})"
-                        "--build-arg", "OFFLINE_SEMGREP_RULESETS=$OfflineSemgrepRulesets"
+                        "--build-arg", "OFFLINE_RULESETS=$OfflineSemgrepRulesets"
                     )
                     # A new BUILD_DATE_EPOCH re-runs the Dockerfile's core stage from
                     # its apt-get upgrade step down, offline download included (see
@@ -2299,7 +2324,7 @@ function Invoke-ASH {
                     # Add image name and ASH command
                     $runCmd += @(
                         $AshImageName
-                        'ash'
+                        'ashx'
                     )
 
 

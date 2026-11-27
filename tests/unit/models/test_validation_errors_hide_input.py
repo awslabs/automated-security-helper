@@ -428,6 +428,7 @@ def test_ash_report_does_not_show_a_section_it_cannot_build(tmp_path, ash_log):
     result = CliRunner().invoke(
         app,
         [
+            "results",
             "report",
             "--format",
             "s3",

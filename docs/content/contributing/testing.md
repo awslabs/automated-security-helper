@@ -114,7 +114,7 @@ installs them first, and turns a missing one into a failure:
 
 <!-- doctest: illustrative reason="downloads scanner binaries from the network" -->
 ```bash
-uv run ash dependencies install --tool actionlint --tool cfn-lint --tool cfn-guard
+uv run ashx dependencies install --tool actionlint --tool cfn-lint --tool cfn-guard
 ```
 
 Binary tools go to `~/.ash/bin`, where ASH looks for them.
@@ -292,7 +292,7 @@ tests are collected, which is where a path that a module computes from the home 
 time points. `UV_CACHE_DIR` stays on the cache uv would use for you, so a test that runs uv
 does not download again. uv's tool and Python directories follow `XDG_DATA_HOME` into the
 test's home on Linux and macOS; on Windows they are under `%APPDATA%`, which is not moved.
-The tools `ash dependencies install` puts in `~/.ash/bin` are out of reach too, so the
+The tools `ashx dependencies install` puts in `~/.ash/bin` are out of reach too, so the
 integration tests that need one skip. Set `ASH_BIN_PATH` to that directory to use them;
 the run's header says so when the directory has tools. Mark a test
 `@pytest.mark.real_home` to give it the values the run started with, and use the
@@ -300,11 +300,11 @@ the run's header says so when the directory has tools. Mark a test
 
 ### Tests that install tools
 
-An install by `ash dependencies install` or the pinned-tool installer writes a receipt
+An install by `ashx dependencies install` or the pinned-tool installer writes a receipt
 under `~/.ash/install-receipts`. An autouse fixture sends each receipt that a test writes
 in the test process to a directory under pytest's base temporary directory instead. A
 child process does not inherit that, so a second autouse fixture fails a test that starts
-a tool-installing child, `ash dependencies install` or a child that calls
+a tool-installing child, `ashx dependencies install` or a child that calls
 `install_pinned_tool`, with the developer's `HOME` or with no `HOME`. Give such a child an
 environment with `HOME`, and `USERPROFILE` on Windows, set to a temporary directory.
 
@@ -319,9 +319,39 @@ A helper or a tool goes in `tests/utils/` under a name that does not start with 
 The walk guard, the docs checks, and the orphan check list files with git, so the unit
 suite fails in a directory that is not a git work tree. Run it in a clone.
 
+## Run the Kubernetes operator's end-to-end tests
+
+The operator's suite in `deploy/kubernetes-operator/tests/e2e` builds three images and
+creates and deletes a kind cluster, so it is skipped unless `ASH_OPERATOR_E2E=1`. The
+run's header says which mode it is in, because a suite that reports "all passed" without
+having stood a cluster up proves nothing. Two more variables name the kind cluster and the
+image tag, so two runs on one host never share either; the workflow sets both from the run
+id.
+
+<!-- doctest: illustrative reason="builds container images and creates a kind cluster" -->
+```bash
+cd deploy/kubernetes-operator
+ASH_OPERATOR_E2E=1 ASH_OPERATOR_E2E_CLUSTER=<unique-name> \
+  PYTHONPATH=. python -m pytest tests/e2e -v
+```
+
+Run it in an environment that has the operator's own test dependencies, installed as the
+operator README's Tests section installs them for the unit suite.
+
+The variables are `ASH_OPERATOR_E2E_CLUSTER` for the cluster name and
+`ASH_OPERATOR_E2E_IMAGE_TAG` for the image tag.
+
+## Run the VS Code extension's integration tests against a real ASH
+
+`editors/vscode` ships a stub CLI that replays captured runs, so its integration suite
+needs no ASH. To run the same suite against genuine scans, set `ASH_IT_REAL_ASH_DIR` to a
+directory holding an installed ASH: a venv's `bin/`, with both `ashx` and `ash`. The
+channel end-to-end run, `npm run test:e2e-vsix`, needs that variable and a built
+`ash-vscode.vsix`, which `ASH_IT_VSIX` names when it is not in the default place.
+
 ## Test an MCP change locally
 
-The MCP server is `ash mcp`. Its tests are in `tests/unit/cli/mcp/` and
+The MCP server is `ashx mcp`. Its tests are in `tests/unit/cli/mcp/` and
 `tests/snapshot/mcp/`:
 
 <!-- doctest: illustrative reason="runs in a checkout of this repository" -->
@@ -407,7 +437,7 @@ whether every registered scanner is in the results:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress --verbose
+ashx --source-dir . --scanners detect-secrets --offline --no-progress --verbose
 ```
 
 In a checkout whose environment is not activated, put `uv run` in front. The command

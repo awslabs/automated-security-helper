@@ -1,0 +1,20 @@
+type=WARNING
+title: ASH scan finished with gaps
+body:
+1 finding(s): 1 warning.<br>
+1 scanner(s) completed.<br>
+2 of 3 result(s) suppressed by the report.<br>
+awslabs/automated-security-helper v4.0.0, exit code 2. Report: /project/.ash/ash_output/reports/ash.sarif<br>
+<br>
+12 part(s) of the report could not be read:<br>
+&bull; problem 1 &lt;x&gt;<br>
+&bull; problem 2 &lt;x&gt;<br>
+&bull; problem 3 &lt;x&gt;<br>
+&bull; problem 4 &lt;x&gt;<br>
+&bull; problem 5 &lt;x&gt;<br>
+&bull; problem 6 &lt;x&gt;<br>
+&bull; problem 7 &lt;x&gt;<br>
+&bull; problem 8 &lt;x&gt;<br>
+&bull; problem 9 &lt;x&gt;<br>
+&bull; problem 10 &lt;x&gt;<br>
+&bull; ...

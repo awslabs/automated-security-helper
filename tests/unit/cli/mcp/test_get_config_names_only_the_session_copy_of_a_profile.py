@@ -207,12 +207,12 @@ def test_a_bound_profile_gone_while_the_workspace_is_being_removed_is_busy(bound
 
     _, session_copy, delivered = bound
     session_copy.unlink()
-    session = get_default_registry().session_for(SESSION)
-    assert session.try_begin_change() is None
+    entry = get_default_registry().session_for(SESSION)
+    assert entry.try_begin_change() is None
     try:
         result = _get_config(delivered)
     finally:
-        session.end_change()
+        entry.end_change()
 
     assert result["success"] is False, result
     assert result["error_type"] == "session_workspace_busy", result

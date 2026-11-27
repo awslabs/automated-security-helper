@@ -19,6 +19,7 @@ from pydantic import (
 from automated_security_helper.utils.redacted_model import RedactedSection
 from yaml import YAMLError
 
+from automated_security_helper.utils.cli_name import CANONICAL_CLI_NAME
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -170,7 +171,7 @@ def _missing_cdk_distributions(
 
     A metadata read, not an import. The alternative -- importing ``cdk_nag`` here
     to prove it works -- was rejected on cost: this module is imported during
-    plugin discovery on every ASH invocation, including ``ash --help`` and runs
+    plugin discovery on every ASH invocation, including ``ashx --help`` and runs
     that never select cdk-nag, and importing cdk_nag starts a jsii kernel, which
     spawns a NodeJS child process. Paying that on every invocation to sharpen one
     scanner's availability check is the wrong trade.
@@ -731,7 +732,7 @@ def _cdk_extra_requirements() -> List[str]:
     such a name is the defect this function exists to remove.
 
     Never returns an empty list. This function is only reached when cdk-nag is
-    already missing, so an empty result means ``ash dependencies install`` runs
+    already missing, so an empty result means ``ashx dependencies install`` runs
     no pip command, exits 0, and leaves cdk-nag MISSING -- which is precisely
     the defect it exists to remove. An empty accumulation therefore falls
     through to the pinned fallback rather than being reported as "nothing to
@@ -762,7 +763,7 @@ def _cdk_extra_requirements() -> List[str]:
     walks every entry on ``sys.path`` and raises ``OSError`` on an unreadable
     one, which is why that call keeps its own handler -- moving all the handling
     inside the loop was tried and let that OSError escape into
-    ``ash dependencies install`` as a traceback. Separately, ``requires()``
+    ``ashx dependencies install`` as a traceback. Separately, ``requires()``
     raises ``PackageNotFoundError`` for a name that stops resolving between the
     two calls -- a concurrent uninstall, or an editable install being rebuilt.
     And a ``*.dist-info`` carrying a ``top_level.txt`` but no ``METADATA`` makes
@@ -1595,7 +1596,10 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         any index -- it installs from git, as the README documents -- and on
         PyPI its distribution name belongs to an unrelated project, so naming
         the extra's packages is what makes this command install what the extra
-        declares.
+        declares. This method used to install ASH's own distribution with that
+        extra, which made ``ashx dependencies install`` resolve that name from whatever
+        index pip is pointed at, and the package it found was installed by a
+        security scanner running with repository access.
         """
         # This method used to install "automated-security-helper[cdk]", which
         # `ash dependencies install` resolved from the configured index, where
@@ -1619,7 +1623,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             # Appended unconditionally. _cdk_extra_requirements never returns an
             # empty list, and the `if requirements:` that used to stand here was
             # what turned an empty result into a silent no-op: no pip command was
-            # appended, `ash dependencies install` exited 0, and cdk-nag stayed
+            # appended, `ashx dependencies install` exited 0, and cdk-nag stayed
             # MISSING. Should that invariant ever break, pip refuses an install
             # with no arguments and exits non-zero, which is the loud failure this
             # command needs rather than a green run that installed nothing.
@@ -2432,7 +2436,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     results=sarif_results,
                     invocations=[
                         Invocation(
-                            commandLine="ash",
+                            commandLine=CANONICAL_CLI_NAME,
                             arguments=[
                                 "--scanner",
                                 "cdk-nag",

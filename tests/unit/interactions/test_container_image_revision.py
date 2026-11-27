@@ -201,6 +201,17 @@ class TestNothingRecordedBuildsTheReleaseTag:
         [warning] = log.warnings()
         assert "v3.7.0" in warning and "guess" in warning
 
+    @pytest.mark.parametrize("quiet", [True, False], ids=["quiet", "loud"])
+    def test_the_guess_is_logged_unless_the_resolve_is_quiet(
+        self, installed, log, quiet
+    ):
+        """A message that names the revision after the build has logged it asks
+        for a quiet resolve, which must not print the guess a second time."""
+        installed.built_with("unknown-commit")
+
+        assert get_ash_revision(quiet=quiet) == "v3.7.0"
+        assert (log.warnings() == []) is quiet
+
     def test_a_missing_asset_reads_as_nothing_recorded(self, tmp_path):
         """A missing asset reads as "unknown-commit", which names no ref."""
         recorded = constants._installed_revision(tmp_path / "ASH_INSTALLED_REVISION")

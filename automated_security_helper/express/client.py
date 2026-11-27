@@ -62,16 +62,12 @@ from automated_security_helper.utils.terminal_text import shown_not_obeyed
 #: correctly, merely through the daemon; tests pin the list against the app.
 NON_SCAN_SUBCOMMANDS = frozenset(
     {
-        "build-image",
-        "report",
-        "diff",
-        "trend",
-        "merge",
+        "results",
         "mcp",
         "get-genai-guide",
+        "container",
         "config",
         "dependencies",
-        "inspect",
         "plugin",
         "suppress",
         "express",
@@ -167,6 +163,7 @@ def delegated_exit_code(
 #: the names through the loop that reads them and documents each one.
 COMPLETION_ENV_NAMES = (
     "_ASH_COMPLETE",
+    "_ASHX_COMPLETE",
     "_ASHV3_COMPLETE",
     "_AUTOMATED_SECURITY_HELPER_COMPLETE",
     "_AGENTIC_SECURITY_HARNESS_COMPLETE",

@@ -85,7 +85,7 @@ class OfflineEnvRow:
 #: Written next to an offline ruleset when it is downloaded, holding the download time as an
 #: RFC 3339 UTC timestamp. A rules file carries no build time of its own, and its mtime is
 #: reset by an ordinary ``cp``, so the download records the time explicitly. No extension, so
-#: neither semgrep nor opengrep tries to load it as a rule file from the ``--config`` directory.
+#: opengrep does not try to load it as a rule file from the ``--config`` directory.
 RULESET_FETCHED_AT_FILE = ".ash-rules-fetched-at"
 
 
@@ -168,7 +168,7 @@ TRIVY_DB_MAX_AGE = timedelta(hours=24)
 OFFLINE_RULESET_MAX_AGE = timedelta(days=30)
 
 OFFLINE_RULESET_BOUND_REASON = (
-    "ASH's own choice, not a tool default: neither semgrep nor opengrep has any notion of a "
+    "ASH's own choice, not a tool default: opengrep has no notion of a "
     "local rules file going stale, so there is no tool number to adopt. 30 days because a "
     "ruleset encodes code patterns rather than advisories, and ages more slowly than a "
     "vulnerability feed: holding it to grype's 5 days would fail every air-gapped image "
@@ -199,8 +199,8 @@ ENGINE_TOOL_PINS: tuple[ToolPin, ...] = (
 #
 # Pins are the same versions the container image already builds with (the Dockerfile's
 # ARG lines), so a scan run from a container, from nix and from a bare
-# ``ash dependencies install`` all execute the same tool versions. opengrep is not in the
-# Dockerfile's ARG lines: the image installs it through ``ash dependencies install``,
+# ``ashx dependencies install`` all execute the same tool versions. opengrep is not in the
+# Dockerfile's ARG lines: the image installs it through ``ashx dependencies install``,
 # which resolves it from its pin. Its version is the default of
 # ``OpengrepScannerConfigOptions.version``, which is also what nix/opengrep.nix pins.
 # ---------------------------------------------------------------------------
@@ -276,7 +276,7 @@ _GRYPE = Provisioning(
             age_source="`built` in `grype db status -o json`, the database's own build time",
             refresh=(
                 "run `grype db update` with network access, or rebuild the offline image "
-                "(`ash container build --offline`) so it downloads a current database"
+                "(`ashx container build --offline`) so it downloads a current database"
             ),
             bound_env={
                 "GRYPE_DB_MAX_ALLOWED_BUILT_AGE": go_duration(GRYPE_DB_MAX_AGE),
@@ -341,7 +341,7 @@ _OPENGREP = Provisioning(
                 "else the oldest rules file's mtime"
             ),
             refresh=(
-                "rebuild the offline image (`ash container build --offline`), which downloads the "
+                "rebuild the offline image (`ashx container build --offline`), which downloads the "
                 "rulesets again, or download them into $OPENGREP_RULES_CACHE_DIR and record the "
                 f"time in {RULESET_FETCHED_AT_FILE}"
             ),
@@ -351,33 +351,10 @@ _OPENGREP = Provisioning(
             ),
         ),
     ),
-)
-
-_SEMGREP = Provisioning(
-    content_databases=(
-        ContentDatabase(
-            name="semgrep-offline-rules",
-            scanner="semgrep",
-            cache_path="/deps/.semgrep",
-            max_age=OFFLINE_RULESET_MAX_AGE,
-            bound_source=OFFLINE_RULESET_BOUND_REASON,
-            bound_is_tool_default=False,
-            timestamp_label="downloaded",
-            age_source=(
-                f"the download time in `{RULESET_FETCHED_AT_FILE}` in the cache directory, "
-                "else the oldest rules file's mtime"
-            ),
-            refresh=(
-                "rebuild the offline image (`ash container build --offline`), which downloads the "
-                "rulesets again, or download them into $SEMGREP_RULES_CACHE_DIR and record the "
-                f"time in {RULESET_FETCHED_AT_FILE}"
-            ),
-            how_enforced=(
-                "none in semgrep: a local rules file has no staleness check. ASH's scan-time "
-                "check holds it to the bound in offline mode, the only mode that uses it"
-            ),
-        ),
-    ),
+    # The semgrep scanner plugin was removed in v4 and opengrep serves its name, so
+    # the two semgrep rows the retired plugin declared are carried here: the offline
+    # environment is the same set it was before the retirement, and a semgrep still
+    # on PATH is held off the network the same way.
     offline_env=(
         OfflineEnvRow(
             "SEMGREP_ENABLE_VERSION_CHECK",
@@ -491,8 +468,8 @@ _TRIVY_REPO = Provisioning(
 
 #: ``{scanner name: its provisioning block}`` for every scanner that provisions
 #: anything. The ORDER is the order the derived tables list their rows in: the content
-#: databases keep the order they were first declared in (grype, trivy, semgrep,
-#: opengrep). A scanner not listed provisions nothing.
+#: databases keep the order they were first declared in (grype, trivy, opengrep). A
+#: scanner not listed provisions nothing.
 PROVISIONING: Mapping[str, Provisioning] = MappingProxyType(
     {
         "actionlint": _ACTIONLINT,
@@ -504,7 +481,6 @@ PROVISIONING: Mapping[str, Provisioning] = MappingProxyType(
         "hadolint": _HADOLINT,
         "npm-audit": _NPM_AUDIT,
         "opengrep": _OPENGREP,
-        "semgrep": _SEMGREP,
         "syft": _SYFT,
         "trivy": _TRIVY,
         "trivy-repo": _TRIVY_REPO,
@@ -512,7 +488,7 @@ PROVISIONING: Mapping[str, Provisioning] = MappingProxyType(
 )
 
 #: The order the derived content-database table lists its entries in.
-_DATABASE_ORDER = ("grype", "trivy-repo", "semgrep", "opengrep")
+_DATABASE_ORDER = ("grype", "trivy-repo", "opengrep")
 
 
 def provisioning_for(scanner: str) -> Provisioning:

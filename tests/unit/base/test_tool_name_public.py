@@ -90,7 +90,6 @@ def test_every_builtin_caller_references_the_public_name():
         "plugin_modules/ash_builtin/scanners/checkov_scanner.py",
         "plugin_modules/ash_builtin/scanners/npm_audit_scanner.py",
         "plugin_modules/ash_builtin/scanners/opengrep_scanner.py",
-        "plugin_modules/ash_builtin/scanners/semgrep_scanner.py",
         "plugin_modules/ash_ferret_plugins/ferret_scanner.py",
         "plugin_modules/ash_snyk_plugins/snyk_code_scanner.py",
     ]

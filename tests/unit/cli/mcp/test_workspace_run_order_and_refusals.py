@@ -537,7 +537,7 @@ class TestTheClockStartsOnceTheSessionLockIsHeld:
         )
 
         reset_default_registry_for_tests()
-        session = get_default_registry().session_for("clock-session")
+        entry = get_default_registry().session_for("clock-session")
         plan = _plan(tmp_path)
         settings = _settings(tmp_path)
         order: List[str] = []
@@ -545,7 +545,7 @@ class TestTheClockStartsOnceTheSessionLockIsHeld:
         released = threading.Event()
 
         def hold_the_lock() -> None:
-            with session.lock:
+            with entry.lock:
                 order.append("lock held by another scan")
                 held.set()
                 released.wait(timeout=5)
@@ -663,7 +663,7 @@ class TestTheClockStartsOnceTheSessionLockIsHeld:
         )
 
         reset_default_registry_for_tests()
-        session = get_default_registry().session_for("clock-session")
+        entry = get_default_registry().session_for("clock-session")
         plan = _plan(tmp_path)
         settings = _settings(tmp_path)
         order: List[str] = []
@@ -672,7 +672,7 @@ class TestTheClockStartsOnceTheSessionLockIsHeld:
         errors: List[BaseException] = []
 
         def hold_the_lock() -> None:
-            with session.lock:
+            with entry.lock:
                 order.append("lock held by another scan")
                 held.set()
                 released.wait(timeout=5)

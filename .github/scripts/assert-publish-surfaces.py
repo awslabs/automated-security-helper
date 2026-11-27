@@ -36,7 +36,8 @@ So the key is the site AND what the site publishes:
 
 where `publishes` is built from the inputs that determine which bytes leave the
 runner -- `name` and `path` for an upload, `path` and `key` for a cache, the
-truthy cache inputs for an action with a built-in cache. Consequences:
+truthy cache inputs for an action with a built-in cache, plus the unset control
+input for an action whose cache is on by default (setup-uv). Consequences:
 
   * A new upload inside an already-allowlisted file has a `publishes` nobody
     listed, so it is unexpected and fails.
@@ -73,15 +74,35 @@ Then add a Surface to ALLOWLIST below with a `reason` that says which of those i
 is and why it is acceptable. Copy the exact `kind`, `action` and `publishes`
 strings out of the census this script prints; they have to match verbatim.
 
+If the decision depends on WHEN the step runs -- "failure evidence only" -- set
+`required_condition` on the entry too, so the step's `if:` is held to it. See the
+first known limitation below for what that does and does not cover.
+
 KNOWN LIMITATIONS
 
   * The key covers WHAT is published, not WHEN. Flipping `if: failure()` to
-    unconditional widens an accepted upload from red runs to every run and this
-    will not notice, because the bytes are the same bytes and were already
-    accepted as publishable.
-  * Release assets (`softprops/action-gh-release` and friends) are out of scope.
-    A release is a deliberate, human-triggered publication with a human on the
-    button, which is the opposite of the accidental case this guards.
+    unconditional widens an accepted upload from red runs to every run, and the
+    key alone will not notice, because the bytes are the same bytes and were
+    already accepted as publishable. An entry whose reason depends on the
+    condition closes that by setting `required_condition`: the matched step's
+    step-level `if:` must then have that exact term as a top-level `&&` conjunct.
+    The parse is deliberately narrow -- any `||`, any parenthesised group other
+    than an empty call such as `failure()`, or a nested `${{` fails the check --
+    so a condition it cannot read is reported rather than trusted. Entries
+    without `required_condition` are still keyed on WHAT only, and a job-level
+    `if:` is not read.
+  * Release assets are censused too, as kind `release-asset`: a `run:` line that
+    calls `gh release create` or `gh release upload`, keyed on the positional
+    arguments after the tag (the files it attaches), and the release-publishing
+    actions (`softprops/action-gh-release`, `ncipollo/release-action`,
+    `actions/upload-release-asset`), keyed on their file inputs. A release has a
+    human on the button, but which files it attaches is decided in YAML, and a
+    second attach site or a widened glob is the same mistake as a second upload.
+    The set of files a glob matches is not this script's business:
+    packaging/release-assets.py holds the staged directory to a fixed list before
+    the one allowlisted site attaches it. A `gh` call built at run time (a
+    variable holding "release", an alias, a script file) is invisible here, the
+    same limit as the `run:` steps described below.
   * Expressions are compared as source text. Two spellings of the same artifact
     name are two different keys, which costs a false failure on a pure
     refactor -- the cheaper direction to be wrong in.
@@ -103,7 +124,10 @@ KNOWN LIMITATIONS
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import re
+import shlex
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -126,6 +150,31 @@ KIND_BUILTIN_CACHE = "builtin-cache"
 # much is exported.
 KIND_CACHE_ACCESS_HANDOFF = "cache-access-handoff"
 KIND_LAYER_CACHE = "layer-cache"
+# Files attached to a GitHub Release. See KNOWN LIMITATIONS.
+KIND_RELEASE_ASSET = "release-asset"
+_GH_RELEASE = re.compile(r"(?:^|[\s;&|(])gh\s+release\s+(create|upload)\b(.*)$")
+# gh release flags that take a value, so the value is not read as a file to attach.
+_GH_RELEASE_VALUE_FLAGS = frozenset(
+    {
+        "--repo",
+        "-R",
+        "--target",
+        "--title",
+        "-t",
+        "--notes",
+        "-n",
+        "--notes-file",
+        "-F",
+        "--discussion-category",
+        "--notes-start-tag",
+    }
+)
+# Actions that attach files to a release, and the inputs that name the files.
+_RELEASE_ACTIONS: dict[str, tuple[str, ...]] = {
+    "action-gh-release": ("files",),
+    "release-action": ("artifacts",),
+    "upload-release-asset": ("asset_path", "asset_name"),
+}
 _LAYER_CACHE_ENV = "ASH_GHA_BUILD_CACHE_EXPORT"
 _LAYER_CACHE_ACTION = "ash build (buildx type=gha)"
 
@@ -148,6 +197,17 @@ CACHE_INPUT_NEGATIVES = frozenset(
 # spells disabled, and it is a string, so a plain truthiness test on the YAML
 # value is not enough on its own.
 FALSEY_INPUT_VALUES = frozenset({"", "false", "no", "none", "off", "0"})
+
+# Actions whose built-in cache is ON when the step says nothing about it, keyed by
+# action, giving the input that controls it and how the census renders the unset
+# case. Without this, a step with no `with:` block reads as "no cache inputs, so no
+# cache", which is the opposite of what the runner does. setup-uv's `enable-cache`
+# defaults to "auto", and auto caches on GitHub-hosted runners for every event
+# except release, tag push, pull_request_target and workflow_run, so an ordinary
+# push or pull request publishes a cache from a step whose YAML shows none.
+DEFAULT_ON_CACHE_INPUTS: dict[str, tuple[str, str]] = {
+    "astral-sh/setup-uv": ("enable-cache", "auto(default)"),
+}
 
 
 @dataclass(frozen=True)
@@ -173,6 +233,9 @@ class Entry:
     publishes: str
     reason: str
     count: int = 1
+    # When set, every censused step matching this entry must have this term as a
+    # top-level `&&` conjunct of its `if:`. See KNOWN LIMITATIONS.
+    required_condition: str = ""
 
     def as_key(self) -> tuple[str, str, str, str]:
         return (self.file, self.kind, self.action, self.publishes)
@@ -185,6 +248,8 @@ class Found:
     surface: Surface
     step: str
     line: int
+    # The step's `if:` as source text, or "" when it has none.
+    condition: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +335,19 @@ _GRYPE_DB_CACHE_REASON = (
     "content_databases.py), so no restored copy is older than that bound."
 )
 
+_RELEASE_ASSET_ARTIFACT_REASON = (
+    "BUILT BYTES, and a release asset (operator decision O3: the native packages and "
+    "IDE artifacts may be public Release downloads; the container image never). "
+    "This upload carries the file the job built, gated and, where the format allows, "
+    "installed and exercised, to .github/workflows/ash-release-assets.yml, which "
+    "gates it again on these bytes and stages it. Each package wraps the one ASH "
+    "wheel the build job already publishes, held to that by its contents gate "
+    "(packaging/assert-package-payload.py, packaging/assert-package-contents.py, "
+    "vsix-contents.ts, editors/jetbrains/assert-plugin-zip-contents.py), so it "
+    "widens the format and not the content. One file per artifact, N only, never "
+    "an N-1 build; if-no-files-found: error and 14-day retention."
+)
+
 _FINCH_DEB_CACHE_REASON = (
     "The cache stores already-public Ubuntu and Finch .deb packages fetched from "
     "their official repositories, scoped by actions/cache to this repository, to "
@@ -277,6 +355,21 @@ _FINCH_DEB_CACHE_REASON = (
 )
 
 ALLOWLIST: tuple[Entry, ...] = (
+    # -- GitHub Release attachments ----------------------------------------
+    Entry(
+        file=".github/workflows/ash-tag-on-merge.yml",
+        kind=KIND_RELEASE_ASSET,
+        action="gh release create",
+        publishes="assets=${NOTES_ARGS[@]+${NOTES_ARGS[@]}}|release-assets/*",
+        reason=(
+            "THE RELEASE. The one place files are attached to a GitHub Release, in "
+            "the job that runs only when a chore(release): pull request merges. "
+            "release-assets/ is the directory the step before it held to "
+            "packaging/release-assets.py (exactly the listed assets, digests equal to "
+            "the ones computed after their gates) and attested. NOTES_ARGS expands to "
+            "--notes and the changelog text, never a file."
+        ),
+    ),
     # -- Digest-pinned scanner release assets (maintainer decision) ----------
     Entry(
         file=".github/actions/tool-download-cache/action.yml",
@@ -382,9 +475,9 @@ ALLOWLIST: tuple[Entry, ...] = (
     ),
     # -- Artifact uploads -----------------------------------------------------
     #
-    # The wheel and the sdist are the only entries here that publish something
-    # this project BUILT. Everything else is a report, a test result, or scan
-    # output kept as evidence from a red run.
+    # Three entries here publish something this project BUILT: the wheel and
+    # sdist, the .msix, and the .vsix. Everything else is a report, a test
+    # result, or scan output kept as evidence from a red run.
     Entry(
         file=".github/workflows/ash-package.yml",
         kind=KIND_UPLOAD,
@@ -401,6 +494,169 @@ ALLOWLIST: tuple[Entry, ...] = (
             "gated separately by .github/scripts/assert-artifact-contents.py, "
             "which self-tests before the build and then checks the real artifact. "
             "Widening what this publishes is a packaging decision, not a CI one."
+        ),
+    ),
+    Entry(
+        file=".github/workflows/ash-package.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-msix-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=build/msix/*.msix"
+        ),
+        reason=(
+            "BUILT BYTES: the MSIX package the msix job builds, installs and scans "
+            "with on windows-latest. Uploaded because packaging/winget/ declares this "
+            "filename as its installer, and this is the only place the code that "
+            "decides the filename produces it. The package wraps the same wheel the "
+            "build job already publishes above plus the launcher compiled from "
+            "packaging/msix/AshLauncher.cs, so it widens the format, not the "
+            "content. Signed with the repository's MSIX_SIGNING_PFX secret when set "
+            "and a throwaway self-signed certificate otherwise, which Windows will "
+            "not trust. ash-release-assets.yml stages this file as the release's "
+            ".msix and renders the winget manifests from it (operator decision O3). "
+            "Exactly one .msix is uploaded, asserted by verify-on-windows.ps1, with "
+            "if-no-files-found: error and 14-day retention."
+        ),
+    ),
+    Entry(
+        file=".github/workflows/ash-package.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-nupkg-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=build/choco-out/*.nupkg"
+        ),
+        reason=_RELEASE_ASSET_ARTIFACT_REASON
+        + " The Chocolatey .nupkg the chocolatey job installed, scanned with, "
+        "upgraded to and uninstalled.",
+    ),
+    Entry(
+        file=".github/workflows/ash-package.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-flatpak-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=build/flatpak-out/*.flatpak"
+        ),
+        reason=_RELEASE_ASSET_ARTIFACT_REASON
+        + " The N Flatpak bundle the flatpak job installed and updated to; the N-1 "
+        "bundle sits under prev/, which the glob does not descend into.",
+    ),
+    Entry(
+        file=".github/workflows/ash-native-packages.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-${{ matrix.family }}-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=build/native-packages/*.${{ matrix.family }}"
+        ),
+        reason=_RELEASE_ASSET_ARTIFACT_REASON
+        + " The .deb from the Debian 12 assert leg and the .rpm from the Amazon "
+        "Linux 2023 assert leg (matrix.asset), each uploaded only after that leg "
+        "installed, scanned with and purged it.",
+        required_condition="matrix.asset",
+    ),
+    Entry(
+        file=".github/workflows/ash-release-assets.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-release-vsix-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=build/vsix/*.vsix"
+        ),
+        reason=_RELEASE_ASSET_ARTIFACT_REASON
+        + " The .vsix, after the no-runtime-dependency check and vsix-contents.ts.",
+    ),
+    Entry(
+        file=".github/workflows/ash-release-assets.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-release-jetbrains-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=editors/jetbrains/build/distributions/*.zip"
+        ),
+        reason=_RELEASE_ASSET_ARTIFACT_REASON
+        + " The JetBrains plugin zip, after assertDistributionContents and "
+        "assert-plugin-zip-contents.py.",
+    ),
+    Entry(
+        file=".github/workflows/ash-release-assets.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-release-assets-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=release-assets/"
+        ),
+        reason=_RELEASE_ASSET_ARTIFACT_REASON
+        + " The whole staged set, uploaded only after packaging/release-assets.py "
+        "passed every gate on it: the files above plus the .mcpb and the winget "
+        "manifests rendered for the staged .msix. ash-tag-on-merge.yml downloads "
+        "it in the same run and attaches exactly these bytes.",
+    ),
+    Entry(
+        file=".github/workflows/ash-vscode-extension.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-vscode-extension-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=editors/vscode/ash-vscode.vsix"
+        ),
+        reason=(
+            "BUILT BYTES: the VS Code extension archive packaged from editors/vscode. "
+            "The step before it reads the archive with an independent zip reader and "
+            "fails on any member under node_modules/ (no bundled third-party code) "
+            "and on a missing extension/out/extension.js, so what is published is the "
+            "extension's own compiled TypeScript and manifest. Not published to the "
+            "Marketplace from here; 7-day retention, if-no-files-found: error."
+        ),
+    ),
+    Entry(
+        file=".github/workflows/ash-vscode-extension.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=vscode-visual-snapshots-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=${{ runner.temp }}/visual-snapshots/"
+        ),
+        reason=(
+            "Failure evidence only (if: failure()): PNG screen captures of a VS Code "
+            "window showing the extension's UI over the committed test fixture, and a "
+            "diff image per mismatched scenario. The same pictures as the baselines "
+            "committed under editors/vscode/test/visual/__snapshots__/, so nothing in "
+            "them is not already in the repository. No built code. 7-day retention; "
+            "if-no-files-found: warn because a failure before the first capture (the "
+            "image build) leaves nothing to upload, and the job is already red."
+        ),
+    ),
+    Entry(
+        file=".github/workflows/ash-jetbrains-ci.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=jetbrains-reports-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=editors/jetbrains/build/reports/|editors/jetbrains/build/test-results/"
+        ),
+        reason=(
+            "Failure evidence only (if: failure()): Gradle's test and coverage "
+            "reports for the JetBrains plugin. Named report directories, not "
+            "build/libs or build/distributions, so the plugin jar is not in it."
+        ),
+    ),
+    Entry(
+        file=".github/workflows/ash-jetbrains-ci.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=jetbrains-visual-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=editors/jetbrains/build/ui-snapshots/|editors/jetbrains/build/ui-logs/|"
+            "editors/jetbrains/build/reports/tests/uiTest/"
+        ),
+        reason=(
+            "Failure evidence only (if: failure()): the visual suite's rendered "
+            "scenes and diff images, the IDE log and the test report, for a pixel "
+            "difference a job log cannot show. Screenshots of a fixture project "
+            "and named build directories, not build/libs or build/distributions."
         ),
     ),
     Entry(
@@ -470,12 +726,14 @@ ALLOWLIST: tuple[Entry, ...] = (
         kind=KIND_UPLOAD,
         action=_UPLOAD,
         publishes=(
-            "name=ts-coverage-${{ matrix.package }} "
-            "path=deploy/${{ matrix.package }}/coverage/"
+            "name=ts-coverage-${{ matrix.package }} path=${{ matrix.dir }}/coverage/"
         ),
         reason=(
             "Coverage report for the TypeScript packages. Instrumented-line data "
-            "over tracked source, not the compiled bundle."
+            "over tracked source, not the compiled bundle. The path moved from "
+            "deploy/${{ matrix.package }} to ${{ matrix.dir }} when editors/vscode "
+            "joined the matrix beside deploy/cdk and deploy/cdk-constructs; the "
+            "directory is still each package's own coverage/ output."
         ),
     ),
     Entry(
@@ -680,6 +938,21 @@ ALLOWLIST: tuple[Entry, ...] = (
             "assembly rather than the whole of cdk.out."
         ),
     ),
+    Entry(
+        file=".github/workflows/ash-kubernetes-operator.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes="name=ash-operator-e2e-log path=${{ env.OPERATOR_DIR }}/e2e.log",
+        reason=(
+            "Failure evidence only (if: failure()), 7-day retention: the pytest -v "
+            "log of the Kubernetes operator's kind end-to-end run. Test names, "
+            "assertion output and the tail of kubectl and operator logs from a "
+            "throwaway cluster, scanning committed fixtures whose only credential is "
+            "AWS's documentation example key. One text file, not build output; the "
+            "operator and ASH images stay on the runner."
+        ),
+        required_condition="failure()",
+    ),
     # -- Standalone caches ----------------------------------------------------
     # The grype database: restored everywhere, saved only from a push to the default
     # branch, keyed on the time bucket content_databases.py derives from the bound grype
@@ -811,7 +1084,38 @@ ALLOWLIST: tuple[Entry, ...] = (
         kind=KIND_BUILTIN_CACHE,
         action=_SETUP_UV,
         publishes="enable-cache=true",
-        reason=_UV_CACHE_REASON,
+        count=3,
+        reason=_UV_CACHE_REASON + " Three times: the build, msix and winget jobs.",
+    ),
+    Entry(
+        file=".github/workflows/ash-actions-pinned.yml",
+        kind=KIND_BUILTIN_CACHE,
+        action=_SETUP_UV,
+        publishes="enable-cache=true",
+        reason=(
+            _UV_CACHE_REASON + " Here it holds only PyYAML, for the "
+            "`uv run --no-project --with pyyaml` workflow-structure check."
+        ),
+    ),
+    Entry(
+        file=".github/workflows/ash-vscode-extension.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=~/.npm "
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('editors/vscode/package-lock.json') }}"
+        ),
+        reason=_NPM_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-vscode-extension.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.npm "
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('editors/vscode/package-lock.json') }}"
+        ),
+        reason=_NPM_CACHE_REASON,
     ),
     Entry(
         file=".github/workflows/ash-unified-ci.yml",
@@ -872,9 +1176,12 @@ ALLOWLIST: tuple[Entry, ...] = (
         action="actions/cache/restore",
         publishes=(
             "path=~/.npm "
-            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(format('deploy/{0}/package-lock.json', matrix.package)) }}"
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(format('{0}/package-lock.json', matrix.dir)) }}"
         ),
-        reason=_NPM_CACHE_REASON,
+        reason=(
+            _NPM_CACHE_REASON + " Keyed on ${{ matrix.dir }} since editors/vscode "
+            "joined deploy/cdk and deploy/cdk-constructs in the matrix."
+        ),
     ),
     Entry(
         file=".github/workflows/ash-iac-drift.yml",
@@ -903,9 +1210,12 @@ ALLOWLIST: tuple[Entry, ...] = (
         action="actions/cache/save",
         publishes=(
             "path=~/.npm "
-            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(format('deploy/{0}/package-lock.json', matrix.package)) }}"
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(format('{0}/package-lock.json', matrix.dir)) }}"
         ),
-        reason=_NPM_CACHE_REASON,
+        reason=(
+            _NPM_CACHE_REASON + " Keyed on ${{ matrix.dir }} since editors/vscode "
+            "joined deploy/cdk and deploy/cdk-constructs in the matrix."
+        ),
     ),
     Entry(
         file=".github/workflows/ash-agent-plugins-drift.yml",
@@ -1037,6 +1347,14 @@ def _classify(step: dict) -> tuple[str, str] | None:
     with_block = step.get("with")
     inputs = with_block if isinstance(with_block, dict) else {}
 
+    # A release-publishing action. Keyed on the inputs that name the files.
+    if segments[-1] in _RELEASE_ACTIONS:
+        rendered = " ".join(
+            f"{name}={_flatten(inputs.get(name)) or '(unset)'}"
+            for name in _RELEASE_ACTIONS[segments[-1]]
+        )
+        return KIND_RELEASE_ASSET, rendered
+
     # An artifact upload, by any owner. Keyed on `name` and `path` because those
     # two decide what appears at the download URL.
     if segments[-1].startswith("upload-artifact"):
@@ -1062,6 +1380,12 @@ def _classify(step: dict) -> tuple[str, str] | None:
         for key, value in inputs.items()
         if str(key) != LINE_KEY and _is_cache_input(str(key)) and not _is_falsey(value)
     }
+    default_on = DEFAULT_ON_CACHE_INPUTS.get(lowered)
+    if default_on is not None:
+        control, unset_rendering = default_on
+        # Input names are case-insensitive to the runner, so match them that way.
+        if not any(str(key).strip().lower() == control for key in inputs):
+            cache_inputs[control] = unset_rendering
     if cache_inputs:
         rendered = " ".join(
             f"{key}={_flatten(cache_inputs[key])}" for key in sorted(cache_inputs)
@@ -1136,6 +1460,56 @@ def _layer_cache_sites(document: object):
                 )
 
 
+def _gh_release_attachments(script: str) -> list[tuple[str, str]]:
+    """(verb, publishes) for each `gh release create|upload` in a run: script.
+
+    Continuation lines are joined first, so a command spread over several lines is
+    one command. A line that is wholly a shell comment is skipped, so prose can
+    name the command. The positional arguments after the tag are the files; a flag
+    that takes a value has its value skipped, and anything dynamic (a variable, an
+    array expansion) stays in the key verbatim, because it could add files.
+    """
+    joined = re.sub(r"\\\n", " ", script)
+    sites: list[tuple[str, str]] = []
+    for line in joined.splitlines():
+        if line.strip().startswith("#"):
+            continue
+        match = _GH_RELEASE.search(line)
+        if match is None:
+            continue
+        verb, rest = match.group(1), match.group(2)
+        try:
+            tokens = shlex.split(rest, comments=True)
+        except ValueError:
+            tokens = rest.split()
+        positional: list[str] = []
+        skip_next = False
+        for token in tokens:
+            if skip_next:
+                skip_next = False
+                continue
+            if token in {";", "&&", "||", "|"}:
+                break
+            if token.startswith("-"):
+                if "=" not in token and token in _GH_RELEASE_VALUE_FLAGS:
+                    skip_next = True
+                continue
+            positional.append(token)
+        files = positional[1:]
+        sites.append((verb, f"assets={'|'.join(files) or '(none)'}"))
+    return sites
+
+
+def _release_sites(document: object):
+    """(mapping, kind, action, publishes) for every gh release attach in run: text."""
+    for node in _walk_mappings(document):
+        text = node.get("run")
+        if not isinstance(text, str) or "gh" not in text:
+            continue
+        for verb, publishes in _gh_release_attachments(text):
+            yield node, KIND_RELEASE_ASSET, f"gh release {verb}", publishes
+
+
 def _walk_steps(node: object):
     """Yield every mapping that carries a `uses:`, wherever it sits.
 
@@ -1176,9 +1550,13 @@ def scan_text(rel_path: str, text: str) -> list[Found]:
                     ),
                     step=_step_name(step, action),
                     line=int(step.get(LINE_KEY, 1)),
+                    condition=_flatten(step.get("if")),
                 )
             )
-        for node, kind, action, publishes in _layer_cache_sites(document):
+        for node, kind, action, publishes in (
+            *_layer_cache_sites(document),
+            *_release_sites(document),
+        ):
             name = node.get("name")
             found.append(
                 Found(
@@ -1240,6 +1618,43 @@ def evaluate(
     return unexpected, unmatched
 
 
+def _top_level_conjuncts(condition: str) -> list[str] | None:
+    """Split an `if:` into its top-level `&&` terms, or None if it cannot be read.
+
+    Narrow on purpose. `||` anywhere, a parenthesised group, or an expression
+    nested inside the outer `${{ }}` returns None, because splitting those on
+    `&&` would misread them: `failure() && x || always()` is
+    `(failure() && x) || always()`, which runs on green builds. An empty call such
+    as `failure()` or `always()` is the only parenthesis allowed.
+    """
+    text = condition.strip()
+    if text.startswith("${{") and text.endswith("}}"):
+        text = text[3:-2].strip()
+    if not text or "${{" in text or "}}" in text or "||" in text:
+        return None
+    if "(" in text.replace("()", "") or ")" in text.replace("()", ""):
+        return None
+    return [term.strip() for term in text.split("&&")]
+
+
+def check_conditions(
+    found: list[Found], allowlist: tuple[Entry, ...]
+) -> list[tuple[Found, Entry]]:
+    """Return the allowlisted sites whose `if:` does not hold the entry's condition."""
+    required = {
+        entry.as_key(): entry for entry in allowlist if entry.required_condition
+    }
+    violations: list[tuple[Found, Entry]] = []
+    for item in found:
+        entry = required.get(item.surface.as_key())
+        if entry is None:
+            continue
+        terms = _top_level_conjuncts(item.condition)
+        if terms is None or entry.required_condition not in terms:
+            violations.append((item, entry))
+    return violations
+
+
 def _print_census(found: list[Found]) -> None:
     print(f"Publish-surface census over {GITHUB_DIR.relative_to(REPO_ROOT)}/:")
     print(f"  {len(found)} site(s) that can publish bytes to a public store\n")
@@ -1254,6 +1669,35 @@ def _print_census(found: list[Found]) -> None:
     print()
 
 
+def _report_condition_failures(violations: list[tuple[Found, Entry]]) -> None:
+    for item, entry in sorted(
+        violations, key=lambda pair: (pair[0].surface.file, pair[0].line)
+    ):
+        surface = item.surface
+        shown = item.condition or "(none, so it runs whenever the job gets this far)"
+        print(
+            f"::error file={surface.file},line={item.line}::Allowlisted publish surface runs outside its accepted condition: {surface.file} step '{item.step}' must have '{entry.required_condition}' as a top-level && term of its if:, found {shown}"
+        )
+        print(f"CONDITION NOT HELD  {surface.file}:{item.line}")
+        print(f"  step       {item.step}")
+        print(f"  publishes  {surface.publishes}")
+        print(f"  required   {entry.required_condition} (as a top-level && term)")
+        print(f"  found if:  {shown}")
+        print(f"  reason on file  {entry.reason}")
+        print(
+            "  why this failed\n"
+            "    This upload was accepted on the condition that it runs only when\n"
+            "    that term is true, and its step-level if: no longer guarantees it,\n"
+            "    or is written in a form this check cannot read (any ||, or a\n"
+            "    parenthesised group). Either way it may now publish on runs the\n"
+            "    decision did not cover.\n"
+            "  what to do\n"
+            "    Restore the condition. If widening it is intended, that is a new\n"
+            "    decision: change required_condition and the reason in the same\n"
+            "    commit.\n"
+        )
+
+
 def _report_failures(
     unexpected: list[Found], unmatched: list[tuple[Entry, int]]
 ) -> None:
@@ -1265,6 +1709,7 @@ def _report_failures(
             KIND_BUILTIN_CACHE: "enables an action's built-in cache",
             KIND_CACHE_ACCESS_HANDOFF: "hands the Actions cache token to later steps",
             KIND_LAYER_CACHE: "sets ASH's image layer-cache export",
+            KIND_RELEASE_ASSET: "attaches files to a GitHub Release",
         }[surface.kind]
         print(
             f"::error file={surface.file},line={item.line}::New publicly-downloadable surface: {surface.file} step '{item.step}' {headline} ({surface.publishes}) and is not allowlisted"
@@ -1325,6 +1770,28 @@ def _report_failures(
 
 _SELF_TEST_ALLOWED_FILE = "fixture/allowed.yml"
 _SELF_TEST_CLEAN_FILE = "fixture/clean.yml"
+_SELF_TEST_RELEASE_FILE = "fixture/release.yml"
+
+# The allowlisted release attach is spread over continuation lines and preceded by a
+# comment that names the command, so the clean baseline already proves the joiner
+# reads one command and the comment rule keeps prose out of the census.
+_SELF_TEST_RELEASE_YAML = """
+name: fixture release
+on: [pull_request]
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish
+        run: |
+          set -euo pipefail
+          # gh release create v9 everything/* would be wrong here
+          gh release create "$TAG" \\
+            --repo "$GITHUB_REPOSITORY" \\
+            --title "$TAG" \\
+            --generate-notes \\
+            dist/*.whl
+"""
 
 _SELF_TEST_ALLOWED_YAML = """
 name: fixture
@@ -1338,6 +1805,7 @@ jobs:
         with:
           enable-cache: true
       - name: Upload the wheel
+        if: ${{ failure() && !env.ACT }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dist
@@ -1359,6 +1827,11 @@ jobs:
           # would read this empty string as "caching is on" and the fixture would
           # stop being a clean control.
           cache: ''
+      # Explicitly off, so not a cache. The control for the default-on cases below:
+      # a detector that flagged every setup-uv would turn this file red.
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
       - run: echo no publishing here
 """
 
@@ -1369,6 +1842,7 @@ _SELF_TEST_ALLOWLIST: tuple[Entry, ...] = (
         action="actions/upload-artifact",
         publishes="name=dist path=dist/",
         reason="self-test fixture",
+        required_condition="failure()",
     ),
     Entry(
         file=_SELF_TEST_ALLOWED_FILE,
@@ -1377,22 +1851,59 @@ _SELF_TEST_ALLOWLIST: tuple[Entry, ...] = (
         publishes="enable-cache=true",
         reason="self-test fixture",
     ),
+    Entry(
+        file=_SELF_TEST_RELEASE_FILE,
+        kind=KIND_RELEASE_ASSET,
+        action="gh release create",
+        publishes="assets=dist/*.whl",
+        reason="self-test fixture",
+    ),
 )
 
 
-def _self_test_case(name: str, files: dict[str, str]) -> tuple[str, int, int]:
+def _self_test_case(name: str, files: dict[str, str]) -> tuple[str, int, int, int]:
     found: list[Found] = []
     for rel, text in files.items():
         found.extend(scan_text(rel, text))
     unexpected, unmatched = evaluate(found, _SELF_TEST_ALLOWLIST)
-    return name, len(unexpected), len(unmatched)
+    ungated = check_conditions(found, _SELF_TEST_ALLOWLIST)
+    return name, len(unexpected), len(unmatched), len(ungated)
 
 
 def self_test() -> int:
     baseline = {
         _SELF_TEST_ALLOWED_FILE: _SELF_TEST_ALLOWED_YAML,
         _SELF_TEST_CLEAN_FILE: _SELF_TEST_CLEAN_YAML,
+        _SELF_TEST_RELEASE_FILE: _SELF_TEST_RELEASE_YAML,
     }
+
+    # (h) a second place that attaches files to a release, through gh.
+    release_upload = dict(baseline)
+    release_upload[_SELF_TEST_CLEAN_FILE] = (
+        _SELF_TEST_CLEAN_YAML
+        + """
+      - name: Attach the image to the release too
+        run: gh release upload "v${VERSION}" image.tar --clobber
+"""
+    )
+
+    # (h1) the same through a release action instead of gh.
+    release_action = dict(baseline)
+    release_action[_SELF_TEST_CLEAN_FILE] = (
+        _SELF_TEST_CLEAN_YAML
+        + """
+      - name: Release with an action
+        uses: softprops/action-gh-release@0000000000000000000000000000000000000000 # v2
+        with:
+          files: dist/*
+"""
+    )
+
+    # (h2) the allowlisted attach widened to more files.
+    release_widened = dict(baseline)
+    release_widened[_SELF_TEST_RELEASE_FILE] = _SELF_TEST_RELEASE_YAML.replace(
+        "dist/*.whl", "dist/*.whl build/*"
+    )
 
     # (a) a new upload in a file that has none today.
     new_file_upload = dict(baseline)
@@ -1478,7 +1989,31 @@ def self_test() -> int:
 """
     )
 
-    # (c3) ASH's layer cache: an export mode set where none was decided, and the
+    # (c3) setup-uv with no `enable-cache` input at all. The input defaults to
+    # "auto", which caches on GitHub-hosted runners for an ordinary push or pull
+    # request, so leaving it out is a cache with nothing in `with:` to see.
+    default_uv_cache = dict(baseline)
+    default_uv_cache[_SELF_TEST_CLEAN_FILE] = (
+        _SELF_TEST_CLEAN_YAML
+        + """
+      - name: Install uv with the default cache setting
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+"""
+    )
+
+    # (c4) the same default, spelled out.
+    auto_uv_cache = dict(baseline)
+    auto_uv_cache[_SELF_TEST_CLEAN_FILE] = (
+        _SELF_TEST_CLEAN_YAML
+        + """
+      - name: Install uv with enable-cache auto
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: auto
+"""
+    )
+
+    # (c5) ASH's layer cache: an export mode set where none was decided, and the
     # credential hand-off that makes an export possible at all.
     layer_export = dict(baseline)
     layer_export[_SELF_TEST_CLEAN_FILE] = (
@@ -1487,7 +2022,7 @@ def self_test() -> int:
       - name: Build the image and export every layer
         env:
           ASH_GHA_BUILD_CACHE_EXPORT: max
-        run: ash container build --no-run
+        run: ashx container build --no-run
 """
     )
     credentials_export = dict(baseline)
@@ -1512,32 +2047,120 @@ def self_test() -> int:
     deleted = dict(baseline)
     deleted[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_CLEAN_YAML
 
+    # (f) a failure-only upload widened to every run. Same bytes, same key, so
+    # only required_condition can see it.
+    _failure_only = "        if: ${{ failure() && !env.ACT }}\n"
+    widened_always = dict(baseline)
+    widened_always[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.replace(
+        _failure_only, "        if: always()\n"
+    )
+
+    # (f1) the condition dropped altogether.
+    widened_dropped = dict(baseline)
+    widened_dropped[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.replace(
+        _failure_only, ""
+    )
+
+    # (f2) failure() still present and still joined by &&, but an || makes the
+    # whole thing true on green runs. A substring match would pass this.
+    widened_or = dict(baseline)
+    widened_or[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.replace(
+        _failure_only, "        if: ${{ failure() && !env.ACT || always() }}\n"
+    )
+
+    # (f3) failure() negated.
+    widened_negated = dict(baseline)
+    widened_negated[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.replace(
+        _failure_only, "        if: ${{ !failure() }}\n"
+    )
+
+    # (f4) failure() inside a negated group. Every term split on && reads as
+    # failure() unless parenthesised groups are refused, yet the whole is true on
+    # every green run (env.ACT is unset in CI).
+    widened_grouped = dict(baseline)
+    widened_grouped[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.replace(
+        _failure_only, "        if: ${{ !(env.ACT && failure() && true) }}\n"
+    )
+
+    # (g) the bare form, without ${{ }}, is the same condition and must pass.
+    bare_failure = dict(baseline)
+    bare_failure[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.replace(
+        _failure_only, "        if: failure()\n"
+    )
+
     expectations = [
-        # name, files, expect unexpected, expect unmatched
-        ("clean tree matches the allowlist", baseline, 0, 0),
-        ("(a) new upload in a file with none", new_file_upload, 1, 0),
-        ("(b) second upload in an allowed file", second_upload, 1, 0),
-        ("(b2) duplicate of an allowed upload", duplicate_upload, 1, 0),
-        ("(c) new actions/cache", new_cache, 1, 0),
-        ("(c1) new actions/cache/save", new_cache_save, 1, 0),
-        ("(c2) built-in cache via cache-to", builtin_cache, 1, 0),
-        ("(c3) layer-cache export mode set", layer_export, 1, 0),
-        ("(c4) cache credentials handed to later steps", credentials_export, 1, 0),
-        ("(d) allowed upload repointed", repointed, 1, 1),
-        ("(e) allowlisted site deleted", deleted, 0, 2),
+        # name, files, expect unexpected, expect unmatched, expect ungated
+        ("clean tree matches the allowlist", baseline, 0, 0, 0),
+        ("(a) new upload in a file with none", new_file_upload, 1, 0, 0),
+        ("(b) second upload in an allowed file", second_upload, 1, 0, 0),
+        ("(b2) duplicate of an allowed upload", duplicate_upload, 1, 0, 1),
+        ("(c) new actions/cache", new_cache, 1, 0, 0),
+        ("(c1) new actions/cache/save", new_cache_save, 1, 0, 0),
+        ("(c2) built-in cache via cache-to", builtin_cache, 1, 0, 0),
+        ("(c3) setup-uv with enable-cache left out", default_uv_cache, 1, 0, 0),
+        ("(c4) setup-uv with enable-cache auto", auto_uv_cache, 1, 0, 0),
+        ("(c5) layer-cache export mode set", layer_export, 1, 0, 0),
+        ("(c6) cache credentials handed to later steps", credentials_export, 1, 0, 0),
+        ("(d) allowed upload repointed", repointed, 1, 1, 0),
+        ("(e) allowlisted site deleted", deleted, 0, 2, 0),
+        ("(f) failure-only upload widened to always()", widened_always, 0, 0, 1),
+        ("(f1) failure-only upload's if: removed", widened_dropped, 0, 0, 1),
+        ("(f2) failure() kept but || always() added", widened_or, 0, 0, 1),
+        ("(f3) failure() negated", widened_negated, 0, 0, 1),
+        ("(f4) failure() inside a negated group", widened_grouped, 0, 0, 1),
+        ("(g) bare if: failure() still holds", bare_failure, 0, 0, 0),
+        ("(h) a second gh release attach", release_upload, 1, 0, 0),
+        ("(h1) a release action attaching files", release_action, 1, 0, 0),
+        ("(h2) the allowed release attach widened", release_widened, 1, 1, 0),
     ]
 
     failures = 0
     print("Self-test: does this check still detect and still fail?\n")
-    for name, files, want_unexpected, want_unmatched in expectations:
-        _, got_unexpected, got_unmatched = _self_test_case(name, files)
-        ok = got_unexpected == want_unexpected and got_unmatched == want_unmatched
+    for name, files, want_unexpected, want_unmatched, want_ungated in expectations:
+        _, got_unexpected, got_unmatched, got_ungated = _self_test_case(name, files)
+        ok = (
+            got_unexpected == want_unexpected
+            and got_unmatched == want_unmatched
+            and got_ungated == want_ungated
+        )
         status = "ok  " if ok else "FAIL"
         print(
             f"  {status} {name}: "
             f"unexpected={got_unexpected} (want {want_unexpected}), "
-            f"unmatched={got_unmatched} (want {want_unmatched})"
+            f"unmatched={got_unmatched} (want {want_unmatched}), "
+            f"ungated={got_ungated} (want {want_ungated})"
         )
+        if not ok:
+            failures += 1
+
+    # The counts above prove the detectors fire. These prove the verdict main()
+    # returns honors each of them, so dropping one from the exit decision (an
+    # unexpected site, an orphaned entry, or a condition not held) goes red here
+    # rather than only in the next incident.
+    # The orphan case keeps the cache site, so the census is not empty and only the
+    # unmatched upload entry can fail it. `deleted` above empties the census, which
+    # the no-sites guard would fail on its own. The empty census is run against an
+    # empty allowlist for the same reason: with any entry, the orphan check fails it.
+    upload_removed = dict(baseline)
+    upload_removed[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.split(
+        "      - name: Upload the wheel"
+    )[0]
+    verdicts: list[tuple[str, dict[str, str], tuple[Entry, ...], int]] = [
+        # name, files, allowlist, expected exit status of gate()
+        ("verdict: clean tree passes", baseline, _SELF_TEST_ALLOWLIST, 0),
+        ("verdict: no sites censused fails", {}, (), 1),
+        ("verdict: unexpected site fails", new_file_upload, _SELF_TEST_ALLOWLIST, 1),
+        ("verdict: orphaned entry fails", upload_removed, _SELF_TEST_ALLOWLIST, 1),
+        ("verdict: condition not held fails", widened_always, _SELF_TEST_ALLOWLIST, 1),
+        ("verdict: grouped condition fails", widened_grouped, _SELF_TEST_ALLOWLIST, 1),
+    ]
+    for name, files, allowlist, want_status in verdicts:
+        found = [item for rel, text in files.items() for item in scan_text(rel, text)]
+        with contextlib.redirect_stdout(io.StringIO()):
+            got_status = gate(found, allowlist)
+        ok = got_status == want_status
+        status = "ok  " if ok else "FAIL"
+        print(f"  {status} {name}: exit={got_status} (want {want_status})")
         if not ok:
             failures += 1
     print()
@@ -1572,7 +2195,14 @@ def main(argv: list[str] | None = None) -> int:
 
     found = scan_tree(GITHUB_DIR)
     _print_census(found)
+    return gate(found, ALLOWLIST)
 
+
+def gate(found: list[Found], allowlist: tuple[Entry, ...]) -> int:
+    """Return main()'s exit status for a census against an allowlist.
+
+    Separate from main() so the self-test can run the real verdict over fixtures.
+    """
     if not found:
         print(
             "::error::assert-publish-surfaces.py censused zero publishing sites. "
@@ -1581,18 +2211,23 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    unexpected, unmatched = evaluate(found, ALLOWLIST)
-    if not unexpected and not unmatched:
+    unexpected, unmatched = evaluate(found, allowlist)
+    ungated = check_conditions(found, allowlist)
+    gated = sum(1 for entry in allowlist if entry.required_condition)
+    if not unexpected and not unmatched and not ungated:
         print(
             f"OK: all {len(found)} publishing site(s) match the "
-            f"{len(ALLOWLIST)} allowlist entr(ies)."
+            f"{len(allowlist)} allowlist entr(ies); {gated} entr(ies) with a "
+            f"required condition hold it."
         )
         return 0
 
     _report_failures(unexpected, unmatched)
+    _report_condition_failures(ungated)
     print(
         f"FAILED: {len(unexpected)} unexpected publishing site(s), "
-        f"{len(unmatched)} unmatched allowlist entr(ies)."
+        f"{len(unmatched)} unmatched allowlist entr(ies), "
+        f"{len(ungated)} site(s) outside their required condition."
     )
     return 1
 

@@ -1,0 +1,346 @@
+name: ASH - End to end
+# Every v4 install channel, built from this commit, installed fresh, and made to run a
+# real `ashx scan` over the fixtures in tests/e2e/fixtures: exit 2 with 3 findings, exit
+# 0 clean, and exit 1 with opengrep MISSING. Each channel also upgrades from N-1,
+# uninstalls, and shows a negative control failing. scripts/e2e/assert_outcome.py is the
+# one verdict every channel uses; tests/e2e/README.md records how the exit-1 trigger was
+# measured.
+#
+# Channels with their own workflow (deb/rpm in ash-native-packages.yml, Flatpak, MSIX,
+# Chocolatey and winget in ash-package.yml, the IDEs, the Kubernetes operator) are not
+# repeated here. This file holds the channels that had no e2e home: the wheel, the
+# container image, Homebrew from head, and the MCPB bundle.
+#
+# WHY THERE IS NO paths FILTER
+#
+# The e2e legs test the product, and the product is mostly automated_security_helper/**.
+# A paths filter that left it out is how the packaging-format jobs came to skip code
+# changes entirely, and merge_group accepts no filter at all. So every push and pull
+# request runs it.
+#
+# PENDING CHANNELS
+#
+# A channel whose job is still a placeholder is listed in E2E_PENDING below and its job
+# carries `if: vars.ASH_E2E_RUN_PLACEHOLDERS == 'true'`. No such repository variable is
+# set, so the job is skipped. (A literal `if: false` would do the same, but actionlint
+# rejects a constant condition, and job-level `if:` cannot read `env`.) The gate requires
+# a pending channel to be skipped and every other channel to succeed. A pending channel
+# that runs, whether because it was implemented or because someone set the variable,
+# fails the gate until it is removed from the list, so the placeholder cannot outlive its
+# reason unnoticed.
+
+on:
+  push:
+    branches:
+      - v4-capabilities
+      - "v4/**"
+  pull_request:
+  merge_group:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  # Pushes are keyed by commit so two pushes never cancel each other's verdicts; pull
+  # requests by ref, so a new push to a PR supersedes the old run.
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Channels whose job below is a placeholder. See PENDING CHANNELS above. Empty:
+  # every channel this file holds is implemented.
+  E2E_PENDING: ""
+
+jobs:
+  contract:
+    name: "e2e: shared contract (fixtures, assert_outcome, cli name)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # No uv cache. An e2e leg is a fresh install by definition, and a saved Actions cache
+      # is a publish surface (.github/scripts/assert-publish-surfaces.py) this workflow
+      # has no reason to open.
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      # The planted-output self-test first: the verdict every channel relies on has to
+      # be seen rejecting each wrong outcome before any channel's green means anything.
+      - name: Prove assert_outcome can fail
+        run: uv run --no-project python scripts/e2e/assert_outcome.py --self-test
+
+      - name: Unit tests for the e2e contract
+        run: >-
+          uv run --group dev pytest tests/unit/test_e2e_assert_outcome.py
+          tests/unit/test_e2e_container_guards.py
+          tests/unit/test_e2e_n1_fetch.py
+          tests/unit/test_e2e_prev_tree.py
+          -p no:cacheprovider -o addopts="" -v
+
+  wheel:
+    name: "e2e: wheel (${{ matrix.os }}, python ${{ matrix.python }})"
+    needs: contract
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.10", "3.14"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Full history and every tag, because N-1 is derived rather than named:
+      # E2E_PREV_REF=latest-release below makes scripts/e2e/n1-ref.sh take the latest
+      # published GitHub release, whose tag this fetch brings in (prev_tree.py fetches it
+      # itself if it is missing). Naming a development branch here would fail the fetch
+      # once that branch is merged and deleted.
+      # tests/unit/test_e2e_n1_fetch.py holds every leg to this.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # No uv cache. An e2e leg is a fresh install by definition, and a saved Actions cache
+      # is a publish surface (.github/scripts/assert-publish-surfaces.py) this workflow
+      # has no reason to open.
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Build, install, scan, upgrade, uninstall
+        env:
+          E2E_PYTHON: ${{ matrix.python }}
+          # N-1 is the latest published release. The token only raises the GitHub API
+          # rate limit for listing releases; the job's permissions stay contents: read.
+          E2E_PREV_REF: latest-release
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          work="$RUNNER_TEMP/e2e-wheel"
+          if command -v cygpath >/dev/null 2>&1; then work="$(cygpath -u "$work")"; fi
+          bash scripts/e2e/wheel.sh "$work"
+
+  # The container image, built from this commit with `ashx container build` and driven by a
+  # host `ashx scan --mode container`, exactly as a user runs it. Never pushed: the image
+  # exists only in this runner's docker, under a tag unique to this run, and
+  # scripts/e2e/container.sh removes it at the end. assert-no-image-publish fails the job
+  # if anything CI runs could log in to a registry or push. docker only; podman, finch
+  # and nerdctl keep their build-and-scan legs in .github/actions/validate-container.
+  container:
+    name: "e2e: container image (docker, never pushed)"
+    needs: contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      # Full history and every tag, because N-1 is derived rather than named:
+      # E2E_PREV_REF=latest-release below makes scripts/e2e/n1-ref.sh take the latest
+      # published GitHub release, whose tag this fetch brings in (prev_tree.py fetches it
+      # itself if it is missing). Naming a development branch here would fail the fetch
+      # once that branch is merged and deleted.
+      # tests/unit/test_e2e_n1_fetch.py holds every leg to this.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # No uv cache, for the reason given in the contract job.
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Nothing CI runs may push an image
+        run: |
+          python3 .github/scripts/assert-no-image-publish.py --self-test
+          python3 .github/scripts/assert-no-image-publish.py
+
+      # The Dockerfile's base image, pulled once and held to BASE_IMAGE_DIGEST before
+      # anything builds, so the build is digest-pinned. container.sh pins N-1's base by
+      # its own digest when it differs from head's.
+      - name: Pre-pull the base image
+        id: prepull
+        uses: ./.github/actions/prepull-base-image
+        with:
+          oci-runner: docker
+
+      # container.sh runs `ashx container build`, which reads the pre-pull's hand-off from
+      # the environment. The action returns it as outputs, not through GITHUB_ENV.
+      - name: Build, install, scan, upgrade, uninstall
+        env:
+          ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
+          ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
+          # N-1 is the latest published release. The token only raises the GitHub API
+          # rate limit for listing releases; the job's permissions stay contents: read.
+          E2E_PREV_REF: latest-release
+          GITHUB_TOKEN: ${{ github.token }}
+          E2E_IMAGE_TAG: ash-e2e-container:${{ github.run_id }}-${{ github.run_attempt }}
+        run: bash scripts/e2e/container.sh "$RUNNER_TEMP/e2e-container"
+
+  # Homebrew from head. Formula/ash.rb names a release tag, so installing it verbatim
+  # would test that release. scripts/e2e/homebrew.sh installs a copy whose one `url`
+  # line points at a `git archive` tarball of this commit, from a throwaway local tap,
+  # and changes nothing else in the formula. Each leg compiles every resource from its
+  # sdist (five are Rust extensions), so the legs run side by side: fresh install with
+  # the three cases and `brew test`; N-1 to N `brew upgrade` and `brew cleanup`; and a
+  # formula missing one resource, which must install and then fail its scan.
+  homebrew:
+    name: "e2e: Homebrew from head (${{ matrix.leg }})"
+    needs: contract
+    runs-on: macos-latest
+    # The upgrade leg builds the formula twice.
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: [fresh, upgrade, negative]
+    env:
+      HOMEBREW_NO_ANALYTICS: "1"
+    steps:
+      # Full history and every tag, because N-1 is derived rather than named:
+      # E2E_PREV_REF=latest-release below makes scripts/e2e/n1-ref.sh take the latest
+      # published GitHub release, whose tag this fetch brings in (prev_tree.py fetches it
+      # itself if it is missing). Naming a development branch here would fail the fetch
+      # once that branch is merged and deleted.
+      # tests/unit/test_e2e_n1_fetch.py holds every leg to this.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # Recorded, not assumed: the harness runs on the image's python3, never on the
+      # keg's, because the uninstall checks run after the keg is gone.
+      - name: Record the Homebrew and Python the image shipped
+        run: |
+          set -euo pipefail
+          brew --version
+          python3 --version
+
+      - name: Build from head, install, scan, then ${{ matrix.leg }}
+        env:
+          E2E_LEG: ${{ matrix.leg }}
+          # N-1 is the latest published release. The token only raises the GitHub API
+          # rate limit for listing releases; the job's permissions stay contents: read.
+          E2E_PREV_REF: latest-release
+          GITHUB_TOKEN: ${{ github.token }}
+          E2E_HARNESS_PYTHON: python3
+        run: bash scripts/e2e/homebrew.sh "$E2E_LEG" "$RUNNER_TEMP/e2e-homebrew"
+
+  # The .mcpb bundle built from this commit, retargeted from its release ref to the
+  # head wheel and launched through the MCP Inspector: upgrade from N-1, a stdio
+  # handshake, run_ash_scan and get_scan_progress on the three cases, uninstall, and
+  # negative controls. scripts/e2e/mcpb_inspector.py explains why the scans use
+  # streamable HTTP (the Inspector CLI is one-shot and run_ash_scan is asynchronous).
+  # Linux only: the bundle's launch is uvx on every platform, and the script stops
+  # its servers with process groups.
+  mcpb:
+    name: "e2e: MCPB via the MCP inspector"
+    needs: contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      # Full history and every tag, because N-1 is derived rather than named:
+      # E2E_PREV_REF=latest-release below makes scripts/e2e/n1-ref.sh take the latest
+      # published GitHub release, whose tag this fetch brings in (prev_tree.py fetches it
+      # itself if it is missing), and the bundle that release shipped.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # No uv cache. An e2e leg is a fresh install by definition, and a saved Actions cache
+      # is a publish surface (.github/scripts/assert-publish-surfaces.py) this workflow
+      # has no reason to open.
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      # No npm cache, for the same reason. The Inspector is installed by mcpb.sh into
+      # the run's own directory at the version validate-mcp pins.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Unit tests for the MCPB leg's own decisions
+        run: >-
+          uv run --group dev pytest tests/unit/test_e2e_mcpb_inspector.py
+          -p no:cacheprovider -o addopts="" -v
+
+      - name: Build the bundle and wheels, launch through the inspector, scan, upgrade, uninstall
+        env:
+          # N-1 is the latest published release. The token only raises the GitHub API
+          # rate limit for listing releases; the job's permissions stay contents: read.
+          E2E_PREV_REF: latest-release
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash scripts/e2e/mcpb.sh "$RUNNER_TEMP/e2e-mcpb"
+
+  e2e-gate:
+    name: "e2e: gate"
+    needs: [contract, wheel, container, homebrew, mcpb]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      # Checked out for the census: the gate reads this file's own jobs so a channel job
+      # added without being added to `needs` fails here instead of going ungated.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Require every channel to have passed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          GATE_JOB: ${{ github.job }}
+        run: |
+          python3 - <<'PY'
+          import importlib.util, json, os, sys
+          spec = importlib.util.spec_from_file_location("census", ".github/scripts/assert-required-checks-census.py")
+          census = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(census)
+          with open(".github/workflows/ash-e2e.yml", encoding="utf-8") as handle:
+              jobs = set(census.workflow_job_names(handle.read())) - {os.environ["GATE_JOB"]}
+          results = {name: entry["result"] for name, entry in json.loads(os.environ["RESULTS"]).items()}
+          pending = set(os.environ.get("E2E_PENDING", "").split())
+          problems = []
+          if not jobs:
+              problems.append("the job census of ash-e2e.yml is empty; the parser or the path is broken")
+          for name in sorted(jobs - set(results)):
+              problems.append(f"job {name} is not in the gate's needs, so the gate would pass without it")
+          for name in sorted(pending - set(results)):
+              problems.append(f"{name} is listed in E2E_PENDING but is not a job the gate needs")
+          for name, result in sorted(results.items()):
+              if name in pending:
+                  if result == "success":
+                      problems.append(f"{name} succeeded but is still listed in E2E_PENDING; remove it")
+                  elif result != "skipped":
+                      problems.append(f"{name} is pending and should be skipped, but is {result}")
+                  else:
+                      print(f"PENDING {name}: not implemented yet")
+              elif result != "success":
+                  problems.append(f"{name} is {result}")
+              else:
+                  print(f"OK      {name}")
+          for problem in problems:
+              print(f"::error::{problem}")
+          sys.exit(1 if problems else 0)
+          PY

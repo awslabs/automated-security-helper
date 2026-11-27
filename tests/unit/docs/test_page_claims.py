@@ -87,6 +87,7 @@ from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Set,
 import pytest
 import yaml
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from tests.utils.helpers import (
     checkout_env,
     importing_this_checkout,
@@ -105,6 +106,10 @@ RUN_IN_A_CONTAINER = "how-to/run-in-a-container.md"
 SCALE_LARGE_REPOS = "how-to/scale-large-repos.md"
 SANDBOX = "concepts/sandbox.md"
 CONFIGURE = "how-to/configure.md"
+
+#: The command the pages' code blocks spell: the canonical ``ashx``, which is also
+#: the program a Python driver starts (CANONICAL_CLI_NAME).
+DOCS_COMMAND = "ashx"
 
 #: How a suppression's justification starts when the entry came from an MCP client.
 CLIENT_MARK = "(ASH, client-supplied config)"
@@ -546,7 +551,13 @@ def _step_script(tmp_path: Path, text: str, name: str = "step.sh") -> str:
 def _runnable_bash_script(path: Path) -> str:
     """``path``, checked to run as ``./<name>`` would: executable, with a ``#!``
     line that starts bash. ``bash <path>`` alone would hide a lost execute bit or
-    a changed shebang that a user's own ``./<name>`` depends on."""
+    a changed shebang that a user's own ``./<name>`` depends on.
+
+    The v4 line deletes the root ``ash`` script (the CLI absorbed it), as the
+    bash-entrypoint test modules already skip for: with no script there is no ``./ash``
+    to run, and the run is skipped, not read as a lost execute bit."""
+    if not path.is_file():
+        pytest.skip(f"repository {path.name} entrypoint not present")
     assert os.access(path, os.X_OK), f"{path} has no execute bit, so ./ cannot run it"
     first_line = path.read_bytes().split(b"\n", 1)[0]
     assert first_line.startswith(b"#!") and b"bash" in first_line, (
@@ -732,12 +743,14 @@ _DENIED_ITEMS: Dict[str, Tuple[str, ...]] = {
         "/content_db_staleness_offline_image_default",
     ),
     "scanner options that drop findings by rule ID, by a baseline, or by a whole category, "
-    "such as `exclude_rule`, `config`, and `severity` of `opengrep` and `semgrep`, checkov's "
+    "such as `exclude_rule`, `config`, and `severity` of `opengrep`, checkov's "
     "`frameworks`, cfn-lint's `ignore_checks`, detect-secrets' `baseline_file` and "
     "`scan_settings`, and trivy's `scanners` and `ignore_unfixed`": (
         "/scanners/opengrep/options/exclude_rule",
         "/scanners/opengrep/options/config",
         "/scanners/opengrep/options/severity",
+        # `semgrep` is a config section name that opengrep serves as an alias; a
+        # delivered config may not reach the same options through the old name.
         "/scanners/semgrep/options/exclude_rule",
         "/scanners/semgrep/options/config",
         "/scanners/semgrep/options/severity",
@@ -893,7 +906,7 @@ def test_a_delivered_config_may_not_set_any_option_the_mcp_page_lists(
 
     named = {segment for field in fields for segment in field.strip("/").split("/")}
     listed = _page_section(
-        MCP_SERVER, _DENIED_INTRO, "`ash config init` writes the full default list"
+        MCP_SERVER, _DENIED_INTRO, "`ashx config init` writes the full default list"
     )
     unchecked = set(re.findall(r"`([^`]+)`", listed)) - named
     assert not unchecked, (
@@ -1540,15 +1553,16 @@ _AWS_PLUGIN_MODULE = "automated_security_helper.plugin_modules.ash_aws_plugins"
 #: the S3 reporter, the file being /etc/ash/ash.yaml.
 _REPORT_IGNORES_THE_FILE = (
     "WARNING Ignoring reporters.s3.options.aws_region, reporters.s3.options.bucket_name, "
-    "reporters.s3.enabled from /etc/ash/ash.yaml: ash report cannot tell that config "
-    "from the scanned repository's own, since stored results do not record which tree "
-    "was scanned, and these options choose whether findings are sent, where they are "
-    "sent or written, and which credentials send them. To send findings off the host "
-    "from ash report, pass each of these settings with --config-overrides instead."
+    "reporters.s3.enabled from /etc/ash/ash.yaml: ashx results report cannot tell that "
+    "config from the scanned repository's own, since stored results do not record which "
+    "tree was scanned, and these options choose whether findings are sent, where they "
+    "are sent or written, and which credentials send them. To send findings off the "
+    "host from ashx results report, pass each of these settings with --config-overrides "
+    "instead."
 )
 _REPORT_REFUSES_THE_REPORTER = (
-    "Error: reporter 's3' sends findings off the host and is not enabled. ash report "
-    "takes whether it runs, and where it sends, from --config-overrides: pass "
+    "Error: reporter 's3' sends findings off the host and is not enabled. ashx results "
+    "report takes whether it runs, and where it sends, from --config-overrides: pass "
     "--config-overrides reporters.s3.enabled=true and its destination options."
 )
 #: The settings of the S3 reporter that aws.md's example turns on, as overrides.
@@ -1680,7 +1694,7 @@ def test_ash_report_takes_no_aws_reporter_setting_from_a_config_file(
     env = {"ASH_CONFIG": str(config)} if named_by == "ASH_CONFIG" else {}
 
     result = _ash_with_no_aws_credentials(
-        ["report", "--format", "s3", *named, "--output-dir", str(output)],
+        ["results", "report", "--format", "s3", *named, "--output-dir", str(output)],
         cwd=work,
         **env,
     )
@@ -1703,9 +1717,9 @@ def test_ash_report_takes_no_aws_reporter_setting_from_a_config_file(
 #: aws.md's paragraph on the pre-flight check ``ash report`` runs, and its quote of
 #: the refusal it prints (Rendering a reporter from saved results).
 _REPORT_RUNS_THE_PREFLIGHT = (
-    "`ash report` runs the reporter's pre-flight check first, as a scan does. When the "
+    "`ashx results report` runs the reporter's pre-flight check first, as a scan does. When the "
     "check refuses, for a missing setting or for credentials it cannot find, the "
-    "reporter sends nothing, and `ash report` logs the reason and exits 1."
+    "reporter sends nothing, and `ashx results report` logs the reason and exits 1."
 )
 _REPORT_PREFLIGHT_REFUSED = (
     "Error: reporter 's3' cannot run: its dependency check refused. See the log above "
@@ -1733,7 +1747,7 @@ def test_ash_report_runs_an_aws_reporter_that_config_overrides_turn_on(
     """
     assert_on_page(
         AWS_PLUGINS,
-        "So `ash report` takes whether the reporter runs, and its destination options, "
+        "So `ashx results report` takes whether the reporter runs, and its destination options, "
         "from `--config-overrides` only:",
     )
     assert_on_page(AWS_PLUGINS, _REPORT_RUNS_THE_PREFLIGHT)
@@ -1742,7 +1756,7 @@ def test_ash_report_runs_an_aws_reporter_that_config_overrides_turn_on(
     output = _stored_scan(tmp_path)
     work = tmp_path / "work"
     work.mkdir()
-    args = ["report", "--format", "s3", "--output-dir", str(output)]
+    args = ["results", "report", "--format", "s3", "--output-dir", str(output)]
     args += ["--config-overrides", f"ash_plugin_modules+=[{_AWS_PLUGIN_MODULE}]"]
 
     if case == "control-the-check-passes":
@@ -1806,16 +1820,16 @@ def test_ash_merge_takes_no_aws_reporter_setting_from_its_config_file(
     """
     assert_on_page(
         AWS_PLUGINS,
-        "`ash merge` holds its `--config` file to the same rule, since the shards do not "
+        "`ashx results merge` holds its `--config` file to the same rule, since the shards do not "
         "record the tree either: the merged findings go off the host only with the "
-        "reporter's `enabled` and destination options in `ash merge`'s "
+        "reporter's `enabled` and destination options in `ashx results merge`'s "
         "`--config-overrides`, and the file's values are ignored with the same warning, "
-        "naming `ash merge`.",
+        "naming `ashx results merge`.",
     )
     assert_on_page(
         SCALE_LARGE_REPOS,
         "The AWS reporters send the merged findings only with their `enabled` and "
-        "destination options in `ash merge`'s `--config-overrides`, not from a config "
+        "destination options in `ashx results merge`'s `--config-overrides`, not from a config "
         "file",
     )
     output = _stored_scan(tmp_path)
@@ -1825,6 +1839,7 @@ def test_ash_merge_takes_no_aws_reporter_setting_from_its_config_file(
 
     result = _ash_with_no_aws_credentials(
         [
+            "results",
             "merge",
             "--results",
             str(output / "ash_aggregated_results.json"),
@@ -1839,9 +1854,9 @@ def test_ash_merge_takes_no_aws_reporter_setting_from_its_config_file(
     text = _squeezed(result.stdout + result.stderr)
     warning = (
         "Ignoring reporters.s3.options.aws_region, reporters.s3.options.bucket_name, "
-        "reporters.s3.enabled from {path}: ash merge cannot tell that config from the "
-        "scanned repository's own, since the shards do not record which tree was "
-        "scanned, and these options choose whether findings are sent"
+        "reporters.s3.enabled from {path}: ashx results merge cannot tell that config "
+        "from the scanned repository's own, since the shards do not record which tree "
+        "was scanned, and these options choose whether findings are sent"
     )
 
     assert result.returncode == 0, _output_tail(result)
@@ -1876,7 +1891,7 @@ def test_ash_merge_runs_the_aws_reporters_only_with_their_package_named_for_it(
     """
     assert_on_page(
         AWS_PLUGINS,
-        "`ash merge` has these reporters only when the package is named for the merge "
+        "`ashx results merge` has these reporters only when the package is named for the merge "
         "itself, in its `--config` file's `ash_plugin_modules` or with "
         "`--config-overrides 'ash_plugin_modules+=[automated_security_helper.plugin_"
         "modules.ash_aws_plugins]'`: a package that only the shards' scan loaded is "
@@ -1894,6 +1909,7 @@ def test_ash_merge_runs_the_aws_reporters_only_with_their_package_named_for_it(
 
     result = _ash_with_no_aws_credentials(
         [
+            "results",
             "merge",
             "--results",
             str(output / "ash_aggregated_results.json"),
@@ -2053,7 +2069,7 @@ def test_an_enabled_aws_reporter_missing_a_setting_logs_an_error_naming_it(
 
 #: aws.md's sentence on what one run is, for the error of a missing setting.
 _ONE_RUN_IS = (
-    "A run is one `ash scan`, `ash report`, or `ash merge`, and a workspace run gives "
+    "A run is one `ashx scan`, `ashx results report`, or `ashx results merge`, and a workspace run gives "
     "each error once for all its projects."
 )
 #: The settings that turn the S3 reporter on with its bucket and no region.
@@ -2408,7 +2424,7 @@ _SAME_NAME_IS_REFUSED = (
     "Two plugins of one type with the very same name, such as a subclass that keeps "
     "its base's config, are refused with exit 3 too, naming both classes and the "
     "modules that define them: a scan and a workspace scan refuse two such scanners, "
-    "converters, or reporters, and `ash report` and `ash merge` refuse two such "
+    "converters, or reporters, and `ashx results report` and `ashx results merge` refuse two such "
     "reporters."
 )
 
@@ -2420,12 +2436,12 @@ _PLUGIN_NAME_OF_ITS_OWN = [
         "two plugins of one type whose names read as one that way would read each "
         "other's section, and are refused with exit 3, naming both plugins and the "
         "modules that define them: a scan and a workspace scan refuse two such scanners, "
-        "converters, or reporters, and `ash report` and `ash merge` refuse two such "
+        "converters, or reporters, and `ashx results report` and `ashx results merge` refuse two such "
         "reporters."
     ),
     (
         "A reporter named `csv_` is refused this way beside the built-in `csv`, and one "
-        "named `S3` when the [AWS reporters](aws.md), among them `s3`, are loaded. `ash "
+        "named `S3` when the [AWS reporters](aws.md), among them `s3`, are loaded. `ashx "
         "config validate` imports no plugin module, so it does not see this."
     ),
     _SAME_NAME_IS_REFUSED,
@@ -2614,12 +2630,24 @@ def test_two_plugins_whose_names_read_as_one_are_refused_by_each_command(
     elif command == "report":
         output = _stored_scan(tmp_path)
         report_format = "page-claims-own" if plugin.endswith("own") else "sarif"
-        args = ["report", "--format", report_format, "--output-dir", str(output)]
+        args = [
+            "results",
+            "report",
+            "--format",
+            report_format,
+            "--output-dir",
+            str(output),
+        ]
         args += load
     elif command == "merge":
         shard = _stored_scan(tmp_path)
         merged = tmp_path / "merged"
-        args = ["merge", "--results", str(shard / "ash_aggregated_results.json")]
+        args = [
+            "results",
+            "merge",
+            "--results",
+            str(shard / "ash_aggregated_results.json"),
+        ]
         args += ["--output-dir", str(merged), *load]
         named_report = merged / "reports" / "ash.page-claims-named.txt"
     else:
@@ -2885,10 +2913,23 @@ def test_two_scanners_or_converters_whose_names_read_as_one_are_refused_by_a_sca
         args += ["--output-dir", str(tmp_path / "out"), *load]
     elif command == "report":
         output = _stored_scan(tmp_path)
-        args = ["report", "--format", "sarif", "--output-dir", str(output), *load]
+        args = [
+            "results",
+            "report",
+            "--format",
+            "sarif",
+            "--output-dir",
+            str(output),
+            *load,
+        ]
     else:
         shard = _stored_scan(tmp_path)
-        args = ["merge", "--results", str(shard / "ash_aggregated_results.json")]
+        args = [
+            "results",
+            "merge",
+            "--results",
+            str(shard / "ash_aggregated_results.json"),
+        ]
         args += ["--output-dir", str(tmp_path / "merged"), *load]
 
     result = _ash(args, cwd=work, PYTHONPATH=python_path)
@@ -2980,7 +3021,7 @@ _SUBCLASS_BESIDE_ITS_BASE = [
     ),
     (
         "Two reporters with names of their own that write one report file are refused "
-        "with exit 1 by a scan, a workspace scan, and `ash merge`, and without the "
+        "with exit 1 by a scan, a workspace scan, and `ashx results merge`, and without the "
         "`model_post_init` the subclass starts from its base's config and writes its "
         "base's file."
     ),
@@ -3083,12 +3124,24 @@ def test_a_reporter_subclass_runs_beside_its_base_as_the_page_shows(
         reports = tmp_path / "ws-output" / "reports"
     elif command == "report":
         output = _stored_scan(tmp_path)
-        args = ["report", "--format", report_format, "--output-dir", str(output)]
+        args = [
+            "results",
+            "report",
+            "--format",
+            report_format,
+            "--output-dir",
+            str(output),
+        ]
         args += load
     else:
         shard = _stored_scan(tmp_path)
         merged = tmp_path / "merged"
-        args = ["merge", "--results", str(shard / "ash_aggregated_results.json")]
+        args = [
+            "results",
+            "merge",
+            "--results",
+            str(shard / "ash_aggregated_results.json"),
+        ]
         args += ["--output-dir", str(merged), *load]
         reports = merged / "reports"
 
@@ -3622,7 +3675,7 @@ def _container_scan(
     if not record.is_file():
         return result, None
     inner = json.loads(record.read_text(encoding="utf-8"))
-    assert "ash" in inner, inner
+    assert CANONICAL_CLI_NAME in inner, inner
     return result, inner
 
 
@@ -3959,10 +4012,10 @@ def test_a_container_workspace_scan_marks_or_refuses_its_config_by_where_it_is(
         ), f"container:\n{_output_tail(result)}\nlocal:\n{_output_tail(local)}"
         return
 
-    scans = [call for call in calls if "ash" in call]
+    scans = [call for call in calls if CANONICAL_CLI_NAME in call]
     assert len(scans) == 1, f"expected one scan command, the runtime got {calls}"
     command = scans[0]
-    inner = command[command.index("ash") :]
+    inner = command[command.index(CANONICAL_CLI_NAME) :]
     mounts = [command[i + 1] for i, arg in enumerate(command[:-1]) if arg == "--mount"]
     config_mounts = sorted(
         m.split("destination=", 1)[1] for m in mounts if "destination=/ash-config" in m
@@ -4369,7 +4422,7 @@ def test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_
     """
     assert_on_page(
         RUN_IN_A_CONTAINER,
-        "`ash scan --mode container` and `ash --mode container` mount that file, and each "
+        "`ashx scan --mode container` and `ash --mode container` mount that file, and each "
         "file it `extends`, read-only under `/ash-env-config`",
     )
     assert_on_page(
@@ -4417,10 +4470,10 @@ def test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_
         ASH_CONFIG=str(env_config),
         OCI_RUNNER_WRAPPER=_wrapper_command(sys.executable, str(runtime)),
     )
-    scans = [call for call in _runtime_calls(record) if "ash" in call]
+    scans = [call for call in _runtime_calls(record) if CANONICAL_CLI_NAME in call]
     assert len(scans) == 1, f"expected one scan command, the runtime got {scans}"
     scan_command = scans[0]
-    inner = scan_command[scan_command.index("ash") :]
+    inner = scan_command[scan_command.index(CANONICAL_CLI_NAME) :]
     mounts = [
         scan_command[i + 1]
         for i, arg in enumerate(scan_command[:-1])
@@ -4614,10 +4667,10 @@ def test_a_container_scan_marks_each_file_of_the_config_chain_on_its_own(
         cwd=tmp_path,
         OCI_RUNNER_WRAPPER=_wrapper_command(sys.executable, str(runtime)),
     )
-    scans = [call for call in _runtime_calls(record) if "ash" in call]
+    scans = [call for call in _runtime_calls(record) if CANONICAL_CLI_NAME in call]
     assert len(scans) == 1, f"expected one scan command, the runtime got {scans}"
     command = scans[0]
-    inner = command[command.index("ash") :]
+    inner = command[command.index(CANONICAL_CLI_NAME) :]
     file_marks = [
         inner[i + 1]
         for i, arg in enumerate(inner[:-1])
@@ -4964,7 +5017,7 @@ def test_container_mode_runs_the_scan_inside_unsandboxed_and_says_so(
     assert_on_page(
         RUN_IN_A_CONTAINER,
         "The scan inside the container gets `sandbox.mode=off` as its last override, and "
-        "`ash scan --mode container` logs a warning that names the mode, such as `The "
+        "`ashx scan --mode container` logs a warning that names the mode, such as `The "
         "scanner sandbox (bwrap, from sandbox.mode in a config file, --config-overrides or "
         "the operator's config) is not applied in container mode`.",
     )
@@ -4974,7 +5027,7 @@ def test_container_mode_runs_the_scan_inside_unsandboxed_and_says_so(
     )
     assert_on_page(
         SANDBOX,
-        "`ash scan --mode container` turns the sandbox off for the scan inside the "
+        "`ashx scan --mode container` turns the sandbox off for the scan inside the "
         "container, and logs a warning when the sandbox was asked for; the container is "
         "the boundary there.",
     )
@@ -5152,7 +5205,7 @@ def test_an_ash_config_that_names_no_loadable_file_stops_the_mcp_server_with_exi
     assert_on_page(
         MCP_SERVER,
         "When it names a path that is not a file, a file the server cannot read, or a "
-        "config that does not load or validate, `ash mcp` refuses to start, on every "
+        "config that does not load or validate, `ashx mcp` refuses to start, on every "
         "transport, with exit code 3. An empty value counts as unset.",
     )
     assert_on_page(
@@ -5675,6 +5728,8 @@ _OUTPUTS_FILE_NAME = re.compile(r"(?<![\w.\-])(\.?ash\.[A-Za-z0-9][\w.\-]*[A-Za-
 _OUTPUTS_REPOSITORY_FILES = (
     "Formula/ash.rb",
     "ash-agent-plugins/agentic-coding/plugins/mcpb/ash.mcpb",
+    # The Chocolatey package's manifest, which its page names as a file of the package.
+    "packaging/chocolatey/ash.nuspec",
 )
 
 
@@ -5691,7 +5746,7 @@ def _outputs_known_file_names() -> Set[str]:
 
     # .ash.lock is the committed suppression lock (utils/ash_lock.py), an input
     # ASH reads and ``ash suppress`` writes at the scan root; the bare ash.lock
-    # spelling is its deprecated .ash/ash.lock location, still read until v4.0.
+    # spelling is its deprecated .ash/ash.lock location, still read until v4.1.
     known = {
         "ash.log",
         "ash.log.jsonl",
@@ -6306,7 +6361,7 @@ def _config_yaml_block(page: str, heading: str) -> str:
 # --------------------------------------------------------------------------- #
 
 _CONFIG_VALIDATE_ROWS = (
-    "| `ash config validate` | 0 | A scan accepts the config, apart from the options of "
+    "| `ashx config validate` | 0 | A scan accepts the config, apart from the options of "
     "plugins loaded from `ash_plugin_modules`, which only a scan checks. Warnings may be "
     "printed, for example for a missing `project_name`, which a scan does not need, or "
     "for a path that starts with `./` and so matches nothing "
@@ -6870,8 +6925,8 @@ def test_a_scan_whose_scanners_were_all_turned_off_reports_scan_ran_no_scanners(
         ),
         pytest.param(
             ("expires:", "expiry:"),
-            0,
-            "Configuration is valid! A scan accepts it.",
+            3,
+            "expiry",
             id="a-misspelled-key",
         ),
         pytest.param(
@@ -6898,10 +6953,9 @@ def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
     ``ash config validate`` as written and with one field broken in each way the
     page's sentence lists. A wrong value and a missing required field exit 3 and
     name the field, and a scan, resolving the same file, refuses it too. A typo
-    in an optional key (``expiry`` for ``expires``) is the warn-then-refuse
-    rollout's default: validate accepts the file, a scan accepts it too, the
-    scan's resolution warning names the key with a did-you-mean, and the entry
-    is kept but applies to nothing (``has_unknown_keys``). The page's ``sed``
+    in an optional key (``expiry`` for ``expires``) is refused the same way
+    since ASH 4.0 (``fail_on_unknown_keys`` is true by default): validate exits
+    3 naming the key, and a scan refuses the file too. The page's ``sed``
     makes a required-key typo (``reasn`` for ``reason``), which exits 3 because
     the required field then goes missing: the missing-required case here is that
     refusal's shape. The file as written is the control: it exits 0, with the
@@ -6912,12 +6966,13 @@ def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
         "It checks the config a scan of the project would use, the way the scan loads it, "
         "and ends with `Configuration is valid! A scan accepts it.` It may also warn that "
         "`project_name` is not set, which a scan accepts. A typo in an optional key such as "
-        "`expiry` for `expires` does not make the file invalid: validate still accepts "
-        "it, the entry suppresses nothing until the key is fixed, and the scan that loads "
-        "the config warns, naming the key with a did-you-mean (`fail_on_unknown_keys: true` "
-        "makes it an error, the default from ASH v4). A wrong value or a missing required "
-        "field such as `reason` makes validate name the field and exit with code 3; a typo "
-        "in a required key does the same, because the required field then goes missing:",
+        "`expiry` for `expires` makes the file invalid, since ASH 4.0 refuses an unknown "
+        "key in a suppression: validate names the key with a did-you-mean and exits with "
+        "code 3 (`fail_on_unknown_keys: false` restores the 3.x behavior, where the scan "
+        "warns and the entry suppresses nothing until the key is fixed). A wrong value or "
+        "a missing required field such as `reason` makes validate name the field and exit "
+        "with code 3 too; a typo in a required key does the same, because the required "
+        "field then goes missing:",
     )
     assert_on_page(_CONFIG_AGENTS_PAGE, "sed 's/reason:/reasn:/' .ash.yaml > typo.yaml")
     text = _config_heredoc(_CONFIG_AGENTS_PAGE, ".ash.yaml")
@@ -6948,13 +7003,9 @@ def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
         f"a scan {'refuses' if refused else 'accepts'} the file validate exited "
         f"{result.returncode} for"
     )
-    if change is not None and verdict == 0:
-        # The warn-mode half of the page's claim: the scan's resolution
-        # warning names the misspelled key, and the entry is kept but inert.
-        warnings = list(resolved._resolution_warnings)
-        assert any("'expiry'" in warning for warning in warnings), warnings
-        (entry,) = resolved.global_settings.suppressions
-        assert entry.has_unknown_keys is True
+    if change is None:
+        assert resolved is not None
+        assert not any("Unknown key" in w for w in resolved._resolution_warnings)
 
 
 # --------------------------------------------------------------------------- #
@@ -7294,7 +7345,7 @@ def test_an_offline_scan_logs_a_warning_for_a_scanner_whose_cache_is_not_set_up(
         "exist`, naming the cache grype would read (`GRYPE_DB_CACHE_DIR`, else grype's "
         "default cache directory).",
     )
-    assert_on_page(_OFFLINE_PAGE, "ash scan --offline --scanners detect-secrets")
+    assert_on_page(_OFFLINE_PAGE, "ashx scan --offline --scanners detect-secrets")
     monkeypatch.delenv("GRYPE_DB_CACHE_DIR", raising=False)
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     tree = _config_scan_tree(tmp_path, {"app.py": _CONFIG_SECRET})
@@ -7479,7 +7530,7 @@ def test_each_content_database_is_held_to_the_age_bound_the_pages_state(
     read_field = {"grype-db": "`built`", "trivy-db": "`VulnerabilityDB.UpdatedAt`"}
     for name, field in read_field.items():
         assert field in age_read_from[name], (name, age_read_from[name])
-    assert RULESET_FETCHED_AT_FILE in age_read_from["semgrep-offline-rules"], (
+    assert RULESET_FETCHED_AT_FILE in age_read_from["opengrep-offline-rules"], (
         age_read_from
     )
 
@@ -7678,7 +7729,7 @@ _CHILD_CTRL_C_ROW = (
     "wait kills it at once. On Windows, a Ctrl-C typed in the console reaches the "
     "container runtime as well, and ASH waits up to 5 seconds for it to stop, as above; "
     "without a console, ASH ends the runtime at once. A scan prints the interrupted-scan "
-    "message above. `ash "
+    "message above. `ashx "
     "container build` prints `ASH container build interrupted before it finished.`, and, without "
     "`--no-run`, adds `: there is no verdict, and the output directory may hold partial "
     "results` before the period. |"
@@ -8294,7 +8345,7 @@ def test_ctrl_c_ends_ash_build_image_with_exit_code_130(
         windows = "no-console"
     console = tmp_path / "console" if windows == "console" else None
     script, log = _interrupt_stand_in(tmp_path, "build", "stops", console)
-    args = ["build-image", "--oci-runner", sys.executable, "--offline"]
+    args = ["container", "build", "--oci-runner", sys.executable, "--offline"]
     if no_run:
         args.append("--no-run")
     wrapper = _wrapper_command(sys.executable, str(script))
@@ -8332,7 +8383,7 @@ def test_ctrl_c_ends_ash_build_image_with_exit_code_130(
 # --------------------------------------------------------------------------- #
 
 _MCP_EXITS_FOR_REFUSED_OPTIONS = (
-    "`ash mcp` exits with code 5 for an unknown option, a value of the wrong type, options "
+    "`ashx mcp` exits with code 5 for an unknown option, a value of the wrong type, options "
     "that cannot be combined, or an `ASH_MCP_TRANSPORT` that names no transport, and with "
     "code 3 when a `--profile` file does not load, is kept inside the MCP workspace root "
     "where a client could have supplied it (a config the server wrote there itself is "
@@ -8344,7 +8395,7 @@ _MCP_EXITS_WHEN_THE_SERVER_FAILS = (
     "the error to standard error even with `--quiet`."
 )
 _MCP_EXITS_ON_CTRL_C = (
-    "Ctrl-C stops the server, and `ash mcp` exits with code 130 on every transport."
+    "Ctrl-C stops the server, and `ashx mcp` exits with code 130 on every transport."
 )
 _MCP_STDIO_EXITS_0 = (
     "A stdio server exits with code 0 when the client closes the connection, and, on "
@@ -9668,7 +9719,7 @@ def test_a_leftover_server_is_ended_only_when_it_runs_under_the_root(
 
 #: The sentences on how a server stops, and what its stopped scans leave.
 _MCP_SIGHUP = (
-    "SIGHUP stops an HTTP server the way SIGTERM does, and `ash mcp` then exits with "
+    "SIGHUP stops an HTTP server the way SIGTERM does, and `ashx mcp` then exits with "
     "code 0."
 )
 _MCP_STOPPED_BY_A_SIGNAL = (
@@ -10381,7 +10432,7 @@ def test_a_cancelled_mcp_scan_leaves_its_output_directory_as_the_pages_say(
 #: mcp-server.md's paragraph on how an HTTP server stops (Run over streamable HTTP).
 _HTTP_STOPS = (
     "Ctrl-C, SIGTERM, or SIGHUP stops an HTTP server: it stops its running scans and "
-    "their scanners' tools, and `ash mcp` exits with code 130 for Ctrl-C and 0 for "
+    "their scanners' tools, and `ashx mcp` exits with code 130 for Ctrl-C and 0 for "
     "SIGHUP, or ends by SIGTERM, which a shell reports as code 143."
 )
 _HTTP_WAITS_FOR_OPEN_REQUESTS = (
@@ -11497,10 +11548,10 @@ def test_ash_mcp_refuses_an_ash_mcp_transport_that_names_no_transport(
         "Always set `ASH_MCP_TRANSPORT` to the transport you serve, `streamable-http` or "
         "`sse`. ASH ignores the value's case and surrounding whitespace. A value that "
         "names no transport, one other than `stdio`, `streamable-http`, or `sse`, makes "
-        "`ash mcp` exit with code 5 before it starts:",
+        "`ashx mcp` exit with code 5 before it starts:",
     )
-    assert_on_page(MCP_SERVER, "ASH_MCP_TRANSPORT=http ash mcp")
-    assert_on_page(MCP_SERVER, "`ash mcp` does not set the variable for you.")
+    assert_on_page(MCP_SERVER, "ASH_MCP_TRANSPORT=http ashx mcp")
+    assert_on_page(MCP_SERVER, "`ashx mcp` does not set the variable for you.")
     result, served = _mcp_cli("--quiet", ASH_MCP_TRANSPORT=value)
     assert result.exit_code == expected, (
         f"ASH_MCP_TRANSPORT={value}: exit {result.exit_code}, expected {expected}:\n"
@@ -11930,7 +11981,7 @@ _SANDBOX_MODES_SENTENCE = (
     "refuses it with exit code 3 and a hint to quote the value."
 )
 _SANDBOX_VALIDATE_SENTENCE = (
-    "`ash config validate` gives the same verdict, with the same exit code."
+    "`ashx config validate` gives the same verdict, with the same exit code."
 )
 
 
@@ -13107,12 +13158,12 @@ def test_the_ci_variables_do_not_choose_the_image_stage(
 _UV_SCANNER_SENTENCES: List[Tuple[str, str]] = [
     (
         "how-to/install.md",
-        "ASH installs bandit, checkov, semgrep, cfn-lint, and zizmor with uv.",
+        "ASH installs bandit, checkov, cfn-lint, and zizmor with uv.",
     ),
     (
         "how-to/install.md",
         (
-            "Either way, ASH installs bandit, checkov, semgrep, cfn-lint, and "
+            "Either way, ASH installs bandit, checkov, cfn-lint, and "
             "zizmor with the environment's own `uv`."
         ),
     ),
@@ -13120,22 +13171,22 @@ _UV_SCANNER_SENTENCES: List[Tuple[str, str]] = [
         "getting-started/index.md",
         (
             "Without them, an online scan with the sandbox off installs bandit, "
-            "checkov, semgrep, cfn-lint, and zizmor itself, with the `uv` installed "
+            "checkov, cfn-lint, and zizmor itself, with the `uv` installed "
             "with ASH."
         ),
     ),
     (
         "docs/advanced-usage.md",
         (
-            "| bandit, checkov, semgrep, cfn-lint, zizmor | same name | ASH installs "
-            "them with `uv tool` during a scan, or `ash dependencies install` does it "
+            "| bandit, checkov, cfn-lint, zizmor | same name | ASH installs "
+            "them with `uv tool` during a scan, or `ashx dependencies install` does it "
             "ahead of time |"
         ),
     ),
     (
         "how-to/ci/github-actions.md",
         (
-            "bandit, checkov, semgrep, cfn-lint, and zizmor need no input: ASH "
+            "bandit, checkov, cfn-lint, and zizmor need no input: ASH "
             "installs them from PyPI with `uv tool install` during the scan."
         ),
     ),
@@ -13145,19 +13196,19 @@ _UV_SCANNER_SENTENCES: List[Tuple[str, str]] = [
 _UV_TOOL_SENTENCES: List[Tuple[str, str]] = [
     (
         "how-to/install.md",
-        "`uv tool uninstall bandit checkov semgrep cfn-lint zizmor nbconvert`.",
+        "`uv tool uninstall bandit checkov cfn-lint zizmor nbconvert`.",
     ),
     (
         "docs/advanced-usage.md",
         (
-            "installs bandit, checkov, semgrep, cfn-lint, zizmor, and nbconvert with "
+            "installs bandit, checkov, cfn-lint, zizmor, and nbconvert with "
             "`uv tool install`, within each scanner's accepted version range."
         ),
     ),
     (
         "docs/advanced-usage.md",
         (
-            "When bandit, checkov, semgrep, cfn-lint, zizmor, or nbconvert is not "
+            "When bandit, checkov, cfn-lint, zizmor, or nbconvert is not "
             "available, ASH installs it with `uv tool install` during the scan, and the "
             "scan takes longer."
         ),
@@ -13166,14 +13217,14 @@ _UV_TOOL_SENTENCES: List[Tuple[str, str]] = [
         "docs/advanced-usage.md",
         (
             "The `uv tool install`, `uv tool run`, and `uv tool list` commands that ASH "
-            "runs for bandit, checkov, semgrep, cfn-lint, zizmor, and nbconvert get no "
+            "runs for bandit, checkov, cfn-lint, zizmor, and nbconvert get no "
             "such flag."
         ),
     ),
     (
         "concepts/scanning-untrusted-code.md",
         (
-            "A missing Python tool (bandit, checkov, semgrep, cfn-lint, zizmor, and "
+            "A missing Python tool (bandit, checkov, cfn-lint, zizmor, and "
             "nbconvert for the notebook converter) is installed at scan time with "
             "`uv tool install`"
         ),
@@ -13346,7 +13397,7 @@ _A_UV_RUN_TOOL_KEEPS_ITS_FILE = (
     "only when `PATH` or `ASH_BIN_PATH` changes."
 )
 _RESTORE_THE_EXECUTE_BITS = (
-    "Restore the cache with the files' execute bits: `ash dependencies install` "
+    "Restore the cache with the files' execute bits: `ashx dependencies install` "
     "downloads a binary there again if it has lost its execute bit, and a scan run "
     "without that step skips it."
 )
@@ -14120,7 +14171,7 @@ _CHECKS_WARN_ABOUT_A_PATH_THAT_MATCHES_NOTHING = [
     (
         SUPPRESS_FINDINGS,
         (
-            "`ash config validate` and `ash config lint` warn, saying what to write "
+            "`ashx config validate` and `ashx config lint` warn, saying what to write "
             "instead, about a path that starts with `./` (`./src/app.py` is "
             "`src/app.py`) and about an empty path or `.`, and exit 0. A path whose "
             "leading names match the tree only in another case (`tests/**` against "
@@ -14351,14 +14402,14 @@ _LINKED_OUTPUT_SENTENCES = [
         OUTPUT_FILES,
         (
             "The check runs before anything is written or deleted, in every run mode "
-            "and whatever the sandbox mode, and also in `ash report` and `ash merge`. "
+            "and whatever the sandbox mode, and also in `ashx results report` and `ashx results merge`. "
             "The command exits 3:"
         ),
     ),
     (
         OUTPUT_FILES,
         (
-            "In an `ash --workspace` scan, a link at `projects` or `.workspace-spool` "
+            "In an `ashx --workspace` scan, a link at `projects` or `.workspace-spool` "
             "stops the whole run this way before any project starts."
         ),
     ),
@@ -14366,7 +14417,7 @@ _LINKED_OUTPUT_SENTENCES = [
         OUTPUT_FILES,
         (
             "This applies to scans in every run mode, including `--use-existing` and "
-            "workspace scans, and to `ash merge`."
+            "workspace scans, and to `ashx results merge`."
         ),
     ),
 ]
@@ -14485,14 +14536,19 @@ def test_a_link_at_or_in_the_output_directory_stops_the_run_with_the_pages_code(
     elif command == "merge":
         shard = _stored_scan(tmp_path)
         output = tmp_path / "merged"
-        args = ["merge", "--results", str(shard / "ash_aggregated_results.json")]
+        args = [
+            "results",
+            "merge",
+            "--results",
+            str(shard / "ash_aggregated_results.json"),
+        ]
         args += ["--output-dir", str(output)]
         assert run().returncode == 0
         where = output if link == "the-output-directory" else output / link
         target = _link_into(where, elsewhere / where.name)
     else:
         _tree, output = _finished_scan(tmp_path)
-        args = ["report", "--format", "sarif", "--output-dir", str(output)]
+        args = ["results", "report", "--format", "sarif", "--output-dir", str(output)]
         assert run().returncode == 0
         if link == "the-output-directory":
             real = tmp_path / "scan-output-real"
@@ -14521,7 +14577,7 @@ def test_a_link_at_or_in_the_output_directory_stops_the_run_with_the_pages_code(
 _CONTAINER_LINKED_OUTPUT = (
     "or the output directory is a symlink, or a symlink below the source directory leads "
     "to it (such as a committed `.ash` link, for the default `.ash/ash_output`), as in every "
-    "mode ([`ash scan`](#scan)). Nothing is created or mounted, also "
+    "mode ([`ashx scan`](#scan)). Nothing is created or mounted, also "
     "with `--no-run`. `./ash` and `Invoke-ASH` refuse the same output directory with exit "
     "3 |"
 )
@@ -14529,10 +14585,10 @@ _CONTAINER_LINKED_OUTPUT = (
 _CONTAINER_SCAN_REFUSES_A_LINKED_OUTPUT = (
     "An output directory that is a symlink, or that a symlink below the source "
     "directory leads to, such as a committed `.ash` link for the default "
-    "`.ash/ash_output`, stops `ash scan --mode container` and `ash container build` with "
-    "exit code 3 ([Exit codes](../reference/exit-codes.md#container)), because the scan "
-    "inside the container would write wherever the link points. The refusal comes before "
-    "a container runtime is looked up, with `--no-run` too, so nothing is built, "
+    "`.ash/ash_output`, stops `ashx scan --mode container` and `ashx container build` "
+    "with exit code 3 ([Exit codes](../reference/exit-codes.md#container)), because the "
+    "scan inside the container would write wherever the link points. The refusal comes "
+    "before a container runtime is looked up, with `--no-run` too, so nothing is built, "
     "created, or mounted."
 )
 
@@ -14593,14 +14649,14 @@ def test_container_mode_refuses_a_linked_output_directory_before_it_runs_anythin
     tmp_path: Path, command: str, link: str
 ) -> None:
     """exit-codes.md (Container and Nix mode), and run-in-a-container.md (Mounts and
-    network) for the scan and for ``ash container build`` that runs its scan.
+    network) for the scan and for ``ashx container build`` that runs its scan.
 
-    ``ash scan --mode container`` runs on a tree whose output directory is a symlink, or
-    whose ``.ash`` is a symlink on the way to the default ``.ash/ash_output``, also
-    with ``--no-run``, and ``ash container build`` runs on the second, with and without
+    ``ashx scan --mode container`` runs on a tree whose output directory is a symlink,
+    or whose ``.ash`` is a symlink on the way to the default ``.ash/ash_output``, also
+    with ``--no-run``, and ``ashx container build`` runs on the second, with and without
     ``--no-run``. The build-image ids keep the name of the 3.8 spelling, which #1133
-    deprecated; the page names ``ash container build``, so that is the command the
-    probe runs. Each names a container runtime that does not exist, also in
+    deprecated and 4.0 removed; the page names ``ashx container build``, so that is the
+    command the probe runs. Each names a container runtime that does not exist, also in
     ``OCI_RUNNER``, so looking it up would fail with exit 1, and runs with logging
     stand-ins for the runtimes first on PATH, none of which may be called. Each must
     exit 3 and refuse the output directory, which shows the refusal came before the
@@ -14807,8 +14863,8 @@ _AN_UNMATCHED_SCANNERS_NAME_IS_RECORDED = (
 #: output-files.md's entry for the field.
 _REQUESTED_SCANNERS_NOT_RUN_FIELD = (
     "`requested_scanners_not_run` (the names in `--scanners` or `ASH_SCANNERS` that "
-    "matched no scanner, or `null` when every name matched or no list was given; `ash "
-    "merge` records the names of all the shards)"
+    "matched no scanner, or `null` when every name matched or no list was given; `ashx "
+    "results merge` records the names of all the shards)"
 )
 
 
@@ -14942,7 +14998,7 @@ def test_ash_merge_records_every_shards_scanners_names_that_matched_nothing(
     work.mkdir()
     merged = tmp_path / "merged"
 
-    args = ["merge", "--output-dir", str(merged)]
+    args = ["results", "merge", "--output-dir", str(merged)]
     for shard in shards:
         args += ["--results", str(shard)]
 
@@ -14962,7 +15018,7 @@ def test_ash_merge_records_every_shards_scanners_names_that_matched_nothing(
 _BUILD_IMAGE_TAKES_NO_SCAN_OPTION = (
     "It takes no `--source-dir`, `--output-dir`, or other scan option: an argument its "
     "help does not list stops it with exit code 5 before anything is built, so use "
-    "`ash scan --mode container` to choose the directories."
+    "`ashx scan --mode container` to choose the directories."
 )
 
 
@@ -15005,11 +15061,8 @@ def test_ash_build_image_refuses_a_scan_option_with_exit_5_before_it_builds(
 
     from automated_security_helper.cli.main import app
 
-    declared = {
-        name
-        for parameter in typer.main.get_command(app).commands["build-image"].params
-        for name in parameter.opts
-    }
+    build = typer.main.get_command(app).commands["container"].commands["build"]
+    declared = {name for parameter in build.params for name in parameter.opts}
     for name in ("--source-dir", "--output-dir", "--scanners", "--json", "--no-run"):
         assert (name in declared) is (name == "--no-run"), (name, sorted(declared))
     tree = _config_scan_tree(tmp_path, {"app.py": "x = 1\n"})
@@ -15018,7 +15071,7 @@ def test_ash_build_image_refuses_a_scan_option_with_exit_5_before_it_builds(
     (tree / "home").mkdir()
     before = _tree_entries(tree)
     runner = str(tmp_path / "no-such-runtime" / "docker")
-    args = ["build-image", "--oci-runner", runner]
+    args = ["container", "build", "--oci-runner", runner]
     args += ["--container-uid", "1000", "--container-gid", "1000"]
     if no_run:
         args.append("--no-run")
@@ -15042,7 +15095,7 @@ def test_ash_build_image_refuses_a_scan_option_with_exit_5_before_it_builds(
 _CONTAINER_REFUSES_WHAT_A_LOCAL_SCAN_REFUSES = (
     "A source or output directory that a local scan refuses, such as a source directory "
     "that does not exist or an output directory that cannot be created, stops "
-    "`ash scan --mode container` with exit code 5, also with `--no-run`, and with the "
+    "`ashx scan --mode container` with exit code 5, also with `--no-run`, and with the "
     "line a local scan prints ([Exit codes](../reference/exit-codes.md#scan)). `./ash` "
     "refuses them as well: it prints the line after `ERROR: ` and exits 5."
 )
@@ -15156,7 +15209,7 @@ _RECORD_SENTENCES = [
             "results (`ash_aggregated_results.json`) and in the merged results, the "
             "results' metadata where it names a config value (a `scanners` key in "
             "`expected_scanners`), what an off-host reporter sends, and what "
-            "`ash config get` prints."
+            "`ashx config get` prints."
         ),
     ),
     (
@@ -15171,14 +15224,14 @@ _RECORD_SENTENCES = [
     (
         CONFIGURE,
         (
-            "`ash config get` loads the file with the variable read, and prints the "
+            "`ashx config get` loads the file with the variable read, and prints the "
             "reference, not the value:"
         ),
     ),
     (
         CONFIGURE,
         (
-            "| `ash config get` | Loads the file the same way and prints the resolved "
+            "| `ashx config get` | Loads the file the same way and prints the resolved "
             "config, with each value read from the environment shown as the reference "
             "the file wrote."
         ),
@@ -15217,7 +15270,7 @@ _READING_A_RECORD_SENTENCES = [
     (
         CONFIGURE,
         (
-            "`ash merge` and `ash report` read the recorded config and do not read the "
+            "`ashx results merge` and `ashx results report` read the recorded config and do not read the "
             "environment for a reference in it. A text field such as `project_name` "
             "keeps the reference as its value. A field that takes a fixed choice, a "
             "boolean, or a number, such as `severity_threshold`, cannot hold one: the "
@@ -15230,7 +15283,7 @@ _READING_A_RECORD_SENTENCES = [
         SCALE_LARGE_REPOS,
         (
             "A value the shards' configuration read from the environment is recorded as "
-            "its reference, and `ash merge` does not read the environment for it: a "
+            "its reference, and `ashx results merge` does not read the environment for it: a "
             "field that takes a fixed choice, a boolean, or a number, such as "
             "`severity_threshold`, cannot hold the reference, so the merge exits 3 "
             "naming the field until you supply it with `--config-overrides` or in the "
@@ -15354,7 +15407,14 @@ def test_what_ash_records_of_a_config_holds_the_reference_and_not_the_value(
     if record == "merged-results":
         merged = tmp_path / "merged"
         result = _ash(
-            ["merge", "--results", str(results), "--output-dir", str(merged)],
+            [
+                "results",
+                "merge",
+                "--results",
+                str(results),
+                "--output-dir",
+                str(merged),
+            ],
             cwd=tmp_path,
         )
         assert result.returncode == 0, _output_tail(result)
@@ -15609,10 +15669,22 @@ def test_merge_and_report_exit_3_for_a_recorded_reference_a_field_cannot_hold(
     output = _scan_with_config(tmp_path, config)
     merged = tmp_path / "merged"
     if command == "merge":
-        args = ["merge", "--results", str(output / "ash_aggregated_results.json")]
+        args = [
+            "results",
+            "merge",
+            "--results",
+            str(output / "ash_aggregated_results.json"),
+        ]
         args += ["--output-dir", str(merged)]
     else:
-        args = ["report", "--format", "markdown", "--output-dir", str(output)]
+        args = [
+            "results",
+            "report",
+            "--format",
+            "markdown",
+            "--output-dir",
+            str(output),
+        ]
     if supplied == "config-overrides":
         args += ["--config-overrides", "global_settings.severity_threshold=MEDIUM"]
     elif supplied == "config":
@@ -15722,7 +15794,7 @@ _A_CHILDS_SPELLING_IS_THAT_SECTION = (
 _TWO_SPELLINGS_ARE_REFUSED = (
     "A file that writes two such spellings, neither of them the plugin's own name, "
     "such as `DetectSecrets` and `DETECT_SECRETS`, is refused with exit 3 by a scan "
-    "and by `ash config validate`, which name both spellings and none of their "
+    "and by `ashx config validate`, which name both spellings and none of their "
     "values. When one of the two is the plugin's own name (`detect-secrets`), the "
     "file is not refused: the plugin's own name wins key by key where both set a "
     "value."
@@ -15967,8 +16039,8 @@ def test_patch_paths_and_overrides_reach_a_section_as_its_name_is_matched(
 
 #: configure.md (Share settings with `extends`): a recorded config with two spellings.
 _A_RECORDED_CONFIG_IS_READ_NOT_REFUSED = (
-    "A config that a results file recorded is read, not refused, by `ash report` and "
-    "`ash merge`: of two such spellings in it, they read the one that the scan which "
+    "A config that a results file recorded is read, not refused, by `ashx results report` and "
+    "`ashx results merge`: of two such spellings in it, they read the one that the scan which "
     "recorded it read, and when the spelling not read sets a value the read one does "
     "not, a warning names the spellings and the one read, never a value."
 )
@@ -16008,9 +16080,16 @@ def test_report_and_merge_read_a_recorded_section_as_the_recording_scan_read_it(
     work.mkdir()
     merged = tmp_path / "merged"
     if command == "report":
-        args = ["report", "--format", "csv", "--output-dir", str(output)]
+        args = ["results", "report", "--format", "csv", "--output-dir", str(output)]
     else:
-        args = ["merge", "--results", str(results), "--output-dir", str(merged)]
+        args = [
+            "results",
+            "merge",
+            "--results",
+            str(results),
+            "--output-dir",
+            str(merged),
+        ]
 
     result = _ash(args, cwd=work)
     text = _squeezed(result.stdout + result.stderr)
@@ -16629,7 +16708,7 @@ def test_a_workspace_scan_refuses_a_value_inside_a_path_under_the_select_profile
 #: configure.md's paragraph on how messages show a value read from the environment
 #: (Check a config).
 _MESSAGES_SHOW_A_VALUE_AS_A_MARKER = (
-    "In the messages of the `ash config` commands, and of a scan that refuses a "
+    "In the messages of the `ashx config` commands, and of a scan that refuses a "
     "config, a value that a reference read from the environment is shown as "
     "`<value>` where the message quotes it, however short the value is, so the "
     "commands do not print what the variable holds. A value that a field taking a "
@@ -16953,10 +17032,10 @@ def test_a_container_scan_passes_only_the_aws_settings_the_operators_config_read
 #: relative ``--bin-path`` (Install tools with `ash dependencies install`).
 _A_RELATIVE_ASH_BIN_PATH_IS_NOT_USED = (
     "the directory in `ASH_BIN_PATH`, or `~/.ash/bin` if it is not set or is empty. "
-    "This is where `ash dependencies install` puts tools, so you do not need to add it "
+    "This is where `ashx dependencies install` puts tools, so you do not need to add it "
     "to `PATH`. A `~` at the start of the value is expanded. A relative `ASH_BIN_PATH` "
     "is not used: ASH logs a warning that names it and uses `~/.ash/bin`, for lookups "
-    "and for `ash dependencies install` alike."
+    "and for `ashx dependencies install` alike."
 )
 #: The same step's sentences on the home directory those need.
 _THE_BIN_DIRECTORY_NEEDS_A_USABLE_HOME = (
@@ -17327,8 +17406,8 @@ _DEPENDENCIES_BAD_SELECTION_ROW = (
 #: test_dependencies_providers_flag.py, test_dependencies_virtualenv_matrix.py and
 #: test_dependencies_binary_path.py in tests/unit/cli.
 _DEPENDENCIES_BAD_SELECTION_INTRO = (
-    "Some `ash dependencies install` selections exit 2 instead: a `--tool` name that it "
-    "has no plugin for, or whose plugin type `--plugin-type` leaves out, a "
+    "Some `ashx dependencies install` selections exit 2 instead: a `--tool` name "
+    "that it has no plugin for, or whose plugin type `--plugin-type` leaves out, a "
     "`--plugin-type` other than `converter`, `scanner`, or `reporter`,"
 )
 
@@ -17497,7 +17576,9 @@ def test_ash_dependencies_install_names_an_unknown_tool_and_lists_the_ones_it_kn
     assert doctest is not None, "no doctest block right after the sentence"
     assert doctest[1] == "2", doctest[0]
     command = shlex.split(doctest[2])
-    assert command[:3] == ["ash", "dependencies", "install"], command
+    # advanced-usage.md writes the v4 command; the READ_RESULTS page below still
+    # writes the deprecated alias (DOCS_COMMAND).
+    assert command[:3] == [CANONICAL_CLI_NAME, "dependencies", "install"], command
     unknown = command[command.index("--tool") + 1]
     cwd = tmp_path / "cwd"
     cwd.mkdir()
@@ -17904,14 +17985,29 @@ def test_every_python_range_the_pages_give_is_requires_python() -> None:
     minors = _install_supported_minors()
     assert minors and minors == list(range(minors[0], minors[-1] + 1)), minors
     ranges = [
-        (str(page.relative_to(CONTENT)), int(match[1]), int(match[2]))
+        (page.relative_to(CONTENT).as_posix(), int(match[1]), int(match[2]))
         for page in sorted(CONTENT.rglob("*.md"))
         for match in re.finditer(
             r"Python 3\.(\d+) to 3\.(\d+)", page.read_text(encoding="utf-8")
         )
     ]
     assert len(ranges) >= 3, ranges
-    wrong = [r for r in ranges if (r[1], r[2]) != (minors[0], minors[-1])]
+    # The Chocolatey package pins the python3 dependency to its own range, which the
+    # manifest declares and its page repeats (the ceiling is the newest Python the
+    # package's CI exercises). That page is held to the manifest's range, not to
+    # requires-python, so a change to either side still fails here.
+    nuspec = (_code_root() / "packaging/chocolatey/ash.nuspec").read_text(
+        encoding="utf-8"
+    )
+    pinned = re.search(r'id="python3" version="\[3\.(\d+),3\.(\d+)\)"', nuspec)
+    assert pinned, "ash.nuspec no longer pins python3 as a [3.A,3.B) range"
+    package_range = (int(pinned[1]), int(pinned[2]) - 1)
+    package_pages = {"docs/native-packages/chocolatey.md": package_range}
+    wrong = [
+        r
+        for r in ranges
+        if (r[1], r[2]) != package_pages.get(r[0], (minors[0], minors[-1]))
+    ]
     assert not wrong, (
         f"requires-python {_install_project()['requires-python']} allows "
         f"3.{minors[0]} to 3.{minors[-1]}; these pages give other ranges: {wrong}"
@@ -18575,9 +18671,10 @@ _PLAIN_STEPS_STOP = (
     "Each step that runs `uv` or `ash` stops workflow commands around it, as the "
     "reusable workflow does"
 )
-#: A ``uv`` or ``ash`` command in a step's script, ``"$(uv tool dir --bin)/ash"``
+#: A ``uv``, ``ash`` or ``ashx`` command in a step's script (the pages write both
+#: names while the docs move to the v4 command), ``"$(uv tool dir --bin)/ash"``
 #: included.
-_TOOL_COMMAND = re.compile(r"\b(?:ash|uv)(?=[\s\"])")
+_TOOL_COMMAND = re.compile(r"\b(?:ashx?|uv)(?=[\s\"])")
 #: A GitHub Actions block of a page, as the docs runner marks it.
 _GITHUB_ACTIONS_BLOCK = re.compile(
     r"<!-- doctest: config kind=github-actions[^>]*-->\n```yaml\n(.*?)```", re.DOTALL
@@ -18721,7 +18818,7 @@ def test_the_pages_ash_steps_stop_workflow_commands_as_the_scan_workflow_does(
     runner_temp = tmp_path / "runner-temp"
     runner_temp.mkdir()
     tool_dir = 'if [ "$1 $2" = "tool dir" ]; then echo "${STUB_BIN}"; exit 0; fi\n'
-    for tool, first in (("ash", ""), ("uv", tool_dir)):
+    for tool, first in (("ash", ""), ("ashx", ""), ("uv", tool_dir)):
         stub = bin_dir / tool
         stub.write_text(
             "#!/bin/sh\n"
@@ -19177,7 +19274,7 @@ READ_RESULTS = "how-to/read-results.md"
 
 #: read-results.md on where ``ash report`` writes its log.
 _REPORT_LOG_TO_STDERR = (
-    "`ash report` writes its log to standard error, so standard output holds the report "
+    "`ashx results report` writes its log to standard error, so standard output holds the report "
     "alone."
 )
 
@@ -19308,7 +19405,15 @@ def test_ash_report_writes_its_log_to_stderr_and_only_the_report_to_stdout(
     output = _saved_results(tmp_path / "ash_output")
 
     result = _ash(
-        ["report", "--format", report_format, "--output-dir", str(output), *log_option],
+        [
+            "results",
+            "report",
+            "--format",
+            report_format,
+            "--output-dir",
+            str(output),
+            *log_option,
+        ],
         cwd=tmp_path,
     )
 
@@ -19328,7 +19433,7 @@ def test_ash_report_writes_its_log_to_stderr_and_only_the_report_to_stdout(
 #: read-results.md and exit-codes.md (ash report) on what ``ash report`` creates with
 #: no results, and on an output directory it cannot search, enter or look up.
 _REPORT_CREATES_NOTHING = (
-    "`ash report` creates nothing then, and an output directory under a directory it "
+    "`ashx results report` creates nothing then, and an output directory under a directory it "
     "cannot search counts as missing."
 )
 _REPORT_REFUSES_AN_UNENTERABLE_DIR = (
@@ -19372,7 +19477,7 @@ _UNWRAPPED = {"COLUMNS": "4096"}
 _REPORT_WITH_A_NUL_IN_THE_OUTPUT_DIR = (
     "import sys\n"
     "from automated_security_helper.cli.entrypoint import main\n"
-    "sys.argv = ['ash', 'report', '--output-dir', 'out\\x00dir']\n"
+    "sys.argv = ['ash', 'results', 'report', '--output-dir', 'out\\x00dir']\n"
     "main()\n"
 )
 
@@ -19452,9 +19557,9 @@ def test_ash_report_with_no_results_file_names_the_paths_it_checked_and_exits_1(
 
     if where == "under-an-unsearchable-directory":
         with _without_search_permission(locked):
-            result = _ash(["report", *args], cwd=cwd, **_UNWRAPPED)
+            result = _ash(["results", "report", *args], cwd=cwd, **_UNWRAPPED)
     else:
-        result = _ash(["report", *args], cwd=cwd, **_UNWRAPPED, **env)
+        result = _ash(["results", "report", *args], cwd=cwd, **_UNWRAPPED, **env)
 
     shown = result.stdout + result.stderr
     after = _tree_entries(tmp_path)
@@ -19504,10 +19609,14 @@ def test_ash_report_refuses_an_output_directory_it_cannot_enter_with_exit_5(
     before = _tree_entries(tmp_path)
 
     if given == "control-an-enterable-directory":
-        result = _ash(["report", "--output-dir", named], cwd=cwd, **_UNWRAPPED)
+        result = _ash(
+            ["results", "report", "--output-dir", named], cwd=cwd, **_UNWRAPPED
+        )
     else:
         with _without_search_permission(directory):
-            result = _ash(["report", "--output-dir", named], cwd=cwd, **_UNWRAPPED)
+            result = _ash(
+                ["results", "report", "--output-dir", named], cwd=cwd, **_UNWRAPPED
+            )
 
     shown = result.stdout + result.stderr
     after = _tree_entries(tmp_path)
@@ -19564,7 +19673,9 @@ def test_ash_report_refuses_a_file_or_a_nul_as_output_directory_with_exit_5(
         refusal = "Output directory is not a valid path: out\\x00dir"
     else:
         named = "a-file" if given == "a-file" else "a-directory"
-        result = _ash(["report", "--output-dir", named], cwd=cwd, **_UNWRAPPED)
+        result = _ash(
+            ["results", "report", "--output-dir", named], cwd=cwd, **_UNWRAPPED
+        )
         refusal = f"Output directory is not a directory: {named}"
 
     shown = result.stdout + result.stderr
@@ -19609,7 +19720,9 @@ def test_ash_report_with_results_in_two_places_reports_on_none_and_exits_5(
         _saved_results(output_dir / ".ash" / "ash_output", ["src/settings.py"])
     before = _tree_entries(tmp_path)
 
-    result = _ash(["report", "--output-dir", str(output_dir)], cwd=cwd, **_UNWRAPPED)
+    result = _ash(
+        ["results", "report", "--output-dir", str(output_dir)], cwd=cwd, **_UNWRAPPED
+    )
 
     if places == "control-one-place":
         assert result.returncode == 0, _output_tail(result)
@@ -19651,7 +19764,8 @@ def test_ash_report_refuses_an_unknown_format_before_it_reads_the_results(
     assert doctest is not None, "no doctest block right after the sentence"
     assert doctest[1] == "5", doctest[0]
     command = shlex.split(doctest[2])
-    assert command[:2] == ["ash", "report"] and "--format" in command, command
+    assert command[:3] == [DOCS_COMMAND, "results", "report"], command
+    assert "--format" in command, command
     name = command[command.index("--format") + 1]
     cwd = tmp_path / "work"
     cwd.mkdir()
@@ -19768,6 +19882,7 @@ def _report_through(
         "-c",
         importing_this_checkout(_RECORDING_REPORT, root=_IMPORTED_ROOT),
         str(record),
+        "results",
         "report",
         *args,
     ]
@@ -20389,7 +20504,12 @@ def test_an_output_directory_holding_a_nul_is_refused_with_exit_5(
         args = [*_CONFIG_SCAN, "--offline", "--source-dir", str(tree)]
     else:
         shard = _stored_scan(tmp_path)
-        args = ["merge", "--results", str(shard / "ash_aggregated_results.json")]
+        args = [
+            "results",
+            "merge",
+            "--results",
+            str(shard / "ash_aggregated_results.json"),
+        ]
 
     result = _ash([*args, "--cli-json-input", str(document)], cwd=work)
 
@@ -22187,6 +22307,7 @@ def test_merge_output_formats_take_a_shipped_reporters_name(tmp_path: Path) -> N
 
     result = _ash(
         [
+            "results",
             "merge",
             "--results",
             str(shard / "ash_aggregated_results.json"),
@@ -22736,7 +22857,7 @@ _HOMEPAGE_ALPHA_SENTENCE = (
     "A scan runs one only when its module is named in `ash_plugin_modules` or "
     "`--ash-plugin-modules`. See the "
     "[alpha plugins](docs/plugins/alpha/index.md) and the "
-    "[scanners reference](reference/scanners.md) for all 23 scanners."
+    "[scanners reference](reference/scanners.md) for all 22 scanners."
 )
 
 
@@ -22759,7 +22880,7 @@ def test_the_homepage_says_asha_ships_six_alpha_scanners_and_links_each(
 
     The sentence is on the page. Its count of six is the number of scanners the
     vendored alpha plugin packages declare, which is every in-tree alpha
-    module; its 23 is built in plus alpha; and each link it carries resolves to
+    module; its 22 is built in plus alpha; and each link it carries resolves to
     a page under docs/content, the alpha index and the scanners reference
     included.
     """
@@ -22771,7 +22892,7 @@ def test_the_homepage_says_asha_ships_six_alpha_scanners_and_links_each(
         len(modules_needing_naming()),
         sorted(alpha),
     )
-    assert len(builtin) + len(alpha) == 23, (len(builtin), len(alpha))
+    assert len(builtin) + len(alpha) == 22, (len(builtin), len(alpha))
     links = re.findall(r"\]\(([^)#]+\.md)", _HOMEPAGE_ALPHA_SENTENCE)
     assert len(links) == 8, links
     for link in links:

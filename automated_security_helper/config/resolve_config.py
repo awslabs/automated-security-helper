@@ -842,7 +842,7 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
     rebuild_warnings: List[str] = []
     rebuild_context = (
         {WARN_UNKNOWN_KEYS: rebuild_warnings}
-        if config_dict.get("fail_on_unknown_keys") is not True
+        if not _flag_is_true(config_dict.get("fail_on_unknown_keys"))
         else None
     )
     try:
@@ -989,7 +989,7 @@ def pasteable_path(path: Path | str) -> bool:
 def lint_hint(config_path: Path | str, source_dir: Path | str | None = None) -> str:
     """What a refusal ends with: the command that lists every problem in the file.
 
-    It names the file. A bare `ash config lint` lints the config of the current
+    It names the file. A bare `ashx config lint` lints the config of the current
     directory, which for `--config other.yaml`, or a scan of another directory,
     is a different file (or none), and reports it clean. With the scan's source
     directory when that is not the working directory: lint confines an
@@ -1021,7 +1021,7 @@ def lint_hint(config_path: Path | str, source_dir: Path | str | None = None) -> 
         shown = [Path(path).as_posix() for path in paths]
     else:
         shown = ["<the file named above>", "<the directory the scan scanned>"]
-    command = f"ash config lint --config {shown[0]}"
+    command = f"ashx config lint --config {shown[0]}"
     if len(paths) > 1:
         command += f" --source-dir {shown[1]}"
     return f"Run: {command}"
@@ -1035,11 +1035,11 @@ def _unknown_entry_keys_are_fatal(
     Read from the raw document before the model is built, because the entry
     validators run inside that build: the flag's own field is still validated
     strictly, so a value that is not a bool refuses the config either way (a
-    non-bool read here only chooses the line's default, which on 3.x is warn
-    mode, the direction that marks the entry inert). An absent flag takes the
-    line's default, ``UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT`` (the one
-    constant the v4 bump flips; AshConfig's field default reads it too, so the
-    raw read and the validated model cannot disagree). An override that sets
+    non-bool read here only chooses the line's default). An absent flag takes
+    the line's default, ``UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT`` (True since
+    ASH 4.0; AshConfig's field default reads the same constant, so the raw read
+    and the validated model cannot disagree; ``false`` keeps the 3.x warn mode,
+    which marks the entry inert). An override that sets
     the flag counts too, last one wins, so ``--config-overrides
     fail_on_unknown_keys=true`` adopts the refusal for one run.
     """
@@ -1048,9 +1048,39 @@ def _unknown_entry_keys_are_fatal(
         fatal = data["fail_on_unknown_keys"]
     for override in config_overrides or []:
         key_path, separator, value = override.partition("=")
-        if separator and key_path.strip().removesuffix("+") == "fail_on_unknown_keys":
-            fatal = value.strip().lower() in ("true", "1", "yes")
+        if (
+            separator
+            and key_path.strip().removesuffix("+").replace("-", "_")
+            == "fail_on_unknown_keys"
+        ):
+            # The value as the override application types it, so both sites
+            # read the same thing (1.0 is a float there, and a true to the model).
+            fatal = _flag_is_true(_parse_config_value(value))
     return fatal
+
+
+#: The words the flag's own field (a pydantic bool) reads as true, lowercase.
+_TRUE_WORDS = frozenset({"true", "1", "yes", "on", "y", "t"})
+
+
+def _flag_is_true(value: Any) -> bool:
+    """Whether a ``fail_on_unknown_keys`` value reads as true, however it arrived.
+
+    One reading for both places that decide the refusal: the load
+    (``_unknown_entry_keys_are_fatal``, an override's text) and the override
+    application (``apply_config_overrides``, the value as ``_parse_config_value``
+    typed it: ``1`` an int, ``yes`` a string). Two readings let an override
+    the load took as fatal be only warned about when the overrides were
+    applied.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        # The model's lax bool reads 1 and 1.0 as true, 0 and 0.0 as false.
+        return value == 1
+    if isinstance(value, str):
+        return value.strip().lower() in _TRUE_WORDS
+    return False
 
 
 def _entry_warn_context(
@@ -2124,19 +2154,22 @@ def resolve_config(
     # from the environment as its reference; it is read from the operator's
     # copy it was built from (config.session_profiles.is_client_copy_of).
     fill: List[Any] = []
+    # The operator's load, taken here when the fill needs it: the references
+    # come from the same read the trusted base is built from, never from a
+    # second read of the file that could see another version of it and that
+    # skipped the run's caches.
+    early_operator: Optional[OperatorConfig] = None
     if config_path is not None and trusted_config_path is not None:
         from automated_security_helper.config.session_profiles import (
             is_client_copy_of,
         )
 
         if is_client_copy_of(config_path, trusted_config_path):
-            fill = list(
-                read_config_document(
-                    Path(trusted_config_path),
-                    confine_to=default_confinement_root(Path(trusted_config_path)),
-                    permit_base=permit_base,
-                ).environment_references
+            early_operator = _load_operator_config(
+                trusted_config_path, source_dir, permit_base, operators_files
             )
+            if early_operator is not None:
+                fill = list(early_operator.environment_references)
     # The selected chain's per-file documents and names, and what the fill read
     # in each, for the client rules.
     client_documents: Dict[Path, Any] = {}
@@ -2650,8 +2683,12 @@ def resolve_config(
         # and warning on it would name a no-op.
         environment_paths = set(default_views()[2])
         repository = default_repository
-    operator = _load_operator_config(
-        trusted_config_path, source_dir, permit_base, operators_files
+    operator = (
+        early_operator
+        if early_operator is not None
+        else _load_operator_config(
+            trusted_config_path, source_dir, permit_base, operators_files
+        )
     )
     if files_read is not None and operator is not None:
         files_read.extend(operator.chain)
@@ -2945,6 +2982,12 @@ def resolve_config(
     # honor_ignore_files and the archive extraction limits. Each replays its
     # own overrides onto the trusted base itself.
     tier_two_documents = _cached_documents(in_tree, reads)
+    # The files themselves, without the MCP client overrides' placeholder:
+    # that entry names a source in the warnings and is no path, so the steps
+    # that resolve each entry (the repository-file sets) must never see it.
+    repository_in_tree = [
+        path for path in in_tree if Path(path) != CLIENT_OVERRIDES_SOURCE
+    ]
     tier_two_overrides = list(operator_overrides)
     # The source is recorded on config beside the record, for
     # confine_declared_reporter_destinations, which runs once the plugin modules
@@ -2969,7 +3012,12 @@ def resolve_config(
     # and onto the recorded view below by _with_reporter_overrides, each on a
     # copy, so an override is applied once per use.
     chain_reporters = _with_operator_chain_reporters(
-        trusted, view_chain, in_tree, reads, environment_paths, roots=view_roots
+        trusted,
+        view_chain,
+        repository_in_tree,
+        reads,
+        environment_paths,
+        roots=view_roots,
     )
     confine_reporter_destinations(
         config,
@@ -3155,7 +3203,7 @@ def resolve_config(
     files_view = _with_operator_chain_scanners(
         operator_reporters,
         view_chain,
-        in_tree,
+        repository_in_tree,
         reads,
         environment_paths,
         environment_values=config_environment_values(config),
@@ -3182,7 +3230,7 @@ def resolve_config(
             outside=outside_membership,
         ),
     )
-    _take_confined_references(config, trusted, settled, in_tree)
+    _take_confined_references(config, trusted, settled, repository_in_tree)
     return config
 
 
@@ -4709,6 +4757,10 @@ class OperatorConfig(NamedTuple):
     #: The names each chain file was reached by, by file
     #: (``ResolvedConfigDocument.names``); the delivered-file judgment reads it.
     names: Dict[Path, Tuple[Path, ...]] = {}
+    #: The references the chain's files read from the environment
+    #: (``ResolvedConfigDocument.environment_references``), for the copy of a
+    #: profile a client patched (the fill of ``resolve_config``).
+    environment_references: Tuple[Any, ...] = ()
 
 
 def trusted_base_config(
@@ -4998,6 +5050,7 @@ def _load_operator_config(
         reads=reads,
         environment_paths=frozenset(document.environment_paths),
         names=dict(document.names),
+        environment_references=tuple(document.environment_references),
     )
 
 
@@ -5220,7 +5273,7 @@ def _resolve_config(
         # An explicit config_path has to survive a missing source_dir. source_dir
         # only drives *discovery* of a config file; when the caller already named
         # one, there is nothing to discover and no reason to bail out to the
-        # default. Testing source_dir alone here meant `ash report --config
+        # default. Testing source_dir alone here meant `ashx report --config
         # <file>` accepted the option and then reported against default settings,
         # because cli/report.py passes config_path with no source_dir (as does
         # cli/config.py). Below, source_dir falls back to Path.cwd(), which is
@@ -5236,7 +5289,7 @@ def _resolve_config(
             return config
 
         # Only a source_dir the caller passed may widen where `extends` bases
-        # may live. The cwd fallback below must not: `ash report --config
+        # may live. The cwd fallback below must not: `ashx report --config
         # <file>` run from a home directory would otherwise let that file's
         # bases reach anywhere under it.
         confinement_source_dir = source_dir
@@ -5770,7 +5823,7 @@ def validate_config_document(
                 f"Configuration validation failed for "
                 f"'{describe_config_path(Path(config_path))}': "
                 f"{described.rstrip('.')}. "
-                "Run 'ash config lint' to identify and fix issues."
+                "Run 'ashx config lint' to identify and fix issues."
             ) from None
         refused = _client_validation_error(config_path, e, why=unquoted)
     else:
@@ -6023,7 +6076,7 @@ def _client_validation_error(
     return ASHConfigValidationError(
         f"Configuration validation failed for '{describe_config_path(Path(config_path))}'"
         f"{layered}: {len(problems)} problem(s): {'; '.join(problems)}. The values are not "
-        f"shown because {why}. Run 'ash config lint' to identify and fix issues."
+        f"shown because {why}. Run 'ashx config lint' to identify and fix issues."
     )
 
 
@@ -6143,13 +6196,20 @@ def _honor_ignore_files_writers(
     confined = [Path(path) for path in in_tree]
     if documents is None:
         return confined, None
-    confined_keys = {path.resolve() for path in confined}
+
+    def resolved(path: Path) -> Path:
+        # The client-overrides placeholder is no file: resolving it would
+        # fail with a deleted working directory and otherwise name
+        # <cwd>/config_overrides, a file the load never read.
+        return path if path == CLIENT_OVERRIDES_SOURCE else path.resolve()
+
+    confined_keys = {resolved(path) for path in confined}
     ordered: List[Path] = []
     # Each file by the name it is first given: the chain's, then the confined
     # list's. The keys are resolved paths, which is how the documents are read.
     spelled: Dict[Path, Path] = {}
     for path in (*(Path(each) for each in chain), *confined):
-        key = path.resolve()
+        key = resolved(path)
         if key not in spelled:
             spelled[key] = path
             ordered.append(key)
@@ -6163,7 +6223,7 @@ def _honor_ignore_files_writers(
         )
     ]
     wrote_set = set(wrote)
-    named = [path for path in confined if path.resolve() in wrote_set]
+    named = [path for path in confined if resolved(path) in wrote_set]
     decided_by = (
         spelled[wrote[-1]] if wrote and wrote[-1] not in confined_keys else None
     )

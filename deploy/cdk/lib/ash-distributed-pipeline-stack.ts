@@ -74,7 +74,7 @@
  * -------------------------------------------
  * Because the split is over scanners and not over files, a shard count higher
  * than the number of enabled scanners produces empty shards and no extra
- * parallelism. Run `ash plugin list` against the pinned version to see how many
+ * parallelism. Run `ashx plugin list` against the pinned version to see how many
  * scanners are enabled before raising it.
  */
 
@@ -101,6 +101,7 @@ import {
   ashOfflineMode, ashVersion, rebuildSchedule, resolveShardCount,
 } from './ash-config';
 import {
+  ASH_CLI,
   ASH_MATERIALIZED_CONFIG_PATH,
   ASH_S3_SYNC_PATH,
   MATERIALIZE_S3_SYNC_COMMAND,
@@ -110,7 +111,6 @@ import {
   suppressPipelineActionRoleWildcards,
   suppressPipelineRoleWildcards,
   suppressScanProjectRoleWildcards,
-  suppressSecretRotation,
   suppressShardProjectRoleWildcards,
   suppressUnevaluableRules,
   suppressBucketTlsLiteral,
@@ -427,7 +427,6 @@ export class AshDistributedPipelineStack extends Stack {
       ],
     });
 
-    suppressSecretRotation(config.authSecret);
     suppressPipelineRoleWildcards(pipeline.role);
     /*
      * The IAM5 wildcards are suppressed on `ashRoleSplitScopeOf(project)`, not on the
@@ -553,7 +552,7 @@ export class AshDistributedPipelineStack extends Stack {
               // (results present) or the shard was clean (results present).
               [
                 'set +e',
-                'ash scan --source-dir "$CODEBUILD_SRC_DIR" --output-dir ./ash-shard-output \\',
+                `${ASH_CLI} scan --source-dir "$CODEBUILD_SRC_DIR" --output-dir ./ash-shard-output \\`,
                 '  --shard-index "$ASH_SHARD_INDEX" --shard-count "$ASH_SHARD_COUNT" \\',
                 '  --no-fail-on-findings --no-progress --simple',
                 'ASH_EXIT=$?',
@@ -650,7 +649,7 @@ export class AshDistributedPipelineStack extends Stack {
               // execution and downloads only that build's keys, so a shard's object at
               // <prefix>/shard-2/<build ARN>/ash_aggregated_results.json lands at
               // ./shard-results/shard-2/ash_aggregated_results.json — the layout the
-              // completeness check below and `ash merge` both expect. Any key under
+              // completeness check below and `ashx merge` both expect. Any key under
               // the prefix from a build this execution does not list fails the merge.
               `python3 ${ASH_S3_SYNC_PATH} collect ` +
                 '"$ASH_RESULTS_BUCKET" "$ASH_RESULTS_PREFIX" ./shard-results ' +
@@ -702,11 +701,7 @@ export class AshDistributedPipelineStack extends Stack {
               // --results is repeatable and accepts a file or a directory. One
               // flag per shard directory, so a shard that vanished between the
               // check above and here still fails rather than being skipped.
-              [
-                'ash merge \\',
-                ...resultsFlags,
-                '  --output-dir ./ash-merged-output',
-              ].join('\n'),
+              [`${ASH_CLI} results merge \\`, ...resultsFlags, '  --output-dir ./ash-merged-output'].join('\n'),
             ],
           },
           post_build: {
@@ -751,7 +746,7 @@ export const EXECUTION_ID_SEGMENT = '????????-????-????-????-????????????';
  * no `AshBaseConfigYaml` the file is `{}`, ASH's defaults, the same document the
  * CodeCommit gate writes. Without a config ASH would look for one in the scanned
  * checkout, so the repository would choose the scanners, ignore paths and
- * `fail_on_findings` the shards record, and `ash merge` forms its verdict from
+ * `fail_on_findings` the shards record, and `ashx merge` forms its verdict from
  * what the shards record. An empty file is no substitute: ASH refuses it.
  *
  * THE READ IS THE SAME ONE THE ENTRYPOINT MAKES, DELIBERATELY. Character for

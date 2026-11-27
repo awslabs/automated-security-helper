@@ -57,7 +57,7 @@ def test_a_stale_removal_does_not_delete_the_entry_now_at_its_index(tmp_path):
                 "path": "src/expired.py",
                 "rule_id": "B102",
                 "reason": "old",
-                "expiration": "2020-01-01",
+                "expires": "2020-01-01",
             },
             {"path": "src/keep.py", "rule_id": "B103", "reason": "keep too"},
         ],
@@ -101,7 +101,7 @@ def test_two_fixes_on_one_entry_are_both_applied(tmp_path):
                 "rule_id": "B102",
                 "reason": "old",
                 "line_start": 10,
-                "expiration": "2020-01-01",
+                "expires": "2020-01-01",
             },
         ],
     )
@@ -161,7 +161,7 @@ def test_a_moved_entry_is_fixed_where_it_is_now(tmp_path):
                 "path": "src/expired.py",
                 "rule_id": "B102",
                 "reason": "old",
-                "expiration": "2020-01-01",
+                "expires": "2020-01-01",
             },
             {"path": "src/keep.py", "rule_id": "B103", "reason": "keep too"},
         ],
@@ -175,7 +175,7 @@ def test_a_moved_entry_is_fixed_where_it_is_now(tmp_path):
                 "path": "src/expired.py",
                 "rule_id": "B102",
                 "reason": "old",
-                "expiration": "2020-01-01",
+                "expires": "2020-01-01",
             },
             {"path": "src/first.py", "rule_id": "B101", "reason": "keep"},
             {"path": "src/keep.py", "rule_id": "B103", "reason": "keep too"},
@@ -205,7 +205,7 @@ def test_of_two_entries_with_one_id_only_the_expired_one_is_removed(tmp_path):
                 "path": "src/same.py",
                 "rule_id": "B101",
                 "reason": "same",
-                "expiration": "2020-01-01",
+                "expires": "2020-01-01",
             },
         ],
     )
@@ -229,7 +229,7 @@ def test_two_entries_written_the_same_way_are_both_removed(tmp_path):
         "path": "src/twice.py",
         "rule_id": "B101",
         "reason": "copied",
-        "expiration": "2020-01-01",
+        "expires": "2020-01-01",
     }
     _write(
         config_path,
@@ -269,7 +269,7 @@ def test_an_entry_un_expired_while_the_prompt_waited_is_kept(tmp_path):
                 "path": "src/expired.py",
                 "rule_id": "B102",
                 "reason": "old",
-                "expiration": "2020-01-01",
+                "expires": "2020-01-01",
             },
         ],
     )
@@ -283,7 +283,7 @@ def test_an_entry_un_expired_while_the_prompt_waited_is_kept(tmp_path):
                 "path": "src/expired.py",
                 "rule_id": "B102",
                 "reason": "old",
-                "expiration": "2099-12-31",
+                "expires": "2099-12-31",
             },
         ],
     )
@@ -385,13 +385,13 @@ def test_an_entry_the_fresh_lint_raises_but_the_operator_did_not_confirm_is_kept
         "path": "src/one.py",
         "rule_id": "B101",
         "reason": "old",
-        "expiration": "2020-01-01",
+        "expires": "2020-01-01",
     }
     second = {
         "path": "src/two.py",
         "rule_id": "B102",
         "reason": "old",
-        "expiration": "2020-01-01",
+        "expires": "2020-01-01",
     }
     _write(config_path, [first])
     confirmed = ConfigLinter.lint(config_path).fixable_issues
@@ -415,7 +415,7 @@ def test_one_confirmed_copy_of_a_duplicated_entry_removes_one_copy(tmp_path):
         "path": "src/twice.py",
         "rule_id": "B101",
         "reason": "copied",
-        "expiration": "2020-01-01",
+        "expires": "2020-01-01",
     }
     _write(config_path, [dict(duplicate), dict(duplicate)])
     issues = ConfigLinter.lint(config_path).fixable_issues
@@ -439,7 +439,7 @@ def test_an_issue_the_file_still_raises_is_applied(tmp_path):
                 "path": "src/expired.py",
                 "rule_id": "B102",
                 "reason": "old",
-                "expiration": "2020-01-01",
+                "expires": "2020-01-01",
             },
         ],
     )

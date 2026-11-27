@@ -16,7 +16,7 @@ available way for this to fail. It is a silent false negative on a security
 scanner, on exactly the axis the central invariant protects:
 
     For any project P, the findings reported for P and the pass/fail verdict for
-    P are identical to what ``ash --source-dir P`` would produce.
+    P are identical to what ``ashx --source-dir P`` would produce.
 
 What an earlier version of this file got wrong, and why it is recorded here
 --------------------------------------------------------------------------
@@ -1211,7 +1211,7 @@ class TestPluginManagerSingletonState:
           pytest process of its own.
         * ``tests/snapshot/conftest.py`` (by path, not by name) narrows the
           registry to ASH's built-in plugins for each snapshot test and puts it
-          back afterwards, so a snapshot shows what a fresh ``ash`` process
+          back afterwards, so a snapshot shows what a fresh ``ashx`` process
           registers rather than whatever earlier tests in the worker imported.
           Same category as the one above: it stops leakage between tests.
         * ``tests/snapshot/test_snapshot_plugin_registry.py`` is the test of that

@@ -81,10 +81,9 @@ class TestInvalidExpirationWarnsInsteadOfSilentSkip:
 
         suppression = MagicMock()
         suppression.rule_id = "TEST-RULE"
-        suppression.expiration = "not-a-date"
-        # The matcher reads the entry's ``expires`` (the single date both
-        # spellings, expiration and expires, resolve to), so a stand-in must
-        # carry the date there too; a bare MagicMock attribute is not a date.
+        # The matcher reads the entry's ``expires`` (ASH 4.0 removed the
+        # ``expiration`` spelling), so a stand-in must carry the date there;
+        # a bare MagicMock attribute is not a date.
         suppression.expires = "not-a-date"
         suppression.paths = []
         suppression.reason = "test"
@@ -170,9 +169,9 @@ class TestExpirationValidatorPreservesMessage:
             path="test.py",
             rule_id="R1",
             reason="test",
-            expiration=yesterday,
+            expires=yesterday,
         )
-        assert s.expiration == yesterday
+        assert s.expires == yesterday
         assert s.is_expired is True
 
     def test_bad_format_gives_format_error(self):
@@ -184,7 +183,7 @@ class TestExpirationValidatorPreservesMessage:
                 rule_id="R1",
                 reason="test",
                 justification="test",
-                expiration="not-a-date",
+                expires="not-a-date",
             )
         error_str = str(exc_info.value)
         assert "format" in error_str.lower() or "YYYY-MM-DD" in error_str, (
@@ -538,7 +537,7 @@ class TestBug52SameDayExpiry:
             reason="r",
             path="f.py",
             rule_id="R1",
-            expiration=today_str,
+            expires=today_str,
             line_start=None,
             line_end=None,
         )
@@ -570,7 +569,7 @@ class TestBug52SameDayExpiry:
             reason="r",
             path="f.py",
             rule_id="R1",
-            expiration=yesterday_str,
+            expires=yesterday_str,
             line_start=None,
             line_end=None,
         )
@@ -598,7 +597,7 @@ class TestBug52SameDayExpiry:
             reason="r",
             path="f.py",
             rule_id="R1",
-            expiration=tomorrow_str,
+            expires=tomorrow_str,
         )
         suppressed, _ = should_suppress_finding(finding, [suppression])
         assert suppressed, "Suppression expiring tomorrow should still suppress"

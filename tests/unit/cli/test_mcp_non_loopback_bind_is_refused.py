@@ -256,7 +256,7 @@ def test_the_terraform_entrypoint_command_line_starts(
     startup, monkeypatch, env
 ) -> None:
     argv = _terraform_entrypoint_argv(monkeypatch, env)
-    assert argv[:2] == ["ash", "mcp"], argv
+    assert argv[:2] == ["ashx", "mcp"], argv
 
     result = CliRunner().invoke(ash_app, argv[1:])
 

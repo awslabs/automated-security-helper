@@ -234,12 +234,17 @@ def shell_invocations(text: str, where: str) -> list[Invocation]:
             if words[:3] == ["set", "--", "$@"]:
                 appended.extend(words[3:])
                 continue
-            if "ash" not in words:
+            names = [i for i, word in enumerate(words) if word in _ASH_NAMES]
+            if not names:
                 continue
-            after = words[words.index("ash") + 1 :]
+            after = words[names[0] + 1 :]
             # A command line, not prose that happens to contain the word: the next
             # word is an option or one of ASH's commands.
-            if not after or not (after[0].startswith("-") or after[0] in _COMMANDS):
+            if not after or not (
+                after[0].startswith("-")
+                or after[0] in _COMMANDS
+                or after[0] in _REMOVED_COMMANDS
+            ):
                 continue
             built_with_set = words[:2] == ["set", "--"]
             found.append((after, built_with_set or "$@" in after))
@@ -261,24 +266,31 @@ def shell_invocations(text: str, where: str) -> list[Invocation]:
 #: test_the_reader_knows_every_ash_command keeps it equal to the CLI's own list.
 _COMMANDS = frozenset(
     {
-        "build-image",
         "config",
         "container",
         "dependencies",
-        "diff",
         "express",
         "get-genai-guide",
-        "inspect",
         "mcp",
-        "merge",
         "plugin",
-        "report",
         "results",
         "scan",
         "suppress",
-        "trend",
     }
 )
+
+#: The top-level spellings ASH 4.0 removed (`ash results <verb>` and `ash container
+#: build` replace them). The reader still takes them for command words, so a target
+#: that kept one is read, and the check reports it as a command the CLI lacks.
+_REMOVED_COMMANDS = frozenset(
+    {"build-image", "diff", "inspect", "merge", "report", "trend"}
+)
+
+
+#: What names ASH on a command line: `ashx` (v4's command), `ash` (its deprecated
+#: alias, and the only name a v3 image has), and the `$ASH_CLI` variable the CDK MCP
+#: entrypoint resolves to one of the two (06652564ef6).
+_ASH_NAMES = frozenset({"ash", "ashx", "$ASH_CLI"})
 
 
 def _relative(path: Path) -> str:
@@ -291,6 +303,15 @@ def _heredocs(command: str) -> Iterator[tuple[str, str]]:
         r"cat > (\S+) <<'(\w+)'\n(.*?)\n\2(?:\n|$)", command, re.DOTALL
     ):
         yield match.group(1), match.group(3)
+
+
+def _is_the_cli_name(element: ast.expr) -> bool:
+    """The CDK gate handler picks its command with `_ash_cli(env)`: `ashx` or `ash`."""
+    return (
+        isinstance(element, ast.Call)
+        and isinstance(element.func, ast.Name)
+        and element.func.id == "_ash_cli"
+    )
 
 
 def _python_argv_invocations(source: str, where: str) -> list[Invocation]:
@@ -322,8 +343,10 @@ def _python_argv_invocations(source: str, where: str) -> list[Invocation]:
             else "$VALUE"
             for element in value.elts
         ]
+        if is_base and value.elts and _is_the_cli_name(value.elts[0]):
+            words[0] = "ashx"
         if is_base:
-            if words[:1] == ["ash"]:
+            if words[:1] in (["ash"], ["ashx"]):
                 base = words[1:]
         else:
             extra.extend(words)
@@ -412,14 +435,14 @@ def _environment(values: dict[str, str], clear_prefixes: tuple[str, ...]):
 def _gate_runner(captured: list[list[str]]):
     """A stand-in for the gate's subprocess runner that records what it would run.
 
-    The gate first asks ``ash scan --help`` whether the image's ASH has
+    The gate first asks ``ashx scan --help`` whether the image's ASH has
     ``--fail-on-incomplete-scanners`` and refuses to scan when it does not; the probe
     is answered as an ASH that has it, and is not a scan, so it is not recorded.
     """
 
     def run(argv, cwd=None, env=None):
         argv = list(argv)
-        if argv == ["ash", "scan", "--help"]:
+        if argv == ["ashx", "scan", "--help"]:
             return SimpleNamespace(
                 returncode=0, stdout="  --fail-on-incomplete-scanners\n", stderr=""
             )
@@ -451,7 +474,7 @@ def terraform_gate_invocations() -> list[Invocation]:
                 ):
                     gate.run_scan(Path(work) / "src", "low", fail_on_findings)
             for argv in captured:
-                assert argv[0] == "ash", argv
+                assert argv[0] == "ashx", argv
                 found.append(
                     Invocation(
                         f"{_relative(TF_GATE)} run_scan(fail_on_findings={fail_on_findings})",
@@ -486,7 +509,7 @@ def terraform_mcp_serve_invocations() -> list[Invocation]:
     for environment in MCP_SERVE_ENVIRONMENTS:
         with _environment(environment, ("ASH_MCP_",)):
             argv = serve.build_argv()
-        assert argv[0] == "ash", argv
+        assert argv[0] == "ashx", argv
         found.append(
             Invocation(f"{_relative(TF_MCP_SERVE)} {environment}", tuple(argv[1:]))
         )
@@ -530,10 +553,19 @@ def workflow_invocations() -> list[Invocation]:
 #: source -> (reader, the command paths it must yield). The second half is the
 #: positive control: a reader that silently stopped matching would otherwise pass.
 SOURCES: dict[str, tuple[Callable[[], list[Invocation]], set[str]]] = {
-    "reusable workflow": (workflow_invocations, {"", "dependencies install", "report"}),
-    "CDK templates": (cdk_template_invocations, {"scan", "merge", "mcp"}),
-    "cdk-constructs buildspecs": (cdk_constructs_invocations, {"scan", "merge"}),
-    "Terraform buildspecs": (terraform_buildspec_invocations, {"scan", "merge"}),
+    "reusable workflow": (
+        workflow_invocations,
+        {"", "dependencies install", "results report"},
+    ),
+    "CDK templates": (cdk_template_invocations, {"scan", "results merge", "mcp"}),
+    "cdk-constructs buildspecs": (
+        cdk_constructs_invocations,
+        {"scan", "results merge"},
+    ),
+    "Terraform buildspecs": (
+        terraform_buildspec_invocations,
+        {"scan", "results merge"},
+    ),
     "Terraform gate": (terraform_gate_invocations, {"scan"}),
     "Terraform ash-mcp-serve": (terraform_mcp_serve_invocations, {"mcp"}),
 }
@@ -571,6 +603,9 @@ def test_the_reader_knows_every_ash_command():
         "_COMMANDS must list ASH's top-level commands exactly, or the shell reader "
         "skips lines that invoke the ones it does not know"
     )
+    assert not _REMOVED_COMMANDS & set(_cli().commands), (
+        "a spelling in _REMOVED_COMMANDS is a command again; move it to _COMMANDS"
+    )
 
 
 def test_the_check_reports_what_the_cli_lacks():
@@ -578,7 +613,7 @@ def test_the_check_reports_what_the_cli_lacks():
     root = _cli()
     accepted = [
         Invocation("control", ("scan", "--source-dir", "$X", "--shard-index", "0")),
-        Invocation("control", ("--output-dir", "out", "report")),
+        Invocation("control", ("--output-dir", "out", "results", "report")),
         Invocation("control", ("mcp", "--stateless-http", "--allowed-host", "h")),
     ]
     for invocation in accepted:
@@ -587,6 +622,8 @@ def test_the_check_reports_what_the_cli_lacks():
     rejected = {
         Invocation("control", ("scan", "--shard-indx", "0")): "--shard-indx",
         Invocation("control", ("merge-results", "--results", "a")): "merge-results",
+        # Removed in 4.0: the top-level spelling of `results merge`.
+        Invocation("control", ("merge", "--results", "a")): "'merge'",
         Invocation("control", ("mcp", "--fail-on-findings")): "--fail-on-findings",
     }
     for invocation, name in rejected.items():
@@ -672,13 +709,25 @@ def test_no_file_in_deploy_runs_ash_unchecked():
 class PinShape:
     glob: str
     pattern: str
+    #: File names under the glob that name no ASH release by design.
+    exempt: tuple[str, ...] = ()
+
+
+#: AshEksOperator installs the operator from an image the adopter builds and names
+#: in `OperatorImageUri`, which has no default; the stack has no `AshVersion` and no
+#: ASH release pin (f27a11d5c38 added it that way).
+TEMPLATES_WITHOUT_AN_ASH_PIN = ("AshEksOperator.template.json",)
 
 
 #: Every place a deploy target names the ASH release it builds or installs by default.
 #: Globs are relative to deploy/, which holds no test scratch to race.
 PIN_SHAPES = (
     PinShape("cdk/lib/ash-config.ts", r"DEFAULT_ASH_VERSION = '(?P<ref>[^']*)'"),
-    PinShape("cdk/templates/*.template.json", r'"Default": "(?P<ref>v[0-9][^"]*)"'),
+    PinShape(
+        "cdk/templates/*.template.json",
+        r'"Default": "(?P<ref>v[0-9][^"]*)"',
+        exempt=TEMPLATES_WITHOUT_AN_ASH_PIN,
+    ),
     PinShape("cdk/README.md", r"\| `AshVersion` \| `(?P<ref>[^`]*)` \|"),
     PinShape(
         "cdk-constructs/src/private/commands.ts",
@@ -695,7 +744,9 @@ PIN_SHAPES = (
 def _pins() -> list[tuple[str, int, str]]:
     found = []
     for shape in PIN_SHAPES:
-        paths = sorted(DEPLOY.glob(shape.glob))
+        paths = sorted(
+            path for path in DEPLOY.glob(shape.glob) if path.name not in shape.exempt
+        )
         assert paths, f"no file matches {shape.glob}"
         for path in paths:
             hits = [
@@ -731,6 +782,11 @@ def test_the_cdk_templates_default_ash_version_to_the_packaged_release():
     expected = f"v{_packaged_version()}"
     for path in all_template_paths():
         parameters = load_template(path).get("Parameters", {})
+        if path.name in TEMPLATES_WITHOUT_AN_ASH_PIN:
+            # Control: the exemption is real, not a template that lost its pin.
+            assert "AshVersion" not in parameters, path.name
+            assert "OperatorImageUri" in parameters, path.name
+            continue
         assert parameters["AshVersion"]["Default"] == expected, path.name
 
 

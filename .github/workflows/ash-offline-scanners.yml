@@ -102,7 +102,7 @@ jobs:
       - name: Install ASH with the cdk extra, and every scanner
         run: |
           pip install ".[cdk]"
-          ash dependencies install
+          ashx dependencies install
       # --sandbox bwrap needs user namespaces, as in the sandbox jobs.
       - name: Install bubblewrap
         uses: ./.github/actions/apt-retry
@@ -204,7 +204,7 @@ jobs:
           export all_proxy=http://127.0.0.1:9
           export no_proxy=
           python scripts/verify_sandbox_scanner_parity.py \
-            --sandbox bwrap --ash ash \
+            --sandbox bwrap --ash ashx \
             --require "$REQUIRED_SCANNERS" \
             --require-findings mcp-config \
             --report "$PARITY_REPORT"

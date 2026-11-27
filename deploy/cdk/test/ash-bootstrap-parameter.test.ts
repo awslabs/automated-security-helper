@@ -103,6 +103,9 @@ function runStarterWith(template: CfnTemplate, requestType: string, failing: str
       StackId: 'stack-1',
       RequestId: 'request-1',
       LogicalResourceId: 'ImageBootstrapBuild',
+      // The starter reads the project and the key from the resource's properties; it has no
+      // environment (CKV_AWS_45), so the harness gives it none either.
+      ResourceProperties: { ProjectName: PROJECT_NAME, KeyArn: KEY_ARN },
     };
     const result = spawnSync(python3(), [path.join(dir, 'driver.py'), path.join(dir, 'index.py'), JSON.stringify(event)], {
       encoding: 'utf-8',
@@ -110,8 +113,6 @@ function runStarterWith(template: CfnTemplate, requestType: string, failing: str
         PATH: process.env.PATH ?? '/usr/bin:/bin',
         PYTHONPATH: path.join(dir, 'py'),
         PYTHONDONTWRITEBYTECODE: '1',
-        PROJECT_NAME,
-        KEY_ARN,
       },
     });
     return { calls: readLines<Call>(log), output: `${result.stdout ?? ''}${result.stderr ?? ''}` };

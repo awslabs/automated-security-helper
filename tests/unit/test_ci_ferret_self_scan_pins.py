@@ -21,7 +21,7 @@ in the config as one that works.
 ids, and detect-secrets is off in that config (``scanners.detect-secrets.enabled:
 false``), so no scan of that config could read an entry for them. The entries were
 removed, and ``_PIN_MARKERS`` is empty until one returns with detect-secrets. This
-test reads only the alpha-plugins config; ``.ash/.ash.yaml`` has no pin of this kind.
+test reads only the alpha-plugins config; ``.ash.yaml`` has no pin of this kind.
 
 What this checks
 ----------------
@@ -135,13 +135,6 @@ _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
     # The report-id helper's twelve-hex-digit default argument.
     ("API_KEY_OR_SECRET", FINDING_TREND_TEST): [
         _Marker((r"^def report_id\(second, token=",)),
-    ],
-    # The two lines of .ash.yaml whose reasons quote a placeholder fixture; they
-    # are the findings the self-scan reports on that file, and each is the one line of
-    # the file that has this shape.
-    ("API_KEY_OR_SECRET", ".ash.yaml"): [
-        _Marker((r'HEAD = "[0-9a-f]{40}" and TOKEN =',)),
-        _Marker((r'`\w+ = "abcdefghijklmnop"` is a fixture',)),
     ],
     # Every line that draws a value from the random module, as the file was written.
     ("B311", DOCX_SCRIPT): [_Marker((_RANDOM_CALL,), every_line=True)],
@@ -633,16 +626,6 @@ def test_an_every_line_pattern_that_matches_nothing_is_reported():
             "def other_id(second, count=3):",
         ),
         (
-            ("API_KEY_OR_SECRET", ".ash.yaml"),
-            'HEAD = "' + "0123456789abcdef0123456789abcdef01234567" + '" and TOKEN =',
-            'HEAD = "unset" and nothing else',
-        ),
-        (
-            ("API_KEY_OR_SECRET", ".ash.yaml"),
-            "`sec" + 'ret = "abcdefghijklmnop"` is a fixture fed into',
-            "`value` is a fixture fed into",
-        ),
-        (
             ("B311", DOCX_SCRIPT),
             "    area = random.randint(900, 999)  # nosec B311",
             "random.seed(42)",
@@ -657,8 +640,6 @@ def test_an_every_line_pattern_that_matches_nothing_is_reported():
         "tool_config_trust",
         "operational_facets",
         "finding_trend_test",
-        "ash_yaml_head",
-        "ash_yaml_secret",
         "B311",
         "PASSPORT",
     ],

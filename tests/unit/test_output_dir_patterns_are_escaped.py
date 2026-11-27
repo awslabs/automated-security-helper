@@ -215,13 +215,7 @@ def _excludes_for(scanner_name, source, output_dir, monkeypatch):
 
 
 def _grep_scanner(kind, context):
-    if kind == "semgrep":
-        from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-            SemgrepScanner,
-            SemgrepScannerConfig,
-        )
-
-        return SemgrepScanner(context=context, config=SemgrepScannerConfig())
+    assert kind == "opengrep", kind
     from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
         OpengrepScanner,
         OpengrepScannerConfig,
@@ -231,10 +225,8 @@ def _grep_scanner(kind, context):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("kind", ["semgrep", "opengrep"])
-def test_semgrep_and_opengrep_exclude_exactly_an_output_dir_named_with_glob_syntax(
-    tmp_path, kind
-):
+@pytest.mark.parametrize("kind", ["opengrep"])
+def test_opengrep_excludes_exactly_an_output_dir_named_with_glob_syntax(tmp_path, kind):
     source, output_dir = _tree(tmp_path, "out[1]", "out1")
     scanner = _grep_scanner(kind, named._context(source, output_dir))
     # Relative to where the tool anchors: the target, or the checkout tmp_path is in.
@@ -252,7 +244,7 @@ def test_semgrep_and_opengrep_exclude_exactly_an_output_dir_named_with_glob_synt
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("kind", ["semgrep", "opengrep"])
+@pytest.mark.parametrize("kind", ["opengrep"])
 def test_the_scanned_directorys_own_name_is_escaped_in_the_anchor(tmp_path, kind):
     """In a git repository the pattern is anchored at its root, so the scanned
     directory's name is part of the pattern too."""

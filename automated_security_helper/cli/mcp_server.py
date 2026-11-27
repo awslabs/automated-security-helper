@@ -361,24 +361,29 @@ async def _lifespan(_server: MCPServer) -> AsyncIterator[Dict[str, Any]]:
         yield {}
     finally:
         if _serving_stdio:
-            with anyio.CancelScope(shield=True):
-                deadline = time.monotonic() + STDIO_SCAN_STOP_TIMEOUT_SECONDS
-                joiner = _begin_stopping_source_jobs()
-                # Kept, as the source jobs' answer is: a scan that did not stop in
-                # time still holds the interpreter's exit, and run_mcp_server keeps
-                # _exit_on_late_signal installed for it.
-                _scans_left_running = bool(
-                    await stop_running_scans(
-                        "the stdio client closed the connection",
-                        timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS,
-                        promptly=True,
+            try:
+                with anyio.CancelScope(shield=True):
+                    deadline = time.monotonic() + STDIO_SCAN_STOP_TIMEOUT_SECONDS
+                    joiner = _begin_stopping_source_jobs()
+                    # Kept, as the source jobs' answer is: a scan that did not
+                    # stop in time still holds the interpreter's exit, and
+                    # run_mcp_server keeps _exit_on_late_signal installed for it.
+                    _scans_left_running = bool(
+                        await stop_running_scans(
+                            "the stdio client closed the connection",
+                            timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS,
+                            promptly=True,
+                        )
                     )
-                )
-                await _wait_for_source_jobs(joiner, deadline)
-            # The process ends next, by the client's SIGTERM if not sooner; a tool
-            # still running then would outlive it (_stop_on_signal).
-            kill_running_groups()
-            _flush_stdout()
+                    await _wait_for_source_jobs(joiner, deadline)
+            finally:
+                # The shield stops a cancel, not an exception: these run even
+                # when the stop raised, or the tools' groups would outlive the
+                # server and the block-buffered stdout would reach the client's
+                # pipe once fd 1 is pointed back at it. The process ends next,
+                # by the client's SIGTERM if not sooner (_stop_on_signal).
+                kill_running_groups()
+                _flush_stdout()
 
 
 mcp = MCPServer(name="ASH Security Scanner", lifespan=_lifespan)
@@ -408,13 +413,19 @@ def _holds_an_entry(directory: Path) -> bool:
     never landed, was scanned and reported clean. The walk now stops at the first
     regular file, skips ``.git`` at every level, and follows no symbolic link. A
     directory whose listing fails is read as holding nothing, so the caller
-    refuses it as it refuses one that cannot be read.
+    refuses it as it refuses one that cannot be read. That is judged per
+    directory: one subdirectory that cannot be listed holds nothing, and the
+    walk goes on through the others, so a delivered tree with a readable file
+    is not read as empty for it.
     """
     try:
         if not directory.is_dir():
             return False
-        pending = [directory]
-        while pending:
+    except OSError:
+        return False
+    pending = [directory]
+    while pending:
+        try:
             with os.scandir(pending.pop()) as entries:
                 for entry in entries:
                     if entry.name == ".git":
@@ -423,9 +434,9 @@ def _holds_an_entry(directory: Path) -> bool:
                         return True
                     if entry.is_dir(follow_symlinks=False):
                         pending.append(Path(entry.path))
-        return False
-    except OSError:
-        return False
+        except OSError:
+            continue
+    return False
 
 
 def _entries_of(directory: Path) -> List[Path]:
@@ -458,7 +469,7 @@ def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
     fails, so the ambiguous cases are refused with a message naming the cause.
 
     The fallback survives only where it is unambiguous. A transport that carries
-    no session header is a single local client -- stdio, where ``ash mcp`` runs
+    no session header is a single local client -- stdio, where ``ashx mcp`` runs
     in the tree the developer means and the working directory has always been the
     documented default. That case keeps working.
 
@@ -1267,7 +1278,7 @@ async def resolve_ash_workspace(
 ) -> Dict[str, Any]:
     """Resolve a VS Code workspace file into a scan plan without scanning anything.
 
-    The MCP equivalent of `ash --workspace <file> --dry-run`. Reads the workspace
+    The MCP equivalent of `ashx --workspace <file> --dry-run`. Reads the workspace
     definition and every project's own ASH config, then reports which directories
     became projects, what key each was given, which scanners its config enables,
     which severity threshold it will be judged against, and which projects were
@@ -1368,7 +1379,7 @@ async def run_ash_workspace_scan(
 ) -> Dict[str, Any]:
     """Scan every project in a VS Code workspace and return the per-project verdict.
 
-    The MCP equivalent of `ash --workspace <file>`. Each project is scanned with
+    The MCP equivalent of `ashx --workspace <file>`. Each project is scanned with
     its own ASH config and its own severity threshold, a workspace policy file can
     impose a ceiling over all of them, and the results are aggregated into one
     workspace payload.
@@ -1772,14 +1783,28 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
                             with open(result_file, "r", encoding="utf-8") as f:  # noqa: ASYNC230
                                 result_data = json.load(f)
 
-                            scanner_results[scanner_name][target_type] = result_data
-
+                            # This file's counts are gathered apart and merged
+                            # once every one is a non-negative integer, and the
+                            # file's payload is recorded only then: a bad
+                            # count drops the file from the totals and from
+                            # `scanners` alike, so the two never disagree.
+                            contribution: Dict[str, int] = {}
                             if counts_from_files and isinstance(
                                 result_data.get("severity_counts"), dict
                             ):
                                 for severity, count in result_data[
                                     "severity_counts"
                                 ].items():
+                                    # bool is an int; a count is not a flag.
+                                    if (
+                                        not isinstance(count, int)
+                                        or isinstance(count, bool)
+                                        or count < 0
+                                    ):
+                                        raise ValueError(
+                                            "a severity count is not a "
+                                            "non-negative integer"
+                                        )
                                     # A count under a key off the ladder is a
                                     # finding too: it goes to the catch-all
                                     # bucket, never nowhere.
@@ -1788,7 +1813,12 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
                                         if severity in severity_counts
                                         else UNKNOWN_SEVERITY
                                     )
-                                    severity_counts[bucket] += count
+                                    contribution[bucket] = (
+                                        contribution.get(bucket, 0) + count
+                                    )
+                            scanner_results[scanner_name][target_type] = result_data
+                            for bucket, count in contribution.items():
+                                severity_counts[bucket] += count
                         except Exception as e:
                             await _tell_client(
                                 ctx,
@@ -1871,7 +1901,7 @@ async def get_scan_results(
                 - "full" (default): Return all results including raw_results, validation_checkpoints, etc.
                 - "summary": Return only summary data (metadata, findings counts, scanner summaries)
                 - "minimal": Return only basic scan status and completion info
-        scanners: Comma-separated list of scanner names to include (e.g., "bandit,semgrep").
+        scanners: Comma-separated list of scanner names to include (e.g., "bandit,opengrep").
                   If not specified, includes all scanners.
         severities: Comma-separated list of severity levels to include (e.g., "critical,high,medium").
                     Options: critical, high, medium, low, info, suppressed
@@ -1954,8 +1984,10 @@ async def get_scan_results(
         # it to judge the findings.
         if actionable_only:
             results = _add_findings_list(results)
-            results.get("raw_results", {}).pop("sarif", None)
-            results.get("raw_results", {}).pop("severity_thresholds", None)
+            raw_results = results.get("raw_results")
+            if isinstance(raw_results, dict):
+                raw_results.pop("sarif", None)
+                raw_results.pop("severity_thresholds", None)
 
         # Apply response size filter based on parameter. The summary and minimal
         # filters carry the coverage keys of the document themselves, as the
@@ -2410,7 +2442,7 @@ async def check_installation(ctx: Context) -> Dict[str, Any]:
     PATH, which the server does not need). Each check may run its scanner's
     tool, so this takes seconds. It installs and downloads nothing. A scanner
     whose tool is not installed yet, and that a scan installs with uv when it
-    starts the scanner (not offline, uv present: bandit, checkov, semgrep on a
+    starts the scanner (not offline, uv present: bandit, checkov on a
     fresh install), is listed in installs_on_first_scan rather than
     missing_dependencies, and does not make ready false. ash_command_output names
     the executable's path only for the client that launched the server; a
@@ -3367,7 +3399,7 @@ async def list_profiles() -> Dict[str, Any]:
     """List the config profiles the operator registered at server startup.
 
     A profile is a named ASH config file. Profiles come only from the operator:
-    each `--profile NAME=path/to/ash.yaml` passed to `ash mcp` (repeatable, on any
+    each `--profile NAME=path/to/ash.yaml` passed to `ashx mcp` (repeatable, on any
     transport) registers the file at that path under NAME, and the server loads
     and validates every one when it starts, refusing to start (exit 3) if one does
     not load. A client cannot add one, and an edit to a profile's file takes
@@ -3405,7 +3437,7 @@ async def select_profile(
     Every later call in this session that does not name a config of its own runs
     under the bound one: run_ash_scan, resolve_ash_workspace and
     run_ash_workspace_scan all pick it up. The profiles are the ones the operator
-    registered when starting the server, with `ash mcp --profile NAME=path/to/ash.yaml`
+    registered when starting the server, with `ashx mcp --profile NAME=path/to/ash.yaml`
     (repeatable); call list_profiles to see their names.
 
     Three modes, distinguished by which optional argument you pass:
@@ -3772,11 +3804,23 @@ async def _stop_on_signal(signals: Optional[Iterable[int]] = None) -> None:
             name = signal.Signals(signum).name
             logger.warning(f"{name} received: stopping the scans and the server")
             with anyio.CancelScope(shield=True):
+                # The source clones and deliveries stop in the same window as
+                # the scans, as the lifespan stops them: exit_at_once removes
+                # the stdio session workspace, which a delivery still writing
+                # into it would leave as a partial tree for the next server.
+                deadline = time.monotonic() + STDIO_SCAN_STOP_TIMEOUT_SECONDS
+                joiner = _begin_stopping_source_jobs()
                 await stop_running_scans(
                     f"the server received {name}",
                     timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS,
                     promptly=True,
                 )
+                if await _wait_for_source_jobs(joiner, deadline):
+                    logger.warning(
+                        "A source clone or delivery was still running when the "
+                        "server exited: the stdio session workspace may hold a "
+                        "partial tree"
+                    )
             exit_at_once(_STOP_SIGNALS[signum])
 
 
@@ -3893,14 +3937,18 @@ async def stop_scans_at_server_exit(reason: str) -> bool:
     or a source clone or delivery (_begin_stopping_source_jobs) was still
     running when the wait ended.
     """
-    with anyio.CancelScope(shield=True):
-        deadline = time.monotonic() + STDIO_SCAN_STOP_TIMEOUT_SECONDS
-        joiner = _begin_stopping_source_jobs()
-        still_running = await stop_running_scans(
-            reason, timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS, promptly=True
-        )
-        jobs_running = await _wait_for_source_jobs(joiner, deadline)
-    kill_running_groups()
+    try:
+        with anyio.CancelScope(shield=True):
+            deadline = time.monotonic() + STDIO_SCAN_STOP_TIMEOUT_SECONDS
+            joiner = _begin_stopping_source_jobs()
+            still_running = await stop_running_scans(
+                reason, timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS, promptly=True
+            )
+            jobs_running = await _wait_for_source_jobs(joiner, deadline)
+    finally:
+        # Also when the stop raised: the tools' groups must not outlive it.
+        kill_running_groups()
+        _flush_stdout()
     return bool(still_running) or jobs_running
 
 

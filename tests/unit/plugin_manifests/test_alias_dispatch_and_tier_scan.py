@@ -4,10 +4,12 @@
 """Alias dispatch and the manifest tier scan.
 
 Design decisions 5 and 7. The semgrep retirement is manifest DATA: opengrep
-declares ``aliases: ["semgrep"]`` and semgrep's manifest is ``deprecated`` and
-``superseded_by`` opengrep, and these rows prove the data dispatches. They also
-prove the declaration changes no run: semgrep stays a manifest of its own, still
-default-enabled, until the retirement is decided and wired separately (#981).
+declares ``aliases: ["semgrep"]``, and these rows prove the data dispatches. On
+the v4 branch the retirement is wired (#981): the semgrep scanner plugin was
+removed, so semgrep has no manifest of its own any more (the totality tests refuse
+a manifest that names no registered scanner), and the scan path reads the same
+alias from ``utils/scanner_names.SCANNER_NAME_ALIASES``. A row below holds the two
+declarations equal.
 
 The registry-consistency rows drive ``_check`` on hand-built manifests, so the
 refusals are proven on inputs that the shipped data never contains.
@@ -58,30 +60,28 @@ def test_a_name_with_no_manifest_and_no_alias_dispatches_nowhere() -> None:
     assert dispatch_target("no-such-scanner") is None
 
 
-def test_the_retirement_is_declared_on_both_manifests() -> None:
-    semgrep = manifest_for("semgrep")
+def test_the_retired_name_has_no_manifest_and_opengrep_carries_it() -> None:
     opengrep = manifest_for("opengrep")
-    assert semgrep.tier is PluginTier.DEPRECATED
-    assert semgrep.superseded_by == "opengrep"
+    assert manifest_for("semgrep") is None
     assert "semgrep" in opengrep.aliases
     assert opengrep.tier is PluginTier.SUPPORTED
 
 
-def test_declaring_the_retirement_changes_no_run() -> None:
-    """semgrep is still a builtin that loads by default; only data was added."""
-    semgrep = manifest_for("semgrep")
-    assert semgrep.default_enabled is True
-    assert semgrep.plugin_module.endswith(".ash_builtin")
-    assert semgrep.entry_points.scanner.endswith(":SemgrepScanner")
+def test_the_manifest_aliases_are_the_aliases_the_scan_path_reads() -> None:
+    """The retirement is wired: the scan path's alias table says what the data says."""
+    from automated_security_helper.utils.scanner_names import SCANNER_NAME_ALIASES
+
+    aliases = {a: m.name for m in scanner_manifests() for a in m.aliases}
+    assert aliases == dict(SCANNER_NAME_ALIASES)
 
 
-def test_only_one_scanner_is_deprecated_and_only_one_alias_exists() -> None:
+def test_no_scanner_is_deprecated_and_only_one_alias_exists() -> None:
     """Planted control for the dispatch rows: the shipped data is exactly this."""
     deprecated = [
         m.name for m in scanner_manifests() if m.tier is PluginTier.DEPRECATED
     ]
     aliases = {a: m.name for m in scanner_manifests() for a in m.aliases}
-    assert deprecated == ["semgrep"]
+    assert deprecated == []
     assert aliases == {"semgrep": "opengrep"}
 
 

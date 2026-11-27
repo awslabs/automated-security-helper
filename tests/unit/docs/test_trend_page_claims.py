@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Page claims for ``ash results trend``: the how-to page and the output-files rows.
+"""Page claims for ``ashx results trend``: the how-to page and the output-files rows.
 
 Each test quotes the sentence a page makes with ``assert_on_page`` and then probes the
 code that makes it true, so a change to either half fails here. This file pins the
@@ -24,8 +24,9 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from automated_security_helper.cli.main import DEPRECATED_RESULTS_SPELLINGS, app
+from automated_security_helper.cli.main import app
 from automated_security_helper.config.ash_config import AshConfig, AshHistoryConfig
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils import finding_trend, scan_history
 from automated_security_helper.utils.scan_results_file import parse_full_scan_results
@@ -213,7 +214,7 @@ _REFUSED_FILES = {
     ),
     "unmerged-shard": (
         lambda: [_results(second=1), _shard_payload()],
-        "use ash merge before comparing sharded results",
+        "use ashx results merge before comparing sharded results",
     ),
     "changed-files-only": (
         lambda: [_results(second=1), _changed_files_payload()],
@@ -230,11 +231,14 @@ _REFUSED_FILES = {
 }
 
 
-def test_the_command_is_ash_results_trend_and_the_old_spelling_still_works(tmp_path):
-    """The old top-level spelling still runs and warns; the new one is quiet."""
+def test_the_command_is_ashx_results_trend_and_the_old_spelling_is_removed(tmp_path):
+    """The old top-level spelling, removed in 4.0, is a usage error that runs
+    nothing; the new one runs, quietly."""
     assert_on_page(
         PAGE,
-        "The top-level spelling `ash trend` still works and prints a deprecation warning",
+        "The top-level spelling, `trend` directly under `ashx`, was deprecated in 3.9 "
+        "and removed in 4.0: it is now an unknown command, a usage error that exits 5 "
+        "and runs nothing",
     )
     files = _files(
         tmp_path,
@@ -242,14 +246,13 @@ def test_the_command_is_ash_results_trend_and_the_old_spelling_still_works(tmp_p
         _results(_finding("B101"), second=2),
     )
     new = _trend(*files, "--format", "json")
-    old = CliRunner().invoke(app, ["trend", *files, "--format", "json"])
+    old = CliRunner().invoke(app, ["trend", *files])
     assert new.exit_code == 0, new.output
-    assert old.exit_code == 0, old.output
-    assert json.loads(new.stdout) == json.loads(old.stdout)
+    assert json.loads(new.stdout)["runs"], new.stdout
     assert new.stderr == ""
-    assert "DeprecationWarning: 'ash trend' is deprecated" in old.stderr
-    assert "Use 'ash results trend' instead" in old.stderr
-    assert "trend" in DEPRECATED_RESULTS_SPELLINGS
+    assert old.exit_code == ASH_EXIT_USAGE_ERROR == 5, old.output
+    assert "No such command 'trend'" in old.stderr
+    assert "DeprecationWarning" not in old.stderr
 
 
 def test_files_are_put_in_order_by_their_report_ids(tmp_path):
@@ -487,7 +490,7 @@ def test_each_refusal_of_results_files_says_why_and_prints_nothing_on_stdout(
     assert_on_page(
         PAGE,
         "a run is a workspace aggregate, an un-merged shard, a `--changed-files-only` "
-        "run, or a baseline-filtered run (the rules `ash results diff` applies);",
+        "run, or a baseline-filtered run (the rules `ashx results diff` applies);",
     )
     build, message = _REFUSED_FILES[case]
     _expect_refused(_trend(*_files(tmp_path, *build())), message)
@@ -587,9 +590,9 @@ def test_a_record_from_another_project_cuts_the_series(tmp_path):
     """Older records of another project are left out and named, and the rest read."""
     assert_on_page(
         PAGE,
-        "A record from another project cuts the series: `ash results trend` keeps the "
-        "records newer than it, names the ones it left out, and refuses only when fewer "
-        "than two remain.",
+        "A record from another project cuts the series: `ashx results trend` keeps "
+        "the records newer than it, names the ones it left out, and refuses only when "
+        "fewer than two remain.",
     )
     out = tmp_path / "out"
     _record(
@@ -655,7 +658,7 @@ def test_turning_the_history_off_keeps_it_and_no_scan_step_clears_it(tmp_path):
     assert_on_page(
         PAGE,
         "Turning `enabled` off stops new records and pruning and leaves the directory "
-        "and its records where they are, so `ash results trend --history` can still "
+        "and its records where they are, so `ashx results trend --history` can still "
         "read them.",
     )
     assert_on_page(
@@ -735,8 +738,8 @@ def test_a_run_a_comparison_would_refuse_is_not_recorded(tmp_path, caplog):
     assert_on_page(
         PAGE,
         "the runs a comparison would refuse: an un-merged shard, the combined results "
-        "of an `ash --workspace` scan, a `--changed-files-only` run, and a run filtered "
-        "by `--baseline`.",
+        "of an `ashx --workspace` scan, a `--changed-files-only` run, and a run "
+        "filtered by `--baseline`.",
     )
     assert_on_page(
         PAGE,
@@ -1017,8 +1020,8 @@ def test_a_linked_history_directory_gets_no_record_and_nothing_pruned_through_it
     )
     assert_on_page(
         OUTPUT_FILES,
-        "`ash results trend --history` reads no records through a linked `history`, and "
-        "refuses as it does for an empty one.",
+        "`ashx results trend --history` reads no records through a linked `history`, "
+        "and refuses as it does for an empty one.",
     )
     real = tmp_path / "real"
     _record(real, _results(second=1), _results(_finding("B101"), second=2))

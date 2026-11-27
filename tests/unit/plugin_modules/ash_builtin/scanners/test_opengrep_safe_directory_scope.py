@@ -20,6 +20,7 @@ the other reading on every platform by taking ``os.geteuid`` away.
 
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -29,9 +30,6 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scan
     OpengrepScannerConfig,
     OpengrepScannerConfigOptions,
 )
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-)
 from automated_security_helper.utils.sandbox.policy import (
     SandboxUnavailable,
     build_scanner_policy,
@@ -39,6 +37,15 @@ from automated_security_helper.utils.sandbox.policy import (
 from tests.utils.tool_guard import stub_tool_probes
 
 pytestmark = pytest.mark.unit
+
+#: A scanner's requirements without the ``git_safe_directory`` declaration. These
+#: tests used the semgrep scanner's, which matched opengrep's apart from that one
+#: field; the semgrep plugin was removed in v4 (opengrep serves its name), so this
+#: is opengrep's own declaration with the field turned off, and the tests below
+#: still differ from the opengrep cases in that field alone.
+_WITHOUT_THE_DECLARATION = replace(
+    OpengrepScanner.sandbox_requirements, git_safe_directory=False
+)
 
 _REAL_LEXISTS = os.path.lexists
 _REAL_LSTAT = os.lstat
@@ -361,7 +368,7 @@ def test_a_scanner_without_the_declaration_gets_no_list(only_staged_checkouts):
     target.mkdir()
 
     policy = _policy(
-        only_staged_checkouts, target, requirements=SemgrepScanner.sandbox_requirements
+        only_staged_checkouts, target, requirements=_WITHOUT_THE_DECLARATION
     )
 
     assert policy.safe_directories == ()
@@ -404,7 +411,7 @@ def test_a_listed_git_config_entry_is_still_allowed_for_other_scanners(
         only_staged_checkouts,
         target,
         environment=["GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.pager"],
-        requirements=SemgrepScanner.sandbox_requirements,
+        requirements=_WITHOUT_THE_DECLARATION,
     )
 
     assert "GIT_CONFIG_COUNT" in policy.environment[0]

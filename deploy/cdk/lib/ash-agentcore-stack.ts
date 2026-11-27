@@ -107,7 +107,7 @@
  * `ContainerUri`. No `Command`, no `EntryPoint`, no `Args`. The MCP invocation
  * therefore cannot come from this template and must be inside the image — which
  * is what the `mcp` flavor in `ash-image-build.ts` builds. ASH's own image ends
- * with `CMD ["ash"]`, so pointing AgentCore straight at it would start a process
+ * with `CMD ["ashx"]`, so pointing AgentCore straight at it would start a process
  * that prints help and exits.
  *
  * WHY THERE IS NO `--allowed-host` HERE
@@ -341,7 +341,7 @@ export class AshAgentCoreStack extends Stack {
          * Mcp-Session-Id it routes on, so in stateless mode the entrypoint passes
          * --trust-upstream-session-id; without it ASH ignores the header and every
          * session tool (source delivery, the scan registry) refuses. Both are
-         * passed only when the image's `ash mcp` has the flag.
+         * passed only when the image's `ashx mcp` has the flag.
          */
         ASH_MCP_TRUST_UPSTREAM_HOST_CHECK: 'true',
         ASH_MCP_TRUST_UPSTREAM_SESSION_ID: 'true',
@@ -371,7 +371,7 @@ export class AshAgentCoreStack extends Stack {
     // inside the build rather than as soon as the build starts.
     runtime.node.addDependency(image.bootstrap!);
 
-    suppressSecretRotation(config.authSecret);
+    suppressSecretRotation(config.mcpAuthSecret());
     /*
      * A FAMILY OF CLOUDFORMATION SPEC WARNINGS IS EXPECTED HERE. ALL FALSE POSITIVES.
      *

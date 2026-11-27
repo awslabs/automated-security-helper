@@ -430,6 +430,10 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             f"--module-dir={module_dir.resolve().as_posix()}",
         ]
 
+    # Package identity (including the license-message ``PkgName:`` read) and
+    # fix-availability attachment live on TrivyScannerBase._attach_package_identity;
+    # this class carries no local copy, so the base's fix-data handling serves.
+
     def content_databases_in_use(self) -> list:
         """trivy-db, unless the scan's effective scanners leave out ``vuln``.
 

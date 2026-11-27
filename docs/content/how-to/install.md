@@ -6,7 +6,7 @@ published by this project, so installing or running ASH by that name from PyPI g
 project's package, not ASH. Always install from the GitHub URL, as on this page.
 
 Installing ASH gives you the `ash` command. The scanners it runs are separate tools:
-after installing, run `ash dependencies install`, described in
+after installing, run `ashx dependencies install`, described in
 [Manage scanner tools](../docs/advanced-usage.md).
 
 ## Requirements
@@ -70,12 +70,12 @@ command is the same in a POSIX shell and in PowerShell:
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
-uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0'
+uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v4.0.0'
 ash --version
 ```
 
 ```text
-awslabs/automated-security-helper v3.8.0
+awslabs/automated-security-helper v4.0.0
 ```
 
 The install provides four names for the same program: `ash`, `ashv3`,
@@ -89,21 +89,21 @@ To move to another version, run the same command with the new tag and add `--for
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
-uvx --python 3.12 --from 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0' ash --version
+uvx --python 3.12 --from 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v4.0.0' ash --version
 ```
 
 uvx builds the environment once and reuses it, so later runs start quickly. Every
 command needs the full `uvx --from` specification, so you may want a shell alias:
 
 ```bash
-alias ash="uvx --python 3.12 --from 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0' ash"
+alias ash="uvx --python 3.12 --from 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v4.0.0' ash"
 ```
 
 ## Install with pipx
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
-pipx install --python python3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0'
+pipx install --python python3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v4.0.0'
 ```
 
 Install pipx itself from your package manager, for example `apt install pipx` on
@@ -111,7 +111,7 @@ Ubuntu, or with `uv tool install pipx`. On systems whose Python is marked as
 externally managed, such as Ubuntu 24.04, pip refuses to install pipx outside a
 virtual environment. pipx needs the named Python on your `PATH`.
 
-ASH installs bandit, checkov, semgrep, cfn-lint, and zizmor with uv. It uses the `uv`
+ASH installs bandit, checkov, cfn-lint, and zizmor with uv. It uses the `uv`
 that pipx installs into ASH's environment, so a pipx install needs no separate uv.
 
 ## Install with pip
@@ -127,7 +127,7 @@ virtual environment.
     ```bash
     python3.12 -m venv ~/.venvs/ash
     . ~/.venvs/ash/bin/activate
-    pip install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0'
+    pip install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v4.0.0'
     ash --version
     ```
 
@@ -139,12 +139,12 @@ virtual environment.
     ```powershell
     py -3.12 -m venv $HOME\.venvs\ash
     & $HOME\.venvs\ash\Scripts\Activate.ps1
-    pip install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0'
+    pip install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v4.0.0'
     ash --version
     ```
 
 Activate the environment in each new shell before you run `ash`, or run the
-environment's `ash` by its path. Either way, ASH installs bandit, checkov, semgrep,
+environment's `ash` by its path. Either way, ASH installs bandit, checkov,
 cfn-lint, and zizmor with the environment's own `uv`.
 
 Keep the environment outside the scanned directory. During a scan ASH does not run
@@ -163,7 +163,7 @@ To install an extra from git, use the direct-reference form `name[extra] @ URL`,
 the commands on this page do. List several extras with commas, as in
 `[cdk,symbols]`.
 
-You can also add the cdk packages later: `ash dependencies install --tool cdk-nag`
+You can also add the cdk packages later: `ashx dependencies install --tool cdk-nag`
 installs them into ASH's environment, whichever way you installed ASH. A later
 `uv tool upgrade` or `uv tool install --force` rebuilds a uv tool environment without
 them, so installing the extra with ASH is simpler.
@@ -174,12 +174,12 @@ the install needs a C compiler.
 
 ## Choose how scanner tools are installed
 
-`ash dependencies install` installs each scanner's tool the way its plugin declares
+`ashx dependencies install` installs each scanner's tool the way its plugin declares
 it: Python tools with `uv tool install`, native tools from pinned, digest-verified
 release downloads, and a few through `gem` or the system package manager. Five options
 change where tools come from. They are options of the command only; no configuration
 file or environment variable sets them, so a repository you scan cannot steer the
-installer. Each is listed in the [`ash dependencies install` reference](../reference/cli.md#dependencies-install).
+installer. Each is listed in the [`ashx dependencies install` reference](../reference/cli.md#dependencies-install).
 
 ### Providers
 
@@ -258,7 +258,7 @@ scanned. On Windows, which keeps no execute permission, an executable file is on
 name ends in `.exe`, `.com`, `.bat` or `.cmd`, the files Windows starts as programs.
 ASH reads and hashes the file, records the path and its SHA-256 in its install
 records under `~/.ash`, and never runs it. The record is read back: the scanners'
-dependency validation and later `ash dependencies install` runs resolve the scanner to
+dependency validation and later `ashx dependencies install` runs resolve the scanner to
 the forced path before any PATH or uv lookup, re-checking the file and its SHA-256 each
 time, and a record whose file moved or changed is named and set aside rather than
 trusted by its path. `--binary-path scanner=` with an empty path removes the record.
@@ -276,9 +276,9 @@ path for them records it but satisfies nothing.
 
 | Reference | What you get |
 |---|---|
-| `@v3.8.0` | That release. The release process creates each version tag once and never moves it. |
+| `@v4.0.0` | That release. The release process creates each version tag once and never moves it. |
 | a full commit SHA | That commit. The only reference that cannot change. |
-| `@v3` | v3.8.0, forever. The retired floating tag: frozen there, it no longer moves with releases. |
+| the `v3` tag | v3.8.0, forever. The retired floating tag: frozen there, it no longer moves with releases. |
 | `@main` | The current development state. |
 
 Release tags are lightweight and unsigned, and releases have no signed artifacts. If
@@ -312,7 +312,7 @@ pinned, so the scanner toolchain matches the code.
 
 No ASH image is published. `ash --mode container` builds an image with every scanner
 on your machine and scans inside it; it rebuilds the image on every run unless you
-pass `--no-build`. `ash container build` builds one to push to your own registry. See
+pass `--no-build`. `ashx container build` builds one to push to your own registry. See
 [Run ASH in a container](run-in-a-container.md).
 
 ## Nix mode
@@ -340,8 +340,8 @@ newer release:
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network and scans in a Nix shell" -->
 ```bash
-uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0'
-ash scan --mode nix
+uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v4.0.0'
+ashx scan --mode nix
 ```
 
 Which flake supplies the shell's tools:
@@ -386,7 +386,7 @@ network access, and building with `HOMEBREW_FORMULA_BUILD_NETWORK=deny` is not
 supported. The formula also installs
 Node.js, which cdk-nag and npm-audit run on; a `node` already on your `PATH` comes
 first. It does not install the scanners that are separate programs, such as grype,
-syft, opengrep, and cfn-nag, so run `ash dependencies install` as with the other
+syft, opengrep, and cfn-nag, so run `ashx dependencies install` as with the other
 methods.
 
 In container mode, a Homebrew install builds its image from the commit the formula
@@ -413,13 +413,13 @@ with `brew untap awslabs/automated-security-helper`.
 
 The scanner tools and data that ASH installed stay behind. To remove them too:
 
-- `~/.ash/`, which holds the binaries from `ash dependencies install`, their install
+- `~/.ash/`, which holds the binaries from `ashx dependencies install`, their install
   records, and the cfn-guard rules. If you installed with `--bin-path` or
   `ASH_BIN_PATH`, the binaries are in that directory instead, and the cfn-guard rules
   are in `share/cfn-guard-rules` next to it.
 - The scanners installed as uv tools. Name the ones `uv tool list` shows, because
   `uv tool uninstall` fails for a name that is not installed:
-  `uv tool uninstall bandit checkov semgrep cfn-lint zizmor nbconvert`.
+  `uv tool uninstall bandit checkov cfn-lint zizmor nbconvert`.
 - The cfn-nag gem: `gem uninstall cfn-nag`. The gems it depends on stay installed.
 - The scanners' own caches, such as `~/.cache/grype` and `~/.cache/trivy`.
 - The `.ash/ash_output/` directory that each scan writes in the project it scanned.

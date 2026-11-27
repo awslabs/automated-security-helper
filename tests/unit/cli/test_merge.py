@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for ``ash merge``, the recombination half of scan sharding.
+"""Tests for ``ashx merge``, the recombination half of scan sharding.
 
 The load-bearing test here is ``TestShardedEqualsUnsharded``, which asserts the
 property the whole feature rests on: merging n shards of a tree yields the same
@@ -25,6 +25,7 @@ difference by looking at the report, so the check is the only thing standing
 between a partial merge and a false clean bill of health.
 """
 
+import contextlib
 import json
 import os
 import re
@@ -1077,6 +1078,9 @@ class TestResolveResultsFile:
 
         assert resolved == tmp_path / "artifact" / "a" / RESULTS_FILE_NAME
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
     def test_a_symlink_found_beneath_a_directory_is_not_followed(self, tmp_path):
         """A link to a file outside the tree was read; one to a procfs file could block.
 
@@ -1096,6 +1100,9 @@ class TestResolveResultsFile:
 
         assert resolve_results_file(outside) == outside
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
     @pytest.mark.parametrize(
         "link, points_at",
         [
@@ -1142,6 +1149,9 @@ class TestResolveResultsFile:
         # The file is there through the link, so the refusal says why it was passed.
         assert "symlinks beneath it are not followed" in str(excinfo.value)
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
     def test_a_results_directory_named_through_a_link_is_followed(self, tmp_path):
         """The control: the --results value itself is the operator's, link or not."""
         real = tmp_path / "real"
@@ -1237,7 +1247,7 @@ class TestExitCode:
         assert _merged_exit_code(merged, tmp_path, "low", True) == 2
 
     def test_min_severity_gates_the_verdict(self, tmp_path):
-        # Parity with `ash scan --min-severity`. Downgrading every finding to
+        # Parity with `ashx scan --min-severity`. Downgrading every finding to
         # MEDIUM puts them all above the config's MEDIUM threshold and below a
         # critical floor. Without min_severity reaching _compute_exit_code both
         # floors would answer 2, and the second answer would be wrong.
@@ -1297,7 +1307,7 @@ def _suppressed_keys(model: AshAggregatedResults) -> List[Tuple]:
 
 
 def _scan_unsharded(tmp_path, suppressions, ignore_suppressions=False):
-    """What ``ash scan`` produces: aggregate, then the aggregated suppression pass.
+    """What ``ashx scan`` produces: aggregate, then the aggregated suppression pass.
 
     The engine applies ``apply_suppressions_to_sarif`` to the aggregated SARIF just
     before the report phase and then repopulates metrics, which is what
@@ -1323,9 +1333,9 @@ class TestSuppressionsAcrossShards:
     ---------------------
     ``AshExecutionEngine`` applies the aggregated suppression pass to the merged
     SARIF before the report phase, because per-scanner passes miss findings whose
-    paths only become matchable after merge and normalization. ``ash merge`` did
+    paths only become matchable after merge and normalization. ``ashx merge`` did
     not, so a suppression of this kind applied in an unsharded scan and not in a
-    sharded one: identical inputs, ``ash scan`` exit 0, ``ash merge`` exit 2.
+    sharded one: identical inputs, ``ashx scan`` exit 0, ``ashx merge`` exit 2.
 
     Why ``TestShardedEqualsUnsharded`` could not catch it
     -----------------------------------------------------
@@ -1351,7 +1361,7 @@ class TestSuppressionsAcrossShards:
         monkeypatch.chdir(tmp_path_factory.mktemp("cwd"))
 
     def _merge_via_cli(self, tmp_path, suppressions, extra_args=()):
-        """Run the real ``ash merge`` and return (exit code, reloaded results)."""
+        """Run the real ``ashx merge`` and return (exit code, reloaded results)."""
         shard_paths = write_shards(
             tmp_path / "artifacts", build_shards(3, suppressions=suppressions)
         )
@@ -1377,7 +1387,7 @@ class TestSuppressionsAcrossShards:
         """Guards the guard: the suppressions must move the unsharded verdict.
 
         If they did not, every assertion below would compare 2 against 2 and pass
-        whether or not ``ash merge`` applies suppressions -- the same way the
+        whether or not ``ashx merge`` applies suppressions -- the same way the
         no-suppression fixtures did.
         """
         unsuppressed = build_unsharded()
@@ -1435,7 +1445,7 @@ class TestSuppressionsAcrossShards:
         """The other half of the contract has to be expressible.
 
         Without ``--ignore-suppressions`` on merge there is no way to ask a sharded
-        run the question ``ash scan --ignore-suppressions`` answers, so an operator
+        run the question ``ashx scan --ignore-suppressions`` answers, so an operator
         auditing what their suppressions hide could not do it on a sharded scan.
         """
         result, merged = self._merge_via_cli(
@@ -1491,6 +1501,28 @@ class TestMergedReportId:
             shard.metadata.report_id for shard in shards
         }
 
+    @staticmethod
+    def _advancing_clock(monkeypatch):
+        """Replace the clock ``new_report_id`` reads with one that moves.
+
+        Each ``now()`` is a minute after the one before, so two id builds that
+        read the clock can never land in one second. A control the caller runs
+        through ``new_report_id`` itself shows the patch is the one in use."""
+        from datetime import datetime as real_datetime
+        from datetime import timedelta
+
+        from automated_security_helper.models import asharp_model
+
+        ticks = {"at": real_datetime(2031, 1, 1, 0, 0, 0)}
+
+        class AdvancingDatetime(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                ticks["at"] += timedelta(minutes=1)
+                return ticks["at"].replace(tzinfo=tz)
+
+        monkeypatch.setattr(asharp_model, "datetime", AdvancingDatetime)
+
     def test_shard_order_does_not_change_the_id(self):
         shards = build_shards(3)
 
@@ -1506,6 +1538,25 @@ class TestMergedReportId:
         second = merge_shard_results(as_loaded(shards))
 
         assert first.metadata.report_id == second.metadata.report_id
+
+    def test_the_id_does_not_come_from_the_clock(self, monkeypatch):
+        """The id is the shard ids' digest and the base shard's own start time
+        (``_union_report_id`` in cli/merge.py); the clock is read only when that
+        start is unparseable. Two merges of the same shards with a clock that
+        moves a minute between them, so a ``now()``-derived id would differ in
+        its seconds field, give the same id."""
+        shards = build_shards(3)
+        self._advancing_clock(monkeypatch)
+        from automated_security_helper.models.asharp_model import new_report_id
+
+        # The control: the patched clock is the one the id builder reads.
+        assert new_report_id() != new_report_id()
+
+        first = merge_shard_results(as_loaded(shards))
+        second = merge_shard_results(as_loaded(shards))
+
+        assert first.metadata.report_id == second.metadata.report_id
+        assert self.REPORT_ID.match(first.metadata.report_id)
 
     def test_another_sharded_scan_gets_another_id(self):
         one = merge_shard_results(as_loaded(build_shards(3)))
@@ -1572,7 +1623,7 @@ class TestMergeCli:
         # Formats whose ExportFormat value equals the reporter's declared
         # extension. ReportPhase filters on config.extension, so a name that
         # differs from its extension -- "markdown" against "summary.md" -- selects
-        # nothing. That mismatch is ReportPhase's, shared with `ash scan`, and is
+        # nothing. That mismatch is ReportPhase's, shared with `ashx scan`, and is
         # not something merging can or should paper over; asserting on it here
         # would pin another command's quirk into this file's tests.
         args += ["--output-dir", str(output_dir), "--output-formats", "sarif,csv"]
@@ -1687,7 +1738,7 @@ class TestMergeCli:
 
         result = self._invoke(args)
 
-        assert result.exit_code in (0, 2), result.output
+        assert result.exit_code == 2, result.output
         [section] = seen
         assert section["options"] == {}
         assert section["enabled"] is False
@@ -1824,7 +1875,7 @@ class TestMergeCli:
         ):
             result = CliRunner().invoke(app, ["results", "merge", *args])
 
-        assert result.exit_code in (0, 2), result.output
+        assert result.exit_code == 2, result.output
         assert sent, result.output
         assert {f["ProductFields"]["ash/target"] for f in sent} == {"operator-scope"}
 
@@ -2074,10 +2125,10 @@ class TestMergeCli:
         assert not (tmp_path / "merged" / RESULTS_FILE_NAME).exists()
 
     def test_an_output_dir_equal_to_the_cwd_is_relocated(self, tmp_path, monkeypatch):
-        """``ash merge --output-dir .`` must not write over the tree it reports on.
+        """``ashx merge --output-dir .`` must not write over the tree it reports on.
 
-        ``ash scan`` has relocated a colliding ``--output-dir`` since before this
-        command existed, and says so loudly (``cli/scan.py``). ``ash merge`` took the
+        ``ashx scan`` has relocated a colliding ``--output-dir`` since before this
+        command existed, and says so loudly (``cli/scan.py``). ``ashx merge`` took the
         operator's value verbatim and built its ``PluginContext`` with
         ``source_dir=Path.cwd()``, so the two coincided and ASH wrote its reports
         into the directory it was treating as the source tree.
@@ -2114,7 +2165,7 @@ class TestMergeCli:
         assert finding_keys(reloaded) == finding_keys(build_unsharded())
 
     def test_an_output_dir_containing_the_cwd_is_relocated(self, tmp_path, monkeypatch):
-        """Containment, which ``ash scan``'s equality check does not cover.
+        """Containment, which ``ashx scan``'s equality check does not cover.
 
         ``--output-dir ..`` from a subdirectory reaches the same destructive state
         without the two paths ever being equal, so the check has to be "equal to or
@@ -2382,7 +2433,7 @@ class TestRequireScannerCompletionResolution:
     so ``_resolve_require_scanner_completion`` always returned through the
     ``isinstance(value, bool)`` branch and the final literal was dead as far as this
     suite was concerned. Flipping it to ``return False`` left every test in this file
-    passing, while ``ash merge`` over shards carrying no config silently returned to
+    passing, while ``ashx merge`` over shards carrying no config silently returned to
     exit 0 for a merge where a shard had completed nothing.
 
     Every branch is exercised here so the precedence is pinned as an order and not
@@ -3437,24 +3488,29 @@ class TestPythonOnlyShardsNameTheFlagThatLeftScannersOut:
         with patch(
             "automated_security_helper.core.phases.scan_phase.ScannerExecutor"
         ) as executor:
-            for scanner_class in {ScannerPluginBase, *shipped}:
-                patch.object(
-                    scanner_class, "validate_plugin_dependencies", return_value=True
-                ).start()
             double = MagicMock()
             double.completed_scanners = []
             double.run_parallel.return_value = aggregated
             double.run_sequential.return_value = aggregated
             executor.return_value = double
-            try:
+            # The ExitStack stops exactly the patches started here; patch.stopall()
+            # would stop every started patch in the process, an autouse fixture's
+            # included, and this helper runs two or three times in one test.
+            with contextlib.ExitStack() as patches:
+                for scanner_class in {ScannerPluginBase, *shipped}:
+                    patches.enter_context(
+                        patch.object(
+                            scanner_class,
+                            "validate_plugin_dependencies",
+                            return_value=True,
+                        )
+                    )
                 results = phase._execute_phase(
                     aggregated_results=aggregated,
                     shard_index=index,
                     shard_count=count,
                     **phase_kwargs,
                 )
-            finally:
-                patch.stopall()
             queued = [name for name, _, _ in executor.call_args.kwargs["scanner_tasks"]]
         for name in queued:
             results.scanner_results[name] = ScannerTargetStatusInfo(
@@ -3770,7 +3826,7 @@ class TestPythonOnlyShardsNameTheFlagThatLeftScannersOut:
 
 
 class TestCompletedClassifiesUnknownStatusesAsIncomplete:
-    """``ash merge`` is the reader most exposed to a status it does not know.
+    """``ashx merge`` is the reader most exposed to a status it does not know.
 
     It consumes results files written by whatever ASH produced each shard, so a
     fan-out whose runners are mid-upgrade can hand it a status string that is not in
@@ -4202,7 +4258,7 @@ class TestShardContributionIsRefused:
 
 
 class TestMergedExitCodeIncompleteScanners:
-    """``ash merge`` inherits the scan side's completeness gate.
+    """``ashx merge`` inherits the scan side's completeness gate.
 
     The pre-merge refusal above answers "did a whole shard contribute nothing".
     This answers the narrower question the scan side asks: is any single scanner

@@ -132,12 +132,12 @@ def test_a_busy_delivered_source_is_refused_with_the_code_for_anything_else(
 ) -> None:
     from automated_security_helper.cli.mcp import sessions
 
-    session = sessions.get_default_registry().session_for(SESSION)
-    assert session.try_begin_change() is None
+    entry = sessions.get_default_registry().session_for(SESSION)
+    assert entry.try_begin_change() is None
     try:
         response = _scan_directory(directory_path=str(layout["scan"]))
     finally:
-        session.end_change()
+        entry.end_change()
 
     assert response["error_type"] == "source_delivery_busy", response
     _assert_refused_with(response, INTERNAL)
@@ -156,12 +156,12 @@ def test_the_per_session_limit_is_refused_with_the_code_for_anything_else(
         encoding="utf-8",
     )
     monkeypatch.setenv("ASH_CONFIG", str(operator))
-    session = sessions.get_default_registry().session_for(SESSION)
-    assert session.try_start_scan(1)
+    entry = sessions.get_default_registry().session_for(SESSION)
+    assert entry.try_start_scan(1)
     try:
         response = _scan_directory(directory_path=str(layout["scan"]))
     finally:
-        session.scan_returned()
+        entry.scan_returned()
 
     assert response["error_type"] == "session_scan_limit", response
     _assert_refused_with(response, INTERNAL)

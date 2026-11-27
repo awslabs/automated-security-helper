@@ -7,8 +7,8 @@ scanner subprocess inside an OS-level sandbox instead. It is off by default.
 
 <!-- doctest: illustrative reason="needs a sandbox backend on the host and the tool of every enabled scanner" -->
 ```bash
-ash scan --sandbox auto            # best sandbox this machine has
-ash scan --sandbox bwrap --offline # bubblewrap, no scanner gets a network
+ashx scan --sandbox auto            # best sandbox this machine has
+ashx scan --sandbox bwrap --offline # bubblewrap, no scanner gets a network
 ```
 
 or in your ASH config file (`.ash.yaml` at the project root):
@@ -21,7 +21,7 @@ sandbox:
 The values are `off`, `auto`, `bwrap`, `firejail`, `landlock`, and `sandbox-exec`,
 lowercase. YAML reads an unquoted `off` as the boolean false, which ASH reads as the
 mode `off`; an unquoted `on`, `yes` or `true` names no mode, so a scan refuses it with
-exit code 3 and a hint to quote the value. `ash config validate` gives the same
+exit code 3 and a hint to quote the value. `ashx config validate` gives the same
 verdict, with the same exit code.
 
 If you ask for a sandbox and ASH cannot provide one, the affected scanners are recorded
@@ -44,7 +44,7 @@ configuration, whose mode is `off`.
 
 `auto` uses the first backend that can start a sandbox on this machine: on Linux
 `bwrap`, then `firejail`, then `landlock`; on macOS `sandbox-exec`. To require one
-backend, name it: `ash scan --sandbox bwrap`.
+backend, name it: `ashx scan --sandbox bwrap`.
 
 The scan output and `ash.log` say which backend ran each scanner:
 
@@ -66,8 +66,8 @@ sandbox, container mode prints a warning on stderr that it is not applied (whate
 `sandbox.mode=off` as its last override, and runs the scan, so one config file can serve
 local and container runs.
 
-Running `ash scan --sandbox <mode>` yourself inside the image, as in
-`docker run <image> ash scan --sandbox landlock`, is your own opt-in: the scan there is
+Running `ashx scan --sandbox <mode>` yourself inside the image, as in
+`docker run <image> ashx scan --sandbox landlock`, is your own opt-in: the scan there is
 a local one, and it applies the mode. The wrappers below never pass a mode other than
 `off`. When the
 backend cannot run in the image, each scanner is recorded MISSING with the reason, and
@@ -111,13 +111,13 @@ it needs.
   uv directory that `UV_TOOL_DIR`, `UV_PYTHON_INSTALL_DIR` or `UV_CACHE_DIR` names
   is not mounted, with a warning, when it is `/`, a home directory, a directory
   holding one, or a directory directly in one such as `~/.local`.
-- Tool caches (uv's cache, grype's and trivy's databases, semgrep's settings) are
+- Tool caches (uv's cache, grype's and trivy's databases, opengrep's settings) are
   writable only where the writes are thrown away: under bwrap (bubblewrap 0.8+ and
   Linux 5.11+) through an overlay, so writes succeed but are discarded when the
   scanner exits. firejail, Landlock, sandbox-exec, and bwrap without overlay support
   mount them read-only, because a write in place would change what later runs,
   sandboxed or not, read; uv hard-links its cache into the tool environments it
-  builds. There, uv and the scanners that have to write a cache (semgrep, opengrep,
+  builds. There, uv and the scanners that have to write a cache (opengrep,
   npm-audit) get a private, empty one under the results directory, removed after the
   spawn, so uv starts from an empty cache: online it downloads what it runs, offline
   it has nothing cached.
@@ -217,8 +217,8 @@ it needs.
   mounted whole. It is acceptable because `sys.prefix` is the Python the operator
   chose to run ASH with, so keep that environment free of files a scanner must not
   read.
-- The offline rule cache of semgrep and opengrep, the directory
-  `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR` names, is mounted read-only
+- The offline rule cache of opengrep, the directory
+  `OPENGREP_RULES_CACHE_DIR` names, is mounted read-only
   for that scanner wherever it is, `$HOME` included. Under sandbox-exec, the backend
   that restricts which files may be executed, no program runs from it; bwrap,
   firejail and Landlock restrict writes and reads, not exec, there. Only the
@@ -230,7 +230,7 @@ it needs.
   directory itself.
 - The environment is filtered to an allowlist: locale, `PATH`, TLS and proxy settings,
   ASH's and uv's own variables, and the prefixes the scanner declares (`GRYPE_`,
-  `SEMGREP_`, ...). Within those, a name containing `TOKEN`, `PASSWORD`, `SECRET`,
+  `OPENGREP_`, ...). Within those, a name containing `TOKEN`, `PASSWORD`, `SECRET`,
   `AUTH`, `CREDENTIAL`, `API_KEY` or `SESSION`, and any value carrying
   `user:password@` in a URL, is dropped unless the scanner names that exact variable
   (snyk-code names `SNYK_TOKEN`). Cloud credentials and tokens are not passed in.
@@ -331,7 +331,6 @@ it needs.
 |---------|--------------------|--------|---------|
 | bandit | no | uv cache | uv-managed Python |
 | checkov | no | uv cache | uv-managed Python |
-| semgrep | yes (registry rules, `p/ci`) | uv cache, `~/.semgrep`; `$SEMGREP_RULES_CACHE_DIR` read-only | uv-managed Python |
 | opengrep | yes (registry rules) | `~/.opengrep`; `$OPENGREP_RULES_CACHE_DIR` read-only | single binary; on macOS it unpacks itself into a private directory per spawn |
 | grype | yes (database update) | grype database cache (read-only, or a throwaway overlay under bwrap) | single binary |
 | syft | no | syft cache | single binary |
@@ -398,7 +397,7 @@ class MyScanner(ScannerPluginBase[MyScannerConfig]):
         # The same for env_prefixes and env_names, with sandbox.env_scanners.
         env_requires_grant=False,
         # Variables in ASH's own environment naming a directory the tool reads
-        # (semgrep's SEMGREP_RULES_CACHE_DIR): mounted read-only, and not
+        # (opengrep's OPENGREP_RULES_CACHE_DIR): mounted read-only, and not
         # executable under sandbox-exec.
         # An unset or empty variable, or one naming /, $HOME or a directory above
         # it, grants nothing.
@@ -600,7 +599,7 @@ a project that has its own config file, the same as for one that doesn't.
 
 A sandboxed scan does not install tools, for scanners and converters alike:
 installing runs a package's build code and writes uv's tool directory, which a
-sandboxed scanner may only read. Run `ash dependencies install` first; a scanner
+sandboxed scanner may only read. Run `ashx dependencies install` first; a scanner
 whose tool is missing is recorded `MISSING`, and so is the jupyter converter when
 nbconvert is missing, which fails the scan if the tree has notebooks.
 
@@ -645,7 +644,7 @@ The sandbox is for three cases.
    rule pack that runs code.
 2. Scanned content that takes control of a scanner. Scanners parse untrusted input and some
    execute it on purpose: tool configuration files committed to the repository
-   (`trivy.yaml`, `.semgrep.yml`, `.checkov.yaml`, `.npmrc`, `.bandit`) change what a
+   (`trivy.yaml`, opengrep rule files, `.checkov.yaml`, `.npmrc`, `.bandit`) change what a
    scanner does, plugin systems `eval` code found in the tree, and parser bugs give
    code execution or path traversal on write.
 3. Data sent off the machine. Code running in any of the above reading credentials
@@ -755,7 +754,7 @@ ERROR    bandit not run: scanner sandbox unavailable: firejail is not installed
 For a repository you do not trust, on Linux or macOS:
 
 1. Install the scanners first, from a trusted environment, with
-   `ash dependencies install`. Run it from a directory outside the repository, because
+   `ashx dependencies install`. Run it from a directory outside the repository, because
    it reads the ASH config of the directory it runs in. A sandboxed scan does not
    install tools (see
    [Install tools before a sandboxed scan](#install-tools-before-a-sandboxed-scan)),
@@ -927,7 +926,8 @@ then `exec`s the scanner:
   shared memory objects of your user from, `/dev/shm`. bwrap gives each scanner its
   own.
 - `io_uring_setup` fails with ENOSYS rather than EACCES, so runtimes that use io_uring
-  when it exists (semgrep-core) fall back to ordinary syscalls instead of aborting.
+  when it exists (opengrep's bundled core, a fork of semgrep-core) fall back to
+  ordinary syscalls instead of aborting.
 - ABI 6 (Linux 6.12) scoping blocks abstract Unix sockets and signals to processes
   outside the sandbox. Below ABI 6 those are not restricted, and the log says so.
 - `/proc` is readable, but Landlock denies `ptrace`-mode access from a sandboxed
@@ -955,7 +955,7 @@ resolver's (`mDNSResponder`), so Docker Desktop's socket and the launchd SSH age
 stay out of reach. The scanner starts in a new session, with no controlling terminal.
 
 The home directory is the one `HOME` names. When that is not the home your account's
-passwd entry names, as in a CI job or `HOME=/tmp/x ash scan`, the profile denies
+passwd entry names, as in a CI job or `HOME=/tmp/x ashx scan`, the profile denies
 reading both, and the keychain rule covers `Library/Keychains` under both. The paths
 the policy lists are allowed again after those denies, wherever they are, so a tool
 path inside either home stays readable. With `HOME` set to the passwd entry's home,
@@ -986,7 +986,7 @@ to start an app, and launchd starts it outside the sandbox. The keychain files
 themselves (`/Library/Keychains` and `~/Library/Keychains`) are denied after every
 file rule.
 
-semgrep's core runs `/usr/bin/security` only to read the system root certificates,
+opengrep's bundled core runs `/usr/bin/security` only to read the system root certificates,
 through OCaml's ca-certs. For a scanner that declares this need
 (`SandboxRequirements.system_trust_roots`), ASH exports the same certificates before
 the spawn, outside the sandbox, with the same command (`security find-certificate -a

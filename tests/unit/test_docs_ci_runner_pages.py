@@ -114,7 +114,7 @@ def _page(rel: str, text: str):
 
 def _merge_flags() -> tuple[str, ...]:
     """The gate flags ``ash merge`` takes, read from the CLI (cli/merge.py)."""
-    merge = _checks().load_cli().subcommands["merge"]
+    merge = _checks().load_cli().subcommands["results"].subcommands["merge"]
     return tuple(flag for flag in GATE_FLAGS if flag in merge.options)
 
 
@@ -147,7 +147,7 @@ def _gate(args: list[str]) -> tuple[str, tuple[str, ...]] | None:
     none."""
     chosen = [arg for arg in args if arg in (GATES_ON_FINDINGS, NOT_GATING)]
     gates = not chosen or chosen[-1] == GATES_ON_FINDINGS
-    if args[:1] == ["merge"]:
+    if args[:2] == ["results", "merge"]:
         return (MERGE, _merge_flags()) if gates else None
     if args[:1] != ["scan"]:
         return None
@@ -259,11 +259,11 @@ CALL_ARGS_LINE = (
     "      ash-args: --fail-on-incomplete-scanners --no-allow-stale-content-db\n"
 )
 SHARD_LINE = (
-    "          ash scan --mode local --no-progress --no-fail-on-findings "
+    "          ashx scan --mode local --no-progress --no-fail-on-findings "
     "--no-allow-stale-content-db \\\n"
 )
 MERGE_LINE = (
-    "          ash merge --fail-on-findings --fail-on-incomplete-scanners "
+    "          ashx results merge --fail-on-findings --fail-on-incomplete-scanners "
     "--output-dir .ash/ash_output \\\n"
 )
 

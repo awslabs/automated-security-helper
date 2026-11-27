@@ -1,0 +1,29 @@
+
+ Usage: ashx results trend [OPTIONS] [files]...
+
+ Show new, carried and fixed findings over a series of saved ASH scans.
+
+┌─ Arguments ─────────────────────────────────────────────────────────────────────────────────────┐
+│   files      <path>  ASH scan results JSON files, one per run. When every file names one of     │
+│                      ASH's timestamped report ids they are put in chronological order by it;    │
+│                      otherwise they are kept in the order given, which the output says. At      │
+│                      least two.                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
+│ --history          <path>       Read the run history recorded under this scan output directory  │
+│                                 (global_settings.history.enabled) instead of results files.     │
+│ --format           <text|json>  Output format (text or json). [default: text]                   │
+│ --help     -h                   Show this message and exit.                                     │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌─ Structured input ──────────────────────────────────────────────────────────────────────────────┐
+│ --cli-json-input               PATH  Read parameter values from a JSON object: a path, a        │
+│                                      file:// URI, or '-' for stdin. Keys are parameter names    │
+│                                      (output_dir) or long flag spellings (--output-dir). Flags  │
+│                                      given on the command line override the file; the file      │
+│                                      overrides environment variables. Run with                  │
+│                                      --generate-cli-skeleton for a template.                    │
+│ --generate-cli-skeleton              Print a JSON template for --cli-json-input, listing every  │
+│                                      parameter of this command with its default, or null where  │
+│                                      it is required or an environment variable backs it, and    │
+│                                      exit.                                                      │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘

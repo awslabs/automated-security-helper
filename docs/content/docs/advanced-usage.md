@@ -10,7 +10,7 @@ ASH v3 supports four execution modes:
 
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
-ash --mode local
+ashx --mode local
 ```
 
 - Runs the scan in the local Python process
@@ -22,9 +22,9 @@ ash --mode local
 ### Tools inside the scanned directory
 
 ASH does not start a scanner or any other tool that it finds inside the directory it
-is scanning. `uv run ash scan --source-dir .` puts the repository's `.venv/bin` first on `PATH`,
+is scanning. `uv run ashx scan --source-dir .` puts the repository's `.venv/bin` first on `PATH`,
 and `npm run` does the same with `node_modules/.bin`, so under either a scanner
-installed in the project, such as a `bandit` or `semgrep` dependency, is part of the
+installed in the project, such as a `bandit` or `checkov` dependency, is part of the
 repository being scanned. ASH skips it and uses the next copy on `PATH`, or the one
 `uv tool` installs. If there is none, the scanner is reported as MISSING, with the
 in-tree path in its `missing_reason`, in the log, and in the message the incomplete
@@ -44,7 +44,7 @@ To run tools from inside the scanned directory, pass `--allow-in-tree-tools` (or
 warning naming each one.
 This also covers the scanner sandbox's own programs (`bwrap`, `firejail`, `readlink`
 and `true`). A
-repository's configuration file cannot turn this on, and `ash mcp` ignores both: an
+repository's configuration file cannot turn this on, and `ashx mcp` ignores both: an
 MCP client's scans never run a tool from inside a scanned or delivered directory, so
 for MCP use, install scanners outside the repository. See
 [Troubleshoot](../how-to/troubleshoot.md#a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree)
@@ -54,7 +54,7 @@ for the message and the fixes.
 
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
-ash --mode container
+ashx --mode container
 ```
 
 - Builds the ASH container image and runs the whole scan inside it
@@ -66,7 +66,7 @@ ash --mode container
 
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
-ash --mode precommit
+ashx --mode precommit
 ```
 
 - A local scan that runs only bandit, detect-secrets, checkov, cdk-nag and npm-audit,
@@ -82,7 +82,7 @@ ash --mode precommit
 
 <!-- doctest: illustrative reason="needs Nix" -->
 ```bash
-ash --mode nix
+ashx --mode nix
 ```
 
 - Runs the scan inside `nix develop`, whose shell supplies every scanner at a pinned
@@ -98,13 +98,13 @@ where each one comes from:
 
 | Scanner | Tool | How you get it |
 |---|---|---|
-| actionlint | `actionlint` | `ash dependencies install` downloads a pinned release |
-| bandit, checkov, semgrep, cfn-lint, zizmor | same name | ASH installs them with `uv tool` during a scan, or `ash dependencies install` does it ahead of time |
+| actionlint | `actionlint` | `ashx dependencies install` downloads a pinned release |
+| bandit, checkov, cfn-lint, zizmor | same name | ASH installs them with `uv tool` during a scan, or `ashx dependencies install` does it ahead of time |
 | cdk-nag | Python packages and Node.js | the `cdk` extra (see [Install ASH](../how-to/install.md#extras)), plus Node.js |
-| cfn-guard | `cfn-guard` and the Guard Rules Registry rules | `ash dependencies install` downloads both |
-| cfn-nag | `cfn_nag_scan` | `ash dependencies install` runs `gem install cfn-nag`, which needs Ruby and a C compiler |
+| cfn-guard | `cfn-guard` and the Guard Rules Registry rules | `ashx dependencies install` downloads both |
+| cfn-nag | `cfn_nag_scan` | `ashx dependencies install` runs `gem install cfn-nag`, which needs Ruby and a C compiler |
 | detect-secrets | Python library | part of ASH |
-| gitleaks, grype, opengrep, syft, trivy | same name | `ash dependencies install` downloads a pinned release |
+| gitleaks, grype, opengrep, syft, trivy | same name | `ashx dependencies install` downloads a pinned release |
 | npm-audit | `npm` | install Node.js; a `yarn.lock` or `pnpm-lock.yaml` also needs yarn or pnpm |
 
 The `jupyter` converter, which converts notebooks for the scanners, uses `nbconvert`,
@@ -121,10 +121,10 @@ ASH looks up each program it starts, scanners and `uv` included, in this order:
    through the current working directory. On Windows, ASH tries the names with
    `.exe`, `.bat`, and `.cmd` before the bare name.
 2. ASH's bin directory: the directory in `ASH_BIN_PATH`, or `~/.ash/bin` if it is not
-   set or is empty. This is where `ash dependencies install` puts tools, so you do not
+   set or is empty. This is where `ashx dependencies install` puts tools, so you do not
    need to add it to `PATH`. A `~` at the start of the value is expanded. A relative
    `ASH_BIN_PATH` is not used: ASH logs a warning that names it and uses `~/.ash/bin`,
-   for lookups and for `ash dependencies install` alike.
+   for lookups and for `ashx dependencies install` alike.
    `~/.ash/bin`, and a `~` in `ASH_BIN_PATH`, need a usable home directory: `HOME`
    when it is set to an absolute path, or, when `HOME` is not set, the home in your
    passwd entry if that is absolute (on Windows, the profile directory). With `HOME`
@@ -155,11 +155,11 @@ During a scan, a copy found inside the scanned directory is skipped, and the loo
 goes on to the next one: see
 [Tools inside the scanned directory](#tools-inside-the-scanned-directory).
 
-## Install tools with `ash dependencies install`
+## Install tools with `ashx dependencies install`
 
 <!-- doctest: illustrative reason="downloads scanner tools from GitHub releases and PyPI" -->
 ```bash
-ash dependencies install
+ashx dependencies install
 ```
 
 For each scanner, converter, and reporter that has an install step, it:
@@ -167,7 +167,7 @@ For each scanner, converter, and reporter that has an install step, it:
 - downloads the pinned release of actionlint, cfn-guard (with the rules it evaluates),
   gitleaks, grype, opengrep, syft, and trivy, and checks each program's download against
   the SHA256 that ASH pins.
-- installs bandit, checkov, semgrep, cfn-lint, zizmor, and nbconvert with
+- installs bandit, checkov, cfn-lint, zizmor, and nbconvert with
   `uv tool install`, within each scanner's accepted version range. These come from the
   package index uv is configured with, PyPI by default, and ASH checks no digest for
   them. See [uv settings](#uv-settings) for the uv configuration they read.
@@ -177,7 +177,7 @@ For each scanner, converter, and reporter that has an install step, it:
 - for cdk-nag, installs the `cdk` extra's packages (aws-cdk-lib, cdk-nag, and
   constructs) into ASH's own environment.
 
-`--tool` installs only the tools you name, such as `ash dependencies install
+`--tool` installs only the tools you name, such as `ashx dependencies install
 --tool grype --tool syft`, and `--bin-path` chooses the directory they are
 installed into. A relative `--bin-path` is read against the directory you run the
 command in. A scan looks for tools in a `--bin-path` directory only when
@@ -191,17 +191,17 @@ lists the ones it knows, installs nothing, and starts no program.
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash dependencies install --tool gryp
+ashx dependencies install --tool gryp
 ```
 
-See [`ash dependencies install`](../reference/cli.md#dependencies-install) for every
+See [`ashx dependencies install`](../reference/cli.md#dependencies-install) for every
 option, and [Scanners reference](../reference/scanners.md) for the per-scanner options
 that change a tool's version (`tool_version`) or how long an install may take
 (`install_timeout`).
 
 ## Installs during a scan
 
-When bandit, checkov, semgrep, cfn-lint, zizmor, or nbconvert is not available, ASH
+When bandit, checkov, cfn-lint, zizmor, or nbconvert is not available, ASH
 installs it with `uv tool install` during the scan, and the scan takes longer. ASH
 runs the uv installed with it, or else a `uv` it finds as described in
 [Where ASH looks for a tool](#where-ash-looks-for-a-tool), so `uv` does not have to be
@@ -214,7 +214,7 @@ ASH does not install scanners during a scan when:
 - the scan is offline (`--offline` or `ASH_OFFLINE`). uv then runs offline, so a tool
   that is installed or in uv's cache still runs, and any other shows as MISSING.
 - the scan runs in a sandbox, which is `--sandbox` with any mode but `off`. Run
-  `ash dependencies install` first.
+  `ashx dependencies install` first.
 
 ## uv settings
 
@@ -228,7 +228,7 @@ read no `uv.toml`, neither the repository's nor your own nor the system one.
 filesystem root instead, where only an administrator can put a `uv.toml`.
 
 The `uv tool install`, `uv tool run`, and `uv tool list` commands that ASH runs for
-bandit, checkov, semgrep, cfn-lint, zizmor, and nbconvert get no such flag. uv does
+bandit, checkov, cfn-lint, zizmor, and nbconvert get no such flag. uv does
 not read project files for `uv tool` commands, so the scanned repository cannot
 configure them, and they read your user `uv.toml` and the system one, where an operator
 usually points uv at an index mirror.
@@ -245,17 +245,17 @@ scanner's `missing_reason` in `ash_aggregated_results.json`. A MISSING scanner m
 the scan incomplete, and by default (`fail_on_incomplete_scanners`) an incomplete
 scan exits 1.
 
-For most scanners, `ash dependencies install` installs the tool. To install one
-scanner's tool, name the scanner, as in `ash dependencies install --tool grype`. Four
+For most scanners, `ashx dependencies install` installs the tool. To install one
+scanner's tool, name the scanner, as in `ashx dependencies install --tool grype`. Four
 scanners need more:
 
 - detect-secrets ships with ASH as one of its Python dependencies. Reinstall ASH.
 - cdk-nag runs in ASH's own Python and needs Node.js, which ASH does not install.
-  `ash dependencies install --tool cdk-nag` installs its Python packages.
+  `ashx dependencies install --tool cdk-nag` installs its Python packages.
 - npm-audit needs Node.js and npm, and yarn or pnpm to audit a `yarn.lock` or a
   `pnpm-lock.yaml`. ASH installs none of them.
 - cfn-nag is a Ruby gem. It needs RubyGems and a C compiler (on Windows, a Ruby
-  DevKit) before `ash dependencies install --tool cfn-nag` can install it. Run it
+  DevKit) before `ashx dependencies install --tool cfn-nag` can install it. Run it
   on a Ruby built from source (3.1, 3.3 and 3.4 were tried), or run ASH with
   `--mode container`, whose image runs cfn-nag on the Ruby 3.1 package it
   installs. Homebrew's portable-ruby, the Ruby that Homebrew bundles to run
@@ -264,13 +264,13 @@ scanners need more:
   that Ruby, which has no public `parse` method, so every template is reported
   as one ASH could not evaluate. Homebrew's `ruby` formula has not been tried.
 
-If you do not need a scanner, leave it out, as in `ash --exclude-scanners npm-audit`.
+If you do not need a scanner, leave it out, as in `ashx --exclude-scanners npm-audit`.
 It is then recorded SKIPPED, which does not make the scan incomplete.
 
 ## Platform limits
 
-- Windows: semgrep and opengrep are off by default. semgrep is SKIPPED even when you
-  turn it on, because it publishes no Windows build. cfn-nag needs a Ruby DevKit. On
+- Windows: opengrep is off by default (also when selected as the alias `semgrep`).
+  cfn-nag needs a Ruby DevKit. On
   Windows on arm64, grype, opengrep and trivy publish no build. ASH does not look for
   tools in `/usr/local/bin`.
 - macOS: each release binary ASH downloads (actionlint, cfn-guard, gitleaks, grype,
@@ -281,7 +281,7 @@ It is then recorded SKIPPED, which does not make the scan incomplete.
   distribution such as Alpine it may not run.
 
 A SKIPPED scanner does not make the scan incomplete, so on Windows a scan does not
-fail for lacking semgrep and opengrep, as long as another selected scanner runs.
+fail for lacking opengrep, as long as another selected scanner runs.
 
 ## Custom Plugins
 
@@ -342,7 +342,7 @@ ash_plugin_modules:
 
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
-ash --ash-plugin-modules my_ash_plugins
+ashx --ash-plugin-modules my_ash_plugins
 ```
 
 ## Offline Mode
@@ -352,13 +352,13 @@ For air-gapped environments:
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Build an offline image
-ash container build --offline --offline-semgrep-rulesets p/ci
+ashx container build --offline --offline-rulesets p/ci
 
 # Run in offline mode
-ash --mode container --offline
+ashx --mode container --offline
 
 # On a host without network access, run the image without rebuilding it
-ash --mode container --offline --no-build
+ashx --mode container --offline --no-build
 ```
 
 Container mode builds the image before every scan unless given `--no-build`.
@@ -369,8 +369,8 @@ rest of that day, so the first build on a new day needs network access. With
 
 An offline image's databases are frozen at build time, and ASH fails a scan whose
 database is past its bound: grype's 5 days (120h) after it was built, the offline
-semgrep and opengrep rulesets 30 days after they were downloaded. Rebuild the image
-(`ash container build --offline`) at least that often. To scan with an older image
+opengrep rulesets 30 days after they were downloaded. Rebuild the image
+(`ashx container build --offline`) at least that often. To scan with an older image
 anyway, pass `--allow-stale-content-db` or set `content_db_staleness: warn`; the scan
 then passes and every report names the stale database. See
 [What happens when a database is stale](../concepts/content-databases.md#what-happens-when-a-database-is-stale).
@@ -379,16 +379,16 @@ then passes and every report names the stale database. See
 
 Offline mode is decided when each scanner runs, from these sources in order:
 
-1. ASH's offline mode: `--offline` on `ash scan`, `ASH_OFFLINE=true` in the
-   environment, or an image built with `ash container build --offline`. It applies to
+1. ASH's offline mode: `--offline` on `ashx scan`, `ASH_OFFLINE=true` in the
+   environment, or an image built with `ashx container build --offline`. It applies to
    every scanner, and no scanner option turns it off.
-2. A scanner's own `options.offline: true` (checkov, grype, opengrep, semgrep, syft,
+2. A scanner's own `options.offline: true` (checkov, grype, opengrep, syft,
    trivy, trivy-repo). It runs that one scanner offline while the rest of the scan
    stays online. npm-audit has the option too, and it makes npm-audit `MISSING` (or
    `SKIPPED` without a lockfile) rather than run it offline; see below.
 
 `options.offline: false` is the default and means "follow ASH's offline mode". It does
-not put a scanner back online during an `--offline` scan; `ash config init` writes
+not put a scanner back online during an `--offline` scan; `ashx config init` writes
 `offline: false` for every scanner that has the option, so a generated config would
 otherwise undo the flag.
 
@@ -448,21 +448,23 @@ over the network on their own:
   scanned repository's `.secrets.baseline` or any config says. See
   [What each tier may set](../concepts/trust-model.md#what-each-tier-may-set).
 
-#### Seeding the semgrep and opengrep rule cache
+<a id="seeding-the-semgrep-and-opengrep-rule-cache"></a>
 
-Offline, semgrep and opengrep read their rules only from a local cache: the directory
-named by `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR`, which must contain
-at least one `.yaml` or `.yml` rule file. If the variable is unset or the directory
-has no rule files, that scanner is reported MISSING and the scan exits 1. ASH does not
-fall back to downloading the rules.
+#### Seeding the opengrep rule cache
+
+Offline, opengrep reads its rules only from a local cache: the directory named by
+`OPENGREP_RULES_CACHE_DIR`, which must contain at least one `.yaml` or `.yml` rule
+file. If the variable is unset or the directory has no rule files, the scanner is
+reported MISSING and the scan exits 1. ASH does not fall back to downloading the
+rules.
 
 For the container, build the image with `--offline`. The build downloads each ruleset
-in `--offline-semgrep-rulesets` (space-separated, default `p/ci`) into
-`/deps/.semgrep` and `/deps/.opengrep` and sets both variables:
+in `--offline-rulesets` (space-separated, default `p/ci`; the deprecated spelling
+`--offline-semgrep-rulesets` still works and warns) into `/deps/.opengrep` and sets `OPENGREP_RULES_CACHE_DIR`:
 
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
-ash container build --offline --offline-semgrep-rulesets "p/ci p/python"
+ashx container build --offline --offline-rulesets "p/ci p/python"
 ```
 
 For a local scan, download the rulesets yourself while online, using the same URL the
@@ -472,20 +474,17 @@ falls back to the oldest rule file's modification time, which a copy resets.
 
 <!-- doctest: illustrative reason="needs the network to download rulesets" -->
 ```bash
-export SEMGREP_RULES_CACHE_DIR="$HOME/.cache/ash/semgrep"
 export OPENGREP_RULES_CACHE_DIR="$HOME/.cache/ash/opengrep"
-mkdir -p "$SEMGREP_RULES_CACHE_DIR" "$OPENGREP_RULES_CACHE_DIR"
+mkdir -p "$OPENGREP_RULES_CACHE_DIR"
 for ruleset in p/ci; do
-  curl -sSf "https://semgrep.dev/c/${ruleset}" -o "$SEMGREP_RULES_CACHE_DIR/$(basename "$ruleset").yml"
+  curl -sSf "https://semgrep.dev/c/${ruleset}" -o "$OPENGREP_RULES_CACHE_DIR/$(basename "$ruleset").yml"
 done
-cp "$SEMGREP_RULES_CACHE_DIR"/*.yml "$OPENGREP_RULES_CACHE_DIR/"
-date -u +%Y-%m-%dT%H:%M:%SZ | tee "$SEMGREP_RULES_CACHE_DIR/.ash-rules-fetched-at" \
-  > "$OPENGREP_RULES_CACHE_DIR/.ash-rules-fetched-at"
+date -u +%Y-%m-%dT%H:%M:%SZ > "$OPENGREP_RULES_CACHE_DIR/.ash-rules-fetched-at"
 
-ash --mode local --offline
+ashx --mode local --offline
 ```
 
-Copy the cache directories to the air-gapped host and export the same two variables
+Copy the cache directory to the air-gapped host and export the same variable
 there. Repeat the download at least every 30 days, or the scan fails as stale.
 
 Under `--sandbox`, the sandbox mounts the directory each variable names read-only for
@@ -494,7 +493,7 @@ hides. Only the variable in ASH's own environment grants it: a rules path in a
 scanner's options, which the scanned repository can set, is not mounted, and an
 empty or relative value grants nothing. A variable naming a file, `/`, `$HOME` or a
 directory that holds `$HOME` is not mounted either, with a warning; point it at the
-rules directory itself. If semgrep or opengrep still cannot read its rules, it exits 7 and is recorded
+rules directory itself. If opengrep still cannot read its rules, it exits 7 and is recorded
 `ERROR`, and the scan exits 1.
 
 ## Customizing Scan Phases
@@ -504,13 +503,13 @@ ASH v3 executes scans in phases:
 <!-- doctest: illustrative reason="runs full scans of the current directory with every enabled scanner, which need their tools and network access" -->
 ```bash
 # Run only specific phases (give --phases once for each phase)
-ash --phases convert --phases scan
+ashx --phases convert --phases scan
 
 # Skip report generation
-ash --phases convert --phases scan
+ashx --phases convert --phases scan
 
 # Include inspection phase
-ash --phases convert --phases scan --phases report --phases inspect
+ashx --phases convert --phases scan --phases report --phases inspect
 ```
 
 ## Using Existing Results
@@ -520,10 +519,10 @@ You can generate reports from existing scan results:
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Use existing results file
-ash --use-existing --output-dir /path/to/results
+ashx --use-existing --output-dir /path/to/results
 
 # Generate a specific report format
-ash report --format html --output-dir /path/to/results
+ashx results report --format html --output-dir /path/to/results
 ```
 
 ## Interactive Findings Explorer
@@ -533,7 +532,7 @@ ASH v3 includes an interactive TUI for exploring findings:
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Launch the findings explorer
-ash inspect findings --output-dir /path/to/results
+ashx results inspect findings --output-dir /path/to/results
 ```
 
 A finding's detail view shows the code snippet its results hold. For a finding with
@@ -551,10 +550,10 @@ directory, a symlink that leads out of it, or results in any other directory sho
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Use Podman instead of Docker
-ash --mode container --oci-runner podman
+ashx --mode container --oci-runner podman
 
 # Use Finch
-ash --mode container --oci-runner finch
+ashx --mode container --oci-runner finch
 ```
 
 ### Custom Container Images
@@ -569,7 +568,7 @@ rebuild cadence it commits you to, and offline builds.
 ```bash
 # Specify a custom container image
 export ASH_IMAGE_NAME="my-registry/ash:custom"
-ash --mode container
+ashx --mode container
 ```
 
 ### Building Custom Images
@@ -577,7 +576,7 @@ ash --mode container
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Build a custom image
-ash container build --build-target ci --custom-containerfile ./my-dockerfile
+ashx container build --build-target ci --custom-containerfile ./my-dockerfile
 ```
 
 ## Advanced Configuration Overrides
@@ -585,9 +584,11 @@ ash container build --build-target ci --custom-containerfile ./my-dockerfile
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Complex configuration overrides
-ash --config-overrides 'scanners.semgrep.options.config=p/owasp-top-ten'
-ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
+ashx --config-overrides 'scanners.opengrep.options.config=p/owasp-top-ten'
+ashx --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
+
+The semgrep scanner was removed in v4; the name `semgrep` is an alias that resolves to the opengrep scanner, so an override that names the semgrep section keeps working (shared options apply to opengrep; semgrep-only options are dropped with a warning).
 
 ## Working with Suppressions
 
@@ -596,10 +597,10 @@ ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reaso
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Add a suppression rule
-ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-123", "path": "src/example.py", "reason": "False positive"}]'
+ashx --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-123", "path": "src/example.py", "reason": "False positive"}]'
 
 # Add a suppression with line range and expiration
-ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-456", "path": "src/*.js", "line_start": 10, "line_end": 15, "reason": "Known issue", "expiration": "2025-12-31"}]'
+ashx --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-456", "path": "src/*.js", "line_start": 10, "line_end": 15, "reason": "Known issue", "expires": "2025-12-31"}]'
 ```
 
 ### Inline code suppressions
@@ -649,10 +650,10 @@ suppressions start with `"(ASH)"` while inline suppressions start with
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Run a scan ignoring all suppression rules, ignore_paths included
-ash --ignore-suppressions
+ashx --ignore-suppressions
 
 # Useful for verifying if suppressed issues have been fixed
-ash --ignore-suppressions --output-dir ./verification-scan
+ashx --ignore-suppressions --output-dir ./verification-scan
 ```
 
 ## Programmatic Usage
@@ -670,7 +671,7 @@ results = run_ash_scan(
     output_dir="/path/to/output",
     mode=RunMode.local,
     strategy=ExecutionStrategy.PARALLEL,
-    scanners=["bandit", "semgrep"],
+    scanners=["bandit", "opengrep"],
     config_overrides=["scanners.bandit.enabled=true"],
     # Return the results even when there are actionable findings
     fail_on_findings=False,
@@ -686,7 +687,7 @@ as a misspelled `fail_on_finding`, raises `TypeError` naming it; earlier version
 accepted it and ran the scan without it.
 
 The call returns the aggregated results only when the scan's exit code is 0.
-Otherwise it ends the way `ash scan` does, by raising `SystemExit` with that code
+Otherwise it ends the way `ashx scan` does, by raising `SystemExit` with that code
 (see [Exit codes](../reference/exit-codes.md)): 2 for actionable findings while
 `fail_on_findings` is on, which is the default, and 1 for an incomplete scan, for
 example a selected scanner whose tool is not installed. That exit 1 is a
@@ -696,7 +697,7 @@ content databases) and whose `results` attribute holds the results. A run ASH re
 or gives up (3 for a config that does not validate or files git tracks where the scan
 writes, 5 for a scanner selection that names nothing, 1 for an error during the scan)
 raises `ScanRefusedExit`, a `SystemExit` subclass whose `message` attribute is the
-text `ash scan` prints for it.
+text `ashx scan` prints for it.
 
 ### Logging to your own handler
 
@@ -720,7 +721,7 @@ logging.getLogger("ash").addHandler(handler)
 
 ## CI/CD Integration
 
-> **Tip**: The examples below use pinned versions (`@v3.8.0`) for reproducibility. The `v3` floating tag is frozen at v3.8.0 and no longer moves to new releases, so pin a release tag in CI/CD.
+> **Tip**: The examples below use pinned versions (`@v4.0.0`) for reproducibility. Floating major tags such as `v4` no longer move to new releases, so pin a release tag in CI/CD.
 
 ### GitHub Actions
 
@@ -744,7 +745,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.8.0
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
       - name: Run ASH scan
         # Workflow commands are stopped around the scan, as the reusable scan
         # workflow does: tool output is untrusted, and a `::`-line in it would
@@ -757,7 +758,7 @@ jobs:
           fi
           printf '::stop-commands::%s\n' "${token}"
           status=0
-          ash --mode local 2>&1 || status=$?
+          ashx --mode local 2>&1 || status=$?
           printf '\n::%s::\n' "${token}"
           exit "${status}"
       - name: Upload scan results
@@ -779,8 +780,8 @@ jobs:
 ash-scan:
   image: python:3.11
   script:
-    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.8.0
-    - ash --mode local
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
+    - ashx --mode local
   artifacts:
     paths:
       - .ash/ash_output/reports
@@ -794,13 +795,13 @@ Both examples keep `scanners/` and `converted/` out of the artifact: those hold 
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Run scanners in parallel (default)
-ash --strategy parallel
+ashx --strategy parallel
 
 # Run scanners sequentially
-ash --strategy sequential
+ashx --strategy sequential
 
 # Clean up temporary files after scan
-ash --cleanup
+ashx --cleanup
 ```
 
 ## Debugging
@@ -808,13 +809,13 @@ ash --cleanup
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Enable debug logging
-ash --debug
+ashx --debug
 
 # Enable verbose logging
-ash --verbose
+ashx --verbose
 
 # Disable progress display
-ash --no-progress
+ashx --no-progress
 ```
 
 ### Scanner Validation

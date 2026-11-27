@@ -293,7 +293,14 @@ def test_merge_refuses_a_named_config_that_does_not_parse(run):
     from tests.unit.cli.test_merge import build_shards, write_shards
 
     run.write_named(UNPARSABLE)
-    args = ["merge", "--config", str(run.named), "--output-dir", str(run.output)]
+    args = [
+        "results",
+        "merge",
+        "--config",
+        str(run.named),
+        "--output-dir",
+        str(run.output),
+    ]
     for path in write_shards(run.root / "shards", build_shards(2)):
         args += ["--results", str(path)]
 

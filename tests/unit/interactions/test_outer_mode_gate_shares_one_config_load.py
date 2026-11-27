@@ -180,7 +180,10 @@ def test_a_gate_load_that_failed_some_other_way_is_read_again_once(
     assert calls["reader_loads"] == 1, calls
 
 
-def test_a_local_scan_loads_the_config_once_for_both_readers(tmp_path, monkeypatch):
+def test_a_local_scan_makes_no_pre_read_for_either_reader(tmp_path, monkeypatch):
+    """The orchestrator's resolved config decides the local gate, so neither
+    exit-code field is pre-read from the file (see
+    test_a_local_scan_makes_no_config_pre_read.py)."""
     src, config = _tree(tmp_path, True, False)
     calls = _counting_loads(monkeypatch)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
@@ -200,7 +203,7 @@ def test_a_local_scan_loads_the_config_once_for_both_readers(tmp_path, monkeypat
             show_summary=False,
         )
 
-    assert calls["reader_loads"] == 1, calls
+    assert calls["reader_loads"] == 0, calls
 
 
 def test_a_config_override_is_the_value_the_container_run_is_handed(

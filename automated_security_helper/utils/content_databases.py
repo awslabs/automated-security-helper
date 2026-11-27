@@ -67,12 +67,12 @@ trivy's vulnerability database
     for, and ``trivy``, named in ``also_read_by``. Both are held to the same bound and
     measured the same way, each under its own name.
 
-semgrep and opengrep offline rulesets
+opengrep offline rulesets
     Downloaded into the image at build time when ``OFFLINE=YES`` (Dockerfile, the
-    ``OFFLINE_SEMGREP_RULESETS`` loop), which also writes the download time to
-    ``RULESET_FETCHED_AT_FILE`` in each cache directory. Neither tool has any staleness
-    notion for a local rules file, so the bound here is ASH's own choice and not a tool
-    default; the reasoning is on the entry. Online, semgrep and opengrep fetch the rules at
+    ``OFFLINE_SEMGREP_RULESETS`` loop; the build-arg keeps its historical name), which also
+    writes the download time to ``RULESET_FETCHED_AT_FILE`` in the cache directory. The tool
+    has no staleness notion for a local rules file, so the bound here is ASH's own choice and
+    not a tool default; the reasoning is on the entry. Online, opengrep fetches the rules at
     scan time and no local copy is involved, so the check applies to offline runs only.
 
 Where a stale database used to be used SILENTLY

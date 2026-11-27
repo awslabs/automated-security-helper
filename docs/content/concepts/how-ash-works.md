@@ -4,7 +4,7 @@ ASH runs a set of third-party security scanners over one directory, collects wha
 
 ## Phases
 
-A scan runs up to three phases, always in this order: convert, scan, and report. `--phases` runs a subset of them, and `ash report` renders reports again from an existing results file without scanning.
+A scan runs up to three phases, always in this order: convert, scan, and report. `--phases` runs a subset of them, and `ashx results report` renders reports again from an existing results file without scanning.
 
 ```mermaid
 flowchart LR
@@ -20,7 +20,7 @@ flowchart LR
     report -.-> inspect[Inspect phase, optional<br/>analysis/]
 ```
 
-The dotted arrow marks the optional inspect phase, which runs after the report phase only when you ask for it with `ash scan --inspect`. Naming `inspect` in `--phases` replaces the default phase list, so include the other phases there as well. It analyzes the SARIF fields of the finished scan and writes the result to `analysis/` in the output directory. It does not scan anything.
+The dotted arrow marks the optional inspect phase, which runs after the report phase only when you ask for it with `ashx scan --inspect`. Naming `inspect` in `--phases` replaces the default phase list, so include the other phases there as well. It analyzes the SARIF fields of the finished scan and writes the result to `analysis/` in the output directory. It does not scan anything.
 
 In the convert phase, converters turn files that scanners cannot read into files they can. Two converters ship with ASH:
 
@@ -37,12 +37,12 @@ Where the scan runs is a separate choice, the run mode. `local` (the default) ru
 
 ## How scanners are selected
 
-ASH ships 17 built-in scanners, all enabled by default except semgrep and opengrep on Windows. For each scanner it knows about, ASH asks these questions in order and records the first answer that stops the scanner:
+ASH ships 16 built-in scanners, all enabled by default except opengrep on Windows. For each scanner it knows about, ASH asks these questions in order and records the first answer that stops the scanner:
 
-1. Is it enabled? `scanners.<name>.enabled: false` in the config turns a scanner off. `--scanners` cannot turn it back on; `ash scan --config-overrides scanners.<name>.enabled=true` can.
+1. Is it enabled? `scanners.<name>.enabled: false` in the config turns a scanner off. `--scanners` cannot turn it back on; `ashx scan --config-overrides scanners.<name>.enabled=true` can.
 2. Was it selected? `--scanners` is an allowlist and `--exclude-scanners` removes names from it. A scanner that is not selected is recorded SKIPPED.
 3. Does it need only Python, when `--python-only` is set? A scanner that runs a tool of its own is recorded SKIPPED.
-4. Does it support this platform? A scanner that declares the operating system unsupported (semgrep on Windows) is recorded SKIPPED.
+4. Does it support this platform? A scanner that declares the operating system unsupported is recorded SKIPPED.
 5. Are its dependencies there? A scanner whose tool cannot be found, or is found only inside the scanned directory, is recorded MISSING. A scanner that the scan has nothing for is recorded SKIPPED instead, for example cdk-nag and cfn-nag with no CloudFormation template, or npm-audit with no lockfile beside a `package.json`.
 
 ASH asks the first four before it looks for the scanner's tool, so a scanner they leave out is SKIPPED whether or not its tool is installed.
@@ -75,7 +75,6 @@ The aggregated SARIF has a single run. Each scanner's results are appended to it
 
 ASH does not deduplicate findings, within a scan or across shards. When two scanners report the same problem, the results contain two findings, each with its own scanner name and rule ID. The default scanner set overlaps in several places:
 
-- semgrep and opengrep both run the `p/ci` ruleset;
 - grype and trivy both match dependency manifests against vulnerability advisories;
 - detect-secrets and gitleaks both look for secrets;
 - several scanners evaluate CloudFormation templates.
@@ -84,7 +83,7 @@ This has three consequences. Finding counts are counts of scanner results, not o
 
 For secret detections, the ASFF findings of the `asff` and `aws-security-hub` reporters say which of them are about one secret: they share an `ash/correlationId`, derived from where the secret is and not from who reported it. The findings stay separate. See [AWS reporters](../plugins/aws.md#aws-security-hub).
 
-Sharding splits a scan by scanner, not by file, so `ash merge` of the shards does not count any finding twice. See [Scale to large repositories](../how-to/scale-large-repos.md).
+Sharding splits a scan by scanner, not by file, so `ashx results merge` of the shards does not count any finding twice. See [Scale to large repositories](../how-to/scale-large-repos.md).
 
 ## Where the exit code comes from
 
@@ -92,4 +91,4 @@ ASH decides the exit code after the report phase, from the scanner rows and the 
 
 ## Plugins
 
-Scanners, reporters, and converters are all plugins, and so are event subscribers, which run code on scan events such as a phase starting or a scanner finishing. The built-in plugins live in one package that every scan loads. Other plugin packages, including the alpha scanners and the AWS reporters that ship with ASH, load in `ash scan` only when a plugin module list names them: `ash_plugin_modules` in the config, `--config-overrides`, `--ash-plugin-modules`, `ASH_PLUGIN_MODULES`, or the Python API's `ash_plugin_modules` argument. For the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do). A plugin module is imported into ASH's own process and runs with ASH's access, outside the scanner sandbox; only the subprocesses a scanner starts through ASH are sandboxed. Which config files may name which modules is part of the [trust model](trust-model.md). [Plugins](../plugins/index.md) explains the plugin model and how to write one.
+Scanners, reporters, and converters are all plugins, and so are event subscribers, which run code on scan events such as a phase starting or a scanner finishing. The built-in plugins live in one package that every scan loads. Other plugin packages, including the alpha scanners and the AWS reporters that ship with ASH, load in `ashx scan` only when a plugin module list names them: `ash_plugin_modules` in the config, `--config-overrides`, `--ash-plugin-modules`, `ASH_PLUGIN_MODULES`, or the Python API's `ash_plugin_modules` argument. For the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do). A plugin module is imported into ASH's own process and runs with ASH's access, outside the scanner sandbox; only the subprocesses a scanner starts through ASH are sandboxed. Which config files may name which modules is part of the [trust model](trust-model.md). [Plugins](../plugins/index.md) explains the plugin model and how to write one.

@@ -783,32 +783,53 @@ def _unreadable_expirations(stored: Any) -> List[str]:
 
     The config is validated again without the tolerance, and each such date is
     one of its errors, located by pydantic: ``global_settings.ignore_paths[0]
-    .expiration``. A mapping key that is not a name of the config schema is
+    .expires``. A mapping key that is not a name of the config schema is
     shown as ``<key>``, since it is the file's data too. Called only when the
     tolerant validation kept such a date.
 
     A date is told by where and how it failed, a ``value_error`` at an
-    ``expiration``, never by the refusal's words, which are the date check's
+    ``expires``, never by the refusal's words, which are the date check's
     own (models/core.expiration_date_problem) and change with it. A count that
     still disagrees falls back to unlocated warnings (validate_ash_config).
+
+    An entry an earlier ASH version wrote under the ``expiration`` spelling is
+    read as ``expires`` here too (``READ_STORED_EXPIRATION``), and its location
+    names the key as the stored file wrote it: ``.expiration`` for an entry
+    stored as ``expiration`` alone, ``.expires`` otherwise.
     """
     from automated_security_helper.config.ash_config import AshConfig
     from automated_security_helper.config.config_validator import (
         _schema_names,
         location_text,
     )
+    from automated_security_helper.utils.unknown_keys import READ_STORED_EXPIRATION
+
+    def written_as_expiration(loc: tuple) -> bool:
+        node = stored
+        for part in loc[:-1]:
+            if isinstance(node, dict) and part in node:
+                node = node[part]
+            elif isinstance(node, list) and isinstance(part, int):
+                if not 0 <= part < len(node):
+                    return False
+                node = node[part]
+            else:
+                return False
+        return isinstance(node, dict) and "expiration" in node and "expires" not in node
 
     try:
-        AshConfig.model_validate(stored)
+        AshConfig.model_validate(stored, context={READ_STORED_EXPIRATION: True})
     except ValidationError as error:
         names = _schema_names()
-        return [
-            location_text(item["loc"], names)
-            for item in error.errors(include_url=False)
-            if item.get("loc")
-            and item["loc"][-1] in ("expires", "expiration")
-            and item.get("type") == "value_error"
-        ]
+        located = []
+        for item in error.errors(include_url=False):
+            loc = tuple(item.get("loc") or ())
+            if not loc or loc[-1] != "expires" or item.get("type") != "value_error":
+                continue
+            if written_as_expiration(loc):
+                loc = (*loc[:-1], "expiration")
+            located.append(location_text(loc, names))
+        return located
     return []
 
 
@@ -957,7 +978,7 @@ class ReportMetadata(StrippedRecordModel):
     # Declared, rather than left to ride on this model's extra="allow". Three
     # things follow from declaring it that an extra key does not give:
     # model_json_schema() carries it, so the committed AshAggregatedResults.json
-    # documents the shape `ash merge` reads; a malformed shard block is refused at
+    # documents the shape `ashx merge` reads; a malformed shard block is refused at
     # model_validate_json time instead of surfacing as an AttributeError inside
     # merge; and it round-trips as a ShardAssignment rather than as a bare dict,
     # so verify_shard_coverage can be handed it directly.
@@ -1018,7 +1039,8 @@ class ReportMetadata(StrippedRecordModel):
                 "The names in --scanners or ASH_SCANNERS that matched no "
                 "registered scanner, recorded by a scan that ran because other "
                 "names matched; sorted, each name once, in the spelling given. "
-                "Null when every name matched or no list was given. `ash merge` "
+                "Null when every name matched or no list was given. "
+                "`ashx results merge` "
                 "records every shard's names, united. An unknown "
                 "--exclude-scanners name is never recorded."
             ),
@@ -1251,7 +1273,8 @@ class AshAggregatedResults(RecordModel):
                 "The shape of each value a secret finding exposed, as its masked "
                 "form shows it: visible prefix, visible suffix and length, never "
                 "the value. Every token of these shapes is masked whenever the "
-                "results are masked, which is how `ash merge` masks, in one shard's "
+                "results are masked, which is how `ashx results merge` masks, in one "
+                "shard's "
                 "findings, a value another shard exposed."
             ),
         ),
@@ -1359,8 +1382,10 @@ class AshAggregatedResults(RecordModel):
         validation: an "after" validator's fallback to the default config could
         never run, since the field would already have failed.
 
-        A kept date is named by where it is (``global_settings.ignore_paths[0]
-        .expiration``), never by what it says, and a kept key by the section
+        A kept date is named by where it is and by the key the stored file
+        wrote it under (``global_settings.ignore_paths[0].expiration`` for an
+        entry an earlier ASH version stored as ``expiration``, ``.expires``
+        otherwise), never by what it says, and a kept key by the section
         that holds it (``an unknown key <key> in 'scanners.bandit.options'``),
         never by its name: both are the results file's data, and the warning
         reaches the CI log.

@@ -45,7 +45,7 @@ export and no hint about which stack to deploy first.
 ## Launching a committed template
 
 The CloudFormation console launch flow reads the template from an S3 URL, so it
-works for all five. Scripting `aws cloudformation create-stack` does not:
+works for all six. Scripting `aws cloudformation create-stack` does not:
 CloudFormation caps an inline `aws cloudformation create-stack --template-body` at
 **51,200 bytes**, and four of these templates are
 larger than that. Upload those to a bucket and launch by URL, where the ceiling is
@@ -55,6 +55,7 @@ larger than that. Upload those to a bucket and launch by URL, where the ceiling 
 | Template | Scripted launch |
 | --- | --- |
 | `AshAgentCore` | `aws cloudformation create-stack --template-body` |
+| `AshEksOperator` | `aws cloudformation create-stack --template-body` |
 | `AshCodeCommitGate` | `aws cloudformation create-stack --template-url` only |
 | `AshImagePipeline` | `aws cloudformation create-stack --template-url` only |
 | `AshFargate` | `aws cloudformation create-stack --template-url` only |
@@ -64,7 +65,7 @@ Byte counts are deliberately not repeated here — they change with every templa
 change and nothing would catch it if this table went stale. Run
 `wc -c templates/*.template.json` for the current numbers.
 
-The one under the cap launches directly:
+The two under the cap launch directly:
 
 <!-- doctest: illustrative reason="needs AWS credentials" -->
 ```sh
@@ -105,7 +106,7 @@ and desynchronizes the two implementations.
 <!-- doctest: options of=cloudformation:deploy/cdk/templates -->
 | Parameter | Default | Notes |
 | --- | --- | --- |
-| `AshVersion` | `v3.8.0` | Git ref fetched and built: a tag, a branch, or a full commit SHA. Not a PyPI version. The release these files belong to; see [Which `AshVersion` to use](../README.md#which-ashversion-to-use). |
+| `AshVersion` | `v4.0.0` | Git ref fetched and built: a tag, a branch, or a full commit SHA. Not a PyPI version. The release these files belong to; see [Which `AshVersion` to use](../README.md#which-ashversion-to-use). |
 | `AshImageTag` | empty | ECR tag the **workload** pulls. Empty tracks the moving tag. Not offered by `AshImagePipeline`, which runs no workload. See below. |
 | `AshOfflineMode` | `NO` | `YES`/`NO`, forwarded to the ASH Dockerfile's `OFFLINE` build argument. The spelling is the Dockerfile's; a boolean would build an image that stayed online. |
 | `AshBaseConfigYaml` | empty | An ASH configuration document. See the size note below. |
@@ -261,7 +262,7 @@ depends on.
 `AgentRuntimeArtifact.ContainerConfiguration` has exactly one property,
 `ContainerUri`. There is no `Command`, `EntryPoint` or `Args`, so the MCP
 invocation cannot come from the template and is baked into the image instead. ASH's
-own image ends with `CMD ["ash"]`, so pointing AgentCore at it directly would start
+own image ends with `CMD ["ashx"]`, so pointing AgentCore at it directly would start
 a process that prints help and exits. The `mcp` image flavor adds a shell
 entrypoint that reads the tunables from environment variables, which AgentCore
 *can* set.
@@ -450,7 +451,7 @@ so an artifact per shard cannot express a six-way split at all.
 
 Those transfers use `boto3`, not `aws s3 cp`, and that is not a style preference.
 The shard and merge actions run with the ASH image as their CodeBuild environment
-image — which is what puts `ash` directly on `PATH` with no Docker-in-Docker — and
+image — which is what puts `ashx` directly on `PATH` with no Docker-in-Docker — and
 **the ASH image installs no AWS CLI.** It does depend on `boto3`, so `python3` is
 the only AWS API client guaranteed to be present. An `aws` invocation in these
 buildspecs exits 127 at runtime, after the scan has already succeeded, and takes
@@ -465,7 +466,7 @@ they run on your workstation, not in the image.
 
 Because the split is over scanners rather than files, a shard count above the
 number of enabled scanners produces empty shards and no extra parallelism. Check
-`ash plugin list` for the pinned version before raising it.
+`ashx plugin list` for the pinned version before raising it.
 
 Start a scan by uploading an archive and starting the pipeline; the source action
 does not poll:
@@ -504,8 +505,8 @@ aws codecommit associate-approval-rule-template-with-repository \
 The shard and merge actions call two commands that no ASH release up to v3.7.1
 has:
 
-- `ash scan --shard-index <i> --shard-count <n>`
-- `ash merge --results ... --output-dir ...`
+- `ashx scan --shard-index <i> --shard-count <n>`
+- `ashx results merge --results ... --output-dir ...`
 
 The `AshDistributedPipeline` template uses them as ASH defines them: zero-based
 index, both shard flags always passed together, `--results` repeatable and
@@ -578,9 +579,9 @@ here rather than to a variant.
 - **The Fargate listener is HTTP, not HTTPS.** A certificate ARN would be needed,
   and the shared parameter surface has no slot for one. The load balancer is
   internal by default to match.
-- **No target sets `ASH_MCP_ALLOWED_ROOTS`.** Only two targets run `ash mcp` at
+- **No target sets `ASH_MCP_ALLOWED_ROOTS`.** Only two targets run `ashx mcp` at
   all, AgentCore and Fargate. The CodeCommit gate and the sharded pipeline invoke
-  `ash scan` directly and are unaffected. On the two that do, the variable is
+  `ashx scan` directly and are unaffected. On the two that do, the variable is
   unset, so the scan boundary is the default of the ASH in the image; check the MCP
   documentation of the version you build. On a network-reachable MCP endpoint,
   naming the roots is the boundary to rely on.
@@ -636,9 +637,11 @@ here rather than to a variant.
   VPC and puts nothing in it but the ASH tasks, so that rule would admit a range
   with no clients in it while still widening access. Real consumers arrive from a
   peered VPC, a VPN or a transit gateway, none of which fall inside it.
-- **An unused Secrets Manager secret is created even with auth disabled.** The
-  alternative was a CloudFormation Condition gating the resource, which makes every
-  IAM grant that mentions its ARN an invalid template. Costs a few cents a month.
+- **AshAgentCore and AshFargate create a Secrets Manager secret even with auth
+  disabled.** The alternative was a CloudFormation Condition gating the resource,
+  which makes every IAM grant that mentions its ARN an invalid template. Costs a few
+  cents a month. AshCodeCommitGate and AshDistributedPipeline serve no MCP endpoint,
+  so they create no secret and grant no read on one.
 - **ECR repositories and buckets are `RETAIN`.** `autoDeleteObjects` and
   `emptyOnDelete` synthesize asset-backed custom resources, which need a staging
   bucket and therefore `cdk bootstrap`, and these templates are meant to launch from
@@ -749,6 +752,10 @@ rather than tidiness. With output beside the sources, `npm run build` leaves
 against code that is no longer there. This was hit in development: four new
 assertions failed against a buildspec that had already been changed.
 `jest.config.js` also lists `ts` first, so the invariant is stated where it matters.
+
+`npm test` needs `python3` on `PATH` (the harness in `test/support/` names the variable that points it elsewhere): the
+EKS suite runs the operator installer's inline Python to get the RBAC it builds, and
+fails rather than skips when no interpreter is found.
 
 The templates synthesize with no AWS credentials and no `cdk.context.json`: nothing
 uses `fromLookup`, so `npx cdk synth --all --no-lookups` works offline. The pinned

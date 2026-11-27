@@ -1,43 +1,44 @@
 # Track findings over time
 
-[`ash results diff`](../reference/cli.md#results-diff) compares two scans.
-[`ash results trend`](../reference/cli.md#results-trend) reads a series of them and shows,
+[`ashx results diff`](../reference/cli.md#results-diff) compares two scans.
+[`ashx results trend`](../reference/cli.md#results-trend) reads a series of them and shows,
 for each run after the first, how many findings per scanner and severity are new, carried
 over, fixed, and unobserved; which findings have been open longest; and where a carried
 finding's severity or suppression changed. It runs no scan and writes nothing.
 
-The top-level spelling `ash trend` still works and prints a deprecation warning; see
-[The `ash results` command group](read-results.md#results-group).
+The top-level spelling, `trend` directly under `ashx`, was deprecated in 3.9 and removed
+in 4.0: it is now an unknown command, a usage error that exits 5 and runs nothing; see
+[The `ashx results` command group](read-results.md#results-group).
 
 ASH keeps one run in its output directory: the next scan replaces it. A series therefore
 needs one saved record per run. There are two ways to keep them, and a single
-`ash results trend` call reads one of them, never both.
+`ashx results trend` call reads one of them, never both.
 
 ## Option 1: archive the results file of each run {#archive}
 
 Save `ash_aggregated_results.json` from every scan under a name that is unique to the run,
-for example as a CI artifact, then pass the files to `ash results trend`. When every file
+for example as a CI artifact, then pass the files to `ashx results trend`. When every file
 records one of ASH's timestamped report IDs, the files are put in chronological order by
 it, so the order on the command line does not matter. When one does not, the order given
 is kept, and the output says so.
 
 <!-- doctest: illustrative reason="requires saved ASH scan results files from earlier runs" -->
 ```bash
-ash results trend runs/1/ash_aggregated_results.json runs/2/ash_aggregated_results.json runs/3/ash_aggregated_results.json
-ash results trend runs/*/ash_aggregated_results.json --format json
+ashx results trend runs/1/ash_aggregated_results.json runs/2/ash_aggregated_results.json runs/3/ash_aggregated_results.json
+ashx results trend runs/*/ash_aggregated_results.json --format json
 ```
 
 In CI this is one extra upload step after the scan, with a step condition that keeps it
 running when the scan exits non-zero, as it does with findings (exit code 2). Download
-the earlier runs' artifacts in the job that runs `ash results trend`.
+the earlier runs' artifacts in the job that runs `ashx results trend`.
 
 This route needs no ASH configuration, and the archived files are the same ones
-`ash results diff` and `--baseline` read.
+`ashx results diff` and `--baseline` read.
 
 ## Option 2: let ASH record a compact history {#history}
 
 Turn on `global_settings.history`. ASH then adds one small record to `history/` in the
-output directory for each recorded run, and `ash results trend --history` reads them.
+output directory for each recorded run, and `ashx results trend --history` reads them.
 Recording is off by default because it adds a file to the output directory on every scan.
 
 <!-- doctest: config kind=ash -->
@@ -52,7 +53,7 @@ global_settings:
 
 <!-- doctest: illustrative reason="requires an output directory with recorded run history" -->
 ```bash
-ash results trend --history .ash/ash_output
+ashx results trend --history .ash/ash_output
 ```
 
 For history to build up in CI, the output directory (or just its `history/` directory)
@@ -67,23 +68,23 @@ These runs add a record:
   scanner coverage is recorded too, including one that exits 1 because
   `fail_on_incomplete_scanners` is on, and its record notes the gap, so the boundaries on
   either side of it are marked as not like for like;
-- `ash results merge`, described below.
+- `ashx results merge`, described below.
 
 These runs add none:
 
 - a scan stopped before it finished: cancelled or timed out over MCP, or stopped by a
-  SIGTERM to `ash scan`. A record already written for it is removed, unless git tracks
+  SIGTERM to `ashx scan`. A record already written for it is removed, unless git tracks
   it or `history/` is in a git repository whose index git cannot list;
 - a scan that fails after its scan phase, which leaves its results file but no record;
-- `ash scan --use-existing`, which runs only the report phase;
+- `ashx scan --use-existing`, which runs only the report phase;
 - the runs a comparison would refuse: an un-merged shard, the combined results of an
-  `ash --workspace` scan, a `--changed-files-only` run, and a run filtered by `--baseline`.
+  `ashx --workspace` scan, a `--changed-files-only` run, and a run filtered by `--baseline`.
   With the history on, a shard or a filtered scan logs a warning that starts
   `This run is not recorded in the history:`.
 
 With `global_settings.history.enabled` on in the merged configuration (the shards'
 recorded configuration, with any `--config-overrides` applied),
-[`ash results merge`](../reference/cli.md#results-merge) records the merged run in its own
+[`ashx results merge`](../reference/cli.md#results-merge) records the merged run in its own
 `--output-dir`, under the merged report's ID, once it has written the merged results file.
 Merging the same shards again replaces that record rather than adding a run. To turn
 recording on at the merge alone, pass
@@ -102,7 +103,7 @@ repository whose index git cannot list, nothing is pruned that time. Each remova
 logged.
 
 No scan removes or clears `history/`. Turning `enabled` off stops new records and pruning
-and leaves the directory and its records where they are, so `ash results trend --history`
+and leaves the directory and its records where they are, so `ashx results trend --history`
 can still read them. To start a new history, delete the directory.
 
 ### What a record holds {#record}
@@ -116,7 +117,7 @@ raw output, the SARIF document, and the resolved configuration.
 
 A record ASH cannot read is skipped: a corrupt file, one in a record format this version
 of ASH does not read, or one whose report ID is not its file name. The output says how
-many were skipped. A record from another project cuts the series: `ash results trend`
+many were skipped. A record from another project cuts the series: `ashx results trend`
 keeps the records newer than it, names the ones it left out, and refuses only when fewer
 than two remain.
 
@@ -158,15 +159,15 @@ A few readings to keep in mind:
   records inputs that were not scanned. Its fixed and new counts do not measure progress,
   and the output says so.
 
-## What `ash results trend` refuses {#refusals}
+## What `ashx results trend` refuses {#refusals}
 
-`ash results trend` exits 1 with a message on standard error, and prints nothing on
+`ashx results trend` exits 1 with a message on standard error, and prints nothing on
 standard output, when:
 
 - fewer than two runs are given, or the same run is given twice;
 - the runs come from different projects;
 - a run is a workspace aggregate, an un-merged shard, a `--changed-files-only` run, or a
-  baseline-filtered run (the rules `ash results diff` applies);
+  baseline-filtered run (the rules `ashx results diff` applies);
 - a results file cannot be read as ASH scan results, or holds duplicate finding IDs;
 - results files and `--history` are given together;
 - `--history` finds no run records, none that ASH can read, or fewer than two that form

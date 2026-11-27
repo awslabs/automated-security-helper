@@ -5,7 +5,7 @@
 
 ``run_ash_container`` resolved the Dockerfile before deciding whether to build.
 Outside an ASH checkout (revision LOCAL and no Dockerfile in or above the working
-directory) ``ash scan --mode container --no-build`` refused with "Dockerfile not
+directory) ``ashx scan --mode container --no-build`` refused with "Dockerfile not
 found" although nothing was going to be built. The lookup now happens only for a
 build, so ``--no-build`` runs an image that is already present wherever it is
 invoked from.

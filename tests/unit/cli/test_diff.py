@@ -271,7 +271,7 @@ def test_text_distinguishes_absence_from_remediation(tmp_path):
                     }
                 }
             },
-            "ash merge",
+            "ashx results merge",
         ),
         (
             {

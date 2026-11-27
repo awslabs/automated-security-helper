@@ -75,7 +75,7 @@ def test_an_expired_ignore_path_no_longer_applies(tmp_path):
     context = _context(
         tmp_path,
         ["app.template.json", "thirdparty/bad.template.json"],
-        [{"path": "thirdparty/**", "expiration": "2000-01-01"}],
+        [{"path": "thirdparty/**", "expires": "2000-01-01"}],
     )
 
     assert _candidates(context) == ["app.template.json", "thirdparty/bad.template.json"]

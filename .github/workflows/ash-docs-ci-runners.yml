@@ -128,7 +128,7 @@ on:
       - "automated_security_helper/cli/entrypoint.py" # the ash command every pipeline runs
       - "automated_security_helper/cli/main.py" # registers the scan, merge and dependencies commands the entry point runs
       - "automated_security_helper/cli/scan.py" # ash scan, whose verdict line the runs check
-      - "automated_security_helper/cli/merge.py" # ash merge, which the sharded workflow runs
+      - "automated_security_helper/cli/merge.py" # ash results merge, which the sharded workflow runs
       - "automated_security_helper/cli/dependencies.py" # ash dependencies install, which every pipeline runs
       - "automated_security_helper/utils/tool_downloads.py" # the pinned tools ash dependencies install fetches
       - "automated_security_helper/utils/download_utils.py" # downloads those tools and checks each against its pinned SHA256, which the pages' cache text relies on

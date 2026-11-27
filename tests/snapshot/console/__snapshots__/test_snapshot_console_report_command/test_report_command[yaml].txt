@@ -1,4 +1,4 @@
-$ ash results report --format yaml --log-level ERROR
+$ ashx results report --format yaml --log-level ERROR
 [exit 0]
 additional_reports:
   bandit:
@@ -84,7 +84,7 @@ ash_config:
   external_reports_to_include: []
   fail_on_findings: true
   fail_on_incomplete_scanners: true
-  fail_on_unknown_keys: false
+  fail_on_unknown_keys: true
   global_settings:
     deduplication:
       annotate: false
@@ -533,22 +533,6 @@ ash_config:
         severity_threshold: CRITICAL
         sha256: {}
         version: v2.0.0
-    semgrep:
-      enabled: true
-      name: semgrep
-      options:
-        config: p/ci
-        exclude:
-        - '*-converted.py'
-        - '*_report_result.txt'
-        exclude_rule: []
-        install_timeout: 300
-        metrics: auto
-        offline: false
-        scan_timeout: 1800
-        severity: []
-        severity_threshold: null
-        tool_version: null
     syft:
       enabled: true
       name: syft

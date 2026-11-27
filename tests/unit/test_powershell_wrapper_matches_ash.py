@@ -83,6 +83,14 @@ from tests.utils.pwsh_env import (  # noqa: F401
 
 RUN_SCAN_TEST = REPO_ROOT / ".github" / "actions" / "run-scan-test" / "action.yml"
 
+# The root ./ash script was deleted by a533dd6531a (absorbed into the ash CLI), so the
+# tests that run it beside Invoke-ASH have nothing to compare and skip. They run again
+# if the script returns.
+_NEEDS_ASH_SCRIPT = pytest.mark.skipif(
+    not (REPO_ROOT / "ash").is_file(),
+    reason="root ./ash script removed by a533dd6531a (absorbed into the ash CLI)",
+)
+
 # Flags whose defaults belong to ash and its configuration, not to the wrapper.
 _DEFAULTED_BY_ASH = {
     "--progress",
@@ -113,8 +121,9 @@ def _require_pwsh(in_ci: bool, request: pytest.FixtureRequest):
 
 
 def _inner_ash_args(run_call: list[str]) -> list[str]:
-    """What follows the image name and ``ash``."""
-    return run_call[run_call.index("ash") + 1 :]
+    """What follows the image name and ``ashx``, the image's command (the v4
+    canonical name; ``ash`` is the deprecated alias)."""
+    return run_call[run_call.index("ashx") + 1 :]
 
 
 #: What Invoke-ASH gives scan, and ash with no command named (which scans), right
@@ -1284,6 +1293,7 @@ def _both_wrappers_in_both_locales(
     reason="./ash's runs in this module are measured on Linux",
 )
 @pytest.mark.parametrize("name", sorted(_IMAGE_NAMES))
+@_NEEDS_ASH_SCRIPT
 def test_the_wrappers_agree_on_an_image_name(tmp_path, name):
     image, code = _IMAGE_NAMES[name]
     measured = _both_wrappers_in_both_locales(
@@ -1302,6 +1312,7 @@ def test_the_wrappers_agree_on_an_image_name(tmp_path, name):
     reason="./ash's runs in this module are measured on Linux",
 )
 @pytest.mark.parametrize("name", sorted(_BASE_IMAGE_OVERRIDES))
+@_NEEDS_ASH_SCRIPT
 def test_the_wrappers_agree_on_a_base_image_override(tmp_path, name):
     # ./ash reads the override only when it builds without ASH_BASE_OCI_LAYOUT, so
     # its runs build; Invoke-ASH reads it when it starts.
@@ -1495,6 +1506,7 @@ def _shown_value(output: str, before: str, after: str) -> str:
 )
 @pytest.mark.parametrize("where", sorted(_SHOWN_IN))
 @pytest.mark.parametrize("character", sorted(_HIDDEN_CHARACTERS))
+@_NEEDS_ASH_SCRIPT
 def test_the_wrappers_show_a_refused_value_alike(tmp_path, where, character):
     """Both refusals print the same message and the same value, in two notations.
 
@@ -1585,6 +1597,7 @@ _WORKSPACE_AND_SANDBOX = {
     reason="./ash's runs in this module are measured on Linux",
 )
 @pytest.mark.parametrize("case", sorted(_WORKSPACE_AND_SANDBOX))
+@_NEEDS_ASH_SCRIPT
 def test_the_wrappers_refuse_a_sandbox_next_to_a_workspace_alike(tmp_path, case):
     ash_args, invocation = _WORKSPACE_AND_SANDBOX[case]
     (tmp_path / "src").mkdir()
@@ -1628,6 +1641,7 @@ def test_the_wrappers_refuse_a_sandbox_next_to_a_workspace_alike(tmp_path, case)
     not sys.platform.startswith("linux"),
     reason="./ash's runs in this module are measured on Linux",
 )
+@_NEEDS_ASH_SCRIPT
 def test_an_empty_ash_image_name_is_unset_in_both_wrappers(tmp_path):
     """An empty ASH_IMAGE_NAME names no image, so both wrappers use the default.
 
@@ -1677,6 +1691,7 @@ def test_an_empty_ash_image_name_is_unset_in_both_wrappers(tmp_path):
     reason="./ash's runs in this module are measured on Linux",
 )
 @pytest.mark.parametrize("character", sorted(_HIDDEN_CHARACTERS))
+@_NEEDS_ASH_SCRIPT
 def test_the_wrappers_show_ash_config_in_their_warning_alike(tmp_path, character):
     """The ASH_CONFIG warning shows the value as a refusal shows one.
 
@@ -1773,6 +1788,7 @@ _TARGET_AND_MODE_LOOKALIKES = {
     reason="./ash's runs in this module are measured on Linux",
 )
 @pytest.mark.parametrize("case", sorted(_TARGET_AND_MODE_LOOKALIKES))
+@_NEEDS_ASH_SCRIPT
 def test_the_wrappers_agree_on_a_lookalike_target_or_mode(tmp_path, case):
     option, value, code = _TARGET_AND_MODE_LOOKALIKES[case]
     (tmp_path / "src").mkdir()
@@ -2156,7 +2172,7 @@ _WRAPME = (
 
 def _run_environment_words(run_call: list[str]) -> list[str]:
     """The word after each ``-e`` before the image name: ``NAME`` or ``NAME=value``."""
-    before_image = run_call[: run_call.index("ash")]
+    before_image = run_call[: run_call.index("ashx")]
     return [
         before_image[i + 1] for i, arg in enumerate(before_image[:-1]) if arg == "-e"
     ]
@@ -2408,13 +2424,14 @@ def test_config_is_passed_as_config(tmp_path):
 def test_source_and_output_dirs_reach_ash_as_environment_variables(tmp_path):
     # Positional --source-dir/--output-dir came before the caller's words, so a
     # subcommand ended up after options it may not take. scan reads ASH_SOURCE_DIR and
-    # ASH_OUTPUT_DIR; report and merge read ASH_OUTPUT_DIR.
+    # ASH_OUTPUT_DIR; results report and results merge read ASH_OUTPUT_DIR.
     result, calls = _invoke(
-        tmp_path, "Invoke-ASH -NoBuild -SourceDir src -OutputDir out -AshArgs 'report'"
+        tmp_path,
+        "Invoke-ASH -NoBuild -SourceDir src -OutputDir out -AshArgs 'results report'",
     )
     assert result.returncode == 0, result.stdout + result.stderr
     run = _run_call(result, calls)
-    assert _inner_ash_args(run) == ["report"], run
+    assert _inner_ash_args(run) == ["results", "report"], run
     env = _run_env(run)
     assert env.get("ASH_SOURCE_DIR") == "/src", run
     assert env.get("ASH_OUTPUT_DIR") == "/out", run
@@ -2441,11 +2458,18 @@ def test_output_format_sets_no_variable_ash_does_not_read(tmp_path):
     [
         # -SourceDir is position 0, so the first argument after the parameters binds
         # to it unless -SourceDir is given; the help and the CHANGELOG say so.
-        ("Invoke-ASH -NoBuild -OutputDir out src report", "src", ["report"]),
         (
-            "Invoke-ASH -NoBuild -OutputDir out -SourceDir src report --format text",
+            "Invoke-ASH -NoBuild -OutputDir out src results report",
             "src",
-            ["report", "--format", "text"],
+            ["results", "report"],
+        ),
+        (
+            (
+                "Invoke-ASH -NoBuild -OutputDir out -SourceDir src results report "
+                "--format text"
+            ),
+            "src",
+            ["results", "report", "--format", "text"],
         ),
     ],
 )
@@ -2488,9 +2512,12 @@ def test_invoke_ash_report_takes_report_as_the_source_directory(tmp_path, report
 
 
 # A subcommand in the arguments. ash takes an option given before a subcommand only
-# when the subcommand declares it, and refuses it otherwise (`ash -q report` exits 5);
-# on the base commit it dropped it silently. So the options Invoke-ASH adds go after
-# the subcommand, and only to one that takes them.
+# when the subcommand declares it, and refuses it otherwise (`ash -q results report`
+# exits 5); on the base commit it dropped it silently. So the options Invoke-ASH adds
+# go after the subcommand, and only to one that takes them. Under `results` and
+# `container` they go to the command the group's words name, after its last word: the
+# group takes none of them itself, and 4.0 removed the top-level report and merge that
+# took them before.
 
 
 @pytest.mark.integration
@@ -2502,19 +2529,50 @@ def test_invoke_ash_report_takes_report_as_the_source_directory(tmp_path, report
             ["scan", *SANDBOX_OFF, "--config", "c.yaml", "--scanners", "bandit"],
             id="scan-takes-the-wrappers-options",
         ),
-        pytest.param("-AshArgs '-q report'", ["report"], id="report-has-no-quiet"),
         pytest.param(
-            "-AshArgs 'report --no-color'",
-            ["report", "--no-color"],
-            id="report-takes-no-color",
+            "-AshArgs '-q results report'",
+            ["results", "report"],
+            id="results-report-has-no-quiet",
         ),
         pytest.param(
-            "-Offline -AshArgs 'report'", ["report"], id="report-has-no-offline"
+            "-AshArgs 'results report --no-color'",
+            ["results", "report", "--no-color"],
+            id="results-report-takes-no-color",
         ),
         pytest.param(
-            "-Verbose -AshArgs 'report --format text'",
-            ["report", "--verbose", "--format", "text"],
-            id="report-takes-verbose",
+            "-Offline -AshArgs 'results report'",
+            ["results", "report"],
+            id="results-report-has-no-offline",
+        ),
+        pytest.param(
+            "-Verbose -AshArgs 'results report --format text'",
+            ["results", "report", "--verbose", "--format", "text"],
+            id="results-report-takes-verbose",
+        ),
+        pytest.param(
+            "-Config c.yaml -AshArgs 'results report'",
+            ["results", "report", "--config", "c.yaml"],
+            id="results-report-takes-config",
+        ),
+        pytest.param(
+            "-Config c.yaml -NoFailOnFindings -AshArgs 'results merge'",
+            ["results", "merge", "--no-fail-on-findings", "--config", "c.yaml"],
+            id="results-merge-takes-its-options",
+        ),
+        pytest.param(
+            "-Config c.yaml -AshArgs 'results inspect findings'",
+            ["results", "inspect", "findings", "--config", "c.yaml"],
+            id="a-command-two-groups-down",
+        ),
+        pytest.param(
+            "-Config c.yaml -AshArgs 'results diff a.json b.json'",
+            ["results", "diff", "a.json", "b.json"],
+            id="results-diff-takes-none",
+        ),
+        pytest.param(
+            "-Verbose -AshArgs 'container build --no-run'",
+            ["container", "build", "--verbose", "--no-run"],
+            id="container-build-takes-verbose",
         ),
         pytest.param(
             "-Verbose -Offline -AshArgs '-q -c config get'",
@@ -2522,8 +2580,8 @@ def test_invoke_ash_report_takes_report_as_the_source_directory(tmp_path, report
             id="a-group-takes-none",
         ),
         pytest.param(
-            "-AshArgs '--log-level DEBUG report'",
-            ["--log-level", "DEBUG", "report"],
+            "-AshArgs '--log-level DEBUG results report'",
+            ["--log-level", "DEBUG", "results", "report"],
             id="the-callers-own-words-stay-where-written",
         ),
         pytest.param(
@@ -2572,8 +2630,8 @@ def test_the_wrappers_options_go_after_a_subcommand_that_takes_them(
             id="a-directory-named-report",
         ),
         pytest.param(
-            "-AshArgs '-q --phases=report report'",
-            ["--phases=report", "report"],
+            "-AshArgs '-q --phases=report results report'",
+            ["--phases=report", "results", "report"],
             id="an-attached-value-is-not-the-next-word",
         ),
         pytest.param(
@@ -2587,8 +2645,8 @@ def test_the_wrappers_options_go_after_a_subcommand_that_takes_them(
             id="a-value-after-clustered-short-options",
         ),
         pytest.param(
-            "-AshArgs '-q -Pfreport report'",
-            ["-Pfreport", "report"],
+            "-AshArgs '-q -Pfreport results report'",
+            ["-Pfreport", "results", "report"],
             id="a-value-attached-to-clustered-short-options",
         ),
     ],
@@ -2609,10 +2667,13 @@ def test_an_option_value_is_not_the_subcommand(tmp_path, invocation, expected):
 def test_an_option_a_subcommand_does_not_take_is_named_in_a_warning(tmp_path):
     result, calls = _invoke(
         tmp_path,
-        "Invoke-ASH -NoBuild -SourceDir src -OutputDir out -Offline -AshArgs 'report'",
+        "Invoke-ASH -NoBuild -SourceDir src -OutputDir out -Offline "
+        "-AshArgs 'results report'",
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "ash report does not take --offline" in result.stdout + result.stderr
+    assert "ash results report does not take --offline" in (
+        result.stdout + result.stderr
+    )
 
 
 @pytest.mark.integration

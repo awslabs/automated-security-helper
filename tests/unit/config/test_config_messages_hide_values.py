@@ -38,14 +38,14 @@ CASES = [
     pytest.param(
         f"project_name: demo\nglobal_settings:\n  suppressions:\n"
         f"    - rule_id: B101\n      path: a.py\n      reason: r\n"
-        f"      expiration: ${{{VARIABLE}:2099-01-01}}\n",
+        f"      expires: ${{{VARIABLE}:2099-01-01}}\n",
         {},
         id="expiration-default-form",
     ),
     pytest.param(
         f"project_name: demo\nglobal_settings:\n  suppressions:\n"
         f"    - rule_id: B101\n      path: a.py\n      reason: r\n"
-        f"      expiration: !ENV ${{{VARIABLE}:2099-01-01}}\n",
+        f"      expires: !ENV ${{{VARIABLE}:2099-01-01}}\n",
         {},
         id="expiration-env-tag",
     ),
@@ -279,7 +279,7 @@ def test_a_value_the_file_holds_is_not_quoted_either(project):
         project,
         "project_name: demo\nglobal_settings:\n  suppressions:\n"
         "    - rule_id: B101\n      path: a.py\n      reason: r\n"
-        "      expiration: not-a-date-literal\n",
+        "      expires: not-a-date-literal\n",
         {},
     )
 
@@ -287,7 +287,7 @@ def test_a_value_the_file_holds_is_not_quoted_either(project):
 
     assert result.exit_code == 3, result.output
     assert "not-a-date-literal" not in result.output
-    assert "global_settings.suppressions[0].expiration" in result.output
+    assert "global_settings.suppressions[0].expires" in result.output
 
 
 def test_a_warning_hides_the_value_too(project):
@@ -908,7 +908,7 @@ def test_a_value_equal_to_the_marker_word_is_not_redacted_twice(project, monkeyp
         project,
         "project_name: demo\nglobal_settings:\n  suppressions:\n"
         "    - rule_id: B101\n      path: a.py\n      reason: r\n"
-        f"      expiration: ${{{PROBE}:x}}\n",
+        f"      expires: ${{{PROBE}:x}}\n",
         {},
     )
     runner = CliRunner()
@@ -919,7 +919,7 @@ def test_a_value_equal_to_the_marker_word_is_not_redacted_twice(project, monkeyp
     for result in (validate, lint):
         assert result.exit_code == 3, result.output
         assert (
-            "Invalid value at 'global_settings.suppressions[0].expiration'"
+            "Invalid value at 'global_settings.suppressions[0].expires'"
             in result.output
         ), result.output
         assert "<<" not in result.output, result.output
@@ -993,7 +993,7 @@ def test_lint_hint_with_a_deleted_working_directory_keeps_the_source_dir(
 
     hint = lint_hint(config, source)
 
-    assert hint.startswith("Run: ash config lint --config "), hint
+    assert hint.startswith("Run: ashx config lint --config "), hint
     assert hint.endswith(f" --source-dir {source.as_posix()}"), hint
 
 

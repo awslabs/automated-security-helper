@@ -502,13 +502,13 @@ def test_a_refusal_of_one_scope_does_not_answer_for_a_call_outside_it(
     scope (another scan of the same server process) must still probe."""
     answers = _script(tmp_path, "zz-answers", "echo 'uv 0.0.0'")
     runner = uv_tool_runner.UVToolRunner(uv_executable=answers)
-    token = sandbox_scope._ACTIVE.set(
+    reset_handle = sandbox_scope._ACTIVE.set(
         sandbox_scope.RefusingScope("zz-scanner", "no sandbox backend")
     )
     try:
         inside = runner.is_uv_available()
     finally:
-        sandbox_scope._ACTIVE.reset(token)
+        sandbox_scope._ACTIVE.reset(reset_handle)
     if inside is not False or attempts.log[0].get("raised") != "SandboxUnavailable":
         raise RuntimeError(
             ("premise: the refusing scope did not refuse", inside, attempts.log)
@@ -588,12 +588,12 @@ def test_one_scopes_wrapper_window_does_not_answer_outside_the_scope(
     monkeypatch.setattr(subprocess_utils, "_prepare_spawn", prepare)
     runner = uv_tool_runner.UVToolRunner(uv_executable=answers)
     scope = _zz_sandbox_scope(tmp_path)
-    token = sandbox_scope._ACTIVE.set(scope)
+    reset_handle = sandbox_scope._ACTIVE.set(scope)
     try:
         inside = runner.is_uv_available()
         inside_again = runner.is_uv_available()
     finally:
-        sandbox_scope._ACTIVE.reset(token)
+        sandbox_scope._ACTIVE.reset(reset_handle)
     if inside is not False or attempts.log[0].get(premise_key) != premise_value:
         raise RuntimeError(("premise: the wrapper's failure", inside, attempts.log))
     assert (inside_again, len(attempts.log)) == (False, 1), (
@@ -664,14 +664,14 @@ def test_a_refused_spawns_warning_names_the_refusal(tmp_path, attempts):
     is missing."""
     answers = _script(tmp_path, "zz-answers", "echo 'uv 0.0.0'")
     runner = uv_tool_runner.UVToolRunner(uv_executable=answers)
-    token = sandbox_scope._ACTIVE.set(
+    reset_handle = sandbox_scope._ACTIVE.set(
         sandbox_scope.RefusingScope("zz-scanner", "no sandbox backend")
     )
     try:
         with _Collector() as warned:
             answer, failure = runner.uv_availability()
     finally:
-        sandbox_scope._ACTIVE.reset(token)
+        sandbox_scope._ACTIVE.reset(reset_handle)
 
     if attempts.log[0].get("raised") != "SandboxUnavailable":
         raise RuntimeError(("premise: the refusal", attempts.log))
@@ -834,11 +834,11 @@ def test_a_waiters_own_scope_does_not_take_another_scopes_answer(
     scope = _zz_sandbox_scope(tmp_path)
 
     def scoped_probe():
-        token = sandbox_scope._ACTIVE.set(scope)
+        reset_handle = sandbox_scope._ACTIVE.set(scope)
         try:
             return runner.is_uv_available()
         finally:
-            sandbox_scope._ACTIVE.reset(token)
+            sandbox_scope._ACTIVE.reset(reset_handle)
 
     prober = threading.Thread(target=scoped_probe)
     prober.start()

@@ -454,7 +454,8 @@ def test_the_reference_branch_says_what_reading_with_its_default_means():
     assert "whole list" in description
     # The load says so, and the commands that act on the field refuse.
     assert "unreadable" in description
-    assert "ash merge" in description and "ash report" in description
+    assert "ashx results merge" in description
+    assert "ashx results report" in description
     # No reference is admitted for a true/false field.
     assert "true/false" in description
 

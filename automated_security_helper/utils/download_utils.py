@@ -58,8 +58,8 @@ _HASH_CHUNK_BYTES = 1024 * 1024
 # A single transient 5xx used to fail an entire install, and through it an entire
 # container build. Measured on job 104983960003 of this repository: grype's pinned
 # asset returned `HTTP Error 500: Internal Server Error` in the non-root image
-# stage, `ash dependencies install` exited 1, and the podman build died at
-# `RUN ash dependencies install`. The same URL had returned 200 minutes earlier in
+# stage, `ashx dependencies install` exited 1, and the podman build died at
+# `RUN ashx dependencies install`. The same URL had returned 200 minutes earlier in
 # the same build's first stage, so the asset was fine and the request was not.
 #
 # The shell side of the toolchain already had this: assets/with-retry.sh wraps the
@@ -1328,7 +1328,7 @@ def _already_installed(
        that will actually run.
 
     Why (5) is not paranoia. ASH's own image puts ASH_BIN_PATH first on PATH and
-    runs ``ash dependencies install`` into it twice. Before idempotence
+    runs ``ashx dependencies install`` into it twice. Before idempotence
     existed every install re-downloaded, so the second run overwrote anything
     substituted in between -- the redundant download was accidentally a self-healing
     property. Skipping on a receipt alone would have converted that into a persistent
@@ -1431,7 +1431,7 @@ def install_binary_from_url(
 
     Idempotent: if a receipt shows the same url and digest already produced the
     installed file, the download is skipped. Before this, every
-    ``ash dependencies install`` re-fetched every binary, so re-running the
+    ``ashx dependencies install`` re-fetched every binary, so re-running the
     installer in CI paid for the whole toolchain again and a network blip turned a
     no-op into a failure.
 
@@ -2173,7 +2173,7 @@ def find_verified_pinned_executable(
 
     Why this exists: ASH's container image installs syft, grype and trivy into
     /usr/local/bin from their pinned release assets, and then runs
-    ``ash dependencies install`` twice -- once as root, once as the non-root user
+    ``ashx dependencies install`` twice -- once as root, once as the non-root user
     -- which installed the pinned grype and syft again into ASH_BIN_PATH each time.
     Each copy is a separate image layer, 167 MB for the two tools per stage.
 
@@ -2310,7 +2310,7 @@ def current_bin_path() -> Optional[Path]:
     """Resolve ASH_BIN_PATH at call time rather than at import time.
 
     ``core.constants.ASH_BIN_PATH`` is computed when that module is first imported.
-    ``ash dependencies install --bin-path`` sets the environment variable *after*
+    ``ashx dependencies install --bin-path`` sets the environment variable *after*
     that import has happened, so a function that closed over the constant would
     install into the default directory while reporting the requested one.
 
@@ -2476,7 +2476,7 @@ def pinned_install_already_satisfied(
 ) -> "Optional[VerifiedPresentTool]":
     """For an argv built by ``create_pinned_tool_install_command``: is it a no-op?
 
-    ``ash dependencies install`` runs each plugin's install commands as argv lists
+    ``ashx dependencies install`` runs each plugin's install commands as argv lists
     and only sees an exit code, so a pinned install that found its tool already
     present would read as INSTALLED. Calling this first lets the installer skip
     the subprocess and report the tool as present and verified instead, naming the
@@ -2548,7 +2548,7 @@ def create_url_download_command(
     #
     # Resolved from the environment rather than from the imported constant. The
     # constant is fixed when core.constants is first imported, which happens before
-    # `ash dependencies install --bin-path X` exports ASH_BIN_PATH -- so opengrep
+    # `ashx dependencies install --bin-path X` exports ASH_BIN_PATH -- so opengrep
     # installed into the default directory while the installer reported the
     # requested one, and the post-install sweep then found nothing there.
     # With no bin directory the command only refuses, and nothing is created here.

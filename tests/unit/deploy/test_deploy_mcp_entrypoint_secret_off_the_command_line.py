@@ -3,7 +3,7 @@
 WHAT IS UNDER TEST
 ------------------
 The MCP entrypoint as every committed template under ``deploy/cdk/templates/``
-writes it into its image, run for real with a stand-in ``ash`` and a stand-in
+writes it into its image, run for real with a stand-in ``ashx`` and a stand-in
 ``python3`` in place of the Secrets Manager read.
 
 A process's command line is readable by every user in the container, and from the
@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import shutil
 import subprocess
 from typing import Dict, List, Optional, Tuple
 
@@ -85,16 +86,44 @@ def entrypoint(request) -> str:
         buildspec, "build", f"{ENTRYPOINT_DESTINATION} <<'{DELIMITER}'"
     )
     body = heredoc_body(command, delimiter=DELIMITER)
-    assert "ash mcp" in body, f"{request.param}: not the MCP entrypoint"
+    # The entrypoint picks `ashx` (v4) or `ash` (v3 image) into $ASH_CLI, then runs it.
+    assert '"$ASH_CLI" mcp' in body, f"{request.param}: not the MCP entrypoint"
     return body
 
 
+#: What the entrypoint runs besides the stand-ins and shell builtins.
+_ENTRYPOINT_TOOLS = ("sh", "grep", "tr", "cat", "dirname", "mkdir")
+
+
+def _tool_dir(tmp_path: pathlib.Path) -> pathlib.Path:
+    """A directory holding only the tools the entrypoint needs, linked from the host.
+
+    The entrypoint picks `ashx` when `command -v ashx` finds one and falls back to
+    `ash` otherwise. With the host's whole PATH in the child, a machine that has ASH
+    installed (CI does) answers `ashx` with the real command, so the v3 case below,
+    which provides only an `ash` stand-in, ran the real server instead of the
+    stand-in ("MCP dependencies found. Starting MCP server..."). The child's PATH is
+    now the stand-in directory and this one, so the stand-in is the only ASH there.
+    """
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for name in _ENTRYPOINT_TOOLS:
+        found = shutil.which(name)
+        assert found, f"{name} is not on this host's PATH"
+        (tools / name).symlink_to(found)
+    return tools
+
+
 def _run(
-    entrypoint: str, tmp_path: pathlib.Path, with_fd: bool, secret: str = SECRET
+    entrypoint: str,
+    tmp_path: pathlib.Path,
+    with_fd: bool,
+    secret: str = SECRET,
+    cli_name: str = "ashx",
 ) -> Tuple[int, List[str], Optional[bytes]]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    ash = bin_dir / "ash"
+    ash = bin_dir / cli_name
     ash.write_text(STAND_IN_ASH, encoding="utf-8")
     ash.chmod(0o755)
     secret_file = tmp_path / "secret"
@@ -106,7 +135,7 @@ def _run(
     script.write_text(entrypoint, encoding="utf-8")
     argv_file = tmp_path / "argv"
     env = {
-        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "PATH": f"{bin_dir}{os.pathsep}{_tool_dir(tmp_path)}",
         "HOME": str(tmp_path / "home"),
         "STAND_IN_ARGV": str(argv_file),
         "STAND_IN_FD": "1" if with_fd else "",
@@ -136,6 +165,16 @@ def test_the_secret_goes_on_a_descriptor_when_ash_takes_one(entrypoint, tmp_path
     assert not [arg for arg in argv if SECRET in arg], argv
     assert fd3 == SECRET.encode() + b"\n"
     assert _auth_value_from_bytes(fd3, "descriptor 3") == SECRET
+
+
+def test_a_v3_image_with_only_ash_still_gets_the_secret_on_a_descriptor(
+    entrypoint, tmp_path
+):
+    """A v3 image ships ``ash`` and no ``ashx``; the entrypoint falls back to it."""
+    _status, argv, fd3 = _run(entrypoint, tmp_path, with_fd=True, cli_name="ash")
+
+    assert "--auth-header-value-fd" in argv, argv
+    assert fd3 == SECRET.encode() + b"\n"
 
 
 def test_an_older_ash_still_gets_the_secret_on_argv(entrypoint, tmp_path):

@@ -60,7 +60,7 @@ Known limitations
   ``download_utils``, unavailable here for the reason above. None is needed: the
   extracted executable is checked against its own pinned digest
   (``ToolAsset.executable_digest``) before it is moved into place, so anything
-  that later finds this binary -- ``ash dependencies install`` does, and then
+  that later finds this binary -- ``ashx dependencies install`` does, and then
   leaves it alone rather than installing a second copy -- can verify it from the
   table alone, with no on-disk record to trust.
 * Retries are the caller's job. ``with-retry`` wraps the invocation in the
@@ -79,11 +79,11 @@ tool also installs its license files from ``THIRD_PARTY_LICENSES`` in
 modes serve the same table::
 
     install-pinned-tool --licenses-only opengrep      # binary installed elsewhere
-    install-pinned-tool --uv-tool-pins                # for `ash dependencies install`
+    install-pinned-tool --uv-tool-pins                # for `ashx dependencies install`
     install-pinned-tool --verify-third-party          # last step of the core stage
 
-``--uv-tool-pins`` prints the ``--config-overrides`` that make ``ash dependencies
-install`` install each Python tool with a license entry (bandit, checkov, semgrep)
+``--uv-tool-pins`` prints the ``--config-overrides`` that make ``ashx dependencies
+install`` install each Python tool with a license entry (bandit, checkov)
 at exactly the entry's version. ``--licenses-only`` then reads those tools' license
 files from the wheel's installed dist-info, found under ``uv tool dir``, falling
 back to an entry's URL-pinned copy where the wheel ships none. The last mode checks
@@ -1095,7 +1095,7 @@ def find_dist_info(entry, tool_dir: Path) -> Path:
     if installed != wanted:
         raise _refuse(
             f"{entry.tool}: {matches[0]} is version {installed}, but its license "
-            f"entry records {entry.version}. `ash dependencies install` was run "
+            f"entry records {entry.version}. `ashx dependencies install` was run "
             "without `install-pinned-tool --uv-tool-pins`, or a version bump is "
             "half-applied.",
             _EXIT_USAGE,
@@ -1450,10 +1450,10 @@ def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
 def install_licenses_only(tool: str, package_root: Path, third_party_dir: Path) -> Path:
     """Install ``tool``'s license files for a binary installed some other way.
 
-    For opengrep, which ``ash dependencies install`` provisions later in the
+    For opengrep, which ``ashx dependencies install`` provisions later in the
     build, every file must be URL-pinned, because there is no archive here to
-    read members from. For an entry with a ``distribution`` -- bandit, checkov,
-    semgrep, which ``ash dependencies install`` has already installed with ``uv
+    read members from. For an entry with a ``distribution`` -- bandit and checkov,
+    which ``ashx dependencies install`` has already installed with ``uv
     tool install`` -- the installed wheel's dist-info is the archive.
     """
     pins = load_pins(package_root)
@@ -1473,9 +1473,9 @@ def install_licenses_only(tool: str, package_root: Path, third_party_dir: Path) 
 
 
 def uv_tool_pins(package_root: Path) -> "list[str]":
-    """``ash dependencies install`` arguments pinning each Python tool to its entry.
+    """``ashx dependencies install`` arguments pinning each Python tool to its entry.
 
-    A scanner's own default is a range (semgrep's is ``>=1.125.0,<2.0.0``), so
+    A scanner's own default is a version range, so
     without these the image would carry whatever release PyPI had on the day,
     and the license entry's tag and commit would describe some other release.
     """
@@ -1827,7 +1827,7 @@ def third_party_main(argv: "list[str]") -> int:
         prog="install-pinned-tool",
         description=(
             "Install license files for tools installed another way "
-            "(--licenses-only), print the `ash dependencies install` arguments "
+            "(--licenses-only), print the `ashx dependencies install` arguments "
             "that pin the Python tools to their license entries (--uv-tool-pins), "
             "or verify the image's third-party license directory and write its "
             "index (--verify-third-party)."

@@ -108,7 +108,7 @@ exec 'sudo' '/usr/local/bin/mcp-files' '--root' '/srv/data'
 - The command line is one logical line: the `env` assignments, then `exec`, then the command and each argument. Every value is single-quoted, and an embedded single quote is written with the `'"'"'` idiom. A newline or other control character is written as an ANSI-C `$'...'` word, so one config token is always one script token.
 - An entry with no command writes no script: there is nothing in it to run, and the policy scanner covers its URL. An entry with both a command and a URL writes its script like any other.
 - `<script>.spanmap.json` sits beside each script. It has one row for every script line, with the original file, the JSON pointer of the entry, and the entry's start and end line and column.
-- ASH scans the converted directory with the same scanners it runs on the source tree, so semgrep and opengrep read the scripts. The bundled stargrep rule `sudo-in-shell-script` flags a whole-word `sudo` in a shell script outside a comment, which is how a server started through sudo is reported by those two scanners as well as by the policy scanner.
+- ASH scans the converted directory with the same scanners it runs on the source tree, so opengrep reads the scripts. The bundled stargrep rule `sudo-in-shell-script` flags a whole-word `sudo` in a shell script outside a comment, which is how a server started through sudo is reported by opengrep as well as by the policy scanner.
 
 ## Where a finding in a generated script lands
 
@@ -127,12 +127,12 @@ Some limits to know:
 
 <!-- doctest: run expect-exit=2 -->
 ```sh
-ash --source-dir . --scanners mcp-config --output-dir ash_output
+ashx --source-dir . --scanners mcp-config --output-dir ash_output
 ```
 
-The policy findings come from `mcp-config` alone. On the `.mcp.json` above it reports `MCP-PRIVILEGE-ESCALATION` (HIGH) at the server's `command`, so the scan exits 2. To have the generated scripts scanned as well, run semgrep or opengrep in the same scan:
+The policy findings come from `mcp-config` alone. On the `.mcp.json` above it reports `MCP-PRIVILEGE-ESCALATION` (HIGH) at the server's `command`, so the scan exits 2. To have the generated scripts scanned as well, run opengrep in the same scan:
 
-<!-- doctest: illustrative reason="runs semgrep, whose default ruleset p/ci is fetched from the Semgrep registry over the network" -->
+<!-- doctest: illustrative reason="runs opengrep, whose default ruleset p/ci is fetched from the Semgrep registry over the network" -->
 ```sh
-ash --source-dir . --scanners mcp-config,semgrep --output-dir ash_output
+ashx --source-dir . --scanners mcp-config,opengrep --output-dir ash_output
 ```

@@ -10,7 +10,7 @@ Workspace mode parallelises *projects* across an in-process thread pool
 CI fleet had no way to spread one scan over several jobs. This module supplies the
 assignment half of that: each executor is told ``--shard-index k --shard-count n``
 and works out its own slice with no coordination, no lock and no shared state. The
-recombination half is ``ash merge``.
+recombination half is ``ashx merge``.
 
 Why the split is by scanner and not by file
 -------------------------------------------
@@ -18,20 +18,20 @@ The obvious design is to partition the file list, and it does not work here.
 Scanners receive a *directory* (``ScannerPluginBase.scan(target: Path, ...)``), and
 only a handful of plugins consult ``utils.get_scan_set.scan_set`` at all --
 ``orchestrator.source_scan_set`` is assigned once for reporting and never read
-back. bandit, semgrep, checkov, grype and syft all walk the tree they are pointed
+back. bandit, opengrep, checkov, grype and syft all walk the tree they are pointed
 at.
 
 So a file-level split would be honoured by roughly a third of the scanners and
-ignored by the rest. Every shard's semgrep would scan the whole repository, and
+ignored by the rest. Every shard's opengrep would scan the whole repository, and
 because merging deliberately does not deduplicate findings (see
-``SarifReport.merge_sarif_report``), an n-shard run would report every semgrep
+``SarifReport.merge_sarif_report``), an n-shard run would report every opengrep
 finding n times. That is a wrong report, not merely a slow one, and it is wrong in
 the direction that wastes a reviewer's time on n-1 phantom copies of every real
 issue.
 
 Partitioning the scanner set instead is honoured by every scanner without any
 scanner knowing sharding exists, and it maps onto the actual cost distribution:
-semgrep and checkov dominate ASH's runtime, so putting them on separate executors
+opengrep and checkov dominate ASH's runtime, so putting them on separate executors
 is where the wall-clock win comes from.
 
 Why an exclusion list rather than a new filter
@@ -83,7 +83,7 @@ got no hole detection at all.
 
 Known limitations
 -----------------
-Balance is by scanner *count*, not by scanner *cost*. A shard holding semgrep
+Balance is by scanner *count*, not by scanner *cost*. A shard holding opengrep
 finishes long after a shard holding syft, so wall clock is bounded by the slowest
 single scanner and shard counts above about four buy very little. There is no
 attempt to model or measure per-scanner cost; doing so would need history the CLI
@@ -179,7 +179,7 @@ _WARNED_PROVENANCE_KEYS: set[tuple[str, str]] = set()
 class ShardAssignment(StrippedRecordModel):
     """What one shard was actually asked to run.
 
-    Recorded on each shard's results so ``ash merge`` can verify coverage from the
+    Recorded on each shard's results so ``ashx merge`` can verify coverage from the
     result files alone, without being told out of band how many shards to expect.
     Taking the expected count as a merge argument would mean an operator who
     changed their matrix in one place and not the other gets a silently short
@@ -348,7 +348,8 @@ class ShardAssignment(StrippedRecordModel):
             "shard owns it: candidate_scanners after the --scanners allowlist, "
             "--exclude-scanners, --python-only and each scanner's own enabled "
             "flag. Unlike selected_scanners, which covers assigned_scanners only, "
-            "it covers every candidate. It lets ash merge tell a scanner no job "
+            "it covers every candidate. It lets ashx results merge tell a scanner "
+            "no job "
             "asked for, which is the operator's choice, from one some job asked "
             "for and its owner did not, which is a coverage hole. None on results "
             "written before this field existed."
@@ -357,7 +358,8 @@ class ShardAssignment(StrippedRecordModel):
     python_only: bool | None = Field(
         default=None,
         description=(
-            "Whether this shard ran with --python-only. ash merge reads it to tell "
+            "Whether this shard ran with --python-only. ashx results merge reads "
+            "it to tell "
             "a sharded --python-only scan, where every shard leaves the non-Python "
             "scanners out, from a matrix whose jobs disagree on the flag, where a "
             "scanner one shard left out ran nowhere. None on results written before "
@@ -466,7 +468,7 @@ def scanners_to_exclude(
     """Turn a shard assignment into the exclusion list that implements it.
 
     ``already_excluded`` is carried through rather than replaced. An operator who
-    passed ``--exclude-scanners semgrep`` means it on every shard; dropping their
+    passed ``--exclude-scanners opengrep`` means it on every shard; dropping their
     exclusions here would quietly run a scanner they had turned off, on whichever
     shard it happened to land.
 
@@ -489,7 +491,7 @@ def scanners_to_exclude(
 def verify_shard_coverage(assignments: Sequence[ShardAssignment]) -> None:
     """Check that *assignments* reconstruct exactly one whole scan.
 
-    Called by ``ash merge`` before merging anything. Every condition checked here
+    Called by ``ashx merge`` before merging anything. Every condition checked here
     would otherwise yield a well-formed report that is quietly missing whole
     scanners, or that counts some findings twice.
 

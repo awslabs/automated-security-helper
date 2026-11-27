@@ -55,7 +55,7 @@ npm run build
 ## There is no ASH container image
 
 ASH publishes no container image to any public registry, and will not, for
-licensing reasons. So this construct never references a prebuilt `ash` image.
+licensing reasons. So this construct never references a prebuilt `ashx` image.
 It defaults to a generic AWS-managed CodeBuild image and installs ASH into it.
 
 If you want a warm image, build one yourself from the `Dockerfile` at the root of
@@ -112,7 +112,7 @@ new ASHScanStep('SecurityScan', {
 `shardCount: 4` produces five actions: four shards that run in parallel, and one
 merge action that runs after them.
 
-Sharding needs `ash scan --shard-index <i> --shard-count <n>` and `ash merge`,
+Sharding needs `ashx scan --shard-index <i> --shard-count <n>` and `ashx results merge`,
 which no ASH release up to v3.7.1 has. Set `version` to a tag or commit whose ASH
 has both (or, with `PREINSTALLED`, use an image built from one); otherwise every
 shard action fails and the merge never runs.
@@ -151,7 +151,7 @@ ignore its exit code, so an ASH exit for an incomplete scanner (which ASH checks
 by default), an invalid configuration or an unknown option fails that shard, and
 the merge action does not run.
 
-Because the merge action's exit code *is* the pipeline's verdict, `ash merge`
+Because the merge action's exit code *is* the pipeline's verdict, `ashx results merge`
 must exit non-zero when the merged findings breach the configured threshold.
 
 Each shard also writes to its own output directory (`<outputDirectory>/shard-N`).
@@ -226,27 +226,27 @@ so ASH treats them as one.
 
 `severityThreshold` is applied to whichever action owns the verdict: the scan
 itself when unsharded, and the merge action when sharded. It is deliberately not
-passed to shards. On `ash scan` that option changes only that scan's exit code,
+passed to shards. On `ashx scan` that option changes only that scan's exit code,
 and a shard's exit code is discarded by design, so a floor passed to a shard would
 look like it was set while having no effect on anything.
 
 ### Triaging a failed merge
 
-`ash merge` refuses results whose `metadata.shard` provenance is missing, which is
+`ashx results merge` refuses results whose `metadata.shard` provenance is missing, which is
 how it distinguishes one shard of several from a whole unsharded scan. Provenance
 is recorded only when a scan runs with both `--shard-index` and `--shard-count`,
 and it is skipped when the scan registered no scanners at all. So a merge action
 failing with "no shard provenance found" usually means the fault is upstream in a
-shard, not in the merge: either a shard ran `ash scan` without both flags, or a
+shard, not in the merge: either a shard ran `ashx scan` without both flags, or a
 shard's container registered zero scanners, for instance because a scanner plugin
 failed to load. The merge action is where it surfaces, not where it broke.
 
-For `ash merge`, a shard count higher than the number of enabled scanners is
+For `ashx results merge`, a shard count higher than the number of enabled scanners is
 wasteful rather than broken. The surplus shards are assigned no scanners, still
 record provenance and still merge; each costs a CodeBuild start. That was
-measured with `ash merge` at 50 shards over a 5-scanner tree (45 empty
+measured with `ashx results merge` at 50 shards over a 5-scanner tree (45 empty
 assignments, all 50 stamped, merged findings identical to one unsharded scan), and
-`ash merge` carries a regression test at that same count. With this construct,
+`ashx results merge` carries a regression test at that same count. With this construct,
 synthesis fails above 5 shards, for the input-artifact reason under
 [Sharding](#sharding).
 
@@ -272,7 +272,7 @@ deliberate:
 
 - ASH is **not published to PyPI**. The name `automated-security-helper` on PyPI
   is an unrelated single-release placeholder package with no connection to this
-  project. Installing it would succeed, leave no `ash` on `PATH` so every build
+  project. Installing it would succeed, leave no `ashx` on `PATH` so every build
   would fail at the scan step, and pull a third party's code into the container
   running your security scan.
 - `aws-automated-security-helper` and `awslabs-automated-security-helper` do not
@@ -282,7 +282,7 @@ So the install is what this repository documents for CI:
 
 <!-- doctest: illustrative reason="installs from the network" -->
 ```console
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.8.0
+pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 ```
 
 If ASH is ever published to PyPI under a name the project controls, installing by

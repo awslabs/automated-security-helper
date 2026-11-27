@@ -1,10 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The generated blocks in ``./ash`` and ``utils/ash_helpers.ps1`` match the ash CLI.
+"""The generated blocks in ``utils/ash_helpers.ps1`` match the ash CLI.
 
 ``scripts/generate_wrapper_tables.py`` renders the wrapper contract into marked blocks
-inside the two wrappers. A CLI change that adds a subcommand or an option makes a block
+inside the wrapper (v4 removed the ``./ash`` bash wrapper, which had its own blocks). A CLI change that adds a subcommand or an option makes a block
 stale; the lint job runs the script with ``--check``, and this test runs the same check
 in every matrix cell so a stale block fails wherever the unit tests run.
 
@@ -72,44 +72,20 @@ def test_every_block_has_its_markers_in_its_file(generator):
         (
             "utils/ash_helpers.ps1",
             "ps1-option-subcommands",
-            "'--ignore-suppressions'  = 'scan merge'\n",
-            "'--ignore-suppressions'  = 'scan'\n",
+            "'--ignore-suppressions'  = @('scan', 'results merge')\n",
+            "'--ignore-suppressions'  = @('scan', 'container build')\n",
+        ),
+        (
+            "utils/ash_helpers.ps1",
+            "ps1-routed-groups",
+            "'container'        = @('build')\n",
+            "'container'        = @('build', 'run')\n",
         ),
         (
             "utils/ash_helpers.ps1",
             "ps1-runner-discovery",
             "@('finch', 'docker', 'nerdctl', 'podman')",
             "@('docker', 'finch', 'nerdctl', 'podman')",
-        ),
-        (
-            "ash",
-            "sh-subcommands",
-            ' suppress express"',
-            ' suppress"',
-        ),
-        (
-            "ash",
-            "sh-root-value-options",
-            "--workspace-config -c",
-            "--workspace-config -c -x",
-        ),
-        (
-            "ash",
-            "sh-runner-order",
-            'ASH_RUNNER_ORDER="finch docker nerdctl podman"',
-            'ASH_RUNNER_ORDER="docker finch nerdctl podman"',
-        ),
-        (
-            "ash",
-            "sh-ci-runner-markers",
-            'ASH_CI_RUNNER_MARKERS="GITHUB_ACTIONS TF_BUILD TEAMCITY_VERSION"',
-            'ASH_CI_RUNNER_MARKERS="GITHUB_ACTIONS TF_BUILD"',
-        ),
-        (
-            "ash",
-            "sh-exit-codes",
-            "USAGE_ERROR_EXIT=5",
-            "USAGE_ERROR_EXIT=4",
         ),
         (
             "utils/ash_helpers.ps1",
@@ -160,14 +136,20 @@ def test_a_perturbed_block_is_reported_by_file_and_block(
 
 def test_regenerating_a_perturbed_copy_restores_the_committed_text(generator, tmp_path):
     root = _copy_of_the_wrappers(tmp_path, generator)
-    path = root / "ash"
+    path = root / "utils" / "ash_helpers.ps1"
     text = path.read_text(encoding="utf-8")
-    path.write_text(text.replace(' suppress express"', ' suppress"'), encoding="utf-8")
+    # The --offline row, named with its key: another row may hold the same list.
+    anchor = "'--offline'              = @('scan', 'container build')\n"
+    assert text.count(anchor) == 1, f"the perturbation's anchor is gone: {anchor!r}"
+    path.write_text(
+        text.replace(anchor, "'--offline'              = @('scan')\n"),
+        encoding="utf-8",
+    )
     assert generator.check(root)
 
     written = generator.write(root)
 
-    assert written == ["ash"]
+    assert written == ["utils/ash_helpers.ps1"]
     assert path.read_text(encoding="utf-8") == text
     assert not generator.check(root)
 
@@ -183,32 +165,34 @@ def test_the_refusal_texts_that_name_a_list_name_the_contracts_list(generator):
     flow; the sentences that name them in a refusal must say the same words in the same
     order, or a runner added to the CLI would run while its refusal still omitted it.
     """
+    # v4 removed the ./ash bash wrapper (the runner-order sentences lived there), so
+    # the PowerShell wrapper is the one whose refusal names a generated list.
     contract = generator._contract()
-    runners = _prose_list(list(contract.runner_order), "or")
     markers = _prose_list(list(contract.ci_runner_markers), "and")
-    ash = (REPO_ROOT / "ash").read_text(encoding="utf-8")
     ps1 = (REPO_ROOT / "utils" / "ash_helpers.ps1").read_text(encoding="utf-8")
 
-    assert ash.count(runners) == 2, runners
-    assert ash.count(markers) == 1, markers
     assert ps1.count(markers) == 1, markers
-    # The control: a list in another order is in neither wrapper.
-    assert _prose_list(list(reversed(contract.runner_order)), "or") not in ash
+    # The control: the list in another order is not in the wrapper.
+    assert _prose_list(list(reversed(contract.ci_runner_markers)), "and") not in ps1
 
 
 @pytest.mark.parametrize("ending", ["\n", "\r\n"])
 def test_regenerating_keeps_each_files_own_line_endings(generator, tmp_path, ending):
     root = _copy_of_the_wrappers(tmp_path, generator)
-    path = root / "ash"
+    path = root / "utils" / "ash_helpers.ps1"
     text = path.read_text(encoding="utf-8")
-    stale = text.replace(' suppress express"', ' suppress"').replace("\n", ending)
+    anchor = "'--offline'              = @('scan', 'container build')\n"
+    assert text.count(anchor) == 1, f"the perturbation's anchor is gone: {anchor!r}"
+    stale = text.replace(anchor, "'--offline'              = @('scan')\n").replace(
+        "\n", ending
+    )
     with path.open("w", encoding="utf-8", newline="") as handle:
         handle.write(stale)
     assert generator.check(root)
 
     written = generator.write(root)
 
-    assert written == ["ash"]
+    assert written == ["utils/ash_helpers.ps1"]
     after = path.read_bytes().decode("utf-8")
     assert after == text.replace("\n", ending)
     if ending == "\r\n":

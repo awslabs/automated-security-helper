@@ -38,9 +38,6 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
 from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
     OpengrepScanner,
 )
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-)
 from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner import (
     GuardDogScanner,
     _risk_severity,
@@ -61,17 +58,16 @@ def _facets(cls: type):
 
 
 # --------------------------------------------------------------------------
-# semgrep, opengrep: no SARIF fixes.
+# opengrep (which serves the semgrep name on this branch): no SARIF fixes.
 # --------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     ("fixture", "cls"),
     [
-        ("semgrep/captured/semgrep-1.187.0-fix-rule.sarif", SemgrepScanner),
         ("opengrep/captured/opengrep-2.0.0-fix-rule.sarif", OpengrepScanner),
     ],
-    ids=["semgrep", "opengrep"],
+    ids=["opengrep"],
 )
 def test_a_rule_with_a_fix_key_gets_no_fixes_in_the_sarif(fixture, cls) -> None:
     """The rot guard of the N/A: the day a tool writes ``fixes``, redeclare it."""
@@ -195,17 +191,17 @@ def test_an_npm_advisory_cwe_reaches_the_flat_cwe_column(test_plugin_context) ->
 
 
 # --------------------------------------------------------------------------
-# semgrep, opengrep: the level lives on the rule, not on the result.
+# opengrep (which serves the semgrep name on this branch): the level lives on
+# the rule, not on the result.
 # --------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     ("fixture", "cls"),
     [
-        ("semgrep/captured/semgrep-1.187.0-m0.sarif", SemgrepScanner),
         ("opengrep/captured/opengrep-2.0.0-m0.sarif", OpengrepScanner),
     ],
-    ids=["semgrep", "opengrep"],
+    ids=["opengrep"],
 )
 def test_the_severity_cell_names_the_rule_level_the_capture_carries(
     fixture, cls

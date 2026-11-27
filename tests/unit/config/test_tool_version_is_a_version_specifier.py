@@ -94,11 +94,6 @@ _OPTION_CLASSES = [
     ),
     (
         "scanners",
-        "semgrep",
-        "automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner.SemgrepScannerConfigOptions",
-    ),
-    (
-        "scanners",
         "cfn-lint",
         "automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner.CfnLintScannerConfigOptions",
     ),

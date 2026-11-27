@@ -49,6 +49,7 @@ def _refused_merge(tmp_path: Path) -> subprocess.CompletedProcess:
         importing_this_checkout(
             "from automated_security_helper.cli.main import app; app()"
         ),
+        "results",
         "merge",
     ]
     for path in write_shards(tmp_path / "artifacts", build_shards(2)):
@@ -100,6 +101,7 @@ def test_the_control_merge_writes_the_file(tmp_path):
         importing_this_checkout(
             "from automated_security_helper.cli.main import app; app()"
         ),
+        "results",
         "merge",
     ]
     for path in write_shards(tmp_path / "artifacts", build_shards(2)):

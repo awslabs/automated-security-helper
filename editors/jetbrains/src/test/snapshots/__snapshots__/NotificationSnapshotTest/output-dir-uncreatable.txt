@@ -1,0 +1,7 @@
+progress:
+  Looking for the ASH executable
+
+notification group=ASH type=ERROR
+title: ASH scan not started
+body:
+Could not create the output directory under <PROJECT>/.ash: <PROJECT>/.ash/ash_output: Not a directory

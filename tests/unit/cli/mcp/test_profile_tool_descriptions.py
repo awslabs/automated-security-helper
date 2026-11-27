@@ -43,7 +43,8 @@ def test_the_descriptions_give_the_options_form():
     for tool in (mcp_server.list_profiles, mcp_server.select_profile):
         doc = tool.__doc__ or ""
         assert "--profile NAME=path/to/ash.yaml" in doc, tool.__name__
-        assert "ash mcp" in doc, tool.__name__
+        # v4's command is `ashx`; the docstrings name `ashx mcp`.
+        assert "ashx mcp" in doc, tool.__name__
         assert "repeatable" in doc, tool.__name__
 
 

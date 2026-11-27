@@ -200,14 +200,34 @@ class TestValidateConfigDocument:
         document = SimpleNamespace(data={"project_name": "p"}, environment_values=[])
         validate_config_document(document, tmp_path / "ash.yaml")
         # The context build_config composes (_entry_warn_context): the strict
-        # file-load marker, and the warn-then-refuse rollout's list for a
-        # document that does not set fail_on_unknown_keys. Asserted by key, not
-        # as an exact dict: the composition is the contract, not its key count.
+        # file-load marker, and no warn list, because since ASH 4.0 a document
+        # that does not set fail_on_unknown_keys refuses an unknown entry key.
+        # Asserted by key, not as an exact dict: the composition is the
+        # contract, not its key count.
         context = seen.get("context")
         assert context is not None, seen
         assert context.get("strict_file_load") is True, context
-        assert isinstance(context.get(WARN_UNKNOWN_KEYS), list), context
+        assert WARN_UNKNOWN_KEYS not in context, context
         assert seen.get("strict") is True
+
+    def test_the_warn_list_is_bound_only_when_the_flag_is_false(self, tmp_path):
+        seen = {}
+        original = AshConfig.model_validate
+
+        def spy(data, **kwargs):
+            seen.update(kwargs)
+            return original(data, **kwargs)
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(AshConfig, "model_validate", spy)
+            document = SimpleNamespace(
+                data={"project_name": "p", "fail_on_unknown_keys": False},
+                environment_values=[],
+            )
+            validate_config_document(document, tmp_path / "ash.yaml")
+        context = seen.get("context")
+        assert context is not None, seen
+        assert isinstance(context.get(WARN_UNKNOWN_KEYS), list), context
 
 
 class TestOperatorChainOccurrences:

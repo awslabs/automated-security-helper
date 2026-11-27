@@ -28,7 +28,7 @@ from automated_security_helper.config.config_validator import ConfigValidator
 
 pytestmark = pytest.mark.unit
 
-SESSION = "client-1"
+CLIENT_ID = "client-1"
 
 
 class _Captured(Exception):
@@ -69,7 +69,7 @@ def _validate(path: Path) -> None:
     from automated_security_helper.cli.mcp_tools import mcp_validate_config
 
     try:
-        mcp_validate_config(config_path=str(path), session_id=SESSION)
+        mcp_validate_config(config_path=str(path), session_id=CLIENT_ID)
     except _Captured:
         pass
 
@@ -87,7 +87,7 @@ def test_a_repository_config_a_remote_client_names_is_the_clients(
     # The two predicates disagree on this file: nobody delivered it, and the
     # operator did not set it aside.
     assert config_is_client_supplied(named) is False
-    assert client_named_config_is_untrusted(named, session_id=SESSION) is True
+    assert client_named_config_is_untrusted(named, session_id=CLIENT_ID) is True
     seen: Dict[str, Any] = {}
     _capturing(seen, monkeypatch)
 
@@ -132,14 +132,14 @@ def test_the_session_copy_of_a_bound_profile_keeps_the_operators_trust(
 
     copy = (
         Path(os.environ["ASH_MCP_WORKSPACE_ROOT"])
-        / SESSION
+        / CLIENT_ID
         / CONFIG_DIR_NAME
         / SESSION_CONFIG_FILENAME
     )
     copy.parent.mkdir(parents=True)
     copy.write_text("project_name: x\n", encoding="utf-8")
     assert config_is_client_supplied(copy) is False
-    assert client_named_config_is_untrusted(copy, session_id=SESSION) is False
+    assert client_named_config_is_untrusted(copy, session_id=CLIENT_ID) is False
     seen: Dict[str, Any] = {}
     _capturing(seen, monkeypatch)
 

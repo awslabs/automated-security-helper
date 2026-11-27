@@ -131,10 +131,6 @@ def test_under_the_fixture_the_probes_start_no_process(tmp_path, monkeypatch):
         OpengrepScanner,
         OpengrepScannerConfig,
     )
-    from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-        SemgrepScanner,
-        SemgrepScannerConfig,
-    )
     from automated_security_helper.utils import uv_tool_runner
 
     monkeypatch.setattr(
@@ -169,7 +165,6 @@ def test_under_the_fixture_the_probes_start_no_process(tmp_path, monkeypatch):
     for scanner_class, config_class in (
         (BanditScanner, BanditScannerConfig),
         (CheckovScanner, CheckovScannerConfig),
-        (SemgrepScanner, SemgrepScannerConfig),
     ):
         scanner_class(context=context, config=config_class())
     DetectSecretsScanner(

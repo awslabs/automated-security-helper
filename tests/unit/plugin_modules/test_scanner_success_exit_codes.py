@@ -83,11 +83,6 @@ EXIT_CODE_TABLE = {
         {0, 2},
         {1},
     ),
-    "semgrep": (
-        f"{_MODULES}.ash_builtin.scanners.semgrep_scanner.SemgrepScanner",
-        {0, 1},
-        {2, 7},
-    ),
     "opengrep": (
         f"{_MODULES}.ash_builtin.scanners.opengrep_scanner.OpengrepScanner",
         {0, 1},
@@ -116,7 +111,6 @@ EXECUTED = [
     "bandit",
     "checkov",
     "grype",
-    "semgrep",
     "opengrep",
     "trivy-repo",
     "syft",
@@ -363,12 +357,10 @@ class TestTheStandInRunsOnEveryHost:
     a scanner that is not enabled; the grading under test does not depend on it, and
     an operator's ``enabled: true`` turns either on.
 
-    Building a SemgrepScanner asks uv for the tool's version (``uv tool run --from
-    <spec> semgrep --version``), and the unit tool guard fails a test that started
-    a tool. ``no_tool_probes`` (tests/unit/conftest.py) answers that probe without a
-    process, so the cases below that build a semgrep scanner start nothing. Their
-    assertions read the row's status, exit code and errors, none of which is the
-    version.
+    The unit tool guard fails a test that started a tool. ``no_tool_probes``
+    (tests/unit/conftest.py) answers a version probe without a process, so the
+    cases below that build a scanner start nothing. Their assertions read the
+    row's status, exit code and errors, none of which is the version.
     """
 
     @pytest.mark.parametrize(
@@ -419,7 +411,7 @@ class TestTheStandInRunsOnEveryHost:
         scanner.config.enabled = False
         return scanner
 
-    @pytest.mark.parametrize("name", ["semgrep", "opengrep"])
+    @pytest.mark.parametrize("name", ["opengrep"])
     def test_control_a_scanner_left_off_runs_nothing_and_its_row_is_skipped(
         self, plugin_context, monkeypatch, name
     ):
@@ -449,8 +441,6 @@ class TestTheStandInRunsOnEveryHost:
     @pytest.mark.parametrize(
         "name, exit_code, status",
         [
-            ("semgrep", 0, ScannerStatus.PASSED),
-            ("semgrep", 2, ScannerStatus.ERROR),
             ("opengrep", 0, ScannerStatus.PASSED),
             ("opengrep", 2, ScannerStatus.ERROR),
         ],
@@ -558,9 +548,7 @@ def _sarif_with_notifications(*notifications) -> str:
     )
 
 
-@pytest.mark.parametrize(
-    "name, exit_code", [("semgrep", 7), ("opengrep", 7), ("ferret-scan", 1)]
-)
+@pytest.mark.parametrize("name, exit_code", [("opengrep", 7), ("ferret-scan", 1)])
 def test_a_rejected_run_quotes_the_errors_its_results_file_reports(
     plugin_context, monkeypatch, name, exit_code
 ):
