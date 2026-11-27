@@ -1921,15 +1921,32 @@ def install_dependencies(
     recorded_forces = _recorded_forces(selected, forced_by_plugin, forced_erase)
     all_forced = {**recorded_forces, **forced_by_plugin}
 
+    # --create-virtualenv is decided here too, before this command writes anything
+    # that outlasts it (the bin directory, the forced-binary record): the interpreter
+    # requests of the tools to install must join into one, and the provider that
+    # creates the virtualenv must be able to honor it. A refusal exits 2 with
+    # nothing made and nothing recorded. The virtualenv itself is made in the install
+    # below.
+    venv_plan: Optional[_VirtualenvPlan] = None
+    if virtualenv_target is not None and not is_virtualenv(virtualenv_target):
+        joined_request, join_error = joined_runtime_request(
+            _plugin_runtime_requests(selected, platform_name, arch, all_forced)
+        )
+        if join_error is not None:
+            _refuse_flags(f"--create-virtualenv: {join_error}")
+        venv_plan = _plan_virtualenv(virtualenv_target, provider_names, joined_request)
+
     # The bin directory is made here, after every refusal above (a --config that is
     # not there, a configuration a scan refuses, a plugin module that does not
-    # load, an unknown --tool or --plugin-type): made first, a refused run that
-    # printed "Nothing installed" had still created it. What this can refuse is
-    # what the read before the first build (refuse_an_unmakable_bin_directory)
-    # could not see or that changed since: a run that built no plugin, a
-    # directory removed or made unwritable in between, a failure only mkdir
-    # reports. It is the same refusal, with the invalid-configuration code as an
-    # unusable --config is, where it was a traceback with the failed-install code.
+    # load, an unknown --tool or --plugin-type, a --create-virtualenv whose
+    # interpreter requests cannot be joined or whose provider cannot honor them):
+    # made first, a refused run that printed "Nothing installed" had still created
+    # it. What this can refuse is what the read before the first build
+    # (refuse_an_unmakable_bin_directory) could not see or that changed since: a
+    # run that built no plugin, a directory removed or made unwritable in between,
+    # a failure only mkdir reports. It is the same refusal, with the
+    # invalid-configuration code as an unusable --config is, where it was a
+    # traceback with the failed-install code.
     try:
         absolute_bin_path.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -1976,13 +1993,6 @@ def install_dependencies(
         if virtualenv_target is not None and is_virtualenv(virtualenv_target)
         else None
     )
-    joined_request: Optional[str] = None
-    if virtualenv_target is not None and not is_virtualenv(virtualenv_target):
-        joined_request, join_error = joined_runtime_request(
-            _plugin_runtime_requests(selected, platform_name, arch, all_forced)
-        )
-        if join_error is not None:
-            _refuse_flags(f"--create-virtualenv: {join_error}")
 
     realized_once: set = set()
     ash_environment_requirements: List[str] = []
@@ -1991,9 +2001,9 @@ def install_dependencies(
     # string is one value, never its characters.
     install_values = _INSTALL_VALUES.set(value_tuple(environment_values))
     try:
-        if virtualenv_target is not None and not is_virtualenv(virtualenv_target):
-            _create_virtualenv(virtualenv_target, provider_names, joined_request)
-            venv_version = pyvenv_cfg_version(virtualenv_target)
+        if venv_plan is not None:
+            _create_virtualenv(venv_plan)
+            venv_version = pyvenv_cfg_version(venv_plan.path)
         for plugin_type, plugin_name, plugin_instance in selected:
             outcome = PluginInstallOutcome(
                 name=plugin_name,
@@ -2657,15 +2667,28 @@ def _plugin_runtime_requests(
     return requests
 
 
-def _create_virtualenv(
+@dataclass(frozen=True)
+class _VirtualenvPlan:
+    """A virtualenv this run will create, as decided before anything was written."""
+
+    path: Path
+    provider_name: str
+    command: List[str]
+    #: The providers passed over for the one that can create it, each with its reason.
+    skipped: List[Tuple[str, str]]
+
+
+def _plan_virtualenv(
     path: Path,
     provider_names: Optional[List[str]],
     runtime_request: Optional[str],
-) -> None:
-    """Create the virtualenv with the first permitted provider that can, or exit.
+) -> _VirtualenvPlan:
+    """How the first permitted provider that can creates the virtualenv, or exit.
 
-    Run first, as one counted command, before any tool install. A refusal exits 2
-    (nothing was created); a failed or incomplete creation exits 1.
+    Every refusal of --create-virtualenv that rests on the providers is made here
+    (exit 2), before the bin directory is made or a forced binary is recorded: no
+    permitted provider can create a virtualenv, or the one that can cannot honor the
+    tools' interpreter request. Nothing is created or run here.
     """
     provider, skipped = venue_for_virtualenv(provider_names)
     if provider is None:
@@ -2676,22 +2699,33 @@ def _create_virtualenv(
     built = provider.venv_create_command(path, runtime_request)
     if isinstance(built, Refusal):
         _refuse_flags(f"--create-virtualenv: {built.text}")
-    for name, reason in skipped:
+    return _VirtualenvPlan(path, provider.name, list(built), skipped)
+
+
+def _create_virtualenv(plan: _VirtualenvPlan) -> None:
+    """Create the virtualenv ``plan`` describes, or exit.
+
+    Run first, as one counted command, before any tool install. A failed or
+    incomplete creation exits 1; the refusals were made when the plan was
+    (``_plan_virtualenv``), before anything was written.
+    """
+    for name, reason in plan.skipped:
         print(
             f"[yellow]Skipped {escape(name)} to create the virtualenv:[/yellow] {escape(reason)}"
         )
     print(
-        f"Creating the virtualenv at {escape(str(path))} with {escape(provider.name)}"
+        f"Creating the virtualenv at {escape(str(plan.path))} with "
+        f"{escape(plan.provider_name)}"
     )
     console.print(
-        f"Running command: {escape(_shown_command(built, _INSTALL_VALUES.get()))}",
+        f"Running command: {escape(_shown_command(plan.command, _INSTALL_VALUES.get()))}",
         soft_wrap=True,
     )
-    code = _run_install_command(list(built))
-    if code != 0 or not is_virtualenv(path):
+    code = _run_install_command(list(plan.command))
+    if code != 0 or not is_virtualenv(plan.path):
         print(
             "[bold red]The virtualenv at "
-            f"{escape(str(path))} was not created (exit code {code}); nothing was "
+            f"{escape(str(plan.path))} was not created (exit code {code}); nothing was "
             "installed.[/bold red]"
         )
         raise typer.Exit(EXIT_INSTALL_FAILED)
