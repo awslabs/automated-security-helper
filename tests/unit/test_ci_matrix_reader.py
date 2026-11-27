@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import functools
 import importlib.util
 import sys
 from collections.abc import Iterable
@@ -661,6 +662,7 @@ def _planted(job_lines: str, header: str = "on: push\n") -> dict[str, Any]:
 
 
 CALLEE_USES = "./.github/workflows/callee.yml"
+CALLER_USES = "./.github/workflows/caller.yml"
 
 #: A reusable workflow whose one job runs on the runner label its caller gives it.
 CALLEE = """\
@@ -707,11 +709,32 @@ def _called(
     }
 
 
+def _uses_of(path: Path, root: Path) -> str:
+    """The text a ``uses:`` calls the workflow file ``path`` of the checkout at ``root``
+    with."""
+    return "./" + path.relative_to(root).as_posix()
+
+
+@functools.cache
+def _repository_sites(root: Path) -> dict[str, Any]:
+    """The calls each workflow file of the checkout at ``root`` receives, from the
+    reader's call_sites over every workflow file there, read once for the checkout."""
+    workflows = {
+        _uses_of(path, root): ci.load_workflow(path)
+        for path in _workflow_files(root / ".github" / "workflows")
+    }
+    return ci.call_sites(workflows)
+
+
 def _check_file(path: Path, root: Path = REPO_ROOT) -> set[str]:
     """The check of one workflow file as the test of the real workflows runs it: the
-    labels the file names, read with the workflows it calls."""
+    labels the file names, read with the workflows it calls and the calls it gets."""
     workflow = ci.load_workflow(path)
-    return ci.check_runner_labels(workflow, called=_called(workflow, root))
+    return ci.check_runner_labels(
+        workflow,
+        called=_called(workflow, root),
+        sites=_repository_sites(root)[_uses_of(path, root)],
+    )
 
 
 def _check_repository(root: Path) -> dict[str, set[str]]:
@@ -1069,16 +1092,22 @@ class TestACallToAReusableWorkflow:
         with pytest.raises(ci.UnknownRunnerLabel, match="plan9"):
             ci.check_runner_labels(bad, called=called)
 
-    def test_a_required_input_is_checked_at_each_call_and_not_in_the_callee(self):
-        """A required input with no default is read from the calls, and the check of
-        each call reads what it passes. Read on its own, the called workflow names no
-        label from it and is not refused for having no default."""
-        called = {CALLEE_USES: ci.parse_workflow(CALLEE_REQUIRING_A_RUNNER)}
-        callee = called[CALLEE_USES]
-        assert ci.check_runner_labels(callee) == set()
-        assert ci.runs_on_labels(callee["jobs"]["work"], callee) == set()
-        # The calls carry the check: a known label passes and an unknown one is named.
+    def test_a_required_input_is_read_from_the_calls_of_the_workflow(self):
+        """A required input with no default is the label each call passes. The workflow
+        is accepted with its calls, and refused without them as an input with no default
+        is when it is not required. The check of each call reads what it passes."""
+        callee = ci.parse_workflow(CALLEE_REQUIRING_A_RUNNER)
+        job = callee["jobs"]["work"]
         ok = _caller("    with:\n      runner: macos-15\n")
+        sites = ci.call_sites({CALLEE_USES: callee, CALLER_USES: ok})[CALLEE_USES]
+        assert ci.check_runner_labels(callee, sites=sites) == set()
+        assert ci.runs_on_labels(job, callee, sites) == set()
+        with pytest.raises(ci.UnsupportedExpression, match="no string default"):
+            ci.check_runner_labels(callee)
+        with pytest.raises(ci.UnsupportedExpression, match="no string default"):
+            ci.runs_on_labels(job, callee)
+        # Each call carries its own label: a known one passes, an unknown one is named.
+        called = {CALLEE_USES: callee}
         assert ci.check_runner_labels(ok, called=called) == {"macos-15"}
         bad = _caller("    with:\n      runner: plan9\n")
         with pytest.raises(ci.UnknownRunnerLabel, match="plan9"):
@@ -1095,11 +1124,17 @@ class TestACallToAReusableWorkflow:
         """GitHub's reference gives a string input with no default the value "", so a
         runs-on that reads one a call leaves out would be empty, and no call passes a
         label for the check to read. Only an input declared required, with no default,
-        is read from the calls."""
+        is read from the calls, and calls that all pass the input change nothing for
+        any other."""
         optional = CALLEE.replace("        default: ubuntu-latest\n", declared)
         assert "required: true" not in optional
-        with pytest.raises(ci.UnsupportedExpression, match="no string default"):
-            ci.check_runner_labels(ci.parse_workflow(optional))
+        callee = ci.parse_workflow(optional)
+        passing = _caller("    with:\n      runner: macos-15\n")
+        sites = ci.call_sites({CALLEE_USES: callee, CALLER_USES: passing})[CALLEE_USES]
+        assert sites.calls, "the call passes the input"
+        for given in (None, sites):
+            with pytest.raises(ci.UnsupportedExpression, match="no string default"):
+                ci.check_runner_labels(callee, sites=given)
 
     def test_runs_on_names_no_label_for_an_input_only_the_caller_gives(self):
         """runs_on names the label of one leg, and the callee holds none for it."""
@@ -1320,6 +1355,63 @@ class TestARequiredRunnerInputIsTheCallers:
         assert "required: true" in callee
         _repository(tmp_path, {}, callee=callee)
         assert _check_repository(tmp_path) == {"callee.yml": {"ubuntu-latest"}}
+
+
+class TestTheCallsOfAWorkflow:
+    """call_sites lists, for each workflow of a repository, the jobs that call it."""
+
+    def test_each_workflow_has_the_calls_that_name_it_in_order(self):
+        a = "./.github/workflows/a.yml"
+        b = "./.github/workflows/b.yml"
+        other = "./.github/workflows/other.yml"
+        workflows = {
+            CALLEE_USES: ci.parse_workflow(CALLEE),
+            b: ci.parse_workflow(_calling(PASSES_A_LABEL, NOTE_ONLY)),
+            a: ci.parse_workflow(_calling("", uses=other)),
+            other: ci.parse_workflow(PLAIN_WORKFLOW),
+        }
+        sites = ci.call_sites(workflows)
+        assert list(sites) == list(workflows)
+        assert sites[CALLEE_USES] == ci.CallSites(
+            CALLEE_USES,
+            (
+                ci.Call(b, "call", {"runner": "macos-15"}),
+                ci.Call(b, "call_2", {"note": "plain text"}),
+            ),
+        )
+        assert sites[other] == ci.CallSites(other, (ci.Call(a, "call", None),))
+        assert sites[a] == ci.CallSites(a, ())
+        assert sites[b] == ci.CallSites(b, ())
+
+    def test_a_job_that_calls_no_workflow_of_the_repository_is_not_listed(self):
+        text = (
+            "on: push\n"
+            "jobs:\n"
+            "  action:\n    uses: actions/checkout@v4\n"
+            "  elsewhere:\n    uses: octo/repo/.github/workflows/x.yml@main\n"
+            "  missing:\n    uses: ./.github/workflows/missing.yml\n"
+            "  plain:\n    runs-on: ubuntu-latest\n"
+        )
+        workflows = {
+            CALLEE_USES: ci.parse_workflow(CALLEE),
+            CALLER_USES: ci.parse_workflow(text),
+        }
+        sites = ci.call_sites(workflows)
+        assert [site.calls for site in sites.values()] == [(), ()]
+
+    @pytest.mark.parametrize(
+        "spelled",
+        [
+            "./.github/workflows/../workflows/callee.yml",
+            "./.github//workflows/callee.yml",
+            "././.github/workflows/callee.yml",
+        ],
+    )
+    def test_a_path_is_folded_before_it_is_compared(self, spelled):
+        caller = ci.parse_workflow(_calling("", uses=spelled))
+        workflows = {CALLEE_USES: ci.parse_workflow(CALLEE), CALLER_USES: caller}
+        calls = ci.call_sites(workflows)[CALLEE_USES].calls
+        assert [call.caller for call in calls] == [CALLER_USES]
 
 
 CONSUMERS = [
