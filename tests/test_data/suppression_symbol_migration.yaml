@@ -347,21 +347,27 @@ entries:
 - config: .ash.yaml
   rule_id: SECRET-BASIC-AUTH-CREDENTIALS
   path: automated_security_helper/utils/secret_masking.py
-  old_line_start: 2261
-  old_line_end: 2261
+  old_line_start: 2356
+  old_line_end: 2356
+  # Re-measured with the span in one read of 20e624b3d5b: the lines above the
+  # definition grew by 95 and its body is unchanged.
+  span_measured_at: 20e624b3d5b
   symbol: _exposed_values
   span_at_migration:
-  - 2253
-  - 2285
+  - 2348
+  - 2380
 - config: .ash.yaml
   rule_id: SECRET-BASIC-AUTH-CREDENTIALS
   path: automated_security_helper/utils/secret_masking.py
-  old_line_start: 2960
-  old_line_end: 2960
+  old_line_start: 3055
+  old_line_end: 3055
+  # Re-measured with the span in one read of 20e624b3d5b: the lines above the
+  # definition grew by 95 and its body is unchanged.
+  span_measured_at: 20e624b3d5b
   symbol: mask_secrets_in_sarif_report
   span_at_migration:
-  - 2960
-  - 2963
+  - 3055
+  - 3058
 - config: .ash.yaml
   rule_id: SECRET-SECRET-KEYWORD
   path: automated_security_helper/utils/detect_secrets_worker.py
@@ -642,9 +648,9 @@ kept:
 - config: .ash.yaml
   rule_id: B104
   path: automated_security_helper/utils/secret_masking.py
-  line_start: 463
-  line_end: 463
-  remeasured_at: c15148192f4
+  line_start: 465
+  line_end: 465
+  remeasured_at: 20e624b3d5b
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash.yaml
   rule_id: SECRET-BASIC-AUTH-CREDENTIALS
