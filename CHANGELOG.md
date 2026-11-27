@@ -190,19 +190,21 @@
   writes only what the fold keeps of a section written under the retired name: the
   section's `name` is dropped from its value, and so is any option the serving scanner
   does not declare, with a warning that counts the options. A value the fold lays
-  nothing of writes nothing: a null or empty section, a section that is not a mapping,
-  an empty `options` mapping, a value that held nothing else, a write of the `name`,
-  and an `add` of such an option. An option the serving scanner does not declare is
-  dropped when a file that writes it under the retired name is read, or when a `patch`
-  value under the retired name holds it, so a `patch` operation that removes, replaces
-  or tests that option refuses the load, and the refusal says the option was dropped.
-  The fold's warning counts the options it drops and names none, since a key a file
-  reads from the environment is the value it read. `--config-overrides` entries under
-  the retired name count as setting an operator-only option only where, applied in
-  their order, they leave that option under its declared name. A value read from the
-  environment under the retired name, in a file's section or in one a `patch` adds, is
-  recorded and shown by its reference, as under the current name. No shipped scanner
-  name is retired today, so no current configuration reads differently.
+  nothing of writes nothing: a null section, a section that is not a mapping, a value
+  that held only what is dropped, a write of the `name`, and an `add` of such an option.
+  An empty value is written as it stands, as under the current name. An option the
+  serving scanner does not declare is dropped when a file that writes it under the
+  retired name is read, or when a `patch` value under the retired name holds it, so a
+  `patch` operation that removes, replaces or tests that option refuses the load, and
+  the refusal says the option was dropped. The fold's log lines name the serving
+  scanner, never the key a file wrote, and its warning counts the options it drops and
+  names none, since a key a file reads from the environment is the value it read.
+  `--config-overrides` entries under the retired name count as setting an operator-only
+  option only where, applied in their order, they leave that option under its declared
+  name. A value read from the environment under the retired name, in a file's section or
+  in one a `patch` adds, is recorded and shown by its reference, as under the current
+  name. No shipped scanner name is retired today, so no current configuration reads
+  differently.
 
 - **A session's patched profile that reads a value from the environment is no longer
   refused for that value.** When the registered profile sets an option a client may

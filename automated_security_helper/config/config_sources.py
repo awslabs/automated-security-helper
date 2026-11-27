@@ -100,11 +100,12 @@ document does not hold. An ``add`` or ``replace`` such a pointer carries to
 the serving plugin's section writes only what the fold keeps of its value:
 the section's ``name`` is dropped from it, and so is an option the serving
 plugin does not declare, with a warning that counts the options and names
-none. A value the fold lays nothing of writes nothing: a null or empty
-section, a section that is not a mapping, an empty ``options`` mapping, a
-value that held nothing else, a write of the ``name`` and an ``add`` of
-such an option. A ``replace``, ``remove`` or ``test`` of such an option is
-refused as above (``_through_the_retired_fold``).
+none. A value the fold lays nothing of writes nothing: a null section, a
+section that is not a mapping, a value that held only what is dropped, a
+write of the ``name`` and an ``add`` of such an option; an empty value
+replaces what the pointer names, as under the current name. A ``replace``,
+``remove`` or ``test`` of such an option is refused as above
+(``_through_the_retired_fold``).
 
 ``move`` and ``copy`` are refused, as in ``runtime_patch.py``; #289 asks for
 ``add``, ``remove`` and ``replace``, and ``test`` is allowed because it reads
@@ -3939,13 +3940,14 @@ def _through_the_retired_fold(
     undeclared options, and an ``options`` value loses its undeclared keys.
     What is left then replaces what the pointer names, as any ``add`` or
     ``replace`` does; only the drops are the fold's, which lays a section
-    over the serving one key by key. A value the fold would lay nothing of
-    writes nothing: a null or empty section, a section that is not a
-    mapping, a section or ``options`` value that held only what the fold
-    drops or nothing at all (written, it would reset what the serving
-    section holds), a write of the section's ``name``, and an ``add`` of an
-    option the serving plugin does not declare. An options mapping left
-    empty is left out of a section value, with any key that stands for it.
+    over the serving one key by key. An empty value holds nothing to drop,
+    so it replaces what the pointer names, as under the current name. A
+    value the fold would lay nothing of writes nothing: a null section, a
+    section that is not a mapping, a section or ``options`` value the drops
+    emptied (written emptied, it would reset what the serving section
+    holds), a write of the section's ``name``, and an ``add`` of an option
+    the serving plugin does not declare. An options mapping the drops empty
+    is left out of a section value, with any key that stands for it.
     The option an ``add`` names is judged as the pointer lands, so an
     ``add`` the pointer respells onto a declared option the section holds (a
     ``-``/``_`` twin) writes that option; _patch_step judges it where the
@@ -4041,19 +4043,20 @@ def _through_the_retired_fold(
             return None
         section = {key: item for key, item in value.items() if name(key) != "name"}
         options = section.get("options")
-        if isinstance(options, dict):
+        if isinstance(options, dict) and options:
             options = kept(options)
             if options:
                 section["options"] = options
             else:
-                # Options the fold lays nothing of go, and so does a key that
-                # stands for the options key (the reference replay's token
-                # beside an options key read from the environment).
+                # Options the drops emptied go, and so does a key that stands
+                # for the options key (the reference replay's token beside an
+                # options key read from the environment).
                 for key in [key for key in section if name(key) == "options"]:
                     del section[key]
-        if not section:
-            # Nothing the fold lays, an empty value included: the operation
-            # writes nothing, where the value would reset the serving section.
+        if value and not section:
+            # The drops emptied the value: the operation writes nothing, where
+            # the emptied value would reset the serving section. An empty
+            # value replaces it, as under the current name.
             return None
         return dict(normalized, value=section)
     if rest[0] == "name":
@@ -4061,10 +4064,10 @@ def _through_the_retired_fold(
     if rest[0] != "options":
         return normalized
     if len(rest) == 1:
-        if isinstance(value, dict):
+        if isinstance(value, dict) and value:
             value = kept(value)
             if not value:
-                # Nothing the fold lays, an empty mapping included.
+                # The drops emptied the mapping; an empty one replaces.
                 return None
         return dict(normalized, value=value)
     if normalized["op"] == "add" and declared is not None and rest[1] not in declared:
@@ -4325,11 +4328,14 @@ def _dropped_option_clause(
     replaces or tests it finds nothing at its path. ``folds`` is the chain's
     record of those folds and drops
     (_resolve); with none, or when the pointer names no option a fold dropped,
-    the message stays as it was. A pointer at an option the serving plugin
-    declares gets no sentence: no fold drops a declared option, so a dropped
-    ``-``/``_`` twin of it is not the cause. The sentence names the serving
-    plugin, a name from the alias table, and nothing a file wrote: the
-    message already quotes the pointer as shown."""
+    the message stays as it was. A pointer at an option the ``options``
+    mapping it lands in holds gets no sentence: the option is there, so a
+    dropped ``-``/``_`` twin of it is not why the operation failed (a test
+    of the value it holds, say). Where the mapping does not hold it, a
+    dropped twin is the cause whichever spelling the pointer uses. The
+    sentence names the serving plugin, a name from the alias table, and
+    nothing a file wrote: the message already quotes the pointer as
+    shown."""
     if not folds or not isinstance(pointer, str) or not pointer.startswith("/"):
         return ""
     normalized = _normalize_pointer(document, pointer, owned, folds)
@@ -4340,21 +4346,18 @@ def _dropped_option_clause(
         or parts[2] != "options"
     ):
         return ""
-    from automated_security_helper.config.ash_config import (
-        ScannerConfigSegment,
-        _declared_option_names,
-    )
-
+    holder: Any = document
+    for part in parts[:3]:
+        holder = holder.get(part) if isinstance(holder, dict) else None
+    if isinstance(holder, dict) and parts[3] in holder:
+        # The option is there, so a dropped -/_ twin of it is not why the
+        # operation failed.
+        return ""
     section = parts[1].replace("-", "_").lower()
     option = parts[3].replace("-", "_")
     for serving, dropped in folds.items():
         if serving.replace("-", "_").lower() != section:
             continue
-        declared = _declared_option_names(ScannerConfigSegment, serving)
-        if declared is not None and parts[3] in declared:
-            # No fold drops a declared option, so a dropped -/_ twin of it is
-            # not why the operation found nothing.
-            return ""
         if any(
             isinstance(name, str) and name.replace("-", "_") == option
             for name in dropped

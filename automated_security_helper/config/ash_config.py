@@ -724,7 +724,8 @@ def fold_scanner_name_aliases(
     which of an alias section's option keys are dropped; the shipped
     ``ScannerConfigSegment`` when it is not given, looked up when the function
     runs. ``log=False`` suppresses every log line, for a view that mirrors a
-    document already folded with logging on, so no line prints twice. The
+    document already folded with logging on, so no line prints twice. Each
+    line names a section by the plugin it serves, never by its key, and the
     warning for dropped options counts them and names none: a key a file
     read from the environment is the value it read.
 
@@ -752,8 +753,8 @@ def fold_scanner_name_aliases(
         section = data.pop(key)
         if log:
             ASH_LOGGER.info(
-                f"scanners.{key} is an alias of the {canonical} plugin; "
-                f"applying its section to scanners.{canonical}"
+                f"A scanners section under a retired name of the {canonical} "
+                f"plugin is applied to scanners.{canonical}"
             )
         if isinstance(section, BaseModel):
             section = section.model_dump(exclude_unset=True)
@@ -762,8 +763,9 @@ def fold_scanner_name_aliases(
         if not isinstance(section, dict):
             if log:
                 ASH_LOGGER.warning(
-                    f"scanners.{key} is not a mapping; nothing of it can be "
-                    f"applied to scanners.{canonical}"
+                    f"A scanners section under a retired name of the {canonical} "
+                    "plugin is not a mapping; nothing of it can be applied to "
+                    f"scanners.{canonical}"
                 )
             continue
         section = dict(section)
@@ -780,7 +782,8 @@ def fold_scanner_name_aliases(
                     # is the value it read.
                     count = len(dropped)
                     ASH_LOGGER.warning(
-                        f"scanners.{key}.options: {count} option"
+                        "A scanners section under a retired name of the "
+                        f"{canonical} plugin: {count} option"
                         f"{'' if count == 1 else 's'} with no {canonical} "
                         f"counterpart {'was' if count == 1 else 'were'} dropped"
                     )
