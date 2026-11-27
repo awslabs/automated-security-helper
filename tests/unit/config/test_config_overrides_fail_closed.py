@@ -29,13 +29,20 @@ from automated_security_helper.config.resolve_config import (
     resolve_config,
 )
 from automated_security_helper.core.constants import ASH_EXIT_CODES
-from automated_security_helper.core.exceptions import ASHConfigValidationError
+from automated_security_helper.core.exceptions import (
+    ASHConfigValidationError,
+    ASHRespelledOverrideError,
+)
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.plugin_manifests import UNTYPED_LIST_OPTION_DEFAULTS
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, importing_this_checkout
 
-pytestmark = pytest.mark.unit
+# Each class carries its own tier. One of them starts a child Python, which is an
+# integration test (tests/NAMING_CONVENTIONS.md, "Test tiers"), so a module-level
+# ``unit`` would give its test two tiers and collection would refuse the session.
 
 
+@pytest.mark.unit
 class TestMalformedOverridesRefused:
     """An override string that is not 'key.path=value' is refused."""
 
@@ -53,6 +60,7 @@ class TestMalformedOverridesRefused:
             apply_config_overrides(AshConfig(project_name="test"), ["=LOW"])
 
 
+@pytest.mark.unit
 class TestInvalidMergedConfigRefused:
     """A well-formed override that produces an invalid config is refused."""
 
@@ -139,6 +147,7 @@ class TestInvalidMergedConfigRefused:
         assert "key.path=value" not in str(invalid_merge.value)
 
 
+@pytest.mark.unit
 class TestGoodOverridesStillApply:
     """The paired half: refusing bad input must not mean refusing everything."""
 
@@ -174,6 +183,7 @@ class TestGoodOverridesStillApply:
         assert apply_config_overrides(config, None) is config
 
 
+@pytest.mark.unit
 class TestResolveConfigPropagates:
     """resolve_config has three swallow-all handlers; none may eat this."""
 
@@ -245,6 +255,7 @@ class TestResolveConfigPropagates:
         assert config.global_settings.severity_threshold == "LOW"
 
 
+@pytest.mark.unit
 class TestExitCode:
     """Exit code 3 is the documented code for an invalid configuration."""
 
@@ -330,6 +341,7 @@ class TestExitCode:
         assert not Path(output_dir, "ash_aggregated_results.json").exists()
 
 
+@pytest.mark.unit
 class TestWhitespaceAroundAKeyIsRefused:
     """An override is applied to its key exactly as written. With a space before
     it, " reporters.aws-security-hub.options.archive_resolved_findings=false"
@@ -572,6 +584,27 @@ def _resolve_config_module():
     return importlib.import_module("automated_security_helper.config.resolve_config")
 
 
+def _bedrock_default_excluded_types() -> list:
+    """The default of the Bedrock reporter's ``exclude_scanner_types``, read from its
+    options model, so a test that expects it does not copy the model's literal."""
+    return list(_plugin_config_class(_BEDROCK)().options.exclude_scanner_types)
+
+
+def _scalars(value: Any) -> list:
+    """Every value in *value* that is not a list, a tuple or a dict, however deep, and
+    every key of a dict in it."""
+    if isinstance(value, dict):
+        return [
+            leaf
+            for key, item in value.items()
+            for leaf in (*_scalars(key), *_scalars(item))
+        ]
+    if isinstance(value, (list, tuple)):
+        return [leaf for item in value for leaf in _scalars(item)]
+    return [value]
+
+
+@pytest.mark.unit
 class TestAppendOntoAnUntypedPluginOption:
     """``+=`` on a plugin option that no config file wrote adds to its default.
 
@@ -609,6 +642,7 @@ class TestAppendOntoAnUntypedPluginOption:
     ):
         default = list(getattr(_plugin_config_class(plugin)().options, option))
         assert default, "control: the option has a default to keep"
+        assert default[0] not in value, "control: no value is the default's first item"
         key = f"{segment}.{plugin}.options.{option}"
 
         replaced = apply_config_overrides(AshConfig(), [f"{key}={json.dumps(value)}"])
@@ -633,6 +667,7 @@ class TestAppendOntoAnUntypedPluginOption:
         AshAggregatedResults.model_rebuild()
         BedrockSummaryReporterConfig.model_rebuild()
         BedrockSummaryReporter.model_rebuild()
+        default = _bedrock_default_excluded_types()
         config = apply_config_overrides(
             AshConfig(), [f'{_BEDROCK_EXCLUDED_TYPES}+=["IAC"]']
         )
@@ -647,12 +682,13 @@ class TestAppendOntoAnUntypedPluginOption:
             config=config.get_plugin_config("reporter", _BEDROCK),
         )
 
-        assert reporter.config.options.exclude_scanner_types == ["SECRET", "IAC"]
+        assert reporter.config.options.exclude_scanner_types == [*default, "IAC"]
 
     def test_an_append_under_the_spelling_the_plugin_reads_adds_the_default(self):
         """The section a plugin reads is found under any spelling the lookup
         accepts (``BedrockSummaryReporter`` names ``bedrock-summary-reporter``), so
         an append under that spelling is to the section the reporter reads."""
+        default = _bedrock_default_excluded_types()
         config = apply_config_overrides(
             AshConfig(),
             ['reporters.BedrockSummaryReporter.options.exclude_scanner_types+=["IAC"]'],
@@ -660,7 +696,7 @@ class TestAppendOntoAnUntypedPluginOption:
 
         assert _effective_list(
             config, "reporter", _BEDROCK, "exclude_scanner_types"
-        ) == ["SECRET", "IAC"]
+        ) == [*default, "IAC"]
 
     def test_an_append_to_a_key_the_file_wrote_extends_it_and_adds_no_default(self):
         written = AshConfig.model_validate(
@@ -675,6 +711,109 @@ class TestAppendOntoAnUntypedPluginOption:
             config, "reporter", _BEDROCK, "exclude_scanner_types"
         ) == ["IAC", "SCA"]
 
+    def test_an_append_beside_another_written_option_adds_the_default(self):
+        """The file writes the reporter's section with one option, not the list the
+        append is for: the list starts from the plugin's default, and the option the
+        file wrote is kept."""
+        written = AshConfig.model_validate(
+            {"reporters": {_BEDROCK: {"options": {"summary_style": "technical"}}}}
+        )
+        default = _bedrock_default_excluded_types()
+
+        config = apply_config_overrides(
+            written, [f'{_BEDROCK_EXCLUDED_TYPES}+=["IAC"]']
+        )
+
+        assert _effective_list(
+            config, "reporter", _BEDROCK, "exclude_scanner_types"
+        ) == [*default, "IAC"]
+        assert config.get_plugin_config("reporter", _BEDROCK) == {
+            "options": {
+                "summary_style": "technical",
+                "exclude_scanner_types": [*default, "IAC"],
+            }
+        }
+
+    def test_an_append_beside_a_section_with_no_options_adds_the_default(self):
+        """The file writes the reporter's section with no ``options`` key at all: the
+        append creates it, starts the list from the plugin's default, and the key the
+        file wrote is kept."""
+        written = AshConfig.model_validate({"reporters": {_BEDROCK: {"enabled": True}}})
+        default = _bedrock_default_excluded_types()
+
+        config = apply_config_overrides(
+            written, [f'{_BEDROCK_EXCLUDED_TYPES}+=["IAC"]']
+        )
+
+        assert _effective_list(
+            config, "reporter", _BEDROCK, "exclude_scanner_types"
+        ) == [*default, "IAC"]
+        assert config.get_plugin_config("reporter", _BEDROCK) == {
+            "enabled": True,
+            "options": {"exclude_scanner_types": [*default, "IAC"]},
+        }
+
+    def test_a_respelled_written_section_is_refused_and_changes_nothing(self):
+        """``BedrockSummaryReporter`` reads as the section the file wrote, but the
+        override walk would add it beside that section as a key of its own, and the
+        append would then be to a section the reporter does not read. It is refused,
+        naming the key the file wrote, and the configuration it was applied to is as
+        it was."""
+        key = "reporters.BedrockSummaryReporter.options.exclude_scanner_types"
+        written = AshConfig.model_validate(
+            {"reporters": {_BEDROCK: {"options": {"exclude_scanner_types": ["IAC"]}}}}
+        )
+
+        with pytest.raises(ASHRespelledOverrideError) as refused:
+            apply_config_overrides(written, [f'{key}+=["SCA"]'])
+
+        assert f"reporters.{_BEDROCK}" in str(refused.value)
+        reporters = written.model_dump()["reporters"]
+        assert reporters[_BEDROCK]["options"]["exclude_scanner_types"] == ["IAC"]
+        assert "BedrockSummaryReporter" not in reporters
+
+    def test_the_underscore_spelling_of_a_section_the_file_wrote_is_that_section(self):
+        """A key that differs from one the document holds only in ``-`` against
+        ``_`` is that key: the append extends the list the file wrote, and no second
+        section appears beside it."""
+        twin = _BEDROCK_EXCLUDED_TYPES.replace("-", "_")
+        assert twin != _BEDROCK_EXCLUDED_TYPES, "control: the spelling differs"
+        written = AshConfig.model_validate(
+            {"reporters": {_BEDROCK: {"options": {"exclude_scanner_types": ["IAC"]}}}}
+        )
+
+        config = apply_config_overrides(written, [f'{twin}+=["SCA"]'])
+
+        reporters = config.model_dump()["reporters"]
+        assert reporters[_BEDROCK]["options"]["exclude_scanner_types"] == ["IAC", "SCA"]
+        assert [key for key in reporters if "bedrock" in key.lower()] == [_BEDROCK]
+
+    def test_an_append_to_a_written_external_list_extends_it(self, caplog):
+        """A plugin from a module outside ASH has no row in the defaults table, so no
+        default to add to. When the file wrote the list, the append extends it and
+        nothing is warned of: the warning is for a list the document lacks."""
+        key = "reporters.acme-written-exporter.options.destinations"
+        unread = "reporters.acme-findings-exporter.options.destinations"
+        warned = _resolve_config_module()._APPEND_TO_UNREAD_SECTION_WARNED
+        assert key not in warned, "control: no earlier append has warned of the key"
+        written = AshConfig.model_validate(
+            {
+                "reporters": {
+                    "acme-written-exporter": {"options": {"destinations": ["a"]}}
+                }
+            }
+        )
+
+        with caplog.at_level("WARNING", logger="ash"):
+            config = apply_config_overrides(written, [f'{key}+=["b"]'])
+            apply_config_overrides(AshConfig(), [f'{unread}+=["x"]'])
+
+        assert config.get_plugin_config("reporter", "acme-written-exporter") == {
+            "options": {"destinations": ["a", "b"]}
+        }
+        assert _warnings_naming(caplog, key) == []
+        assert len(_warnings_naming(caplog, unread)) == 1, "control: the capture works"
+
     def test_an_append_to_an_option_whose_default_is_empty_starts_the_list(self):
         assert _plugin_config_class("guarddog")().options.rules == [], "control"
 
@@ -687,6 +826,7 @@ class TestAppendOntoAnUntypedPluginOption:
         ]
 
     def test_two_appends_accumulate_after_the_default(self):
+        default = _bedrock_default_excluded_types()
         config = apply_config_overrides(
             AshConfig(),
             [
@@ -697,7 +837,7 @@ class TestAppendOntoAnUntypedPluginOption:
 
         assert _effective_list(
             config, "reporter", _BEDROCK, "exclude_scanner_types"
-        ) == ["SECRET", "IAC", "SCA"]
+        ) == [*default, "IAC", "SCA"]
 
     def test_a_later_set_replaces_the_default_and_the_appends(self):
         config = apply_config_overrides(
@@ -712,15 +852,26 @@ class TestAppendOntoAnUntypedPluginOption:
             config, "reporter", _BEDROCK, "exclude_scanner_types"
         ) == ["SCA"]
 
-    def test_an_append_onto_a_whole_section_is_unchanged(self):
+    def test_an_append_onto_a_whole_section_adds_no_default(self):
         """Only an override that lands at an option inside an untyped section is
-        read against the plugin's defaults; one at the section itself still starts
-        the value from what it was given."""
-        config = apply_config_overrides(
-            AshConfig(), ["reporters.acme-findings-exporter+=[1]"]
-        )
+        read against the plugin's defaults. One at the section itself has no option
+        to read a default for: it is refused, or it is applied as the items it was
+        given, and what it writes holds none of the plugin's default items."""
+        defaults = [
+            item
+            for row in UNTYPED_LIST_OPTION_DEFAULTS["reporters"][_BEDROCK].values()
+            for item in row
+        ]
+        assert defaults, "control: the table has default items for the plugin"
+        key = f"reporters.{_BEDROCK}"
 
-        assert config.get_plugin_config("reporter", "acme-findings-exporter") == [1]
+        try:
+            config = apply_config_overrides(AshConfig(), [f"{key}+=[1]"])
+        except ASHConfigValidationError:
+            return
+
+        written = config.get_plugin_config("reporter", _BEDROCK)
+        assert [leaf for leaf in _scalars(written) if leaf in defaults] == []
 
     def test_a_typed_section_keeps_its_default_as_before(self):
         default = list(AshConfig().scanners.checkov.options.frameworks)
@@ -771,12 +922,13 @@ class TestAppendOntoAnUntypedPluginOption:
             _with_reporter_overrides,
         )
 
+        default = _bedrock_default_excluded_types()
         view = _with_reporter_overrides(
             AshConfig(), [f'{_BEDROCK_EXCLUDED_TYPES}+=["IAC"]'], AshConfig()
         )
 
         options = view.model_dump(by_alias=True)["reporters"][_BEDROCK]["options"]
-        assert options["exclude_scanner_types"] == ["SECRET", "IAC"]
+        assert options["exclude_scanner_types"] == [*default, "IAC"]
 
     def test_an_external_reporters_section_survives_the_trusted_replay(self):
         """The repository's own file holds the reporter's section and the trusted
@@ -927,3 +1079,78 @@ class TestAppendOntoAnUntypedPluginOption:
 
         assert appended.exit_code == 0, appended.output
         assert assigned.exit_code == 0, assigned.output
+
+
+@pytest.mark.integration
+class TestAnAppendImportsNoPluginModule:
+    """Applying ``+=`` to a shipped plugin's option imports no plugin module.
+
+    The list an append starts from comes from ``UNTYPED_LIST_OPTION_DEFAULTS``, not
+    from the plugin's options model, because importing a plugin module registers
+    its plugins and a scan runs every plugin registered: an append to the Bedrock
+    reporter's option must not enlist the reporter. Only a fresh interpreter shows
+    what an operation imports, since this process has imported the module for its
+    other tests.
+
+    Building ``AshConfig`` imports the built-in plugins' config classes, which its
+    typed sections need, so the child cannot be asked for no plugin module at all.
+    It is asked for the same set before and after the append, and for none under the
+    reporter's package.
+    """
+
+    def test_applying_an_append_imports_no_plugin_module(self, tmp_path):
+        import subprocess  # nosec B404 - starts a fresh interpreter to watch imports
+        import sys
+
+        module = _plugin_config_class(_BEDROCK).__module__
+        package = module.rpartition(".")[0]
+        default = _bedrock_default_excluded_types()
+        code = (
+            "import importlib, json, sys\n"
+            "from automated_security_helper.config.ash_config import AshConfig\n"
+            "from automated_security_helper.config.resolve_config import (\n"
+            "    apply_config_overrides,\n"
+            ")\n"
+            "override, plugin, module = sys.argv[1:]\n"
+            "def loaded():\n"
+            "    return sorted(m for m in sys.modules if '.plugin_modules.' in m)\n"
+            "base = AshConfig()\n"
+            "before = loaded()\n"
+            "config = apply_config_overrides(base, [override])\n"
+            "after = loaded()\n"
+            "section = config.get_plugin_config('reporter', plugin)\n"
+            "importlib.import_module(module)\n"
+            "print(json.dumps({\n"
+            "    'before': before,\n"
+            "    'after': after,\n"
+            "    'value': section['options']['exclude_scanner_types'],\n"
+            "    'control': loaded(),\n"
+            "}))\n"
+        )
+
+        result = subprocess.run(  # nosec B603 - fixed argv: this interpreter, literal probe
+            [
+                sys.executable,
+                "-c",
+                importing_this_checkout(code),
+                f'{_BEDROCK_EXCLUDED_TYPES}+=["IAC"]',
+                _BEDROCK,
+                module,
+            ],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=CHILD_TIMEOUT_SECONDS,
+        )
+
+        def under_the_package(names: list) -> list:
+            return [n for n in names if n == package or n.startswith(f"{package}.")]
+
+        assert result.returncode == 0, result.stderr[-2000:]
+        child = json.loads(result.stdout.strip().splitlines()[-1])
+        assert child["value"] == [*default, "IAC"], "control: the append took effect"
+        assert under_the_package(child["control"]), "control: an import is recorded"
+        assert under_the_package(child["after"]) == []
+        assert child["after"] == child["before"], sorted(
+            set(child["after"]) - set(child["before"])
+        )

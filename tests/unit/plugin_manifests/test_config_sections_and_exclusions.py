@@ -20,6 +20,7 @@ import typing
 
 import pytest
 from pydantic import BaseModel, ValidationError
+from pydantic_core import to_jsonable_python
 
 from automated_security_helper.base.converter_plugin import ConverterPluginConfigBase
 from automated_security_helper.base.plugin_config import plugin_config_key
@@ -361,22 +362,15 @@ def _list_defaults(
     options_class: type[BaseModel], path: tuple[str, ...]
 ) -> typing.Iterator[tuple[tuple[str, ...], tuple]]:
     """``(path, items)`` for each field of the options model whose default is a list
-    or a tuple, the items as JSON values, descending into a field whose default is a
-    model of its own. A field is keyed by its alias when it has one, as a config
-    file spells it."""
+    or a tuple, the items as JSON values (``to_jsonable_python``, which writes a
+    model as its dump, an enum as its value and a path as its text), descending
+    into a field whose default is a model of its own. A field is keyed by its alias
+    when it has one, as a config file spells it."""
     for name, field in options_class.model_fields.items():
         key = field.alias or name
         default = field.get_default(call_default_factory=True)
         if isinstance(default, (list, tuple)):
-            yield (
-                (*path, key),
-                tuple(
-                    item.model_dump(mode="json")
-                    if isinstance(item, BaseModel)
-                    else item
-                    for item in default
-                ),
-            )
+            yield ((*path, key), tuple(to_jsonable_python(default)))
         elif isinstance(default, BaseModel):
             yield from _list_defaults(type(default), (*path, key))
 
@@ -414,7 +408,12 @@ def _declared_rows() -> dict[_Row, tuple]:
         if options_class is None:
             continue
         for path, items in _list_defaults(options_class, ("options",)):
-            rows[(segment, plugin, path)] = items
+            row = (segment, plugin, path)
+            assert row not in rows, (
+                f"{segment}.{plugin}.{'.'.join(path)} is declared by two plugin "
+                "classes that share the key, so one row would overwrite the other"
+            )
+            rows[row] = items
     return rows
 
 
