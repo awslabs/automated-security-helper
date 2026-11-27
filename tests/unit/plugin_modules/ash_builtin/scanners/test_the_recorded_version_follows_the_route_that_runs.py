@@ -30,6 +30,7 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    bandit_scanner,
     cfn_lint_scanner,
     checkov_scanner,
     zizmor_scanner,
@@ -315,6 +316,40 @@ def test_bandit_records_the_version_a_resolved_copy_answered(tmp_path):
     assert bandit.tool_version == "1.8.3"
 
 
+def test_a_bandit_revalidation_off_uv_takes_the_uv_route_the_resolver_names(
+    tmp_path, monkeypatch
+):
+    """A bandit on a direct route is validated again. It records no verified copy,
+    so the re-validation falls through to the final fallback and asks the resolver,
+    and a uv answer there is the uv route: the scanner goes back to it with the
+    record that route owes, the version of the copy dropped and the uv probe owed
+    again. The check of uv's availability is not replaced: off uv, the real one
+    answers True at once.
+
+    Without the fix the route stayed direct, and the scan started whatever bandit
+    PATH holds under a requirement it was never checked against."""
+    bandit = BanditScanner(context=_context(tmp_path))
+    bandit.use_uv_tool = False
+    bandit.tool_version = "1.8.3"  # what the direct route recorded
+    bandit._deferred_tool_version_probe = None
+    monkeypatch.setattr(
+        BanditScanner, "resolve_deferred_tool_version", lambda self: None
+    )
+    monkeypatch.setattr(
+        bandit_scanner,
+        "get_uv_tool_command",
+        lambda *args, **kwargs: ["uv", "tool", "run", "bandit"],
+    )
+
+    with patch(VERIFY, side_effect=_never_verified):
+        assert bandit.validate_plugin_dependencies() is True
+
+    assert bandit.use_uv_tool is True
+    assert bandit.tool_version is None
+    assert bandit._deferred_tool_version_probe == ("bandit", None)
+    assert bandit.dependencies_satisfied is True
+
+
 # ---------------------------------------------------------------------------
 # checkov, cfn-lint and guarddog resolver arms
 # ---------------------------------------------------------------------------
@@ -525,6 +560,41 @@ def test_a_uv_answer_named_by_path_with_uv_unavailable_is_not_verified_as_the_to
 
     assert scanner.use_uv_tool is True
     assert scanner.tool_version == "9.9.9"
+    assert scanner.dependencies_satisfied is True
+
+
+@RESOLVER_SCANNERS
+def test_a_uv_answer_reached_off_uv_takes_the_uv_route(
+    tmp_path, monkeypatch, make, module, tool
+):
+    """The uv-absent branch is entered through ``_validate_uv_tool_availability``,
+    which answers True at once for a scanner off uv, so its one real caller is on
+    uv. Any other entry (an override of that check, a new caller, a test that
+    patches it, as this one does) must not leave a uv answer on a direct route,
+    where the scan starts whatever copy PATH holds, unverified. A uv answer is the
+    uv route: the scanner goes back to it with the record that route owes, the
+    version of the direct copy dropped and the uv probe owed again.
+
+    Without the fix the branch returned True with the route still direct."""
+    scanner = make(tmp_path)
+    scanner.use_uv_tool = False
+    scanner.tool_version = "3.3.15"  # a direct route's record
+    scanner._deferred_tool_version_probe = None
+    cls = type(scanner)
+    monkeypatch.setattr(cls, "resolve_deferred_tool_version", lambda self: None)
+    monkeypatch.setattr(cls, "_validate_uv_tool_availability", lambda self: False)
+    monkeypatch.setattr(
+        module,
+        "get_uv_tool_command",
+        lambda *args, **kwargs: ["uv", "tool", "run", tool],
+    )
+
+    with patch(VERIFY, side_effect=_never_verified):
+        assert scanner.validate_plugin_dependencies() is True
+
+    assert scanner.use_uv_tool is True
+    assert scanner.tool_version is None
+    assert scanner._deferred_tool_version_probe == (tool, None)
     assert scanner.dependencies_satisfied is True
 
 

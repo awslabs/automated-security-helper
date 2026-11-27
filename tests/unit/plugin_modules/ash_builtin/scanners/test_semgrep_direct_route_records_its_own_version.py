@@ -192,6 +192,40 @@ def test_a_uv_answer_keeps_the_uv_routes_record(test_plugin_context, monkeypatch
     assert scanner._deferred_tool_version_probe == ("semgrep", None)
 
 
+def test_a_uv_answer_reached_off_uv_takes_the_uv_route(
+    test_plugin_context, monkeypatch
+):
+    """The test above enters on uv, which is where the one real caller is. Any other
+    entry (an override of the availability check, a new caller, a test that patches
+    it) must not leave a uv answer on a direct route, where the scan starts whatever
+    semgrep PATH holds, unverified. A uv answer is the uv route: the scanner goes
+    back to it with the record that route owes, the version of the direct copy
+    dropped and the uv probe owed again.
+
+    Without the fix the branch returned True with the route still direct."""
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    monkeypatch.setattr(
+        semgrep_scanner,
+        "get_uv_tool_command",
+        lambda name, **kwargs: ["uv", "tool", "run", "semgrep"],
+    )
+    monkeypatch.setattr(
+        pre_installed_tool,
+        "verify_pre_installed_tool",
+        lambda *args, **kwargs: pytest.fail("a uv answer is not verified as semgrep"),
+    )
+    scanner.use_uv_tool = False
+    scanner.tool_version = "1.130.0"  # a direct route's record
+    scanner._deferred_tool_version_probe = None
+
+    assert scanner._direct_or_uv_command_found() is True
+
+    assert scanner.use_uv_tool is True
+    assert scanner.tool_version is None
+    assert scanner._deferred_tool_version_probe == ("semgrep", None)
+    assert scanner.dependencies_satisfied is True
+
+
 @pytest.mark.parametrize("status", ["satisfied", "unverifiable"])
 def test_checking_a_copy_on_path_changes_no_record(
     test_plugin_context, monkeypatch, status
@@ -215,3 +249,47 @@ def test_checking_a_copy_on_path_changes_no_record(
     assert scanner.use_uv_tool is True
     assert answer is not None
     assert answer.version == "1.130.0"
+
+
+@pytest.mark.parametrize(
+    "direct_only", [True, False], ids=["install-fallback", "resolver-fallback"]
+)
+def test_a_copy_check_that_answers_false_refuses_the_copy(
+    test_plugin_context, monkeypatch, direct_only
+):
+    """The check of a copy on PATH answers with a verdict, and a refusal is no
+    verdict. A stand-in or an override still written to the old yes-or-no answer
+    says False to refuse, and both callers (the install fallback and the resolver
+    fallback) take that as a refusal: the copy does not run, the route and the
+    record the uv route made stay, and the dependency is not satisfied.
+
+    Without the fix a False answer was taken as a copy that may run: only None
+    refused."""
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    monkeypatch.setattr(
+        SemgrepScanner, "_direct_binary_satisfies", lambda self, executable: False
+    )
+    if direct_only:
+        _binary_on_path(monkeypatch)
+    else:
+        monkeypatch.setattr(
+            semgrep_scanner, "get_uv_tool_command", lambda name, **kwargs: [BINARY]
+        )
+    scanner.use_uv_tool = True
+    scanner.tool_version = UV_PROBE_VERSION
+    scanner._deferred_tool_version_probe = ("semgrep", None)
+
+    assert scanner._direct_or_uv_command_found(direct_only=direct_only) is False
+
+    assert scanner.use_uv_tool is True
+    assert scanner.tool_version == UV_PROBE_VERSION
+    assert scanner._deferred_tool_version_probe == ("semgrep", None)
+    assert scanner.dependencies_satisfied is not True
+
+
+def test_the_copy_check_is_named_for_the_verdict_it_returns():
+    """The check returns the verifier's verdict for a copy that may run and None
+    for one that may not, so it is not named as a yes-or-no question. No alias of
+    the old name stays: an override of it would never be called by the base."""
+    assert callable(getattr(SemgrepScanner, "_direct_binary_verdict", None))
+    assert not hasattr(SemgrepScanner, "_direct_binary_satisfies")

@@ -624,6 +624,40 @@ def test_a_uv_answer_inside_the_window_keeps_uv_over_a_copy_that_falls_short(
     assert detail not in capture.text
 
 
+def test_a_uv_answer_reached_off_uv_keeps_uv_over_a_copy_that_falls_short(
+    tmp_path, monkeypatch, capture
+):
+    """The uv-absent branch is entered through the availability check, which answers
+    True at once for a scanner off uv, so its one real caller is on uv. Any other
+    entry (an override of that check, a new caller, a test that patches it, as this
+    one does) is put on the uv route when the answer is uv and the copy on PATH falls
+    short, not left on a direct route that would start the copy that was just
+    refused. The route comes back with the record it owes: the version of the direct
+    copy dropped, and the uv probe owed again.
+
+    Without the fix the branch returned True with the route still direct."""
+    scanner = _scanner(tmp_path)
+    scanner.use_uv_tool = False
+    scanner.tool_version = "3.2.0"  # a direct route's record
+    scanner._deferred_tool_version_probe = None
+    detail = "guarddog 2.9.0 does not satisfy ==3.2.0"
+    summary = "version 2.9.0 is below the required ==3.2.0"
+    verifier = _Verifier(
+        _verdict("unsatisfied", version="2.9.0", detail=detail, summary=summary)
+    )
+    _without_uv(monkeypatch, scanner, UV_ANSWER, verifier, on_path=COPY)
+
+    assert scanner.validate_plugin_dependencies() is True
+
+    assert scanner.use_uv_tool is True
+    assert scanner.tool_version is None
+    assert scanner._deferred_tool_version_probe == (TOOL, None)
+    assert scanner.dependencies_satisfied is True
+    assert scanner.dependency_unavailable_reason is None
+    assert COPY in capture.text
+    assert summary in capture.text
+
+
 # ---------------------------------------------------------------------------
 # What the check shows of a constraint read from the environment, and what it does
 # when the plugin's values cannot be read
