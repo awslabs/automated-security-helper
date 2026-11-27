@@ -21,10 +21,10 @@ What it holds
 * the scrub scan: ``scan_text`` and ``scan_cast`` look for tokens that must not appear
   in a recording (home directories, user and host names) and name each hit by its
   kind, never by its value. A token that a color change or a cursor movement splits,
-  or that a line wrap splits with only line breaks, borders and spaces between its
-  halves, is found in the text with those taken out (``flatten_text``). A cell that
-  wraps inside a row of several columns is not rejoined, so the recorder has to work
-  at a width where no table wraps.
+  or that a line wrap splits with only line breaks, box-drawing borders and spaces
+  between its halves, is found in the text with those taken out (``flatten_text``). A
+  cell that wraps inside a row of several columns is not rejoined, so the recorder has
+  to work at a width where no table wraps.
 * the run record: dataclasses for what a recording run observed, and
   ``canonical_json``, the one JSON form the record is written in.
 
@@ -1286,8 +1286,9 @@ class ForbiddenHit:
     #: ``raw`` is the text as recorded; ``plain`` is the text with SGR color runs
     #: removed, which finds a token that color changes split; ``flat`` is the text with
     #: every escape sequence, control character, line break and box-drawing character
-    #: removed, which finds a token that a cursor movement or a line wrap split, except
-    #: a cell that wrapped inside a row of several columns (see ``flatten_text``).
+    #: removed, which finds a token that a cursor movement or a line wrap split, unless
+    #: other text lies between the halves, as in a cell that wrapped inside a row of
+    #: several columns or in a table drawn with ASCII bars (see ``flatten_text``).
     view: str
 
     def __str__(self) -> str:
@@ -1317,15 +1318,17 @@ def flatten_text(text: str) -> str:
     (U+2500 to U+257F, the borders of a table) is removed, with the spaces beside a
     removed control or box-drawing character. So a token whose halves nothing else
     parts reads as the token again: a path that a cursor movement or a color change
-    cut, a path that wraps onto the next line, and a path that wraps inside a table of
-    one column or inside the last filled cell of a row of several.
+    cut, a path that wraps onto the next line, and a path that wraps inside a table
+    with box-drawing borders or none, in a table of one column or in the last filled
+    cell of a row of several.
 
-    A cell that wraps inside a row of several columns is not rejoined when other cells
-    have text after it on its first line or before the rest of it on the next line:
-    that text lies between the halves, and the view keeps it. A recording therefore
-    has to be made at a width where no table wraps; this view is no substitute for
-    that. It can also join words that were apart, which only makes a scan that looks
-    for a token stricter.
+    Other text between the halves is kept, and then the token is not found. A cell
+    that wraps inside a row of several columns is not rejoined when other cells have
+    text after it on its first line or before the rest of it on the next line. A table
+    drawn with ASCII bars (``|``) is not rejoined either, since only box-drawing
+    characters are removed. A recording therefore has to be made at a width where no
+    table wraps; this view is no substitute for that. It can also join words that
+    were apart, which only makes a scan that looks for a token stricter.
     """
     kept: list[str] = []
     in_gap = False
@@ -1374,9 +1377,9 @@ def scan_text(
 
     The text is read as recorded, again with its color sequences removed and again
     flattened, so a path that color changes, a cursor movement or a line wrap split
-    into pieces is still found. The flat view has one limit, for a table cell that
-    wraps inside a row of several columns (see ``flatten_text``). A view that equals
-    an earlier one is not read twice.
+    into pieces is still found. The flat view does not rejoin every wrapped table (see
+    ``flatten_text`` for the ones it does). A view that equals an earlier one is not
+    read twice.
     """
     return _scan(text, [(token, token.pattern()) for token in tokens], where)
 
