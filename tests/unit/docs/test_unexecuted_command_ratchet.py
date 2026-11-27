@@ -497,8 +497,8 @@ def test_a_command_in_a_block_nothing_runs_is_counted_whatever_starts_the_line(
     """A bash block fenced as text leaves the runs with no marker, and its seed line can
     then be deleted as if it were converted. Only an ``ash`` line and a ``$`` prompt line
     were counted, so a block got away by starting its line another way: through uvx or
-    uv run, behind sudo or an environment assignment, after a ``%`` or ``PS>`` prompt, or
-    as a container, pip, git or aws command."""
+    uv run, behind sudo or an environment assignment, after a ``%``, ``PS>`` or Windows
+    command prompt, or as a container, pip, git or aws command."""
     dc = checks()
     page = _write(tmp_path, "docs/page.md", _page(_text(f"Run it:\n{line}\ndone")))
 

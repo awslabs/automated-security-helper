@@ -172,12 +172,12 @@ release (`CHANGELOG.md` and the notes under `.github/release-notes/`), or is lis
 [`scripts/docs_unexecuted_commands_seed.tsv`](https://github.com/awslabs/automated-security-helper/blob/main/scripts/docs_unexecuted_commands_seed.tsv).
 A line shows a command when it follows a `$` prompt, or starts with `ash` (or another
 name of ASH), a container runtime (`docker`, `podman`, `finch`, `nerdctl`), `uv`, `uvx`,
-`pip`, `git` or `aws`, after an optional `%` or `PS>` prompt, environment assignments
-and a wrapper such as `sudo`. That file holds a line for each such block as it was when
-the check was added: the page's path, a tab, and the block's first command. It only
-shrinks too. Fence the block as `bash` so the runner executes it, or as `console` when it
-shows `$` prompts with their output, or mark it `output`, or write the command in prose,
-and delete its line.
+`pip`, `git` or `aws`, after an optional `%`, `PS>` or `C:\>` prompt, environment
+assignments and a wrapper such as `sudo`. That file holds a line for each such block as
+it was when the check was added: the page's path, a tab, and the block's first command.
+It only shrinks too. Fence the block as `bash` so the runner executes it, or as
+`console` when it shows `$` prompts with their output, or mark it `output`, or write the
+command in prose, and delete its line.
 
 On a page that a generator writes, the check leaves out the usage lines and reads every
 other block. A page is one when `REFERENCE_PAGES` in the freshness test lists it and the

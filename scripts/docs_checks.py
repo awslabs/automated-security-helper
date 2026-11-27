@@ -1403,9 +1403,9 @@ def check_markers(files: Iterable[Path], root: Path = REPO_ROOT) -> list[Finding
 # marker, so the seed check never sees it. A block in a language nothing runs (the
 # family "other": text and the rest, groovy aside) that shows an ``ash`` command line, a
 # ``$`` prompt line, or a line that starts with a program (_program_line: ASH, a
-# container runtime, uv, uvx, pip, git or aws, after a ``%`` or ``PS>`` prompt,
-# environment assignments and a wrapper such as ``sudo``) is a finding, unless it is the
-# output of the run block above it
+# container runtime, uv, uvx, pip, git or aws, after a ``%``, ``PS>`` or ``C:\>``
+# prompt, environment assignments and a wrapper such as ``sudo``) is a finding, unless
+# it is the output of the run block above it
 # (output_samples), or the page is a record of a past release (is_historical_doc), or
 # the block is the usage line of a command on a page a generator writes
 # (is_generated_page: the repository's list of those names the page, and the banner
@@ -1432,9 +1432,9 @@ UNEXECUTED_SEED_FILE = "scripts/docs_unexecuted_commands_seed.tsv"
 _PAGE_SUFFIXES = (".md", ".md.template")
 
 _PROMPT_LINE = re.compile(r"^\s*\$ +(?P<command>\S.*)$")
-#: The prompts that are not a ``$``: a ``%`` (csh and zsh), and PowerShell's ``PS>`` or
-#: ``PS C:\path>``.
-_OTHER_PROMPT = re.compile(r"^\s*(?:%\s+|PS(?: [^>\n]*)?>\s*)")
+#: The prompts that are not a ``$``: a ``%`` (csh and zsh), PowerShell's ``PS>`` or
+#: ``PS C:\path>``, and the Windows command prompt's ``C:\>`` or ``C:\path>``.
+_OTHER_PROMPT = re.compile(r"^\s*(?:%\s+|PS(?: [^>\n]*)?>\s*|[A-Za-z]:\\[^>\n]*>\s*)")
 _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 #: Words that run the next word as a command, and so may stand in front of a program.
 _WRAPPERS = frozenset({"sudo", "env", "time", "nohup", "exec", "command"})
@@ -1591,12 +1591,12 @@ def _program_line(line: str) -> str | None:
     """The command ``line`` shows when it starts with a program, or None.
 
     A program is ASH under any of its names, a container runtime, ``uv``, ``uvx``,
-    ``pip``, ``git`` or ``aws``, and it may follow a ``%`` or ``PS>`` prompt (a ``$``
-    prompt is read by _PROMPT_LINE, for any command), environment assignments, and a
-    wrapper such as ``sudo`` with all its options and their values (``sudo -E -H``,
-    ``sudo -u root``): the program is the first word after those, so a user named ``ash``
-    is no program. It must have an argument: a word alone is prose. The command is the
-    line after its prompt, which is how the seed names it.
+    ``pip``, ``git`` or ``aws``, and it may follow a ``%``, ``PS>`` or Windows command
+    prompt (a ``$`` prompt is read by _PROMPT_LINE, for any command), environment
+    assignments, and a wrapper such as ``sudo`` with all its options and their values
+    (``sudo -E -H``, ``sudo -u root``): the program is the first word after those, so a
+    user named ``ash`` is no program. It must have an argument: a word alone is prose.
+    The command is the line after its prompt, which is how the seed names it.
     """
     text = _OTHER_PROMPT.sub("", line, count=1).strip()
     words = text.split()
