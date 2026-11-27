@@ -586,7 +586,20 @@ def derived_error_reason(
     The caller asks only when no error says why in a sentence a report can show
     (``recorded_error_sentence``): a count says how many targets failed, and an
     error says what failed them, which is the cause.
+
+    A scan that crashed is not one of the ERRORs the statistics alone decide: its
+    report is a failure report (``_is_failure_report``: ``raw_results.status`` is
+    ``"failed"``, or an exception is recorded), graded ERROR whatever its counts,
+    and the counts it kept before it raised, or the lack of them, say nothing of
+    why. "It failed on 1 of its 3 target(s)" would read as a partial loss. A
+    crash whose error gave no sentence to show is ``run_failed``, with the code's
+    default sentence.
     """
+    if any(
+        ScannerStatisticsCalculator._is_failure_report(report)
+        for report in own_target_reports(asharp_model, scanner_name).values()
+    ):
+        return ReasonCode.RUN_FAILED, DEFAULT_SENTENCES[ReasonCode.RUN_FAILED]
     if unusable_counters:
         return (
             ReasonCode.COUNTERS_UNUSABLE,

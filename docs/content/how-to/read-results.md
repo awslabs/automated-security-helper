@@ -237,7 +237,9 @@ config file that does not exist, an ignore file in the scanned tree, an exclusio
 tool cannot express, or a scan that read none of the files it was given. A sentence built
 from a value says the count or the option name and never the path. When the counts
 decide the status and no recorded error has a sentence to show, the sentence says so, as
-in `it failed on 2 of its 3 target(s)`.
+in `it failed on 2 of its 3 target(s)`. A scan that crashed is not one of those: the
+counts it kept before it stopped say nothing of why, so with no sentence to show its
+reason is `its run failed`.
 
 An `ERROR` row has a `null` `error_reason` when nothing recorded a reason, as in a
 results file written before ASH recorded them, or when a scanner's error gave none. The

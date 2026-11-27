@@ -388,12 +388,68 @@ class TestASentenceThatSaysWhyOutranksTheCounts:
             ),
         ],
     )
-    def test_control_an_error_with_no_sentence_to_show_leaves_the_counts(self, error):
-        """The sentence is held back, not the counts: they stay the cause that is left."""
+    def test_a_failure_report_with_no_sentence_to_show_is_a_failed_run_not_a_partial_loss(
+        self, error
+    ):
+        """A scan that raised is not an ERROR the counts decide: what it counted
+        before it raised says nothing of why it failed, and "it failed on 1 of its 3
+        target(s)" would read as a partial loss. With no sentence to show, the
+        reason is the code's own, ``run_failed``."""
         results = _model(
             {
                 "source": _raised_report(
                     error=error, targets_attempted=3, targets_failed=1
+                )
+            }
+        )
+
+        metrics = _metrics(results)
+
+        assert metrics.error_reason_code == ReasonCode.RUN_FAILED
+        assert metrics.error_reason == DEFAULT_SENTENCES[ReasonCode.RUN_FAILED]
+        assert unified_metrics.recorded_error_sentence(results, "example-tool") is None
+
+    @pytest.mark.parametrize("home", ["raw_results", "errors"])
+    def test_a_failure_report_with_unreadable_counters_is_a_failed_run_too(self, home):
+        results = _model(
+            {
+                "source": _raised_report(
+                    home,
+                    error="templates/x.yaml: could not be read",
+                    targets_attempted="3",
+                    targets_failed=0,
+                )
+            }
+        )
+
+        metrics = _metrics(results)
+
+        assert metrics.error_reason_code == ReasonCode.RUN_FAILED, (
+            metrics.error_reason_code,
+            metrics.error_reason,
+        )
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param("templates/x.yaml: could not be read", id="no prefix"),
+            pytest.param(
+                "Failed to execute example-tool scanner on source: could not read "
+                "/home/someone/x.yaml",
+                id="a sentence that names a path",
+            ),
+        ],
+    )
+    def test_control_an_error_only_the_counts_decide_keeps_them(self, error):
+        """The counts stay the reason of an ERROR that is no failure report: the
+        scanner returned, with some targets failed and an error nobody can show."""
+        results = _model(
+            {
+                "source": _report(
+                    ScannerStatus.ERROR,
+                    errors=[error],
+                    targets_attempted=3,
+                    targets_failed=1,
                 )
             }
         )
@@ -436,7 +492,9 @@ class TestASentenceThatSaysWhyOutranksTheCounts:
         monkeypatch.setattr(
             unified_metrics, "recorded_error_sentence", lambda *args, **kwargs: None
         )
-        report = _raised_report(targets_attempted=3, targets_failed=1)
+        report = _report(
+            ScannerStatus.ERROR, errors=[RAISED], targets_attempted=3, targets_failed=1
+        )
 
         metrics = _metrics(_model({"source": report}))
 
