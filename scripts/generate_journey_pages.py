@@ -46,6 +46,7 @@ A journey is a mapping with exactly these keys::
     body:                                         # ordered segments
       - prose: |            # Markdown, verbatim
       - block:              # a fenced block
+          id: scan-two                                  # optional, see below
           lang: bash
           marker: {mode: illustrative, reason: "..."}   # optional doctest marker
           twin: {kind: scan, exit: "2", actionable: 2}  # optional, see below
@@ -65,6 +66,11 @@ is a fragment the docs runner merges into it, the way ``ci.md`` adds a second jo
 the workflow of its first step. A config marker takes the keys the docs checks read for
 its kind; ``extends`` must name a file an earlier block of the journey saved, as the
 same kind.
+
+A block's ``id`` is optional: a kebab-case name such as ``scan-two`` that no other block
+of the journey has. It is never rendered, so the page is the same with or without it. It
+lets another file name the block: the storyboard of the terminal recording, beside the
+journey, names the blocks it plays by id and holds no command text of its own for them.
 
 ``twin`` kinds, the steps the twin test runs in page order:
 
@@ -92,6 +98,7 @@ Each refusal names the segment and is a ``--check`` failure:
   each through a heredoc that line would end);
 * a marker key that is not one the docs runner reads, an unknown key anywhere in
   the file, a YAML anchor, alias or merge key;
+* a block ``id`` that is not kebab-case, or that another block of the journey has;
 * a render that does not parse back, through ``scripts/docs_checks.py``, to the
   blocks and markers the journey states, so the static checks and the runner see
   exactly what the journey says.
@@ -127,7 +134,7 @@ REGENERATE = f"uv run python {GENERATOR}"
 
 _TOP_KEYS = frozenset({"schema", "template", "page", "twin", "body"})
 _TWIN_KEYS = frozenset({"scan", "timeout"})
-_BLOCK_KEYS = frozenset({"lang", "marker", "twin", "body"})
+_BLOCK_KEYS = frozenset({"id", "lang", "marker", "twin", "body"})
 #: The keys each twin kind carries (``kind`` itself is always required).
 _TWIN_KINDS: dict[str, frozenset[str]] = {
     "project": frozenset(),
@@ -142,6 +149,9 @@ _SAFE_VALUE = re.compile(r"[A-Za-z0-9_@%+,./:-]+")
 _TWIN_PATH = re.compile(r"[A-Za-z0-9_./-]+")
 _MODE = re.compile(r"[a-z][a-z-]*")
 _LANG = re.compile(r"[A-Za-z0-9_+.-]+")
+#: A block id is kebab-case: words of lowercase letters and digits joined by single
+#: hyphens, the first word starting with a letter.
+_BLOCK_ID = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
 _EXIT_LINE = re.compile(r"^exit code: (\d+)$", re.MULTILINE)
 _ACTIONABLE_LINE = re.compile(r"Exiting due to (\d+) actionable findings")
 _RULE_LINE = re.compile(r"Rule ID: (\S+)")
@@ -229,6 +239,22 @@ def _text(value: Any, where: str, field: str) -> str:
             "blank line"
         )
     return value
+
+
+def _check_block_id(value: Any, where: str, index: int, seen: dict[str, int]) -> None:
+    """A block's ``id`` is kebab-case and no other block of the journey has it."""
+    if not isinstance(value, str) or _BLOCK_ID.fullmatch(value) is None:
+        raise JourneyError(
+            f"{where}: id must be kebab-case: lowercase letters and digits in words "
+            "joined by single hyphens, starting with a letter, such as scan-two; "
+            f"got {value!r}"
+        )
+    if value in seen:
+        raise JourneyError(
+            f"{where}: id {value!r} is already the id of body[{seen[value]}]; "
+            "an id names one block of the journey"
+        )
+    seen[value] = index
 
 
 def block_body(block: dict) -> str:
@@ -585,6 +611,7 @@ def load_journey(path: Path) -> dict:
     body = journey.get("body")
     if not isinstance(body, list) or not body:
         raise JourneyError(f"{path}: body is a list of segments")
+    block_ids: dict[str, int] = {}
     for index, segment in enumerate(body):
         if (
             not isinstance(segment, dict)
@@ -603,6 +630,8 @@ def load_journey(path: Path) -> dict:
         if not isinstance(value, dict):
             raise JourneyError(f"{where}: a block is a mapping")
         _unknown(value, _BLOCK_KEYS, where)
+        if "id" in value:
+            _check_block_id(value["id"], where, index, block_ids)
         lang = value.get("lang")
         if not isinstance(lang, str) or not _LANG.fullmatch(lang):
             raise JourneyError(f"{where}: a block needs a lang such as bash")
