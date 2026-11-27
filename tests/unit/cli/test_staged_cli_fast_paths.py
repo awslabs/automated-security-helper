@@ -24,7 +24,7 @@ def _invoke(tmp_path, monkeypatch, reader, argv):
     from automated_security_helper.cli.main import app
 
     monkeypatch.setattr(staged_files_module, "staged_files_for_source", reader)
-    return CliRunner().invoke(app, [*argv, "--source-dir", str(tmp_path)])
+    return CliRunner().invoke(app, ["scan", "fs", str(tmp_path), *argv])
 
 
 def test_nothing_staged_exits_clean_before_any_scan(tmp_path, monkeypatch):

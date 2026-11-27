@@ -56,15 +56,17 @@ def scan_reads_the_runner(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     return reader
 
 
-def _scan(*arguments: str, **environment: str):
-    """``ash scan`` through the parser with ``run_ash_scan`` stubbed: (result, stub)."""
+def _scan(
+    *arguments: str, subject: tuple[str, ...] = ("fs", "source"), **environment: str
+):
+    """``ash scan <subject>`` through the parser with ``run_ash_scan`` stubbed:
+    (result, stub). The subject is the ``source`` directory unless one is given."""
     with patch("automated_security_helper.cli.scan.run_ash_scan") as run:
         result = CliRunner().invoke(
             app,
             [
                 "scan",
-                "--source-dir",
-                "source",
+                *subject,
                 "--output-dir",
                 "output",
                 *arguments,
@@ -126,9 +128,8 @@ def test_a_workspace_dry_run_refuses_what_the_run_refuses():
     result, run = _scan(
         "--mode",
         "container",
-        "--workspace",
-        "auto",
         "--dry-run",
+        subject=("workspace", "auto"),
         OCI_RUNNER="bin/docker",
     )
 

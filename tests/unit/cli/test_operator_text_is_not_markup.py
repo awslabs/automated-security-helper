@@ -123,12 +123,12 @@ def test_scan_refuses_a_bracketed_scanner_name_as_a_usage_error(in_tmp):
             app,
             [
                 "scan",
+                "fs",
                 "--no-progress",
-                "--source-dir",
                 "src",
                 "--output-dir",
                 "out",
-                "--scanners",
+                "--only-scanners",
                 "x[/y]",
                 "--phases",
                 "scan",
@@ -160,8 +160,8 @@ def test_an_adjusted_output_dir_is_printed_as_given(in_tmp):
             app,
             [
                 "scan",
+                "fs",
                 "--no-progress",
-                "--source-dir",
                 "src-[/x]",
                 "--output-dir",
                 "src-[/x]",
@@ -191,9 +191,9 @@ def test_a_bracketed_config_path_gets_the_config_checks_exit(in_tmp):
             app,
             [
                 "scan",
+                "fs",
                 "--no-progress",
                 "--debug",
-                "--source-dir",
                 "src",
                 "--output-dir",
                 "out",
@@ -247,7 +247,7 @@ def test_an_exception_holding_markup_is_logged_and_printed_as_given(
     ):
         result = CliRunner().invoke(
             app,
-            ["scan", "--no-progress", "--source-dir", "src", "--output-dir", "out"],
+            ["scan", "fs", "--no-progress", "src", "--output-dir", "out"],
         )
 
     assert result.exit_code == code, result.output
@@ -309,8 +309,8 @@ def test_a_workspace_project_whose_name_and_error_read_as_markup_is_reported(
             app,
             [
                 "scan",
+                "workspace",
                 "--no-progress",
-                "--workspace",
                 "dev.code-workspace",
                 "--output-dir",
                 "out",
@@ -679,7 +679,7 @@ class TestRepositoryTextIsShownNotObeyed:
         ):
             result = CliRunner().invoke(
                 app,
-                ["scan", "--no-progress", "--source-dir", "src", "--output-dir", "out"],
+                ["scan", "fs", "--no-progress", "src", "--output-dir", "out"],
             )
 
         shown = result.stdout + result.stderr

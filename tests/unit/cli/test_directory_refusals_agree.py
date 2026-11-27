@@ -243,7 +243,15 @@ def _assert_refused(
     assert "Traceback" not in output, output
 
 
-_SCAN = ("scan", "--mode", "local", "--offline", "--scanners", "detect-secrets")
+_SCAN = (
+    "scan",
+    "fs",
+    "--mode",
+    "local",
+    "--offline",
+    "--only-scanners",
+    "detect-secrets",
+)
 
 
 @pytest.mark.parametrize("case", _SOURCE_CASES)
@@ -254,7 +262,6 @@ def test_ash_scan_refuses_a_source_dir(tmp_path, case):
         _cli(
             tmp_path,
             *_SCAN,
-            "--source-dir",
             given,
             "--output-dir",
             str(tmp_path / "out"),
@@ -270,7 +277,6 @@ def test_ash_scan_refuses_a_source_dir_that_cannot_be_entered(tmp_path, unentera
         _cli(
             tmp_path,
             *_SCAN,
-            "--source-dir",
             given,
             "--output-dir",
             str(tmp_path / "out"),
@@ -310,15 +316,18 @@ def _one_line(path: Path) -> str:
 
 @_NEEDS_NEWLINE_NAMES
 @pytest.mark.parametrize(
-    "command",
-    [pytest.param(_SCAN, id="scan"), pytest.param(("config", "validate"), id="config")],
+    "command, directory_option",
+    [
+        pytest.param(_SCAN, (), id="scan"),
+        pytest.param(("config", "validate"), ("--source-dir",), id="config"),
+    ],
 )
-def test_a_source_dir_refusal_stays_on_one_line(tmp_path, command):
+def test_a_source_dir_refusal_stays_on_one_line(tmp_path, command, directory_option):
     """The path's newline is shown as an escape, as ./ash shows it, so the name
     cannot make a line of its own."""
     given = tmp_path / _FORGED
 
-    result = _cli(tmp_path, *command, "--source-dir", str(given))
+    result = _cli(tmp_path, *command, *directory_option, str(given))
 
     _assert_refused(result, f"Source directory does not exist: {_one_line(given)}")
     assert "Source directory is fine" not in result.stderr.splitlines(), result.stderr
@@ -333,7 +342,6 @@ def test_an_output_dir_refusal_stays_on_one_line(tmp_path):
     result = _cli(
         tmp_path,
         *_SCAN,
-        "--source-dir",
         str(tmp_path / "src"),
         "--output-dir",
         str(blocker),
@@ -363,7 +371,6 @@ def test_the_use_existing_refusal_names_the_output_dir_on_one_line(tmp_path):
         tmp_path,
         *_SCAN,
         "--use-existing",
-        "--source-dir",
         str(tmp_path / "src"),
         "--output-dir",
         str(out),
@@ -409,7 +416,6 @@ def test_ash_scan_refuses_an_output_dir_that_is_a_file(tmp_path):
     result = _cli(
         tmp_path,
         *_SCAN,
-        "--source-dir",
         str(tmp_path / "src"),
         "--output-dir",
         str(blocker),
@@ -428,7 +434,6 @@ def test_ash_scan_refuses_an_output_dir_that_cannot_be_created(tmp_path, unmakea
     result = _cli(
         tmp_path,
         *_SCAN,
-        "--source-dir",
         str(tmp_path / "src"),
         "--output-dir",
         str(out),
@@ -447,7 +452,6 @@ def test_ash_scan_refuses_an_output_dir_that_cannot_be_entered(
     result = _cli(
         tmp_path,
         *_SCAN,
-        "--source-dir",
         str(tmp_path / "src"),
         "--output-dir",
         str(out),
@@ -466,7 +470,6 @@ def test_ash_scan_refuses_an_output_dir_that_cannot_be_written(
     result = _cli(
         tmp_path,
         *_SCAN,
-        "--source-dir",
         str(tmp_path / "src"),
         "--output-dir",
         str(out),
@@ -510,7 +513,7 @@ def test_a_config_command_refuses_a_source_dir_that_cannot_be_entered(
 def test_the_bash_wrapper_refuses_a_source_dir(tmp_path, case):
     given, text = _cases(tmp_path)[case]
 
-    _assert_refused(_ash(tmp_path, "--source-dir", given), f"ERROR: {text}")
+    _assert_refused(_ash(tmp_path, "scan", "fs", given), f"ERROR: {text}")
 
 
 @pytest.mark.skipif(os.name == "nt", reason="./ash is a bash script")
@@ -519,7 +522,7 @@ def test_the_bash_wrapper_refuses_a_source_dir_that_cannot_be_entered(
 ):
     given, text = unenterable
 
-    _assert_refused(_ash(tmp_path, "--source-dir", given), f"ERROR: {text}")
+    _assert_refused(_ash(tmp_path, "scan", "fs", given), f"ERROR: {text}")
 
 
 @pytest.mark.skipif(os.name == "nt", reason="./ash is a bash script")
@@ -528,7 +531,7 @@ def test_the_bash_wrapper_refuses_an_output_dir_that_is_a_file(tmp_path):
     blocker = tmp_path / "out-file"
     blocker.write_text("x\n", encoding="utf-8")
 
-    result = _ash(tmp_path, "--source-dir", "src", "--output-dir", str(blocker))
+    result = _ash(tmp_path, "scan", "fs", "src", "--output-dir", str(blocker))
 
     _assert_refused(result, f"ERROR: Output directory is not a directory: {blocker}")
     assert blocker.read_text(encoding="utf-8") == "x\n"
@@ -542,7 +545,7 @@ def test_the_bash_wrapper_refuses_an_output_dir_that_cannot_be_created(
     (tmp_path / "src").mkdir()
     out, text = unmakeable
 
-    result = _ash(tmp_path, "--source-dir", "src", "--output-dir", str(out))
+    result = _ash(tmp_path, "scan", "fs", "src", "--output-dir", str(out))
 
     _assert_refused(result, f"ERROR: {text}")
     assert not out.exists()
@@ -555,7 +558,7 @@ def test_the_bash_wrapper_refuses_an_output_dir_that_cannot_be_entered(
     (tmp_path / "src").mkdir()
     out, text = unenterable_output
 
-    result = _ash(tmp_path, "--source-dir", "src", "--output-dir", str(out))
+    result = _ash(tmp_path, "scan", "fs", "src", "--output-dir", str(out))
 
     _assert_refused(result, f"ERROR: {text}")
 
@@ -568,7 +571,7 @@ def test_the_bash_wrapper_refuses_an_output_dir_that_cannot_be_written(
     (tmp_path / "src").mkdir()
     out, text = unwritable_output
 
-    result = _ash(tmp_path, "--source-dir", "src", "--output-dir", str(out))
+    result = _ash(tmp_path, "scan", "fs", "src", "--output-dir", str(out))
 
     _assert_refused(result, f"ERROR: {text}")
     assert list(out.iterdir()) == []
@@ -582,7 +585,7 @@ def test_the_bash_wrapper_leaves_nothing_in_a_writable_output_dir(tmp_path):
     out = tmp_path / "out"
     out.mkdir()
 
-    result = _ash(tmp_path, "--source-dir", "src", "--output-dir", str(out))
+    result = _ash(tmp_path, "scan", "fs", "src", "--output-dir", str(out))
 
     assert "Unable to resolve an OCI_RUNNER" in result.stderr, result.stderr
     assert list(out.iterdir()) == []
@@ -594,7 +597,7 @@ def test_the_bash_wrapper_still_makes_a_missing_output_dir(tmp_path):
     (tmp_path / "src").mkdir()
     out = tmp_path / "p" / "q" / "out"
 
-    result = _ash(tmp_path, "--source-dir", "src", "--output-dir", str(out))
+    result = _ash(tmp_path, "scan", "fs", "src", "--output-dir", str(out))
 
     assert out.is_dir(), result.stdout + result.stderr
     assert "Unable to resolve an OCI_RUNNER" in result.stderr, result.stderr
@@ -655,7 +658,6 @@ def test_a_link_into_a_directory_that_cannot_be_searched_cannot_be_entered(tmp_p
         scanned = _cli(
             tmp_path,
             *_SCAN,
-            "--source-dir",
             str(link),
             "--output-dir",
             str(tmp_path / "out"),

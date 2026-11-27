@@ -119,7 +119,7 @@ def test_the_scan_entry_sets_the_gate_at_the_resolved_level(
         ash_log._LAST_RESORT.setLevel(_PARKED)
         result = CliRunner().invoke(
             app,
-            ["scan", "--source-dir", str(tmp_path), *log_flags],
+            ["scan", "fs", str(tmp_path), *log_flags],
             catch_exceptions=False,
         )
         assert result.exit_code == 0, result.output
@@ -171,7 +171,7 @@ def test_the_gate_follows_the_same_env_precedence_as_the_scan(
         ash_log._LAST_RESORT.setLevel(_PARKED)
         result = CliRunner().invoke(
             app,
-            ["scan", "--source-dir", str(tmp_path), *log_flags],
+            ["scan", "fs", str(tmp_path), *log_flags],
             catch_exceptions=False,
         )
         assert result.exit_code == 0, result.output

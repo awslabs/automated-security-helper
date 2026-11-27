@@ -128,7 +128,7 @@ def test_the_scan_gate_follows_the_console_rule(
         ash_log._LAST_RESORT.setLevel(_PARKED)
         result = CliRunner().invoke(
             app,
-            ["scan", "--source-dir", str(tmp_path), *flags],
+            ["scan", "fs", str(tmp_path), *flags],
             catch_exceptions=False,
         )
         if result.exit_code != 0 or len(calls) != 1:

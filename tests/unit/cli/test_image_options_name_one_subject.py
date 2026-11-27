@@ -135,7 +135,7 @@ class TestWhatTheCliHandsRunAshScan:
             # cli/scan.py documents for a test's patch of `cli.scan.<name>`.
             "automated_security_helper.cli.scan.run_ash_scan",
         ) as run:
-            result = _scan("--source-dir", str(tmp_path))
+            result = _scan("fs", str(tmp_path))
         assert result.exit_code == 0, result.output
         kwargs = run.call_args.kwargs
         assert kwargs["image"] is None

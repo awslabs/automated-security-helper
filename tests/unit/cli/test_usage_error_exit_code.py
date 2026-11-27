@@ -405,7 +405,7 @@ CLICK_USAGE_ERRORS = [
         ["scan", "--shard-index", "first"], "Invalid value", id="scan-not-an-int"
     ),
     pytest.param(
-        ["scan", "--no-progress", "--source-dir", "src", "--output-formats", "pdf"],
+        ["scan", "fs", "--no-progress", "src", "--output-formats", "pdf"],
         "not a valid format",
         id="scan-bad-output-format",
     ),
@@ -529,14 +529,14 @@ def test_help_and_version_exit_zero(in_tmp, args):
 class TestAshsOwnRefusalsOfAnInvocation:
     """The refusals ASH makes itself, before any scanner runs."""
 
-    def _scan(self, *extra):
+    def _scan(self, *extra, subject=()):
         with patch("automated_security_helper.cli.scan.run_ash_scan") as run:
-            result = _invoke(["scan", "--no-progress", *extra])
+            result = _invoke(["scan", *subject, "--no-progress", *extra])
         run.assert_not_called()
         return result
 
     def test_a_missing_source_dir(self, in_tmp):
-        result = self._scan("--source-dir", "does-not-exist")
+        result = self._scan("does-not-exist", subject=("fs",))
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
         assert "Source directory does not exist" in _plain(result.stderr)
@@ -544,7 +544,7 @@ class TestAshsOwnRefusalsOfAnInvocation:
     def test_a_source_dir_that_is_a_file(self, in_tmp):
         (in_tmp / "file.py").write_text("x = 1\n", encoding="utf-8")
 
-        result = self._scan("--source-dir", "file.py")
+        result = self._scan("file.py", subject=("fs",))
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
 
@@ -584,8 +584,8 @@ class TestAshsOwnRefusalsOfAnInvocation:
             result = _invoke(
                 [
                     "scan",
+                    "fs",
                     "--no-progress",
-                    "--source-dir",
                     "src",
                     "--output-dir",
                     "out",
@@ -725,8 +725,8 @@ class TestNamesASHDoesNotKnow:
             result = _invoke(
                 [
                     "scan",
+                    "fs",
                     "--no-progress",
-                    "--source-dir",
                     "src",
                     "--output-dir",
                     "out",
@@ -780,8 +780,8 @@ class TestNamesASHDoesNotKnow:
         report.write_text("{}", encoding="utf-8")
         args = [
             "scan",
+            "fs",
             "--no-progress",
-            "--source-dir",
             "src",
             "--output-dir",
             "out",
@@ -829,9 +829,9 @@ class TestWorkspaceScannerSelection:
             result = _invoke(
                 [
                     "scan",
-                    "--no-progress",
-                    "--workspace",
+                    "workspace",
                     workspace,
+                    "--no-progress",
                     "--output-dir",
                     "out",
                     *selection,
@@ -890,9 +890,9 @@ class TestWorkspaceScannerSelection:
             result = _invoke(
                 [
                     "scan",
-                    "--no-progress",
-                    "--workspace",
+                    "workspace",
                     workspace,
+                    "--no-progress",
                     "--output-dir",
                     "out",
                     *selection,
@@ -1102,9 +1102,9 @@ class TestTheSelectionPreCheckJudgesOnlyThisWorkspacesPlugins:
             result = _invoke(
                 [
                     "scan",
-                    "--no-progress",
-                    "--workspace",
+                    "workspace",
                     workspace,
+                    "--no-progress",
                     "--output-dir",
                     "out",
                     *args,
@@ -1190,9 +1190,9 @@ class TestTheSelectionPreCheckJudgesOnlyThisWorkspacesPlugins:
                 result = _invoke(
                     [
                         "scan",
-                        "--no-progress",
-                        "--workspace",
+                        "workspace",
                         workspace,
+                        "--no-progress",
                         "--output-dir",
                         "out",
                         "--ash-plugin-modules",
@@ -1259,9 +1259,9 @@ class TestWorkspaceDryRunRefusesTheSameSelections:
             result = _invoke(
                 [
                     "scan",
-                    "--no-progress",
-                    "--workspace",
+                    "workspace",
                     workspace,
+                    "--no-progress",
                     "--output-dir",
                     "out",
                     "--dry-run",
@@ -1320,9 +1320,9 @@ class TestWorkspaceDryRunRefusesTheSameSelections:
             real = _invoke(
                 [
                     "scan",
-                    "--no-progress",
-                    "--workspace",
+                    "workspace",
                     workspace,
+                    "--no-progress",
                     "--output-dir",
                     "out",
                     *selection,
@@ -1365,9 +1365,9 @@ class TestWorkspaceDryRunRefusesTheSameSelections:
             real = _invoke(
                 [
                     "scan",
-                    "--no-progress",
-                    "--workspace",
+                    "workspace",
                     workspace,
+                    "--no-progress",
                     "--output-dir",
                     "out",
                     *selection,
@@ -1498,9 +1498,7 @@ class TestStateProblemsStayAtOne:
 
     def test_use_existing_without_results(self, in_tmp):
         with patch("automated_security_helper.cli.scan.run_ash_scan") as run:
-            result = _invoke(
-                ["scan", "--no-progress", "--source-dir", "src", "--use-existing"]
-            )
+            result = _invoke(["scan", "fs", "--no-progress", "src", "--use-existing"])
 
         run.assert_not_called()
         assert result.exit_code == 1, result.output

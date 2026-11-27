@@ -202,7 +202,7 @@ def test_ash_scan_accepts_every_reporter_name(name, tmp_path):
             app,
             [
                 "scan",
-                "--source-dir",
+                "fs",
                 str(source),
                 "--output-dir",
                 str(tmp_path / "out"),
@@ -236,7 +236,7 @@ def test_an_unknown_name_is_refused(tmp_path):
     with patch(RUN_ASH_SCAN) as mock_run:
         result = CliRunner().invoke(
             app,
-            ["scan", "--source-dir", str(source), "-f", "github-gas"],
+            ["scan", "fs", str(source), "-f", "github-gas"],
         )
 
     assert result.exit_code != 0
