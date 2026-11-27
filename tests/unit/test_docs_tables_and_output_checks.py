@@ -29,11 +29,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from tests.utils.helpers import WINDOWS_CHILD_START_NAMES
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECKS_PATH = REPO_ROOT / "scripts" / "docs_checks.py"
@@ -1890,6 +1893,66 @@ def test_the_page_module_runs_without_the_callers_credentials(tmp_path, monkeypa
         dc.check_config_blocks([page], tmp_path),
         "scanners.acme-scan.options: Value error, Unknown key 'selct'",
     )
+
+
+@pytest.mark.unit
+def test_the_page_module_child_is_given_every_name_the_suites_child_builders_carry():
+    """The names a Windows Python needs are listed once in the suite
+    (WINDOWS_CHILD_START_NAMES) and once for this child. This child may carry more,
+    never fewer. The carry test below sees only the names its host sets, and a
+    native 64-bit Windows has no PROCESSOR_ARCHITEW6432, so this one compares the
+    lists themselves."""
+    assert set(WINDOWS_CHILD_START_NAMES) <= set(dc._CHILD_ENVIRONMENT_NAMES)
+
+
+@pytest.mark.unit
+def test_the_page_module_child_keeps_the_names_a_windows_python_needs(
+    tmp_path, monkeypatch
+):
+    """The child that imports the page's module is given a built environment. On
+    a Windows Python 3.11 ``platform.machine()`` reads PROCESSOR_ARCHITECTURE, and
+    without it polars' import-time CPU check raised "unknown feature flag: 'sse3'"
+    in the child, so every block that loads a page module failed to validate on
+    that leg. No child starts here (its run is replaced). Off Windows a stand-in
+    value stands for each name; on Windows the host's own values are what the
+    child must be given, and a stand-in architecture name set in this process
+    would change what ``platform.machine()`` answers here."""
+    if os.name == "nt":
+        expected = {
+            name: os.environ[name]
+            for name in WINDOWS_CHILD_START_NAMES
+            if name in os.environ
+        }
+        # A Windows host always sets these two, so the carry is proved there too.
+        named = set(expected)
+        assert {"SYSTEMROOT", "PROCESSOR_ARCHITECTURE"} <= named, sorted(named)
+    else:
+        expected = dict.fromkeys(WINDOWS_CHILD_START_NAMES, "stand-in")
+        for name, value in expected.items():
+            monkeypatch.setenv(name, value)
+    monkeypatch.setenv("AWS_PROFILE", "docs-check-test")
+    given = []
+    real_run = subprocess.run
+
+    def run(argv, *args, **kwargs):
+        if list(argv[:3]) != [sys.executable, "-I", "-c"]:
+            return real_run(argv, *args, **kwargs)
+        given.append(dict(kwargs["env"]))
+        return subprocess.CompletedProcess(
+            argv, 0, stdout=f"{dc._CHILD_RESULT}[]\n", stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", run)
+    page = _write(tmp_path, "docs/page.md", PAGE_PLUGIN + _typo_config())
+
+    assert dc.check_config_blocks([page], tmp_path) == []
+    # A failure shows the child's names, not its environment's values.
+    count = len(given)
+    assert count == 1, [sorted(each) for each in given]
+    carried = {name: given[0].get(name) for name in expected}
+    assert carried == expected
+    names = set(given[0])
+    assert "AWS_PROFILE" not in names
 
 
 @pytest.mark.unit

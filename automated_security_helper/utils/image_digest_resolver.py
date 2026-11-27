@@ -243,6 +243,15 @@ def payload_digest(image: ImageLocator) -> Tuple[Optional[str], str]:
     Only the record file is read (one bounded member read; no layer), and an
     index that names several manifests answers nothing with the reason: which
     of them the scan is about is not this module's guess to make.
+
+    The payload is a client's file, so what its record holds is not this
+    module's to choose. A member that is not a regular file is skipped, never
+    read: the archive reader would follow a link to another member, and raises
+    on one the archive lacks. A record that cannot be read or parsed (JSON
+    nested past the parser's recursion limit included) answers nothing, with a
+    reason that names it. Nothing the payload holds raises out of this
+    function: a payload that names no digest is keyed on its path, and a
+    resolution failure never fails or skips the scan.
     """
     import tarfile
     from pathlib import Path
@@ -257,10 +266,11 @@ def payload_digest(image: ImageLocator) -> Tuple[Optional[str], str]:
             if len(body) > _MAX_PAYLOAD_RECORD_BYTES:
                 return None, "its index.json is too large to be an image index"
             return _single_index_digest(json.loads(body))
-        except (OSError, ValueError) as error:
+        except Exception as error:  # noqa: BLE001 - a bad index is no digest
             return None, f"its index.json could not be read ({type(error).__name__})"
     if image.oci_archive is None:
         return None, "not a direct payload"
+    not_regular: list[str] = []
     try:
         with tarfile.open(image.oci_archive, "r:") as saved:
             records: dict = {}
@@ -268,26 +278,37 @@ def payload_digest(image: ImageLocator) -> Tuple[Optional[str], str]:
                 name = member.name.lstrip("./")
                 if name not in ("manifest.json", "index.json"):
                     continue
+                if not member.isreg():
+                    # A record is a plain file: extractfile would follow a link
+                    # to another member, and raises on one the archive lacks.
+                    not_regular.append(name)
+                    continue
                 if member.size > _MAX_PAYLOAD_RECORD_BYTES:
                     return None, f"its {name} is too large to be an image record"
-                handle = saved.extractfile(member)
-                if handle is None:
-                    continue
-                with handle:
-                    records[name] = json.loads(
-                        handle.read(_MAX_PAYLOAD_RECORD_BYTES + 1)
-                    )
+                try:
+                    handle = saved.extractfile(member)
+                    if handle is None:
+                        continue
+                    with handle:
+                        records[name] = json.loads(
+                            handle.read(_MAX_PAYLOAD_RECORD_BYTES + 1)
+                        )
+                except Exception as error:  # noqa: BLE001 - a bad record is no digest
+                    kind = type(error).__name__
+                    return None, f"its {name} could not be read ({kind})"
                 # manifest.json decides (a recent docker save writes BOTH, and
                 # is read as a docker archive, exactly as archive_scheme
                 # routes it); nothing later in the tar changes that.
                 if name == "manifest.json":
                     break
-    except (tarfile.TarError, OSError, ValueError) as error:
+    except Exception as error:  # noqa: BLE001 - a bad archive is no digest
         return None, f"the archive could not be read ({type(error).__name__})"
     if "manifest.json" in records:
         return _single_config_digest(records["manifest.json"])
     if "index.json" in records:
         return _single_index_digest(records["index.json"])
+    if not_regular:
+        return None, f"its {not_regular[0]} is not a regular file"
     return None, "the archive holds no manifest.json or index.json"
 
 

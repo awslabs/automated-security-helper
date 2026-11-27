@@ -405,7 +405,10 @@ from automated_security_helper.utils.secret_masking import (
     mask_secrets_in_results,
     shapes_of_secret_values,
 )
-from automated_security_helper.utils.subprocess_utils import SANDBOX_STOP_GRACE_SECONDS
+from automated_security_helper.utils.subprocess_utils import (
+    SANDBOX_STOP_GRACE_SECONDS,
+    keep_an_ignored_sigint_ignored,
+)
 from automated_security_helper.workspace.aggregation import (
     POLICY_ORIGIN,
     RESULTS_FILENAME,
@@ -3426,6 +3429,11 @@ def _run_projects(
                 duration_seconds=time.monotonic() - began,
             )
 
+    # Each project's scan runs on a worker, and starts its tools there or on its
+    # own scanner pool, off the main thread, where the hold around each start
+    # cannot set a disposition: an ignored SIGINT is set again here, before the
+    # pool starts (subprocess_utils.keep_an_ignored_sigint_ignored).
+    keep_an_ignored_sigint_ignored()
     pool = ThreadPoolExecutor(max_workers=bound)
     try:
         futures: Dict[Future, ProjectPlan] = {
