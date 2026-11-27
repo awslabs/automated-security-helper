@@ -210,31 +210,37 @@ SUBJECTS_RELEASE = (3, 9, 0)
 # `ash` or `ashv3` as a command word: not the end of a longer name (`dash`, `flash`) and
 # not a path that ends in `ash` (`/usr/local/bin/ash`).
 _ASH_COMMAND = r"(?<![\w./-])(?P<ash>ash|ashv3)"
-_BLANKS = r"[ \t]+"
+# What separates two words of one command: blanks, a backslash that ends a line (the
+# next line goes on with the command, and a blank must still stand between the words:
+# `ash\` and `scan` on the next line are one word), or the quotes and comma between two
+# items of a list of arguments (`["ash", "scan", "fs", "."]`), which may put each item on
+# a line of its own.
+_WORD_GAP = r"""(?:(?:\\\r?\n)*[ \t](?:[ \t]|\\\r?\n)*|["'][ \t]*,\s*["'])"""
 # The word after `fs` that is its path argument: a quoted string, a `<placeholder>`, or
 # a word that starts no option (`-`), continues no line (`\`), and is not a shell
-# operator, a comment, or the end of a code span or of quoted text.
+# operator, a comment, the end of a code span or of quoted text, a redirection (`2>&1`),
+# a usage placeholder (`[OPTIONS]`) or an ellipsis (`...`).
 _FS_PATH = (
     r"(?P<path>\"[^\"\n]*\"|'[^'\n]*'|<[A-Za-z][\w-]*>"
-    r"|[^\s`'\"\\|;&()<>#-][^\s`'\"|;&()<>]*)"
+    r"|(?!\d+[<>]|\[|\.\.\.)[^\s`'\"\\|;&()<>#-][^\s`'\"|;&()<>]*)"
 )
 # `fs` ends where a word ends; a `.` after it ends a sentence, but `fs.py` is a name.
 _SCAN_FS = re.compile(
-    rf"{_ASH_COMMAND}(?P<before_scan>{_BLANKS})scan{_BLANKS}fs(?![\w/-])(?!\.\w)"
-    rf"(?:(?P<before_path>{_BLANKS}){_FS_PATH})?"
+    rf"{_ASH_COMMAND}(?P<before_scan>{_WORD_GAP})scan{_WORD_GAP}fs(?![\w/-])(?!\.\w)"
+    rf"(?:(?P<before_path>{_WORD_GAP}){_FS_PATH})?"
 )
 _RESULTS_VERB = re.compile(
-    rf"{_ASH_COMMAND}(?P<blank>{_BLANKS})results{_BLANKS}"
+    rf"{_ASH_COMMAND}(?P<blank>{_WORD_GAP})results{_WORD_GAP}"
     r"(?P<verb>report|diff|trend|merge|inspect)(?![\w-])"
 )
 _CONTAINER_BUILD = re.compile(
-    rf"{_ASH_COMMAND}(?P<blank>{_BLANKS})container{_BLANKS}build(?![\w-])"
+    rf"{_ASH_COMMAND}(?P<blank>{_WORD_GAP})container{_WORD_GAP}build(?![\w-])"
 )
 # One `ash scan` command: up to a newline that is not escaped, or a separator that starts
 # another command, as _SAME_COMMAND reads a command. The flags below are rewritten only
 # inside it: a page that names a flag in a sentence says the flag, whatever release the
 # page pins.
-_SCAN_COMMAND = re.compile(rf"{_ASH_COMMAND}{_BLANKS}scan(?![\w-]){_SAME_COMMAND}")
+_SCAN_COMMAND = re.compile(rf"{_ASH_COMMAND}{_WORD_GAP}scan(?![\w-]){_SAME_COMMAND}")
 # The flags of 3.9 that name the scanners to run: `--only-scanners` for the whole
 # selection and `--add-scanners` for the scanners added to it. 3.8 has `--scanners` for
 # both, which 3.9 still reads and warns about.
@@ -262,11 +268,18 @@ _HOOK_ENTRY = re.compile(
 
 
 def _scan_before_the_subjects(found: "re.Match[str]") -> str:
-    """`ash scan fs [PATH]` as a release before SUBJECTS_RELEASE spells it."""
+    """`ash scan fs [PATH]` as a release before SUBJECTS_RELEASE spells it.
+
+    The words keep the gaps they had, so a command that continues on the next line
+    still does, and a list of arguments (`["ash", "scan", "fs", "."]`) gets the flag
+    and its path as two items (`"--source-dir", "."`), not one.
+    """
     command = f"{found['ash']}{found['before_scan']}scan"
     if found["path"] is None:
         return command
-    return f"{command}{found['before_path']}--source-dir {found['path']}"
+    gap = found["before_path"]
+    flag_gap = gap if "," in gap else " "
+    return f"{command}{gap}--source-dir{flag_gap}{found['path']}"
 
 
 def spellings_for_release(text: str, version: str) -> str:
@@ -281,6 +294,11 @@ def spellings_for_release(text: str, version: str) -> str:
     (HOOK_ENTRIES_BEFORE_THE_SUBJECTS) become the entries that release ships, whole. Text
     for SUBJECTS_RELEASE or a later release comes back unchanged, as does text for a
     version that does not start with a release number (a branch name, a placeholder).
+
+    A command is read as a shell writes it, with its words on one line or on lines
+    joined by a backslash, and as a list of arguments (``["ash", "scan", "fs", "."]``).
+    What follows ``fs`` is its path only when it can be one: not an option, a
+    redirection (``2>&1``), a placeholder such as ``[OPTIONS]``, or ``...``.
     """
     found = _RELEASE_NUMBER.match(version.strip())
     if found is None:

@@ -253,6 +253,13 @@ ROWS = [
         True,
         0,
     ),
+    # A command on two lines joined by a backslash, and a list of arguments.
+    (_page("3.8.0", "ash \\\n  scan fs ."), False, 1),
+    (_page("3.8.0", "ash \\\n  results report"), True, 1),
+    (_page("3.8.0", 'cmd = ["ash", "scan", "fs", "."]'), False, 1),
+    (_page("3.8.0", 'cmd = ["ash", "container", "build"]'), True, 1),
+    (_page("3.8.0", 'cmd = ["ash", "scan", "--mode", "local"]'), False, 0),
+    (_page("3.9.0", 'cmd = ["ash", "scan", "fs", "."]'), False, 0),
 ]
 
 

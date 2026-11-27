@@ -238,6 +238,54 @@ ROWS = [
     ("ash --only-scanners bandit", "ash --only-scanners bandit"),
     ("dash scan --only-scanners bandit", "dash scan --only-scanners bandit"),
     ("ash scan --exclude-scanners bandit", "ash scan --exclude-scanners bandit"),
+    # What follows `fs` is its path only when it can be one: a redirection, a usage
+    # placeholder and an ellipsis are not, and a number that is no redirection is.
+    ("ash scan fs 2>&1", "ash scan 2>&1"),
+    ("ash scan fs . 2>&1", "ash scan --source-dir . 2>&1"),
+    ("ash scan fs 2>&1 | tee ash.log", "ash scan 2>&1 | tee ash.log"),
+    ("ash scan fs 1>/dev/null", "ash scan 1>/dev/null"),
+    ("ash scan fs 2", "ash scan --source-dir 2"),
+    ("ash scan fs [OPTIONS] [PATH]", "ash scan [OPTIONS] [PATH]"),
+    ("ash scan fs [PATH]", "ash scan [PATH]"),
+    ("`ash scan fs ...`", "`ash scan ...`"),
+    ("ash scan fs ... --mode local", "ash scan ... --mode local"),
+    # A command that goes on after a backslash at the end of a line is one command; a
+    # backslash with no blank beside it joins two words into one.
+    ("ash \\\n  scan fs .", "ash \\\n  scan --source-dir ."),
+    ("ash scan \\\n  fs .", "ash scan --source-dir ."),
+    (
+        "ash scan fs \\\n  . --output-dir x",
+        "ash scan \\\n  --source-dir . --output-dir x",
+    ),
+    (
+        "ash \\\n  scan fs . \\\n  --only-scanners bandit",
+        "ash \\\n  scan --source-dir . \\\n  --scanners bandit",
+    ),
+    ("ash \\\n  results report", "ash \\\n  report"),
+    ("ash \\\n  container build --no-run", "ash \\\n  build-image --no-run"),
+    ("ash\\\nscan fs .", "ash\\\nscan fs ."),
+    # A list of arguments, on one line or one item to a line, in either kind of quote:
+    # the flag and its path are two items.
+    ('["ash", "scan", "fs", "."]', '["ash", "scan", "--source-dir", "."]'),
+    ("['ash', 'scan', 'fs', '.']", "['ash', 'scan', '--source-dir', '.']"),
+    ('["ash", "scan", "fs"]', '["ash", "scan"]'),
+    (
+        '["ash", "scan", "fs", "--mode", "local"]',
+        '["ash", "scan", "--mode", "local"]',
+    ),
+    (
+        '["ash", "scan", "fs", "--only-scanners", "bandit"]',
+        '["ash", "scan", "--scanners", "bandit"]',
+    ),
+    ('["ash", "results", "report"]', '["ash", "report"]'),
+    ('["ash", "container", "build"]', '["ash", "build-image"]'),
+    (
+        '[\n    "ash",\n    "scan",\n    "fs",\n    ".",\n]',
+        '[\n    "ash",\n    "scan",\n    "--source-dir",\n    ".",\n]',
+    ),
+    ('["dash", "scan", "fs"]', '["dash", "scan", "fs"]'),
+    ('["ash", "scan", "fsck"]', '["ash", "scan", "fsck"]'),
+    ('["ash", "scan", "--mode", "local"]', '["ash", "scan", "--mode", "local"]'),
 ]
 
 
@@ -277,6 +325,36 @@ def test_the_placeholders_still_render_beside_the_rewrite():
         "ash scan fs --mode container\n"
         "ASH 3.9.0\n"
     )
+
+
+# (text, how many spellings 3.8 lacks the detector reads in it). The same shapes as the
+# rows above, from the other side: whatever the render writes back, the detectors read.
+DETECTOR_ROWS = [
+    ("ash scan fs .", 1),
+    ("ash scan fs . --only-scanners bandit", 2),
+    ("ash scan --only-scanners bandit", 1),
+    ("ash scan --scanners bandit", 0),
+    ("the `--only-scanners` flag replaces the set", 0),
+    ("ash \\\n  scan fs .", 1),
+    ("ash scan \\\n  --only-scanners bandit", 1),
+    ("ash \\\n  results merge", 1),
+    ("ash\\\nscan fs .", 0),
+    ('["ash", "scan", "fs", "."]', 1),
+    ('["ash", "scan", "--only-scanners", "bandit"]', 1),
+    ('["ash", "container", "build"]', 1),
+    ('[\n    "ash",\n    "scan",\n    "fs",\n]', 1),
+    ('["ash", "scan", "--mode", "local"]', 0),
+    ('["dash", "scan", "fs"]', 0),
+]
+
+
+@pytest.mark.parametrize(
+    ("text", "count"),
+    DETECTOR_ROWS,
+    ids=[f"row-{index}" for index in range(len(DETECTOR_ROWS))],
+)
+def test_the_detector_on_planted_text(text, count):
+    assert len(_newer_spellings(text)) == count, text
 
 
 def test_the_threshold_is_the_release_that_introduced_the_spellings():

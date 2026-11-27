@@ -8,6 +8,10 @@ test_agent_plugin_scan_spellings.py), and a fifth reads the deprecated ones
 release threshold and the verb list, so a verb added to one copy never reached the
 others. They import this module, and test_version_template_release_spellings.py holds
 it to scripts/version_template_manager.py, which keeps its own list of what to rewrite.
+
+The patterns read a command the way a shell and a list of arguments write it:
+``ash scan fs .``; ``ash \\`` with ``scan fs .`` on the next line; and
+``["ash", "scan", "fs", "."]``, which may put each item on a line of its own.
 """
 
 from __future__ import annotations
@@ -26,8 +30,11 @@ SCAN_SUBJECTS = ("fs", "workspace", "image", "git")
 #: The commands 3.9 moved under ``ash results``.
 RESULTS_VERBS = ("report", "diff", "trend", "merge", "inspect")
 
-#: What separates two words of one command.
-WORD_GAP = r"[ \t]+"
+#: What separates two words of one command: blanks, a backslash that ends a line (a
+#: blank must still stand beside it: ``ash\`` and ``scan`` on the next line are one
+#: word), or the quotes and comma between two items of a list of arguments, which may
+#: put each item on a line of its own.
+WORD_GAP = r"""(?:(?:\\\r?\n)*[ \t](?:[ \t]|\\\r?\n)*|["'][ \t]*,\s*["'])"""
 
 _SUBJECTS = "|".join(SCAN_SUBJECTS)
 _VERBS = "|".join(RESULTS_VERBS)

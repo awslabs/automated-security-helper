@@ -150,6 +150,23 @@ ROWS = [
     ("a workspace: `ash scan --workspace f.code-workspace`", SUBJECTLESS_SCAN, 0),
     ("an image: `ash scan --image app:1`", SUBJECTLESS_SCAN, 0),
     ("the user runs `dash scan --mode container`", SUBJECTLESS_SCAN, 0),
+    # A command on two lines joined by a backslash, and a list of arguments.
+    ("the user runs\n  ash \\\n  scan fs .", NEWER_SPELLING, 1),
+    ("the user runs ash \\\n  results merge", NEWER_SPELLING, 1),
+    ("the user runs ash \\\n  container build", NEWER_SPELLING, 1),
+    ("the user runs ash\\\nscan fs .", NEWER_SPELLING, 0),
+    ('cmd = ["ash", "scan", "fs", "."]', NEWER_SPELLING, 1),
+    ("cmd = ['ash', 'results', 'report']", NEWER_SPELLING, 1),
+    ('cmd = ["ash", "container", "build"]', NEWER_SPELLING, 1),
+    ('cmd = [\n    "ash",\n    "scan",\n    "fs",\n]', NEWER_SPELLING, 1),
+    ('cmd = ["ash", "scan", "--mode", "container"]', NEWER_SPELLING, 0),
+    ('cmd = ["dash", "scan", "fs"]', NEWER_SPELLING, 0),
+    ('cmd = ["ash", "scan", "--only-scanners", "bandit"]', NEWER_OPTION, 1),
+    ('cmd = ["ash", "scan", "--mode", "container"]', SUBJECTLESS_SCAN, 1),
+    ('cmd = ["ash", "scan", "fs", "."]', SUBJECTLESS_SCAN, 0),
+    ('cmd = ["ash", "scan", "--workspace", "w.code-workspace"]', SUBJECTLESS_SCAN, 0),
+    ("the user runs ash \\\n  scan --mode container", SUBJECTLESS_SCAN, 1),
+    ("the user runs ash \\\n  scan fs .", SUBJECTLESS_SCAN, 0),
 ]
 
 
