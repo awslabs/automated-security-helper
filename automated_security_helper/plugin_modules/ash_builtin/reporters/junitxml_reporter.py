@@ -666,10 +666,10 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                     # is decided ahead of the gate, above.
                     #
                     # A result that is not actionable is a skip whatever its
-                    # kind: the exit code reads the level against the threshold
-                    # and ignores the kind, so a `pass` or `informational` result
-                    # below it is a skip here too, and the report agrees with the
-                    # exit code.
+                    # kind. A `pass` or `informational` result below the
+                    # threshold is one, and above it keeps its bare passing test
+                    # case (see above): the exit code counts neither, because it
+                    # leaves out every result whose kind states no finding.
                     actionable = is_actionable
 
                 level_types.append(_ERROR_TYPE_BY_LEVEL.get(str(result.level)))
