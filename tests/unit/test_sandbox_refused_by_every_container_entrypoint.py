@@ -505,11 +505,10 @@ class TestTheBashEntrypoint:
     def test_a_double_dash_after_the_command_leaves_the_sandbox_off(self, tmp_path):
         """--sandbox off goes right after the command, ahead of the caller's words.
 
-        Appended after them, it came after `scan --`, where it was one of scan's
-        extra arguments and no option at all, so the configured mode stayed on.
-        ash scan takes no extra arguments, so with a word after the `--` the scan
-        refuses it as a usage error and nothing runs; the words still reach it as
-        typed.
+        Appended after them, it came after `scan --`, where it was a positional word
+        and no option at all, so the configured mode stayed on. With no subject
+        named, ash scan refuses a word after the `--` as one that is not a scan
+        subject, a usage error, and nothing runs; the words still reach it as typed.
         """
         bare = tmp_path / "bare"
         proc, _ = _run_ash(
@@ -550,7 +549,7 @@ class TestTheBashEntrypoint:
         assert inner[inner.index("--") :] == ["--", "extra"], inner
         code, output, overrides = _parse_inner(inner, extra)
         assert code == ASH_EXIT_USAGE_ERROR, (code, output, overrides)
-        assert "unexpected extra argument(s) (extra)" in " ".join(output.split())
+        assert "'extra' is not a scan subject" in " ".join(output.split())
         assert overrides is None, overrides
 
     def test_a_trailing_option_cannot_take_sandbox_off_as_its_value(self, tmp_path):
@@ -1172,9 +1171,10 @@ class TestThePowerShellEntrypoint:
     def test_a_double_dash_after_the_command_leaves_the_sandbox_off(
         self, pwsh, tmp_path
     ):
-        # Quoted: a bare -- is PowerShell's own end-of-parameters marker. ash scan
-        # takes no extra arguments, so with a word after the `--` it refuses it as a
-        # usage error and nothing runs; the words still reach it as typed.
+        # Quoted: a bare -- is PowerShell's own end-of-parameters marker. With no
+        # subject named, ash scan refuses a word after the `--` as one that is not a
+        # scan subject, a usage error, and nothing runs; the words still reach it as
+        # typed.
         bare = tmp_path / "bare"
         bare.mkdir()
         result = _invoke_ash(
@@ -1209,7 +1209,7 @@ class TestThePowerShellEntrypoint:
         assert inner[inner.index("--") :] == ["--", "extra"], inner
         code, output, overrides = _parse_inner(inner, extra)
         assert code == ASH_EXIT_USAGE_ERROR, (code, output, overrides)
-        assert "unexpected extra argument(s) (extra)" in " ".join(output.split())
+        assert "'extra' is not a scan subject" in " ".join(output.split())
         assert overrides is None, overrides
 
     def test_a_trailing_option_cannot_take_sandbox_off_as_its_value(
