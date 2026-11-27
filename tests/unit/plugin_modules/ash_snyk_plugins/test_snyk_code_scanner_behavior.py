@@ -2192,45 +2192,57 @@ def test_a_name_ending_in_whitespace_is_copied_under_its_own_name(
 # Working directory of the snyk process
 # ---------------------------------------------------------------------------
 
-EMPTY_SARIF = json.dumps(
-    {
-        "version": "2.1.0",
-        "runs": [
-            {"tool": {"driver": {"name": "SnykCode", "rules": []}}, "results": []}
-        ],
-    }
-)
-
 
 @pytest.fixture
 def snyk_run_record(monkeypatch):
-    """Record the ``cwd`` and ``command`` the subprocess layer is given.
+    """Record each spawn the subprocess layer is given, as the snyk process sees it.
 
     Patches the name ``_run_subprocess`` actually calls, so the working directory
-    the scanner passes is the one observed, and writes an empty SARIF file where
-    the argv names it.
+    the scanner passes is the one observed. Each spawn's entry holds the argv and
+    the state of the working directory when the process starts: its entries, its
+    mode and whether it is a link. The double then writes an empty SARIF file
+    where the argv names it, resolving a relative path against that working
+    directory as the CLI does. When the directory that path names does not exist
+    it writes nothing, as a CLI that cannot write its output writes nothing.
     """
+    import os
+    import stat
+
     from automated_security_helper.utils import subprocess_utils
 
-    seen = {}
+    runs = []
 
     def run(command, *args, **kwargs):
         command = [str(part) for part in command]
-        seen["command"] = command
-        seen["cwd"] = kwargs.get("cwd")
-        destination = next(
-            part.split("=", 1)[1]
-            for part in command
-            if part.startswith(SARIF_OUTPUT_FLAG)
+        cwd = Path(kwargs["cwd"])
+        runs.append(
+            {
+                "command": command,
+                "cwd": cwd,
+                "entries": sorted(os.listdir(cwd)),
+                "mode": stat.S_IMODE(os.lstat(cwd).st_mode),
+                "is_link": cwd.is_symlink(),
+            }
         )
-        Path(destination).write_text(EMPTY_SARIF, encoding="utf-8")
+        destination = Path(
+            next(
+                part.split("=", 1)[1]
+                for part in command
+                if part.startswith(SARIF_OUTPUT_FLAG)
+            )
+        )
+        if not destination.is_absolute():
+            destination = cwd / destination
+        if destination.parent.is_dir():
+            destination.write_text(snyk_code_document([]), encoding="utf-8")
         return {"stdout": "", "stderr": "", "returncode": 0}
 
     monkeypatch.setattr(subprocess_utils, "run_command_with_output_handling", run)
-    return seen
+    return runs
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("target_type", ["source", "converted"])
 @pytest.mark.parametrize(
     "name,body",
     [
@@ -2238,26 +2250,72 @@ def snyk_run_record(monkeypatch):
         ("snyk.yaml", "endpoint: https://example.invalid\n"),
     ],
 )
-def test_snyk_starts_outside_the_scanned_tree_in_an_empty_directory(
-    scanner, snyk_on_path, plugin_context, snyk_run_record, name, body
+def test_snyk_starts_in_a_new_private_empty_directory_outside_the_scanned_tree(
+    scanner, snyk_on_path, plugin_context, snyk_run_record, name, body, target_type
 ):
+    """Read when the CLI starts: the directory is empty, private and not a link,
+    and it is none of the directories that existed before the run or that other
+    processes share. Both targets: the converted target is tested in place, and
+    its run starts from the same call as the source's."""
+    import os
+    import tempfile
+
     source = plugin_context.source_dir
     (source / name).write_text(body, encoding="utf-8")
     (source / "app.py").write_text("print('hello')\n", encoding="utf-8")
+    target = source
+    if target_type == "converted":
+        target = plugin_context.work_dir
+        converted = target / "jupyter"
+        converted.mkdir(parents=True)
+        (converted / name).write_text(body, encoding="utf-8")
+        (converted / "nb-converted.py").write_text("x = 1\n", encoding="utf-8")
+
+    scanner.scan(target=target, target_type=target_type)
+
+    (run,) = snyk_run_record
+    cwd = run["cwd"].resolve()
+    tested = next(
+        Path(arg).resolve() for arg in run["command"][3:] if not arg.startswith("-")
+    )
+    assert run["entries"] == []
+    assert not run["is_link"]
+    if os.name != "nt":
+        assert run["mode"] == 0o700, oct(run["mode"])
+    existing = {
+        source.resolve(): "the source directory",
+        tested: "the directory snyk tests",
+        Path(scanner.results_dir)
+        .joinpath(target_type)
+        .resolve(): "the results directory",
+        Path(plugin_context.output_dir).resolve(): "the output directory",
+        Path(plugin_context.work_dir).resolve(): "the work directory",
+        Path(tempfile.gettempdir()).resolve(): "the temporary directory",
+    }
+    assert cwd not in existing, existing.get(cwd)
+    assert source.resolve() not in cwd.parents
+    assert tested not in cwd.parents
+
+
+@pytest.mark.unit
+def test_each_snyk_run_starts_in_a_directory_of_its_own(
+    scanner, snyk_on_path, plugin_context, snyk_run_record
+):
+    """Made for the run, not reused: two runs of one scanner start in two
+    directories, each empty when its CLI starts."""
+    source = plugin_context.source_dir
+    (source / "app.py").write_text("print('hello')\n", encoding="utf-8")
+    converted = plugin_context.work_dir / "jupyter"
+    converted.mkdir(parents=True)
+    (converted / "nb-converted.py").write_text("x = 1\n", encoding="utf-8")
 
     scanner.scan(target=source, target_type="source")
+    scanner.scan(target=plugin_context.work_dir, target_type="converted")
 
-    cwd = Path(snyk_run_record["cwd"]).resolve()
-    copy = next(
-        Path(arg).resolve()
-        for arg in snyk_run_record["command"][3:]
-        if not arg.startswith("-")
-    )
-    assert cwd != source.resolve()
-    assert source.resolve() not in cwd.parents
-    assert cwd != copy
-    assert copy not in cwd.parents
-    assert [e.name for e in cwd.iterdir() if e.name.startswith("snyk.")] == []
+    first, second = snyk_run_record
+    assert first["cwd"].resolve() != second["cwd"].resolve()
+    assert first["entries"] == []
+    assert second["entries"] == []
 
 
 @pytest.mark.unit
@@ -2269,8 +2327,58 @@ def test_control_snyk_is_still_given_the_staged_copy_and_the_sarif_output(
 
     scanner.scan(target=source, target_type="source")
 
-    command = snyk_run_record["command"]
+    (run,) = snyk_run_record
+    command = run["command"]
     target = Path(next(arg for arg in command[3:] if not arg.startswith("-")))
     assert target.is_absolute()
     assert target.resolve() != source.resolve()
     assert any(arg.startswith(SARIF_OUTPUT_FLAG) for arg in command)
+
+
+@pytest.mark.unit
+def test_relative_orchestrator_directories_reach_snyk_as_absolute_paths(
+    tmp_path, monkeypatch, snyk_on_path, snyk_run_record
+):
+    """ASHScanOrchestrator keeps the directories it is given as given, and so does
+    the context it builds for the scanners. snyk starts in a directory of its own,
+    where a relative path names something else, so the converted target and the
+    SARIF output path reach it absolute, and the file it writes is the one ASH
+    reads."""
+    from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+
+    monkeypatch.chdir(tmp_path)
+    Path("src").mkdir()
+    Path("src", "app.py").write_text("print('hello')\n", encoding="utf-8")
+    orchestrator = ASHScanOrchestrator(source_dir=Path("src"), output_dir=Path("out"))
+    # The fields orchestrator.initialize() builds the scanners' context from.
+    context = PluginContext(
+        source_dir=orchestrator.source_dir,
+        output_dir=orchestrator.output_dir,
+        work_dir=orchestrator.engine_work_dir(),
+        config=get_default_config(),
+    )
+    assert not context.source_dir.is_absolute()
+    assert not context.output_dir.is_absolute()
+    assert not context.work_dir.is_absolute()
+    converted = context.work_dir / "jupyter"
+    converted.mkdir(parents=True)
+    (converted / "nb-converted.py").write_text("x = 1\n", encoding="utf-8")
+    scanner = SnykCodeScanner(context=context, config=SnykCodeScannerConfig())
+
+    report = scanner.scan(target=context.work_dir, target_type="converted")
+
+    (run,) = snyk_run_record
+    tested = next(arg for arg in run["command"][3:] if not arg.startswith("-"))
+    sarif = next(
+        arg.split("=", 1)[1]
+        for arg in run["command"]
+        if arg.startswith(SARIF_OUTPUT_FLAG)
+    )
+    assert Path(tested).is_absolute(), run["command"]
+    assert Path(sarif).is_absolute(), run["command"]
+    assert Path(tested).resolve() == context.work_dir.resolve()
+    assert (
+        Path(sarif).resolve()
+        == Path(scanner.results_dir, "converted", "results_sarif.sarif").resolve()
+    )
+    assert report is not None
