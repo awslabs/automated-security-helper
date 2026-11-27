@@ -557,6 +557,17 @@ def _entry_around(lines: List[str], index: int, begin: int, finish: int) -> str:
     return entry[before + 1 : until]
 
 
+def _first_difference(page: str, rendered: str) -> Tuple[int, str, str]:
+    """Where two texts first differ: the line number, and that line of each text."""
+    offset = next(
+        (index for index, pair in enumerate(zip(page, rendered)) if pair[0] != pair[1]),
+        min(len(page), len(rendered)),
+    )
+    # Up to ``offset`` the texts are the same, so the line is the same in both.
+    number = page.count("\n", 0, offset)
+    return number + 1, page.split("\n")[number], rendered.split("\n")[number]
+
+
 class FileResult(enum.Enum):
     """What convert_file or generate_file did with one file.
 
@@ -763,9 +774,20 @@ class VersionTemplateManager:
         with those placeholders gone and the next generate stamped the stale doc
         over every edit made to the template.
 
+        With ``overwrite`` the template is replaced only by one that renders back to
+        the doc: rendered for the release the doc pins, it has to give the doc itself.
+        A doc that pins two releases, that names a placeholder in its text, or that
+        holds a spelling its release does not read (a command of a newer ASH on a page
+        pinned to an older one) comes back different, and replacing the template with
+        what was written from it would change the next generate. What the check cannot
+        see is what a doc never held: a page rendered for a release before 3.9 holds
+        that release's spellings, so the template written from it holds them too, and
+        loses the newer ones its predecessor had.
+
         Args:
             file_path: Path to the file to convert.
-            overwrite: Replace an existing template instead of keeping it.
+            overwrite: Replace an existing template instead of keeping it, when the
+                template written from the doc renders back to the doc.
 
         Returns:
             True if conversion was successful and changes were made. False for a skip
@@ -780,7 +802,9 @@ class VersionTemplateManager:
 
         DONE when a template was written; SKIPPED for a reason that is not an error (a
         template kept, no version reference, no change); FAILED for an error, which it
-        has already printed, a listed page that does not exist included.
+        has already printed, a listed page that does not exist included, and a template
+        that ``overwrite`` would have replaced with one that does not render back to
+        the doc (_why_it_does_not_render_back), which is left as it was.
         """
         if not file_path.exists():
             # A listed target with no page is the convert-side twin of a target with no
@@ -790,7 +814,8 @@ class VersionTemplateManager:
             return FileResult.FAILED
 
         template_path = self.template_beside(file_path)
-        if template_path.exists() and not overwrite:
+        replacing = template_path.exists()
+        if replacing and not overwrite:
             print(
                 f"Template {template_path} exists; keeping it (convert replaces an "
                 "existing template only with --overwrite)"
@@ -816,6 +841,15 @@ class VersionTemplateManager:
                 print(f"No changes made to {file_path}")
                 return FileResult.SKIPPED
 
+            if replacing:
+                why_not = self._why_it_does_not_render_back(original_content, content)
+                if why_not is not None:
+                    print(
+                        f"Error: not replacing {template_path}: the template written "
+                        f"from {file_path} would not give it back. {why_not}"
+                    )
+                    return FileResult.FAILED
+
             # Create template file
             with open(template_path, "w", encoding="utf-8") as f:
                 f.write(content)
@@ -826,6 +860,31 @@ class VersionTemplateManager:
         except Exception as e:
             print(f"Error converting {file_path} to template: {e}")
             return FileResult.FAILED
+
+    def _why_it_does_not_render_back(self, page: str, template: str) -> Optional[str]:
+        """Why ``template``, written from ``page``, renders to something else; None if
+        it renders back to ``page``.
+
+        A template renders for one release, so a page that pins two cannot come back
+        from it. For the one release the page pins, the render writes the placeholders
+        in and the spellings of that release, so a placeholder the page names in its
+        text, or a spelling its release does not read, comes back changed.
+        """
+        pins = self.release_pins(page)
+        if len(pins) != 1:
+            return (
+                f"The page pins {len(pins)} releases ({', '.join(sorted(pins))}) and "
+                "a template renders for one."
+            )
+        (release,) = pins
+        rendered = self.render(template, release)
+        if rendered == page:
+            return None
+        number, wanted, written = _first_difference(page, rendered)
+        return (
+            f"Rendered for {release}, line {number} of the page is {wanted!r} and the "
+            f"template writes {written!r}."
+        )
 
     def _version_to_render(self) -> str:
         """The version of the checkout the templates belong to, never "unknown"."""
@@ -1012,7 +1071,10 @@ def main() -> int:
     parser.add_argument(
         "--overwrite",
         action="store_true",
-        help="convert: replace an existing .template instead of keeping it",
+        help=(
+            "convert: replace an existing .template instead of keeping it, when the "
+            "template written from the page renders back to the page"
+        ),
     )
 
     args = parser.parse_args()
