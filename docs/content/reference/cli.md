@@ -35,7 +35,6 @@ The Environment variable column names the variable click reads for the option; a
 | [`ash dependencies`](#dependencies) | Check or install dependencies for ASH plugins |
 | [`ash dependencies check`](#dependencies-check) | Check Grype and Trivy cache metadata without running or downloading tools. |
 | [`ash dependencies install`](#dependencies-install) | Install dependencies for ASH plugins. |
-| [`ash diff`](#diff) | Compare the findings in two saved ASH scans without running a scan. |
 | [`ash express`](#express) | Manage the express daemon: a resident warm ASH process that removes startup cost from every scan. Unix only; scans fall back to ordinary cold runs wherever the daemon is unavailable. |
 | [`ash express start`](#express-start) | Start the express daemon for this user and ASH version (idempotent). |
 | [`ash express status`](#express-status) | Report whether the express daemon is running, and what it has served. |
@@ -60,11 +59,11 @@ The Environment variable column names the variable click reads for the option; a
 | [`ash results trend`](#results-trend) | Show new, carried and fixed findings over a series of saved ASH scans. |
 | [`ash scan`](#scan) | Scan code, infrastructure, secrets, and dependencies. |
 | [`ash scan fs`](#scan-fs) | Scan a directory for code, infrastructure, secrets, and dependency findings. |
+| [`ash scan workspace`](#scan-workspace) | Scan the projects of a VS Code workspace file, each on its own. |
 | [`ash suppress`](#suppress) | Create symbol suppressions and keep their content-hash lock (.ash.lock) current. |
 | [`ash suppress add`](#suppress-add) | Add a symbol suppression and lock its file's content hash. |
 | [`ash suppress refresh`](#suppress-refresh) | Record a new review: re-hash locked files whose bytes changed. |
 | [`ash suppress verify`](#suppress-verify) | Check the lock against the tree. Exits 1 when anything is out of date. |
-| [`ash trend`](#trend) | Show new, carried and fixed findings over a series of saved ASH scans. |
 
 ## `ash`
 
@@ -129,7 +128,7 @@ Options that only `ash` itself accepts:
 | <a id="ash--config-file-from-another-checkout"></a>`--config-file-from-another-checkout` | text, repeatable | not set |  | Apply the limits ASH puts on a config file inside a git checkout other than the scanned one to this one file of the extends chain of the --config file or of the file ASH_CONFIG names. The file cannot grant, and still sets what only restricts, as it does on the host: a lowered archive extraction limit, a scanner option that sends no usage data, and a network_scanners list as a limit. Container mode passes it, once per file, for each file of those chains that is in such a checkout, by its path inside the container, where the scan inside cannot see the checkout. Refused for a file that is in neither chain. This option is hidden from `--help` output. |
 | <a id="ash--require-scanner-selection"></a>`--require-scanner-selection` | text | not set |  | Refuse to scan unless the default_scanners this scan settles equals this JSON document ({"only": [...], "add": [...]}, names lower-cased). Container mode passes it, with the lists it read on the host, when the selection comes from the operator's config, so an image built from an ASH that does not know it rejects the command and an image that lost the mounted config refuses before any scanner runs. This option is hidden from `--help` output. |
 | <a id="ash--ash-config-from-host"></a>`--ash-config-from-host` | text | not set |  | Read this file as the file ASH_CONFIG names, for the whole command. Container mode passes it to the scan inside the container, with the path there of the file the host's ASH_CONFIG names, which a local scan reads as its base whatever names the config. Not --config, whose environment variable ASH_CONFIG is. This option is hidden from `--help` output. |
-| <a id="ash--workspace"></a>`--workspace` | text | not set | `ASH_WORKSPACE` | Path to a '.code-workspace' file whose folders are scanned as separate, independently-scoped projects. Pass 'auto' to use the single '\*.code-workspace' file in the current directory. Mutually exclusive with --source-dir. |
+| <a id="ash--workspace"></a>`--workspace` | text | not set | `ASH_WORKSPACE` | Path to a '.code-workspace' file whose folders are scanned as separate, independently-scoped projects. Pass 'auto' to use the single '\*.code-workspace' file in the current directory. Mutually exclusive with --source-dir. Deprecated as an option, removed in ASH v4.0: give it as the FILE argument of `ash scan workspace`. |
 | <a id="ash--workspace-config"></a>`--workspace-config` | text | not set | `ASH_WORKSPACE_CONFIG` | Path to the workspace policy file (severity ceiling, workspace-wide suppressions and ignore paths, additional scanners). Without this, ASH looks for 'ash-workspace.{yaml,yml,json}' in the workspace root or its '.ash' directory; finding none is not an error. Must not be any project's own ASH config: workspace policy governs every project, so reading one project's config as policy would apply its settings to its siblings. |
 | <a id="ash--allow-missing-projects"></a>`--allow-missing-projects` | flag | off |  | In workspace mode, skip project folders that are absent or unreadable instead of failing. Skipped projects are recorded in the plan. Without this, a missing project fails the whole workspace, so a typo or an un-cloned repository cannot pass as a clean scan. |
 | <a id="ash--dry-run"></a>`--dry-run` | flag | off |  | In workspace mode, print the resolved execution plan and exit without scanning anything. |
@@ -153,7 +152,7 @@ Options that only `ash` itself accepts:
 | <a id="ash--install-completion"></a>`--install-completion` | flag | off |  | Install completion for the current shell. |
 | <a id="ash--show-completion"></a>`--show-completion` | flag | off |  | Show completion for the current shell, to copy it or customize the installation. |
 
-Subcommands: [`ash build-image`](#build-image), [`ash config`](#config), [`ash container`](#container), [`ash dependencies`](#dependencies), [`ash diff`](#diff), [`ash express`](#express), [`ash get-genai-guide`](#get-genai-guide), [`ash inspect`](#inspect), [`ash mcp`](#mcp), [`ash merge`](#merge), [`ash plugin`](#plugin), [`ash report`](#report), [`ash results`](#results), [`ash scan`](#scan), [`ash suppress`](#suppress), [`ash trend`](#trend).
+Subcommands: [`ash build-image`](#build-image), [`ash config`](#config), [`ash container`](#container), [`ash dependencies`](#dependencies), [`ash express`](#express), [`ash get-genai-guide`](#get-genai-guide), [`ash inspect`](#inspect), [`ash mcp`](#mcp), [`ash merge`](#merge), [`ash plugin`](#plugin), [`ash report`](#report), [`ash results`](#results), [`ash scan`](#scan), [`ash suppress`](#suppress).
 
 ## <a id="build-image"></a>`ash build-image`
 
@@ -161,7 +160,7 @@ Deprecated: use `ash container build`, which takes the same options.
 
 Builds the ASH container image, then scans the current directory with it unless --no-run is given.
 
-It takes only the options below. To scan with scan options, run `ash scan --mode container`, which builds the image the same way and accepts every scan option.
+It takes only the options below. To scan with scan options, run `ash scan fs --mode container`, which builds the image the same way and accepts every scan option.
 
 ```text
 ash build-image [OPTIONS]
@@ -566,29 +565,6 @@ ash dependencies install [OPTIONS]
 | <a id="dependencies-install--verbose"></a>`--verbose`, `-v` | flag | off |  | Enable verbose logging |
 | <a id="dependencies-install--debug"></a>`--debug`, `-d` | flag | off |  | Enable debug logging |
 | <a id="dependencies-install--color"></a>`--color` / `--no-color` | flag | on |  | Enable/disable colorized output |
-
-## <a id="diff"></a>`ash diff`
-
-Compare the findings in two saved ASH scans without running a scan.
-
-```text
-ash diff [OPTIONS] {before} {after}
-```
-
-This command is hidden from `--help` output.
-
-<!-- doctest: options of=cli.diff -->
-| Argument | Type | Default | Environment variable | Description |
-|----------|------|---------|----------------------|-------------|
-| <a id="diff--arg-before"></a>`before` | path | required |  | Baseline ASH scan results JSON file. |
-| <a id="diff--arg-after"></a>`after` | path | required |  | Current ASH scan results JSON file. |
-
-<!-- doctest: options of=cli.diff -->
-| Option | Type | Default | Environment variable | Description |
-|--------|------|---------|----------------------|-------------|
-| <a id="diff--format"></a>`--format` | one of `text`, `json` | `text` |  | Output format (text or json). |
-| <a id="diff--cli-json-input"></a>`--cli-json-input` | text | not set |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
-| <a id="diff--generate-cli-skeleton"></a>`--generate-cli-skeleton` | flag | off |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit. |
 
 ## <a id="express"></a>`ash express`
 
@@ -1043,7 +1019,7 @@ ash results trend [OPTIONS] [files]...
 
 Scan code, infrastructure, secrets, and dependencies.
 
-Name what to scan: `ash scan fs <path>` scans a directory. `ash scan` with no subject still scans the working directory, but that form is deprecated and will be removed in ASH v4.0.
+Name what to scan: `ash scan fs <path>` scans a directory and `ash scan workspace <file>` scans the projects of a `.code-workspace` file. `ash scan` with no subject still scans the working directory, but that form is deprecated and will be removed in ASH v4.0.
 
 ```text
 ash scan [OPTIONS] COMMAND [ARGS]...
@@ -1051,7 +1027,7 @@ ash scan [OPTIONS] COMMAND [ARGS]...
 
 This command takes no options.
 
-Subcommands: [`ash scan fs`](#scan-fs).
+Subcommands: [`ash scan fs`](#scan-fs), [`ash scan workspace`](#scan-workspace).
 
 ### <a id="scan-fs"></a>`ash scan fs`
 
@@ -1061,8 +1037,9 @@ Start with: ash scan fs . --mode container
 
 Review the result with: ash results inspect findings
 
-Options are grouped by workflow below. `fs` is the only subject of `ash scan`
-today; `ash scan` with no subject runs it, but that form is deprecated.
+Options are grouped by workflow below. To scan the projects of a `.code-workspace`
+file, use `ash scan workspace`. `ash scan` with no subject runs this subject, but
+that form is deprecated.
 
 ```text
 ash scan fs [OPTIONS] [PATH]
@@ -1071,12 +1048,13 @@ ash scan fs [OPTIONS] [PATH]
 <!-- doctest: options of=cli.scan.fs -->
 | Argument | Type | Default | Environment variable | Description |
 |----------|------|---------|----------------------|-------------|
-| <a id="scan-fs--arg-path"></a>`[PATH]` | text | not set |  | The directory to scan. Defaults to the current directory. --source-dir and ASH_SOURCE_DIR also name it. |
+| <a id="scan-fs--arg-path"></a>`[PATH]` | text | not set |  | The directory to scan. Defaults to the current directory. --source-dir and ASH_SOURCE_DIR also name it, and both are deprecated and will be removed in ASH v4.0. |
 
 <!-- doctest: options of=cli.scan.fs -->
 | Option | Type | Default | Environment variable | Description |
 |--------|------|---------|----------------------|-------------|
 | <a id="scan-fs--source-dir"></a>`--source-dir` | text | not set | `ASH_SOURCE_DIR` | The source directory to scan. Deprecated as an option, removed in ASH v4.0: give it as the PATH argument of `ash scan fs`. |
+| <a id="scan-fs--archive"></a>`--archive` | text | not set |  | A zip of source code to scan in place of a directory. ASH checks it against its size, name and link rules, extracts it to a temporary directory that is removed when the command ends, and scans that; results go to .ash/ash_output in the working directory unless --output-dir names another. Cannot be combined with the PATH argument, --source-dir, --source-git, an image option, --staged, --use-existing or --changed-files-only. |
 | <a id="scan-fs--output-dir"></a>`--output-dir` | text | not set | `ASH_OUTPUT_DIR` | The directory to output results to |
 | <a id="scan-fs--scanners"></a>`--scanners` | text, repeatable | not set | `ASH_SCANNERS` | Deprecated: use --only-scanners to state the whole selection, or --add-scanners to add to the mode's default set. Behavior is unchanged: specific scanner names to run (additive to the precommit set in --mode precommit; the whole selection elsewhere). Cannot be combined with --only-scanners. |
 | <a id="scan-fs--exclude-scanners"></a>`--exclude-scanners` | text, repeatable | not set | `ASH_EXCLUDED_SCANNERS` | Specific scanner names to exclude from running. Takes precedence over scanners parameter. |
@@ -1126,10 +1104,6 @@ ash scan fs [OPTIONS] [PATH]
 | <a id="scan-fs--config-file-from-another-checkout"></a>`--config-file-from-another-checkout` | text, repeatable | not set |  | Apply the limits ASH puts on a config file inside a git checkout other than the scanned one to this one file of the extends chain of the --config file or of the file ASH_CONFIG names. The file cannot grant, and still sets what only restricts, as it does on the host: a lowered archive extraction limit, a scanner option that sends no usage data, and a network_scanners list as a limit. Container mode passes it, once per file, for each file of those chains that is in such a checkout, by its path inside the container, where the scan inside cannot see the checkout. Refused for a file that is in neither chain. This option is hidden from `--help` output. |
 | <a id="scan-fs--require-scanner-selection"></a>`--require-scanner-selection` | text | not set |  | Refuse to scan unless the default_scanners this scan settles equals this JSON document ({"only": [...], "add": [...]}, names lower-cased). Container mode passes it, with the lists it read on the host, when the selection comes from the operator's config, so an image built from an ASH that does not know it rejects the command and an image that lost the mounted config refuses before any scanner runs. This option is hidden from `--help` output. |
 | <a id="scan-fs--ash-config-from-host"></a>`--ash-config-from-host` | text | not set |  | Read this file as the file ASH_CONFIG names, for the whole command. Container mode passes it to the scan inside the container, with the path there of the file the host's ASH_CONFIG names, which a local scan reads as its base whatever names the config. Not --config, whose environment variable ASH_CONFIG is. This option is hidden from `--help` output. |
-| <a id="scan-fs--workspace"></a>`--workspace` | text | not set | `ASH_WORKSPACE` | Path to a '.code-workspace' file whose folders are scanned as separate, independently-scoped projects. Pass 'auto' to use the single '\*.code-workspace' file in the current directory. Mutually exclusive with --source-dir. |
-| <a id="scan-fs--workspace-config"></a>`--workspace-config` | text | not set | `ASH_WORKSPACE_CONFIG` | Path to the workspace policy file (severity ceiling, workspace-wide suppressions and ignore paths, additional scanners). Without this, ASH looks for 'ash-workspace.{yaml,yml,json}' in the workspace root or its '.ash' directory; finding none is not an error. Must not be any project's own ASH config: workspace policy governs every project, so reading one project's config as policy would apply its settings to its siblings. |
-| <a id="scan-fs--allow-missing-projects"></a>`--allow-missing-projects` | flag | off |  | In workspace mode, skip project folders that are absent or unreadable instead of failing. Skipped projects are recorded in the plan. Without this, a missing project fails the whole workspace, so a typo or an un-cloned repository cannot pass as a clean scan. |
-| <a id="scan-fs--dry-run"></a>`--dry-run` | flag | off |  | In workspace mode, print the resolved execution plan and exit without scanning anything. |
 | <a id="scan-fs--build"></a>`--build`, `-b` / `--no-build`, `-B` | flag | on |  | Whether to build the ASH container image |
 | <a id="scan-fs--run"></a>`--run`, `-r` / `--no-run`, `-R` | flag | on |  | Whether to run the ASH container image |
 | <a id="scan-fs--force"></a>`--force` | flag | off |  | Force rebuild of the ASH container image |
@@ -1148,7 +1122,95 @@ ash scan fs [OPTIONS] [PATH]
 | <a id="scan-fs--git-ref"></a>`--git-ref` | text | not set |  | Branch or tag to clone with --source-git (default: the remote's default branch). |
 | <a id="scan-fs--git-depth"></a>`--git-depth` | integer | not set |  | History depth of the --source-git clone (default 1). |
 | <a id="scan-fs--cli-json-input"></a>`--cli-json-input` | text | not set |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
-| <a id="scan-fs--generate-cli-skeleton"></a>`--generate-cli-skeleton` | flag | off |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit. |
+| <a id="scan-fs--generate-cli-skeleton"></a>`--generate-cli-skeleton` | flag | off |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit. Deprecated parameters are left out of the template, and a document that names one is still read. |
+
+### <a id="scan-workspace"></a>`ash scan workspace`
+
+Scan the projects of a VS Code workspace file, each on its own.
+
+Start with: ash scan workspace my.code-workspace --mode container
+
+Review the result with: ash results inspect findings
+
+Each folder of the workspace is a project with its own configuration and its own
+result, and the results are combined. With --changed-files-only, each project is
+judged on the files changed in its own git repository against --base-ref, and a
+project with no change is skipped. Options are grouped by workflow below. The
+options that read one directory (--baseline, --shard-index and the others) belong
+to `ash scan fs`.
+
+```text
+ash scan workspace [OPTIONS] {FILE}
+```
+
+<!-- doctest: options of=cli.scan.workspace -->
+| Argument | Type | Default | Environment variable | Description |
+|----------|------|---------|----------------------|-------------|
+| <a id="scan-workspace--arg-file"></a>`FILE` | text | required | `ASH_WORKSPACE` | The '.code-workspace' file whose folders are scanned as separate, independently-scoped projects. Pass 'auto' to use the single '\*.code-workspace' file in the current directory. ASH_WORKSPACE also names it; that variable is deprecated and will be removed in ASH v4.0. |
+
+<!-- doctest: options of=cli.scan.workspace -->
+| Option | Type | Default | Environment variable | Description |
+|--------|------|---------|----------------------|-------------|
+| <a id="scan-workspace--output-dir"></a>`--output-dir` | text | not set | `ASH_OUTPUT_DIR` | The directory to output results to |
+| <a id="scan-workspace--scanners"></a>`--scanners` | text, repeatable | not set | `ASH_SCANNERS` | Deprecated: use --only-scanners to state the whole selection, or --add-scanners to add to the mode's default set. Behavior is unchanged: specific scanner names to run (additive to the precommit set in --mode precommit; the whole selection elsewhere). Cannot be combined with --only-scanners. |
+| <a id="scan-workspace--exclude-scanners"></a>`--exclude-scanners` | text, repeatable | not set | `ASH_EXCLUDED_SCANNERS` | Specific scanner names to exclude from running. Takes precedence over scanners parameter. |
+| <a id="scan-workspace--only-scanners"></a>`--only-scanners` | text, repeatable | not set |  | Run exactly these scanners: the whole selection, replacing the mode's default set (--mode precommit's five) and the config file's precommit.only_scanners/add_scanners keys. Repeatable, and each value may name several scanners separated by commas, as --scanners accepts. Cannot be combined with --add-scanners or the deprecated --scanners. --exclude-scanners still removes names from it. |
+| <a id="scan-workspace--add-scanners"></a>`--add-scanners` | text, repeatable | not set |  | Scanner names to run in addition to the selection the mode and config give: in --mode precommit, the five default scanners plus the config's precommit keys; elsewhere the same additive meaning as --scanners. Repeatable, comma lists accepted. Cannot be combined with --only-scanners. --exclude-scanners still applies last. |
+| <a id="scan-workspace--ash-plugin-modules"></a>`--ash-plugin-modules` | text, repeatable | not set | `ASH_PLUGIN_MODULES` | List of Python modules to import containing ASH plugins and/or event subscribers. These are loaded in addition to the default modules. |
+| <a id="scan-workspace--config-overrides"></a>`--config-overrides` | text, repeatable | not set |  | Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2'). Supports lists with [item1,item2], append mode with key+=[value], and JSON syntax. See https://awslabs.github.io/automated-security-helper/latest/how-to/configure/ |
+| <a id="scan-workspace--offline"></a>`--offline` / `--no-offline` | flag | off |  | Run scan in offline/airgapped mode. npm-audit does not run offline, because npm, yarn and pnpm audit by asking the registry: a project with a lockfile reports it MISSING, and one without reports it SKIPPED. IMPORTANT: Online access is needed when building ASH to prepare it for usage during a scan! If selecting Offline while performing a build, the ASH container image will be built in offline mode and any typically online-only dependencies like downloadable tool vulnerability databases will be cached in the image itself before publishing for scan usage. |
+| <a id="scan-workspace--sandbox"></a>`--sandbox` | one of `off`, `auto`, `bwrap`, `firejail`, `landlock`, `sandbox-exec` | not set |  | Run every scanner subprocess in an OS-level sandbox: read-only source, writable results directory only, private home and temporary directory, no network unless the scanner needs one (never under --offline). 'auto' picks the best available (Linux: bwrap, firejail, landlock; macOS: sandbox-exec). A scanner whose sandbox cannot be set up is graded by the refusal: under 'auto' no working backend is a missing dependency and the scanner is reported MISSING; a named backend that is unavailable, or any other refusal (such as a results path that is a symlink), is reported ERROR. Overrides the config file's sandbox.mode; default off. Refused with --mode container (exit 5), which runs the scanners unsandboxed inside the container. See docs/content/docs/scanner-sandbox.md |
+| <a id="scan-workspace--express"></a>`--express` / `--no-express` | flag | not set |  | Run this scan on the resident express daemon, starting it if it is not running (--express), or force an ordinary cold in-process run (--no-express). Without either, a scan uses the daemon automatically whenever its socket exists and its ASH version matches, and silently runs cold otherwise. Unix only (Linux and macOS). The flag is read by the console entry point before this command parses, so it applies to CLI invocations: the 'ash' console script gets the full saving; 'python -m automated_security_helper.cli.main' delegates too but has paid the import cost already; scans the MCP server hosts in-process never delegate. By the time a scan runs here the decision has been made, so this parameter only documents and accepts the flag. |
+| <a id="scan-workspace--offline-semgrep-rulesets"></a>`--offline-semgrep-rulesets` | text | `p/ci` |  | Specify Semgrep rulesets for use in ASH offline mode |
+| <a id="scan-workspace--strategy"></a>`--strategy` | one of `sequential`, `parallel` | `parallel` |  | Whether to run scanners in parallel or sequential |
+| <a id="scan-workspace--progress"></a>`--progress`, `-p` / `--no-progress`, `-P` | flag | on |  | Show progress of each job live in the console. Defaults to True. |
+| <a id="scan-workspace--output-formats"></a>`--output-formats`, `--output-format`, `--formats`, `--format`, `-f` | text, repeatable | not set |  | The output formats to use (comma-separated). Available formats: text, flat-json, yaml, csv, html, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, github-ghas, gitlab-sast, gitlab-cyclonedx, unused-suppressions. With the AWS plugin module (ash_aws_plugins) in ash_plugin_modules, also, once enabled: aws-security-hub, bedrock-summary-reporter, cloudwatch-logs, s3. Also accepted, though no reporter writes them: aggregated, dict, custom. |
+| <a id="scan-workspace--cleanup"></a>`--cleanup` / `--no-cleanup` | flag | off |  | Clean up 'converted' directory and other temporary files after scan completes. Defaults to False. Note: Scans will always clean up existing files in the output directory before a new scan starts. This parameter only affects the cleanup of the temporary work directory after a scan has completed, typically for inspection of temporary artifacts. |
+| <a id="scan-workspace--phases"></a>`--phases` | one of `convert`, `scan`, `report`, `inspect`, repeatable | not set |  | The phases to run. Defaults to all phases except inspect. |
+| <a id="scan-workspace--inspect"></a>`--inspect` / `--no-inspect` | flag | off |  | Enable inspection of SARIF fields after running. This adds the inspect phase to the execution. |
+| <a id="scan-workspace--version"></a>`--version` | flag | off |  | Prints version number |
+| <a id="scan-workspace--mode"></a>`--mode` | one of `precommit`, `container`, `local`, `nix` | `local` | `ASH_MODE` | Execution mode preset. 'local' (default) runs the scan in this process with the scanner tools installed on this machine. 'precommit' is a local scan that runs only bandit, detect-secrets, checkov, cdk-nag, npm-audit, plus any --add-scanners (or the deprecated --scanners); the config file's precommit.only_scanners and the --only-scanners flag replace that set instead. It prints simplified output and no progress display; in workspace mode it changes only the output. 'container' builds the ASH container image and runs the scan inside it. 'nix' runs the scan inside `nix develop`, whose shell supplies pinned scanner versions, and always offline. |
+| <a id="scan-workspace--python-only"></a>`--python-only`, `--python-based-scanners-only`, `--python-based-plugins-only` / `--full`, `--all-enabled-scanners`, `--all-enabled-plugins` | flag | off |  | Exclude execution of any plugins or tools that have depencies external to Python. |
+| <a id="scan-workspace--show-summary"></a>`--show-summary` / `--no-show-summary` | flag | on |  | Show metrics table and results summary |
+| <a id="scan-workspace--quiet"></a>`--quiet` / `--no-quiet` | flag | off |  | Hide all log output |
+| <a id="scan-workspace--log-level"></a>`--log-level` | one of `QUIET`, `SIMPLE`, `ERROR`, `INFO`, `VERBOSE`, `DEBUG`, `TRACE` | `INFO` |  | Set the log level. |
+| <a id="scan-workspace--config"></a>`--config`, `-c` | text | not set | `ASH_CONFIG` | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: .ash.yaml at the root, then the deprecated ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/; .ash.yaml only in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
+| <a id="scan-workspace--verbose"></a>`--verbose`, `-v` | flag | off | `ASH_VERBOSE` | Enable verbose logging. Any log flag on the command line overrides ASH_VERBOSE. |
+| <a id="scan-workspace--debug"></a>`--debug`, `-d` | flag | off | `ASH_DEBUG` | Enable debug logging. Any log flag on the command line overrides ASH_DEBUG. |
+| <a id="scan-workspace--color"></a>`--color` / `--no-color` | flag | on |  | Enable/disable colorized output |
+| <a id="scan-workspace--fail-on-findings"></a>`--fail-on-findings` / `--no-fail-on-findings` | flag | not set |  | Enable/disable throwing non-successful exit codes if any actionable findings are found. Defaults to unset, which prefers the configuration value. If this is set directly, it takes precedence over the configuration value. |
+| <a id="scan-workspace--fail-on-incomplete-scanners"></a>`--fail-on-incomplete-scanners` / `--no-fail-on-incomplete-scanners` | flag | not set |  | Exit 1 when a selected scanner did not complete -- ERROR (ran and failed) or MISSING (dependencies unavailable, so it never ran). On by default: under --no-fail-on-incomplete-scanners, a run where nothing ran exits 0, the same code as a clean scan, because no scanner produced any finding. A SKIPPED scanner, one you did not select or one with nothing of its kind to scan, does not trip it by itself, so --scanners and --exclude-scanners both narrow what is gated; but a run in which every scanner is SKIPPED, such as one where no selected scanner had a file to scan, exits 1. Independent of --fail-on-findings, and takes precedence over it when both would fail: a partial scan's findings are real but its clean bill of health is not. Defaults to unset, which prefers the configuration value and then on. Pass --no-fail-on-incomplete-scanners to accept a partial scan's exit code, or --exclude-scanners for a tool you do not have, which records it SKIPPED and says so in the report. |
+| <a id="scan-workspace--allow-stale-content-db"></a>`--allow-stale-content-db` / `--no-allow-stale-content-db` | flag | not set |  | Let the scan pass when a scanner's content database (grype's or trivy's vulnerability database, the offline semgrep/opengrep rulesets) is older than its declared bound -- for grype, 120h after the database was built. Without it such a scan exits 1, except for trivy's database in an image built with OFFLINE=YES, which warns by default. With it the scan proceeds and the warning is recorded in the log and in the reports. --no-allow-stale-content-db forces the failure, for that database too. Defaults to unset, which prefers the `content_db_staleness` config value and then 'fail'; either form of the flag takes precedence over the config. |
+| <a id="scan-workspace--simple"></a>`--simple` / `--no-simple` | flag | off |  | Simplified output mode with minimal logging |
+| <a id="scan-workspace--ignore-suppressions"></a>`--ignore-suppressions` / `--no-ignore-suppressions` | flag | off |  | Ignore all suppression rules and report all findings regardless of suppression status. |
+| <a id="scan-workspace--honor-ignore-files"></a>`--honor-ignore-files` / `--no-honor-ignore-files` | flag | not set |  | Whether the .gitignore and .ignore files in the scanned tree decide which files are left out of ASH's scan set (the files detect-secrets, cfn-nag, cdk-nag, cfn-lint, cfn-guard, actionlint, zizmor, npm-audit and the converters read). --no-honor-ignore-files scans the files they match too; ASH's own exclusions such as .git still apply. Defaults to unset, which prefers the operator's `honor_ignore_files` config value and then honoring them. Either form takes precedence over the config. A config file inside the scanned tree cannot set it. The results and summaries record whether the ignore files were honored and how many files they excluded. |
+| <a id="scan-workspace--min-severity"></a>`--min-severity` | one of `critical`, `high`, `medium`, `low`, `none` | `low` |  | Minimum severity to trigger non-zero exit code (critical, high, medium, low, none). 'critical' and 'high' are equivalent because SARIF does not distinguish them. Findings below this threshold are still reported but don't affect the exit code. |
+| <a id="scan-workspace--compact-report"></a>`--compact-report` | flag | off |  | Produce a shorter markdown report suitable for PR comments. Omits the severity legend, scan metadata, footer, and rows for scanners that were skipped or had zero findings. |
+| <a id="scan-workspace--annotate-duplicates"></a>`--annotate-duplicates` | flag | off |  | Add `cluster_id`, `duplicate_of` and `duplicate_sources` columns to the CSV and flat-JSON reports, naming findings that two scanners report for one defect (same CVE and package, same IaC resource, or same line and CWE). Rows, ids, counts, SARIF, suppressions and baselines are unchanged. Adds three columns to the CSV header, so it is off by default. Sets `global_settings.deduplication.annotate`. |
+| <a id="scan-workspace--fold-duplicates"></a>`--fold-duplicates` | flag | off |  | Show one row per duplicate cluster in the human-readable reports (HTML, Markdown, text, and the Bedrock summary), with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Findings fold when they share a CVE and package, or when overlapping lines share a CWE; line overlaps chain, so two findings can fold through a third that overlaps both. Finding ids, SARIF, per-scanner counts, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. Sets `global_settings.deduplication.fold`. |
+| <a id="scan-workspace--changed-files-only"></a>`--changed-files-only` | flag | off | `ASH_CHANGED_FILES_ONLY` | Report only findings in files changed between --base-ref and HEAD, for example on a pull request. Scanners still scan every file; findings located in other files are dropped from every report, the summary counts and the exit code. Findings with no file location are kept. When git cannot list the changes, everything is reported; when nothing changed inside --source-dir, nothing is. Not supported with --mode container, which refuses it (exit 5). |
+| <a id="scan-workspace--base-ref"></a>`--base-ref` | text | `origin/main` | `ASH_BASE_REF` | Git ref to diff against when --changed-files-only is set. |
+| <a id="scan-workspace--allow-in-tree-tools"></a>`--allow-in-tree-tools` | flag | off |  | Let ASH start scanners and other tools found inside the scanned directory, such as an activated in-repo .venv/bin or node_modules/.bin. Off by default: a tool inside the scanned directory is treated as missing. Only this flag (also the allow_in_tree_tools key of --cli-json-input) and the ASH_ALLOW_IN_TREE_TOOLS environment variable (1, true, yes or on) turn it on, never a config file, and `ash mcp` never does. |
+| <a id="scan-workspace--config-from-scanned-repository"></a>`--config-from-scanned-repository` | flag | off |  | Apply the limits ASH puts on a repository-written config file to the --config file and every file it extends, wherever they are. Container mode passes this to the scan inside the container when the config is a file the scanned repository wrote (judged by its resolved path and by the name that reached it) but outside --source-dir, where that scan cannot see it. In a workspace scan it marks the --config file that is layered over every project's own config and used alone by a project without one, from planning on. This option is hidden from `--help` output. |
+| <a id="scan-workspace--config-file-from-scanned-repository"></a>`--config-file-from-scanned-repository` | text, repeatable | not set |  | Apply the limits ASH puts on a repository-written config file to this one file of the extends chain of the --config file or of the file ASH_CONFIG names. Container mode passes it, once per file, for each file of those chains the scanned repository wrote; the bases of a --config whose whole chain carries --config-from-scanned-repository are passed individually as well, so a mounted base judged on its own is still a marked file. Refused for a file that is in neither chain. This option is hidden from `--help` output. |
+| <a id="scan-workspace--config-file-from-another-checkout"></a>`--config-file-from-another-checkout` | text, repeatable | not set |  | Apply the limits ASH puts on a config file inside a git checkout other than the scanned one to this one file of the extends chain of the --config file or of the file ASH_CONFIG names. The file cannot grant, and still sets what only restricts, as it does on the host: a lowered archive extraction limit, a scanner option that sends no usage data, and a network_scanners list as a limit. Container mode passes it, once per file, for each file of those chains that is in such a checkout, by its path inside the container, where the scan inside cannot see the checkout. Refused for a file that is in neither chain. This option is hidden from `--help` output. |
+| <a id="scan-workspace--require-scanner-selection"></a>`--require-scanner-selection` | text | not set |  | Refuse to scan unless the default_scanners this scan settles equals this JSON document ({"only": [...], "add": [...]}, names lower-cased). Container mode passes it, with the lists it read on the host, when the selection comes from the operator's config, so an image built from an ASH that does not know it rejects the command and an image that lost the mounted config refuses before any scanner runs. This option is hidden from `--help` output. |
+| <a id="scan-workspace--ash-config-from-host"></a>`--ash-config-from-host` | text | not set |  | Read this file as the file ASH_CONFIG names, for the whole command. Container mode passes it to the scan inside the container, with the path there of the file the host's ASH_CONFIG names, which a local scan reads as its base whatever names the config. Not --config, whose environment variable ASH_CONFIG is. This option is hidden from `--help` output. |
+| <a id="scan-workspace--workspace-config"></a>`--workspace-config` | text | not set | `ASH_WORKSPACE_CONFIG` | Path to the workspace policy file (severity ceiling, workspace-wide suppressions and ignore paths, additional scanners). Without this, ASH looks for 'ash-workspace.{yaml,yml,json}' in the workspace root or its '.ash' directory; finding none is not an error. Must not be any project's own ASH config: workspace policy governs every project, so reading one project's config as policy would apply its settings to its siblings. |
+| <a id="scan-workspace--allow-missing-projects"></a>`--allow-missing-projects` | flag | off |  | In workspace mode, skip project folders that are absent or unreadable instead of failing. Skipped projects are recorded in the plan. Without this, a missing project fails the whole workspace, so a typo or an un-cloned repository cannot pass as a clean scan. |
+| <a id="scan-workspace--dry-run"></a>`--dry-run` | flag | off |  | In workspace mode, print the resolved execution plan and exit without scanning anything. |
+| <a id="scan-workspace--build"></a>`--build`, `-b` / `--no-build`, `-B` | flag | on |  | Whether to build the ASH container image |
+| <a id="scan-workspace--run"></a>`--run`, `-r` / `--no-run`, `-R` | flag | on |  | Whether to run the ASH container image |
+| <a id="scan-workspace--force"></a>`--force` | flag | off |  | Force rebuild of the ASH container image |
+| <a id="scan-workspace--oci-runner"></a>`--oci-runner`, `--oci`, `--runner`, `-o` | text | not set | `OCI_RUNNER` | Use the specified OCI runner instead of docker to run the containerized tools |
+| <a id="scan-workspace--build-target"></a>`--build-target` | one of `non-root`, `ci` | not set |  | The ASH image stage to build and run: 'non-root' (an unprivileged user, the default) or 'ci' (root, the default on Windows). CI environment variables do not change it; --custom-containerfile builds on 'ci'. |
+| <a id="scan-workspace--container-uid"></a>`--container-uid`, `-u` | text | not set |  | UID to use for the container user |
+| <a id="scan-workspace--container-gid"></a>`--container-gid`, `-g` | text | not set |  | GID to use for the container user |
+| <a id="scan-workspace--ash-revision-to-install"></a>`--ash-revision-to-install` | text | not set |  | ASH branch, tag or full commit id to install in the container image for usage during containerized scans |
+| <a id="scan-workspace--custom-containerfile"></a>`--custom-containerfile` | text | not set |  | Path to a custom container definition (e.g. Dockerfile) that you would like to build \*after\* the ASH container image builds. This is typically used when building a custom container image for ASH and including custom tooling that ASH does not come with by default. The fully qualified image name for the ASH image is passed in as the `ASH_BASE_IMAGE` build-arg so you can use it as a base. IMPORTANT: When a custom_containerfile path is provided, the build-target is set to `ci` so the container run-as configuration is not shifted to the non-root user. If you are using this parameter, you are responsible for securing your final container as appropriate. |
+| <a id="scan-workspace--custom-build-arg"></a>`--custom-build-arg` | text, repeatable | not set |  | Custom build arguments to pass to the container build |
+| <a id="scan-workspace--cli-json-input"></a>`--cli-json-input` | text | not set |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
+| <a id="scan-workspace--generate-cli-skeleton"></a>`--generate-cli-skeleton` | flag | off |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit. Deprecated parameters are left out of the template, and a document that names one is still read. |
 
 ## <a id="suppress"></a>`ash suppress`
 
@@ -1246,26 +1308,3 @@ ash suppress verify [OPTIONS]
 |--------|------|---------|----------------------|-------------|
 | <a id="suppress-verify--config"></a>`--config`, `-c` | text, repeatable | not set |  | A YAML config file whose symbol suppressions must each have a lock entry. Repeat it for several. Defaults to the config a scan of the source directory uses. |
 | <a id="suppress-verify--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash.lock. Defaults to the current directory. |
-
-## <a id="trend"></a>`ash trend`
-
-Show new, carried and fixed findings over a series of saved ASH scans.
-
-```text
-ash trend [OPTIONS] [files]...
-```
-
-This command is hidden from `--help` output.
-
-<!-- doctest: options of=cli.trend -->
-| Argument | Type | Default | Environment variable | Description |
-|----------|------|---------|----------------------|-------------|
-| <a id="trend--arg-files"></a>`files` | path, any number | not set |  | ASH scan results JSON files, one per run. When every file names one of ASH's timestamped report ids they are put in chronological order by it; otherwise they are kept in the order given, which the output says. At least two. |
-
-<!-- doctest: options of=cli.trend -->
-| Option | Type | Default | Environment variable | Description |
-|--------|------|---------|----------------------|-------------|
-| <a id="trend--history"></a>`--history` | path | not set |  | Read the run history recorded under this scan output directory (global_settings.history.enabled) instead of results files. |
-| <a id="trend--format"></a>`--format` | one of `text`, `json` | `text` |  | Output format (text or json). |
-| <a id="trend--cli-json-input"></a>`--cli-json-input` | text | not set |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
-| <a id="trend--generate-cli-skeleton"></a>`--generate-cli-skeleton` | flag | off |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit. |
