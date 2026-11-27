@@ -2241,7 +2241,6 @@ def test_a_workspace_run_gives_the_error_for_a_missing_setting_once(
         [
             *_WORKSPACE_SCAN,
             "--offline",
-            "--workspace",
             str(workspace),
             "--output-dir",
             str(output),
@@ -2684,7 +2683,7 @@ def test_two_plugins_whose_names_read_as_one_are_refused_by_each_command(
         (project / "main.py").write_text("x = 1\n", encoding="utf-8")
         workspace = tmp_path / "ws" / "services.code-workspace"
         workspace.write_text(json.dumps({"folders": [{"path": "api"}]}), "utf-8")
-        args = [*_WORKSPACE_SCAN, "--offline", "--workspace", str(workspace)]
+        args = [*_WORKSPACE_SCAN, "--offline", str(workspace)]
         args += ["--output-dir", str(tmp_path / "ws-output"), *load]
     elif command == "report":
         output = _stored_scan(tmp_path)
@@ -2774,7 +2773,7 @@ def test_resolve_ash_workspace_does_not_check_plugin_names(tmp_path: Path) -> No
     """scale-large-repos.md (Workspace scans over MCP).
 
     A one-project workspace whose project config loads a plugin module with a reporter
-    named ``csv_``, beside the built-in ``csv``: ``ash scan --workspace --dry-run``
+    named ``csv_``, beside the built-in ``csv``: ``ash scan workspace --dry-run``
     exits 3 naming both reporters and their modules, while ``resolve_ash_workspace``
     succeeds, says ``plugin_names_checked`` false, and leaves the module unimported,
     judged inside the child process that ran it. The resolve response's plan must
@@ -2799,7 +2798,7 @@ def test_resolve_ash_workspace_does_not_check_plugin_names(tmp_path: Path) -> No
     work.mkdir()
 
     dry_run = _ash(
-        [*_WORKSPACE_SCAN, "--offline", "--workspace", str(workspace), "--dry-run"],
+        [*_WORKSPACE_SCAN, "--offline", str(workspace), "--dry-run"],
         cwd=work,
         PYTHONPATH=python_path,
     )
@@ -3154,7 +3153,7 @@ def test_a_reporter_subclass_runs_beside_its_base_as_the_page_shows(
         (project / "main.py").write_text("x = 1\n", encoding="utf-8")
         workspace = tmp_path / "ws" / "services.code-workspace"
         workspace.write_text(json.dumps({"folders": [{"path": "api"}]}), "utf-8")
-        args = [*_WORKSPACE_SCAN, "--offline", "--workspace", str(workspace)]
+        args = [*_WORKSPACE_SCAN, "--offline", str(workspace)]
         args += ["--output-dir", str(tmp_path / "ws-output"), *load]
         reports = tmp_path / "ws-output" / "reports"
     elif command == "report":
@@ -4093,7 +4092,7 @@ def test_the_workspace_scan_inside_limits_a_marked_config_as_a_local_one_in_a_ch
         result = _ash(
             [
                 "scan",
-                "--workspace",
+                "workspace",
                 str(workspace),
                 "--config",
                 str(config),
@@ -4591,7 +4590,7 @@ def test_the_scan_inside_reads_the_handed_over_file_as_its_ash_config(
         result = _ash(
             [
                 "scan",
-                "--workspace",
+                "workspace",
                 str(workspace),
                 "--config",
                 str(config),
@@ -5424,7 +5423,7 @@ def test_workspace_mode_checks_rules_that_could_not_be_evaluated(
     in_a_workspace = _ash(
         [
             "scan",
-            "--workspace",
+            "workspace",
             str(workspace),
             "--output-dir",
             str(tmp_path / "workspace-output"),
@@ -6335,10 +6334,15 @@ _CONFIG_SECRET = 'DATABASE_PASSWORD = "correct-horse-battery-staple-1234"\n'
 #: The scan the pages run: detect-secrets only, which ships with ASH and needs no network.
 _CONFIG_SCAN = ["scan", "fs", "--only-scanners", "detect-secrets", "--no-progress"]
 
-#: The same scan of a workspace. The pages keep the subject-less form, ``ash scan
-#: --workspace <file>``, until ``ash scan workspace`` exists, so a workspace run is
-#: driven as the pages write it.
-_WORKSPACE_SCAN = ["scan", "--only-scanners", "detect-secrets", "--no-progress"]
+#: The same scan of a workspace, as the pages write it: ``ash scan workspace <file>``.
+#: A run puts the workspace file after these words.
+_WORKSPACE_SCAN = [
+    "scan",
+    "workspace",
+    "--only-scanners",
+    "detect-secrets",
+    "--no-progress",
+]
 
 #: The results commands and the image build, spelled as the pages spell them.
 _REPORT = ["results", "report"]
@@ -14507,7 +14511,7 @@ def test_a_link_at_or_in_the_output_directory_stops_the_run_with_the_pages_code(
         workspace = tmp_path / "ws" / "services.code-workspace"
         workspace.write_text(json.dumps({"folders": [{"path": "api"}]}), "utf-8")
         output = tmp_path / "ws-output"
-        args = [*_WORKSPACE_SCAN, "--offline", "--workspace", str(workspace)]
+        args = [*_WORKSPACE_SCAN, "--offline", str(workspace)]
         args += ["--output-dir", str(output)]
         assert run().returncode == 0
         target = _link_into(output / "projects", elsewhere / "projects")
@@ -20679,7 +20683,7 @@ def test_a_workspace_dry_run_refuses_what_the_run_refuses_before_any_project(
 ) -> None:
     """scale-large-repos.md (workspace mode: --dry-run), and exit-codes.md (Workspace mode).
 
-    ``ash scan --workspace ... --dry-run`` loads a plugin module with
+    ``ash scan workspace ... --dry-run`` loads a plugin module with
     ``--ash-plugin-modules``, or a project's config lists it. For a module with a
     reporter named ``csv_``, a reporter with the built-in ``csv``'s very name, a scanner
     or converter whose name reads as a built-in's, a module that does not import, and
@@ -20704,7 +20708,7 @@ def test_a_workspace_dry_run_refuses_what_the_run_refuses_before_any_project(
     (project / "main.py").write_text("x = 1\n", encoding="utf-8")
     workspace = tmp_path / "ws" / "services.code-workspace"
     workspace.write_text(json.dumps({"folders": [{"path": "api"}]}), "utf-8")
-    args = [*_WORKSPACE_SCAN, "--offline", "--workspace", str(workspace), "--dry-run"]
+    args = [*_WORKSPACE_SCAN, "--offline", str(workspace), "--dry-run"]
     args += ["--output-dir", str(tmp_path / "ws-output")]
     module = {"no-import": "page_claims_absent_ash_plugins", "outside": "json"}.get(
         case, _NAMES_MODULE
