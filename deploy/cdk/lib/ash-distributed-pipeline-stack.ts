@@ -557,10 +557,15 @@ export class AshDistributedPipelineStack extends Stack {
               // still runs with a deprecation line and v4.0 removes. So the image's
               // ASH is asked first, and only an answer picks a spelling (see
               // `ifAshHas`): a probe that fails any other way fails the shard with
-              // what it printed, and is not read as an older ASH. ASH_EXIT is the
-              // scan's status either way, since an `if` exits with its branch's
-              // last command.
+              // status 70 and what it printed, and is not read as an older ASH.
+              // ASH_EXIT is the scan's status either way, since an `if` exits with
+              // its branch's last command.
               [
+                // post_build uploads this directory and runs after a failed build
+                // phase too. It is made before the probe, so a probe that ends the
+                // step leaves an empty directory to upload, not a second failure about
+                // a missing one that hides which step failed first.
+                'mkdir -p ./ash-shard-output',
                 'set +e',
                 ...ifAshHas(
                   SCAN_FS,
@@ -795,8 +800,10 @@ const RESULTS_MERGE: NewAshCommand = { name: 'results merge', refused: 'results'
  *   for `ash scan fs --help`, since its help option is read before the extra argument
  *   is refused), or a usage error that refuses the word the command adds: it does not;
  * - anything else (a crash, an import error, an out-of-memory kill) says nothing about
- *   the ASH's commands. The lines print the end of what the probe printed and exit 1,
- *   so the build fails instead of running a spelling chosen by guess.
+ *   the ASH's commands. The lines print the end of what the probe printed and exit 70,
+ *   so the build fails instead of running a spelling chosen by guess. 70 is not one of
+ *   ASH's own statuses: 1 is the merge's code for an incomplete result, so a merge
+ *   build that ended with 1 could be a refused merge or a probe that crashed.
  *
  * The spelling chosen and why are printed to stderr. This is a different function from
  * the `onEitherAsh` of the CDK constructs package, which renders the same choice as one
@@ -842,7 +849,7 @@ function ifAshHas(
         'is chosen by guess. The end of its output:',
     )}`,
     `    printf '%s\\n' "$ASH_PROBE_HELP" | tail -n 20 >&2`,
-    '    exit 1 ;;',
+    '    exit 70 ;;',
     'esac',
     'if [ "$ASH_SPELLING" = current ]; then',
     ...branch(newCommand),

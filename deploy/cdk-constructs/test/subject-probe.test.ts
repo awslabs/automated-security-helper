@@ -15,9 +15,9 @@
  * Only an answer picks the old spelling: a help that does not name the command, or
  * a usage error that refuses the word the command adds (`fs`, or `results`). A probe
  * that fails any other way (a crash, an import error, an out-of-memory kill) says
- * nothing about the ASH's commands, so the step fails with the end of the probe's
- * output and runs neither spelling. Every run prints the spelling it chose and why to
- * stderr.
+ * nothing about the ASH's commands, so the step fails with status 70 and the end of the
+ * probe's output and runs neither spelling. Every run prints the spelling it chose and
+ * why to stderr.
  *
  * These tests run the rendered commands in a real shell against a stand-in `ash`
  * that answers the help probe as each kind of release would, and record the command
@@ -353,7 +353,7 @@ describe('the generated buildspecs name the subject on an ASH that has one', () 
     for (const release of UNANSWERED) {
       const ran = run(buildCommands(spec), release, { env });
       expect(ran.calls).toEqual([]);
-      expect(ran.status).not.toBe(0);
+      expect(ran.status).toBe(70);
       expect(ran.stderr).toContain('could not tell whether this ASH has');
     }
   });
@@ -374,7 +374,7 @@ describe('a probe that does not answer is not read as an older ASH', () => {
     test.each(commands)('%s runs neither spelling and fails', (_what, command, asked) => {
       const ran = run(command, release);
       expect(ran.calls).toEqual([]);
-      expect(ran.status).toBe(1);
+      expect(ran.status).toBe(70);
       expect(ran.stderr).toContain(`could not tell whether this ASH has '${asked}'`);
     });
   });
@@ -388,13 +388,14 @@ describe('a probe that does not answer is not read as an older ASH', () => {
     expect(unexplained).toContain('not a command line this release takes');
   });
 
-  test('the step\'s exit status is a plain failure, not the probe\'s own', () => {
+  test('the step\'s exit status is 70, which ASH never gives, not the probe\'s own', () => {
     // The probe exits 5 here, ASH's usage-error code, and the step does not pass that
-    // on: a probe that did not answer ends the step with status 1, a plain failure.
-    // One is also the code the merge gives for an incomplete result, so the status
-    // alone does not tell the two apart; the end of the probe's output, which the
-    // step prints, does.
-    expect(run(MERGE, 'unexplained-exit').status).toBe(1);
+    // on: a probe that did not answer ends the step with status 70. One is the code
+    // the merge gives for an incomplete result, so a step that ended with 1 could be
+    // a refused merge or a probe that crashed; a log reader seeing 70 knows no scan
+    // or merge ran, and the end of the probe's output, which the step prints, says why.
+    expect(run(MERGE, 'unexplained-exit').status).toBe(70);
+    expect(run(UNSHARDED, 'crashing').status).toBe(70);
   });
 });
 

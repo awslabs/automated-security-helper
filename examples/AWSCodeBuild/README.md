@@ -39,7 +39,7 @@ The buildspec's `env.variables` block sets four variables:
 - The scan writes every report format, including `reports/ash.junit.xml`, during this phase
 - ASH exits non-zero when it finds actionable findings, which fails the build
 - Asks the installed ASH whether it has `ash scan fs`, ASH 3.9's spelling, and runs the older `ash --mode ...` form when `RELEASE_TAG` names an older release
-- Picks the older form only from an answer: a help that does not name `scan fs`, or a usage error that refuses the word `fs`. A probe that fails any other way, such as a crash or an out-of-memory kill, fails the build with the end of its output instead of being read as an older ASH
+- Picks the older form only from an answer: a help that does not name `scan fs`, or a usage error that refuses the word `fs`. A probe that fails any other way, such as a crash or an out-of-memory kill, fails the build with status 70 and the end of its output instead of being read as an older ASH. 70 is not a status ASH gives, so it cannot be read as the scan's verdict
 - Prints the spelling it chose and why to the build log
 
 ### Post-Build

@@ -233,14 +233,29 @@ SHARD_ENV = {"SHARD_INDEX": "1", "SHARD_COUNT": "3"}
 MERGE_ENV = {"SHARD_COUNT": "3", "MIN_SEVERITY": "low", "FAIL_ON_FINDINGS": "true"}
 
 
+def _post_build_command(name: str, marker: str) -> str:
+    """The one post_build command of buildspec *name* that contains *marker*."""
+    spec = yaml.safe_load((MODULE / name).read_text(encoding="utf-8"))
+    matches = [c for c in spec["phases"]["post_build"]["commands"] if marker in c]
+    assert len(matches) == 1, (
+        f"expected one post_build command with {marker!r} in {name}"
+    )
+    return matches[0]
+
+
 def test_a_shard_whose_probe_crashes_does_not_guess_the_older_spelling(tmp_path):
-    """The crash is not an answer: the action fails, naming the probe's output."""
+    """The crash is not an answer: the action fails, naming the probe's output.
+
+    It fails with 70, a status ASH never gives. The merge's code for an incomplete
+    result is 1, and a shard that ended with 1 could not be told from one whose scan
+    reported that.
+    """
     command = _build_command("buildspec-shard.yml.tftpl", "--shard-index")
 
     calls, finished = _run_process(tmp_path, command, RELEASE_CRASHING, SHARD_ENV)
 
     assert calls == [], calls
-    assert finished.returncode != 0, finished.stderr
+    assert finished.returncode == 70, finished.stderr
     assert "could not tell whether this ASH has 'ash scan fs'" in finished.stderr
     assert "exited 1" in finished.stderr
     assert "MemoryError" in finished.stderr
@@ -252,9 +267,43 @@ def test_a_merge_whose_probe_crashes_does_not_guess_the_older_spelling(tmp_path)
     calls, finished = _run_process(tmp_path, command, RELEASE_CRASHING, MERGE_ENV)
 
     assert calls == [], calls
-    assert finished.returncode != 0, finished.stderr
+    assert finished.returncode == 70, finished.stderr
     assert "could not tell whether this ASH has 'ash results merge'" in finished.stderr
     assert "MemoryError" in finished.stderr
+
+
+def test_a_merge_whose_probe_got_no_answer_is_reported_as_that_and_not_as_a_refusal(
+    tmp_path,
+):
+    """post_build runs after a failed build phase and must say why the merge is missing.
+
+    The probe records its 70 as the merge's code. Without that the file is missing,
+    post_build reads 1, and reports "shard coverage incomplete, findings UNKNOWN" for a
+    merge that never ran, which hides the probe's output above it.
+    """
+    build = _build_command("buildspec-merge.yml.tftpl", "MERGE_EXIT=$?")
+    post = _post_build_command("buildspec-merge.yml.tftpl", "cat merge_exit_code")
+
+    _, finished = _run_process(tmp_path, build, RELEASE_CRASHING, MERGE_ENV)
+    assert finished.returncode == 70, finished.stderr
+    work = tmp_path / "work"
+    assert (work / "merge_exit_code").read_text(encoding="utf-8") == "70"
+
+    shell = shutil.which("sh")
+    assert shell, "no sh on PATH"
+    after = subprocess.run(
+        [shell, "-c", post],
+        cwd=work,
+        env={"PATH": "/usr/bin:/bin", "MIN_SEVERITY": "low"},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+
+    assert after.returncode == 70, after.stderr
+    assert "got no answer" in after.stderr, after.stderr
+    assert "shard coverage" not in after.stderr, after.stderr
 
 
 def test_a_shard_scans_with_source_dir_when_its_ash_refuses_the_word_fs(tmp_path):

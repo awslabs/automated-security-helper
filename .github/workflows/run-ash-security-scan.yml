@@ -2292,13 +2292,13 @@ jobs:
           # that does not name it picks the older spelling, as does the usage error
           # that refuses the word `fs`. A probe that fails any other way (uvx cannot
           # fetch the source, ASH crashes) says nothing about the ASH's commands, so
-          # the step fails with the end of what the probe printed and neither
-          # spelling runs. The probe names the scan's config as the scan does,
-          # though --help reads none. The help is read whole into a variable, with
-          # color off, so no pipe is closed early and no style code falls between
-          # the words. It is printed only when the probe fails, and then through
-          # one_line, a line at a time. The step says which spelling it chose and
-          # why, on stderr.
+          # the step fails with status 70, which ASH never gives, and the end of what
+          # the probe printed, and neither spelling runs. The probe names the scan's
+          # config as the scan does, though --help reads none. The help is read whole
+          # into a variable, with color off, so no pipe is closed early and no style
+          # code falls between the words. It is printed only when the probe fails,
+          # and then through one_line, a line at a time. The step says which spelling
+          # it chose and why, on stderr.
           #
           # This step used to pass --source-dir . ahead of ash-args, so a
           # --source-dir in ash-args came later and named the directory scanned,
@@ -2328,7 +2328,7 @@ jobs:
               while IFS= read -r probe_line || [ -n "${probe_line}" ]; do
                 printf '%s\n' "$(one_line "${probe_line}")" >&2
               done <<<"${probe_tail}"
-              exit 1
+              exit 70
               ;;
           esac
           if [ "${scan_has_subject}" = yes ]; then
@@ -2417,10 +2417,10 @@ jobs:
           # prints `results report` in its help. A help that does not name it picks
           # the older spelling, as does the usage error that refuses the word
           # `results`. A probe that fails any other way says nothing about the ASH's
-          # commands, so the step fails with the end of what the probe printed and
-          # neither spelling runs. The probe names the report's config as the report
-          # does, though --help reads none. The step says which spelling it chose
-          # and why, on stderr.
+          # commands, so the step fails with status 70, which ASH never gives, and
+          # the end of what the probe printed, and neither spelling runs. The probe
+          # names the report's config as the report does, though --help reads none.
+          # The step says which spelling it chose and why, on stderr.
           report_help_status=0
           report_help="$(NO_COLOR=1 uvx --from "${ASH_UVX_SOURCE}" ash results report ${ASH_CONFIG:+--config "${ASH_CONFIG}"} --help 2>&1)" || report_help_status=$?
           case "${report_help_status}:${report_help}" in
@@ -2442,7 +2442,7 @@ jobs:
               while IFS= read -r probe_line || [ -n "${probe_line}" ]; do
                 printf '%s\n' "$(one_line "${probe_line}")" >&2
               done <<<"${probe_tail}"
-              exit 1
+              exit 70
               ;;
           esac
           if [ "${report_has_results}" = yes ]; then

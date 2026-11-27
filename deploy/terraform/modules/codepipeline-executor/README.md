@@ -46,6 +46,7 @@ The verdict is `ash merge`'s exit code, propagated unchanged:
 | 1 | The result is incomplete, so findings are **unknown**: shard coverage has a gap, a scanner in the merged result did not finish, a rule could not be evaluated, or a content database is past its age limit |
 | 2 | Actionable findings at or above `min_severity` |
 | 5 | Usage error — ASH refused the merge command line, so nothing was merged |
+| 70 | Not a status ASH gives: the check of which merge command the image's ASH has (see below) got no answer, so no merge ran |
 
 Exit 5 comes from ASH releases after 3.7.1. ASH 3.7.0 and 3.7.1 have no `ash
 merge`, and report that as exit 2.
@@ -168,8 +169,10 @@ it has: `ash scan fs --help` for a shard and `ash results merge --help` for the
 merge. Only an answer picks the older spelling: a help that does not name the
 command, or a usage error that refuses the word `fs` (`results` for the merge). A
 probe that fails any other way, such as a crash or an out-of-memory kill, fails the
-action with the end of what it printed, and neither spelling runs. Each action
-prints the spelling it chose and why to stderr.
+action with status 70 and the end of what it printed, and neither spelling runs. 70
+is not one of ASH's own statuses, so it cannot be mistaken for the merge's exit 1, a
+refusal to merge an incomplete result. Each action prints the spelling it chose and
+why to stderr.
 
 With `base_config_ssm_parameter_name` null, `ash-container-init` sets no
 `ASH_CONFIG`, so both buildspecs write `{}`, ASH's defaults, to a temporary

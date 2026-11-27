@@ -18,7 +18,8 @@ phases:
   # asks the installed ASH first, and only an answer picks a spelling: a help that
   # names the new command, or an older ASH's help or usage error that does not. A
   # probe that fails any other way (a crash, an out-of-memory kill) says nothing about
-  # the ASH, so the build fails with what the probe printed instead of guessing.
+  # the ASH, so the build fails with status 70 and what the probe printed instead of
+  # guessing. 70 is not a status ASH gives, so it cannot be read as a scan's verdict.
   # Each command prints the spelling it chose and why.
   build:
     commands:
@@ -39,7 +40,7 @@ phases:
           *)
             echo "ash: could not tell whether this ASH has 'ash scan fs': 'ash scan fs --help' exited $ASH_PROBE_STATUS without saying it refused 'fs', so no spelling is chosen by guess. The end of its output:" >&2
             printf '%s\n' "$ASH_PROBE_HELP" | tail -n 20 >&2
-            exit 1 ;;
+            exit 70 ;;
         esac
         if [ "$ASH_SCAN_FS" = yes ]; then
           ash scan fs --mode container --build-target ci --no-progress --output-dir .ash/ash_output
@@ -67,7 +68,7 @@ phases:
           *)
             echo "ash: could not tell whether this ASH has 'ash results report': 'ash results report --help' exited $ASH_PROBE_STATUS without saying it refused 'results', so no spelling is chosen by guess. The end of its output:" >&2
             printf '%s\n' "$ASH_PROBE_HELP" | tail -n 20 >&2
-            exit 1 ;;
+            exit 70 ;;
         esac
         if [ "$ASH_RESULTS_REPORT" = yes ]; then
           ash results report --output-dir .ash/ash_output

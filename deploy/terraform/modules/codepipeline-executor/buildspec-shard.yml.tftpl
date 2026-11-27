@@ -65,9 +65,11 @@ phases:
       # Only an answer picks a spelling: a help that names `scan fs` (the new
       # one), a help that does not or a usage error naming `fs` (an older ASH).
       # Any other failure of the probe says nothing about the ASH, so the action
-      # fails with what the probe printed instead of guessing. Each choice and
-      # its reason is printed to stderr. ASH_EXIT is the scan's status either
-      # way, since an `if` exits with its branch's last command.
+      # fails with status 70 and what the probe printed instead of guessing. 70 is
+      # not one of ASH's own statuses, so the build's status tells a probe that
+      # got no answer from a scan that ran. Each choice and its reason is printed
+      # to stderr. ASH_EXIT is the scan's status either way, since an `if` exits
+      # with its branch's last command.
       - |
         set -eu
         mkdir -p ash_output
@@ -91,7 +93,7 @@ phases:
           *)
             echo "ash: could not tell whether this ASH has 'ash scan fs': 'ash scan fs --help' exited $ASH_PROBE_STATUS without saying it refused 'fs', so no spelling is chosen by guess. The end of its output:" >&2
             printf '%s\n' "$ASH_PROBE_HELP" | tail -n 20 >&2
-            exit 1 ;;
+            exit 70 ;;
         esac
         set +e
         if [ "$ASH_SCAN_FS" = yes ]; then

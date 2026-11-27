@@ -476,13 +476,17 @@ def test_the_codebuild_example_does_not_read_a_crashed_probe_as_an_older_ash(
     tmp_path, phase, asked
 ):
     """A crash says nothing about the ASH's commands. Read as an older ASH, it would run
-    the older spelling on an ASH that has the new one, with no word of why."""
+    the older spelling on an ASH that has the new one, with no word of why.
+
+    The build ends with 70, a status ASH never gives: the scan's own 1 is "incomplete
+    result", and a build that ended with it could be a scan or a probe that failed.
+    """
     calls, finished = _run_codebuild_command(
         tmp_path, _phase_command(phase), "crashing"
     )
 
     assert calls == [], calls
-    assert finished.returncode != 0, finished.stderr
+    assert finished.returncode == 70, finished.stderr
     assert f"could not tell whether this ASH has '{asked}'" in finished.stderr
     assert f"'{asked} --help' exited 1" in finished.stderr
     assert "MemoryError" in finished.stderr

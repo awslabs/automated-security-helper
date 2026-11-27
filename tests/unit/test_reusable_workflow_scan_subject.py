@@ -316,7 +316,9 @@ def test_the_scan_does_not_read_a_failed_probe_as_an_older_ash(
     why, and the older spelling is the one that goes in v4.0."""
     ran = _run(tmp_path, helps, RUN_ASH, release, SCAN_ENV)
 
-    assert ran.result.returncode != 0, _output(ran)
+    # 70, which ASH never gives: its 1 is "incomplete result", so a step that ended
+    # with 1 could be a scan that reported that or a probe that failed.
+    assert ran.result.returncode == 70, _output(ran)
     assert ran.calls == [], ran.calls
     output = _output(ran)
     could_not_tell = "Could not tell whether the ASH this workflow installs has"
@@ -502,7 +504,7 @@ def test_the_report_does_not_read_a_failed_probe_as_an_older_ash(
 ):
     ran = _run(tmp_path, helps, REPORT, release, {"ASH_CONFIG": ""})
 
-    assert ran.result.returncode != 0, _output(ran)
+    assert ran.result.returncode == 70, _output(ran)
     assert ran.calls == [], ran.calls
     output = _output(ran)
     could_not_tell = "Could not tell whether the ASH this workflow installs has"
@@ -527,7 +529,7 @@ def test_what_a_failed_probe_printed_is_not_read_as_a_workflow_command(
     repository's config before it reads --help."""
     ran = _run(tmp_path, helps, step, "hostile", env)
 
-    assert ran.result.returncode != 0, _output(ran)
+    assert ran.result.returncode == 70, _output(ran)
     assert ran.calls == [], ran.calls
     output = _output(ran)
     # Shown, not dropped.

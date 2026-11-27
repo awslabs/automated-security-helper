@@ -13,6 +13,8 @@ version: 0.2
 #      ASH releases after 3.7.1 use 5 for this. 3.7.0 and 3.7.1 have no `ash
 #      merge` at all, and click reports that as 2, which the arm below would name
 #      as findings.
+#   70 not a status ASH gives: the check of which merge command the installed ASH
+#      has got no answer, so no merge ran. The build phase says why.
 #
 # Nothing here re-derives that judgment. ASH already routes it through
 # _compute_exit_code, the same function `ash scan` uses, precisely so a merged
@@ -106,8 +108,11 @@ phases:
       # about `scan fs`. Only an answer picks a spelling: a help that names
       # `results merge` (the new one), or a usage error naming `results` (an older
       # ASH, which has no such command). Any other failure of the probe says
-      # nothing about the ASH, so the action fails with what the probe printed
-      # instead of guessing. Each choice and its reason is printed to stderr.
+      # nothing about the ASH, so the action fails with status 70 and what the
+      # probe printed instead of guessing. 70 is not one of ASH's own statuses
+      # (1 is the refusal to merge an incomplete result), and the probe records it
+      # in merge_exit_code, so post_build reports it as what it is and not as a
+      # refused merge. Each choice and its reason is printed to stderr.
       - |
         set -eu
         if [ -z "$ASH_BASE_CONFIG_SSM_PARAMETER" ]; then
@@ -130,7 +135,8 @@ phases:
           *)
             echo "ash: could not tell whether this ASH has 'ash results merge': 'ash results merge --help' exited $ASH_PROBE_STATUS without saying it refused 'results', so no spelling is chosen by guess. The end of its output:" >&2
             printf '%s\n' "$ASH_PROBE_HELP" | tail -n 20 >&2
-            exit 1 ;;
+            printf '%s' 70 > merge_exit_code
+            exit 70 ;;
         esac
         if [ "$ASH_RESULTS_MERGE" = yes ]; then
           set -- /usr/local/bin/ash-container-init ash results merge \
@@ -180,6 +186,7 @@ phases:
           1) echo "ash merge: refused to merge - shard coverage incomplete, findings UNKNOWN" >&2 ;;
           2) echo "ash merge: actionable findings at or above $MIN_SEVERITY" >&2 ;;
           5) echo "ash merge: usage error - ASH refused its command line; check the image's ash_version" >&2 ;;
+          70) echo "ash merge: not run - the check of which merge command this ASH has got no answer; its output is in the build phase's log" >&2 ;;
           *) echo "ash merge: exited $MERGE_EXIT" >&2 ;;
         esac
         exit "$MERGE_EXIT"

@@ -84,7 +84,8 @@ function spellingNote(
     'when it does not, so an older ASH_VERSION keeps working. Only an answer',
     'picks the older spelling: a help that does not name the command, or a usage',
     `error that refuses the word ${refused}. A probe that fails any other way stops`,
-    'the step with the end of its output instead of being read as an older ASH.',
+    'the step with exit status 70 and the end of its output instead of being read as',
+    'an older ASH.',
   ];
 }
 

@@ -310,10 +310,20 @@ const PROBE_HELP = 'ash_probe_help';
 const SPELLING = 'ash_spelling';
 
 /**
+ * The status a version check ends with when the ASH gives no answer. It is not one of
+ * ASH's own: 1 is the verdict for an incomplete result, 2 for findings and 5 for a
+ * usage error, so a build whose step ended with one of those could be a refused merge
+ * or a check that crashed. 70 is EX_SOFTWARE, an internal error, and a log reader
+ * seeing it knows no scan or merge ran.
+ */
+const UNANSWERED_PROBE_STATUS = 70;
+
+/**
  * The shell text that asks the installed ASH whether it has `command`, and leaves
  * the answer in `$ash_spelling`: `current` for an ASH that has it, `older` for one
- * that does not. For an ASH that gives no answer it prints why and ends with
- * `false`, so a caller that chains the next command with `&&` never runs it.
+ * that does not. For an ASH that gives no answer it prints why and ends with status
+ * 70 (`UNANSWERED_PROBE_STATUS`) in a subshell, so a caller that chains the next
+ * command with `&&` never runs it, and the status of the chain is the 70.
  *
  * Only an answer settles it, and the answer is read from the probe's exit status
  * and its output together:
@@ -328,7 +338,8 @@ const SPELLING = 'ash_spelling';
  * Any other failure (a crash, an import error, an out-of-memory kill, a `uvx` that
  * could not fetch ASH) says nothing about the ASH's commands. Reading it as an
  * older ASH would run the older spelling on an ASH that has the new one, so the
- * step fails instead, with the end of the probe's output, and nothing runs.
+ * step fails instead, with status 70 and the end of the probe's output, and nothing
+ * runs.
  *
  * The probe's output is captured whole and matched with `case`, with no pipe, so an
  * ASH that prints thousands of lines never writes into a closed pipe, which under
@@ -368,7 +379,7 @@ function askAsh(ash: string, command: NewCommand): string {
         'The end of its output:',
     ) + ';',
     `printf '%s\\n' "${help}" | tail -n 20 >&2;`,
-    'false;;',
+    `(exit ${UNANSWERED_PROBE_STATUS});;`,
     'esac',
   ].join(' ');
 }
@@ -377,7 +388,7 @@ function askAsh(ash: string, command: NewCommand): string {
  * One command line for each ASH: the new spelling when the installed ASH has it,
  * the old one when it does not, and neither when it cannot be asked. The exit
  * status of the `if` is that of the branch that ran, so the verdict is the scan's
- * or the merge's own; when the probe gives no answer it is the probe's `false`.
+ * or the merge's own; when the probe gives no answer it is the probe's 70.
  */
 function onEitherAsh(
   ash: string,

@@ -50,6 +50,8 @@ interface Ran {
   readonly statuses: (number | null)[];
   /** What the shells wrote to stderr, all commands together. */
   readonly stderr: string;
+  /** Whether `./ash-shard-output`, which the shard's upload reads, exists once they ended. */
+  readonly shardOutputDirectory: boolean;
 }
 
 /** Run `commands` with a stand-in `ash` answering as `release`, and return what it recorded. */
@@ -80,7 +82,13 @@ function run(commands: string[], release: AshRelease): Ran {
       statuses.push(finished.status);
       stderr += finished.stderr ?? '';
     }
-    return { records: readLines<AshRecord>(record), src, statuses, stderr };
+    return {
+      records: readLines<AshRecord>(record),
+      src,
+      statuses,
+      stderr,
+      shardOutputDirectory: fs.existsSync(path.join(dir, 'ash-shard-output')),
+    };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -141,22 +149,31 @@ describe('a probe that does not answer is not read as an older ASH', () => {
   // the new spellings' probes crash, and the old spelling's own help answers as an
   // older ASH's would, so a build that took the crash for "no such command" would go on
   // to scan and merge with commands an ASH 3.9 prints deprecation lines for.
-  test('a shard runs neither spelling and fails with what the probe printed', () => {
+  test('a shard runs neither spelling and fails with status 70 and what the probe printed', () => {
     const { records, statuses, stderr } = run(SHARD_BUILD, 'new-spellings-crash');
 
     expect(records).toEqual([]);
-    // The shard's build runs an echo first, which succeeds; the script after it fails.
-    expect(statuses.filter((status) => status !== 0)).toEqual([1]);
+    // The shard's build runs an echo first, which succeeds; the script after it fails
+    // with 70, a status ASH never gives. The merge's code for an incomplete result is
+    // 1, so a 1 here could not be told from a refused merge.
+    expect(statuses.filter((status) => status !== 0)).toEqual([70]);
     expect(stderr).toContain("could not tell whether this ASH has 'ash scan fs'");
     expect(stderr).toContain("'ash scan fs --help' exited 1");
     expect(stderr).toContain('MemoryError');
   });
 
-  test('the merge runs neither spelling and fails with what the probe printed', () => {
+  test('a shard whose probe ends the step still leaves the directory its upload reads', () => {
+    // post_build uploads ./ash-shard-output and runs after a failed build phase too.
+    // Without the directory the upload adds a second failure, about a directory that is
+    // missing, to the probe's.
+    expect(run(SHARD_BUILD, 'new-spellings-crash').shardOutputDirectory).toBe(true);
+  });
+
+  test('the merge runs neither spelling and fails with status 70 and what the probe printed', () => {
     const { records, statuses, stderr } = run(MERGE_BUILD, 'new-spellings-crash');
 
     expect(records).toEqual([]);
-    expect(statuses).toEqual([1]);
+    expect(statuses).toEqual([70]);
     expect(stderr).toContain("could not tell whether this ASH has 'ash results merge'");
     expect(stderr).toContain("'ash results merge --help' exited 1");
     expect(stderr).toContain('MemoryError');
