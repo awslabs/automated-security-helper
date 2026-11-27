@@ -724,9 +724,7 @@ def _scanner_list(flake: str) -> str:
     raise RouteError("the scannersFor list in flake.nix is not closed")
 
 
-def nix_rows_missing_from_flake(
-    flake: str, regs: Registers | None = None
-) -> list[str]:
+def nix_rows_missing_from_flake(flake: str, regs: Registers | None = None) -> list[str]:
     """Tools with a Nix package row that the flake's scanner list does not carry."""
     registers = Registers.read() if regs is None else regs
     listed = _scanner_list(flake)

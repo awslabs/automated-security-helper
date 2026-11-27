@@ -185,8 +185,7 @@ def test_the_plan_on_main_installs_five_scanners_and_exempts_snyk_code(script):
     pins = tool_versions()
 
     got = {
-        r.scanner: (r.runtime, r.route, r.version, r.pin_source, r.status)
-        for r in rows
+        r.scanner: (r.runtime, r.route, r.version, r.pin_source, r.status) for r in rows
     }
     assert got == {
         "betterleaks": (
@@ -196,7 +195,13 @@ def test_the_plan_on_main_installs_five_scanners_and_exempts_snyk_code(script):
             "release_pin",
             "install",
         ),
-        "ferret-scan": ("pypi_package", "ash_environment", "2.5.3", "interim", "install"),
+        "ferret-scan": (
+            "pypi_package",
+            "ash_environment",
+            "2.5.3",
+            "interim",
+            "install",
+        ),
         "guarddog": ("uv_python", "uv_tool", "3.2.0", "pypi_pin", "install"),
         "hadolint": (
             "pinned_binary",
@@ -261,7 +266,10 @@ def _expected_args():
         *[
             part
             for package in ("betterleaks", "ferret", "guarddog", "hadolint", "trivy")
-            for part in ("--config-overrides", f"ash_plugin_modules+=[{module(package)}]")
+            for part in (
+                "--config-overrides",
+                f"ash_plugin_modules+=[{module(package)}]",
+            )
         ],
         "--tool",
         "betterleaks",
@@ -515,7 +523,9 @@ def test_an_exemption_for_a_scanner_the_plan_could_install_is_refused(script):
 
 @pytest.mark.parametrize("reason", ["", "   ", "\n"])
 def test_an_exemption_without_a_reason_is_refused(script, reason):
-    with pytest.raises(script.PlanError, match=r"EXEMPT row for snyk-code gives no reason"):
+    with pytest.raises(
+        script.PlanError, match=r"EXEMPT row for snyk-code gives no reason"
+    ):
         script.plan(exempt={"snyk-code": reason})
 
 
@@ -688,9 +698,7 @@ def test_args_prints_one_token_per_line(script, capsys):
     assert capsys.readouterr().out.rstrip("\n").split("\n") == _expected_args()
 
 
-def test_a_plan_that_installs_nothing_is_an_error_for_args(
-    script, capsys, monkeypatch
-):
+def test_a_plan_that_installs_nothing_is_an_error_for_args(script, capsys, monkeypatch):
     held_all = {name: "held" for name in MAIN_SCANNERS if name != "snyk-code"}
     monkeypatch.setattr(script, "HELD", held_all)
 
@@ -752,9 +760,7 @@ _ALL_TOOLS = ("betterleaks", "ferret-scan", "guarddog", "hadolint", "trivy")
 def test_verify_accepts_what_the_plan_says_is_installed(script, tmp_path):
     directory = _bin(tmp_path, *_ALL_TOOLS)
 
-    problems = script.verify(
-        script.plan(), path=str(directory), probes=_probes(script)
-    )
+    problems = script.verify(script.plan(), path=str(directory), probes=_probes(script))
 
     assert problems == []
 
@@ -762,9 +768,7 @@ def test_verify_accepts_what_the_plan_says_is_installed(script, tmp_path):
 def test_verify_names_a_tool_that_is_not_on_the_path(script, tmp_path):
     directory = _bin(tmp_path, *(t for t in _ALL_TOOLS if t != "hadolint"))
 
-    problems = script.verify(
-        script.plan(), path=str(directory), probes=_probes(script)
-    )
+    problems = script.verify(script.plan(), path=str(directory), probes=_probes(script))
 
     assert len(problems) == 1
     assert "hadolint" in problems[0] and "not on the session PATH" in problems[0]
@@ -799,7 +803,9 @@ def test_a_version_found_inside_another_is_not_the_pin(script, tmp_path, reporte
     assert [p for p in problems if "trivy" in p], reported
 
 
-def test_verify_names_a_uv_tool_the_tool_list_does_not_show_at_the_pin(script, tmp_path):
+def test_verify_names_a_uv_tool_the_tool_list_does_not_show_at_the_pin(
+    script, tmp_path
+):
     directory = _bin(tmp_path, *_ALL_TOOLS)
 
     for listing in ("", "guarddog v3.1.0\n- guarddog\n", "other-tool v3.2.0\n"):

@@ -623,9 +623,7 @@ def test_a_user_installed_cli_that_declares_none_has_no_route(ir, regs):
     assert row.installable is False
 
 
-def test_two_scanners_that_differ_only_in_their_declaration_route_differently(
-    ir, regs
-):
+def test_two_scanners_that_differ_only_in_their_declaration_route_differently(ir, regs):
     declaring = _cli_scanner(regs, "planted-cli", ("linux/amd64",))
     silent = _cli_scanner(regs, "planted-cli", ())
     kind = opsf.RuntimeKind.USER_INSTALLED_CLI
@@ -773,7 +771,7 @@ def test_the_image_runs_every_builtin_and_every_alpha_scanner_it_installs(ir, re
     got = ir.scanners_for(_image(ir), regs)
 
     assert _statuses(got) == {
-        **{name: "available" for name in BUILTIN},
+        **dict.fromkeys(BUILTIN, "available"),
         "betterleaks": "opt_in",
         "guarddog": "opt_in",
         "hadolint": "opt_in",
@@ -869,7 +867,7 @@ def test_nix_runs_what_the_flake_carries_and_cdk_nag_needs_the_host_extra(ir, re
     got = ir.scanners_for(_nix(ir), regs)
 
     assert _statuses(got) == {
-        **{name: "available" for name in BUILTIN},
+        **dict.fromkeys(BUILTIN, "available"),
         "cdk-nag": "missing",
         "betterleaks": "opt_in",
         "hadolint": "opt_in",
@@ -892,7 +890,9 @@ def test_nix_with_the_extra_runs_cdk_nag(ir, regs):
     assert _statuses(got)["cdk-nag"] == "available"
 
 
-def test_a_nix_environment_without_node_misses_npm_audit_and_not_the_nix_tools(ir, regs):
+def test_a_nix_environment_without_node_misses_npm_audit_and_not_the_nix_tools(
+    ir, regs
+):
     got = ir.scanners_for(_nix(ir, runtimes=frozenset()), regs)
 
     assert _reasons(got)["npm-audit"] == "needs node, npm"
@@ -929,9 +929,7 @@ def _host(ir, *, os_="linux", arch="amd64", **replace):
         extras=frozenset({"cdk"}),
         runtimes=frozenset({"node", "npm"}),
     )
-    return ir.Env(
-        os_, arch, RunMode.local, dataclasses.replace(provision, **replace)
-    )
+    return ir.Env(os_, arch, RunMode.local, dataclasses.replace(provision, **replace))
 
 
 def test_a_host_runs_the_tools_its_recipe_installs(ir, regs):

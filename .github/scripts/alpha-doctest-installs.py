@@ -43,7 +43,9 @@ from automated_security_helper.base.plugin_provisioning import normalize_distrib
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ROUTES = REPO_ROOT / "scripts" / "_install_routes.py"
-INSTALLER = REPO_ROOT / "automated_security_helper" / "assets" / "install-pinned-tool.py"
+INSTALLER = (
+    REPO_ROOT / "automated_security_helper" / "assets" / "install-pinned-tool.py"
+)
 DOCS_RUNNER = REPO_ROOT / "tests" / "integration" / "docs" / "docs_runner.py"
 
 #: The platform the docs job runs on.
@@ -221,7 +223,9 @@ def _plan(regs, exempt, held, interim) -> list[PlanRow]:
     for name in sorted(interim):
         _check_named("INTERIM_PINS", name, manifests)
 
-    found = {m.name: routes.route_for(m.name, registers, interim=interim) for m in alpha}
+    found = {
+        m.name: routes.route_for(m.name, registers, interim=interim) for m in alpha
+    }
 
     permanent = (routes.PinSource.PYPI_PIN, routes.PinSource.DISTRIBUTION_ENTRY)
     for name in sorted(interim):
@@ -369,7 +373,10 @@ def install_args(rows: Sequence[PlanRow]) -> list[str]:
     for row in install:
         args += ["--tool", row.scanner]
     for row in install:
-        if row.route in (routes.Route.UV_TOOL.value, routes.Route.ASH_ENVIRONMENT.value):
+        if row.route in (
+            routes.Route.UV_TOOL.value,
+            routes.Route.ASH_ENVIRONMENT.value,
+        ):
             args += [
                 "--config-overrides",
                 f"scanners.{row.scanner}.options.tool_version==={row.version}",
@@ -493,7 +500,9 @@ def _verify_row(row: PlanRow, path: str, probes: Probes) -> list[str]:
             )
     elif row.route == routes.Route.UV_TOOL.value:
         if not _lists_tool(probes.uv_tool_list(), distribution, version):
-            problems.append(f"{name}: `uv tool list` does not show {distribution} {version}")
+            problems.append(
+                f"{name}: `uv tool list` does not show {distribution} {version}"
+            )
     elif row.route == routes.Route.ASH_ENVIRONMENT.value:
         installed = probes.distribution_version(distribution)
         if installed != version:
