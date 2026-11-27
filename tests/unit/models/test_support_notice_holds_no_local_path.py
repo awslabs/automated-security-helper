@@ -62,6 +62,14 @@ LOCAL_PATHS = {
     "a network share in forward slashes": "//fileserver/share/alice/ash",
     "a path with a doubled leading slash": "//home/alice/.venv/bin/python",
     "a drive-relative path": "C:Users\\alice\\AppData",
+    # The same two shapes with the separators written another way. Two separators in a
+    # row start a share or a doubled root whatever they are and however many: a third
+    # slash, a share that mixes a slash and a backslash in either order, and the share
+    # as repr() or json.dumps() spells it, with every backslash doubled.
+    "a path with a tripled leading slash": "///home/alice/.venv/bin/python",
+    "a share with a slash and a backslash": "/\\fileserver\\share\\alice",
+    "a share with a backslash and a slash": "\\/fileserver/share/alice",
+    "a share with its backslashes doubled": "\\\\\\\\fileserver\\\\share\\\\alice",
 }
 
 #: Ordinary text a notice holds, each in a spelling a path guard could get wrong.
@@ -83,6 +91,8 @@ PLAIN_TEXT = {
     # alone, not when it ends a word.
     "a URL with a host and a path": "https://host/path",
     "a URL of another scheme": "s3://bucket/prefix/key",
+    "a URL with credentials": "ssh://git@host/owner/repo.git",
+    "a URL with a doubled slash in its path": "https://host//path/to/file",
     "an image tag": "ubuntu:22.04",
     "a runtime and its build": "polars:runtime-32",
     "a time": "20:54",
