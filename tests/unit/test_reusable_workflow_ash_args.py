@@ -73,12 +73,14 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import typer
 import yaml
 
 # Typer 0.27 vendors click as ``typer._click``, so the usage errors of ASH's commands
 # are that copy's, not the ``click`` package's.
 from typer._click.exceptions import UsageError
 
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from tests.utils.workflow_one_line import COMMAND_TEXT, command_lines, write_helper
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -345,8 +347,6 @@ def test_the_dashdash_refusal_says_what_click_does(tmp_path):
 
 
 def _ash_group():
-    import typer.main
-
     from automated_security_helper.cli.main import app
 
     return typer.main.get_command(app)
@@ -463,6 +463,28 @@ def _what_the_scan_is_given(argv: list[str], monkeypatch) -> dict:
     subcommand, params = _parse(words)
     assert subcommand is None, f"click runs {subcommand!r} for {argv}"
     return params
+
+
+@pytest.mark.unit
+def test_the_parse_is_strict():
+    """The control for every parse below: an option the command lacks and a value its
+    type refuses fail the parse, where resilient parsing reads both as a pass.
+
+    The root group prints a usage error and exits with the usage-error code; `ash scan
+    fs` raises it.
+    """
+    with pytest.raises(typer.Exit) as refused:
+        _parse(["--no-such-option"])
+    assert refused.value.exit_code == ASH_EXIT_USAGE_ERROR
+    with pytest.raises(typer.Exit) as refused:
+        _parse(["--phases", "not-a-phase"])
+    assert refused.value.exit_code == ASH_EXIT_USAGE_ERROR
+    with pytest.raises(UsageError, match="--no-such-option"):
+        _parse_fs([".", "--no-such-option"])
+    with pytest.raises(UsageError, match="not-a-phase"):
+        _parse_fs([".", "--phases", "not-a-phase"])
+    # What the grammar tests use on purpose: the same words, read without refusing.
+    assert _parse(["--no-such-option"], strict=False)[0] is None
 
 
 @pytest.mark.integration
@@ -643,6 +665,9 @@ def test_a_workspace_in_ash_args_is_refused_or_handed_on_never_dropped(
         given = _what_the_scan_is_given(argv, monkeypatch)
     except UsageError as refusal:
         assert "--workspace" in str(refusal), refusal
+    except typer.Exit as refusal:
+        # The root group prints a usage error and exits with the usage-error code.
+        assert refusal.exit_code == ASH_EXIT_USAGE_ERROR, refusal
     else:
         assert given["workspace"] == _WORKSPACE, given
 
