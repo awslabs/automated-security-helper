@@ -896,6 +896,56 @@ class TestMeasuring:
         with pytest.raises(script.ResolverError, match="cannot order.*odd.version"):
             self._requests_cells(script, {first.triple: "odd.version"})
 
+    def _core_cells(self, script, runner, requirements):
+        """The ``core`` row's cells for Python 3.12 under *runner*."""
+        measured = script.measure_sets(
+            runner, "uv", {"core": tuple(requirements)}, ("3.12",), CUTOFF, ENVIRONMENT
+        )
+        return {key: row["3.12"] for key, row in measured["core"].items()}
+
+    def _pinned_twice(self, script, triple, first, second):
+        """``uv`` for a ``requests`` row, except that the platform *triple* pins it at
+        *second* as well as at *first*, as a resolution that holds different versions
+        for different markers prints it."""
+        fake = FakeUv(script, versions={(triple, "requests"): first})
+
+        def runner(argv, stdin, env):
+            result = fake(argv, stdin, env)
+            if result.returncode == 0 and triple in argv:
+                extra = f"requests=={second}\n"
+                return script.Result(0, result.stdout + extra, result.stderr)
+            return result
+
+        return runner
+
+    def test_a_platform_that_pinned_the_newest_among_several_versions_is_not_behind(
+        self, script
+    ):
+        runner = self._pinned_twice(
+            script, "aarch64-unknown-linux-musl", "1.0.0", "0.9.0"
+        )
+        cells = self._core_cells(script, runner, ["requests>=0.1"])
+        assert set(cells.values()) == {"ok"}
+
+    def test_a_platform_with_only_older_pins_names_every_one_of_them(self, script):
+        runner = self._pinned_twice(
+            script, "aarch64-unknown-linux-musl", "0.9.0", "0.8.0"
+        )
+        cells = self._core_cells(script, runner, ["requests>=0.1"])
+        expected = "backtracked: requests 1.0.0 -> 0.8.0, 0.9.0"
+        assert cells.pop("linux-aarch64-musl") == expected
+        assert set(cells.values()) == {"ok"}
+
+    @pytest.mark.parametrize("count", [5, 6, 8])
+    def test_a_cell_names_five_packages_and_counts_the_rest(self, script, count):
+        names = ["aa", "ab", "ac", "ad", "ae", "af", "ag", "ah"][:count]
+        triple = "aarch64-unknown-linux-musl"
+        fake = FakeUv(script, versions={(triple, name): "0.9.0" for name in names})
+        cells = self._core_cells(script, fake, [f"{name}>=0.1" for name in names])
+        shown = "; ".join(f"{name} 1.0.0 -> 0.9.0" for name in names[:5])
+        rest = f"; and {count - 5} more" if count > 5 else ""
+        assert cells["linux-aarch64-musl"] == f"backtracked: {shown}{rest}"
+
     def test_the_macos_target_reaches_the_resolver_and_the_index_settings_do_not(
         self, script
     ):
