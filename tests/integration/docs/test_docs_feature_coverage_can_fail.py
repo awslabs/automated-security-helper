@@ -15,7 +15,7 @@ and the runner's records:
 * a block that reaches the function and then fails its expected exit does not count;
 * nor does a block that reaches it while it shows ASH refusing something (its marker
   expects the usage-error exit), nor one whose output sample no longer matches;
-* a call that the function's early exit answers does not reach its region.
+* a call that the function's leading guard answers does not reach its region.
 
 It also pins what the runner records (every block it ran or saved, with its session
 and the exit it expects, and nothing for a page whose run raised) and that a block's
@@ -61,10 +61,10 @@ FENCE = "```"
 #: tools and the plugins, so a passing block that runs its region covers it.
 PLANTED_ID = "mcp-tool:planted"
 
-#: A name the planted function reads past its early exit (it does not end like a
-#: secret, so that exit does not answer it), and a name the early exit answers at once.
-REACHES_THE_REGION = "EXAMPLE_LOG_LEVEL"
-ANSWERED_EARLY = "EXAMPLE_API_TOKEN"
+#: A path the planted function reads past its leading guard (it is not blank, so the
+#: guard does not answer it), and a blank one the guard answers at once.
+REACHES_THE_REGION = "/opt/ash/bin"
+ANSWERED_EARLY = "   "
 
 
 def _load(name: str, path: Path):
@@ -96,11 +96,11 @@ def _cov():
 def _planted_function():
     from automated_security_helper.core import constants
 
-    return constants.is_secret_shaped_environment_name
+    return constants.is_blank_bin_path
 
 
 def _planted():
-    """The planted feature: ``is_secret_shaped_environment_name``, a pure function of
+    """The planted feature: ``is_blank_bin_path``, a pure function of
     automated_security_helper.core.constants.
 
     Chosen because importing that module runs none of its body: measured on this
@@ -110,9 +110,11 @@ def _planted():
     reaches this function only if it calls it. A function whose body ran at import
     would make the uncovered page below cover it; that test says so if it happens.
 
-    Its region starts past its one early exit, the ``return True`` for a name that
-    ends like a secret. So the pages that must reach it call it with a name that is
-    not secret-shaped, and one page calls it with a name that exit answers.
+    Its region starts past its leading guard, the ``return True`` for a blank path,
+    which is the first statement of its body: the region rule measures past the
+    guards a function opens with, and only those. So the pages that must reach it call
+    it with a path that is not blank, and one page calls it with a path that guard
+    answers.
     """
     return _cov().code_feature(PLANTED_ID, _planted_function())
 
@@ -239,7 +241,7 @@ def _calls(name: str) -> str:
     return f"""{FENCE}python
 import automated_security_helper.core.constants as constants
 
-print(constants.is_secret_shaped_environment_name("{name}"))
+print(constants.is_blank_bin_path("{name}"))
 {FENCE}
 """
 
@@ -306,7 +308,7 @@ def test_a_shell_blocks_python_grandchild_carries_the_blocks_context(tmp_path):
     page, results = _run_page(
         tmp_path,
         f"""{FENCE}bash
-python -c "import automated_security_helper.core.constants as c; c.is_secret_shaped_environment_name('{REACHES_THE_REGION}')"
+python -c "import automated_security_helper.core.constants as c; c.is_blank_bin_path('{REACHES_THE_REGION}')"
 {FENCE}
 """,
         coverage,
@@ -334,7 +336,7 @@ def test_a_block_that_reaches_the_planted_function_and_then_fails_does_not_count
 {FENCE}python
 import automated_security_helper.core.constants as constants
 
-constants.is_secret_shaped_environment_name("{REACHES_THE_REGION}")
+constants.is_blank_bin_path("{REACHES_THE_REGION}")
 raise SystemExit(3)
 {FENCE}
 """,
@@ -369,7 +371,7 @@ def test_a_block_that_shows_a_refusal_does_not_count_though_it_reached_the_funct
 {FENCE}python
 import automated_security_helper.core.constants as constants
 
-constants.is_secret_shaped_environment_name("{REACHES_THE_REGION}")
+constants.is_blank_bin_path("{REACHES_THE_REGION}")
 raise SystemExit({refused})
 {FENCE}
 """,
@@ -427,12 +429,12 @@ a line the block does not print
     assert report["gate"]["failures"]["F1"] == [PLANTED_ID]
 
 
-def test_a_call_that_the_functions_early_exit_answers_does_not_reach_its_region(
+def test_a_call_that_the_functions_leading_guard_answers_does_not_reach_its_region(
     tmp_path,
 ):
-    """The statements up to a function's last early exit run on calls that do none of
-    the work past it, so they are not its region: the function ran, and the gate
-    still finds it uncovered."""
+    """The guards a function opens with run on calls that do none of the work past
+    them, so they are not its region: the function ran, and the gate still finds it
+    uncovered."""
     coverage = _coverage(tmp_path)
     page, results = _run_page(tmp_path, _calls(ANSWERED_EARLY), coverage)
 

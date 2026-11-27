@@ -79,7 +79,8 @@ RCFILE_NAME = "coverage.rc"
 #: something or being stopped, and the code it names never ran its work.
 COUNTING_EXITS = ("SUCCESS", "ACTIONABLE_FINDINGS")
 #: An exit that counts only when the block's scan also wrote its results (it reached
-#: ASHScanOrchestrator._write_results_file past its early exits): ASH exits 1 for a
+#: ASHScanOrchestrator._write_results_file past both its early exits, the named
+#: exception to the region rule, which measures past the last one): ASH exits 1 for a
 #: scan with scanner errors and for many refusals alike (``--use-existing`` with no
 #: results, ``ash config init`` refusing a second source), and a refusal never ran the
 #: work its feature names.
@@ -434,14 +435,26 @@ def _is_guard(statement) -> bool:
     )
 
 
-def _region_oracle(node) -> frozenset:
+def _region_oracle(node, *, past_the_last_exit: bool = False) -> frozenset:
     """The region rule, read from the syntax tree on its own: the body without its
-    docstring, past its last early exit (all of it when it has none, or when nothing
-    follows the last one), each statement as its full span of lines."""
+    docstring, past its leading guards, the early exits before its first statement
+    that is not one (all of it when it opens with none, or when nothing follows them),
+    each statement as its full span of lines.
+
+    ``past_the_last_exit`` is the named exception: past the body's last early exit,
+    wherever it is (all of it when it has none, or when nothing follows the last one).
+    """
     body = _without_docstring(node.body)
-    guards = [index for index, statement in enumerate(body) if _is_guard(statement)]
-    if guards and guards[-1] + 1 < len(body):
-        body = body[guards[-1] + 1 :]
+    if past_the_last_exit:
+        guards = [index for index, statement in enumerate(body) if _is_guard(statement)]
+        start = guards[-1] + 1 if guards else 0
+    else:
+        start = next(
+            (index for index, statement in enumerate(body) if not _is_guard(statement)),
+            len(body),
+        )
+    if 0 < start < len(body):
+        body = body[start:]
     return frozenset(
         line
         for statement in body
@@ -484,15 +497,70 @@ def _innermost_function(path: str, line: int):
     return max(around, key=lambda node: node.lineno)
 
 
-def _assert_region(region, node) -> None:
-    """``region`` is ``node``'s region under the rule, line for line."""
-    expected = _region_oracle(node)
+def _assert_region(region, node, *, past_the_last_exit: bool = False) -> None:
+    """``region`` is ``node``'s region under the rule (or its named exception), line
+    for line."""
+    expected = _region_oracle(node, past_the_last_exit=past_the_last_exit)
+    where = (
+        "past its last early exit" if past_the_last_exit else "past its leading guards"
+    )
     assert expected, f"{region.path}: {node.name} has no statement to measure"
     assert region.lines == expected, (
         f"{region.path}: the region of {node.name} (def at {node.lineno}) differs from "
-        f"its statements past its last early exit; lines in only one of them: "
+        f"its statements {where}; lines in only one of them: "
         f"{sorted(region.lines ^ expected)[:20]}"
     )
+
+
+#: The kinds whose work method is measured past its last early exit, the named
+#: exception to the region rule. A scanner's work method opens with resets (counters,
+#: the target list) before the skip checks that end a scan with nothing to scan, and a
+#: converter's late exits are its no-input skips; every scan runs both, so measured past
+#: their leading guards alone every scan would cover every scanner and converter it
+#: skipped. No scanner or converter here runs its tool or its conversion before its last
+#: early exit, which the tests below read from the syntax tree.
+PAST_THE_LAST_EXIT_KINDS = ("scanner", "converter")
+
+
+def _feature_node(feature):
+    """(repository-relative path, syntax node) of the function a feature's location
+    names: the one whose def line, or first decorator's line, is on that line."""
+    path, _, line = feature.location.rpartition(":")
+    tree = ast.parse((REPO_ROOT / path).read_text(encoding="utf-8"))
+    found = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and int(line)
+        in (node.lineno, *(decorator.lineno for decorator in node.decorator_list[:1]))
+    ]
+    assert len(found) == 1, (feature.id, feature.location, [n.name for n in found])
+    return path, found[0]
+
+
+def _statement_with(path: str, node, needle: str):
+    """The one top-level statement of ``node``'s body whose source holds ``needle``."""
+    source = (REPO_ROOT / path).read_text(encoding="utf-8")
+    found = [
+        statement
+        for statement in _without_docstring(node.body)
+        if needle in (ast.get_source_segment(source, statement) or "")
+    ]
+    assert len(found) == 1, (path, node.name, needle, [s.lineno for s in found])
+    return found[0]
+
+
+def _lines_of(statement) -> set:
+    return set(range(statement.lineno, statement.end_lineno + 1))
+
+
+def _up_to_the_last_early_exit(node) -> set:
+    """The lines a call runs when it leaves ``node`` at its last early exit: every
+    statement from the first through that exit."""
+    body = _without_docstring(node.body)
+    guards = [statement for statement in body if _is_guard(statement)]
+    assert guards, f"{node.name} (def at {node.lineno}) has no early exit"
+    return set(range(body[0].lineno, guards[-1].end_lineno + 1))
 
 
 def _source_path(obj) -> str:
@@ -1076,13 +1144,35 @@ def exits_inside_a_loop(values):
 
 def documented_only():
     """Nothing but this docstring."""
+
+
+def two_leading_guards(ctx, version):
+    if ctx.invoked_subcommand is not None:
+        return None
+    if version:
+        print("1.0")
+        raise SystemExit(0)
+    scanned = ctx
+    return scanned
+
+
+def a_guard_after_the_docstring(value):
+    """A guard right after the docstring still leads."""
+    if value is None:
+        return None
+    return value
 '''
 
 
 @pytest.mark.parametrize(
     ("name", "firstlineno", "lines"),
     [
-        pytest.param("plain", 4, {10}, id="past-its-early-exit"),
+        pytest.param(
+            "plain",
+            4,
+            {7, 8, 9, 10},
+            id="an-early-exit-after-a-statement-does-not-lead",
+        ),
         pytest.param(
             "decorated", 13, {20, 21, 22, 23, 24, 25}, id="by-its-first-decorator"
         ),
@@ -1109,28 +1199,108 @@ def documented_only():
             {65, 66},
             id="nothing-after-the-early-exit-keeps-the-body",
         ),
-        pytest.param("two_guards", 69, {76, 77, 78, 79, 80}, id="past-the-last-of-two"),
+        pytest.param(
+            "two_guards",
+            69,
+            {72, 73, 74, 75, 76, 77, 78, 79, 80},
+            id="past-the-leading-guard-only",
+        ),
         pytest.param(
             "exits_inside_a_loop",
             83,
             {84, 85, 86, 87},
             id="an-exit-inside-a-loop-is-not-one",
         ),
+        pytest.param(
+            "two_leading_guards", 94, {100, 101}, id="past-two-leading-guards"
+        ),
+        pytest.param(
+            "a_guard_after_the_docstring",
+            104,
+            {108},
+            id="a-guard-after-the-docstring-leads",
+        ),
     ],
 )
-def test_a_region_is_the_functions_statements_past_its_last_early_exit(
+def test_a_region_is_the_functions_statements_past_its_leading_guards(
     name, firstlineno, lines
 ):
     """Importing a module runs its def lines, decorators and default values, so they
-    can never show that a feature ran, and a docstring is not executed. The
-    statements up to a function's last early exit (a top-level ``if`` with no
-    ``else`` whose body ends in ``return`` or ``raise``) run on calls that do none of
-    its work: the scan callback's ``ctx.invoked_subcommand`` exit runs before every
-    subcommand. So the region is the statements after the last early exit, each as
-    its whole span of lines (coverage can record a continuation line), and all of the
-    body when nothing follows the last one. The function is the one whose def line or
-    first decorator is on ``firstlineno``."""
+    can never show that a feature ran, and a docstring is not executed. The early
+    exits a function opens with (top-level ``if`` statements with no ``else`` whose
+    bodies end in ``return`` or ``raise``, before its first statement that is not
+    one) run on calls that do none of its work: the scan callback's
+    ``ctx.invoked_subcommand`` exit runs before every subcommand. An early exit after
+    the function has done something can follow its work, so it does not lead: a
+    reporter that renders and then returns early on an empty report has run. So the
+    region is the statements past the leading guards, each as its whole span of lines
+    (coverage can record a continuation line), and all of the body when it opens with
+    none or nothing follows them. The function is the one whose def line or first
+    decorator is on ``firstlineno``."""
     assert _cov().region_lines(REGION_SOURCE, name, firstlineno) == frozenset(lines)
+
+
+@pytest.mark.parametrize(
+    ("name", "firstlineno", "lines"),
+    [
+        pytest.param("plain", 4, {10}, id="past-an-exit-that-does-not-lead"),
+        pytest.param("two_guards", 69, {76, 77, 78, 79, 80}, id="past-the-last-of-two"),
+        pytest.param(
+            "two_leading_guards", 94, {100, 101}, id="past-two-leading-guards"
+        ),
+        pytest.param("raises_early", 43, {46, 47}, id="a-raise-is-an-early-exit"),
+        pytest.param(
+            "only_a_guard",
+            64,
+            {65, 66},
+            id="nothing-after-the-early-exit-keeps-the-body",
+        ),
+        pytest.param(
+            "guard_with_else",
+            50,
+            {51, 52, 53, 54, 55},
+            id="an-if-with-an-else-is-not-an-early-exit",
+        ),
+        pytest.param(
+            "decorated", 13, {20, 21, 22, 23, 24, 25}, id="no-early-exit-at-all"
+        ),
+    ],
+)
+def test_the_named_exception_measures_past_the_last_early_exit(
+    name, firstlineno, lines
+):
+    """The exception the scanners, the converters and the results write take (see
+    PAST_THE_LAST_EXIT_KINDS and the results-write tests): the statements past the
+    last early exit wherever it is, all of the body when there is none or nothing
+    follows the last one."""
+    assert _cov().region_lines(
+        REGION_SOURCE, name, firstlineno, past_the_last_exit=True
+    ) == frozenset(lines)
+
+
+#: A work method that runs its tool, returns early when the tool found nothing, and
+#: post-processes otherwise. Line numbers matter: the tool runs on line 3.
+LATE_EXIT_SOURCE = (
+    "def work(self, target):\n"
+    '    """Run the tool, then post-process."""\n'
+    "    results = run_tool(target)\n"
+    "    if not results:\n"
+    "        return report\n"
+    "    post_process(results)\n"
+    "    return report\n"
+)
+
+
+def test_an_early_exit_after_the_work_keeps_the_work_in_the_region():
+    """A call that runs the tool and leaves at the exit after it did the work: its
+    region holds the line that runs the tool. Past the last early exit, as the named
+    exception measures, it holds only the post-processing."""
+    cov = _cov()
+
+    assert cov.region_lines(LATE_EXIT_SOURCE, "work", 1) == frozenset({3, 4, 5, 6, 7})
+    assert cov.region_lines(
+        LATE_EXIT_SOURCE, "work", 1, past_the_last_exit=True
+    ) == frozenset({6, 7})
 
 
 @pytest.mark.parametrize(
@@ -1955,8 +2125,14 @@ def test_the_scan_command_is_one_feature_that_bare_ash_belongs_to():
     (region,) = scan.regions
     assert region.path == path
     _assert_region(region, node)
+    body = _without_docstring(node.body)
+    assert [_is_guard(statement) for statement in body[:3]] == [True, True, False], (
+        "the scan callback's two early exits no longer lead its body, so the region "
+        "rule would measure them"
+    )
     for mentions in ("invoked_subcommand", "version"):
         guard = _scan_early_exit(node, mentions=mentions)
+        assert guard in body[:2], mentions
         assert not region.lines & set(range(guard.lineno, guard.end_lineno + 1)), (
             mentions
         )
@@ -2167,7 +2343,8 @@ def test_a_scanner_that_replaces_the_scan_template_is_measured_in_its_own_scan(n
     """Its _execute_scan is a stub that raises NotImplementedError and never runs, so
     measured there it could never be covered; detect-secrets, which the default scan
     runs, is one of these. Its region is its scan() past the skip checks it opens
-    with."""
+    with, past the last of them (the named exception: the resets before them run on
+    every scan, the scanner's skipped ones included)."""
     plugin = _scanner_classes()[name]
     path = _source_path(plugin)
     stub = _function_node(path, "_execute_scan", cls=plugin.__name__)
@@ -2176,7 +2353,11 @@ def test_a_scanner_that_replaces_the_scan_template_is_measured_in_its_own_scan(n
     (region,) = _by_id()[f"scanner:{name}"].regions
 
     assert region.path == path
-    _assert_region(region, _function_node(path, "scan", cls=plugin.__name__))
+    _assert_region(
+        region,
+        _function_node(path, "scan", cls=plugin.__name__),
+        past_the_last_exit=True,
+    )
     assert not any(stub.lineno <= line <= stub.end_lineno for line in region.lines)
 
 
@@ -2195,7 +2376,9 @@ def test_bandit_is_measured_in_its_own_execute_scan():
     )
     assert not _replaces_the_scan_template(BanditScanner)
     _assert_region(
-        region, _function_node(region.path, "_execute_scan", cls="BanditScanner")
+        region,
+        _function_node(region.path, "_execute_scan", cls="BanditScanner"),
+        past_the_last_exit=True,
     )
 
 
@@ -2218,7 +2401,9 @@ def test_opengrep_and_semgrep_share_the_grep_bases_execute_scan_and_say_so():
         (region,) = feature.regions
         assert region.path == path
         _assert_region(
-            region, _function_node(path, "_execute_scan", cls=owner.__name__)
+            region,
+            _function_node(path, "_execute_scan", cls=owner.__name__),
+            past_the_last_exit=True,
         )
         assert (
             "shares its code with" in feature.note
@@ -2355,7 +2540,213 @@ def test_a_reporter_and_a_converter_are_measured_in_report_and_convert():
         feature = by_id[f"{kind}:{checks._declared_plugin_name(plugin)}"]
         (region,) = feature.regions
         assert region.path == path
-        _assert_region(region, _function_node(path, method, cls=plugin.__name__))
+        _assert_region(
+            region,
+            _function_node(path, method, cls=plugin.__name__),
+            past_the_last_exit=kind in PAST_THE_LAST_EXIT_KINDS,
+        )
+
+
+#: Reporters whose report() does its work before an early exit that follows the work,
+#: each with a statement of that work, found by its text so that a case follows the
+#: source when its lines move.
+REPORTERS_WITH_WORK_BEFORE_A_LATE_EXIT = [
+    pytest.param("csv", "model.to_flat_vulnerabilities()", id="csv"),
+    pytest.param("asff", "model.sarif.get_all_results()", id="asff"),
+    pytest.param(
+        "bedrock-summary-reporter",
+        "self._extract_findings(model)",
+        id="bedrock-summary-reporter",
+    ),
+    pytest.param(
+        "gitlab-cyclonedx", "conforming_bom(model.cyclonedx)", id="gitlab-cyclonedx"
+    ),
+    pytest.param("ocsf", "for i, result in enumerate(all_results):", id="ocsf"),
+]
+
+
+@pytest.mark.parametrize(("name", "work"), REPORTERS_WITH_WORK_BEFORE_A_LATE_EXIT)
+def test_a_reporter_is_measured_over_the_work_it_does_before_a_late_exit(name, work):
+    """A reporter that reads the findings and then returns early when there are none
+    has run, so the statement that does the work is in its region, and so is the early
+    exit after it."""
+    feature = _by_id()[f"reporter:{name}"]
+    path, node = _feature_node(feature)
+    (region,) = feature.regions
+    statement = _statement_with(path, node, work)
+    late = [
+        guard
+        for guard in _without_docstring(node.body)
+        if _is_guard(guard) and guard.lineno > statement.end_lineno
+    ]
+
+    assert region.path == path
+    assert _lines_of(statement) <= region.lines, (name, statement.lineno)
+    assert late, f"{name} has no early exit after {work!r}"
+    assert _lines_of(late[0]) <= region.lines, (name, late[0].lineno)
+    _assert_region(region, node)
+
+
+def test_ash_results_report_is_measured_over_the_reporter_it_builds_and_runs():
+    """``ash results report`` builds the reporter it was asked for, leaves (exit 1) when
+    the reporter's dependency check refuses, and then runs the reporter. Building the
+    reporter is the command's own work, so the statement that builds it is in the
+    region with the one that runs it; the refusal's exit 1 is kept from counting by
+    the exit filter, not by the region."""
+    feature = _by_id()["command:ash results report"]
+    path, node = _feature_node(feature)
+    (region,) = feature.regions
+
+    assert region.path == path
+    for needle in ("reporter_class(", ".report(model)"):
+        statement = _statement_with(path, node, needle)
+        assert _lines_of(statement) <= region.lines, (needle, statement.lineno)
+    _assert_region(region, node)
+
+
+def test_every_code_feature_is_measured_under_the_region_rule():
+    """Every command, plugin and MCP tool is measured in its function past its leading
+    guards, and a scanner and a converter past their last early exit (the named
+    exception), read from the syntax tree on its own."""
+    measured = 0
+    for feature in _inventory():
+        if feature.kind not in (
+            "command",
+            "mcp-tool",
+            "scanner",
+            "reporter",
+            "converter",
+        ):
+            continue
+        path, node = _feature_node(feature)
+        region = feature.regions[0]
+        assert region.path == path, feature.id
+        _assert_region(
+            region, node, past_the_last_exit=feature.kind in PAST_THE_LAST_EXIT_KINDS
+        )
+        measured += 1
+
+    assert measured, "the inventory holds no code feature"
+
+
+#: The scanners and converters whose region the named exception keeps clear of what
+#: they run before their last early exit: their work method opens with statements
+#: that are not early exits (resets, option reads) before the skip checks. Pinned, so
+#: that a plugin joining or leaving the set is a visible change.
+PLUGINS_THE_EXCEPTION_HOLDS_TO_THEIR_WORK = (
+    "converter:archive",
+    "converter:jupyter",
+    "converter:mcp_config",
+    "converter:sdist-lock-harvester",
+    "scanner:actionlint",
+    "scanner:bandit",
+    "scanner:cdk-nag",
+    "scanner:cfn-guard",
+    "scanner:cfn-lint",
+    "scanner:cfn-nag",
+    "scanner:checkov",
+    "scanner:detect-secrets",
+    "scanner:ferret-scan",
+    "scanner:guarddog",
+    "scanner:hadolint",
+    "scanner:mcp-config",
+    "scanner:npm-audit",
+    "scanner:snyk-code",
+    "scanner:syft",
+    "scanner:trivy-repo",
+)
+#: The calls a scanner's work method runs its tool through.
+TOOL_RUNNERS = frozenset(
+    {
+        "_run_subprocess",
+        "_run_until",
+        "_scan_in_worker",
+        "_scan_target",
+        "cdk_nag_worker_batch",
+        "evaluate_files",
+    }
+)
+
+
+def _calls_named(statement, names) -> set:
+    return {
+        call.func.attr if isinstance(call.func, ast.Attribute) else call.func.id
+        for call in ast.walk(statement)
+        if isinstance(call, ast.Call)
+        and (
+            (isinstance(call.func, ast.Attribute) and call.func.attr in names)
+            or (isinstance(call.func, ast.Name) and call.func.id in names)
+        )
+    }
+
+
+def test_a_scanners_and_a_converters_skip_checks_stay_out_of_their_region():
+    """A scan with nothing for a scanner to scan stops at one of its skip checks after
+    the resets it opens with, and every scan runs every converter, which leaves at
+    its no-input skip; so their regions start past their last early exit. The
+    exception leaves no work out: no scanner calls its tool before that exit."""
+    differ = set()
+    for feature in _inventory():
+        if feature.kind not in PAST_THE_LAST_EXIT_KINDS:
+            continue
+        path, node = _feature_node(feature)
+        (region,) = feature.regions
+        body = _without_docstring(node.body)
+        guards = [statement for statement in body if _is_guard(statement)]
+        for guard in guards:
+            assert not _lines_of(guard) & region.lines, (feature.id, guard.lineno)
+        if feature.kind == "scanner" and guards:
+            before = [s for s in body if s.end_lineno <= guards[-1].end_lineno]
+            ran = set().union(*(_calls_named(s, TOOL_RUNNERS) for s in before))
+            assert not ran, (feature.id, sorted(ran))
+        if _region_oracle(node) != _region_oracle(node, past_the_last_exit=True):
+            differ.add(feature.id)
+
+    assert differ == set(PLUGINS_THE_EXCEPTION_HOLDS_TO_THEIR_WORK)
+
+
+def _a_block_left_at_the_last_early_exit(tmp_path, feature_id):
+    """The covered set of one feature for a passing block whose process ran the
+    feature's work method from its first statement through its last early exit."""
+    feature = _by_id()[feature_id]
+    path, node = _feature_node(feature)
+    run = Run(tmp_path)
+    (line,) = run.page("page.md", ONE_BLOCK)
+    run.record("page.md", _block("page.md", line))
+    run.hit(f"page.md::{line}", path, _up_to_the_last_early_exit(node))
+    return feature, _covered(run, [feature])
+
+
+@pytest.mark.parametrize(
+    "feature_id",
+    [
+        "command:ash express status",
+        "command:ash results report",
+        "reporter:asff",
+        "reporter:bedrock-summary-reporter",
+        "reporter:csv",
+        "reporter:gitlab-cyclonedx",
+        "reporter:ocsf",
+    ],
+)
+def test_a_block_that_leaves_at_an_early_exit_after_the_work_covers_the_feature(
+    tmp_path, feature_id
+):
+    """Each did its work before the exit it left at: ``ash express status`` asked the
+    server for its status and printed it at its ``--json`` exit, and a reporter read
+    the findings before its empty-report exit."""
+    feature, covered = _a_block_left_at_the_last_early_exit(tmp_path, feature_id)
+
+    assert feature.id in covered
+
+
+@pytest.mark.parametrize("feature_id", PLUGINS_THE_EXCEPTION_HOLDS_TO_THEIR_WORK)
+def test_a_block_whose_scan_stopped_at_a_skip_check_does_not_cover_the_plugin(
+    tmp_path, feature_id
+):
+    feature, covered = _a_block_left_at_the_last_early_exit(tmp_path, feature_id)
+
+    assert feature.id not in covered
 
 
 def test_plugins_here_that_share_one_work_method_name_each_other():
@@ -2535,20 +2926,24 @@ def _results_write():
     return ASHScanOrchestrator._write_results_file
 
 
+def _results_write_node():
+    """(path, syntax node) of the results write, read from its file."""
+    path = "automated_security_helper/core/orchestrator.py"
+    return path, _function_node(path, "_write_results_file", cls="ASHScanOrchestrator")
+
+
 def _scan_wrote_its_results(run: Run, context: str) -> None:
-    """Coverage data in which ``context`` ran the results write past its early exits."""
-    region = _cov().function_region(_results_write())
-    run.hit(context, region.path, {min(region.lines)})
+    """Coverage data in which ``context`` ran the results write past its early exits:
+    the first line past its last one, read from the syntax tree."""
+    path, node = _results_write_node()
+    run.hit(context, path, {min(_region_oracle(node, past_the_last_exit=True))})
 
 
 def _scan_left_the_results_write_at_an_early_exit(run: Run, context: str) -> None:
     """Coverage data in which ``context`` ran the results write up to its last early
     exit and no further."""
-    path = "automated_security_helper/core/orchestrator.py"
-    node = _function_node(path, "_write_results_file", cls="ASHScanOrchestrator")
-    body = _without_docstring(node.body)
-    guards = [statement for statement in body if _is_guard(statement)]
-    run.hit(context, path, set(range(body[0].lineno, guards[-1].end_lineno + 1)))
+    path, node = _results_write_node()
+    run.hit(context, path, _up_to_the_last_early_exit(node))
 
 
 @pytest.mark.parametrize("results", RESULTS_WRITES)
@@ -2594,20 +2989,28 @@ def test_a_scan_wrote_its_results_once_it_passed_both_early_exits_of_the_results
     results write past its two early exits, the return for a run that writes no
     results file and the return for an engine that gave something other than
     results. Pinned, so that a change to either exit, or a third one, is a visible
-    change to what an exit-1 example must reach."""
-    path = "automated_security_helper/core/orchestrator.py"
-    node = _function_node(path, "_write_results_file", cls="ASHScanOrchestrator")
-    guards = [
-        statement for statement in _without_docstring(node.body) if _is_guard(statement)
-    ]
+    change to what an exit-1 example must reach.
 
-    region = _cov().function_region(_results_write())
+    The second exit follows the cancellation check, so it does not lead the body: the
+    region rule would measure it, and a run whose engine gave no results would count
+    as one that wrote them. So the results write takes the named exception, past its
+    last early exit."""
+    path, node = _results_write_node()
+    body = _without_docstring(node.body)
+    guards = [statement for statement in body if _is_guard(statement)]
+
+    region = _cov().function_region(_results_write(), past_the_last_exit=True)
 
     assert len(guards) == 2, [ast.unparse(guard.test) for guard in guards]
     assert "_writes_results_file" in ast.unparse(guards[0].test)
     assert "AshAggregatedResults" in ast.unparse(guards[1].test)
+    assert body[0] is guards[0] and not _is_guard(body[1]), (
+        "the results write's second early exit leads its body now, so it needs the "
+        "named exception no longer"
+    )
+    assert guards[1].lineno in _region_oracle(node)
     assert region.path == path
-    _assert_region(region, node)
+    _assert_region(region, node, past_the_last_exit=True)
     for guard in guards:
         assert not region.lines & set(range(guard.lineno, guard.end_lineno + 1))
 
