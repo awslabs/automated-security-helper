@@ -843,7 +843,7 @@ def recorded_ignore_paths(
         _expiry_under_both_spellings(shown)
         shown = record_environment_references(shown, references, at=tuple(at))
         _expiry_folded_to_expires(entries, shown)
-    return {id(entry): fields for entry, fields in zip(entries, shown)}
+    return {id(entry): shown_fields for entry, shown_fields in zip(entries, shown)}
 
 
 def check_for_expiring_suppressions(

@@ -5178,7 +5178,13 @@ def mcp_get_config(
         A named file that does not exist, and a named or discovered file that
         cannot be loaded, return ``success`` False with ``error_category``
         ``file_not_found`` or ``invalid_format``; the default config is
-        returned only when no file is named or found.
+        returned only when no file is named or found. A named or discovered
+        file whose load leaves no single record of what its files wrote for
+        the operator-only options (the record the ignored markers above are
+        judged by) is refused instead of shown without that judgment:
+        ``success`` False, ``error_category`` ``unexpected_error``, exit code
+        1, and ``error_type`` the exception's class name
+        (``MCPResourceError``).
     """
 
     # The files the grant check opens stay open until the answer is made.
@@ -5266,6 +5272,9 @@ def _answer_get_config(
     # list entry is the one at the index the file wrote the reference at: in a
     # session config, the index the profile's patch moved it to. Any other entry
     # of that list, one a client added say, is shown as written whatever it holds.
+    # Run it on a dump BEFORE mark_operator_only_options writes its markers, never
+    # on a marked one: it replaces a reference's value inside any string at the
+    # reference's place, a marker included (the two call sites say why).
     def shown_config(config: Any, data: Any) -> Any:
         return record_environment_references(
             data,
@@ -5529,11 +5538,17 @@ def _answer_get_config(
         environment_values = tuple(
             dict.fromkeys((*marking_values, *config_environment_values(base)))
         )
-        return shown_config(
-            base,
-            mark_operator_only_options(
-                base.model_dump(), settings, marking_references, environment_values
-            ),
+        # The display walk runs on the dump first, and the markers are written
+        # into what it returns, as on the named-file path below: the walk
+        # replaces a reference's value inside any string at the reference's
+        # place, so it never runs over a marker. The markers are built from the
+        # record (settings) and from the first read's references and values,
+        # never from the dump.
+        return mark_operator_only_options(
+            shown_config(base, base.model_dump()),
+            settings,
+            marking_references,
+            environment_values,
         )
 
     if raw:
@@ -5832,7 +5847,6 @@ def _answer_get_config(
             plugin_module_refusal_message(exc, **_MCP_PLUGIN_MODULE_CLOSINGS),
             path,
         )
-    shown = resolved.model_dump()
     # The reporter options only the operator may set are shown as a scan of the
     # file's own repository applies them: ignored. A file outside every checkout
     # is an operator's, and a scan that names it applies them. The selected
@@ -5868,6 +5882,16 @@ def _answer_get_config(
             REFUSED_INTERNAL_EXIT_CODE,
         )
     [written] = chain_repository
+    # The display walk runs on the dump first, and the markers below are written
+    # into what it returns. The walk replaces a reference's value inside any
+    # string at the reference's place, and an option the load settled holds the
+    # trusted base's references at that exact place (_take_confined_references):
+    # the operator's own ASH_CONFIG file, outside every checkout, can read such an
+    # option from the environment while the named file writes it too. A walk
+    # after the marking would edit a marker's text. The markers are built from
+    # the record (written) and from the references and values passed in, never
+    # from the dump, so nothing after the marking touches one.
+    shown = shown_config(resolved, resolved.model_dump())
     # Marked when no chain file is inside the scanned trees -- judged against
     # the trees the resolution confined with (RepositorySettings.trees), with
     # the same fail-closed walk, so an undecided name counts as the trees' here
@@ -5892,22 +5916,23 @@ def _answer_get_config(
         # The resolution's references: an option the chain read from the
         # environment is marked by the reference it was written as, never by
         # its value. The confinement rewrite (_take_confined_references) drops
-        # the references at the places it settled, a chain file in another
-        # checkout included, so no reference may sit at the place of such an
-        # option. The marker then shows ``<from the environment>``, and the
-        # option stays marked: the client reads that the file set an option a
-        # scan ignores. What tells a value read from the environment from a
-        # literal, in whatever shape the file wrote it, is the configuration's
-        # own record of what its chain read (config_environment_values, every
-        # read included, the ones at dropped places too) and the loader's mark
-        # on each scalar it read.
+        # the references the chain's files wrote at the places it settled, a
+        # chain file in another checkout included, so none of the file's own
+        # sits at the place of such an option (the trusted base's references
+        # do, which is why the walk above ran first). The marker then shows
+        # ``<from the environment>``, and the option stays marked: the client
+        # reads that the file set an option a scan ignores. What tells a value
+        # read from the environment from a literal, in whatever shape the file
+        # wrote it, is the configuration's own record of what its chain read
+        # (config_environment_values, every read included, the ones at dropped
+        # places too) and the loader's mark on each scalar it read.
         shown = mark_operator_only_options(
             shown,
             written,
             tuple(getattr(resolved, "_environment_references", ()) or ()),
             config_environment_values(resolved),
         )
-    return shown_config(resolved, shown)
+    return shown
 
 
 def _config_problem(field: str, message: str, kind: str) -> Dict[str, Any]:

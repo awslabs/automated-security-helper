@@ -24,6 +24,12 @@ working directory elsewhere, once for each shape a read value can take. They
 keep the controls that must not change (a literal, a reference that survives, an
 option left unmarked), pin the refusal for a load that did not record exactly
 one set of settings, and call ``mark_operator_only_options`` directly.
+
+Two more pin what the marker is made of. A value the operator's own file read
+from the environment is never replaced inside a marker written at the place its
+reference sits, because the display walk runs on the dump before the markers go
+in. And a default the loader supplied for an unset variable is the file's own
+text, shown as written and not as the placeholder.
 """
 
 import contextlib
@@ -109,6 +115,49 @@ def _found_by_ash_config(
     monkeypatch.setenv("ASH_CONFIG", str(named))
     monkeypatch.chdir(checkout)
     return mcp_get_config(search_dir=str(checkout))
+
+
+#: The variables of the cell that puts a marker where the operator's own
+#: reference sits. The operator's holds "no", a value that also occurs inside
+#: the marker's own words; the checkout's holds a distinctive value. Neither
+#: name ends in _KEY, _TOKEN, _SECRET or _PASSWORD.
+_OPERATOR_VAR = "ASH_TEST_ARCHIVE_RESOLVED"
+_OPERATOR_REFERENCE = "<from ${ASH_TEST_ARCHIVE_RESOLVED}>"
+_OTHER_VAR = "ASH_TEST_OTHER_ARCHIVE"
+_OTHER_VALUE = "other-archive-value-9e4d"
+
+
+def _named_beside_the_operators_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str
+) -> Dict[str, Any]:
+    """get_config of ``checkout/.ash.yaml``, which holds *body*, named from a
+    working directory elsewhere, while ASH_CONFIG names the operator's own file.
+
+    The operator's file is in a plain directory, outside every checkout, and
+    reads archive_resolved_findings from a variable that holds "no". What the
+    checkout's file writes for the flag is left out of the load, as a scan of
+    that checkout leaves it out, so the flag takes the operator's value, and the
+    load takes the operator's reference at the flag's place with it
+    (``_take_confined_references``): the place a marker is written at holds a
+    reference whose value is "no"."""
+    monkeypatch.setenv(_OPERATOR_VAR, "no")
+    operator = tmp_path / "operator"
+    operator.mkdir()
+    operators_file = operator / "ash.yaml"
+    operators_file.write_text(
+        _section("archive_resolved_findings: ${ASH_TEST_ARCHIVE_RESOLVED}\n"),
+        encoding="utf-8",
+    )
+    checkout = tmp_path / "checkout"
+    mark_git_checkout(checkout)
+    named = checkout / ".ash.yaml"
+    named.write_text(body, encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setenv("ASH_CONFIG", str(operators_file))
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
+    return mcp_get_config(config_path=str(named))
 
 
 def _options(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -265,15 +314,43 @@ def test_a_literal_that_is_or_contains_a_read_value_shows_the_placeholder(
     assert not _wrong(result, _scope(result), _PLACEHOLDER), result
 
 
+@pytest.mark.parametrize(
+    "answer",
+    [
+        pytest.param(_named_from_elsewhere, id="named-file"),
+        pytest.param(_found_by_ash_config, id="ash-config-no-file-named"),
+    ],
+)
+def test_a_default_the_loader_supplied_is_shown_as_written_not_as_the_placeholder(
+    tmp_path, monkeypatch, answer
+):
+    """``${VAR:default}`` with VAR unset resolves to the default, which is the
+    file's own text. The loader marks that scalar as not read from the
+    environment (``EnvResolvedScalar.from_environment`` is False), and the
+    record of what the chain read lists no value for it
+    (``config_validator._interpolated_pairs`` pairs a reference only when its
+    variable is set), so no reference and no environment value matches it.
+    Nothing was read, so the marker shows the default as JSON, as it shows any
+    literal, and not the placeholder."""
+    monkeypatch.delenv("ASH_TEST_UNSET_SCOPE", raising=False)
+    body = _section("findings_scope: ${ASH_TEST_UNSET_SCOPE:a-default-scope}\n")
+
+    result = answer(tmp_path, monkeypatch, body)
+
+    assert not _wrong(result, _scope(result), _IGNORED + '"a-default-scope">'), result
+
+
 def test_aws_region_read_from_the_environment_is_left_out_and_not_marked(
     tmp_path, monkeypatch
 ):
     """aws_region is not an operator-only option, so it is never marked. The
-    off-host reporter rule takes the whole aws-security-hub section from the
-    operator's configuration (``reporter_section``), and the record the marking
-    reads (``RepositorySettings``) holds only the operator-only places: what a
-    repository's file wrote for aws_region is not recorded. The answer holds
-    the section without it, neither as applied nor as ignored, and no value."""
+    load confines the whole aws-security-hub section to the operator's
+    configuration (``record_operator_reporters``; a scan reads it through
+    ``reporter_section``), so what a repository's file wrote for aws_region is
+    left out of the answer, and the record the marking reads
+    (``RepositorySettings``) holds only the operator-only places. The answer
+    holds the section without it, neither as applied nor as ignored, and no
+    value."""
     body = _section(
         "findings_scope: a-literal-scope\naws_region: ${ASH_TEST_GETCFG_VALUE}\n"
     )
@@ -283,6 +360,45 @@ def test_aws_region_read_from_the_environment_is_left_out_and_not_marked(
     assert "aws_region" not in _options(result), result
     assert _scope(result) == _IGNORED + '"a-literal-scope">', result
     assert _VALUE not in json.dumps(result, default=str), result
+
+
+# A marker is written at a place where the operator's own reference sits, and
+# that reference's value occurs inside the marker's own words. The cell asserts
+# the option's exact text: an edit of the marker around that value would fail
+# it, and a check that the value appears nowhere in the answer would not.
+_ARCHIVE_WRITES = {
+    "literal": ("archive_resolved_findings: true\n", _IGNORED + "true>"),
+    "read-from-the-environment": (
+        "archive_resolved_findings: ${ASH_TEST_OTHER_ARCHIVE}\n",
+        _PLACEHOLDER,
+    ),
+}
+
+
+@pytest.mark.parametrize("write", list(_ARCHIVE_WRITES))
+def test_a_marker_where_the_operators_reference_sits_is_shown_whole(
+    tmp_path, monkeypatch, write
+):
+    """The operator's own file reads the archive flag from a variable that holds
+    "no", and the named file in another checkout writes the flag too, which a scan
+    of that checkout ignores, so the flag is shown as ignored. The flag is the
+    operator's now, and the operator's reference sits at its place. The marker is
+    still whole: the checkout's value as the file wrote it (a literal) or the
+    placeholder (a read), with nothing of the operator's reference inside the
+    words around it. The display walk runs before the markers are written, and
+    a marker is built from the record, never from the dump."""
+    checkout_writes, expected = _ARCHIVE_WRITES[write]
+    monkeypatch.setenv(_OTHER_VAR, _OTHER_VALUE)
+
+    result = _named_beside_the_operators_file(
+        tmp_path, monkeypatch, _section(checkout_writes)
+    )
+
+    assert "reporters" in result, result
+    flag = _options(result).get("archive_resolved_findings", _ABSENT)
+    assert _OPERATOR_REFERENCE not in str(flag), result
+    assert flag == expected, result
+    assert _OTHER_VALUE not in json.dumps(result, default=str), result
 
 
 # With no file named, ASH_CONFIG's file in the searched checkout keeps the

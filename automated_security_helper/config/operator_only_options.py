@@ -1253,7 +1253,7 @@ def _marker_value(
     key: str,
     option: str,
     references: Sequence["EnvironmentReference"],
-    environment_values: Sequence[str] = (),
+    needles: Sequence[str] = (),
 ) -> str:
     """How the ignored marker shows *value*, what the chain wrote at
     ``kind.key.options.option``. Never a value the chain read from the
@@ -1271,9 +1271,9 @@ def _marker_value(
        ``ENVIRONMENT_PLACEHOLDER`` and none of it is shown, the entries beside
        the read one included. A leaf reads the environment when the loader
        marked it so (``EnvResolvedScalar.from_environment``), or when its text
-       equals or contains one of *environment_values*, the values and keys the
-       chain read; for a scalar that is not a string that text is its ``str``
-       and its JSON. The loader drops the references at the places it settles,
+       equals or contains one of *needles*, the values and keys the chain
+       read; for a scalar that is not a string that text is its ``str`` and its
+       JSON. The loader drops the references at the places it settles,
        which for a file in a checkout other than the scanned one is every
        place of the options marked here, so there this is the only way a read
        value is kept out of the marker. A literal that happens to equal or
@@ -1285,13 +1285,19 @@ def _marker_value(
 
     A set or frozenset is shown as a JSON list of its members, in the order
     of their shown text, so one set always has one marker.
+
+    *needles* are the values and keys the chain read, already normalized by
+    ``environment_strings`` (each a non-empty string, and a lone string one
+    value, never its characters). ``mark_operator_only_options``, the one
+    caller, normalizes them once for every option it marks. This function does
+    not normalize them again, so a lone string given here would be read as its
+    characters.
     """
     from automated_security_helper.config.environment_record import (
         environment_marker,
     )
 
     wanted = (kind, folded_section_name(key), "options", option)
-    needles = environment_strings(environment_values)
     reads_the_environment = False
 
     def at_place(reference: Any, *, within: bool) -> bool:
@@ -1438,11 +1444,13 @@ def mark_operator_only_options(
 
     The rest of an off-host reporter's section (``aws_region`` and the other
     aws-security-hub options) is not marked: it is not an operator-only
-    option. The off-host rule takes that whole section from the operator's
-    configuration (``reporter_section``), and the record this marking reads
-    (``RepositorySettings``) holds only the operator-only places, so what a
-    repository's file wrote there is not recorded, and the option is absent
-    from the answer.
+    option. The load confines an off-host reporter's whole section to the
+    operator's configuration (``record_operator_reporters``; a scan reads it
+    through ``reporter_section``), so what a repository's file wrote there is
+    left out of the answer. The record this marking reads
+    (``RepositorySettings``) holds only the operator-only places, so it has
+    nothing to show for the rest of the section, and the option is absent from
+    the answer.
     """
     needles = environment_strings(environment_values)
     marked = copy.deepcopy(data)
