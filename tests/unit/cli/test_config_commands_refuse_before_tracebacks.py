@@ -127,6 +127,22 @@ def test_init_still_refuses_a_new_file_beside_the_one_ash_reads(tmp_path, monkey
 
 TOML_RC_NAMES = [name for name in ASH_RC_FILE_NAMES if name.endswith(".toml")]
 
+# The sentences init adds after its move advice, each for one kind of source. The
+# file's path sits between the two parts of the first two.
+EXTENDS_BEFORE_PATH = (
+    "A relative extends path is read from the file's own directory, so rewrite any in "
+)
+EXTENDS_AFTER_PATH = " for the scan root before you move it"
+TAB_BEFORE_PATH = "Replace each tab character in "
+TAB_AFTER_PATH = (
+    " with spaces before you move it: .ash.yaml is read as YAML, which refuses "
+    "a tab (the parse error gives the tab's line and column)"
+)
+ENV_ADVICE = (
+    "Write a value that starts with ${ without quotes in YAML (or tag it !ENV), "
+    "or it is read as literal text, not from the environment"
+)
+
 
 def test_the_toml_rc_names_are_there_to_test():
     """The parametrized test below has cases."""
@@ -151,26 +167,75 @@ def test_init_beside_a_toml_source_says_to_rewrite_it_as_yaml(
     assert "renaming the TOML file is not enough" in result.output, result.output
     assert "Move " not in result.output, result.output
     assert not (tmp_path / ".ash.yaml").exists()
+    # A TOML string that starts with `${` is read from the environment, and only a
+    # YAML value without quotes (or tagged !ENV) still is.
+    assert ENV_ADVICE in result.output, result.output
+    assert EXTENDS_BEFORE_PATH not in result.output, result.output
+    assert TAB_BEFORE_PATH not in result.output, result.output
 
 
-def test_init_beside_a_json_source_says_a_file_with_tabs_needs_spaces_first(
+def test_init_beside_a_json_source_says_a_file_with_a_tab_needs_spaces_first(
     tmp_path, monkeypatch
 ):
     """A JSON file is read as YAML at `.ash.yaml`, and the YAML loader refuses a
-    tab for indentation: the move is still the advice, with that caveat."""
+    tab between tokens: the move is still the advice, with that caveat."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".ashrc.json").write_text('{"project_name": "old"}\n', encoding="utf-8")
 
     result = _invoke(["init"])
 
     assert result.exit_code == 1, result.output
-    assert "Move " in result.output, result.output
-    assert " to .ash.yaml (the canonical config file, which is read as YAML" in (
-        result.output
-    )
-    assert "is indented with tabs, re-indent it with spaces first)" in result.output
+    assert " to .ash.yaml (the canonical config file), edit " in result.output
+    assert TAB_BEFORE_PATH in result.output, result.output
+    assert TAB_AFTER_PATH in result.output, result.output
+    assert EXTENDS_BEFORE_PATH not in result.output, result.output
+    assert ENV_ADVICE not in result.output, result.output
     assert "as YAML in .ash.yaml and delete" not in result.output, result.output
     assert not (tmp_path / ".ash.yaml").exists()
+
+
+@pytest.mark.parametrize(
+    ("name", "text", "holds_a_tab_caveat"),
+    [
+        (".ash/.ash.yaml", "project_name: old\n", False),
+        (".ash/ash.json", '{"project_name": "old"}\n', True),
+    ],
+)
+def test_init_beside_a_source_in_ash_says_to_rewrite_a_relative_extends(
+    tmp_path, monkeypatch, name, text, holds_a_tab_caveat
+):
+    """The file moves to the root above `.ash/`, and a base is read from the
+    directory of the file that names it, so a relative path changes with it."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".ash").mkdir()
+    (tmp_path / name).write_text(text, encoding="utf-8")
+
+    result = _invoke(["init"])
+
+    assert result.exit_code == 1, result.output
+    assert EXTENDS_BEFORE_PATH in result.output, result.output
+    assert EXTENDS_AFTER_PATH in result.output, result.output
+    assert (TAB_BEFORE_PATH in result.output) is holds_a_tab_caveat, result.output
+    if holds_a_tab_caveat:
+        assert result.output.index(EXTENDS_BEFORE_PATH) < result.output.index(
+            TAB_BEFORE_PATH
+        )
+    assert ENV_ADVICE not in result.output, result.output
+
+
+def test_init_beside_a_yaml_source_at_the_root_keeps_the_plain_advice(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".ashrc.yaml").write_text("project_name: old\n", encoding="utf-8")
+
+    result = _invoke(["init"])
+
+    assert result.exit_code == 1, result.output
+    assert " to .ash.yaml (the canonical config file), edit " in result.output
+    assert EXTENDS_BEFORE_PATH not in result.output, result.output
+    assert TAB_BEFORE_PATH not in result.output, result.output
+    assert ENV_ADVICE not in result.output, result.output
 
 
 def test_init_beside_a_pyproject_table_keeps_its_own_advice(tmp_path, monkeypatch):

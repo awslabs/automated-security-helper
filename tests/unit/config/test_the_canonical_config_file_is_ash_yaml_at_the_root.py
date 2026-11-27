@@ -32,7 +32,10 @@ from automated_security_helper.core.constants import (
     ASH_DEFAULT_CONFIG_FILE_NAME,
     ASH_RC_FILE_NAMES,
 )
-from automated_security_helper.core.exceptions import ASHConfigValidationError
+from automated_security_helper.core.exceptions import (
+    ASHConfigSourceError,
+    ASHConfigValidationError,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 pytestmark = pytest.mark.unit
@@ -49,7 +52,7 @@ LEGACY_LOCATIONS = [
 
 # The legacy locations by the language their name says. The canonical file is
 # read as YAML, so a TOML file cannot be moved there, and a JSON file can only
-# when it is not indented with tabs.
+# when it holds no tab character.
 TOML_LEGACY = [location for location in LEGACY_LOCATIONS if location.endswith(".toml")]
 JSON_LEGACY = [location for location in LEGACY_LOCATIONS if location.endswith(".json")]
 YAML_LEGACY = [
@@ -57,6 +60,29 @@ YAML_LEGACY = [
     for location in LEGACY_LOCATIONS
     if location not in TOML_LEGACY + JSON_LEGACY
 ]
+
+# A file in .ash/ moves to the root above it, and a relative extends path is read
+# from the directory of the file that names it, so it must change with the move.
+ASH_DIR_YAML = [location for location in YAML_LEGACY if location.startswith(".ash/")]
+ROOT_YAML = [location for location in YAML_LEGACY if location not in ASH_DIR_YAML]
+ASH_DIR_JSON = [location for location in JSON_LEGACY if location.startswith(".ash/")]
+ROOT_JSON = [location for location in JSON_LEGACY if location not in ASH_DIR_JSON]
+
+# The sentences the warning adds after its move advice, each for one kind of
+# file, in the order it adds them.
+EXTENDS_CAVEAT = (
+    "A relative extends path is read from the file's own directory, so rewrite "
+    "any in this file for the scan root before you move it."
+)
+TAB_CAVEAT = (
+    "Replace each tab character in this file with spaces before you move it: "
+    ".ash.yaml is read as YAML, which refuses a tab (the parse error gives the "
+    "tab's line and column)."
+)
+ENV_CAVEAT = (
+    "Write a value that starts with ${ without quotes in YAML (or tag it !ENV), "
+    "or it is read as literal text, not from the environment."
+)
 
 # The ashrc names include TOML and JSON files, so each location is written in
 # the language its name says.
@@ -125,6 +151,16 @@ def test_the_legacy_locations_by_language_are_there_to_test():
     )
     assert all(location.endswith(_YAML_SUFFIXES) for location in YAML_LEGACY)
     assert sorted(TOML_LEGACY + JSON_LEGACY + YAML_LEGACY) == sorted(LEGACY_LOCATIONS)
+    assert sorted(ASH_DIR_YAML) == [
+        ".ash/.ash.yaml",
+        ".ash/.ash.yml",
+        ".ash/ash.yaml",
+        ".ash/ash.yml",
+    ]
+    assert sorted(ASH_DIR_JSON) == [".ash/.ash.json", ".ash/ash.json"]
+    assert sorted(ROOT_YAML + ASH_DIR_YAML) == sorted(YAML_LEGACY)
+    assert sorted(ROOT_JSON + ASH_DIR_JSON) == sorted(JSON_LEGACY)
+    assert len(ROOT_YAML) == 7 and len(ROOT_JSON) == 4
 
 
 class TestCanonicalIsFirst:
@@ -236,45 +272,174 @@ class TestWarnings:
         [warning] = discovery_warnings(discover_config_source(tmp_path))
         canonical = (tmp_path / ".ash.yaml").as_posix()
         assert f"rewrite this file as YAML in {canonical}" in warning, warning
-        assert "renaming the TOML file is not enough" in warning, warning
         assert "move this file to" not in warning, warning
+        assert warning.endswith(
+            f"renaming the TOML file is not enough. {ENV_CAVEAT}"
+        ), warning
+        assert EXTENDS_CAVEAT not in warning, warning
+        assert TAB_CAVEAT not in warning, warning
 
-    @pytest.mark.parametrize("legacy", YAML_LEGACY)
-    def test_a_yaml_legacy_file_keeps_the_advice_to_move_it(self, tmp_path, legacy):
-        _write(tmp_path, legacy, "legacy")
-        [warning] = discovery_warnings(discover_config_source(tmp_path))
-        canonical = (tmp_path / ".ash.yaml").as_posix()
-        assert warning.endswith(f"move this file to {canonical}."), warning
-
-    @pytest.mark.parametrize("legacy", JSON_LEGACY)
-    def test_a_json_legacy_file_is_moved_after_its_tabs_are_replaced(
+    @pytest.mark.parametrize("legacy", ROOT_YAML)
+    def test_a_yaml_legacy_file_at_the_root_keeps_the_advice_to_move_it(
         self, tmp_path, legacy
     ):
         _write(tmp_path, legacy, "legacy")
         [warning] = discovery_warnings(discover_config_source(tmp_path))
         canonical = (tmp_path / ".ash.yaml").as_posix()
-        caveat = (
-            ".ash.yaml is read as YAML, so re-indent this file with spaces first "
-            "if it is indented with tabs."
+        assert warning.endswith(f"move this file to {canonical}."), warning
+
+    @pytest.mark.parametrize("legacy", ASH_DIR_YAML)
+    def test_a_yaml_legacy_file_in_ash_says_to_rewrite_a_relative_extends(
+        self, tmp_path, legacy
+    ):
+        _write(tmp_path, legacy, "legacy")
+        [warning] = discovery_warnings(discover_config_source(tmp_path))
+        canonical = (tmp_path / ".ash.yaml").as_posix()
+        assert warning.endswith(f"move this file to {canonical}. {EXTENDS_CAVEAT}"), (
+            warning
         )
-        assert warning.endswith(f"move this file to {canonical}; {caveat}"), warning
+
+    @pytest.mark.parametrize("legacy", ROOT_JSON)
+    def test_a_json_legacy_file_at_the_root_is_moved_after_its_tabs_are_replaced(
+        self, tmp_path, legacy
+    ):
+        _write(tmp_path, legacy, "legacy")
+        [warning] = discovery_warnings(discover_config_source(tmp_path))
+        canonical = (tmp_path / ".ash.yaml").as_posix()
+        assert warning.endswith(f"move this file to {canonical}. {TAB_CAVEAT}"), warning
+        assert EXTENDS_CAVEAT not in warning, warning
+
+    @pytest.mark.parametrize("legacy", ASH_DIR_JSON)
+    def test_a_json_legacy_file_in_ash_gets_both_caveats(self, tmp_path, legacy):
+        _write(tmp_path, legacy, "legacy")
+        [warning] = discovery_warnings(discover_config_source(tmp_path))
+        canonical = (tmp_path / ".ash.yaml").as_posix()
+        assert warning.endswith(
+            f"move this file to {canonical}. {EXTENDS_CAVEAT} {TAB_CAVEAT}"
+        ), warning
 
 
-class TestAMovedFileIsRefusedWhenYamlCannotReadIt:
-    """Why the advice above is not "rename it": `.ash.yaml` is parsed as YAML."""
+#: JSON with one tab, each in a different place. `json.loads` accepts a tab
+#: between tokens, so each loads as `.ash.json`; the YAML loader skips only
+#: spaces between tokens, so each is refused as `.ash.yaml`.
+TABBED_JSON = {
+    "leading": '{\n\t"project_name": "x"\n}\n',
+    "after_colon": '{\n  "project_name":\t"x"\n}\n',
+    "after_comma": '{\n  "project_name": "x",\t"fail_on_findings": false\n}\n',
+    "after_brace": '{\t\n  "project_name": "x"\n}\n',
+    "before_newline": '{\n  "project_name": "x"\t\n}\n',
+}
 
-    def test_json_indented_with_tabs_in_the_canonical_file_is_refused(self, tmp_path):
+
+class TestAMovedJsonFileIsRefusedWhenItHoldsATab:
+    """Why the JSON advice says to replace each tab character, wherever it is:
+    `.ash.yaml` is parsed as YAML, which skips only spaces between tokens."""
+
+    @pytest.mark.parametrize("text", TABBED_JSON.values(), ids=TABBED_JSON.keys())
+    def test_json_with_a_tab_loads_as_json(self, tmp_path, text):
+        (tmp_path / ".ash.json").write_text(text, encoding="utf-8")
+        assert resolve_config(source_dir=tmp_path).project_name == "x"
+
+    @pytest.mark.parametrize("text", TABBED_JSON.values(), ids=TABBED_JSON.keys())
+    def test_the_same_text_in_the_canonical_file_is_refused(self, tmp_path, text):
+        (tmp_path / ".ash.yaml").write_text(text, encoding="utf-8")
+        with pytest.raises(ASHConfigValidationError):
+            resolve_config(source_dir=tmp_path)
+
+    @pytest.mark.parametrize("text", TABBED_JSON.values(), ids=TABBED_JSON.keys())
+    def test_the_same_text_with_each_tab_replaced_by_a_space_is_read(
+        self, tmp_path, text
+    ):
+        (tmp_path / ".ash.yaml").write_text(text.replace("\t", " "), encoding="utf-8")
+        assert resolve_config(source_dir=tmp_path).project_name == "x"
+
+    def test_the_refusal_gives_the_line_and_column_of_the_tab(self, tmp_path):
         (tmp_path / ".ash.yaml").write_text(
-            '{\n\t"project_name": "x"\n}\n', encoding="utf-8"
+            TABBED_JSON["after_colon"], encoding="utf-8"
+        )
+        with pytest.raises(ASHConfigValidationError, match=r"line 2, column 18"):
+            resolve_config(source_dir=tmp_path)
+
+    def test_a_tab_inside_a_json_string_is_refused_as_json(self, tmp_path):
+        """So in a JSON file that loads, every tab is between tokens."""
+        (tmp_path / ".ash.json").write_text(
+            '{"project_name": "a\tb"}\n', encoding="utf-8"
         )
         with pytest.raises(ASHConfigValidationError):
             resolve_config(source_dir=tmp_path)
 
-    def test_the_same_json_indented_with_spaces_is_read(self, tmp_path):
-        (tmp_path / ".ash.yaml").write_text(
-            '{\n  "project_name": "x"\n}\n', encoding="utf-8"
+
+class TestAMovedFileKeepsItsRelativeBasesOnlyIfTheyAreRewritten:
+    """Why a file in `.ash/` needs its relative `extends` path rewritten: a base
+    is read from the directory of the file that names it, and the move changes it."""
+
+    @staticmethod
+    def _ash_directory_with_a_base(tmp_path: Path) -> None:
+        (tmp_path / ".ash").mkdir()
+        (tmp_path / ".ash" / "base.yaml").write_text(
+            "project_name: from-base\n", encoding="utf-8"
         )
-        assert resolve_config(source_dir=tmp_path).project_name == "x"
+
+    def test_a_relative_extends_in_ash_names_a_file_beside_it(self, tmp_path):
+        self._ash_directory_with_a_base(tmp_path)
+        (tmp_path / ".ash" / ".ash.yaml").write_text(
+            "extends: base.yaml\n", encoding="utf-8"
+        )
+        assert resolve_config(source_dir=tmp_path).project_name == "from-base"
+
+    def test_the_same_file_moved_to_the_root_names_a_file_that_is_not_there(
+        self, tmp_path
+    ):
+        self._ash_directory_with_a_base(tmp_path)
+        (tmp_path / ".ash.yaml").write_text("extends: base.yaml\n", encoding="utf-8")
+        with pytest.raises(ASHConfigSourceError, match="does not exist"):
+            resolve_config(source_dir=tmp_path)
+
+    def test_the_moved_file_is_read_when_the_path_is_rewritten_for_the_root(
+        self, tmp_path
+    ):
+        self._ash_directory_with_a_base(tmp_path)
+        (tmp_path / ".ash.yaml").write_text(
+            "extends: .ash/base.yaml\n", encoding="utf-8"
+        )
+        assert resolve_config(source_dir=tmp_path).project_name == "from-base"
+
+
+class TestATomlReferenceToTheEnvironmentNeedsNoQuotesInYaml:
+    """Why the TOML advice says to write a `${...}` value without quotes: TOML
+    resolves every string that starts with `${`, YAML only a plain scalar (or one
+    tagged `!ENV`)."""
+
+    REFERENCE = "${ASH_SERVICE_NAME:payments-api}"
+
+    @pytest.fixture(autouse=True)
+    def _variable(self, monkeypatch):
+        monkeypatch.setenv("ASH_SERVICE_NAME", "from-env")
+
+    def test_a_toml_string_that_starts_with_a_reference_is_read_from_the_environment(
+        self, tmp_path
+    ):
+        (tmp_path / ".ashrc.toml").write_text(
+            f'project_name = "{self.REFERENCE}"\n', encoding="utf-8"
+        )
+        assert resolve_config(source_dir=tmp_path).project_name == "from-env"
+
+    @pytest.mark.parametrize(
+        "line",
+        [f"project_name: {REFERENCE}", f"project_name: !ENV '{REFERENCE}'"],
+        ids=["unquoted", "tagged"],
+    )
+    def test_the_yaml_rewrite_is_read_from_the_environment(self, tmp_path, line):
+        (tmp_path / ".ash.yaml").write_text(f"{line}\n", encoding="utf-8")
+        assert resolve_config(source_dir=tmp_path).project_name == "from-env"
+
+    def test_the_yaml_rewrite_that_keeps_the_quotes_reads_the_literal_text(
+        self, tmp_path
+    ):
+        (tmp_path / ".ash.yaml").write_text(
+            f'project_name: "{self.REFERENCE}"\n', encoding="utf-8"
+        )
+        assert resolve_config(source_dir=tmp_path).project_name == self.REFERENCE
 
 
 class TestAMovedTomlFileIsRefused:
