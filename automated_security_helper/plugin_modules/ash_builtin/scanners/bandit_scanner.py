@@ -48,6 +48,7 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.base.uv_tool_mixin import (
     _record_direct_route_version,
+    _restore_uv_route,
     is_uv_form,
     tool_name,
 )
@@ -1189,8 +1190,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # use_uv_tool already False, a re-validation skipped the selection
         # branch below and fell to the consolidated resolver, which paid its
         # cold `uv tool run ... --version` probe per re-check (checkov's
-        # measured shape; bandit's resolver answer keeps the route but still
-        # pays the probe).
+        # measured shape; bandit's resolver answer pays the probe too).
         if self._honored_verified_pre_installed():
             return True
         if not self._validate_uv_tool_availability():
@@ -1269,8 +1269,10 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     def _take_resolved_command(self, command: List[str]) -> bool:
         """Set the route from ``get_uv_tool_command``'s answer, and decide the dependency.
 
-        A ``uv`` answer (bare, or by its path) keeps the uv route. A direct binary
-        on PATH is verified as ``_select_tool_execution`` verifies one
+        A ``uv`` answer (bare, or by its path) is the uv route: a caller that came
+        in on a direct route gets it back (``_restore_uv_route``), and one already
+        on it keeps it. A direct binary on PATH is verified as
+        ``_select_tool_execution`` verifies one
         (``utils/pre_installed_tool.py``: the sarif and toml extras,
         ``tool_version``): one that falls short is refused with what is missing
         named, since running it would fail at ``--format sarif`` or report with
@@ -1281,9 +1283,14 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         did before.
         """
         if is_uv_form(command):
-            # uv bare, by its path, or as uv.exe is the uv route, which stays on
-            # (is_uv_form). Compared as the bare word, an absolute uv path read as
-            # a bandit binary and was "verified" as one.
+            # uv bare, by its path, or as uv.exe is the uv route (is_uv_form).
+            # Compared as the bare word, an absolute uv path read as a bandit
+            # binary and was "verified" as one. The final fallback reaches here on a
+            # re-validation off uv, and an override of the availability check can
+            # too; either is put on the uv route, not left on a direct one that
+            # would start whatever bandit PATH holds under a requirement it was not
+            # checked against.
+            _restore_uv_route(self)
             self.dependencies_satisfied = True
             return True
         from automated_security_helper.utils.pre_installed_tool import (

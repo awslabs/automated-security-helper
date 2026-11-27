@@ -1987,8 +1987,8 @@ class UVToolMixin:
         scanners whose validation, entered with ``use_uv_tool`` False, falls
         into a ``get_uv_tool_command`` fallback -- checkov, cfn-lint and
         guarddog, whose fallback also re-points the route from the resolver's
-        answer, and bandit, whose ``_take_resolved_command`` keeps the route
-        but still pays the resolver's cold probe. Semgrep needs no consult:
+        answer, and bandit, whose ``_take_resolved_command`` takes a uv answer
+        as the uv route and pays the resolver's cold probe. Semgrep needs no consult:
         entered with ``use_uv_tool`` False and uv available, its
         ``_validate_tool_dependencies`` returns satisfied with no probe
         (semgrep_scanner.py, the final ``dependencies_satisfied = True`` arm).

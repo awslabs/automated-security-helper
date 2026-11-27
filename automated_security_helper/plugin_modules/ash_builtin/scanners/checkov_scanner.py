@@ -1569,10 +1569,13 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         )
 
         if is_uv_form(resolved):
-            # Called only from validate_plugin_dependencies' uv-absent branch,
-            # entered only while use_uv_tool is True (_validate_uv_tool_availability
-            # answers True at once for a scanner off uv): the uv route and the
-            # version it recorded are already in place.
+            # The uv route the answer names. validate_plugin_dependencies reaches
+            # here only on uv (_validate_uv_tool_availability answers True at once
+            # for a scanner off uv), where this changes nothing. Any other entry (an
+            # override of that check, a new caller, a test that patches it) is put on
+            # the uv route, not left on a direct one that would start whatever
+            # checkov PATH holds, unverified.
+            _restore_uv_route(self)
             self.dependencies_satisfied = True
             return True
         executable = resolved[0]

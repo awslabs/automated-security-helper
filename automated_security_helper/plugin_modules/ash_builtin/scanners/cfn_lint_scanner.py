@@ -1095,10 +1095,13 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         )
 
         if is_uv_form(resolved):
-            # Reachable only if the resolver found a uv the availability check did
-            # not, and only while use_uv_tool is True (that check answers True at
-            # once for a scanner off uv): the uv route and the version it recorded
-            # are already in place, and the scan runs through uv.
+            # The uv route the answer names. validate_plugin_dependencies reaches
+            # here only on uv (_validate_uv_tool_availability answers True at once
+            # for a scanner off uv), where this changes nothing. Any other entry (an
+            # override of that check, a new caller, a test that patches it) is put on
+            # the uv route, not left on a direct one that would start whatever
+            # cfn-lint PATH holds, unverified.
+            _restore_uv_route(self)
             self.dependencies_satisfied = True
             return True
         executable = resolved[0]

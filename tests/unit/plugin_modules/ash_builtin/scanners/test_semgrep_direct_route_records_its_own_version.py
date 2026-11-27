@@ -4,8 +4,8 @@ A semgrep binary on PATH that runs directly (uv missing, or uv's install failed)
 is the binary the scan runs, so the version the reports name is its own. A copy
 that answered no version used to leave the value an earlier uv probe wrote, which
 names uv's environment and not the binary that ran. The record is made where the
-route changes: asking whether a copy may run changes nothing, and a uv answer
-leaves the uv route's record as it is.
+route changes: asking whether a copy may run changes no route and no version
+record, and a uv answer leaves the uv route's record as it is.
 """
 
 from __future__ import annotations
@@ -231,8 +231,8 @@ def test_checking_a_copy_on_path_changes_no_record(
     test_plugin_context, monkeypatch, status
 ):
     """Asking whether the copy on PATH may run answers with the verifier's
-    verdict and changes nothing: the caller that takes the direct route records
-    the copy's version beside its route change.
+    verdict and changes no route and no version record: the caller that takes the
+    direct route records the copy's version beside its route change.
 
     Fails at the base: the check itself replaced the version the uv probe
     recorded and dropped the probe still owed."""
@@ -242,7 +242,7 @@ def test_checking_a_copy_on_path_changes_no_record(
     scanner._deferred_tool_version_probe = ("semgrep", None)
     _answer(monkeypatch, status, "1.130.0")
 
-    answer = scanner._direct_binary_satisfies(BINARY)
+    answer = scanner._direct_binary_verdict(BINARY)
 
     assert scanner.tool_version == UV_PROBE_VERSION
     assert scanner._deferred_tool_version_probe == ("semgrep", None)
@@ -267,7 +267,7 @@ def test_a_copy_check_that_answers_false_refuses_the_copy(
     refused."""
     scanner = _scanner(test_plugin_context, monkeypatch)
     monkeypatch.setattr(
-        SemgrepScanner, "_direct_binary_satisfies", lambda self, executable: False
+        SemgrepScanner, "_direct_binary_verdict", lambda self, executable: False
     )
     if direct_only:
         _binary_on_path(monkeypatch)

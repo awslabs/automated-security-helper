@@ -28,6 +28,7 @@ from automated_security_helper.base.scanner_facets import (
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.uv_tool_mixin import (
     _record_direct_route_version,
+    _restore_uv_route,
     is_uv_form,
     tool_name,
 )
@@ -389,7 +390,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         is found.
 
         A binary on PATH, however it was found, is verified against the scan's
-        requirement before it is taken (``_direct_binary_satisfies``), as
+        requirement before it is taken (``_direct_binary_verdict``), as
         ``_select_tool_execution`` verifies a pre-installed tool before running it
         directly. The version that copy answered is recorded here, where the route
         changes, not by the check.
@@ -404,8 +405,11 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                     level=logging.WARNING,
                 )
                 return False
-            answer = self._direct_binary_satisfies(found)
-            if answer is None:
+            answer = self._direct_binary_verdict(found)
+            # Falsy, not only None: an override or a stand-in still written to the
+            # old yes-or-no answer says False to refuse, and that refuses here too.
+            # A verdict is a frozen dataclass and always true.
+            if not answer:
                 return False
             # The copy that runs is this one, verified or not, so its own answer
             # is the version the reports name. Read with a default, as the mixin
@@ -427,14 +431,18 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         if command is None:
             return False
         if is_uv_form(command):
-            # Called only from _validate_tool_dependencies' uv-absent branch,
-            # entered only while use_uv_tool is True (_validate_uv_tool_availability
-            # answers True at once for a scanner off uv): the uv route and the
-            # version it recorded are already in place.
+            # The uv route the answer names. _validate_tool_dependencies' uv-absent
+            # branch reaches here only on uv (_validate_uv_tool_availability answers
+            # True at once for a scanner off uv), where this changes nothing. Any
+            # other entry (an override of that check, a new caller, a test that
+            # patches it) is put on the uv route, not left on a direct one that would
+            # start whatever semgrep PATH holds, unverified.
+            _restore_uv_route(self)
             self.dependencies_satisfied = True
             return True
-        answer = self._direct_binary_satisfies(_command_words(command)[0])
-        if answer is None:
+        answer = self._direct_binary_verdict(_command_words(command)[0])
+        # Falsy, as in the direct_only branch above.
+        if not answer:
             return False
         # The copy that runs is this one, verified or not (see the direct_only
         # branch above).
@@ -443,7 +451,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         self.dependencies_satisfied = True
         return True
 
-    def _direct_binary_satisfies(
+    def _direct_binary_verdict(
         self, executable: str
     ) -> Optional[PreInstalledToolVerdict]:
         """The verifier's answer for the semgrep binary on PATH when it may run
@@ -464,9 +472,11 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         the plugin's failure, not the host's, and a run shown against nothing is
         worse than a MISSING row.
 
-        It changes no route and no record: the caller that takes the direct route
-        records the answer's version beside its ``use_uv_tool = False``
-        (``_direct_or_uv_command_found``), as checkov and bandit record theirs.
+        It changes no route and no version record, and on a refusal it records
+        the reason for the MISSING row (``dependency_unavailable_reason``): the
+        caller that takes the direct route records the answer's version beside
+        its ``use_uv_tool = False`` (``_direct_or_uv_command_found``), as checkov
+        and bandit record theirs.
         """
         from automated_security_helper.utils.pre_installed_tool import (
             build_requirement,

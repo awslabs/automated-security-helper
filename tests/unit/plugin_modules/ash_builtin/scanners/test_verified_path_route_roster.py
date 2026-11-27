@@ -18,8 +18,8 @@ At the bytes today:
   (``uses_uv = is_uv_form(resolved)``, then ``use_uv_tool = uses_uv``) and
   consult the record;
 * bandit (bandit_scanner.py) routes its fallback through
-  ``_take_resolved_command`` -- a uv answer keeps the route, so no flip, but
-  the cold probe is paid -- and consults the record;
+  ``_take_resolved_command`` -- a uv answer puts the uv route back, as the
+  others' flip does, and the cold probe is paid -- and consults the record;
 * semgrep (semgrep_scanner.py) needs no consult: entered with ``use_uv_tool``
   False and uv available, ``_validate_tool_dependencies`` ends in its final
   ``dependencies_satisfied = True`` arm with no probe;

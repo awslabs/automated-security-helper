@@ -1288,9 +1288,15 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         route made, as it does when nothing is on PATH, and that route runs once the
         check passes.
 
+        ``_restore_uv_route`` makes that hold for any caller: the uv-absent branch
+        enters on uv, where it changes nothing, and an entry off uv (an override of
+        the availability check, a new caller, a test that patches it) is put back
+        on the uv route rather than left on a direct one, which would start
+        ``guarddog`` by name.
+
         Every line this check writes, and the reason a MISSING row carries, go
         through the uv layer (``shown_uv_output``) with the plugin's values, read
-        once and guarded, as semgrep's ``_direct_binary_satisfies`` reads them. The
+        once and guarded, as semgrep's ``_direct_binary_verdict`` reads them. The
         verdict's detail quotes the scan's requirement in the spelling the options
         validator stored, and an environment-read ``tool_version`` was written in
         another spelling, which the plain value match the scan phase applies to the
@@ -1304,6 +1310,10 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         # arm uses too: the copy a uv answer leaves on PATH is the one that would run.
         executable = find_executable(_COMMAND) if uv_answer else resolved[0]
         if executable is None:
+            # A uv answer with nothing on PATH: the uv route (see the docstring).
+            # Defensive: the uv-absent branch enters on uv, where this changes
+            # nothing; any other entry is put back on the uv route.
+            _restore_uv_route(self)
             self.dependencies_satisfied = True
             return True
         # Read once a copy is to be checked, and only then: a uv answer with nothing
@@ -1359,6 +1369,9 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                     ),
                     level=logging.WARNING,
                 )
+                # Defensive, as above: the uv-absent branch enters on uv, where
+                # this changes nothing; any other entry is put back on the uv route.
+                _restore_uv_route(self)
                 self.dependencies_satisfied = True
                 return True
             remedy = self._unusable_copy_remedy(
@@ -1368,7 +1381,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
             # The log gets the copy's path and the verdict's detail. The reason gets
             # the summary, the path-free line the verifier gives for that use; the
             # detail stands in only for a verdict without one, as in semgrep's
-            # _direct_binary_satisfies.
+            # _direct_binary_verdict.
             self._plugin_log(
                 _shown(
                     "uv's availability check did not pass, and the guarddog on PATH "
