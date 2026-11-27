@@ -184,6 +184,28 @@
 │                                                              engine. Exclusive with             │
 │                                                              --source-dir, --image and          │
 │                                                              --image-archive.                   │
+│ --source-git                URL                              Scan a remote git repository       │
+│                                                              instead of a source directory: ASH │
+│                                                              clones it (https or ssh URL, or    │
+│                                                              user@host:path; never a local      │
+│                                                              path) into a temporary directory,  │
+│                                                              scans that, and removes it. git    │
+│                                                              runs without your configuration or │
+│                                                              credentials, so the repository     │
+│                                                              must be readable anonymously or by │
+│                                                              a key a non-interactive ssh finds. │
+│                                                              Same request rules as the MCP      │
+│                                                              set_source_git tool. Exclusive     │
+│                                                              with --source-dir, --workspace,    │
+│                                                              the image options, --staged,       │
+│                                                              --use-existing and                 │
+│                                                              --changed-files-only.              │
+│ --git-ref                   REF                              Branch, tag or commit of           │
+│                                                              --source-git to scan. Default: the │
+│                                                              remote's default branch.           │
+│ --git-depth                 N                                How many commits of history        │
+│                                                              --source-git fetches, 1 to 1000    │
+│                                                              (default 1).                       │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Reports ───────────────────────────────────────────────────────────────────────────────────────┐
 │ --output-dir                                              <str>  The directory to output        │

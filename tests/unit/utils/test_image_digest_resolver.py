@@ -13,7 +13,9 @@ the reference text when the lookup cannot or may not run.
 
 from __future__ import annotations
 
+import io
 import logging
+import tarfile
 
 import pytest
 
@@ -434,3 +436,189 @@ class TestThePayloadRung:
             run.results[0], tool_name="grype", tool_type="SCA", run=run
         )
         assert flat.image_digest == DIGEST
+
+
+def _tar_of(tmp_path, *members):
+    """A tar of ``(info, body)`` pairs in order; a link has no body."""
+    path = tmp_path / "payload.tar"
+    with tarfile.open(path, "w") as archive:
+        for info, body in members:
+            archive.addfile(info, None if body is None else io.BytesIO(body))
+    return path
+
+
+def _record(name, body):
+    """A regular member called *name* that holds *body*."""
+    info = tarfile.TarInfo(name=name)
+    info.size = len(body)
+    return info, body
+
+
+def _link(name, kind, target):
+    """A member called *name* that is a link (*kind*) to the member *target*."""
+    info = tarfile.TarInfo(name=name)
+    info.type = kind
+    info.linkname = target
+    return info, None
+
+
+def _manifest_naming_the_digest() -> bytes:
+    """A ``docker save`` manifest.json whose one config blob is DIGEST."""
+    import json
+
+    config = DIGEST.removeprefix("sha256:") + ".json"
+    return json.dumps([{"Config": config}]).encode()
+
+
+def _nested_json() -> bytes:
+    """JSON as long as a record may be, nested as deep as that length allows.
+
+    Exactly the record size cap, so the member is read in full and handed to the
+    parser instead of being refused as too large; the parser gives up on the
+    nesting long before the end.
+    """
+    from automated_security_helper.utils import image_digest_resolver as idr
+
+    depth = idr._MAX_PAYLOAD_RECORD_BYTES // 2
+    return b"[" * depth + b"]" * depth
+
+
+def _archive_holding(tmp_path, *members):
+    return ImageLocator(oci_archive=_tar_of(tmp_path, *members))
+
+
+def _layout_holding(tmp_path, index: bytes):
+    layout = tmp_path / "layout"
+    layout.mkdir()
+    (layout / "oci-layout").write_text('{"imageLayoutVersion": "1.0.0"}')
+    (layout / "index.json").write_bytes(index)
+    return ImageLocator(oci_layout=layout)
+
+
+#: Payloads whose record cannot be read, each with the member a reason must name.
+UNREADABLE_PAYLOADS = [
+    pytest.param(
+        lambda tmp_path: _archive_holding(
+            tmp_path, _link("manifest.json", tarfile.SYMTYPE, "no-such-member.json")
+        ),
+        "manifest.json",
+        id="manifest-symlink-to-a-missing-member",
+    ),
+    pytest.param(
+        lambda tmp_path: _archive_holding(
+            tmp_path, _link("manifest.json", tarfile.SYMTYPE, "manifest.json")
+        ),
+        "manifest.json",
+        id="manifest-symlink-to-itself",
+    ),
+    pytest.param(
+        lambda tmp_path: _archive_holding(
+            tmp_path, _link("manifest.json", tarfile.LNKTYPE, "manifest.json")
+        ),
+        "manifest.json",
+        id="manifest-hard-link-to-itself",
+    ),
+    pytest.param(
+        lambda tmp_path: _archive_holding(
+            tmp_path, _record("manifest.json", _nested_json())
+        ),
+        "manifest.json",
+        id="manifest-nested-past-the-parsers-limit",
+    ),
+    pytest.param(
+        lambda tmp_path: _archive_holding(
+            tmp_path, _record("index.json", _nested_json())
+        ),
+        "index.json",
+        id="archive-index-nested-past-the-parsers-limit",
+    ),
+    pytest.param(
+        lambda tmp_path: _layout_holding(tmp_path, _nested_json()),
+        "index.json",
+        id="layout-index-nested-past-the-parsers-limit",
+    ),
+]
+
+
+@pytest.mark.parametrize(("build", "member"), UNREADABLE_PAYLOADS)
+class TestAPayloadWhoseRecordCannotBeRead:
+    """A payload's record is a client's file, and it can be anything.
+
+    ``payload_digest`` reads one JSON record from a saved image or an OCI layout
+    the client supplied. A record it cannot read as one answers no digest, with a
+    reason that names the member, and the scan keys its ids on the payload path
+    as it does for a payload that names none: a resolution failure never fails
+    or skips the scan.
+    """
+
+    def test_a_record_that_cannot_be_read_names_no_digest(
+        self, tmp_path, build, member
+    ):
+        """A link in place of the record, or JSON nested past the parser's limit.
+
+        The standard library's lookup of a link's target raises KeyError for a
+        missing target and RecursionError for a link to itself, and the JSON
+        parser raises RecursionError past its depth limit. None of them may leave
+        ``payload_digest``.
+        """
+        from automated_security_helper.utils.image_digest_resolver import (
+            payload_digest,
+        )
+
+        digest, why = payload_digest(build(tmp_path))
+        assert digest is None
+        assert member in why
+
+    def test_the_resolver_returns_the_locator_unchanged(
+        self, tmp_path, notices, build, member
+    ):
+        """Resolving such a payload keeps the locator and says why it has no digest."""
+        locator = build(tmp_path)
+        resolved = resolve_image_locator(locator, offline=True)
+        assert resolved is locator
+        assert resolved.resolved_digest is None
+        assert member in notices.text
+
+
+class TestOnlyARegularMemberIsARecord:
+    """The record is read from a regular member; a link is passed over, not followed."""
+
+    def test_a_link_named_like_a_record_is_skipped_and_the_next_record_is_read(
+        self, tmp_path
+    ):
+        """A link called index.json is passed over, and manifest.json still decides.
+
+        Reading the link would follow it to a member the archive lacks; the
+        regular manifest.json after it names the config digest.
+        """
+        from automated_security_helper.utils.image_digest_resolver import (
+            payload_digest,
+        )
+
+        archive = _archive_holding(
+            tmp_path,
+            _link("index.json", tarfile.SYMTYPE, "no-such-member.json"),
+            _record("manifest.json", _manifest_naming_the_digest()),
+        )
+        assert payload_digest(archive) == (DIGEST, "")
+
+    def test_a_well_formed_payload_still_names_its_digest(self, tmp_path):
+        """Control: the builders above, given a readable record, name the digest.
+
+        A saved image's manifest.json and an OCI layout's index.json, built the
+        way the rows that fail are built, each resolve to the digest they name,
+        so those rows fail on what their record holds and not on how it was made.
+        """
+        import json
+
+        from automated_security_helper.utils.image_digest_resolver import (
+            payload_digest,
+        )
+
+        archive = _archive_holding(
+            tmp_path, _record("manifest.json", _manifest_naming_the_digest())
+        )
+        index = json.dumps({"schemaVersion": 2, "manifests": [{"digest": DIGEST}]})
+        layout = _layout_holding(tmp_path, index.encode())
+        assert payload_digest(archive) == (DIGEST, "")
+        assert payload_digest(layout) == (DIGEST, "")

@@ -536,9 +536,9 @@ def rewrite_checkov_paths(
 #:   name, which the parser keys a file's resources by, a nested one under its
 #:   parent's name)
 #:
-#: Even for these, a record names no resource when its file's records give its
-#: id at more than one line range: two resources then share the id
-#: (:func:`checkov_resources`).
+#: Even for these, a record names no resource when its file's records, the
+#: passed ones too, give its id at more than one line range: two resources then
+#: share the id (:func:`checkov_resources`).
 _RESOURCE_FRAMEWORKS = frozenset(
     {
         "terraform",
@@ -596,6 +596,10 @@ _NO_RESOURCE_FRAMEWORKS = {
 #: What identifies a checkov record in both of its reports: the rule, the file
 #: as the SARIF URI spells it, and the line range.
 _RecordKey = Tuple[str, str, int, int]
+
+#: The record lists of checkov's JSON report that the SARIF report has a result
+#: for. The records of ``passed_checks`` have none.
+_RESULT_KINDS = ("failed_checks", "skipped_checks")
 
 
 def _record_key(record: Any) -> Optional[_RecordKey]:
@@ -658,28 +662,28 @@ def checkov_resources(json_report: Any) -> dict[_RecordKey, List[Optional[str]]]
     lists the records' results: report by report, the failed records and then
     the skipped ones. An entry is the record's ``resource`` when its framework
     is one of :data:`_RESOURCE_FRAMEWORKS` and None otherwise, so a key's entries
-    still count every record that has it.
+    still count every record that has it. The records of the checks that passed
+    have no result in the SARIF report, so they have no entry.
 
     An entry is None as well when its file's records give its resource at more
     than one line range. Every check on one resource gives that resource's
-    lines, so such an id is shared by two resources, and a suppression scoped to
-    it would cover the findings of both. Neither is given it; a suppression for
-    them is scoped by path and lines instead.
+    lines, whether it failed, was skipped or passed, so such an id is shared by
+    two resources, and a suppression scoped to it would cover the findings of
+    both. Neither is given it; a suppression for them is scoped by path and
+    lines instead. The records of the checks that passed count as places, so a
+    finding keeps or loses its id whichever of the other checks fail.
 
     Read before :func:`rewrite_checkov_paths` changes the report's paths: the
     keys are checkov's own spelling, which is what its SARIF URIs hold.
     """
-    found = _record_values(
-        json_report,
-        lambda record, named: (
-            record.get("resource")
-            if named
-            and isinstance(record.get("resource"), str)
-            and record.get("resource")
-            else None
-        ),
-    )
-    shared = _resources_at_more_than_one_place(found)
+
+    def resource_of(record: dict[str, Any], named: bool) -> Optional[str]:
+        resource = record.get("resource")
+        return resource if named and isinstance(resource, str) and resource else None
+
+    found = _record_values(json_report, resource_of)
+    passed = _record_values(json_report, resource_of, kinds=("passed_checks",))
+    shared = _resources_at_more_than_one_place(found, passed)
     if not shared:
         return found
     return {
@@ -690,14 +694,18 @@ def checkov_resources(json_report: Any) -> dict[_RecordKey, List[Optional[str]]]
 
 def _resources_at_more_than_one_place(
     found: dict[_RecordKey, List[Optional[str]]],
+    passed: dict[_RecordKey, List[Optional[str]]],
 ) -> set[Tuple[str, str]]:
     """The ``(file, resource)`` pairs that the records give at two or more line
-    ranges, the file and the lines as a key spells them."""
+    ranges, the file and the lines as a key spells them. The records of the
+    checks that passed count with the others: a check gives the lines of its
+    resource whether it failed, was skipped or passed."""
     places: dict[Tuple[str, str], set[Tuple[int, int]]] = {}
-    for (_rule, uri, start, end), resources in found.items():
-        for resource in resources:
-            if resource is not None:
-                places.setdefault((uri, resource), set()).add((start, end))
+    for records in (found, passed):
+        for (_rule, uri, start, end), resources in records.items():
+            for resource in resources:
+                if resource is not None:
+                    places.setdefault((uri, resource), set()).add((start, end))
     return {pair for pair, lines in places.items() if len(lines) > 1}
 
 
@@ -722,9 +730,13 @@ def checkov_guidelines(json_report: Any) -> dict[_RecordKey, List[Optional[str]]
 
 
 def _record_values(
-    json_report: Any, value_of: Callable[[dict[str, Any], bool], Optional[str]]
+    json_report: Any,
+    value_of: Callable[[dict[str, Any], bool], Optional[str]],
+    kinds: Tuple[str, ...] = _RESULT_KINDS,
 ) -> dict[_RecordKey, List[Optional[str]]]:
-    """``value_of(record, in_a_resource_framework)`` for every record, by key."""
+    """``value_of(record, in_a_resource_framework)`` for every record of the
+    report's *kinds* lists, by key. The default is the lists the SARIF report has
+    results for."""
     found: dict[_RecordKey, List[Optional[str]]] = {}
     reports = json_report if isinstance(json_report, list) else [json_report]
     for report in reports:
@@ -736,7 +748,7 @@ def _record_values(
         check_type = report.get("check_type")
         # A list or dict is not hashable: only a string can be a framework.
         named = isinstance(check_type, str) and check_type in _RESOURCE_FRAMEWORKS
-        for kind in ("failed_checks", "skipped_checks"):
+        for kind in kinds:
             records = results.get(kind)
             for record in records if isinstance(records, list) else []:
                 key = _record_key(record)
