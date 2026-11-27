@@ -1283,6 +1283,19 @@ class TestCommand:
         assert out.getvalue().isascii()
         assert ascii(text)[1:-1] in out.getvalue()
 
+    def test_a_control_character_is_shown_as_an_escape(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An escape sequence for the terminal, a bell and a line break in the
+        text of a problem come out as escapes, and one problem stays one line."""
+        text = "a" + chr(0x1B) + "]52;c;x" + chr(0x07) + "b" + chr(0x0A) + "c"
+        monkeypatch.setattr(
+            checker, "check_registry", lambda: {"s": [Problem("P5", "/p", text)]}
+        )
+        out = io.StringIO()
+        assert main([], out=out) == 1
+        assert out.getvalue() == "s\tP5\t/p\ta\\x1b]52;c;x\\x07b\\nc\n"
+
     def test_a_directory_that_is_no_package_is_one_problem_without_importing_it(
         self, tmp_path: Path
     ) -> None:

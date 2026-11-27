@@ -2156,8 +2156,25 @@ def format_problem(scanner: str, problem: Problem) -> str:
     return f"{scanner}\t{problem.rule}\t{problem.path}\t{problem.text}"
 
 
-def _ascii(line: str) -> str:
-    return line.encode("ascii", "backslashreplace").decode("ascii")
+def _shown(line: str) -> str:
+    """The line as text a terminal only shows, never acts on.
+
+    Every character that is not printable ASCII, except the tab between the
+    fields, comes out as a Python-style escape. Text from a plugin (a key, a
+    description, the message of an error) can hold an escape sequence for the
+    terminal or a line break that would split a line in two.
+    """
+    return "".join(
+        char
+        if char == "\t" or " " <= char <= "~"
+        else char.encode("unicode_escape").decode("ascii")
+        for char in line
+    )
+
+
+def _write(stream: TextIO, line: str) -> None:
+    """Write one shown line, with its line end, to a stream."""
+    stream.write(_shown(line) + "\n")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -2210,7 +2227,7 @@ def main(argv: Sequence[str] | None = None, *, out: TextIO | None = None) -> int
             else check_registry()
         )
     except (OSError, ValueError) as error:
-        print(_ascii(f"error: {error}"), file=sys.stderr)
+        _write(sys.stderr, f"error: {error}")
         return 2
     total = sum(len(rows) for rows in findings.values())
     if baseline is None:
@@ -2224,10 +2241,10 @@ def main(argv: Sequence[str] | None = None, *, out: TextIO | None = None) -> int
         lines = [f"new\t{format_problem(scanner, row)}" for scanner, row in new]
         lines += ["stale\t" + "\t".join(line) for line in stale]
     for line in lines:
-        print(_ascii(line), file=stdout)
-    print(
+        _write(stdout, line)
+    _write(
+        sys.stderr,
         f"checked {len(findings)} scanner(s) or root surface(s): {total} problem(s)",
-        file=sys.stderr,
     )
     return 1 if lines else 0
 
