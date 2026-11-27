@@ -265,10 +265,22 @@ def _reads_a_platform_argument_in_from_or_global_arg(item: Instruction) -> bool:
 
 # Images that only run on Windows: those under the registry's windows path, and the
 # .NET Framework images. Nano Server and Server Core are the Windows Server container
-# bases, so a name or tag on mcr.microsoft.com that holds either one is a Windows image
-# too ("windowsservercore" holds the second).
+# bases, so a tag that holds either name is a Windows image on any registry
+# ("windowsservercore" holds the second). A repository name that holds one proves
+# nothing, so only the tag counts.
 _WINDOWS_IMAGES = ("mcr.microsoft.com/windows", "mcr.microsoft.com/dotnet/framework/")
 _WINDOWS_NAMES = ("nanoserver", "servercore")
+
+
+def _tag(image: str) -> str:
+    """The tag of an image reference, or an empty string when it names none.
+
+    A digest after ``@`` is dropped first, and a colon that a slash follows is a
+    registry port, not a tag.
+    """
+    reference = image.partition("@")[0]
+    tag = reference.rpartition(":")[2] if ":" in reference else ""
+    return "" if "/" in tag else tag
 
 
 def _builds_a_windows_container(item: Instruction) -> bool:
@@ -278,8 +290,14 @@ def _builds_a_windows_container(item: Instruction) -> bool:
     image = (item.words[0] if item.words else "").strip("\"'").lower()
     if platform.startswith("windows") or image.startswith(_WINDOWS_IMAGES):
         return True
-    on_the_registry = image.startswith("mcr.microsoft.com/")
-    return on_the_registry and any(name in image for name in _WINDOWS_NAMES)
+    # Docker Hub's official images name their Windows variants this way: python
+    # 3.15-windowsservercore-ltsc2022 and golang 1.27-nanoserver-ltsc2022 are listed
+    # for windows-amd64 only. Read at docker-library/official-images commit
+    # 17883d23632b953bc523c6bed4c0b445f0f41a16, files library/python and library/golang:
+    # https://github.com/docker-library/official-images/blob/17883d23632b953bc523c6bed4c0b445f0f41a16/library/python#L84-L89
+    # https://github.com/docker-library/official-images/blob/17883d23632b953bc523c6bed4c0b445f0f41a16/library/golang#L54-L60
+    tag = _tag(image)
+    return any(name in tag for name in _WINDOWS_NAMES)
 
 
 # Each entry: the form, the probe that finds it, why it is refused and the pages it was
