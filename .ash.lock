@@ -26,7 +26,7 @@
           "symbol": "_run_declared_install_command"
         }
       ],
-      "sha256": "bf8b6c50a9d0c0c39309916be5ef9a6b903f558a9197c6ddfba219cadf4df013"
+      "sha256": "e7d034b686ee99d1bf2eb8178ef703eeacfe8f589d05be46b05878b082f3f2ae"
     },
     "automated_security_helper/cli/mcp/__init__.py": {
       "created": "2026-11-25T17:03:33Z",
@@ -46,7 +46,7 @@
           "symbol": "_validate_zip_member"
         }
       ],
-      "sha256": "e17db0c9766f6b023bad1457a5e057ac76ffadf757e132fb841e21cca20035ff"
+      "sha256": "078207fa4948d3ab40e71d50fb96ec57a631b38f6606e755360568d10dc465a5"
     },
     "automated_security_helper/interactions/run_ash_container.py": {
       "created": "2026-11-25T17:02:59Z",
@@ -76,7 +76,7 @@
           "symbol": "NpmAuditScanner._probe_npm_version"
         }
       ],
-      "sha256": "5c2fa1ac345989fe0c0e0569f7f16b8b2dff4c6ffcfc6a6d68f53392bd012405"
+      "sha256": "4e6521849e3ef7cf8a92b4bd8b82031a8bdadd9c66e210354f67df92f8afd92d"
     },
     "automated_security_helper/utils/content_db_refresh.py": {
       "created": "2026-11-25T17:03:23Z",

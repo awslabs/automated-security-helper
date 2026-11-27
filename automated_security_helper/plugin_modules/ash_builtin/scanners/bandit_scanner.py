@@ -1069,7 +1069,12 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # requirement handed to uv had no version constraint at all (any
         # bandit, the next major version included), unlike semgrep's, which
         # falls back to its default range the same way.
-        configured = self.config.options.tool_version
+        # Checked here rather than through ``_require_config``, so that this also
+        # runs on an object that carries only a configuration.
+        config = self.config
+        if config is None:
+            raise ScannerError(f"{self.__class__.__name__} has no configuration")
+        configured = config.options.tool_version
         if configured:
             return configured
         return BanditScannerConfigOptions.model_fields["tool_version"].default
@@ -1154,8 +1159,9 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         if config is not None:
             if hasattr(config, "model_dump") and callable(config.model_dump):
                 config = config.model_dump(by_alias=True)
-            replacement = self.config.__class__.model_validate(config)
-            if replacement.model_dump(by_alias=True) != self.config.model_dump(
+            current_config = self._require_config()
+            replacement = current_config.__class__.model_validate(config)
+            if replacement.model_dump(by_alias=True) != current_config.model_dump(
                 by_alias=True
             ):
                 self.config = replacement
@@ -1400,7 +1406,8 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
         context_config = getattr(self.context, "config", None)
         source_dir = Path(getattr(self.context, "source_dir", None) or ".")
-        configured = self.config.options.config_file
+        scanner_config = self._require_config()
+        configured = scanner_config.options.config_file
         configured_path = None
         refused_configured = False
         if configured is not None:
@@ -1476,7 +1483,8 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
         self.args.extra_args.append(
             ToolExtraArg(
-                key="--confidence-level", value=self.config.options.confidence_level
+                key="--confidence-level",
+                value=scanner_config.options.confidence_level,
             )
         )
         self.args.extra_args.append(ToolExtraArg(key="--severity-level", value="all"))
@@ -1485,7 +1493,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # format into bandit.sarif, and reading the results as SARIF failed the
         # scan. bandit cannot write two formats in one run, so none is added.
         not_produced = [
-            fmt for fmt in self.config.options.additional_formats if fmt != "sarif"
+            fmt for fmt in scanner_config.options.additional_formats if fmt != "sarif"
         ]
         if not_produced:
             ASH_LOGGER.warning(
@@ -1498,7 +1506,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 ),
                 extra=NO_MARKUP,
             )
-        if self.config.options.ignore_nosec:
+        if scanner_config.options.ignore_nosec:
             self.args.extra_args.append(ToolExtraArg(key="--ignore-nosec", value=None))
 
         required, _best_effort = self._configured_token_excludes(warn=True)
@@ -1529,13 +1537,14 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # Redacted: the entries are configured, a configured value can come from
         # the environment, and ash.log keeps these lines (DEBUG under --debug).
         environment_values = self._environment_values()
+        scanner_config = self._require_config()
         for item in active_ignore_paths(
-            self.config.options.excluded_paths,
+            scanner_config.options.excluded_paths,
             where="scanners.bandit.options.excluded_paths",
         ):
             ASH_LOGGER.debug(
                 text_without_values(
-                    f"Path '{item.path}' excluded from {self.config.name} scan "
+                    f"Path '{item.path}' excluded from {scanner_config.name} scan "
                     f"for reason: {item.reason}",
                     environment_values,
                 ),
@@ -1925,7 +1934,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         bound is measured on the resolved command, so the budget on Windows is
         what the other arguments leave.
         """
-        target_results_dir = self.results_dir.joinpath(target_type)
+        target_results_dir = self._require_results_dir().joinpath(target_type)
         results_file = target_results_dir.joinpath("bandit.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
 

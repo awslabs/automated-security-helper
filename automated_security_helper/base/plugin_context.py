@@ -167,12 +167,24 @@ class PluginContext(BaseModel):
     ]
     # work_dir and config declare a non-optional type and default to None, which
     # pydantic tolerates because defaults are not validated (see the note above
-    # on validate_assignment). The ignores below name that known gap; making the
-    # annotations honest is the wider change that note describes.
-    work_dir: Annotated[
-        Path, Field(description="Working directory for temporary files")
-    ] = None  # ty: ignore[invalid-assignment]
-    config: Annotated["AshConfig", Field(description="ASH configuration")] = None  # ty: ignore[invalid-assignment]
+    # on validate_assignment). The checker is given what they can hold: a work
+    # directory is None until _derive_work_dir derives one (a context built with
+    # model_construct can keep None), and the config is None for a context built
+    # without one. The runtime annotations stay as they are: Optional there would
+    # let an explicit None through validation and change the generated schemas,
+    # which is the wider change that note describes.
+    if TYPE_CHECKING:
+        work_dir: Annotated[
+            Optional[Path], Field(description="Working directory for temporary files")
+        ] = None
+        config: Annotated[
+            Optional["AshConfig"], Field(description="ASH configuration")
+        ] = None
+    else:
+        work_dir: Annotated[
+            Path, Field(description="Working directory for temporary files")
+        ] = None
+        config: Annotated["AshConfig", Field(description="ASH configuration")] = None
     ignore_suppressions: Annotated[
         bool, Field(description="Ignore all suppression rules")
     ] = False
@@ -439,6 +451,24 @@ class PluginContext(BaseModel):
         # Last, so the output and work directories are both settled.
         _record_derived_roots_on_config(self)
         return self
+
+
+def context_ash_config(context: PluginContext, owner: str) -> "AshConfig":
+    """The context's ASH configuration, or a ``ValueError`` naming ``owner``
+    when the context was built without one.
+
+    ``PluginContext.config`` defaults to None, and pydantic does not validate a
+    default, so a context built without a configuration keeps None rather than
+    the empty ``AshConfig`` its validator would build. A function rather than a
+    method so that a context double which sets only ``config`` still works. A
+    ``ValueError``, not ``ScannerError``: that lives in ``core``, and one more
+    import of ``core`` here would be one more edge against the layer order
+    (``tests/unit/test_layer_dag_boundaries.py``).
+    """
+    ash_config = context.config
+    if ash_config is None:
+        raise ValueError(f"{owner} has no ASH configuration")
+    return ash_config
 
 
 def _record_derived_roots_on_config(context: Any) -> None:

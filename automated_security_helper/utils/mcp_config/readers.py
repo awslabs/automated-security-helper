@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from automated_security_helper.utils.mcp_config.json_spans import (
     JsonSpanError,
+    JsonSpans,
     parse_json_with_spans,
 )
 from automated_security_helper.utils.mcp_config.model import (
@@ -29,6 +30,7 @@ from automated_security_helper.utils.mcp_config.model import (
     pointer_join,
 )
 from automated_security_helper.utils.mcp_config.toml_spans import (
+    TomlSpans,
     parse_toml_with_spans,
 )
 
@@ -214,6 +216,7 @@ def parse_mcp_config_text(
     if fmt is None:
         return []
     source_file = rel_path.replace("\\", "/")
+    parsed: JsonSpans | TomlSpans
     try:
         if fmt.syntax == "toml":
             parsed = parse_toml_with_spans(text)

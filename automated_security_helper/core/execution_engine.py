@@ -870,6 +870,13 @@ class ScanExecutionEngine:
         reset_unmatched_engine_warnings()
 
         config = self._context.config
+        if config is None:
+            # ensure_initialized puts a configuration on the context before it
+            # calls this.
+            raise ValueError(
+                "The execution engine's context has no configuration to check "
+                "suppression scopes against"
+            )
         suppressions = getattr(config.global_settings, "suppressions", None)
         if not suppressions:
             return

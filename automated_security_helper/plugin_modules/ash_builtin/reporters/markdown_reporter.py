@@ -498,7 +498,7 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
     def report(self, model: "AshAggregatedResults") -> str:
         if isinstance(self.config, dict):
             self.config = MarkdownReporterConfig.model_validate(self.config)
-        options = self.config.options
+        options = self._require_config().options
         emitter = ReportContentEmitter(model, human_presentation=True)
         metadata = emitter.get_metadata()
         summary = emitter.get_scan_summary()

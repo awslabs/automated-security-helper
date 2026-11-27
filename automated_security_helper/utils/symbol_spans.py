@@ -307,7 +307,7 @@ def _load_language(grammar: SymbolGrammar) -> Any:
             # The grammar's loader hands back the language pointer; py-tree-sitter
             # marks the int overload of Language() deprecated in favor of a
             # capsule, which the loaders here do not return.
-            language = tree_sitter.Language(getattr(module, grammar.loader)())  # ty: ignore[deprecated]
+            language = tree_sitter.Language(getattr(module, grammar.loader)())
         except (ImportError, AttributeError, TypeError, ValueError) as exc:
             raise SymbolsUnavailableError(f"{type(exc).__name__}: {exc}") from exc
         _language_cache[key] = language
@@ -539,7 +539,7 @@ def _unsupported_reason(file_name: str) -> str:
 #: A scan builds a fresh resolver for each suppression pass (per scanner, then
 #: merged), so a per-resolver record repeated every stale-file warning, and its
 #: re-hash, once per pass.
-_LOCK_NOTICED: set = set()
+_LOCK_NOTICED: set[Tuple[str, str, str]] = set()
 
 
 def clear_symbol_cache() -> None:

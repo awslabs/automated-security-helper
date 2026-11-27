@@ -11,7 +11,6 @@ import re
 import threading
 from pathlib import Path
 from typing import (
-    TYPE_CHECKING,
     Annotated,
     Any,
     Callable,
@@ -1001,16 +1000,11 @@ class PluginBase(UVToolMixin, BaseModel):
         # environment, and an error's text goes wherever the error is shown.
         hide_input_in_errors=True,
     )
-    if TYPE_CHECKING:
-        # A phase hands every plugin its context before any method that reads
-        # a directory from it runs; the few that can be reached without one
-        # check ``is None`` first. The runtime field below accepts None so a
-        # plugin can still be built on its own.
-        # The ``= None`` keeps it optional in the constructor the checker
-        # sees; this branch is never evaluated.
-        context: PluginContext = None  # ty: ignore[invalid-assignment]
-    else:
-        context: PluginContext | None = None
+    # A phase hands every plugin its context before any method that reads a
+    # directory from it runs, but a plugin can still be built on its own, so the
+    # field can be None. A method that needs it reads it through
+    # ``_require_context``, which names the plugin when there is none.
+    context: PluginContext | None = None
     config: PluginConfigBase | None = None
 
     output: List[str] = []
@@ -1133,15 +1127,42 @@ class PluginBase(UVToolMixin, BaseModel):
         """The plugin's context, or a ``ScannerError`` naming the plugin when it
         was built without one.
 
-        The field is typed as always set for the methods that run under a phase,
-        which hands every plugin its context first; a plugin built on its own
-        can still reach one of those methods without it, and this is where that
-        stops with a named error rather than an ``AttributeError`` on ``None``.
+        A phase hands every plugin its context before it runs one; a plugin
+        built on its own can still reach a method that reads the context, and
+        this is where that stops with a named error rather than an
+        ``AttributeError`` on ``None``.
         """
-        context: PluginContext | None = self.context
+        context = self.context
         if context is None:
             raise ScannerError(f"No context provided for {self.__class__.__name__}!")
         return context
+
+    def _require_work_dir(self) -> Path:
+        """The context's work directory, or a ``ScannerError`` naming the plugin
+        when its context has none.
+
+        A validated context always has one (``PluginContext._derive_work_dir``
+        derives it from the output directory); a context built with
+        ``model_construct`` and no work directory does not.
+        """
+        work_dir = self._require_context().work_dir
+        if work_dir is None:
+            raise ScannerError(f"{self.__class__.__name__} has no work directory")
+        return work_dir
+
+    def _require_results_dir(self) -> Path:
+        """The plugin's results directory, or a ``ScannerError`` naming the
+        plugin when none has been set.
+
+        A scanner's and a converter's ``model_post_init`` set it before the
+        methods that write there run; a plugin reached without it stops here
+        with a named error rather than a ``TypeError`` or ``AttributeError`` on
+        ``None`` further down.
+        """
+        results_dir = self.results_dir
+        if results_dir is None:
+            raise ScannerError(f"{self.__class__.__name__} has no results directory")
+        return Path(results_dir)
 
     def __init__(self, **data: Any) -> None:
         # The caller's own declaration wins over the type inference: a dict

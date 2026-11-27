@@ -451,7 +451,11 @@ class ScanOptions(BaseModel):
 # Keyed by exactly the MinSeverity values, which are what the CLI offers and what
 # ScanOptions accepts, so the lookup in _compute_exit_code never meets a value it does
 # not rank. tests/unit/cli/test_min_severity_is_validated.py holds the two together.
-_SEVERITY_RANK = {
+# Typed by the text the other lookups pass (a result's severity word, a count
+# bucket): the member keys are str, so text finds its rank, and a ladder word the
+# scale does not rank (info) takes the lookup's default.
+# tests/unit/vocab/test_status_family_vocab.py pins both.
+_SEVERITY_RANK: Dict[str, int] = {
     MinSeverity.CRITICAL: 3,
     MinSeverity.HIGH: 3,
     MinSeverity.MEDIUM: 2,

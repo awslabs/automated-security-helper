@@ -185,7 +185,18 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    ClassVar,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Set,
+    Tuple,
+)
 
 from pydantic import Field
 
@@ -217,6 +228,9 @@ from automated_security_helper.utils.config_trust import (
 from automated_security_helper.utils.image_reference import checked_image_reference
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+
+if TYPE_CHECKING:
+    from automated_security_helper.base.scanner_plugin import ImageLocator
 
 # UNBOUNDED_TRIVY_TIMEOUT and trivy_timeout live in the shared base since trivy-repo
 # passes the same bound; both names stay importable from this module.
@@ -698,7 +712,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         return final_args, results_file, subprocess_env
 
     def _execute_image_scan(
-        self, image
+        self, image: ImageLocator
     ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Resolve the argv, results path and environment for one image run.
 
@@ -782,7 +796,13 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             # the manifest the finding ids key on, however the tag has moved.
             # Read against the one reference grammar once more, whichever way
             # the locator was built: it lands in a positional slot.
-            target_token = checked_image_reference(image.pulled_ref())
+            pulled = image.pulled_ref()
+            if pulled is None:
+                raise ScannerError(
+                    f"container image at {image.shown()} has neither a reference "
+                    "nor a saved archive for trivy image to read"
+                )
+            target_token = checked_image_reference(pulled)
 
         original_subcommands = self.subcommands
         try:
@@ -887,9 +907,9 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         )
         from automated_security_helper.utils.subprocess_utils import spawn_run
 
-        json_path = getattr(self, "_image_layers_json", None)
+        json_path: Optional[Path] = getattr(self, "_image_layers_json", None)
         argv = json_argv(final_args, json_path) if json_path is not None else None
-        if argv is None:
+        if json_path is None or argv is None:
             self._plugin_log(
                 "The image scan's layer attribution is skipped: the invocation "
                 "names no --format and --output to ask for trivy's JSON report.",

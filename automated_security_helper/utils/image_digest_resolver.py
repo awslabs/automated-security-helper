@@ -50,7 +50,7 @@ import http.client
 import json
 import re
 import socket
-from typing import Callable, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 from urllib.parse import quote
 
 from automated_security_helper.core.asset import ImageLocator
@@ -70,7 +70,7 @@ _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
 #: ``Runner(argv, timeout)`` returns ``(exit_code, stdout)``; tests pass a fake
 #: so no suite run reads a registry.
-Runner = Callable[[list, float], "tuple[int, str]"]
+Runner = Callable[[list[str], float], "tuple[int, str]"]
 
 #: ``Inspector(ref)`` returns ``(digest or None, why it answered nothing)``;
 #: tests pass a fake so no suite run asks an engine.
@@ -86,7 +86,7 @@ def _pinned_by_digest(ref: str) -> bool:
     return _DIGEST.fullmatch(ref.rsplit("@", 1)[-1]) is not None
 
 
-def _spawn(argv: list, timeout: float) -> "tuple[int, str]":
+def _spawn(argv: list[str], timeout: float) -> "tuple[int, str]":
     from automated_security_helper.utils.subprocess_utils import spawn_run
 
     completed = spawn_run(
@@ -261,8 +261,8 @@ def payload_digest(image: ImageLocator) -> Tuple[Optional[str], str]:
         try:
             # Sized: an index is a few hundred bytes; read(cap + 1) so a
             # bigger file is seen as over the cap rather than truncated.
-            with open(index, "rb") as handle:
-                body = handle.read(_MAX_PAYLOAD_RECORD_BYTES + 1)
+            with open(index, "rb") as index_handle:
+                body = index_handle.read(_MAX_PAYLOAD_RECORD_BYTES + 1)
             if len(body) > _MAX_PAYLOAD_RECORD_BYTES:
                 return None, "its index.json is too large to be an image index"
             return _single_index_digest(json.loads(body))
@@ -273,7 +273,7 @@ def payload_digest(image: ImageLocator) -> Tuple[Optional[str], str]:
     not_regular: list[str] = []
     try:
         with tarfile.open(image.oci_archive, "r:") as saved:
-            records: dict = {}
+            records: dict[str, Any] = {}
             for member in saved:
                 name = member.name.lstrip("./")
                 if name not in ("manifest.json", "index.json"):
@@ -341,7 +341,7 @@ def resolve_image_locator(
     offline: bool,
     runner: Optional[Runner] = None,
     crane: Optional[str] = None,
-    inspector: "Optional[tuple[str, Inspector]]" = None,
+    inspector: "Optional[tuple[str, Optional[Inspector]]]" = None,
     detect_engine: bool = True,
 ) -> ImageLocator:
     """*image* with ``resolved_digest`` filled where a rung can say it.
@@ -382,7 +382,7 @@ def resolve_image_locator(
         return image
 
     ref = image.ref
-    reasons = []
+    reasons: list[str] = []
 
     def fall_back() -> ImageLocator:
         ASH_LOGGER.warning(

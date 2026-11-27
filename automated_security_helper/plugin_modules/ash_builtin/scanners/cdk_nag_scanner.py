@@ -1549,7 +1549,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
     def nothing_to_scan_reason(self) -> str | None:
         """None when either tree holds a CloudFormation template; see the base class."""
-        return cloudformation_nothing_to_scan_reason(self.context)
+        return cloudformation_nothing_to_scan_reason(self._require_context())
 
     def missing_dependency_reason(self) -> str:
         """Name what cdk-nag lacks: the CDK packages, or node.
@@ -1837,8 +1837,9 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # nothing_to_scan_reason, which answers from this same selection. The
         # selection drops the files the global ignore paths ignore and honors the
         # repository's ignore files as the scan set does.
+        context = self._require_context()
         scannable = cloudformation_candidate_files(
-            self.context, target_type, global_ignore_paths
+            context, target_type, global_ignore_paths
         )
 
         # The counters are already at 0 here, set at the top of the method. Deliberately not
@@ -1869,7 +1870,8 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # appended to on both failure paths and never read, so a run that failed on every
         # template still produced an empty-but-successful report. They are attributes rather than
         # locals precisely so the executor can read them and status computation can see them.
-        if _include_compliant_checks_requested(self.config.options):
+        scanner_config = self._require_config()
+        if _include_compliant_checks_requested(scanner_config.options):
             # Said once per scan. The option is documented as adding compliant-resource
             # findings, and cdk-nag 3's validation report lists violations only, so
             # there is nothing for it to add; a run that set it used to get the same
@@ -1897,9 +1899,9 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # The tree the candidates came from. Each template is checked against it here,
         # before it reaches the worker, and the worker reads it under the same rule.
         scan_root = (
-            self.context.work_dir
+            self._require_work_dir()
             if target_type == TargetType.CONVERTED
-            else self.context.source_dir
+            else context.source_dir
         )
         # Candidates the scanned-tree rule refused, counted so a target that
         # attempted nothing can say they were there (below the loop).
@@ -1939,7 +1941,9 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 try:
                     # Run CDK synthesis for this file
                     config_options: CdkNagScannerConfigOptions = (
-                        CdkNagScannerConfigOptions.model_validate(self.config.options)
+                        CdkNagScannerConfigOptions.model_validate(
+                            scanner_config.options
+                        )
                     )
                     nag_packs = config_options.nag_packs
                     if isinstance(config_options.nag_packs, CdkNagPacks):
@@ -1979,7 +1983,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                         # target that was not evaluated as requested must never read as clean.
                         # Every other consumer of this field in the codebase reads it directly
                         # too, so this is also the house form.
-                        honor_template_suppressions=not self.context.ignore_suppressions,
+                        honor_template_suppressions=not context.ignore_suppressions,
                         scan_root=scan_root,
                     )
                     if nag_result_dict is None:
@@ -2408,7 +2412,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         rules: List[ReportingDescriptor] = [
             _reporting_descriptor_for(
                 representative,
-                tool_name=self.config.name,
+                tool_name=scanner_config.name,
                 tool_type=self.tool_type or ScannerToolType.UNKNOWN,
             )
             for representative in rule_reps.values()
@@ -2544,11 +2548,12 @@ if __name__ == "__main__":
 
     AshConfig.model_rebuild()
     ASH_LOGGER.debug("Running cdk-nag via __main__")
+    scanner_context = PluginContext(
+        source_dir=Path.cwd(),
+        output_dir=Path.cwd().joinpath(".ash", "ash_output"),
+    )
     scanner = CdkNagScanner(
-        context=PluginContext(
-            source_dir=Path.cwd(),
-            output_dir=Path.cwd().joinpath(".ash", "ash_output"),
-        ),
+        context=scanner_context,
         config=CdkNagScannerConfig(
             options=CdkNagScannerConfigOptions(
                 nag_packs=CdkNagPacks(
@@ -2562,7 +2567,7 @@ if __name__ == "__main__":
         ),
     )
     report = scanner.scan(
-        target=scanner.context.source_dir, target_type=TargetType.SOURCE
+        target=scanner_context.source_dir, target_type=TargetType.SOURCE
     )
 
     from automated_security_helper.utils.command_safe_stream import (

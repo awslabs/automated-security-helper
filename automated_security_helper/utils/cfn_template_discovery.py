@@ -92,7 +92,7 @@ from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
 from automated_security_helper.utils.link_exclusions import drop_ignored
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.scan_targets import scan_targets
+from automated_security_helper.utils.scan_targets import context_work_dir, scan_targets
 from automated_security_helper.utils.scanned_tree import TreeInputRefused
 
 if TYPE_CHECKING:
@@ -147,7 +147,7 @@ def candidate_files(
     enumeration order.
     """
     if target_type == TargetType.CONVERTED:
-        found = [str(p) for p in Path(context.work_dir).glob("**/*.*")]
+        found = [str(p) for p in context_work_dir(context).glob("**/*.*")]
     else:
         if global_ignore_paths is None:
             # The caller did not say (nothing_to_scan_reason has no scan() call
@@ -189,7 +189,9 @@ def discover_templates(
     result = TemplateDiscovery()
     # The tree CfnNagScanner.scan reads each candidate against.
     scan_root = (
-        context.work_dir if target_type == TargetType.CONVERTED else context.source_dir
+        context_work_dir(context)
+        if target_type == TargetType.CONVERTED
+        else context.source_dir
     )
     for path in candidate_files(context, target_type, global_ignore_paths):
         if not path.is_file():

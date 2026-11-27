@@ -1012,6 +1012,7 @@ def _replace_staged(partial: Path, target: Path) -> Optional[str]:
                 if not _rename_waits_on_readers() or attempt == _REPLACE_ATTEMPTS - 1:
                     raise
                 time.sleep(_REPLACE_RETRY_SECONDS)
+        raise AssertionError("unreachable: the last attempt returns or raises")
     finally:
         partial.unlink(missing_ok=True)
 
@@ -1323,13 +1324,18 @@ def _rematerialize_binding(sid: str) -> Tuple[Optional[str], Optional[str]]:
         adopted = False
         with _session_lock:
             current = _session_state.get(sid)
+            if current is None:
+                # The session's state was dropped meanwhile (clear_session_state,
+                # at the session's end): no binding to answer with, and none to
+                # write again.
+                return None, None
             # A copy, so the checks below, which stat and read every recorded
             # file, run outside the lock on the paths and digests of one moment
             # (as ``_bound_config_paths`` does). The binding's write lock is held,
             # so no bind writes these files meanwhile.
-            snapshot = copy.copy(current) if current is not None else None
+            snapshot = copy.copy(current)
         if current is not state:
-            if snapshot is None or snapshot.config_path is None:
+            if snapshot.config_path is None:
                 return None, None
             if _binding_intact(snapshot):
                 return snapshot.config_path, snapshot.trusted_config_path

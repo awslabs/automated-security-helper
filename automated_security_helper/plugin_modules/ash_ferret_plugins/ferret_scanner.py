@@ -1606,7 +1606,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             )
 
         if not is_compatible:
-            if self.config.options.skip_version_check:
+            if self._require_config().options.skip_version_check:
                 self._plugin_log(
                     f"Version compatibility check skipped (skip_version_check=true). {warning}",
                     level=logging.WARNING,
@@ -1643,7 +1643,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         # Clear extra_args to prevent duplication on repeated calls
         self.args.extra_args = []
 
-        options = self.config.options
+        options = self._require_config().options
 
         # Confidence levels
         if options.confidence_levels != "all":
@@ -1802,7 +1802,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         # config/path_trust.py. The bundled default is used instead. The path
         # returned is the one honored_path checked, never one rebuilt from the
         # option's value.
-        source_dir = self.context.source_dir
+        source_dir = self._require_context().source_dir
         context_config = getattr(self.context, "config", None)
 
         # 1. Check explicitly specified config file
@@ -1890,12 +1890,12 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
         # 2. Search for config files in source directory
         possible_paths = [
-            self.context.source_dir / "ferret.yaml",
-            self.context.source_dir / "ferret.yml",
-            self.context.source_dir / ".ferret.yaml",
-            self.context.source_dir / ".ferret.yml",
-            self.context.source_dir / ".ash" / "ferret.yaml",
-            self.context.source_dir / ".ash" / "ferret-scan.yaml",
+            source_dir / "ferret.yaml",
+            source_dir / "ferret.yml",
+            source_dir / ".ferret.yaml",
+            source_dir / ".ferret.yml",
+            source_dir / ".ash" / "ferret.yaml",
+            source_dir / ".ash" / "ferret-scan.yaml",
         ]
 
         for candidate in possible_paths:
@@ -1933,10 +1933,11 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         does not turn a root working directory into a read grant
         (``sandbox.policy._readable_cwd``).
         """
+        source_dir = self._require_context().source_dir
         return cwd_outside_scanned_tree(
-            self._ferret_target or Path(os.path.abspath(self.context.source_dir)),
+            self._ferret_target or Path(os.path.abspath(source_dir)),
             results_dir=results_dir,
-            source_dir=self.context.source_dir,
+            source_dir=source_dir,
             config=getattr(self.context, "config", None),
         )
 
@@ -1948,7 +1949,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
     def _bundled_config(self) -> Path | None:
         """The config bundled with this plugin, when use_default_config allows it."""
-        if self.config.options.use_default_config and DEFAULT_FERRET_CONFIG.exists():
+        if (
+            self._require_config().options.use_default_config
+            and DEFAULT_FERRET_CONFIG.exists()
+        ):
             self._plugin_log(
                 f"Using default Ferret config bundled with plugin: {DEFAULT_FERRET_CONFIG}",
                 level=logging.DEBUG,
@@ -2102,7 +2106,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             target = Path(os.path.abspath(target))
             self._ferret_target = target
             target_results_dir = Path(
-                os.path.abspath(self.results_dir.joinpath(target_type))
+                os.path.abspath(self._require_results_dir().joinpath(target_type))
             )
             results_file = target_results_dir.joinpath("ferret-scan.sarif")
             target_results_dir.mkdir(exist_ok=True, parents=True)
@@ -2110,7 +2114,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             # A local copy, so self.config.options.exclude_patterns is not changed
             # across calls. The global ignore paths come last
             # (_ignore_exclude_patterns), resolved to the paths ASH ignores.
-            exclude_patterns = list(self.config.options.exclude_patterns)
+            exclude_patterns = list(self._require_config().options.exclude_patterns)
             # ASH's own output directories, as the escaped full path followed by
             # the separator and "*". 2.4.x tests a pattern as a glob and as a
             # substring of the full path, 2.5.x as a glob only (DEVELOPMENT.md
@@ -2283,14 +2287,15 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             # put the configured list back whether or not resolving raises: the
             # same instance scans the next target, which must not inherit this
             # target's absolute patterns.
-            original_patterns = self.config.options.exclude_patterns
-            self.config.options.exclude_patterns = exclude_patterns
+            options = self._require_config().options
+            original_patterns = options.exclude_patterns
+            options.exclude_patterns = exclude_patterns
             try:
                 final_args = self._resolve_arguments(
                     target=target, results_file=results_file
                 )
             finally:
-                self.config.options.exclude_patterns = original_patterns
+                options.exclude_patterns = original_patterns
 
             # The values hook is overridable and is read once, guarded, for the
             # log line and both SARIF records. When it raised or gave no usable
@@ -2405,7 +2410,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             # Attach scanner details
             sarif_report = attach_scanner_details(
                 sarif_report=sarif_report,
-                scanner_name=self.config.name,
+                scanner_name=self._require_config().name,
                 scanner_version=getattr(self, "tool_version", None),
                 invocation_details={
                     "command_line": shown_command,

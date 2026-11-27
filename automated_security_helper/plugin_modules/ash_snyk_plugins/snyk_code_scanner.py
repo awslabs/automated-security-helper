@@ -961,7 +961,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         # are the only guard it has.
         try:
             if (
-                not self.config.options.honor_tree_exclusions
+                not self._require_config().options.honor_tree_exclusions
                 and target_type != TargetType.SOURCE
             ):
                 # The converted target is tested where ASH wrote it, so the
@@ -993,7 +993,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             # Undone in the finally: the copy snyk tests for the source target, and
             # the sandbox's read grant for it.
             cleanup = ExitStack()
-            target_results_dir = self.results_dir.joinpath(target_type)
+            target_results_dir = self._require_results_dir().joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             target_results_dir.mkdir(exist_ok=True, parents=True)
             # A report left by an earlier run must not be read as this run's: snyk
@@ -1010,7 +1010,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                     self.targets_attempted = 0
                     self._post_scan(target=target, target_type=target_type)
                     return True
-                if not self.config.options.honor_tree_exclusions:
+                if not self._require_config().options.honor_tree_exclusions:
                     # The copy holds exactly the files snyk is given, so an
                     # exclusion file counts here only when it reaches snyk. A
                     # .gitignore in the copy was honored by the scan set already
@@ -1134,7 +1134,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                     # Attach scanner details for proper identification
                     sarif_report = attach_scanner_details(
                         sarif_report=sarif_report,
-                        scanner_name=self.config.name,
+                        scanner_name=self._require_config().name,
                         scanner_version=getattr(self, "tool_version", None),
                         invocation_details={
                             "command_line": recorded_attach_line,
@@ -1260,9 +1260,10 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
 
         root = Path(target)
         temp_root = Path(os.path.realpath(tempfile.gettempdir()))
+        context_output_dir = self._require_context().output_dir
         for name, directory in (
             ("scanned directory", root),
-            ("output directory", Path(self.context.output_dir)),
+            ("output directory", Path(context_output_dir)),
         ):
             real = Path(os.path.realpath(directory))
             if temp_root == real or real in temp_root.parents:
@@ -1275,7 +1276,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             temp_root,
             older_than=self._effective_scan_timeout() or _UNBOUNDED_SWEEP_AGE_SECONDS,
             # Never the scan's own directories, whatever they are named.
-            keep=(root, Path(self.context.output_dir)),
+            keep=(root, Path(context_output_dir)),
         )
         staged = Path(tempfile.mkdtemp(prefix=_COPY_PREFIX))
         # Registered first, so it is released last: the copy is removed while the
@@ -1317,7 +1318,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         deferred_links: List[tuple[Path, Path, str]] = []
         for name in scan_set(
             source=str(root),
-            output=str(self.context.output_dir),
+            output=str(context_output_dir),
             honor_ignore_files=honors_ignore_files(
                 getattr(self.context, "config", None)
             ),

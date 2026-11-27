@@ -77,17 +77,21 @@ class PluginConfigBase(RedactedSection):
             return data
         raise ValueError(" ".join(problems))
 
-    name: Annotated[
-        str,
-        Field(
-            min_length=1,
-            description="Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
-            pattern=r"^[a-zA-Z][\w-]+$",
-        ),
-        # A subclass or the loader fills the name in; the base default is None,
-        # which pydantic does not validate. Typing it Optional would change the
-        # generated JSON schema of every plugin config.
-    ] = None  # ty: ignore[invalid-assignment]
+    # A subclass or the loader fills the name in; the base default is None,
+    # which pydantic does not validate, so the checker is told the name can be
+    # None. Typing it Optional at runtime would change the generated JSON schema
+    # of every plugin config.
+    if typing.TYPE_CHECKING:
+        name: Optional[str] = None
+    else:
+        name: Annotated[
+            str,
+            Field(
+                min_length=1,
+                description="Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
+                pattern=r"^[a-zA-Z][\w-]+$",
+            ),
+        ] = None
     enabled: Annotated[bool, Field(description="Whether the component is enabled")] = (
         True
     )

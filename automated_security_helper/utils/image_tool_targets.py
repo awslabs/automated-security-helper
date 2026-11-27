@@ -106,7 +106,13 @@ def stereoscope_target(
         engine = detect_container_engine()
     # Digest-pinned where the REGISTRY named the digest (ImageLocator.pulled_ref):
     # the tool then pulls exactly the manifest the finding ids key on.
-    ref = checked_image_reference(image.pulled_ref())
+    pulled = image.pulled_ref()
+    if pulled is None:
+        raise ValueError(
+            "the container image has neither a reference, a saved archive nor a "
+            "layout for the tool to read"
+        )
+    ref = checked_image_reference(pulled)
     if _schemeless(image, engine, remote_daemon):
         return ref
     if engine == ContainerEngine.DOCKER:

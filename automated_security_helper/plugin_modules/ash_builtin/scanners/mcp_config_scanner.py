@@ -101,7 +101,7 @@ from typing import (
 )
 from urllib.parse import urlsplit
 
-from pydantic import Field
+from pydantic import AnyUrl, Field
 
 from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -184,6 +184,9 @@ _LEVEL_BY_SEVERITY: Dict[str, Level] = {
     "MEDIUM": Level.warning,
     "LOW": Level.note,
 }
+
+# Keep below the rule tables: line-based suppressions pin the RULE_ENV_SECRET lines.
+from automated_security_helper.models.vocab import TargetType
 
 #: Programs that raise the privilege a command runs with.
 PRIVILEGE_COMMANDS: FrozenSet[str] = frozenset({"sudo", "doas", "su", "pkexec"})
@@ -927,7 +930,7 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
         )
     )
 
-    def model_post_init(self, context):
+    def model_post_init(self, context: Any) -> None:
         if self.config is None:
             self.config = McpConfigScannerConfig()
         self.command = "ash-mcp-config-scanner"
@@ -958,7 +961,12 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
             options.model_dump() if options is not None else {}
         )
 
-    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+    def _execute_scan(
+        self,
+        target: Path,
+        target_type: TargetType,
+        global_ignore_paths: List[IgnorePathWithReason],
+    ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Abstract stub: this scanner overrides scan() directly; it is unreachable."""
         raise NotImplementedError(
             f"{self.__class__.__name__} overrides scan() directly."
@@ -971,7 +979,9 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
     ) -> List[McpServerEntry]:
         """The entries of one config file; a file that cannot be read adds a note."""
         try:
-            with open_in_scanned_tree(path, self.context.source_dir) as handle:
+            with open_in_scanned_tree(
+                path, self._require_context().source_dir
+            ) as handle:
                 data = handle.read(MAX_CONFIG_BYTES + 1)
         except TreeInputRefused:
             notes.append(
@@ -1026,7 +1036,7 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
             tags=[
                 "mcp-config",
                 "security",
-                f"tool_name::{self.config.name}",
+                f"tool_name::{self._require_config().name}",
                 f"tool_type::{tool_type}",
             ],
         )
@@ -1075,7 +1085,9 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
                 fullName="ASH MCP server config policy scanner",
                 organization="awslabs",
                 version=self.tool_version,
-                informationUri="https://github.com/awslabs/automated-security-helper",
+                informationUri=AnyUrl(
+                    "https://github.com/awslabs/automated-security-helper"
+                ),
                 rules=[],
             )
         )
@@ -1088,21 +1100,21 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
             exitCode=self.exit_code,
             exitCodeDescription="\n".join([*self.errors[errors_before:], *notes]),
             workingDirectory=ArtifactLocation(uri=get_shortest_name(input=target)),
-            properties=PropertyBag(tool=tool),
+            properties=PropertyBag.model_validate({"tool": tool}),
         )
         return SarifReport(
             version="2.1.0",
             runs=[Run(tool=tool, invocations=[invocation], results=results)],
         )
 
-    def scan(  # type: ignore[override]
+    def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: Any = None,
-        *args,
-        **kwargs,
+        *args: Any,
+        **kwargs: Any,
     ) -> SarifReport | bool:
         """Read every MCP config file of the scan set and report policy violations.
 
@@ -1133,20 +1145,23 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
             self._post_scan(target=target, target_type=target_type)
             return False
 
-        results_file = self.results_dir.joinpath(target_type, "results_sarif.sarif")
+        results_file = self._require_results_dir().joinpath(
+            target_type, "results_sarif.sarif"
+        )
         results_file.parent.mkdir(exist_ok=True, parents=True)
         notes: List[str] = []
         results: List[Result] = []
         if target_type == "source":
+            context = self._require_context()
             candidates = scan_set(
-                source=self.context.source_dir,
-                output=self.context.output_dir,
-                honor_ignore_files=honors_ignore_files(self.context.config),
-                run_id=getattr(self.context, "run_id", None),
+                source=context.source_dir,
+                output=context.output_dir,
+                honor_ignore_files=honors_ignore_files(context.config),
+                run_id=getattr(context, "run_id", None),
             )
             files: Dict[str, str] = {}
             for path in candidates:
-                display = relative_display(path, self.context.source_dir)
+                display = relative_display(path, context.source_dir)
                 if detect_format(display) is not None:
                     files[display] = path
             results = self.evaluate_files(files, notes)

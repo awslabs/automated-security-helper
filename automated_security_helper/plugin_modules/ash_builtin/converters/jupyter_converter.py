@@ -42,6 +42,7 @@ from automated_security_helper.base.options import (
     ConverterOptionsBase,
     tool_version_constraint,
 )
+from automated_security_helper.base.plugin_context import context_ash_config
 from automated_security_helper.base.uv_tool_mixin import (
     deferred_tool_version_probes,
     tool_name,
@@ -381,13 +382,30 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             return nullcontext()
         return plugin_probe_scope(self, self.context)
 
+    def _jupyter_options(self) -> JupyterConverterConfigOptions:
+        """This converter's own options: the nbconvert version and install timeout.
+
+        Raises:
+            ScannerError: When the converter has no configuration.
+            TypeError: When it runs on the generic converter configuration, which
+                declares neither option.
+        """
+        config = self._require_config()
+        if not isinstance(config, JupyterConverterConfig):
+            raise TypeError(
+                f"{self.__class__.__name__} runs on the generic converter "
+                "configuration, which has no nbconvert version or install "
+                "timeout options"
+            )
+        return config.options
+
     def _get_tool_version_constraint(self) -> Optional[str]:
         """Get version constraint for nbconvert installation.
 
         Returns:
             Version constraint string for nbconvert (e.g., ">=7.16.0") or None for latest
         """
-        return self.config.options.tool_version
+        return self._jupyter_options().tool_version
 
     def _get_tool_package_extras(self) -> Optional[List[str]]:
         """Get package extras for nbconvert installation.
@@ -528,7 +546,9 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                 # succeeds. With the install failing (offline, say), the
                 # converter is missing, with the verification's reason, rather
                 # than ready with every notebook failing at conversion.
-                if self._install_uv_tool(timeout=self.config.options.install_timeout):
+                if self._install_uv_tool(
+                    timeout=self._jupyter_options().install_timeout
+                ):
                     # The refused copy is detail here, logged once with its
                     # host path (found.detail): the scan still converts,
                     # through uv.
@@ -546,7 +566,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
 
             # Tool not available, attempt installation
             installation_success = self._install_uv_tool(
-                timeout=self.config.options.install_timeout
+                timeout=self._jupyter_options().install_timeout
             )
 
             if installation_success:
@@ -649,7 +669,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         requirement = self._shown_uv_from_spec()
         if executable is None:
             executable, refused = lookup_for_scan(
-                tool_name(self), self.context.source_dir
+                tool_name(self), self._require_context().source_dir
             )
             if executable is None:
                 reason = refused or (
@@ -894,12 +914,13 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         the orchestrator's did, instead of converting notebooks from another
         project's output.
         """
-        workspace_output_dir = getattr(self.context, "workspace_output_dir", None)
+        context = self._require_context()
+        workspace_output_dir = getattr(context, "workspace_output_dir", None)
         ipynb_files = scan_set(
-            source=self.context.source_dir,
-            output=self.context.output_dir,
-            honor_ignore_files=honors_ignore_files(self.context.config),
-            run_id=getattr(self.context, "run_id", None),
+            source=context.source_dir,
+            output=context.output_dir,
+            honor_ignore_files=honors_ignore_files(context.config),
+            run_id=getattr(context, "run_id", None),
             workspace_output_dir=(
                 None if workspace_output_dir is None else str(workspace_output_dir)
             ),
@@ -936,8 +957,12 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         what the conversion would have done.
         """
         return ignore_paths_that_skip_scanning(
-            active_ignore_paths(self.context.config.global_settings.ignore_paths),
-            ignore_suppressions=self.context.ignore_suppressions,
+            active_ignore_paths(
+                context_ash_config(
+                    self._require_context(), self.__class__.__name__
+                ).global_settings.ignore_paths
+            ),
+            ignore_suppressions=self._require_context().ignore_suppressions,
         )
 
     def _ignored_by(
@@ -955,7 +980,11 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         if not ignore_paths:
             return None
         try:
-            rel_path = Path(ipynb_file).relative_to(self.context.source_dir).as_posix()
+            rel_path = (
+                Path(ipynb_file)
+                .relative_to(self._require_context().source_dir)
+                .as_posix()
+            )
         except ValueError:
             return None
         for ignore_path in ignore_paths:
@@ -979,7 +1008,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         ignore_paths = self._ignore_paths_skipping_conversion()
         for notebook in self._notebooks_in_scan_set():
             if (
-                refusal_reason(notebook, self.context.source_dir) is None
+                refusal_reason(notebook, self._require_context().source_dir) is None
                 and self._ignored_by(notebook, ignore_paths) is None
                 and self._would_hand_to_nbconvert(notebook)
             ):
@@ -1256,7 +1285,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         non-ASCII notebook path does not fail its own conversion. ``taken`` maps
         each name used so far to its notebook.
         """
-        relative = relative_display(ipynb_file, self.context.source_dir)
+        relative = relative_display(ipynb_file, self._require_context().source_dir)
         folded = get_normalized_filename(relative)
         digest = hashlib.sha256(
             relative.encode("utf-8", "surrogateescape")
@@ -1288,7 +1317,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                 extra=NO_MARKUP,
             )
         taken[name.casefold()] = relative
-        return self.results_dir.joinpath(f"{name}-converted")
+        return self._require_results_dir().joinpath(f"{name}-converted")
 
     @staticmethod
     def _move_output(output_dir: Path, target_base: Path) -> Optional[Path]:
@@ -1377,8 +1406,9 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         Returns:
             List[Path]: List of converted Python files
         """
+        context = self._require_context()
         ASH_LOGGER.debug(
-            f"Searching for .ipynb files in search_path within the ASH scan set: {self.context.source_dir}"
+            f"Searching for .ipynb files in search_path within the ASH scan set: {context.source_dir}"
         )
         # Find all notebook files to scan from the scan set
         ipynb_files = self._notebooks_in_scan_set()
@@ -1389,11 +1419,11 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         # Add warning if no Jupyter notebook files found
         if not ipynb_files:
             ASH_LOGGER.info(
-                f"No Jupyter notebook (.ipynb) files found in {self.context.source_dir}"
+                f"No Jupyter notebook (.ipynb) files found in {context.source_dir}"
             )
             return results
 
-        self.results_dir.mkdir(parents=True, exist_ok=True)
+        self._require_results_dir().mkdir(parents=True, exist_ok=True)
         # The same reading candidate_input_count takes, so the count says what
         # this loop does.
         ignore_paths = self._ignore_paths_skipping_conversion()
@@ -1450,7 +1480,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                 # outside the tree, and nbconvert, run in run/, which holds nothing
                 # but the copy, writes into a fresh directory under the converter's
                 # results directory: the one place a scanner sandbox lets it write.
-                self.results_dir.mkdir(parents=True, exist_ok=True)
+                self._require_results_dir().mkdir(parents=True, exist_ok=True)
                 with (
                     notebook_handle,
                     tempfile.TemporaryDirectory(prefix="ash-nbconvert-") as staging_dir,
@@ -1498,9 +1528,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                     )
                     continue
                 results.append(converted)
-                sources[converted] = relative_display(
-                    ipynb_file, self.context.source_dir
-                )
+                sources[converted] = relative_display(ipynb_file, context.source_dir)
                 ASH_LOGGER.debug(
                     f"Successfully converted {ipynb_file} to {converted}",
                     extra=NO_MARKUP,
@@ -1556,5 +1584,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                 )
 
         if sources:
-            record_converted_sources(self.results_dir, self.context.work_dir, sources)
+            record_converted_sources(
+                self._require_results_dir(), self._require_work_dir(), sources
+            )
         return results

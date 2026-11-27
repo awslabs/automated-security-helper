@@ -108,15 +108,17 @@ from typing import Mapping
 
 # The declaration vocabulary lives with the declarations, in a module that is standard
 # library only for the same reason this one is. Re-exported: this module is where callers
-# have always imported them from.
-from automated_security_helper.base.plugin_provisioning import (  # noqa: F401
-    GRYPE_DB_MAX_AGE,
-    OFFLINE_RULESET_BOUND_REASON,
-    OFFLINE_RULESET_MAX_AGE,
-    RULESET_FETCHED_AT_FILE,
-    TRIVY_DB_MAX_AGE,
-    ContentDatabase,
-    go_duration,
+# have always imported them from. Each is spelled ``name as name`` to mark it a deliberate
+# re-export; under mypy's ``no_implicit_reexport`` a bare imported name is not exported,
+# and a caller importing it from here fails type checking.
+from automated_security_helper.base.plugin_provisioning import (
+    GRYPE_DB_MAX_AGE as GRYPE_DB_MAX_AGE,
+    OFFLINE_RULESET_BOUND_REASON as OFFLINE_RULESET_BOUND_REASON,
+    OFFLINE_RULESET_MAX_AGE as OFFLINE_RULESET_MAX_AGE,
+    RULESET_FETCHED_AT_FILE as RULESET_FETCHED_AT_FILE,
+    TRIVY_DB_MAX_AGE as TRIVY_DB_MAX_AGE,
+    ContentDatabase as ContentDatabase,
+    go_duration as go_duration,
 )
 from automated_security_helper.base.plugin_provisioning import (
     content_databases as declared_content_databases,

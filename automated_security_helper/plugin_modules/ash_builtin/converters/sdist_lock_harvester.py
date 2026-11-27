@@ -8,12 +8,24 @@ import ntpath
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Dict, Iterable, List, Literal, Optional, Tuple, Union, cast
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    Union,
+    cast,
+)
 
 from automated_security_helper.base.converter_plugin import (
     ConverterPluginBase,
     ConverterPluginConfigBase,
 )
+from automated_security_helper.base.plugin_context import context_ash_config
 from automated_security_helper.core.constants import is_offline_mode
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -113,7 +125,7 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
         "dependencies, so the SBOM covers cross-toolchain packages"
     )
 
-    def model_post_init(self, context):
+    def model_post_init(self, context: Any) -> None:
         if self.config is None:
             self.config = SdistLockHarvesterConverterConfig()
         return super().model_post_init(context)
@@ -135,10 +147,11 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
         """
         workspace_output_dir = getattr(self.context, "workspace_output_dir", None)
         wanted = set(lockfile_names)
+        context = self._require_context()
         files = scan_set(
-            source=self.context.source_dir,
-            output=self.context.output_dir,
-            honor_ignore_files=honors_ignore_files(self.context.config),
+            source=context.source_dir,
+            output=context.output_dir,
+            honor_ignore_files=honors_ignore_files(context.config),
             run_id=getattr(self.context, "run_id", None),
             workspace_output_dir=(
                 None if workspace_output_dir is None else str(workspace_output_dir)
@@ -151,7 +164,11 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
 
     def _ignore_paths_skipping_harvest(self) -> List[IgnorePathWithReason]:
         return ignore_paths_that_skip_scanning(
-            active_ignore_paths(self.context.config.global_settings.ignore_paths),
+            active_ignore_paths(
+                context_ash_config(
+                    self._require_context(), self.__class__.__name__
+                ).global_settings.ignore_paths
+            ),
             ignore_suppressions=getattr(self.context, "ignore_suppressions", False),
         )
 
@@ -160,7 +177,7 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
     ) -> Optional[IgnorePathWithReason]:
         from automated_security_helper.utils.scanned_tree import relative_display
 
-        display = relative_display(lock_file, self.context.source_dir)
+        display = relative_display(lock_file, self._require_context().source_dir)
         for item in ignore_paths:
             if ignore_path_matches(display, item.path):
                 return item
@@ -221,7 +238,7 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
             context_config = getattr(self.context, "config", None)
             root = honored_path(
                 cast(Union[str, Path], configured),
-                source_dir=Path(self.context.source_dir),
+                source_dir=Path(self._require_context().source_dir),
                 config=context_config,
                 key="scanners.syft.options.sdist_harvest.cache_dir",
                 operator_written=operator_wrote_value(
@@ -262,7 +279,7 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
 
         scan_root = (
             getattr(getattr(self.context, "config", None), "_scanned_root", None)
-            or self.context.source_dir
+            or self._require_context().source_dir
         )
         try:
             reason = in_tree_reason(Path(root), Path(scan_root))
@@ -294,7 +311,9 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
         scanner stamps onto each harvested component.
         """
         destination = confined_path(
-            self.results_dir.joinpath(HARVEST_DIR_NAME), package.name, package.version
+            self._require_results_dir().joinpath(HARVEST_DIR_NAME),
+            package.name,
+            package.version,
         )
         if destination is None:
             raise RuntimeError("the harvest destination is outside its root")
@@ -352,15 +371,17 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
             names = list(cached.get("lockfiles", []))
             digests = cached.get("digests")
         except Exception as error:
-            return self._evict_cache_entry(
+            self._evict_cache_entry(
                 cache_root,
                 entry,
                 f"its index could not be read ({type(error).__name__})",
             )
+            return None
         if not isinstance(digests, dict):
-            return self._evict_cache_entry(
+            self._evict_cache_entry(
                 cache_root, entry, "its index records no content digests"
             )
+            return None
         from automated_security_helper.utils.download_utils import sha256_file
 
         wanted = {
@@ -380,12 +401,13 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
             except OSError:
                 matches = False
             if not matches:
-                return self._evict_cache_entry(
+                self._evict_cache_entry(
                     cache_root,
                     entry,
                     f"'{name}' does not match the digest recorded when the "
                     "entry was written",
                 )
+                return None
         return served
 
     def _evict_cache_entry(self, cache_root: Path, entry: Path, why: str) -> None:
@@ -393,8 +415,8 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
 
         Serving is refused on ANY doubt; eviction then makes the next online
         run re-fetch and re-verify against the lock's pin instead of meeting
-        the same unverifiable bytes again. Returns None, the caller's cold-miss
-        answer.
+        the same unverifiable bytes again. The caller then answers None, its
+        cold miss.
         """
         confined = confined_path(cache_root, entry.name)
         if confined is None or confined != Path(entry).resolve():
@@ -506,7 +528,7 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
         if not lock_files:
             ASH_LOGGER.debug(
                 f"No {', '.join(lockfile_names) or 'configured'} lockfiles in "
-                f"{self.context.source_dir}; nothing to harvest"
+                f"{self._require_context().source_dir}; nothing to harvest"
             )
             return []
 
@@ -516,7 +538,7 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
         )
         offline = is_offline_mode() or bool(options["syft_offline"])
         cache_root = self._cache_root(options["cache_dir"])
-        run_private_cache: Optional[tempfile.TemporaryDirectory] = None
+        run_private_cache: Optional[tempfile.TemporaryDirectory[str]] = None
         if cache_root is None:
             # No usable persistent root (_cache_root said why): cache in a
             # private directory of this run alone, which no repository content
@@ -525,7 +547,7 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
             cache_root = Path(run_private_cache.name)
         ignore_paths = self._ignore_paths_skipping_harvest()
 
-        self.results_dir.mkdir(parents=True, exist_ok=True)
+        self._require_results_dir().mkdir(parents=True, exist_ok=True)
         results: List[Path] = []
         sources: Dict[Path, str] = {}
         # cause -> [(lock display, "name version (sha prefix)"), ...]; one
@@ -564,7 +586,9 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
                     relative_display,
                 )
 
-                display = relative_display(lock_file, self.context.source_dir)
+                display = relative_display(
+                    lock_file, self._require_context().source_dir
+                )
                 with handle:
                     lock_bytes = handle.read()
                 try:
@@ -614,7 +638,9 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
             )
 
         if sources:
-            record_converted_sources(self.results_dir, self.context.work_dir, sources)
+            record_converted_sources(
+                self._require_results_dir(), self._require_work_dir(), sources
+            )
         return results
 
     def _harvest_one(
@@ -627,7 +653,7 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
         offline: bool,
         results: List[Path],
         sources: Dict[Path, str],
-        skip,
+        skip: Callable[[FlaggedPackage, str], None],
     ) -> None:
         """Harvest one flagged package, or record why it was skipped."""
         if package.rejected_reason is not None:

@@ -468,16 +468,17 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
         """Validate reporter configuration and AWS connectivity."""
         self.dependencies_satisfied = False
 
-        if not self.config.options.aws_region:
+        config = self._require_config()
+        if not config.options.aws_region:
             report_missing_setting(
-                self.config.name, "aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")
+                config.name, "aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")
             )
             return self.dependencies_satisfied
 
         try:
             session = boto3.Session(
-                profile_name=self.config.options.aws_profile,
-                region_name=self.config.options.aws_region,
+                profile_name=config.options.aws_profile,
+                region_name=config.options.aws_region,
             )
 
             # Test Security Hub connectivity. DescribeHub needs
@@ -504,10 +505,10 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
                 )
 
             # Get account ID if not provided
-            if not self.config.options.account_id:
+            if not config.options.account_id:
                 sts_client = session.client("sts")
                 identity = self._with_retry(sts_client.get_caller_identity)
-                self.config.options.account_id = identity["Account"]
+                config.options.account_id = identity["Account"]
 
             self.dependencies_satisfied = True
             # The region is named by its option, not its value, which a config
@@ -558,11 +559,12 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
                 f"disabled: {self._config_error}. Fix "
                 "reporters.aws-security-hub in the ASH configuration."
             )
-        if not self.config.enabled:
+        config = self._require_config()
+        if not config.enabled:
             raise SecurityHubImportError(_not_enabled_message())
         if getattr(model, "workspace", None) is not None:
             raise SecurityHubImportError(_workspace_results_message(model))
-        options = self.config.options
+        options = config.options
         region = options.aws_region
         if not region:
             raise SecurityHubImportError(_missing_region_message())
@@ -742,7 +744,7 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
         the scope its operator names. Unset or blank is refused; there is no
         fallback.
         """
-        scope = (self.config.options.findings_scope or "").strip()
+        scope = (self._require_config().options.findings_scope or "").strip()
         if not scope:
             raise SecurityHubImportError(_missing_findings_scope_message())
         return scope
@@ -832,7 +834,7 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
             target_counts,
         )
 
-        if not self.config.options.archive_resolved_findings:
+        if not self._require_config().options.archive_resolved_findings:
             return None, "archive_resolved_findings is false"
         if getattr(model, "sarif", None) is None:
             # No SARIF report is not "zero findings": what the scan reported is
@@ -1056,7 +1058,7 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
                         rejected=rejected_count,
                         account_id=account_id,
                         region=region,
-                        max_retries=self.config.options.max_retries,
+                        max_retries=self._require_config().options.max_retries,
                     )
                 ) from e
             requests += 1
@@ -1128,7 +1130,7 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
         (https://docs.aws.amazon.com/securityhub/1.0/APIReference/Welcome.html#throttling-limits),
         and a throttled request fails with LimitExceededException (HTTP 429).
         """
-        options = self.config.options
+        options = self._require_config().options
 
         @retry_with_backoff(
             max_retries=options.max_retries,

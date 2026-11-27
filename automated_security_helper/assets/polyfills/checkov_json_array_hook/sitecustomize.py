@@ -69,7 +69,9 @@ def _patch(decoder_module: object) -> bool:
             kwargs["array_hook"] = DEFAULT_ARRAY_HOOK
         return original(*args, **kwargs)
 
-    json_array._ash_runtime_compat_polyfill = "checkov_json_array_hook"  # type: ignore[attr-defined]
+    # The marker is an attribute a function object takes at runtime, set as the
+    # patch below is.
+    setattr(json_array, "_ash_runtime_compat_polyfill", "checkov_json_array_hook")
     setattr(decoder_module, "JSONArray", json_array)
     return True
 

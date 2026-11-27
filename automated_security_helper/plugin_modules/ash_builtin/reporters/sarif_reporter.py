@@ -165,7 +165,9 @@ def _with_correlation_properties(
         if not value:
             continue
         if result.properties is None:
-            result.properties = PropertyBag(**{CORRELATION_ID_PROPERTY: value})
+            result.properties = PropertyBag.model_validate(
+                {CORRELATION_ID_PROPERTY: value}
+            )
         else:
             setattr(result.properties, CORRELATION_ID_PROPERTY, value)
     return sarif

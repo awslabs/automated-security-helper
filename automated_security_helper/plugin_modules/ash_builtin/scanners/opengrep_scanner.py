@@ -15,7 +15,7 @@ import logging
 import platform
 import sys
 from pathlib import Path
-from typing import Annotated, ClassVar, Dict, List, Literal
+from typing import Annotated, ClassVar, Dict, List, Literal, Tuple
 
 from pydantic import Field, PrivateAttr, model_validator
 
@@ -58,6 +58,30 @@ from automated_security_helper.utils.subprocess_utils import (
     spawn_run,
 )
 from automated_security_helper.utils.process_env import snapshot_environ
+
+#: The platform/arch keys of ``OpengrepScannerConfigOptions.sha256``: one per
+#: release asset ``OpengrepScanner.setup_custom_install_commands`` builds an
+#: install command for.
+_OpengrepPlatform = Literal[
+    "linux/amd64",
+    "linux/arm64",
+    "darwin/amd64",
+    "darwin/arm64",
+    "windows/amd64",
+]
+#: The operating-system half of an ``_OpengrepPlatform`` key, as ``get_opengrep_url``
+#: takes it.
+_OpengrepOs = Literal["linux", "darwin", "windows"]
+#: Every ``_OpengrepPlatform`` with the operating system and architecture it names, in
+#: the order the install commands are built. The two halves are written out rather
+#: than split from the key, so each keeps its literal type.
+_OPENGREP_PLATFORMS: Tuple[Tuple[_OpengrepPlatform, _OpengrepOs, str], ...] = (
+    ("linux/amd64", "linux", "amd64"),
+    ("linux/arm64", "linux", "arm64"),
+    ("darwin/amd64", "darwin", "amd64"),
+    ("darwin/arm64", "darwin", "arm64"),
+    ("windows/amd64", "windows", "amd64"),
+)
 
 
 class OpengrepScannerConfigOptions(ScannerOptionsBase):
@@ -122,13 +146,7 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
     # rather than installed unverified.
     sha256: Annotated[
         Dict[
-            Literal[
-                "linux/amd64",
-                "linux/arm64",
-                "darwin/amd64",
-                "darwin/arm64",
-                "windows/amd64",
-            ],
+            _OpengrepPlatform,
             Annotated[str, Field(pattern=r"^[0-9a-fA-F]{64}$")],
         ],
         Field(
@@ -510,27 +528,22 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         a config naming a custom version must still load, so a host that already has
         opengrep can scan with it, and only the install is refused.
         """
-        version = self.config.options.version
+        config = self._require_config()
+        version = config.options.version
         if _is_pinned_release(version):
             self.custom_install_commands.update(
                 pinned_tool_install_commands("opengrep")
             )
             return self
 
-        digests = self.config.options.sha256
+        digests = config.options.sha256
         # TODO: detect manylinux vs musllinux. Only matters for a 1.x version: from
         # 2.0.0 the Linux build is one static executable (get_opengrep_url).
-        for target_platform, arch in (
-            ("linux", "amd64"),
-            ("linux", "arm64"),
-            ("darwin", "amd64"),
-            ("darwin", "arm64"),
-            ("windows", "amd64"),
-        ):
+        for platform_key, target_platform, arch in _OPENGREP_PLATFORMS:
             url = get_opengrep_url(
                 target_platform, arch, version=version, linux_type="manylinux"
             )
-            digest = digests.get(f"{target_platform}/{arch}")
+            digest = digests.get(platform_key)
             if url.endswith(".zip"):
                 # From 2.0.0 the Windows asset is a zip of opengrep.exe and its DLLs.
                 # The URL download installs the file it fetches as the executable, so
@@ -735,6 +748,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         write instead, and a run that did not select opengrep records it as not
         selected, as for any other construction-time refusal.
         """
-        if self.config.options.patterns:
-            raise ScannerError(patterns_mode_refusal(self.config.options.patterns))
+        patterns = self._require_config().options.patterns
+        if patterns:
+            raise ScannerError(patterns_mode_refusal(patterns))
         return super()._process_config_options()

@@ -8,7 +8,7 @@ CLI subcommand for inspecting and analyzing ASH plugins.
 import json
 import logging
 from pathlib import Path
-from typing import Annotated, List, Optional
+from typing import Annotated, Dict, List, Optional
 import typer
 from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.utils.ui_theme import rich_theme
@@ -234,7 +234,8 @@ def list_plugins(
         # trusted modules do not load. Listing everything registered named
         # plugins, as Enabled, that no scan with the same configuration runs.
         admits = scan_plugin_filter(split_modules)
-        selected = {
+        # Keyed by plain str, as the registry and the filters below take it.
+        selected: Dict[str, List[type]] = {
             kind: list(ash_plugin_manager.plugin_modules(kind, admits))
             for kind, _title in _PLUGIN_TYPES
         }
@@ -258,7 +259,7 @@ def list_plugins(
         # would read the registry outside the scan's filter.
         refuse_unknown_plugin_options(ash_config, selected)
 
-        def _registered(plugin_type: str, declared: List) -> List:
+        def _registered(plugin_type: PluginKind, declared: List) -> List:
             registered = list(selected[plugin_type])
             order = {cls: index for index, cls in enumerate(declared)}
             return sorted(
@@ -443,6 +444,8 @@ def _print_tables(
                 try:
                     # ``plugin_type`` is the section key here (the table title).
                     kind = PluginKind.from_section(plugin_type)
+                    if kind is None:
+                        raise ValueError(f"{plugin_type!r} is not a plugin section")
                     if kind is PluginKind.REPORTER:
                         # The section a scan builds the reporter from: for a
                         # reporter that sends findings off the host, the
@@ -451,7 +454,8 @@ def _print_tables(
                         # as the report phase and ash report read it.
                         plugin_config = reporter_section(ash_config, plugin_class)
                     else:
-                        plugin_config = plugin_context.config.get_plugin_config(
+                        # The configuration the context was built with.
+                        plugin_config = ash_config.get_plugin_config(
                             plugin_type=kind,
                             plugin_name=plugin_config_key(plugin_class),
                         )

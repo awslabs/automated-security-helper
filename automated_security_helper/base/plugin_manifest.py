@@ -133,7 +133,7 @@ def _refuse(self: object, *_args: object, **_kwargs: object) -> Any:
     )
 
 
-class _FrozenList(list):
+class _FrozenList(list[Any]):
     """A ``list`` that refuses every in-place change.
 
     Still a ``list`` by ``isinstance``: it compares equal to a plain one, which is
@@ -150,11 +150,11 @@ class _FrozenList(list):
     append = extend = insert = remove = pop = clear = sort = reverse = _refuse
     __setitem__ = __delitem__ = __iadd__ = __imul__ = _refuse
 
-    def __reduce__(self):
+    def __reduce__(self) -> tuple[type[_FrozenList], tuple[list[Any]]]:
         return (_FrozenList, (list(self),))
 
 
-class _FrozenDict(dict):
+class _FrozenDict(dict[Any, Any]):
     """A ``dict`` that refuses every in-place change; see :class:`_FrozenList`."""
 
     __slots__ = ()
@@ -162,7 +162,7 @@ class _FrozenDict(dict):
     __setitem__ = __delitem__ = __ior__ = _refuse
     pop = popitem = setdefault = update = clear = _refuse
 
-    def __reduce__(self):
+    def __reduce__(self) -> tuple[type[_FrozenDict], tuple[dict[Any, Any]]]:
         return (_FrozenDict, (dict(self),))
 
 

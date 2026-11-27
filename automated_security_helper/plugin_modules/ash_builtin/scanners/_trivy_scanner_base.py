@@ -72,7 +72,7 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.core.enums import OfflineStrategy
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolExtraArg
-from automated_security_helper.models.vocab import Severity
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.schemas.sarif_schema_model import (
     Level,
     PropertyBag,
@@ -810,8 +810,8 @@ def _verified_message_lines(result: Any) -> Optional[List[str]]:
     which a name carrying a line break cannot satisfy. Split on ``\\n`` alone,
     the separator trivy writes, for the reason ``trivy_severity`` gives.
     """
-    message = result.message.root.text if result.message else None
-    lines = (message or "").split("\n")
+    message: Optional[str] = result.message.root.text if result.message else None
+    lines = message.split("\n") if message else [""]
     uri = _decoded_single_uri(result)
     if uri is None or lines[0] != f"Artifact: {uri}":
         return None
@@ -1370,7 +1370,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         (``_TRIVY_SCANNER_ALIASES``), so a set written with the old name is still
         seen to turn the checks on.
         """
-        options: Any = self.config.options  # type: ignore[union-attr]
+        options: Any = self._require_config().options
         chosen = [name for name in (options.scanners or []) if name]
         if chosen:
             return self._canonical_scanners(chosen)
@@ -1577,7 +1577,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         global_ignore_paths: Optional[List[IgnorePathWithReason]],
         operator_skips: _OperatorSkips,
         *,
-        target_type: Optional[str] = None,
+        target_type: Optional[TargetType] = None,
     ) -> List[str]:
         """ASH's skip tokens for the links and ignored paths, or none when the
         operator's own list is left to trivy.
@@ -1626,7 +1626,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         return []
 
     def _output_dir_skip_args(
-        self, target: Path | str, target_type: Optional[str] = None
+        self, target: Path | str, target_type: Optional[TargetType] = None
     ) -> List[str]:
         """``--skip-dirs`` for ASH's own output directories inside ``target``.
 
@@ -1664,7 +1664,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         ]
 
     def _skip_dirs_value(
-        self, relative: Path, target_type: Optional[str] = None
+        self, relative: Path, target_type: Optional[TargetType] = None
     ) -> Optional[str]:
         """``relative`` as a ``--skip-dirs`` value, or None for a path trivy's CSV
         read cannot carry.
@@ -1697,7 +1697,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         final_args: List[str],
         skips: Optional[_OperatorSkips] = None,
         *,
-        target_type: Optional[str] = None,
+        target_type: Optional[TargetType] = None,
     ) -> List[str]:
         """The operator's own ``--skip-dirs`` and ``--skip-files`` entries, as tokens.
 
@@ -1900,7 +1900,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             raise ScannerError(f"{self.__class__.__name__} has no plugin context")
         source_dir = Path(self.context.source_dir)
         name = self.config.name if self.config is not None else "trivy"
-        options: Any = self.config.options  # type: ignore[union-attr]
+        options: Any = self._require_config().options
         value = getattr(options, option)
         if value:
             path = self._operator_path(
@@ -2165,7 +2165,18 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         """
         if self.context is None:
             raise ScannerError(f"{self.__class__.__name__} has no plugin context")
-        name = self.config.name if self.config is not None else "trivy"
+        config = self.config
+        if config is None:
+            name = "trivy"
+        elif config.name is None:
+            # The key below is where the operator's write of the option is looked
+            # up; without a name it would name no scanner's section at all.
+            raise ScannerError(
+                f"{self.__class__.__name__}'s configuration has no name, so where "
+                f"the operator set {option} cannot be looked up"
+            )
+        else:
+            name = config.name
         key = f"scanners.{name}.options.{option}"
         # A configuration the embedding caller built is the operator's own write,
         # as for syft, bandit, checkov and grype (operator_wrote_value): the
@@ -2399,7 +2410,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         line is unchanged.
         """
         # Read by attribute: both trivy config classes declare these fields.
-        options: Any = self.config.options  # type: ignore[union-attr]
+        options: Any = self._require_config().options
         if len(options.scanners) > 0:
             self.args.extra_args.append(
                 ToolExtraArg(

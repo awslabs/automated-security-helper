@@ -536,8 +536,9 @@ class AshTyperGroup(TyperGroup):
             # Not a command; super().invoke reports it as one.
             return []
         leaf_args = ctx.args
-        if hasattr(command, "get_command") and ctx.args:
-            # A nested group: the options belong to the leaf it names.
+        if isinstance(command, TyperGroup) and ctx.args:
+            # A nested group (every group under the root is a TyperGroup): the
+            # options belong to the leaf it names.
             leaf = command.get_command(ctx, ctx.args[0])
             if leaf is not None:
                 # The refusal below names what the operator would type: the

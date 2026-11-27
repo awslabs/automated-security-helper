@@ -458,9 +458,10 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         # the source directory itself, which exists, so the probe below would read
         # it as a configured file (refused, with no refusal line to point at).
         # Blank reads as unset.
+        config = self._require_config()
         possible_config_paths = [
             item
-            for item in [self.config.options.config_file]
+            for item in [config.options.config_file]
             if item is not None and str(item).strip()
         ]
 
@@ -484,7 +485,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         # find one there itself (_working_directory): a .syft.yaml can turn on remote
         # license and package lookups, which contacted proxy.golang.org and
         # github.com in an offline scan, and change what is reported.
-        source_dir = Path(self.context.source_dir)
+        source_dir = Path(self._require_context().source_dir)
         # A refused configured value drops the ``--config`` rather than falling
         # through to discovery: the option named one file, and discovery would
         # silently replace it. Whether a candidate may be used is honored_path's
@@ -498,7 +499,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
 
         context_config = getattr(self.context, "config", None)
         for index, conf_path in enumerate(possible_config_paths):
-            configured = index == 0 and self.config.options.config_file is not None
+            configured = index == 0 and config.options.config_file is not None
             # As syft will read it: "~" expanded, a relative path taken from the
             # source directory (path_trust.resolved_path, the resolution
             # honored_path checks). Joining the value as written under the
@@ -563,7 +564,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 self._warn_once(
                     text_without_values(
                         f"Configured syft config file does not exist: "
-                        f"{self.config.options.config_file}. Syft will run "
+                        f"{config.options.config_file}. Syft will run "
                         "with an empty config file that ASH writes; no config "
                         "file is discovered from the scanned tree in its place.",
                         self._environment_values(),
@@ -572,7 +573,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 break
 
         for item in active_ignore_paths(
-            self.config.options.exclude, where="scanners.syft.options.exclude"
+            config.options.exclude, where="scanners.syft.options.exclude"
         ):
             # NO_MARKUP: the path and the reason are the config's text, and a
             # "[/" in either is a closing Rich tag that raises instead of printing.
@@ -580,7 +581,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             # ash.log keeps DEBUG lines under --debug.
             ASH_LOGGER.debug(
                 text_without_values(
-                    f"Path '{item.path}' excluded from {self.config.name} scan "
+                    f"Path '{item.path}' excluded from {config.name} scan "
                     f"for reason: {item.reason}",
                     self._environment_values(),
                 ),
@@ -614,7 +615,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         path that does not contain the scanned directory would make syft spell
         every path from a directory the scan is not under.
         """
-        source_dir = Path(os.path.abspath(self.context.source_dir))
+        source_dir = Path(os.path.abspath(self._require_context().source_dir))
         scanned = Path(os.path.abspath(target))
         if scanned == source_dir or source_dir in scanned.parents:
             return source_dir
@@ -629,7 +630,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         return cwd_outside_scanned_tree(
             target,
             results_dir=results_dir,
-            source_dir=self.context.source_dir,
+            source_dir=self._require_context().source_dir,
             config=getattr(self.context, "config", None),
         )
 
@@ -713,9 +714,9 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             # Absolute, because syft runs from outside the source directory
             # (_working_directory), where a relative path names something else.
             target = Path(os.path.abspath(target))
-            target_results_dir = Path(os.path.abspath(self.results_dir)).joinpath(
-                target_type
-            )
+            target_results_dir = Path(
+                os.path.abspath(self._require_results_dir())
+            ).joinpath(target_type)
             target_results_dir.mkdir(parents=True, exist_ok=True)
             results_file = target_results_dir.joinpath("syft.cdx.json")
             self.args = ToolArgs(
@@ -747,10 +748,10 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             self.args.extra_args.extend(
                 ToolExtraArg(key="--exclude", value=pattern)
                 for pattern in syft_excludes(
-                    target, self.context.source_dir, global_ignore_paths
+                    target, self._require_context().source_dir, global_ignore_paths
                 )
             )
-            conf: SyftScannerConfig = self.config
+            conf: SyftScannerConfig = self._require_config()
             opts: SyftScannerConfigOptions = conf.options
             for out in opts.additional_outputs:
                 out_ext = "txt"
@@ -910,8 +911,8 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         of the source tree is read, and the results land under the scanner's
         ``image`` results directory.
         """
-        image_target_type = "image"
-        anchor = Path(os.path.abspath(self.context.source_dir))
+        image_target_type = TargetType.IMAGE
+        anchor = Path(os.path.abspath(self._require_context().source_dir))
 
         self.exit_code = 0
         self.start_time = None
@@ -962,9 +963,9 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             # engine is docker or podman, so the always-socketless NONE case
             # is unaffected.
             remote_daemon = self._image_engine_socket is None
-            target_results_dir = Path(os.path.abspath(self.results_dir)).joinpath(
-                image_target_type
-            )
+            target_results_dir = Path(
+                os.path.abspath(self._require_results_dir())
+            ).joinpath(image_target_type)
             target_results_dir.mkdir(parents=True, exist_ok=True)
             results_file = target_results_dir.joinpath("syft.cdx.json")
             self.args = ToolArgs(
@@ -1006,7 +1007,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 self.args.extra_args.append(
                     ToolExtraArg(key="--config", value=empty.as_posix())
                 )
-            conf: SyftScannerConfig = self.config
+            conf: SyftScannerConfig = self._require_config()
             opts: SyftScannerConfigOptions = conf.options
             for out in opts.additional_outputs:
                 out_ext = "txt"

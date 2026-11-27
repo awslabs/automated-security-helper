@@ -2288,18 +2288,22 @@ def _apply_suppressions_within_budget(
     # vulnerable dependency at node_modules/<pkg>/package.json, and that finding
     # is the point of running them. The code scanners skip these directories
     # themselves (bandit --exclude, checkov --skip-path).
-    ignore_paths = active_ignore_paths(
-        plugin_context.config.global_settings.ignore_paths
-    )
+    config = plugin_context.config
+    if config is None:
+        raise ValueError(
+            "The suppression pass has no configuration: its plugin context was "
+            "built without one"
+        )
+    ignore_paths = active_ignore_paths(config.global_settings.ignore_paths)
     # Rule+path exclusions (issue #894), filtered through the same
     # expiry/unknown-keys gate as ignore paths. The field is read with getattr
     # so a stand-in config (a test double) without it reads as none.
     exclusions = active_ignore_paths(
-        getattr(plugin_context.config.global_settings, "exclusions", None),
+        getattr(config.global_settings, "exclusions", None),
         where="global_settings.exclusions",
     )
 
-    suppressions = plugin_context.config.global_settings.suppressions or []
+    suppressions = config.global_settings.suppressions or []
     # The written form each used entry is recorded by (written_suppression_id),
     # built once per call and shared with the written reasons. The written ids
     # are kept as they are computed, once per matched suppression.

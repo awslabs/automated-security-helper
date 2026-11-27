@@ -3,7 +3,6 @@
 from abc import abstractmethod
 from pathlib import Path
 from typing import (
-    TYPE_CHECKING,
     Annotated,
     Any,
     BinaryIO,
@@ -72,17 +71,10 @@ class ConverterPluginBase(PluginBase, Generic[T]):
     implemented for convenience.
     """
 
-    if TYPE_CHECKING:
-        # Every concrete converter fills its config in ``model_post_init`` when
-        # none was given, so the methods read it as the plugin's own config
-        # type; the runtime field below still accepts None until then.
-        # The ``= None`` keeps both optional in the constructor the checker
-        # sees; this branch is never evaluated.
-        config: T = None  # ty: ignore[invalid-assignment]
-        # The converter's own results directory, set before a conversion runs.
-        results_dir: Path = None  # ty: ignore[invalid-assignment]
-    else:
-        config: T | ConverterPluginConfigBase | None = None
+    # The converter's own model, or the generic config ``_default_config``
+    # falls back to when that model cannot be built without a section, or None
+    # until ``model_post_init`` fills it in.
+    config: T | ConverterPluginConfigBase | None = None
     dependencies_satisfied: bool = True
     # Why the dependency check failed, when the converter knows more than that its tool
     # is absent: for example, that the copy on PATH does not satisfy its tool_version.
@@ -152,10 +144,24 @@ class ConverterPluginBase(PluginBase, Generic[T]):
             raise ScannerError(f"No context provided for {self.__class__.__name__}!")
         if self.config is None:
             self.config = self._default_config()
-        self.results_dir = self.context.work_dir.joinpath(
+        self.results_dir = self._require_work_dir().joinpath(
             self.config.name or self.__class__.__name__
         )
         return super().model_post_init(context)
+
+    def _require_config(self) -> T | ConverterPluginConfigBase:
+        """The converter's configuration, or a ``ScannerError`` naming the
+        converter when it has none.
+
+        ``model_post_init`` fills one in when none was given, so a converter
+        reaches a method without one only when its config was set to None
+        afterwards. It can be the generic config rather than the converter's
+        own model; see ``_default_config``.
+        """
+        config = self.config
+        if config is None:
+            raise ScannerError(f"{self.__class__.__name__} has no configuration")
+        return config
 
     @classmethod
     def _declared_config_model(cls) -> type[ConverterPluginConfigBase] | None:
@@ -274,10 +280,9 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         construction.
         """
         if config:
-            # The converter's own config model (or the generic base, which the
-            # isinstance check below tells apart); the field is typed as the
-            # model for the methods that read it.
-            self.config = cast(T, config)
+            # The converter's own config model, or the generic base, which the
+            # isinstance check below tells apart; the field holds either.
+            self.config = config
             if self._config_fallback_reason is not None:
                 declared = self._declared_config_model()
                 if declared is not None and isinstance(self.config, declared):

@@ -534,7 +534,10 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                     # readers, here and in bedrock_summary_reporter, have no
                     # writer -- so in a real scan this leaves is_actionable alone
                     # and the gate below decides.
-                    if self.config.options.respect_severity_threshold and props:
+                    if (
+                        self._require_config().options.respect_severity_threshold
+                        and props
+                    ):
                         # Read as a flag: the string "false" is truthy to Python,
                         # and negating it marked an actionable finding as
                         # below threshold. A value that states neither true nor
@@ -545,7 +548,10 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                         if below_threshold is not None:
                             is_actionable = not below_threshold
 
-                    if is_actionable and self.config.options.respect_severity_threshold:
+                    if (
+                        is_actionable
+                        and self._require_config().options.respect_severity_threshold
+                    ):
                         # The threshold comes from the scan's configuration, not
                         # from the finding.
                         #

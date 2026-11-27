@@ -1638,7 +1638,8 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
 
     def _process_config_options(self):
         # Checkov config path
-        configured_file = self.config.options.config_file
+        scanner_config = self._require_config()
+        configured_file = scanner_config.options.config_file
         if configured_file is not None and not str(configured_file).strip():
             # "" or whitespace resolved to the source directory itself, which
             # exists, so the discovery stopped there and a directory was handed
@@ -1678,7 +1679,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # cwd were the same directory. Resolving explicitly keeps the behaviour
         # correct without a global chdir, which also matters for scanning several
         # projects in one process.
-        source_dir = Path(self.context.source_dir)
+        source_dir = Path(self._require_context().source_dir)
         context_config = getattr(self.context, "config", None)
         file_values: dict = {}
         for index, conf_path in enumerate(possible_config_paths):
@@ -1753,7 +1754,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
 
         # The JSON report is always asked for: it is the only checkov report that
         # names the resource of each record (attach_checkov_resources).
-        for item in dict.fromkeys([*self.config.options.additional_formats, "json"]):
+        for item in dict.fromkeys([*scanner_config.options.additional_formats, "json"]):
             self.args.extra_args.append(ToolExtraArg(key="--output", value=item))
         # An empty list is read as checkov reads it, as all: checkov's parser gives
         # --framework no default, and its normalization sets ['all'] when none is
@@ -1761,7 +1762,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # main.py:248-250). So it is passed as all is, with the config file's
         # frameworks in its place and the VCS configuration frameworks left out
         # (below); passed as nothing, it ran all three.
-        frameworks = list(self.config.options.frameworks) or ["all"]
+        frameworks = list(scanner_config.options.frameworks) or ["all"]
         file_frameworks = file_values.get("framework")
         if isinstance(file_frameworks, str):
             file_frameworks = [file_frameworks]
@@ -1778,7 +1779,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             frameworks = list(file_frameworks)
         for item in frameworks:
             self.args.extra_args.append(ToolExtraArg(key="--framework", value=item))
-        skip_frameworks: list[str] = list(self.config.options.skip_frameworks)
+        skip_frameworks: list[str] = list(scanner_config.options.skip_frameworks)
         file_skip_frameworks = file_values.get("skip-framework")
         if isinstance(file_skip_frameworks, str):
             file_skip_frameworks = [file_skip_frameworks]
@@ -1826,7 +1827,8 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             )
 
         for item in active_ignore_paths(
-            self.config.options.skip_path, where="scanners.checkov.options.skip_path"
+            scanner_config.options.skip_path,
+            where="scanners.checkov.options.skip_path",
         ):
             if not str(item.path).strip():
                 # "--skip-path=" matches every path, as a regex and as a substring,
@@ -1844,7 +1846,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             # ash.log keeps DEBUG lines under --debug.
             ASH_LOGGER.debug(
                 text_without_values(
-                    f"Path '{item.path}' excluded from {self.config.name} scan "
+                    f"Path '{item.path}' excluded from {scanner_config.name} scan "
                     f"for reason: {item.reason}",
                     self._environment_values(),
                 ),
@@ -1876,7 +1878,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         target = Path(os.path.abspath(target))
         self._checkov_target = target
         target_results_dir = Path(
-            os.path.abspath(self.results_dir.joinpath(target_type))
+            os.path.abspath(self._require_results_dir().joinpath(target_type))
         )
         if "," in str(target_results_dir):
             # checkov splits --output-file-path on commas into one path per
@@ -2142,7 +2144,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             return []
         files, _ = walked_files(target)
         entries = ignored_entries(
-            target, self.context.source_dir, global_ignore_paths, files
+            target, self._require_context().source_dir, global_ignore_paths, files
         )
         root = _skip_path_root(target)
         escaped_dot = "\\."
@@ -2249,7 +2251,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         chosen = cwd_outside_scanned_tree(
             self._scanned_target(),
             results_dir=results_dir,
-            source_dir=self.context.source_dir,
+            source_dir=self._require_context().source_dir,
             config=getattr(self.context, "config", None),
         )
         # Kept for _read_results_file: the directory is usually the root, but
@@ -2260,7 +2262,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
 
     def _scanned_target(self) -> Path:
         """The target of the scan in progress, or the source directory."""
-        return self._checkov_target or Path(os.path.abspath(self.context.source_dir))
+        return self._checkov_target or Path(
+            os.path.abspath(self._require_context().source_dir)
+        )
 
     def _read_results_file(self, results_file: Path) -> Optional[dict[str, Any]]:
         """Read checkov's SARIF with its paths made relative to the source directory.
@@ -2279,7 +2283,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             if self._checkov_cwd is not None
             else Path(target).anchor
         )
-        source_dir = os.path.abspath(self.context.source_dir)
+        source_dir = os.path.abspath(self._require_context().source_dir)
         scanned_dirs = [target.as_posix(), Path(source_dir).as_posix()]
         json_report = Path(results_file).parent / "results_json.json"
         resources: dict[_RecordKey, List[Optional[str]]] = {}

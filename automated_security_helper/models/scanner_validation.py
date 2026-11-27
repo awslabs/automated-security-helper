@@ -48,7 +48,7 @@ class EnablementStatus(str, Enum):
 
 
 #: The state fields that hold one of the two status vocabularies above, by name.
-_STATUS_FIELD_ENUMS: Dict[str, type] = {
+_STATUS_FIELD_ENUMS: Dict[str, type[Enum]] = {
     "registration_status": RegistrationStatus,
     "enablement_status": EnablementStatus,
 }

@@ -22,6 +22,23 @@ if TYPE_CHECKING:
     from automated_security_helper.base.plugin_context import PluginContext
 
 
+def context_work_dir(context: "PluginContext") -> Path:
+    """The context's work directory, the converted tree's root, or a
+    ``ValueError`` when the context has none.
+
+    A validated context always has one (``PluginContext._derive_work_dir``
+    derives it from the output directory); a context built with
+    ``model_construct`` and no work directory does not. A ``ValueError``, not
+    ``ScannerError``: that lives in ``core``, and an import of ``core`` here
+    would be one more edge against the layer order
+    (``tests/unit/test_layer_dag_boundaries.py``).
+    """
+    work_dir = context.work_dir
+    if work_dir is None:
+        raise ValueError("The scan's context has no work directory")
+    return Path(work_dir)
+
+
 def scan_targets(
     context: "PluginContext",
 ) -> List[Tuple[TargetType, Path]]:
@@ -29,7 +46,7 @@ def scan_targets(
     targets: List[Tuple[TargetType, Path]] = [
         (TargetType.SOURCE, Path(context.source_dir))
     ]
-    work_dir = Path(context.work_dir)
+    work_dir = context_work_dir(context)
     if work_dir.is_dir() and any(work_dir.rglob("*.*")):
         targets.append((TargetType.CONVERTED, work_dir))
     return targets

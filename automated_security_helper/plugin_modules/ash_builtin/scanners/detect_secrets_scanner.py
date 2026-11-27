@@ -665,7 +665,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         repository could otherwise give its own code a network. The sandbox
         grants it only when ``sandbox.network_scanners`` names detect-secrets.
         """
-        verifying = self._verifies(self.config.options.scan_settings.filters_used)
+        verifying = self._verifies(
+            self._require_config().options.scan_settings.filters_used
+        )
         return SandboxRequirements(network=verifying, network_requires_grant=True)
 
     @staticmethod
@@ -756,10 +758,12 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         swap rebuilt the same settings as new objects, and the record is
         carried over by position, which covers both.
         """
-        before = None if config is None else self.config.model_dump(by_alias=True)
+        before = (
+            None if config is None else self._require_config().model_dump(by_alias=True)
+        )
         validated = super()._pre_scan(target, target_type, config, *args, **kwargs)
         if validated and before is not None:
-            if self.config.model_dump(by_alias=True) != before:
+            if self._require_config().model_dump(by_alias=True) != before:
                 self._process_config_options()
             else:
                 self._rekey_operator_filter_ids()
@@ -774,7 +778,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         nothing is carried over: those entries read as the baseline's, the
         one-anchor behavior ``_exclude_patterns_by_author`` documents.
         """
-        entries = list(self.config.options.scan_settings.filters_used)
+        entries = list(self._require_config().options.scan_settings.filters_used)
         if len(entries) != self._operator_filter_total:
             self._operator_filter_ids = set()
             return
@@ -792,7 +796,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         way of the tree's own ``.secrets.baseline``. It is read as unset, as an
         operator who writes ``baseline_file: ""`` means it.
         """
-        value = self.config.options.baseline_file
+        value = self._require_config().options.baseline_file
         if isinstance(value, str) and not value.strip():
             return None
         return value
@@ -1238,9 +1242,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         # _apply_settings_trust judges each by its own source. The baseline's
         # filters are added beside the config's, which are kept whole: the
         # option's documentation gives scan_settings precedence over the baseline.
-        config_filter_ids = {
-            id(item) for item in self.config.options.scan_settings.filters_used
-        }
+        scan_settings = self._require_config().options.scan_settings
+        config_filter_ids = {id(item) for item in scan_settings.filters_used}
         loaded_from_baseline: set = set()
         # The settings as configured, put back whole if the baseline turns out
         # malformed partway through the load below: a baseline whose plugins
@@ -1248,8 +1251,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         # plugins, so the fallback ran the baseline's plugins with none of its
         # filters, not the default settings the warning names.
         settings_before = (
-            list(self.config.options.scan_settings.plugins_used),
-            list(self.config.options.scan_settings.filters_used),
+            list(scan_settings.plugins_used),
+            list(scan_settings.filters_used),
         )
         if self._baseline_in_use() and self._baseline_real is not None:
             try:
@@ -1268,10 +1271,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 # choice of settings; it used to gate this too, so naming a
                 # version alone silently dropped the baseline's plugins and
                 # its filters (the exclusions among them).
-                if len(self.config.options.scan_settings.plugins_used) == 0:
+                if len(scan_settings.plugins_used) == 0:
                     # Load plugins from baseline
                     if "plugins_used" in baseline_data:
-                        self.config.options.scan_settings.plugins_used = [
+                        scan_settings.plugins_used = [
                             DetectSecretsScanSettingsPluginsUsed(**plugin)
                             for plugin in baseline_data["plugins_used"]
                         ]
@@ -1283,11 +1286,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     # to survive this replacement. A baseline entry whose path
                     # the operator also configured is the operator's.
                     if "filters_used" in baseline_data:
-                        config_filters = list(
-                            self.config.options.scan_settings.filters_used
-                        )
+                        config_filters = list(scan_settings.filters_used)
                         config_paths = {item.path for item in config_filters}
-                        self.config.options.scan_settings.filters_used = [
+                        scan_settings.filters_used = [
                             item
                             for item in (
                                 DetectSecretsScanSettingsFiltersUsed(**f)
@@ -1298,8 +1299,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         loaded_from_baseline.add("filters_used")
                     ASH_LOGGER.debug(
                         f"Loaded settings from baseline: "
-                        f"{len(self.config.options.scan_settings.plugins_used)} plugins, "
-                        f"{len(self.config.options.scan_settings.filters_used)} filters"
+                        f"{len(scan_settings.plugins_used)} plugins, "
+                        f"{len(scan_settings.filters_used)} filters"
                     )
             except (OSError, TypeError, ValueError) as e:
                 # ValueError covers json.JSONDecodeError, UnicodeDecodeError,
@@ -1310,8 +1311,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 # every scan. The scan runs with no baseline, as it does for
                 # a missing file, and with the settings as configured.
                 self._baseline_document = None
-                self.config.options.scan_settings.plugins_used = settings_before[0]
-                self.config.options.scan_settings.filters_used = settings_before[1]
+                scan_settings.plugins_used = settings_before[0]
+                scan_settings.filters_used = settings_before[1]
                 loaded_from_baseline.clear()
                 ASH_LOGGER.warning(
                     text_without_values(
@@ -1327,14 +1328,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             settings_from_baseline=bool(loaded_from_baseline),
             config_entries={
                 id(item)
-                for item in self.config.options.scan_settings.filters_used
+                for item in scan_settings.filters_used
                 if id(item) in config_filter_ids
             },
         )
         # The operator's entries that survived both rules, by identity (the
         # rules rebuild the list but keep the objects); the scan reads this to
         # match each exclude pattern where its author wrote it.
-        survivors = list(self.config.options.scan_settings.filters_used)
+        survivors = list(scan_settings.filters_used)
         self._operator_filter_ids = {
             id(item) for item in survivors if id(item) in config_filter_ids
         }
@@ -1381,13 +1382,13 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         # other: the condition and the merge are what keep a configured scan from
         # silently detecting nothing, and the indirection is what keeps the other
         # nine scanners registered.
-        if len(self.config.options.scan_settings.plugins_used) == 0:
+        if len(scan_settings.plugins_used) == 0:
             _, _, secret_type_to_class = _detect_secrets_api()
-            self.config.options.scan_settings.plugins_used = [
+            scan_settings.plugins_used = [
                 DetectSecretsScanSettingsPluginsUsed(name=plugin_type.__name__)
                 for plugin_type in secret_type_to_class().values()
             ]
-            settings = self.config.options.scan_settings.model_dump(
+            settings = scan_settings.model_dump(
                 exclude_defaults=True, exclude_none=True, exclude_unset=True
             )
             ASH_LOGGER.debug(
@@ -1423,8 +1424,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         and one under a derived output or work directory, which the operator's
         own configuration may name, was refused with a warning.
         """
-        settings = self.config.options.scan_settings
-        source_dir = Path(self.context.source_dir)
+        settings = self._require_config().options.scan_settings
+        source_dir = Path(self._require_context().source_dir)
         derived_dirs = derived_roots(self.context)
         config_filters = set(config_filter_ids)
 
@@ -1563,7 +1564,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         warning that names the key, never the value (which can come from the
         environment).
         """
-        settings = self.config.options.scan_settings
+        settings = self._require_config().options.scan_settings
         filters_from_baseline = "filters_used" in loaded_from_baseline
         # Set when the configuration was read from files the operator did not
         # write (resolve_config); the record is read whatever the baseline did,
@@ -1798,7 +1799,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         baseline = self._baseline_file_path()
         judged = self._baseline_named if self._baseline_named is not None else baseline
         config = getattr(self.context, "config", None)
-        root = getattr(config, "_scanned_root", None) or self.context.source_dir
+        root = (
+            getattr(config, "_scanned_root", None) or self._require_context().source_dir
+        )
         why = scanned_checkout_reason(Path(judged), root)
         if why is None and Path(judged) != Path(baseline):
             why = scanned_checkout_reason(Path(baseline), root)
@@ -1841,7 +1844,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         if why is not None:
             return f"the baseline {Path(baseline).as_posix()} is used, and {why}"
         if record is None or same_baseline(
-            record.operator_baseline, baseline, self.context.source_dir
+            record.operator_baseline, baseline, self._require_context().source_dir
         ):
             return None
         return (
@@ -1893,7 +1896,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         return record is None or same_baseline(
             record.operator_baseline,
             self._baseline_file_path(),
-            self.context.source_dir,
+            self._require_context().source_dir,
         )
 
     def _apply_settings_trust(
@@ -1922,7 +1925,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             config_entries: ``id()`` of the filter entries that came from the config
                 rather than the baseline.
         """
-        settings = self.config.options.scan_settings
+        settings = self._require_config().options.scan_settings
         record = getattr(
             getattr(self.context, "config", None),
             "_untrusted_detect_secrets_settings",
@@ -2081,7 +2084,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         from_repository = self._repository_config_record() is not None
         own: List[Dict[str, Any]] = []
         others: List[Dict[str, Any]] = []
-        for item in self.config.options.scan_settings.filters_used:
+        for item in self._require_config().options.scan_settings.filters_used:
             dump = item.model_dump(exclude_none=True)
             if id(item) not in self._operator_filter_ids:
                 others.append(dump)
@@ -2669,7 +2672,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         if not path.is_absolute():
             path = Path(scan_root).absolute() / path
         path = Path(os.path.normpath(path))
-        source = Path(os.path.abspath(self.context.source_dir))
+        source = Path(os.path.abspath(self._require_context().source_dir))
         if path.is_relative_to(source):
             return path.relative_to(source).as_posix()
         return path.as_posix()
@@ -2912,7 +2915,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         ):
             try:
                 unlink_beneath(
-                    Path(self.results_dir).absolute(),
+                    self._require_results_dir().absolute(),
                     (target_type, stale_worker_file),
                 )
             except IsADirectoryError:
@@ -2999,7 +3002,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             self._secrets_collection = secrets_collection_cls()
             # Empty until a worker scan fills it; see _scan_in_worker.
             self._secret_columns = {}
-            target_results_dir = self.results_dir.joinpath(target_type)
+            target_results_dir = self._require_results_dir().joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             results_file.parent.mkdir(exist_ok=True, parents=True)
             self._resolve_arguments(target=target, results_file=target_results_dir)
@@ -3051,10 +3054,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # ``resolve()``: the file list keeps whatever symlinked prefix it was
             # walked with, and resolving only one side of os.path.relpath() would
             # turn every key into a chain of '..' segments.
+            context = self._require_context()
             scan_root = (
-                self.context.work_dir
+                self._require_work_dir()
                 if target_type == TargetType.CONVERTED
-                else self.context.source_dir
+                else context.source_dir
             )
             self._secrets_collection.root = Path(scan_root).absolute()
             # The directory the baseline's keys and exclude patterns are
@@ -3092,18 +3096,18 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # ``config``, or a ``.gz`` decompressed to a dotless name, was never
             # handed to detect-secrets.
             candidates = (
-                [item for item in self.context.work_dir.rglob("*") if item.is_file()]
+                [item for item in self._require_work_dir().rglob("*") if item.is_file()]
                 if target_type == TargetType.CONVERTED
                 else scan_set(
-                    source=self.context.source_dir,
-                    output=self.context.output_dir,
-                    honor_ignore_files=honors_ignore_files(self.context.config),
-                    run_id=getattr(self.context, "run_id", None),
+                    source=context.source_dir,
+                    output=context.output_dir,
+                    honor_ignore_files=honors_ignore_files(context.config),
+                    run_id=getattr(context, "run_id", None),
                 )
             )
             skipped_names = (
                 frozenset(KNOWN_GENERATED_LOCKFILE_NAMES)
-                if self.config.options.skip_generated_lockfiles
+                if self._require_config().options.skip_generated_lockfiles
                 else frozenset()
             )
             scannable = [
@@ -3150,7 +3154,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # Build the scan_settings dict for transient_settings, ensuring
             # filters_used from the baseline are included so detect-secrets
             # can apply should_exclude_file and other filters during scanning.
-            scan_settings_dict = self.config.options.scan_settings.model_dump(
+            scan_settings = self._require_config().options.scan_settings
+            scan_settings_dict = scan_settings.model_dump(
                 exclude_defaults=True, exclude_none=True, exclude_unset=True
             )
             # model_dump with exclude_defaults drops empty lists, but we need
@@ -3158,12 +3163,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # so that transient_settings -> configure_settings_from_baseline
             # actually configures them.
             if (
-                len(self.config.options.scan_settings.filters_used) > 0
+                len(scan_settings.filters_used) > 0
                 and "filters_used" not in scan_settings_dict
             ):
                 scan_settings_dict["filters_used"] = [
-                    f.model_dump(exclude_none=True)
-                    for f in self.config.options.scan_settings.filters_used
+                    f.model_dump(exclude_none=True) for f in scan_settings.filters_used
                 ]
 
             # Verification is decided again on the settings the worker gets, because
@@ -3198,7 +3202,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # own run gets: the patterns are the baseline's, and one that
             # backtracks heavily held the scan here for as long as it liked,
             # before the worker's limit ever started.
-            scan_timeout = self.config.options.scan_timeout
+            scan_timeout = self._require_config().options.scan_timeout
             own_patterns, baseline_patterns = self._exclude_patterns_by_author(values)
             if own_patterns or baseline_patterns:
                 # Each run is labeled with where its patterns came from, so a
@@ -3301,7 +3305,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 # acts on.
                 handed_names = [
                     getattr(item, "filename", None)
-                    for item in self.config.options.scan_settings.filters_used
+                    for item in scan_settings.filters_used
                     if item.path == IS_BASELINE_FILE_FILTER
                     and self._operator_authored(item)
                 ]
@@ -3346,7 +3350,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 # file `x` does not also drop an archive member extracted to the
                 # same relative name. The baseline's patterns above are the
                 # exception, written for the files the baseline names.
-                ignore_root = Path(self.context.source_dir)
+                ignore_root = Path(context.source_dir)
                 original_count = len(scannable)
                 scannable = [
                     file_path
@@ -3538,7 +3542,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                                 if suppressed and baseline_suppression is not None
                                 else None
                             ),
-                            config_name=self.config.name,
+                            config_name=self._require_config().name,
                             # The enum's value, not str(): str() of a (str, Enum)
                             # reads "ScannerToolType.SECRETS" on every Python,
                             # where the f-string this replaced gave the bare
