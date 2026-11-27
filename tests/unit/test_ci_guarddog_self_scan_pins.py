@@ -159,8 +159,14 @@ def test_a_missing_extra_fails_the_span_check_under_the_ci_flag(
     """With the CI flag set, a missing extra fails the check instead of skipping."""
     _without_tree_sitter(monkeypatch)
     monkeypatch.setenv("ASH_REQUIRE_SYMBOLS_EXTRA", "1")
-    with pytest.raises(pytest.fail.Exception, match="ASH_REQUIRE_SYMBOLS_EXTRA is set"):
+    # pytest.raises lets a skip through, and the run would then report this test as
+    # skipped. Accept both outcomes and fail on the skip below.
+    with pytest.raises((pytest.fail.Exception, pytest.skip.Exception)) as outcome:
         _symbol_spans(_THIS_FILE)
+    assert outcome.type is pytest.fail.Exception, (
+        f"skipped instead of failing: {outcome.value}"
+    )
+    outcome.match("ASH_REQUIRE_SYMBOLS_EXTRA is set")
 
 
 def test_a_parse_error_is_not_read_as_a_missing_extra(
@@ -173,8 +179,14 @@ def test_a_parse_error_is_not_read_as_a_missing_extra(
     parser = SimpleNamespace(parse=lambda source: SimpleNamespace(root_node=root))
     monkeypatch.setattr(symbol_spans, "_new_parser", lambda grammar: parser)
     monkeypatch.delenv("ASH_REQUIRE_SYMBOLS_EXTRA", raising=False)
-    with pytest.raises(symbol_spans.SymbolParseError):
+    # As in the flag test: accept a skip so that it fails here instead of skipping.
+    with pytest.raises(
+        (symbol_spans.SymbolParseError, pytest.skip.Exception)
+    ) as outcome:
         _symbol_spans(_THIS_FILE)
+    assert outcome.type is symbol_spans.SymbolParseError, (
+        f"a parse error was skipped as a missing extra: {outcome.value}"
+    )
 
 
 #: Text the pinned line must contain, by rule id: the shape of what each GuardDog
