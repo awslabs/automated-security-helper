@@ -25,7 +25,9 @@
 # approval vote. Those need a deployed stack; see README.md for that procedure.
 # A green run here does NOT mean the deployed gate works end to end.
 #
-# Set KEEP_WORKDIR=1 to retain the scratch trees for inspection.
+# Set KEEP_WORKDIR=1 to retain the scratch trees for inspection. A run in which a
+# case produced no result keeps them without it, because the log the failure message
+# names is in them.
 
 set -euo pipefail
 
@@ -82,9 +84,11 @@ build_repo() {
 # only an answer picks the older spelling: a help that does not name `scan fs`, or a
 # usage error that refuses the word `fs`. A probe that fails any other way (a crash,
 # an out-of-memory kill) says nothing about the image's ASH, so the script exits 70
-# with the end of the probe's output BEFORE it prints the ASH_EXIT marker. The caller
-# then reports that ash never ran, with the diagnosis in the log, instead of scoring a
-# scan that used a spelling chosen by guess.
+# with the end of the probe's output BEFORE it prints the ASH_EXIT marker. 70 is not one
+# of ASH's own exit codes, so docker's status, which is the script's, tells a check that
+# got no answer from a scan that ran. The caller then reports that ash never ran, with
+# the diagnosis in the log, instead of scoring a scan that used a spelling chosen by
+# guess.
 #
 # A quoted heredoc: this shell expands none of it. `read -d ''` takes the whole text and
 # returns non-zero at the end of it, which is why `|| true` follows.
@@ -114,19 +118,26 @@ ash scan $directory --output-dir /work/out \
 echo "ASH_EXIT=$?"
 SH
 
-# Returns ASH's exit code on stdout.
+# Runs one scan in the image and sets two variables. They are set here, not printed,
+# because a command substitution would lose the second.
+#   SCAN_CODE      ASH's exit code, read from the marker the inner script echoes;
+#                  empty when there is no marker, which means ash never ran.
+#   DOCKER_STATUS  docker's own status, which is the inner script's: 70 when its check
+#                  of which spelling the image's ASH takes got no answer.
 run_scan() {
   local repo="$1" out="$2" dest="$3" log="$4"
   mkdir -p "$out"
   chmod 777 "$out"
-  # `|| true` on docker itself would mask a container failure, so instead the
-  # inner shell echoes ASH's own status and we parse that. A missing marker is
-  # treated as a failure below rather than as success.
+  # ASH's own status travels in the marker, not in docker's, so a non-zero docker
+  # status must not stop the script. It is kept, because without it a docker failure
+  # and a check that got no answer would read the same. A missing marker is treated
+  # as a failure below rather than as success.
+  DOCKER_STATUS=0
   docker run --rm --entrypoint /bin/sh \
     -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
     -v "$repo:/work/src" -v "$out:/work/out" \
-    "$IMAGE" -c "$INNER_SCAN" sh "$dest" > "$log" 2>&1 || true
-  sed -n 's/^ASH_EXIT=\([0-9]\+\).*/\1/p' "$log" | tail -1
+    "$IMAGE" -c "$INNER_SCAN" sh "$dest" > "$log" 2>&1 || DOCKER_STATUS=$?
+  SCAN_CODE="$(sed -n 's/^ASH_EXIT=\([0-9]\+\).*/\1/p' "$log" | tail -1)"
 }
 
 declare -A VERDICTS
@@ -143,17 +154,26 @@ for spec in "vulnerable:feat/unsafe-subprocess" "clean:feat/safe-math"; do
   build_repo "$case_name" "$branch" "$repo"
   dest="$(git -C "$repo" rev-parse main)"
 
-  code="$(run_scan "$repo" "$out" "$dest" "$log")"
+  run_scan "$repo" "$out" "$dest" "$log"
+  code="$SCAN_CODE"
   if [ -z "$code" ]; then
     echo "FAIL: the container produced no ASH_EXIT marker; ash never ran."
-    echo "      (a probe that could not tell which spelling this image's ASH has"
-    echo "      stops the scan with exit 70 and prints why)"
+    echo "      docker exited $DOCKER_STATUS"
+    # Only the scan script gives 70, so the hint is for 70 alone: any other status is
+    # docker's or the kernel's (125 docker could not run it, 137 the container was
+    # killed), and a hint about the check would send the reader to the wrong place.
+    if [ "$DOCKER_STATUS" -eq 70 ]; then
+      echo "      70 is the status the scan script ends with when it cannot tell which"
+      echo "      spelling this image's ASH takes, or cannot enter its source mount:"
+      echo "      no scan ran, and the log says which"
+    fi
     echo "      full log: $log"
-    # The probe's own line comes first: a long traceback pushes it out of the tail.
-    grep -m1 '^ash: could not tell' "$log" | sed 's/^/        /' || true
+    # 21 lines: the check's own line, which names the command it asked about, and the
+    # 20 lines of its output that follow it. A shorter tail cuts the line off.
     echo "      last lines of $log:"
-    tail -15 "$log" | sed 's/^/        /'
-    # Keep the log: a run that never ran has nothing else to show why.
+    tail -21 "$log" | sed 's/^/        /'
+    # Keep the log: a run that never ran has nothing else to show why, and the
+    # default run deletes the directory it is in.
     KEEP_WORKDIR=1
     OVERALL=1
     VERDICTS[$case_name]="<no-run>"
