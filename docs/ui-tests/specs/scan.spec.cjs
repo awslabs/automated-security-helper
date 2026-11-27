@@ -127,3 +127,15 @@ test("the static example survives an unavailable animation library", async ({ pa
   await expect(example.getByRole("link", { name: "HTML", exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test("an animation library that never answers does not hold up the page", async ({ page }) => {
+  await page.route("https://cdnjs.cloudflare.com/**", () => {});
+  await page.goto("./", { waitUntil: "commit" });
+  await expect.poll(() => page.evaluate(
+    () => performance.getEntriesByType("navigation")[0]?.domContentLoadedEventStart || 0
+  ), { timeout: 5000 }).toBeGreaterThan(0);
+  const example = page.locator("[data-ash-scan]");
+  await expect(example.locator("[data-scan-state]")).toHaveText("Reports ready");
+  await expect(example).not.toHaveClass(/is-ready/);
+  await expect(example.getByRole("link", { name: "HTML", exact: true })).toBeVisible();
+});

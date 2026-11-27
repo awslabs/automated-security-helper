@@ -23,10 +23,11 @@ found must be exactly the recorded remainder below. A newly copied library fails
 here until it is loaded from cdnjs instead or recorded with its license, and a
 recorded file that is gone fails too, so the record cannot go stale.
 
-What is deliberately not here: Python modules (the artifact gate,
+What is deliberately not read for a banner: Python modules. The artifact gate,
 .github/scripts/assert-artifact-contents.py, checks the built wheel and sdist for
-vendored scanner code), and the scanner fixtures under tests/test_data/, which
-are input a scanner reads and are not shipped.
+vendored scanner code, and a Python module is found here only when it sits under
+a directory named for vendored code. Not read at all: the scanner fixtures under
+tests/test_data/, which are input a scanner reads and are not shipped.
 """
 
 from __future__ import annotations
@@ -54,7 +55,7 @@ WEB_ASSET_SUFFIXES = FONT_SUFFIXES | frozenset(
 SCRIPT_SUFFIXES = frozenset({".js", ".mjs", ".cjs"})
 VENDOR_DIRECTORY_NAMES = frozenset({"vendor", "vendored", "third_party", "third-party"})
 #: A license text is named for its license: LICENSE.txt, COPYING, NOTICE,
-#: animejs-MIT.txt, open-sans-OFL.txt.
+#: phosphor-MIT.txt, open-sans-OFL.txt.
 LICENSE_TEXT_NAME = re.compile(
     r"(^|[-_.])(licen[cs]e|copying|notice|ofl|mit)([-_.]|$)", re.IGNORECASE
 )
@@ -72,8 +73,8 @@ THIRD_PARTY_MARKERS = (
 #: and any line naming Amazon is not counted anyway.
 COPYRIGHT_LINE = re.compile(r"Copyright\s+(\(c\)|©|\d{4})", re.IGNORECASE)
 #: How much of a file's leading text is read for a banner. A license banner
-#: sits at the top; the vendored animation module's MIT banner ended at byte
-#: 1,190 of its 40,076.
+#: sits at the top: the animation module this repository used to vendor ended
+#: its MIT banner at byte 1,095 of its 40,076.
 LEADING_BYTES = 16384
 
 #: Copied third-party files the package ships, each recorded in

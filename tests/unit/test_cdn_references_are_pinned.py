@@ -19,6 +19,10 @@ template, and require each one to be:
 * ``integrity`` with one sha384 or sha512 digest of the right length (cdnjs
   publishes sha512), ``crossorigin="anonymous"`` and
   ``referrerpolicy="no-referrer"``;
+* ``async`` on a script. A deferred script holds up DOMContentLoaded until the
+  CDN answers, and the theme starts its components on that event, so a slow or
+  silently dropped connection to cdnjs would hold up the whole page, not only
+  the animation;
 * matched by the privacy plugin's ``assets_exclude`` in mkdocs.yml. The plugin
   downloads every other external asset at build time, and the site must build
   with no network (tests/integration/docs/test_site_builds_offline.py).
@@ -174,6 +178,11 @@ def element_problems(tag: str, attributes: dict[str, str]) -> list[str]:
             f"a <{tag}> cannot carry Subresource Integrity; load only scripts and "
             "stylesheets from cdnjs"
         )
+    if tag == "script" and "async" not in attributes:
+        problems.append(
+            "a script from cdnjs must load with async: a deferred script holds up "
+            "DOMContentLoaded, and the page that waits on it, until the CDN answers"
+        )
     if not CDNJS_URL.match(url):
         problems.append(
             f"{url!r} is not https://cdnjs.cloudflare.com/ajax/libs/<library>/"
@@ -280,9 +289,40 @@ def test_a_library_loaded_from_cdnjs_has_no_license_entry_or_provenance_block():
         )
 
 
+def test_the_scan_module_waits_on_the_element_that_loads_the_library():
+    """The module reads the outcome the async library records on its element.
+
+    An async script can finish before or after the module that uses it runs. Its
+    onload and onerror handlers write the outcome to the element's data-state,
+    which the module reads, and the module listens on the same element when
+    neither has happened yet. A renamed id on either side would leave the
+    animation off for good while every other check here still passed.
+    """
+    libraries = [
+        attributes
+        for rel, _line, tag, attributes in cdn_elements()
+        if rel == "docs/overrides/home.html" and tag == "script"
+    ]
+    assert len(libraries) == 1, libraries
+    library = libraries[0]
+    identifier = library.get("id", "")
+    assert identifier, "the cdnjs script has no id for the scan module to find"
+    for handler in ("onload", "onerror"):
+        assert "dataset.state" in library.get(handler, ""), (
+            f"the cdnjs script's {handler} does not record the outcome in data-state"
+        )
+    module = (
+        REPO_ROOT / "docs" / "content" / "assets" / "javascripts" / "ash-scan.js"
+    ).read_text(encoding="utf-8")
+    assert f'getElementById("{identifier}")' in module, (
+        f"ash-scan.js does not look up the element with id {identifier!r}"
+    )
+
+
 #: A well-formed element. The digest is 64 zero bytes: the check reads the
 #: digest's shape, never its value.
 GOOD = {
+    "async": "",
     "src": "https://cdnjs.cloudflare.com/ajax/libs/example/1.2.3/example.min.js",
     "integrity": "sha512-" + base64.b64encode(bytes(64)).decode("ascii"),
     "crossorigin": "anonymous",
@@ -294,6 +334,7 @@ GOOD = {
     ("change", "fragment"),
     [
         ({}, None),
+        ({"async": None}, "must load with async"),
         (
             {
                 "src": "https://cdnjs.cloudflare.com/ajax/libs/example/latest/example.min.js"
@@ -345,7 +386,7 @@ def test_an_image_from_cdnjs_is_flagged_even_with_integrity():
 def test_the_file_walk_finds_planted_references_and_skips_prose(tmp_path):
     """Planted elements and fetches are found where they are, and prose is not."""
     good = (
-        f'<script defer src="{GOOD["src"]}" integrity="{GOOD["integrity"]}" '
+        f'<script async src="{GOOD["src"]}" integrity="{GOOD["integrity"]}" '
         'crossorigin="anonymous" referrerpolicy="no-referrer"></script>'
     )
     stylesheet = (

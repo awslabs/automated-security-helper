@@ -18,7 +18,8 @@ no-JavaScript note to be there, and no element or stylesheet rule to load
 anything over the network. They pass on the tree before the site's change too:
 they hold a property the report already has, so the change cannot take it away.
 The browser checks in docs/ui-tests/specs/reports.spec.cjs open the same kind of
-document in a real browser with JavaScript off and record every request.
+document in a real browser: one records every request it makes, and another
+opens it with JavaScript off.
 """
 
 from __future__ import annotations
