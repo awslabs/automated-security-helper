@@ -1660,6 +1660,11 @@ class TestTheInnerArgvIsAcceptedByTheInnerCli:
             assert "source_dir" not in ctx.params
 
 
+# ---------------------------------------------------------------------------
+# _execute_container
+# ---------------------------------------------------------------------------
+
+
 @pytest.mark.unit
 class TestExecuteContainer:
     def test_a_successful_run_returns_the_completed_process(self, monkeypatch, capfd):
