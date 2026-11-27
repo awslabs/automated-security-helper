@@ -118,12 +118,19 @@
   made the scan exit 2; it is now left out of the exit-code gate, of the
   `--min-severity` check and of a workspace project's verdict. The per-scanner and
   summary counts leave it out too, so the info and total counts drop by exactly those
-  results, and the ASFF export and the Security Hub import no longer carry it as an
-  INFORMATIONAL finding. With `archive_resolved_findings` on, a finding exported earlier
-  for such a result is archived by the next import, as any finding the scan no longer
-  reports is. A suppression in effect on such a result is still counted as suppressed.
-  At the default threshold, `MEDIUM`, the exit code does not change, because INFO never
-  failed it.
+  results. So do the counts the MCP server reports (the actionable view of a scan's
+  results and its recounts under the `scanners` and `severities` filters, the progress
+  of a scan and the summary of a completed one) and the counts of a workspace run (a
+  project's `finding_count` and `policy_origin_finding_count`, and the per-scanner
+  `finding_count` of the unified results). The ASFF export and the Security Hub import
+  no longer carry it as an INFORMATIONAL finding, and the Bedrock summary's
+  `actionable_only` no longer sends it to the model. With `archive_resolved_findings`
+  on, a finding exported earlier for such a result is archived by the next import, as
+  any finding the scan no longer reports is. A suppression in effect on such a result is
+  still counted as suppressed. The finding listings still show every result of the
+  SARIF, and the actionable list and count that the HTML, Markdown and text reports
+  build from those rows are unchanged. At the default threshold, `MEDIUM`, the exit
+  code does not change, because INFO never failed it.
 
 ### Maintenance
 
