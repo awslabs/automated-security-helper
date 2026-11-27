@@ -168,9 +168,13 @@
 
 ### Fixes
 
-- **The Snyk Code scanner starts the Snyk CLI in an empty directory outside the
-  scanned tree**, so the CLI reads no configuration file from the scanned
-  repository.
+- **The Snyk Code scanner starts the Snyk CLI in a new, empty, private directory
+  of its own** (mode 0700 on Linux and macOS), so nothing from the scanned
+  repository is in the directory the CLI starts in. The directory is outside the
+  scanned tree unless no private directory outside it is available, for example
+  when `TMPDIR` is inside the tree and the output directory is in its default
+  place under the source. Then ASH makes it inside the tree and logs a warning
+  that names each directory it passed over.
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or
   `fold` through an object value at the section or at `global_settings`, with a

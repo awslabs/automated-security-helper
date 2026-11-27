@@ -2288,7 +2288,104 @@ def tested_path(command):
     return Path(target)
 
 
+SCOPE_MODES = pytest.mark.parametrize(
+    "scoped", [False, True], ids=["without_scope", "in_scope"]
+)
+
+
+def in_run_scope(context, scoped):
+    """The scope the scanner executor runs each scan() in, or none.
+
+    The executor wraps every scanner run in ``tool_config_scope`` (utils/
+    tool_config_dir). A scanner run on its own, as a test or a script does, has
+    none. The directory snyk starts in is made the same way in both, and goes
+    with the scope when the scope ends.
+    """
+    import contextlib
+
+    from automated_security_helper.utils.tool_config_dir import tool_config_scope
+
+    return tool_config_scope(context) if scoped else contextlib.nullcontext()
+
+
+@pytest.fixture
+def private_umask():
+    """A umask of 022 for the test, so the directories it makes are not
+    group-writable.
+
+    The directory snyk starts in is never made under one that another account
+    could change, and a group-writable directory is one. Under a umask of 002 the
+    layout a test builds would be passed over, and the test would not measure the
+    layout it names.
+    """
+    import os
+
+    previous = os.umask(0o022)
+    try:
+        yield
+    finally:
+        os.umask(previous)
+
+
+def point_tmpdir_at(monkeypatch, directory):
+    """Make ``directory`` the temporary directory, as TMPDIR does for an operator.
+
+    tempfile keeps the answer it first gave, so the cached one is cleared too.
+    """
+    import tempfile
+
+    monkeypatch.setenv("TMPDIR", str(directory))
+    monkeypatch.setattr(tempfile, "tempdir", None)
+
+
+def default_layout(root):
+    """The context and scanner for the default layout, the output directory in the tree.
+
+    ASH writes below <source>/.ash/ash_output by default, and the converted files,
+    the work directory, are below that. The source holds a committed snyk.yaml.
+    """
+    source = root / "repo"
+    output = source / ".ash" / "ash_output"
+    work = output / "converted"
+    converted = work / "jupyter"
+    converted.mkdir(parents=True)
+    (converted / "nb-converted.py").write_text("x = 1\n", encoding="utf-8")
+    (source / "snyk.yaml").write_text(
+        "endpoint: https://example.invalid\n", encoding="utf-8"
+    )
+    context = PluginContext(
+        source_dir=source,
+        output_dir=output,
+        work_dir=work,
+        config=get_default_config(),
+    )
+    return context, SnykCodeScanner(context=context, config=SnykCodeScannerConfig())
+
+
+def assert_new_private_empty_directory(run):
+    """What the recorded call says about the directory snyk started in."""
+    import os
+
+    assert run["entries"] == [], run["entries"]
+    assert not run["is_link"]
+    if os.name != "nt":
+        # A new directory takes a set-gid parent's set-gid bit; only the
+        # permission bits say who can reach it.
+        assert run["mode"] & 0o777 == 0o700, oct(run["mode"])
+
+
+def warnings_naming(caplog, directory):
+    """The messages logged at WARNING or above that name ``directory``."""
+    named = directory.as_posix()
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno >= logging.WARNING and named in record.getMessage()
+    ]
+
+
 @pytest.mark.unit
+@SCOPE_MODES
 @pytest.mark.parametrize("target_type", ["source", "converted"])
 @pytest.mark.parametrize(
     "name,body",
@@ -2298,13 +2395,21 @@ def tested_path(command):
     ],
 )
 def test_snyk_starts_in_a_new_private_empty_directory_outside_the_scanned_tree(
-    scanner, snyk_on_path, plugin_context, snyk_run_record, name, body, target_type
+    scanner,
+    snyk_on_path,
+    plugin_context,
+    snyk_run_record,
+    name,
+    body,
+    target_type,
+    scoped,
 ):
     """Read when the CLI starts: the directory is empty, private and not a link,
     and it is none of the directories that existed before the run or that other
     processes share. Both targets: the converted target is tested in place, and
-    its run starts from the same call as the source's."""
-    import os
+    its run starts from the same call as the source's. Both ways a scanner runs:
+    on its own, and inside the scope the scanner executor wraps every scan() in,
+    where the directory is the scope's."""
     import tempfile
 
     source = plugin_context.source_dir
@@ -2318,17 +2423,13 @@ def test_snyk_starts_in_a_new_private_empty_directory_outside_the_scanned_tree(
         (converted / name).write_text(body, encoding="utf-8")
         (converted / "nb-converted.py").write_text("x = 1\n", encoding="utf-8")
 
-    scanner.scan(target=target, target_type=target_type)
+    with in_run_scope(plugin_context, scoped):
+        scanner.scan(target=target, target_type=target_type)
 
     (run,) = snyk_run_record
     cwd = run["cwd"].resolve()
     tested = tested_path(run["command"]).resolve()
-    assert run["entries"] == []
-    assert not run["is_link"]
-    if os.name != "nt":
-        # A new directory takes a set-gid parent's set-gid bit; only the
-        # permission bits say who can reach it.
-        assert run["mode"] & 0o777 == 0o700, oct(run["mode"])
+    assert_new_private_empty_directory(run)
     existing = {
         source.resolve(): "the source directory",
         tested: "the directory snyk tests",
@@ -2394,40 +2495,79 @@ def test_a_second_run_of_the_same_target_does_not_start_in_the_first_runs_direct
 
 
 @pytest.mark.unit
+@SCOPE_MODES
 def test_snyk_starts_outside_the_scanned_tree_when_the_output_directory_is_in_it(
-    tmp_path, snyk_on_path, snyk_run_record
+    tmp_path, monkeypatch, snyk_on_path, snyk_run_record, caplog, scoped
 ):
     """The default layout puts the output directory, and with it the results and
     work directories, at <source>/.ash/ash_output. The converted target, the work
-    directory, still reaches snyk there, and its run must not start in the tree."""
-    import os
+    directory, still reaches snyk there, and its run must not start in the tree.
+    With a private temporary directory outside the tree, the directory is made
+    there and nothing is logged about it, on its own and inside a scope.
 
-    source = tmp_path / "repo"
-    output = source / ".ash" / "ash_output"
-    work = output / "converted"
-    converted = work / "jupyter"
-    converted.mkdir(parents=True)
-    (converted / "nb-converted.py").write_text("x = 1\n", encoding="utf-8")
-    (source / "snyk.yaml").write_text(
-        "endpoint: https://example.invalid\n", encoding="utf-8"
-    )
-    context = PluginContext(
-        source_dir=source,
-        output_dir=output,
-        work_dir=work,
-        config=get_default_config(),
-    )
-    scanner = SnykCodeScanner(context=context, config=SnykCodeScannerConfig())
+    The source target has no directory to read in this layout: it holds the output
+    directory, so it is refused before snyk starts
+    (test_the_same_layout_with_a_directory_is_refused_by_snyk_code_by_its_path)."""
+    temp = tmp_path / "temp"
+    temp.mkdir(mode=0o700)
+    point_tmpdir_at(monkeypatch, temp)
+    context, scanner = default_layout(tmp_path)
+    source = context.source_dir
 
-    scanner.scan(target=work, target_type="converted")
+    with caplog.at_level(logging.WARNING):
+        with in_run_scope(context, scoped):
+            scanner.scan(target=context.work_dir, target_type="converted")
 
     (run,) = snyk_run_record
     cwd = run["cwd"].resolve()
-    assert run["entries"] == []
-    if os.name != "nt":
-        assert run["mode"] & 0o777 == 0o700, oct(run["mode"])
+    assert_new_private_empty_directory(run)
+    assert temp.resolve() in cwd.parents
     assert cwd != source.resolve()
     assert source.resolve() not in cwd.parents
+    assert context.output_dir.resolve() not in cwd.parents
+    assert warnings_naming(caplog, run["cwd"].parent) == []
+
+
+@pytest.mark.unit
+@SCOPE_MODES
+def test_snyk_starts_in_the_tree_and_warns_when_no_private_directory_is_outside_it(
+    private_umask,
+    tmp_path,
+    monkeypatch,
+    snyk_on_path,
+    snyk_run_record,
+    caplog,
+    scoped,
+):
+    """TMPDIR inside the scanned tree, with the output directory in its default
+    place inside it too, leaves no private directory outside the tree. The
+    directory is then made in the tree, still new, empty and private, and a
+    warning says so and names each directory it passed over, on its own and inside
+    a scope.
+
+    The source target never gets here: it is refused before snyk starts, for the
+    output directory in the tree
+    (test_the_same_layout_with_a_directory_is_refused_by_snyk_code_by_its_path)
+    and for a TMPDIR in the tree (test_tmpdir_inside_the_scanned_tree_is_refused)."""
+    context, scanner = default_layout(tmp_path)
+    temp = context.source_dir / "tmp"
+    temp.mkdir(mode=0o700)
+    point_tmpdir_at(monkeypatch, temp)
+
+    with caplog.at_level(logging.WARNING):
+        with in_run_scope(context, scoped):
+            scanner.scan(target=context.work_dir, target_type="converted")
+
+    (run,) = snyk_run_record
+    cwd = run["cwd"].resolve()
+    assert_new_private_empty_directory(run)
+    assert context.source_dir.resolve() in cwd.parents
+    assert temp.resolve() in cwd.parents
+    (warning,) = warnings_naming(caplog, run["cwd"].parent)
+    assert "inside the scanned tree" in warning, warning
+    for passed_over in (temp, context.output_dir):
+        entry = f"{passed_over.resolve().as_posix()}: inside the scanned tree"
+        assert entry in warning, warning
 
 
 @pytest.mark.unit
