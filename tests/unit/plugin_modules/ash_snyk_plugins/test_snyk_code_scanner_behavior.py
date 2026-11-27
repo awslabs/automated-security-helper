@@ -5,16 +5,19 @@ The snyk CLI is a Node tool and is not installed here, so
 resolving a single argument -- the module measured 31% covered, with even
 ``model_post_init`` unexecuted.
 
-Two seams are patched and nothing else, apart from the third one described
-below: ``find_executable`` (so the binary reads as present without installing
-it) and ``_run_subprocess`` (autospec, so a call with the wrong signature fails
-the test). The subprocess double writes its SARIF to the path it is *told* to
-write to, parsed out of the ``command`` it receives -- so a change to the
-``--sarif-file-output=`` argument breaks the tests rather than quietly producing
-a scan that finds nothing.
+``snyk_on_path`` patches ``find_executable``, so the binary reads as present
+without installing it, and ``subprocess_double`` patches ``_run_subprocess``
+with autospec, so a call with the wrong signature fails the test. The
+subprocess double writes its SARIF to the path it is *told* to write to, parsed
+out of the ``command`` it receives -- so a change to the
+``--sarif-file-output=`` argument breaks the tests rather than quietly
+producing a scan that finds nothing. Other seams are patched where a test needs
+them, in the test or in a fixture of its own, for example the offline check,
+the home directory, the copy of the source, the temporary directory and, in
+``refusals_set_aside``, the refusals that come before the copy.
 
 The tests of the directory snyk starts in (the ``snyk_run_record`` fixture) patch
-a third seam in place of ``_run_subprocess``:
+a different seam in place of ``_run_subprocess``:
 ``subprocess_utils.run_command_with_output_handling``, the function the real
 ``_run_subprocess`` calls. It is needed to see the real ``cwd``: with no working
 directory given, ``_run_subprocess`` falls back to the source directory, so only
