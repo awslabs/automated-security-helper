@@ -340,9 +340,9 @@ def test_a_single_scans_crash_line_names_the_module_masked(
         app,
         [
             "scan",
-            "--no-progress",
-            "--source-dir",
+            "fs",
             str(source),
+            "--no-progress",
             "--output-dir",
             str(tmp_path / "out"),
             "--config",
@@ -362,7 +362,7 @@ def test_a_workspace_runs_crash_line_names_the_module_masked(
 
     result = CliRunner().invoke(
         app,
-        ["scan", "--no-progress", "--workspace", workspace, "--output-dir", "out"],
+        ["scan", "workspace", workspace, "--no-progress", "--output-dir", "out"],
     )
 
     _crash_named_masked(result, log_records)
@@ -419,9 +419,9 @@ def test_a_workspace_dry_runs_crash_line_names_the_module_masked(
         app,
         [
             "scan",
-            "--no-progress",
-            "--workspace",
+            "workspace",
             workspace,
+            "--no-progress",
             "--output-dir",
             "out",
             "--dry-run",

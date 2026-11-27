@@ -138,7 +138,7 @@ def _ash(packages: Path, args, cwd: Path):
 def _scan_args(source: Path, output: Path, *extra: str) -> list:
     return [
         "scan",
-        "--source-dir",
+        "fs",
         str(source),
         "--output-dir",
         str(output),
@@ -180,9 +180,9 @@ def test_a_config_enabled_scanner_of_a_broken_module_refuses_the_scan(
         _scan_args(
             source,
             tmp_path / "out",
-            "--scanners",
+            "--add-scanners",
             "brokendep-scanner",
-            "--scanners",
+            "--add-scanners",
             "detect-secrets",
         ),
         cwd=tmp_path,
@@ -213,9 +213,9 @@ def test_a_mixed_selection_with_the_broken_module_refuses_too(
         _scan_args(
             source,
             tmp_path / "out",
-            "--scanners",
+            "--add-scanners",
             "brokendep-scanner",
-            "--scanners",
+            "--add-scanners",
             "detect-secrets",
         ),
         cwd=tmp_path,
@@ -244,7 +244,7 @@ def test_requesting_only_the_broken_modules_scanner_refuses_in_the_refusals_word
         _scan_args(
             source,
             tmp_path / "out",
-            "--scanners",
+            "--add-scanners",
             "brokendep-scanner",
         ),
         cwd=tmp_path,
@@ -310,7 +310,7 @@ def test_a_module_that_crashes_at_import_refuses_the_scan_the_same_way(
         _scan_args(
             source,
             tmp_path / "out",
-            "--scanners",
+            "--add-scanners",
             "detect-secrets",
         ),
         cwd=tmp_path,
@@ -336,7 +336,7 @@ def test_requesting_only_an_unknown_scanner_keeps_its_own_refusal(
         _scan_args(
             source,
             tmp_path / "out",
-            "--scanners",
+            "--add-scanners",
             "brokendep-scanner",
         ),
         cwd=tmp_path,
@@ -369,7 +369,7 @@ def test_the_control_scanner_runs_when_its_dependency_is_present(
         _scan_args(
             source,
             output_dir,
-            "--scanners",
+            "--add-scanners",
             "brokendep-scanner",
         ),
         cwd=tmp_path,

@@ -111,11 +111,11 @@ def test_a_scans_refusal_output_never_quotes_the_env_value(
         app,
         [
             "scan",
+            "fs",
+            str(tmp_path / "src"),
             "--mode",
             "local",
             "--no-progress",
-            "--source-dir",
-            str(tmp_path / "src"),
             "--output-dir",
             str(tmp_path / "out"),
             "--config",

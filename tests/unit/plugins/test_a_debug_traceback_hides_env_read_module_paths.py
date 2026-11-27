@@ -103,13 +103,13 @@ def _scan(tmp_path, monkeypatch):
     monkeypatch.chdir(source)
     return source, [
         "scan",
+        "fs",
+        str(source),
         "--mode",
         "local",
         "--no-progress",
         "--log-level",
         "DEBUG",
-        "--source-dir",
-        str(source),
         "--output-dir",
         str(tmp_path / "out"),
     ]

@@ -103,7 +103,7 @@ def test_a_workspace_scans_output_never_shows_the_value(
     workspace.write_text(json.dumps({"folders": [{"path": "api"}]}), encoding="utf-8")
     monkeypatch.chdir(planted)
 
-    result = CliRunner().invoke(app, ["scan", "--workspace", str(workspace)])
+    result = CliRunner().invoke(app, ["scan", "workspace", str(workspace)])
 
     assert result.exit_code == 3, (result.exit_code, result.output[-4000:])
     assert BROKEN in result.output, result.output[-4000:]
@@ -128,11 +128,11 @@ def test_a_single_scans_output_never_shows_the_value(planted, monkeypatch, log_r
         app,
         [
             "scan",
+            "fs",
+            str(source),
             "--mode",
             "local",
             "--no-progress",
-            "--source-dir",
-            str(source),
             "--output-dir",
             str(planted / "out"),
         ],
