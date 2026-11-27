@@ -214,6 +214,7 @@ def test_offline_export_matches_the_live_import(tmp_path, monkeypatch):
     exported = CliRunner().invoke(
         app,
         [
+            "results",
             "report",
             "--format",
             "asff",
