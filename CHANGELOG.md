@@ -271,6 +271,13 @@
   directory. The second run that fills `layer_digest` needs a saved archive or layout,
   or a reference that carries its digest, even when an engine is detected, and a time
   budget it cannot work out no longer fails the scan.
+- **A grype or trivy image scan whose configuration cannot be applied now records an
+  end time,** as a directory scan does for the same error. The configuration is also
+  applied once for each grype or trivy image scan that is not skipped, where it was
+  applied twice.
+- **A reference skipped in offline mode is now logged as a warning.** The image is
+  still skipped and the report still carries its informational result; the skip was
+  logged at INFO before.
 
 ### Features
 
