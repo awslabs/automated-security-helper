@@ -49,13 +49,13 @@ which are both, so the scanned tree does not configure gitleaks:
   scanned directory, ``utils/config_trust.py``), else ``GITLEAKS_CONFIG`` or ``GITLEAKS_CONFIG_TOML``
   from the operator's environment (outside the scanner sandbox, which does not
   pass them in), else a config ASH writes that extends gitleaks' default rules and
-  adds nothing. It is passed as ``--config`` in every case but one, so gitleaks
-  never falls through to ``<target>/.gitleaks.toml``: an absolute
-  ``GITLEAKS_CONFIG``, or ``GITLEAKS_CONFIG_TOML``, is left to gitleaks, which
-  reads the variable itself; a ``GITLEAKS_CONFIG`` that is not absolute as given
-  (``rules.toml``, ``~/rules.toml``) is anchored to the directory ASH runs in and
-  passed as ``--config``, because gitleaks would resolve it against its working
-  directory, the scanned tree. A
+  adds nothing. It is always passed as ``--config``, so gitleaks never falls
+  through to ``<target>/.gitleaks.toml``: ``GITLEAKS_CONFIG_TOML`` is written to a
+  file outside the tree; a ``GITLEAKS_CONFIG`` that is not absolute as given
+  (``rules.toml``, ``~/rules.toml``) is anchored to the directory ASH runs in,
+  because gitleaks would resolve it against its working directory, the scanned
+  tree. A config whose ``[extend] path`` is not absolute is refused, for the
+  same reason (``config/tool_config_trust.refuse_relative_extend_path``). A
   ``config_file`` or ``baseline_path`` set by a config inside a git checkout or the
   scanned directory is ignored with a warning, and a ``.gitleaks.toml`` or ``.ash/.gitleaks.toml`` in
   the tree with a note. An operator's file that does not exist fails the scan

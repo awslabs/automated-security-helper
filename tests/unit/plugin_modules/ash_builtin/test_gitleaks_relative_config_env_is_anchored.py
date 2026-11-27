@@ -147,16 +147,20 @@ def test_the_rescan_anchors_the_variable_where_the_first_run_did(tmp_path, monke
     assert scanner._rescan_env(["--report-format=sarif"]) is None
 
 
-def test_an_absolute_config_env_is_left_to_gitleaks(tmp_path, monkeypatch):
-    """Control: the shape the existing test pins, unchanged."""
+def test_an_absolute_config_env_is_passed_as_it_is(tmp_path, monkeypatch):
+    """Control: an absolute path is passed unchanged, now as ``--config``."""
     monkeypatch.delenv("GITLEAKS_CONFIG_TOML", raising=False)
     monkeypatch.setenv("GITLEAKS_CONFIG", str(tmp_path / "operator.toml"))
     scanner = _scanner(tmp_path)
-    assert scanner._resolve_config_file() is None
+    assert scanner._resolve_config_file() == tmp_path / "operator.toml"
 
 
-def test_config_toml_text_in_the_environment_is_left_to_gitleaks(tmp_path, monkeypatch):
+def test_config_toml_text_in_the_environment_is_passed_as_a_file(tmp_path, monkeypatch):
+    """The text is written to a file outside the scanned tree and passed as
+    ``--config``, so gitleaks does not set its config path inside the tree."""
     monkeypatch.delenv("GITLEAKS_CONFIG", raising=False)
     monkeypatch.setenv("GITLEAKS_CONFIG_TOML", 'title = "inline"\n')
     scanner = _scanner(tmp_path)
-    assert scanner._resolve_config_file() is None
+    chosen = scanner._resolve_config_file()
+    assert chosen is not None and chosen.read_text() == 'title = "inline"\n'
+    assert not chosen.resolve().is_relative_to(scanner.context.source_dir.resolve())
