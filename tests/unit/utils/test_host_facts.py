@@ -17,7 +17,8 @@ What this file pins, beside each fact's table of cases:
   else, and ``unknown`` matches none of the support rows the facts decide (the
   stand-in below encodes those rows);
 * the one mapping onto the fields a support row matches on;
-* what is read once per process and what is read on every call.
+* what is read once per process and what is read on every call;
+* plain versions, which the module compares itself, against what ``packaging`` says.
 
 The processor facts (``cpu_level``, ``polars_runtime``) and their drift test against
 the installed polars runtime are in ``test_host_facts_processor.py``.
@@ -29,12 +30,15 @@ import ast
 import dataclasses
 import errno
 import itertools
+import sys
 from collections import Counter
 from importlib.metadata import PathDistribution
 from pathlib import Path
 from typing import Any, Callable, Collection, Iterable, Mapping, Optional
 
 import pytest
+from packaging.specifiers import SpecifierSet
+from packaging.version import InvalidVersion, Version
 
 from automated_security_helper.utils import host_facts
 from automated_security_helper.utils.host_facts import (
@@ -1159,6 +1163,431 @@ def test_python_build_is_the_implementation_and_the_gil_build(
 
 
 # --------------------------------------------------------------------------------------
+# Plain versions are read here, without packaging
+# --------------------------------------------------------------------------------------
+#
+# A version made only of digits and dots is compared by the module itself, and any other
+# text goes to ``packaging``, so every reading and every error stays what it was. The
+# three functions below are what ``packaging`` says, written out with no help from the
+# module, and each fast path is held to them.
+
+
+def packaging_polars_in_range(version: str) -> bool:
+    low = ".".join(str(part) for part in host_facts.POLARS_MIN_VERSION)
+    high = ".".join(str(part) for part in host_facts.POLARS_BELOW_VERSION)
+    try:
+        parsed = Version(version)
+    except InvalidVersion:
+        return False
+    return SpecifierSet(f">={low},<{high}").contains(parsed, prereleases=True)
+
+
+def packaging_same_version(first: str, second: str) -> bool:
+    if first == second:
+        return True
+    try:
+        return Version(first) == Version(second)
+    except InvalidVersion:
+        return False
+
+
+#: The order the text of a specifier set is written in: lower bounds, equalities,
+#: exclusions, then upper bounds.
+OPERATOR_RANK = {">=": 0, ">": 0, "~=": 0, "==": 1, "===": 1, "!=": 2, "<=": 3, "<": 3}
+
+
+def packaging_requires(header: str, python: str) -> tuple[str, str]:
+    """``(canonical text, in range)`` as ``packaging`` reads a ``Requires-Python``."""
+    specifiers = SpecifierSet(header)
+    inside = specifiers.contains(Version(python), prereleases=True)
+    ordered = sorted(
+        specifiers,
+        key=lambda spec: (OPERATOR_RANK.get(spec.operator, 4), str(spec)),
+    )
+    return (",".join(str(spec) for spec in ordered), "yes" if inside else "no")
+
+
+def python_text(version: tuple[int, int, int, str, int]) -> str:
+    major, minor, micro, level, serial = version
+    if level == "final":
+        return f"{major}.{minor}.{micro}"
+    suffix = {"alpha": "a", "beta": "b", "candidate": "rc"}[level]
+    return f"{major}.{minor}.{micro}{suffix}{serial}"
+
+
+@pytest.fixture
+def no_packaging(monkeypatch):
+    """Every import of ``packaging`` raises ``ModuleNotFoundError`` during the test."""
+    names = {"packaging", "packaging.specifiers", "packaging.version", "packaging.tags"}
+    names.update(name for name in sys.modules if name.startswith("packaging."))
+    for name in sorted(names):
+        monkeypatch.setitem(sys.modules, name, None)
+
+
+@pytest.mark.parametrize(
+    ("text", "release"),
+    [
+        ("1.44.2", (1, 44, 2)),
+        ("1.33", (1, 33)),
+        ("1.33.0", (1, 33)),
+        ("1.33.0.0", (1, 33)),
+        ("1.0.0.1", (1, 0, 0, 1)),
+        ("3.11", (3, 11)),
+        ("3.011", (3, 11)),
+        ("01.044.2", (1, 44, 2)),
+        ("2.0.0", (2,)),
+        ("10", (10,)),
+        ("0", ()),
+        ("0.0.0", ()),
+        ("1" * 64, (int("1" * 64),)),
+    ],
+)
+def test_a_plain_release_is_its_numbers_with_the_trailing_zeros_dropped(text, release):
+    assert host_facts._plain_release(text) == release
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        ".",
+        "1.",
+        ".1",
+        "1..2",
+        "1.0rc1",
+        "1.0a1",
+        "1.0.post1",
+        "1.0.dev1",
+        "v1.2",
+        "1!2",
+        "1.2+x",
+        "1.2.*",
+        " 1.2",
+        "1.2 ",
+        "1.2\n",
+        "1,2",
+        "1_2",
+        "-1",
+        "+1",
+        "1e3",
+        "\N{FULLWIDTH DIGIT ONE}.\N{FULLWIDTH DIGIT TWO}",
+        "\N{ARABIC-INDIC DIGIT ONE}.\N{ARABIC-INDIC DIGIT TWO}",
+        "\N{SUPERSCRIPT TWO}",
+        "1" * 65,
+    ],
+)
+def test_anything_but_digits_and_dots_is_not_a_plain_release(text):
+    assert host_facts._plain_release(text) is None
+
+
+PLAIN_POLARS_VERSIONS = [
+    "1.33",
+    "1.33.0",
+    "1.33.0.0",
+    "1.33.0.1",
+    "1.44.2",
+    "1.99.4",
+    "1.99.99.99",
+    "01.044.2",
+    "1.044.2",
+    "0",
+    "0.0.0",
+    "1",
+    "1.0",
+    "1.32.9",
+    "1.32.99",
+    "2",
+    "2.0",
+    "2.0.0",
+    "2.0.0.0",
+    "2.0.0.1",
+    "2.0.1",
+    "2.1.0",
+    "3",
+]
+OTHER_POLARS_VERSIONS = [
+    "1.33.0rc1",
+    "1.33.0.dev0",
+    "1.33.0.post1",
+    "1.33.0+local",
+    "1.35.0b1",
+    "2.0.0rc1",
+    "2.0.0.dev1",
+    "2.0.0a1",
+    "1!1.44.2",
+    "v1.44.2",
+    " 1.44.2",
+    "1.44.2 ",
+    "1.44.2-1",
+    "garbage",
+    "",
+    "1.44.",
+    ".1.44",
+    "1..44",
+    "\N{ARABIC-INDIC DIGIT ONE}.\N{ARABIC-INDIC DIGIT TWO}",
+    f"1.{'0' * 70}",
+    "1" * 65,
+]
+
+
+@pytest.mark.parametrize("version", PLAIN_POLARS_VERSIONS + OTHER_POLARS_VERSIONS)
+def test_the_polars_range_is_what_packaging_says_of_it(version):
+    assert host_facts._polars_in_range(version) == packaging_polars_in_range(version)
+
+
+def test_the_polars_range_follows_the_bounds_the_module_declares(monkeypatch):
+    monkeypatch.setattr(host_facts, "POLARS_MIN_VERSION", (1, 40))
+    monkeypatch.setattr(host_facts, "POLARS_BELOW_VERSION", (1, 99, 2))
+    for version in ("1.39.9", "1.40", "1.40.0", "1.44.2", "1.99.1", "1.99.2", "2.0.0"):
+        expected = packaging_polars_in_range(version)
+        assert host_facts._polars_in_range(version) == expected, version
+    assert host_facts._polars_in_range("1.44.2")
+    assert not host_facts._polars_in_range("1.99.2.0")
+
+
+SAME_VERSION_TEXTS = [
+    "1.44.2",
+    "1.44.2.0",
+    "1.44.02",
+    "01.44.2",
+    "1.44",
+    "1.44.1",
+    "v1.44.2",
+    " 1.44.2",
+    "1.44.2 ",
+    "1.44.2rc1",
+    "1.44.2.post0",
+    "1.44.2+x",
+    "1!1.44.2",
+    "1.44.2-0",
+    "garbage",
+    "",
+]
+
+
+def test_two_versions_are_the_same_when_packaging_says_so():
+    for first, second in itertools.product(SAME_VERSION_TEXTS, repeat=2):
+        expected = packaging_same_version(first, second)
+        assert host_facts._same_version(first, second) == expected, (first, second)
+
+
+def test_a_version_with_a_prefix_is_the_same_as_the_plain_one():
+    # Only one side is plain, so the plain fast path must not decide this one.
+    assert host_facts._same_version("v1.44.2", "1.44.2")
+    assert host_facts._same_version("1.44.2", "v1.44.2")
+    assert host_facts._same_version("1.44.2.0", "1.44.2")
+    assert not host_facts._same_version("1.44.2.1", "1.44.2")
+
+
+@pytest.mark.parametrize(
+    ("header", "python", "expected"),
+    [
+        (">=3.11,<3.15", "3.12.15", (">=3.11,<3.15", True)),
+        ("<3.15, >=3.11", "3.12.15", (">=3.11,<3.15", True)),
+        (" >=3.11 , <3.15 ", "3.15.0", (">=3.11,<3.15", False)),
+        (">=3.11,,<3.15,", "3.10.14", (">=3.11,<3.15", False)),
+        ("!=3.12.4,>=3.11,<3.15", "3.12.4", (">=3.11,!=3.12.4,<3.15", False)),
+        (">=3.011", "3.11.0", (">=3.011", True)),
+        ("==3.12", "3.12.0", ("==3.12", True)),
+        ("<3.12.15", "3.12.15", ("<3.12.15", False)),
+        ("<=3.12.15", "3.12.15", ("<=3.12.15", True)),
+        (">3.12.15", "3.12.15", (">3.12.15", False)),
+    ],
+)
+def test_plain_specifiers_read_as_packaging_reads_them(header, python, expected):
+    assert host_facts._plain_requires(header, python) == expected
+    # The expectations above are packaging's own answers, not a second opinion.
+    text, inside = expected
+    assert packaging_requires(header, python) == (text, "yes" if inside else "no")
+
+
+@pytest.mark.parametrize(
+    ("header", "python"),
+    [
+        ("~=3.11", "3.12.15"),
+        ("===3.12.15", "3.12.15"),
+        ("==3.12.*", "3.12.15"),
+        ("!=3.12.*", "3.12.15"),
+        (">= 3.11", "3.12.15"),
+        (">=3.11rc1", "3.12.15"),
+        (">=3.11.post1", "3.12.15"),
+        (">=1!3", "3.12.15"),
+        (">=v3.11", "3.12.15"),
+        # Two pieces that name one bound are one specifier to packaging.
+        (">=3.11,>=3.11.0", "3.12.15"),
+        (">=3.11,>=3.11", "3.12.15"),
+        ("<3.15,<3.15.0", "3.12.15"),
+        (">=3.11,>=3.011", "3.12.15"),
+        ("", "3.12.15"),
+        (" , ", "3.12.15"),
+        ("=>3.11", "3.12.15"),
+        (">=3.", "3.12.15"),
+        ("3.11", "3.12.15"),
+        # An interpreter that is not a plain release.
+        (">=3.11,<3.15", "3.15.0a1"),
+        (">=3.11,<3.15", "3.14.0rc2"),
+        (">=3.11,<3.15", ""),
+    ],
+)
+def test_what_is_not_plain_is_left_to_packaging(header, python):
+    assert host_facts._plain_requires(header, python) is None
+
+
+PYTHON_VERSIONS = [
+    (3, 12, 15, "final", 0),
+    (3, 12, 0, "final", 0),
+    (3, 11, 0, "final", 0),
+    (3, 10, 14, "final", 0),
+    (3, 14, 3, "final", 0),
+    (3, 15, 0, "final", 0),
+    (3, 15, 0, "alpha", 1),
+    (3, 14, 0, "beta", 3),
+    (3, 12, 0, "candidate", 1),
+]
+REQUIRES_HEADERS = [
+    ">=3.11,<3.15",
+    "<3.15,>=3.11",
+    ">=3.11, <3.15",
+    " >=3.11 , <3.15 ",
+    ">=3.11,<3.15,",
+    ",>=3.11,,<3.15",
+    ">=3.11.0,<3.15.0",
+    ">=3.011",
+    ">3.10,<=3.14",
+    "<3.15",
+    ">=3,<4",
+    ">=3.12.15",
+    ">3.12.15",
+    "<=3.12.15",
+    "<3.12.15",
+    "==3.12.15",
+    "!=3.12.15",
+    "==3.12",
+    "==3.12.0",
+    ">=3.11,<3.15,!=3.12.4",
+    "!=3.12.4,<3.15,>=3.11",
+    ">=3.11,<=3.14,!=3.13,==3.12.15",
+    ">=3.11,>=3.12",
+    # Two pieces that name one bound: packaging keeps the first.
+    ">=3.11,>=3.11.0",
+    ">=3.11.0,>=3.11",
+    ">=3.11,>=3.11",
+    "<3.15,<3.15.0",
+    ">=3.11,>=3.011",
+    # Not plain.
+    "==3.12.*",
+    "!=3.12.*",
+    "~=3.11",
+    "~=3.12.1",
+    "===3.12.15",
+    ">= 3.11",
+    ">=3.11,< 3.15",
+    ">=1!3",
+    ">=v3.11",
+    ">=3.11rc1,<3.15",
+    ">=3.11,<3.15.dev1",
+    ">=3.11.post1",
+    ">=3.11.0a1",
+    # Not a specifier at all.
+    "=>3.11",
+    ">==3.11",
+    "<>3.11",
+    "3.11",
+    ">=",
+    ">=3.",
+    ">=3..11",
+    ">=3.11+local",
+    ">=3.11.*",
+    "<3.11.*",
+    ">=3.11 and <3.15",
+    "\N{GREATER-THAN OR EQUAL TO} 3.11",
+    ">=\N{FULLWIDTH DIGIT THREE}.11",
+]
+
+
+@pytest.mark.parametrize("header", REQUIRES_HEADERS)
+def test_requires_python_reads_as_packaging_reads_it(tmp_path, header):
+    site = polars_site(tmp_path, ash=False)
+    seen = site.add_ash(requires_python=header).metadata["Requires-Python"]
+    base = linux_host(tmp_path, site=site)
+    for version in PYTHON_VERSIONS:
+        sources = dataclasses.replace(
+            base, python_version=lambda version=version: version
+        )
+        reading = read(sources)
+        try:
+            expected = (packaging_requires(seen, python_text(version)), ())
+        except Exception as exc:
+            expected = ((UNKNOWN, UNKNOWN), (("python_in_range", type(exc).__name__),))
+        got = ((reading.requires_python, reading.python_in_range), reading.failed)
+        assert got == expected, (header, version)
+
+
+def test_a_plain_host_reads_in_full_without_importing_packaging(tmp_path, no_packaging):
+    reading = read(linux_host(tmp_path))
+    assert reading.failed == ()
+    assert (reading.polars_runtime, reading.cpu_level) == ("runtime-32", "full")
+    assert (reading.python_in_range, reading.requires_python) == ("yes", ">=3.11,<3.15")
+
+
+def test_the_runtime_of_plain_versions_is_chosen_without_packaging(no_packaging):
+    chosen = host_facts.choose_runtime(
+        "1.44.2", {"32": "1.44.2.0"}, force=None, prefer=None, injected=False
+    )
+    assert chosen == ("runtime-32", "32")
+
+
+@pytest.mark.parametrize(
+    ("python", "header"),
+    [
+        ((3, 15, 0, "alpha", 1), "<3.16,>=3.11"),
+        ((3, 12, 15, "final", 0), "~=3.11"),
+        ((3, 12, 15, "final", 0), ">=3.11,!=3.12.*"),
+        ((3, 12, 15, "final", 0), ">= 3.11"),
+        ((3, 12, 15, "final", 0), ">=3.11rc1"),
+        ((3, 12, 15, "final", 0), ">=3.11,>=3.11.0"),
+    ],
+)
+def test_a_requires_python_that_is_not_plain_still_goes_to_packaging(
+    tmp_path, no_packaging, python, header
+):
+    # The control of the test above: the same host, with a text the fast path leaves to
+    # packaging, reports the import it could not make, so no failure is swallowed.
+    site = polars_site(tmp_path, ash=False)
+    site.add_ash(requires_python=header)
+    sources = dataclasses.replace(
+        linux_host(tmp_path, site=site), python_version=lambda: python
+    )
+    reading = read(sources)
+    assert reading.failed == (("python_in_range", "ModuleNotFoundError"),)
+    assert (reading.python_in_range, reading.requires_python) == (UNKNOWN, UNKNOWN)
+
+
+def test_a_polars_that_is_not_plain_still_goes_to_packaging(tmp_path, no_packaging):
+    site = polars_site(tmp_path, polars="1.35.0b1")
+    reading = read(linux_host(tmp_path, site=site))
+    assert reading.failed == (("polars_runtime", "ModuleNotFoundError"),)
+    assert (reading.polars_runtime, reading.cpu_level) == (UNKNOWN, UNKNOWN)
+
+
+def test_a_runtime_version_spelled_with_a_prefix_is_the_same_version(tmp_path):
+    site = polars_site(tmp_path, runtimes={})
+    site.add_runtime("32", DEFAULT_FLAGS_TEXT, version="v1.44.2")
+    reading = read(linux_host(tmp_path, site=site))
+    assert (reading.polars_runtime, reading.cpu_level) == ("runtime-32", "full")
+
+
+def test_a_runtime_version_spelled_with_a_prefix_goes_to_packaging(
+    tmp_path, no_packaging
+):
+    # Only one side is plain: the fast path leaves the comparison to packaging.
+    site = polars_site(tmp_path, runtimes={})
+    site.add_runtime("32", DEFAULT_FLAGS_TEXT, version="v1.44.2")
+    reading = read(linux_host(tmp_path, site=site))
+    assert reading.failed == (("polars_runtime", "ModuleNotFoundError"),)
+
+
+# --------------------------------------------------------------------------------------
 # install_channel
 # --------------------------------------------------------------------------------------
 
@@ -1759,6 +2188,111 @@ def test_a_failed_read_is_remembered_not_retried(tmp_path):
     assert sorted(attempts) == ["/proc/cpuinfo", "/proc/sys/kernel/osrelease"]
 
 
+class Counted:
+    """A real distribution behind a proxy that counts what the reader asks of it.
+
+    ``fail`` names the attributes whose read raises ``RuntimeError`` instead.
+    """
+
+    def __init__(self, inner: PathDistribution, fail: Collection[str] = ()) -> None:
+        self._inner = inner
+        self._fail = frozenset(fail)
+        self.asked: Counter = Counter()
+
+    def __getattr__(self, name: str) -> Any:
+        self.asked[name] += 1
+        if name in self._fail:
+            raise RuntimeError(f"planted failure reading {name}")
+        return getattr(self._inner, name)
+
+
+def counted_distributions(
+    site: Site, fail: Optional[Mapping[str, Collection[str]]] = None
+) -> tuple[Callable[[str], Optional[Counted]], dict[str, Counted]]:
+    """A ``distribution`` source over ``site`` whose answers count what is asked of them."""
+    proxies: dict[str, Counted] = {}
+
+    def lookup(name: str) -> Optional[Counted]:
+        found = site.lookup(name)
+        if found is None:
+            return None
+        key = canonical(name)
+        if key not in proxies:
+            proxies[key] = Counted(found, (fail or {}).get(key, ()))
+        return proxies[key]
+
+    return lookup, proxies
+
+
+def counted_sources(
+    tmp_path: Path, site: Site, fail: Optional[Mapping[str, Collection[str]]] = None
+) -> tuple[Sources, dict[str, Counted]]:
+    lookup, proxies = counted_distributions(site, fail)
+    sources = dataclasses.replace(linux_host(tmp_path, site=site), distribution=lookup)
+    return sources, proxies
+
+
+def test_installed_distributions_are_read_once_per_reader(tmp_path):
+    site = polars_site(
+        tmp_path,
+        runtimes={
+            "compat": COMPAT_FLAGS_TEXT,
+            "64": DEFAULT_FLAGS_TEXT,
+            "32": DEFAULT_FLAGS_TEXT,
+        },
+    )
+    sources, proxies = counted_sources(tmp_path, site)
+    reader = HostFactsReader(sources)
+    first = reader.read(express_supported=lambda: True)
+    second = reader.read(express_supported=lambda: True)
+    assert first == second
+    assert first.polars_runtime == "compat"
+    for name in (
+        "polars",
+        "polars-runtime-compat",
+        "polars-runtime-64",
+        "polars-runtime-32",
+    ):
+        assert proxies[name].asked["version"] == 1, name
+    # The flags file of the runtime in use is found once, and ASH's metadata is parsed
+    # once, not once per reading.
+    assert proxies["polars-runtime-compat"].asked["files"] == 1
+    assert proxies["automated-security-helper"].asked["metadata"] == 1
+
+
+def test_a_new_reader_reads_the_distributions_again(tmp_path):
+    sources, proxies = counted_sources(tmp_path, polars_site(tmp_path))
+    HostFactsReader(sources).read(express_supported=lambda: True)
+    HostFactsReader(sources).read(express_supported=lambda: True)
+    assert proxies["polars"].asked["version"] == 2
+    assert proxies["automated-security-helper"].asked["metadata"] == 2
+
+
+def test_a_failed_version_read_is_remembered_not_retried(tmp_path):
+    sources, proxies = counted_sources(
+        tmp_path, polars_site(tmp_path), fail={"polars": {"version"}}
+    )
+    reader = HostFactsReader(sources)
+    first = reader.read(express_supported=lambda: True)
+    second = reader.read(express_supported=lambda: True)
+    assert first == second
+    assert ("polars_runtime", "RuntimeError") in second.failed
+    assert (second.polars_runtime, second.cpu_level) == (UNKNOWN, UNKNOWN)
+    assert proxies["polars"].asked["version"] == 1
+
+
+def test_a_failed_requires_python_read_is_remembered_not_retried(tmp_path):
+    site = polars_site(tmp_path, ash=False)
+    site.add_ash(requires_python="not a specifier")
+    sources, proxies = counted_sources(tmp_path, site)
+    reader = HostFactsReader(sources)
+    first = reader.read(express_supported=lambda: True)
+    second = reader.read(express_supported=lambda: True)
+    assert first == second
+    assert ("python_in_range", "InvalidSpecifier") in second.failed
+    assert proxies["automated-security-helper"].asked["metadata"] == 1
+
+
 def test_the_default_reader_is_built_once_per_process(tmp_path, monkeypatch):
     built = []
 
@@ -1836,9 +2370,7 @@ def test_each_reader_asks_only_for_what_it_needs(tmp_path):
 MODULE_SCOPE_IMPORTS = {
     "__future__",
     "dataclasses",
-    "ntpath",
     "os",
-    "pathlib",
     "posixpath",
     "sys",
     "typing",
@@ -1898,6 +2430,12 @@ def test_the_control_the_import_walk_sees_a_planted_module_scope_import():
         "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import collections\n"
     )
     assert _module_scope_imports(guarded) == {"typing"}
+
+
+def test_a_module_scope_ntpath_import_is_one_the_walk_would_flag():
+    # ntpath is imported inside the one reader that needs it, on Windows only.
+    planted_tree = ast.parse("import ntpath\n")
+    assert not _module_scope_imports(planted_tree) <= MODULE_SCOPE_IMPORTS
 
 
 def test_the_sources_are_exactly_the_host_reads_the_module_makes():
