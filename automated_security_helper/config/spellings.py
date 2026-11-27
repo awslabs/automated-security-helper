@@ -674,7 +674,10 @@ class _Fold:
         """``pointer`` with each segment that is an old spelling along the model
         spelled as the canonical one, and the shape the pointer ends at (None
         once it leaves the model). A pointer that names no old spelling is the
-        same object."""
+        same object. The root pointer, the empty string, names the whole
+        document and ends at the root model."""
+        if pointer == "":
+            return pointer, Shape("model", self.root)
         if not isinstance(pointer, str) or not pointer.startswith("/"):
             return pointer, None
         shape: Optional[Shape] = Shape("model", self.root)
@@ -721,8 +724,8 @@ def fold_spellings(
     override's own ``expiration``) is left alone, as is anything the walk does not
     know. The file's ``patch`` operations are part of it: each ``path`` and
     ``from`` pointer is respelled along the model, and a value an operation adds,
-    replaces or tests is read as the model its path names. Never changes
-    ``document``.
+    replaces or tests is read as the model its path names (the whole
+    configuration, for the root pointer). Never changes ``document``.
 
     Raises SpellingRefused, naming ``source``, the place and the keys, when an old
     spelling is read at or after the row's ``removed_in`` (``version`` is the
