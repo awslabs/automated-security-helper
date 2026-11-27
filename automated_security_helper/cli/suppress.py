@@ -109,15 +109,18 @@ def _key_for(root: Path, path: str) -> str:
     and the one the config check and ``verify`` look up: with ``link -> src``,
     an entry written under ``link/app.py`` would never be read by a scan looking
     up ``src/app.py``, and the suppression would sit inert with ``add`` and
-    ``verify`` both green. An absolute path is first taken relative to the
-    source directory.
+    ``verify`` both green. A path is first resolved against the source
+    directory, a relative one joined to it, as the scan's resolver resolves a
+    finding's path before it builds its key, so one that leaves the directory
+    is refused there.
     """
     candidate = Path(path)
-    if candidate.is_absolute():
-        try:
-            path = candidate.resolve().relative_to(root).as_posix()
-        except (OSError, RuntimeError, ValueError):
-            _fail(f"{path} is not inside the source directory {root.as_posix()}")
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    try:
+        path = candidate.resolve().relative_to(root).as_posix()
+    except (OSError, RuntimeError, ValueError):
+        _fail(f"{path} is not inside the source directory {root.as_posix()}")
     key = resolved_lock_key(root, path)
     if key is None:
         _fail(f"{path} is not a path inside the source directory")
