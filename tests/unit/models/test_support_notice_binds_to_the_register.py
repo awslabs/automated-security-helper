@@ -138,9 +138,7 @@ class TestEveryRowTheRegisterRaisesBuildsANotice:
         }
         assert {row.notify for row in rows} == {Notify.START, Notify.DECISION}
 
-    @pytest.mark.parametrize(
-        "row", _rows_that_raise_a_notice(), ids=lambda row: row.id
-    )
+    @pytest.mark.parametrize("row", _rows_that_raise_a_notice(), ids=lambda row: row.id)
     def test_the_model_holds_the_row_as_declared(self, row):
         notice = notice_of_row(row)
 

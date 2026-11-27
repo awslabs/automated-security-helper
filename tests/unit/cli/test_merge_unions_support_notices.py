@@ -62,7 +62,9 @@ class TestEveryShardsNoticesAreRecorded:
     def test_a_notice_two_shards_share_is_recorded_once_as_the_first_has_it(self):
         shards = build_shards(3)
         first = cpu_notice(found="avx2 is missing (polars-runtime-32 1.44.2).")
-        second = cpu_notice(found="avx2 and fma are missing (polars-runtime-32 1.44.2).")
+        second = cpu_notice(
+            found="avx2 and fma are missing (polars-runtime-32 1.44.2)."
+        )
         shards[1].metadata.support_notices = [first]
         shards[2].metadata.support_notices = [second, sandbox_notice()]
 

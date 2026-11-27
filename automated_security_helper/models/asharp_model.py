@@ -1182,9 +1182,7 @@ class SupportNotice(StrippedRecordModel):
         "id", "scope", "dimension", "message", "polyfill", "found", "docs", mode="after"
     )
     @classmethod
-    def _hold_no_local_path(
-        cls, value: str | None, info: ValidationInfo
-    ) -> str | None:
+    def _hold_no_local_path(cls, value: str | None, info: ValidationInfo) -> str | None:
         if value is None:
             return value
         return _refuse_a_local_path(str(info.field_name), value)

@@ -84,7 +84,9 @@ class TestEveryProjectsNoticesAreRecorded:
         self, tmp_path
     ):
         first = cpu_notice(found="avx2 is missing (polars-runtime-32 1.44.2).")
-        second = cpu_notice(found="avx2 and fma are missing (polars-runtime-32 1.44.2).")
+        second = cpu_notice(
+            found="avx2 and fma are missing (polars-runtime-32 1.44.2)."
+        )
 
         document, _ = _written(tmp_path, [[first], [second, sandbox_notice()]])
 
