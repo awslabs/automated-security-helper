@@ -692,6 +692,102 @@ def scopes_of_problem(
     ]
 
 
+class _RepeatedKey(ValueError):
+    """An object of the lock writes one key more than once. ``str`` of it names
+    the key and the object that holds it."""
+
+
+class _RepeatSignal(Exception):
+    """Raised by the fast parse when an object holds a repeated key."""
+
+
+class _Pairs(dict):
+    """A JSON object read with its pairs kept in order, repeats included: a
+    dict keeps only the last of two equal keys."""
+
+    def __init__(self, pairs: List[Tuple[str, Any]]) -> None:
+        super().__init__(pairs)
+        self.pairs = list(pairs)
+
+
+def _dict_unless_repeated(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
+    result = dict(pairs)
+    if len(result) != len(pairs):
+        raise _RepeatSignal
+    return result
+
+
+def _shown_key(text: str) -> str:
+    """``text`` as a message shows a key: as written when it is printable and
+    holds no quote or backslash, otherwise with its escapes spelled out, so a
+    message never carries a control character."""
+    if text.isprintable() and not any(c in text for c in ("'", '"', "\\")):
+        return text
+    return repr(text)[1:-1]
+
+
+def _pointer_segment(key: str) -> str:
+    """``key`` as one RFC 6901 pointer segment, shown as ``_shown_key`` shows a key."""
+    return _shown_key(key.replace("~", "~0").replace("/", "~1"))
+
+
+def _first_repeated_key(document: Any) -> Optional[Tuple[str, str]]:
+    """The first key any object of ``document`` (read with ``_Pairs``) writes
+    more than once, as ``(key, pointer)``, or None.
+
+    An object's own keys are checked first, then each value in the order
+    written, list items in order. The pointer (RFC 6901) is that of the object
+    that holds the key twice, empty for the top level.
+    """
+    stack: List[Tuple[Any, str]] = [(document, "")]
+    while stack:
+        node, pointer = stack.pop()
+        if isinstance(node, _Pairs):
+            keys = [key for key, _ in node.pairs]
+            counts: Dict[str, int] = {}
+            for key in keys:
+                counts[key] = counts.get(key, 0) + 1
+            for key in keys:
+                if counts[key] > 1:
+                    return key, pointer
+            children = [
+                (value, f"{pointer}/{_pointer_segment(key)}")
+                for key, value in node.pairs
+            ]
+        elif isinstance(node, list):
+            children = [
+                (value, f"{pointer}/{index}") for index, value in enumerate(node)
+            ]
+        else:
+            continue
+        stack.extend(reversed(children))
+    return None
+
+
+def _loads_refusing_repeated_keys(text: str) -> Any:
+    """``json.loads`` that raises ``_RepeatedKey`` when any object in ``text``
+    writes a key more than once.
+
+    Python's JSON reader keeps only the last of two equal keys, so a lock that
+    repeated a file key would read as its second block alone, and the next save
+    would write it without the first block's scopes, digests and date. Every
+    other error propagates as ``json.loads`` raises it. The result equals
+    ``json.loads(text)`` for every document with no repeat.
+    """
+    try:
+        return json.loads(text, object_pairs_hook=_dict_unless_repeated)
+    except _RepeatSignal:
+        pass
+    found = _first_repeated_key(json.loads(text, object_pairs_hook=_Pairs))
+    if found is None:
+        raise _RepeatedKey("an object writes a key more than once") from None
+    key, pointer = found
+    where = "at the top level" if not pointer else f"in the object at {pointer}"
+    raise _RepeatedKey(
+        f"key '{_shown_key(key)}' appears more than once {where}"
+    ) from None
+
+
 @dataclass
 class AshLock:
     """The parsed ``.ash.lock`` of one scan root."""
@@ -751,7 +847,14 @@ class AshLock:
         except OSError as e:
             raise AshLockError(f"{shown} cannot be read: {e}") from None
         try:
-            document = json.loads(raw.decode("utf-8"))
+            document = _loads_refusing_repeated_keys(raw.decode("utf-8"))
+        except _RepeatedKey as e:
+            # A repeated key would keep only the last block, and the next save
+            # would write the lock without the first one.
+            raise AshLockError(
+                f"{shown}: {e}; a lock that repeats a key is not read: merge the "
+                "two entries for that file into one"
+            ) from None
         except (UnicodeDecodeError, ValueError):
             raise AshLockError(f"{shown} is not valid JSON") from None
         lock.entries = _entries_of(document, shown)
