@@ -214,7 +214,7 @@ def test_a_symlinked_entrypoint_builds_from_the_checkout_it_links_to(
 
     result, calls = _run(
         runner,
-        ["--source-dir", str(source)],
+        ["scan", "fs", str(source)],
         cwd=tmp_path,
         env={"BUILD_FAILS": "1"},
         script=link,
@@ -318,10 +318,16 @@ def test_dash_o_after_scan_or_build_image_names_the_runner(
     runner on PATH, so a host with docker and podman scanned under docker."""
     other = _executable(tmp_path / "bin" / "other-runner", RECORDING_RUNNER)
     dash_o = ["-o", str(other)] if spelling == "spaced" else [f"-o{other}"]
+    # A scan takes its directory as the PATH argument of `scan fs`; build-image is
+    # not a scan, so the wrapper is given the directory to mount ahead of it.
+    if subcommand == "scan":
+        named = ["scan", "fs", str(source)]
+    else:
+        named = ["--source-dir", str(source), subcommand]
 
     result, calls = _run(
         runner,
-        ["--no-build", "--source-dir", str(source), subcommand, *dash_o],
+        ["--no-build", *named, *dash_o],
         cwd=tmp_path,
         name_the_runner=False,
     )
@@ -358,7 +364,7 @@ def test_dash_o_before_a_subcommand_names_the_runner(runner, source, tmp_path):
 
     result, calls = _run(
         runner,
-        ["--no-build", "-o", str(other), "--source-dir", str(source), "scan"],
+        ["--no-build", "-o", str(other), "scan", "fs", str(source)],
         cwd=tmp_path,
         name_the_runner=False,
     )
@@ -376,7 +382,7 @@ def test_offline_reaches_the_scan_inside_the_container(runner, source, tmp_path)
     online mode with no network."""
     result, calls = _run(
         runner,
-        ["--no-build", "--offline", "--source-dir", str(source)],
+        ["--no-build", "--offline", "scan", "fs", str(source)],
         cwd=tmp_path,
     )
 
@@ -397,7 +403,7 @@ def test_a_run_refused_after_the_output_dir_is_made_leaves_it(runner, source, tm
     refusals behind the runtime one there."""
     result, calls = _run(
         runner,
-        ["--no-build", "--source-dir", str(source), "--container-uid", "abc"],
+        ["--no-build", "scan", "fs", str(source), "--container-uid", "abc"],
         cwd=tmp_path,
     )
 
@@ -412,7 +418,7 @@ def test_a_non_numeric_container_uid_is_shown_not_written_raw(runner, source, tm
     escape in it reached the terminal."""
     result, calls = _run(
         runner,
-        ["--no-build", "--source-dir", str(source), "--container-uid", "1\x1b[2J2"],
+        ["--no-build", "scan", "fs", str(source), "--container-uid", "1\x1b[2J2"],
         cwd=tmp_path,
     )
 
@@ -434,7 +440,7 @@ def test_a_runner_found_on_path_under_a_directory_with_a_space_runs(
 
     result, calls = _run(
         runner,
-        ["--source-dir", str(source)],
+        ["scan", "fs", str(source)],
         cwd=tmp_path,
         env={"BUILD_FAILS": "1"},
         name_the_runner=False,
@@ -459,7 +465,7 @@ def test_a_runner_given_with_arguments_is_recognized_by_its_first_word(
 
     result, calls = _run(
         runner,
-        ["--source-dir", str(source)],
+        ["scan", "fs", str(source)],
         cwd=tmp_path,
         env={
             "OCI_RUNNER": f"{nerdctl} --namespace ash",
@@ -485,7 +491,8 @@ def test_debug_traces_the_build_with_its_values_shown(runner, source, tmp_path):
         [
             "--debug",
             "--no-run",
-            "--source-dir",
+            "scan",
+            "fs",
             str(source),
             "--ash-revision",
             "rev\x1b[2Jision",
@@ -513,7 +520,7 @@ def test_a_config_inside_one_quoted_argument_is_mounted(runner, source, tmp_path
 
     result, calls = _run(
         runner,
-        ["--no-build", "--source-dir", str(source), f"--config {config}"],
+        ["--no-build", "scan", "fs", str(source), f"--config {config}"],
         cwd=tmp_path,
     )
 
@@ -560,7 +567,7 @@ def test_an_outside_config_with_an_extends_entry_in_another_spelling_is_refused(
 
     result, calls = _run(
         runner,
-        ["--no-build", "--source-dir", str(source), "--config", str(config)],
+        ["--no-build", "scan", "fs", str(source), "--config", str(config)],
         cwd=tmp_path,
     )
 
@@ -593,7 +600,8 @@ def test_a_link_whose_target_ends_in_a_slash_is_followed_on_the_mark_walk(
         runner,
         [
             "--no-build",
-            "--source-dir",
+            "scan",
+            "fs",
             str(src),
             "--config",
             str(outer / "lnk" / "cfg.yaml"),
@@ -626,7 +634,7 @@ def test_a_relative_oci_runner_from_the_environment_is_refused(
 
     result, calls = _run(
         runner,
-        ["--no-build", "--source-dir", str(source)],
+        ["--no-build", "scan", "fs", str(source)],
         cwd=tmp_path,
         env={"OCI_RUNNER": value},
     )
@@ -659,7 +667,7 @@ def test_a_drive_letter_path_is_relative_outside_git_bash(
 
     result, calls = _run(
         runner,
-        ["--no-build", "--source-dir", str(source)],
+        ["--no-build", "scan", "fs", str(source)],
         cwd=tmp_path,
         env={variable: value},
     )
@@ -683,7 +691,8 @@ def test_a_relative_runner_typed_after_the_option_runs_from_the_working_director
             "--no-build",
             "--oci-runner",
             "bin/relative-runner",
-            "--source-dir",
+            "scan",
+            "fs",
             str(source),
         ],
         cwd=tmp_path,
@@ -703,7 +712,7 @@ def test_a_relative_oci_runner_wrapper_is_refused(runner, source, tmp_path):
 
     result, calls = _run(
         runner,
-        ["--no-build", "--source-dir", str(source)],
+        ["--no-build", "scan", "fs", str(source)],
         cwd=tmp_path,
         env={"OCI_RUNNER_WRAPPER": "bin/relative-wrapper -n"},
     )

@@ -174,7 +174,7 @@ def test_the_default_output_directory_is_inside_the_scanned_directory(
     sub.mkdir(parents=True)
     (checkout / ".ash").symlink_to(elsewhere, target_is_directory=True)
 
-    result, calls = _run(runner, ["--no-build", "--source-dir", "sub"], cwd=checkout)
+    result, calls = _run(runner, ["--no-build", "scan", "fs", "sub"], cwd=checkout)
 
     shown = result.stdout + result.stderr
     assert result.returncode == 0, shown
@@ -201,7 +201,7 @@ def test_a_link_below_the_source_is_refused_when_spelled_through_a_linked_cwd(
 
     result, calls = _run(
         runner,
-        ["--no-build", "--source-dir", str(project), "--output-dir", ".ash/ash_output"],
+        ["--no-build", "scan", "fs", str(project), "--output-dir", ".ash/ash_output"],
         cwd=through,
         # bash keeps a PWD that names the current directory, so the output path is
         # spelled through the link, as a shell at that prompt would spell it.
@@ -230,7 +230,7 @@ def test_a_committed_link_under_the_default_output_names_the_option(
     source.mkdir()
     (source / ".ash").symlink_to(elsewhere, target_is_directory=True)
 
-    result, calls = _run(runner, ["--no-build", "--source-dir", "src"], cwd=tmp_path)
+    result, calls = _run(runner, ["--no-build", "scan", "fs", "src"], cwd=tmp_path)
 
     shown = result.stdout + result.stderr
     assert result.returncode == 3, shown
@@ -254,7 +254,7 @@ def test_a_default_output_that_resolves_to_the_source_names_the_option(
     source = tmp_path / "src"
     (source / ".ash").mkdir(parents=True)
     (source / ".ash" / "ash_output").symlink_to("..", target_is_directory=True)
-    args = ["--no-build", "--source-dir", "src"]
+    args = ["--no-build", "scan", "fs", "src"]
     if output == "given":
         args += ["--output-dir", "src/.ash/ash_output"]
 
@@ -308,7 +308,7 @@ def test_the_oci_layout_directory_reaches_the_build_as_one_argument(runner, tmp_
 
     result, calls = _run(
         runner,
-        ["--source-dir", str(source), "--output-dir", str(tmp_path / "out")],
+        ["scan", "fs", str(source), "--output-dir", str(tmp_path / "out")],
         cwd=tmp_path,
         env={
             "ASH_BASE_OCI_LAYOUT": f"{layout}@sha256:{'0' * 64}",
