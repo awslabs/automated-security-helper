@@ -359,7 +359,6 @@ _LEFT_AS_THE_RUN_LEFT_THEM = {
     "_scan_could_not_stop_runs": "the per-run record of the same signal",
     "_scan_could_not_stop_history": "the per-run history of the same signal",
     "_deferred_tool_version_probe": "set before any run, not by one",
-    "_warned_in_tree_uv_python": "a once-per-instance warning flag",
     "_uv_run_failure": "reset at the start of each uv run",
     "_verified_pre_installed_executable": "a cache of the tool path, valid for any run",
     "_processed_responses": "marks of responses already recorded; not a scan record",

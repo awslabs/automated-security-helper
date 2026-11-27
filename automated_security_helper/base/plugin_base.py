@@ -54,6 +54,7 @@ from automated_security_helper.utils.error_text import (
 )
 from automated_security_helper.utils.uv_tool_runner import (
     spelled_forms as _spelled_forms,
+    warn_of_a_uv_python_left_out,
     with_no_env_file,
     without_tree_uv_files,
 )
@@ -1063,10 +1064,6 @@ class PluginBase(UVToolMixin, BaseModel):
     # Why ASH could not record the output of this plugin's most recent tool run,
     # or None. See scan_post_run_error.
     _scan_post_run_error: str | None = PrivateAttr(default=None)
-
-    # Whether this plugin has already said it ignored a UV_PYTHON that names an
-    # interpreter inside the scanned tree (once per plugin, not per tool run).
-    _warned_in_tree_uv_python: bool = PrivateAttr(default=False)
 
     # The flag, and its reason, of this plugin's most recent run that did not
     # finish (a timeout, a cancel, a rejected result, a signal death), or None.
@@ -2390,16 +2387,15 @@ class PluginBase(UVToolMixin, BaseModel):
             # UV_PYTHON is dropped before the choice is read, so ASH's
             # interpreter is set in its place.
             if _uv_interpreter_inside(env, working_dir, Path(source_dir)):
-                # Said once per plugin, as a warning: the operator or the scan's
-                # config set a variable that is not honored, and one line per
-                # tool run would repeat it for every run. The value is not shown.
-                if not self._warned_in_tree_uv_python:
-                    self._warned_in_tree_uv_python = True
-                    self._plugin_log(
-                        "Ignoring a UV_PYTHON that names an interpreter inside the "
-                        "scanned tree; it is not passed to the tool.",
-                        level=logging.WARNING,
-                    )
+                # Said as a warning, since the operator or the scan's config set a
+                # variable that is not honored. It is said in the uv runner's warning
+                # for a variable it leaves out, which the filter below cannot say for
+                # this one, gone by then: once in a process for each variable and
+                # reason, so another tool run, another plugin, and a judgment of the
+                # same value on another route name it in one line between them. The
+                # value is not shown, and the reason is judged against the directory
+                # the check above used.
+                warn_of_a_uv_python_left_out(env, (Path(source_dir),))
                 env = {
                     key: value
                     for key, value in (
@@ -2412,11 +2408,21 @@ class PluginBase(UVToolMixin, BaseModel):
             # relative name against the directory it starts in: the scanned tree.
             # A value is not passed on when a path in it is relative (a leading
             # ``~`` included, which uv does not expand) or lies inside the source
-            # directory, the output directory or a scanned tree, by its spelling or
-            # by its real path; and a ``uv tool run`` gets ``--no-env-file``. An
-            # absolute path outside those directories is the operator's and stays.
+            # directory, the output directory, the directory the child starts in or
+            # a scanned tree, by its spelling or by its real path; and a ``uv tool
+            # run`` gets ``--no-env-file``. An absolute path outside those
+            # directories is the operator's and stays. The directory the child
+            # starts in is ``working_dir``, the caller's ``cwd``, which need not be
+            # the source directory, and a bare ``UV_PYTHON`` such as ``.venv`` is
+            # judged against it: it names an entry of that directory when it holds
+            # one of that name, and uv reads it as that path.
             env = without_tree_uv_files(
-                env, (Path(source_dir), Path(self._require_context().output_dir))
+                env,
+                (
+                    Path(source_dir),
+                    Path(self._require_context().output_dir),
+                    working_dir,
+                ),
             )
             command = with_no_env_file(command)
 

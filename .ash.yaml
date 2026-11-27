@@ -3529,6 +3529,9 @@ global_settings:
     - rule_id: B604
       path: tests/unit/utils/test_subprocess_utils_stops_resolution_and_records_edges.py
       reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/unit/utils/test_uv_ignores_repository_config.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that a uv path the tree supplies is left out of a declared shell line's environment too."
     # === The #865 chain's test files: detect-secrets ===
     # Per-file entries with the established reasons, as above. Each flagged line
     # was read: every value is a made-up fixture, a planted probe, or a name the

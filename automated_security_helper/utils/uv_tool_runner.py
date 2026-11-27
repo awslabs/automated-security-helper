@@ -156,8 +156,9 @@ UV_NO_ENV_FILE = "--no-env-file"
 # read it as a request first (a directory named ``3.12``), the safe side. Any other
 # name is a version request (``3.12``, ``cpython@3.12``, ``python3.12``) or a program
 # uv looks up on PATH, and is passed on. ``without_tree_uv_files`` judges it on every
-# route that starts uv; ``plugin_base`` also checks a scanner's own ``UV_PYTHON`` and
-# warns once per plugin when it names an interpreter inside the tree.
+# route that starts uv; ``plugin_base`` also checks a scanner's own ``UV_PYTHON``, drops
+# one that names an interpreter inside the tree itself, and names it in the same
+# warning (``warn_of_a_uv_python_left_out``).
 # ``UV_PROJECT_ENVIRONMENT`` names a project's environment, and the uv tool commands run
 # no project. The endpoints of remote services (``UV_S3_ENDPOINT_URL``,
 # ``UV_GCS_ENDPOINT_URL``, ``UV_AZURE_ENDPOINT_URL``, ``UV_MALWARE_CHECK_URL`` and
@@ -313,8 +314,9 @@ _PATH_OF_THE_TREE = (
     "its value names a path inside the scanned tree or a directory ASH treats as one."
 )
 
-# The (variable, reason) pairs ``without_tree_uv_files`` has already warned of in this
-# process: a run judges the same environment many times, and each is said once.
+# The (variable, reason) pairs ``without_tree_uv_files`` and
+# ``warn_of_a_uv_python_left_out`` have already warned of in this process: a run judges
+# the same environment many times, and each is said once, whichever of the two says it.
 # ``_reset_uv_tool_runner_caches`` clears them. The lock is held for the check and the
 # add alone, so a caller may hold any other lock when it judges an environment.
 _uv_variables_warned: Set[Tuple[str, str]] = set()
@@ -583,6 +585,38 @@ def without_tree_uv_files(
     for name, reason in dropped.items():
         _warn_of_a_variable_left_out(name, reason)
     return {key: item for key, item in current.items() if key not in dropped}
+
+
+def warn_of_a_uv_python_left_out(
+    environment: Optional[Dict[str, str]],
+    roots: Iterable[Union[str, "os.PathLike[str]"]],
+) -> None:
+    """Warn that the ``UV_PYTHON`` of ``environment`` is not passed to uv.
+
+    For a caller that drops the variable itself, before ``without_tree_uv_files``
+    judges the environment: ``PluginBase._run_subprocess`` does, for an interpreter
+    inside the scanned tree, so that ASH's own is named in its place. The filter
+    never sees a variable that is already gone, so it cannot say that one is left
+    out. A warning the caller keeps of its own is said again by each plugin, and
+    again when the same value is judged on another route. Said here, it is the
+    filter's own warning (``_warn_of_a_variable_left_out``): once in a process for
+    each variable and reason, whichever route leaves the variable out first, and
+    never with its value.
+
+    The reason is the one the filter gives for the value against ``roots``
+    (``_tree_path_reason``), so a value both leave out is named in one line. The
+    caller's own test reads the interpreter's directory resolved and its name as
+    written (a ``.venv`` python is a link to the interpreter it was made from), and
+    the filter reads the value as written and resolved whole, so the two can differ:
+    an interpreter that is a link out of the tree, reached through a link above the
+    tree, is inside by the test and outside by the filter. When the filter gives no
+    reason, the reason is that the value names a path inside the tree.
+    ``environment`` is what the child gets (this process's when None).
+    """
+    current = snapshot_environ() if environment is None else environment
+    value = current.get("UV_PYTHON")
+    reason = _tree_path_reason(value, roots) if isinstance(value, str) else None
+    _warn_of_a_variable_left_out("UV_PYTHON", reason or _PATH_OF_THE_TREE)
 
 
 class UVToolRunnerError(Exception):
@@ -3993,8 +4027,8 @@ def invalidate_tool_version_cache(name: str) -> None:
 def _reset_uv_tool_runner_caches() -> None:
     """Reset module-level caches (mainly for testing).
 
-    That includes the memory of the uv variables ``without_tree_uv_files`` has warned
-    of, so each is warned of again.
+    That includes the memory of the uv variables ``without_tree_uv_files`` and
+    ``warn_of_a_uv_python_left_out`` have warned of, so each is warned of again.
     """
     global _lookup_generation
     with _uv_variables_warned_lock:
