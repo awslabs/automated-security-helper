@@ -1064,7 +1064,7 @@ class TestACallToAReusableWorkflow:
             for job_id, job in workflow["jobs"].items()
             if "runner" in (job.get("with") or {})
         ]
-        assert passing, "a job of ash-repo-scan.yml passes a runner to a called workflow"
+        assert passing, "ash-repo-scan.yml passes a runner to a called workflow"
         for job_id in passing:
             assert workflow["jobs"][job_id]["with"]["runner"] in labels
             planted = copy.deepcopy(workflow)
