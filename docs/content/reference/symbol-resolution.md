@@ -12,7 +12,7 @@ A suppression with `symbol: MyClass.my_method` covers a finding when the finding
 fall inside a definition with that qualified name in the finding's file. A line-number
 suppression points at whatever sits on those lines after an edit; a symbol suppression keeps
 pointing at the definition, wherever it moves. This repository's own configs
-(`.ash/.ash.yaml`, `.ash/.ash_alpha_plugins.yaml`) use symbol scoping for every
+(`.ash.yaml` and `.ash/.ash_alpha_plugins.yaml`) use symbol scoping for every
 suppression that sits inside a named definition; the migration record and its oracle live in
 `tests/test_data/suppression_symbol_migration.yaml` and
 `tests/unit/config/test_symbol_migration_record.py`.
