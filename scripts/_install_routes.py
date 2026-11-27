@@ -469,7 +469,12 @@ def routes(
 
 @dataclass(frozen=True)
 class AllTools:
-    """Every tool is present: the image counts as providing every built-in tool."""
+    """Every tool is present: the image counts as providing every built-in tool.
+
+    It stands for the tool of an alpha scanner too, so an environment that provides
+    ``ALL_TOOLS`` runs every alpha scanner whose own row does not leave it out (an
+    image row that names the reason, a platform with no release asset).
+    """
 
     def __contains__(self, tool: object) -> bool:
         return True
@@ -483,11 +488,14 @@ class Provision:
     """What an environment provides before a scan.
 
     ``kind`` is how the environment is provisioned. An image names its stage (``ci``
-    or ``non-root``) and counts as providing the tools its ``tools`` lists. The
-    pre-commit hook provides the pre-commit set. A Nix shell provides what the
-    flake's package rows carry. A host provides the tools, extras and runtimes its
-    recipe installs; ``alpha_with_tools`` lists the alpha modules whose tools it
-    installs too.
+    or ``non-root``) and counts as providing the tools its ``tools`` lists, with
+    whatever its runtime and extras need already inside it; the answer does not
+    depend on the stage today, because the image register has one row per scanner.
+    The pre-commit hook provides the pre-commit set. A Nix shell provides what the
+    flake's package rows carry, so a scanner with a Nix row needs no runtime from
+    the provision. A host provides the tools, extras and runtimes its recipe
+    installs; ``alpha_with_tools`` lists the alpha modules whose tools it installs
+    too, so a host recipe that installs ``--tool hadolint`` lists that module.
     """
 
     kind: str
