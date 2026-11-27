@@ -4,7 +4,8 @@ A plugin is configured through a pydantic model: its config class (C), whose
 ``options`` field holds an options model (O). The JSON schema of C is what ASH
 publishes for the plugin and what an editor validates a config file against.
 This module checks that schema, and the declarations around it, with one pure
-function per rule. It also has a command for plugin authors.
+function per rule. The command for plugin authors, and the walk over the shipped
+plugins that finds what to check, are in ``cli/config_schema_check.py``.
 
 The rules
 ---------
@@ -55,65 +56,36 @@ cannot read as a pass. ``path`` is a JSON pointer into what the rule reads:
 
 There is one row per (rule, path): rows that share both are joined into one text.
 The root surface (the keys of AshConfig.json and AshWorkspaceConfig.json outside
-the plugin sections) is checked by ``check_root_keys`` and reported under the
-labels ``(root)`` and ``(workspace-root)``. A manifest name matches
-``[a-z0-9]+(?:-[a-z0-9]+)*``, so no manifest name can collide with them.
-
-The author command
-------------------
-
-``python -m automated_security_helper.schemas.config_schema_check`` checks every
-shipped scanner and prints one line per problem, tab-separated: the scanner, the
-rule, the JSON pointer and the text. The pointer of a problem at the root of a
-schema is empty, so that field is empty. The scanners are the union of two
-enumerations: the classes that the packages under ``plugin_modules`` export in
-``ASH_SCANNERS``, and the manifests (``scanner_manifests()``). A scanner found by
-one route only gets a P1 problem by name.
-
-``--path DIR`` checks the plugin package in directory DIR instead. The package is
-imported in the command's own process, so run it where registering plugins does
-no harm. Only the class half of P1 and P2 to P8 apply: the package has no
-manifest and is not published, so the manifest half of P1, P9 and P10 do not. A
-package that fails to import gives one P1 problem naming the module.
-
-``--baseline FILE`` reads a file of known problems, one per line, with four
-tab-separated fields: scanner, rule, JSON pointer, fix id. The lines are LF
-terminated, sorted and free of duplicates. The command then prints only what the
-file does not account for, each line starting with a status field: ``new`` (a
-problem the file does not list: scanner, rule, JSON pointer, text) and ``stale``
-(a line of the file that no longer occurs: scanner, rule, JSON pointer, fix id).
-
-Exit status: 0 when nothing is printed, 1 when at least one problem (or, with
-``--baseline``, one new problem or stale line) is printed, 2 for a usage error, a
-path that cannot be read or a baseline file that cannot be parsed. A summary of
-what was checked goes to standard error.
+the plugin sections) is checked by ``check_root_keys``.
 
 Layering
 --------
 
-This module reads the whole tree to check it, so it names the packages above its
-own layer (``utils``, ``config`` and the plugin packages) as dotted strings and
-resolves them with ``resolve_ref``, the way a manifest names a class, instead of
-with import statements. The classes of the contract layer (``base`` and
-``plugin_manifests``) are imported where they are used.
+This module is in the contract layer and names no package above it, by an import
+statement or by a string. It reads the classes, manifests and schema dicts it is
+given, the committed schema files beside it, and the contract layer's own tables
+(the ToolPins, the pins of the tool schemas, the generated modules). A manifest's
+own references (its entry point, its options model, the constant of a route's
+version source) are resolved with ``resolve_ref``, the way the manifest names them.
+The two P10 sources that live in layers above this one, the versions in the
+license table and the sentence that says only the operator sets an option, are
+supplied through ``RouteSources`` by the command in ``cli/config_schema_check.py``,
+which is in the layer that may read the whole tree.
 """
 
 from __future__ import annotations
 
-import argparse
 import functools
 import hashlib
 import importlib.util
 import json
 import keyword
-import pkgutil
 import re
-import sys
 import typing
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NamedTuple, ParamSpec, TextIO
+from typing import Any, NamedTuple, ParamSpec
 from urllib.parse import unquote
 
 from pydantic import BaseModel, ValidationError
@@ -122,14 +94,9 @@ from automated_security_helper.base.plugin_manifest import resolve_ref
 
 __all__ = [
     "RULES",
-    "ROOT_SCANNER",
-    "ROOT_WORKSPACE_SCANNER",
-    "BaselineLine",
-    "Enumeration",
     "GeneratedModule",
     "Problem",
     "RouteSources",
-    "Subject",
     "body_sha256",
     "check_bounded",
     "check_closed",
@@ -141,21 +108,14 @@ __all__ = [
     "check_described",
     "check_generates",
     "check_keys",
-    "check_package",
     "check_published",
-    "check_registry",
     "check_root_keys",
     "check_route",
     "check_scanner",
     "check_typed",
-    "compare_baseline",
-    "enumerate_scanners",
-    "format_problem",
     "load_published",
-    "main",
     "options_model_of",
     "own_option_fields",
-    "read_baseline",
     "split_generated_module",
 ]
 
@@ -204,11 +164,6 @@ RULES: dict[str, str] = {
     ),
 }
 
-#: The scanner label of problems in the keys of AshConfig.json outside its plugin
-#: sections, and of AshWorkspaceConfig.json.
-ROOT_SCANNER = "(root)"
-ROOT_WORKSPACE_SCANNER = "(workspace-root)"
-
 #: The root properties of the config schema whose members are plugin sections:
 #: their keys are plugin names, which follow the manifest-name rule, and each
 #: section is checked as the config class of its plugin.
@@ -224,7 +179,6 @@ _WRONG_VALUES: tuple[Any, ...] = ([], {PROBE_KEY: []}, PROBE_KEY)
 
 _KEY = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
 _READ_AT = re.compile(r"[^/@\s]+/[^@\s]+@\S+")
-_PLUGIN_PACKAGE = "automated_security_helper.plugin_modules"
 _ABSENT = object()
 
 P = ParamSpec("P")
@@ -1481,11 +1435,16 @@ class GeneratedModule(NamedTuple):
 class RouteSources:
     """Where P10 reads what a route is compared with.
 
-    A field left as None is read from this installation: the ToolPins of
-    ``base.plugin_provisioning``, the versions in the ``THIRD_PARTY_LICENSES`` table
-    of ``utils.tool_downloads`` (read, never written), the pins of
+    A field left as None is read from this installation where this module may read
+    it: the ToolPins of ``base.plugin_provisioning``, the pins of
     ``plugin_manifests.tool_schemas`` (an empty mapping while that module does not
-    exist) and the generated modules on the import path. Tests inject their own.
+    exist) and the generated modules on the import path. Two sources are in layers
+    above this module's, so the caller that checks the installed tree supplies
+    them (``default_sources`` in ``cli/config_schema_check.py``): the versions of
+    the license table, and the sentence an option's description ends with when only
+    the operator sets it. Left as None they are empty: no license entry is found,
+    and a route that needs the sentence is reported as one that cannot be checked.
+    Tests inject their own.
     """
 
     pins: Mapping[str, Any] | None = None
@@ -1513,14 +1472,9 @@ class RouteSources:
         return tool_versions().get(name)
 
     def license_version(self, key: str) -> str | None:
-        if self.license_versions is not None:
-            return self.license_versions.get(key)
-        table = resolve_ref(
-            "automated_security_helper.utils.tool_downloads:THIRD_PARTY_LICENSES"
-        )
-        entry = _mapping(table).get(key)
-        version = getattr(entry, "version", None)
-        return version if isinstance(version, str) else None
+        if self.license_versions is None:
+            return None
+        return self.license_versions.get(key)
 
     def module(self, dotted: str, root_class: str) -> GeneratedModule | None:
         if self.load_module is not None:
@@ -1528,12 +1482,7 @@ class RouteSources:
         return _load_generated_module(dotted, root_class)
 
     def operator_only_sentence(self) -> str:
-        if self.operator_sentence is not None:
-            return self.operator_sentence
-        text = resolve_ref(
-            "automated_security_helper.config.confinement_remedy:SET_BY_THE_OPERATOR"
-        )
-        return text if isinstance(text, str) else ""
+        return self.operator_sentence or ""
 
 
 def _load_generated_module(dotted: str, root_class: str) -> GeneratedModule | None:
@@ -1803,7 +1752,16 @@ def _upstream_rows(
                     )
                 )
             sentence = sources.operator_only_sentence()
-            if sentence not in (info.description or ""):
+            if not sentence:
+                rows.append(
+                    _row(
+                        "P10",
+                        where,
+                        "no operator-only sentence was supplied, so the description "
+                        f"of {option!r} cannot be checked against it",
+                    )
+                )
+            elif sentence not in (info.description or ""):
                 rows.append(
                     _row(
                         "P10",
@@ -1880,7 +1838,7 @@ def check_route(
 
 
 # ---------------------------------------------------------------------------
-# One scanner, and every scanner.
+# One scanner.
 # ---------------------------------------------------------------------------
 
 
@@ -1936,318 +1894,8 @@ def check_scanner(
     return _merged(rows)
 
 
-@dataclass(frozen=True)
-class Subject:
-    """One registered scanner as the two enumeration routes see it."""
-
-    name: str
-    scanner_class: type | None
-    manifest: Any | None
-
-
-class Enumeration(NamedTuple):
-    """The scanners to check, and the packages that could not be read."""
-
-    subjects: list[Subject]
-    failures: dict[str, list[Problem]]
-
-
-def _plugin_packages() -> list[str]:
-    paths = resolve_ref(f"{_PLUGIN_PACKAGE}:__path__")
-    return sorted(info.name for info in pkgutil.iter_modules(paths) if info.ispkg)
-
-
-def enumerate_scanners() -> Enumeration:
-    """The union of the two routes that name a scanner.
-
-    Route 1: the classes the packages under ``plugin_modules`` export in
-    ``ASH_SCANNERS``, after the builtin package has retried the plugin groups an
-    import-order cycle cost it. Route 2: ``scanner_manifests()``, which imports no
-    plugin. A class and a manifest are the same scanner when the manifest's entry
-    point is the class; one found by one route only is a subject of its own, so it
-    gets its P1 problem by name.
-    """
-    from automated_security_helper.plugin_manifests import scanner_manifests
-
-    failures: dict[str, list[Problem]] = {}
-    retry = resolve_ref(f"{_PLUGIN_PACKAGE}.ash_builtin:retry_failed_plugin_groups")
-    for module, error in sorted(_mapping(retry()).items()):
-        failures.setdefault(str(module), []).append(
-            _row("P1", "", f"the builtin plugin group failed to import: {error}")
-        )
-    classes: list[type] = []
-    for package in _plugin_packages():
-        dotted = f"{_PLUGIN_PACKAGE}.{package}"
-        try:
-            exported = resolve_ref(f"{dotted}:ASH_SCANNERS")
-        except AttributeError:
-            continue
-        except Exception as error:
-            failures.setdefault(dotted, []).append(
-                _row("P1", "", f"importing {dotted} failed: {_describe(error)}")
-            )
-            continue
-        for cls in exported:
-            if isinstance(cls, type) and cls not in classes:
-                classes.append(cls)
-    by_entry = {
-        str(getattr(m.entry_points, "scanner", "")): m for m in scanner_manifests()
-    }
-    subjects: list[Subject] = []
-    for cls in classes:
-        manifest = by_entry.pop(_ref_of(cls), None)
-        if manifest is not None:
-            name = str(manifest.name)
-        else:
-            name = _name_default(_declared_config(cls)) or cls.__name__
-        subjects.append(Subject(name, cls, manifest))
-    subjects += [Subject(str(m.name), None, m) for m in by_entry.values()]
-    return Enumeration(sorted(subjects, key=lambda s: s.name), failures)
-
-
 def load_published(name: str = "AshConfig.json") -> dict[str, Any]:
     """A committed schema file of this package, as a dict."""
     text = (Path(__file__).resolve().parent / name).read_text(encoding="utf-8")
     loaded = json.loads(text)
     return loaded if isinstance(loaded, dict) else {}
-
-
-def check_registry(
-    *,
-    published: Mapping[str, Any] | None = None,
-    sources: RouteSources | None = None,
-) -> dict[str, list[Problem]]:
-    """Every rule over every shipped scanner, and P8 over the root surface.
-
-    The result has one entry per scanner (an empty list for a clean one) and the
-    two root labels, so a caller can count what was checked as well as what failed.
-    """
-    document = published if published is not None else load_published()
-    enumeration = enumerate_scanners()
-    findings: dict[str, list[Problem]] = {
-        name: list(rows) for name, rows in enumeration.failures.items()
-    }
-    for subject in enumeration.subjects:
-        rows = check_scanner(
-            subject.scanner_class,
-            subject.manifest,
-            published=document,
-            sources=sources,
-            name=subject.name,
-        )
-        findings[subject.name] = _merged([*findings.get(subject.name, []), *rows])
-    findings[ROOT_SCANNER] = check_root_keys(document)
-    findings[ROOT_WORKSPACE_SCANNER] = check_root_keys(
-        load_published("AshWorkspaceConfig.json")
-    )
-    return findings
-
-
-def check_package(path: Path) -> dict[str, list[Problem]]:
-    """The class half of P1 and P2 to P8 for the plugin package in a directory.
-
-    The package is imported in this process, with the directory's parent on the
-    import path while it loads, and every class in its ``ASH_SCANNERS`` is checked.
-    """
-    directory = Path(path).resolve()
-    module = directory.name
-    if not (directory / "__init__.py").is_file():
-        return {
-            module: [
-                _row("P1", "", f"{directory} is not a plugin package: no __init__.py")
-            ]
-        }
-    parent = str(directory.parent)
-    sys.path.insert(0, parent)
-    try:
-        resolve_ref(f"{module}:__name__")
-    except (Exception, SystemExit) as error:
-        return {
-            module: [_row("P1", "", f"importing {module} failed: {_describe(error)}")]
-        }
-    finally:
-        if parent in sys.path:
-            sys.path.remove(parent)
-    try:
-        exported = resolve_ref(f"{module}:ASH_SCANNERS")
-    except AttributeError:
-        return {
-            module: [
-                _row(
-                    "P1",
-                    "",
-                    f"{module} imports but exports no ASH_SCANNERS: this command "
-                    "checks scanners",
-                )
-            ]
-        }
-    findings: dict[str, list[Problem]] = {}
-    for cls in exported:
-        if not isinstance(cls, type):
-            findings.setdefault(module, []).append(
-                _row("P1", "", f"ASH_SCANNERS holds {cls!r}, which is not a class")
-            )
-            continue
-        name = _name_default(_declared_config(cls)) or cls.__name__
-        findings[name] = check_scanner(cls, None, require_manifest=False, name=name)
-    if not findings:
-        findings[module] = [_row("P1", "", f"{module} exports an empty ASH_SCANNERS")]
-    return findings
-
-
-# ---------------------------------------------------------------------------
-# The baseline and the command.
-# ---------------------------------------------------------------------------
-
-
-class BaselineLine(NamedTuple):
-    """One known problem: scanner, rule, JSON pointer, and what removes it."""
-
-    scanner: str
-    rule: str
-    path: str
-    fix: str
-
-    @property
-    def key(self) -> tuple[str, str, str]:
-        return self.scanner, self.rule, self.path
-
-
-def read_baseline(path: Path) -> list[BaselineLine]:
-    """The lines of a baseline file. Raises ValueError for a line that is not four
-    tab-separated fields (the JSON pointer may be empty, for a root problem)."""
-    lines: list[BaselineLine] = []
-    for number, raw in enumerate(Path(path).read_text(encoding="utf-8").split("\n"), 1):
-        if not raw.strip():
-            continue
-        fields = raw.split("\t")
-        if len(fields) != 4 or not (fields[0] and fields[1] and fields[3]):
-            raise ValueError(
-                f"{path}:{number}: expected scanner, rule, JSON pointer and fix id "
-                "separated by tabs"
-            )
-        lines.append(BaselineLine(*fields))
-    return lines
-
-
-def compare_baseline(
-    findings: Mapping[str, Sequence[Problem]], baseline: Sequence[BaselineLine]
-) -> tuple[list[tuple[str, Problem]], list[BaselineLine]]:
-    """The problems no baseline line lists, and the baseline lines that no longer
-    occur."""
-    listed = {line.key for line in baseline}
-    occurring = {
-        (scanner, row.rule, row.path)
-        for scanner, rows in findings.items()
-        for row in rows
-    }
-    new = [
-        (scanner, row)
-        for scanner in sorted(findings)
-        for row in findings[scanner]
-        if (scanner, row.rule, row.path) not in listed
-    ]
-    stale = [line for line in baseline if line.key not in occurring]
-    return new, stale
-
-
-def format_problem(scanner: str, problem: Problem) -> str:
-    """One output line: scanner, rule, JSON pointer and text, tab-separated."""
-    return f"{scanner}\t{problem.rule}\t{problem.path}\t{problem.text}"
-
-
-def _shown(line: str) -> str:
-    """The line as text a terminal only shows, never acts on.
-
-    Every character that is not printable ASCII, except the tab between the
-    fields, comes out as a Python-style escape. Text from a plugin (a key, a
-    description, the message of an error) can hold an escape sequence for the
-    terminal or a line break that would split a line in two.
-    """
-    return "".join(
-        char
-        if char == "\t" or " " <= char <= "~"
-        else char.encode("unicode_escape").decode("ascii")
-        for char in line
-    )
-
-
-def _write(stream: TextIO, line: str) -> None:
-    """Write one shown line, with its line end, to a stream."""
-    stream.write(_shown(line) + "\n")
-
-
-def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="python -m automated_security_helper.schemas.config_schema_check",
-        description=(
-            "Check the config schema of every shipped scanner against ten rules, "
-            "and print one tab-separated line per problem: scanner, rule, JSON "
-            "pointer, text. Exit status 0 when nothing is printed, 1 when a "
-            "problem is printed, 2 for a usage or read error."
-        ),
-        epilog="rules:\n" + "\n".join(f"  {k}  {v}" for k, v in RULES.items()),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--path",
-        type=Path,
-        metavar="DIR",
-        help=(
-            "check the plugin package in DIR (imported in this process) instead of "
-            "the shipped scanners: the class half of P1 and P2 to P8 only"
-        ),
-    )
-    parser.add_argument(
-        "--baseline",
-        type=Path,
-        metavar="FILE",
-        help=(
-            "print only what FILE (scanner, rule, JSON pointer and fix id, "
-            "tab-separated) does not list, as 'new' lines, and the lines of FILE "
-            "that no longer occur, as 'stale' lines"
-        ),
-    )
-    return parser
-
-
-def main(argv: Sequence[str] | None = None, *, out: TextIO | None = None) -> int:
-    """The author command; returns its exit status."""
-    arguments = _parser().parse_args(argv)
-    stdout = out if out is not None else sys.stdout
-    try:
-        baseline = (
-            read_baseline(arguments.baseline)
-            if arguments.baseline is not None
-            else None
-        )
-        findings = (
-            check_package(arguments.path)
-            if arguments.path is not None
-            else check_registry()
-        )
-    except (OSError, ValueError) as error:
-        _write(sys.stderr, f"error: {error}")
-        return 2
-    total = sum(len(rows) for rows in findings.values())
-    if baseline is None:
-        lines = [
-            format_problem(scanner, row)
-            for scanner in sorted(findings)
-            for row in findings[scanner]
-        ]
-    else:
-        new, stale = compare_baseline(findings, baseline)
-        lines = [f"new\t{format_problem(scanner, row)}" for scanner, row in new]
-        lines += ["stale\t" + "\t".join(line) for line in stale]
-    for line in lines:
-        _write(stdout, line)
-    _write(
-        sys.stderr,
-        f"checked {len(findings)} scanner(s) or root surface(s): {total} problem(s)",
-    )
-    return 1 if lines else 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

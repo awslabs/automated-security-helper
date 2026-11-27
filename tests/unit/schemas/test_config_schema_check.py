@@ -7,6 +7,10 @@ and that the baseline and the author command say what they should. A rule that
 could no longer fail would pass every other test of the suite, so each rule has a
 model that must trip it.
 
+The rules are in ``schemas/config_schema_check.py``; the walk over the shipped
+plugins and the author command are in ``cli/config_schema_check.py``. The tests of
+both are here, since they are one feature.
+
 The tests of the author command's ``--path`` mode run it in a child process. The
 command imports the package it is given, which can register plugins, and a child
 keeps that out of this process.
@@ -14,10 +18,11 @@ keeps that out of this process.
 
 from __future__ import annotations
 
+import ast
 import copy
 import hashlib
 import importlib.util
-import io
+import re
 import subprocess  # nosec B404 - the test's own interpreter, fixed argv
 import sys
 from collections.abc import Callable, Iterator
@@ -29,13 +34,23 @@ import pytest
 
 from automated_security_helper.base.plugin_provisioning import tool_versions
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.cli import config_schema_check as command
+from automated_security_helper.cli.config_schema_check import (
+    ROOT_SCANNER,
+    ROOT_WORKSPACE_SCANNER,
+    BaselineLine,
+    check_registry,
+    compare_baseline,
+    default_sources,
+    enumerate_scanners,
+    main,
+    read_baseline,
+)
+from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.plugin_manifests import scanner_manifests
 from automated_security_helper.schemas import config_schema_check as checker
 from automated_security_helper.schemas.config_schema_check import (
-    ROOT_SCANNER,
-    ROOT_WORKSPACE_SCANNER,
     RULES,
-    BaselineLine,
     GeneratedModule,
     Problem,
     RouteSources,
@@ -51,21 +66,16 @@ from automated_security_helper.schemas.config_schema_check import (
     check_generates,
     check_keys,
     check_published,
-    check_registry,
     check_root_keys,
     check_route,
     check_scanner,
     check_typed,
-    compare_baseline,
-    enumerate_scanners,
-    format_problem,
     load_published,
-    main,
     options_model_of,
     own_option_fields,
-    read_baseline,
     split_generated_module,
 )
+from automated_security_helper.utils.tool_downloads import THIRD_PARTY_LICENSES
 from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, REPO_ROOT, checkout_env
 
 FIXTURE_NAME = "ash_config_schema_fixture_models"
@@ -450,11 +460,6 @@ class TestRules:
             ("P10", "/a"),
         ]
 
-    def test_a_problem_is_one_line_of_output(self) -> None:
-        assert format_problem("scan", Problem("P5", "/a", "text")) == (
-            "scan\tP5\t/a\ttext"
-        )
-
     @pytest.mark.parametrize(
         ("check", "argument", "rule"),
         [
@@ -470,6 +475,101 @@ class TestRules:
         (row,) = check(argument)
         assert row.rule == rule
         assert row.text.startswith("the check could not run")
+
+
+#: The top-level package of ASH, and the packages of its lowest layer, the only
+#: ones the rule module may name (tests/unit/test_layer_dag_boundaries.py).
+PACKAGE = "automated_security_helper"
+CONTRACT_LAYER = frozenset({"base", "schemas", "plugin_manifests"})
+
+
+def _packages_named(source: str, package: str = "schemas") -> set[str]:
+    """The packages of ASH that a module of ``package`` names: in an import
+    statement of any form, or in a dotted name inside a string (the form
+    ``resolve_ref`` is given one in). The layer guard counts import statements
+    only; a name put together at run time is not seen here either."""
+    here = [PACKAGE, package]
+    named: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            named.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                base = here[: len(here) - (node.level - 1)]
+                module = ".".join([*base, *([node.module] if node.module else [])])
+            else:
+                module = node.module or ""
+            named.add(module)
+            if module == PACKAGE:
+                named.update(f"{PACKAGE}.{alias.name}" for alias in node.names)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            named.update(re.findall(rf"{PACKAGE}\.\w+", node.value))
+    packages: set[str] = set()
+    for name in named:
+        parts = name.split(".")
+        if parts[0] == PACKAGE and len(parts) > 1:
+            packages.add(parts[1])
+    return packages
+
+
+class TestLayering:
+    pytestmark = pytest.mark.unit
+
+    def test_the_rule_module_names_no_package_above_its_layer(self) -> None:
+        source = Path(checker.__file__).read_text(encoding="utf-8")
+        assert _packages_named(source) <= CONTRACT_LAYER
+
+    def test_the_command_is_where_the_edges_to_the_layers_above_are(self) -> None:
+        source = Path(command.__file__).read_text(encoding="utf-8")
+        assert {"utils", "config", "plugin_manifests", "plugin_modules"} <= (
+            _packages_named(source, "cli")
+        )
+
+    @pytest.mark.parametrize(
+        ("source", "above"),
+        [
+            pytest.param(
+                "import automated_security_helper.utils.terminal_text\n",
+                "utils",
+                id="an import",
+            ),
+            pytest.param(
+                "from automated_security_helper.config import x\n",
+                "config",
+                id="a from-import",
+            ),
+            pytest.param(
+                "from automated_security_helper import cli\n",
+                "cli",
+                id="a package imported by name",
+            ),
+            pytest.param("from ..core import x\n", "core", id="a relative import"),
+            pytest.param(
+                'resolve_ref("automated_security_helper.core.exceptions:E")\n',
+                "core",
+                id="a string given to resolve_ref",
+            ),
+            pytest.param(
+                'name = f"automated_security_helper.plugin_modules.{x}"\n',
+                "plugin_modules",
+                id="a dotted name in an f-string",
+            ),
+        ],
+    )
+    def test_the_scan_finds_a_package_above_the_layer_however_it_is_named(
+        self, source: str, above: str
+    ) -> None:
+        assert above in _packages_named(source)
+        assert not _packages_named(source) <= CONTRACT_LAYER
+
+    def test_the_scan_passes_a_module_that_names_only_the_contract_layer(self) -> None:
+        source = (
+            "from automated_security_helper.base.options import X\n"
+            "from automated_security_helper.schemas import generate_schemas\n"
+            "from . import sibling\n"
+            'resolve_ref("automated_security_helper.plugin_manifests.tool_schemas:P")\n'
+        )
+        assert _packages_named(source) == CONTRACT_LAYER
 
 
 class TestEachModelTripsOneRule:
@@ -1017,9 +1117,34 @@ class TestRoute:
         tool, version = next(iter(versions.items()))
         assert sources.tool_version(tool) == version
         assert sources.tool_version("no-such-tool") is None
-        assert sources.license_version("no-such-key") is None
         assert sources.pin("no-such-pin") is None
-        assert sources.operator_only_sentence()
+
+    def test_the_sources_above_the_rules_layer_are_empty_until_supplied(self) -> None:
+        sources = RouteSources()
+        assert THIRD_PARTY_LICENSES
+        assert sources.license_version(next(iter(THIRD_PARTY_LICENSES))) is None
+        assert sources.operator_only_sentence() == ""
+
+    def test_the_command_supplies_the_license_versions_and_the_operator_sentence(
+        self,
+    ) -> None:
+        sources = default_sources()
+        assert THIRD_PARTY_LICENSES
+        for key, entry in THIRD_PARTY_LICENSES.items():
+            assert sources.license_version(key) == entry.version
+        assert sources.license_version("no-such-key") is None
+        assert sources.operator_only_sentence() == SET_BY_THE_OPERATOR
+
+    def test_a_route_that_needs_the_operator_sentence_says_when_none_was_supplied(
+        self, models: ModuleType
+    ) -> None:
+        manifest, _options, overrides = _scenario(
+            models, "UpstreamOptions", route=models.upstream_route
+        )
+        sources = _sources(models, operator_sentence=None, **overrides)
+        (row,) = check_route(manifest, models.UpstreamOptions, sources=sources)
+        assert (row.rule, row.path) == ("P10", "/tool_config/option")
+        assert "no operator-only sentence was supplied" in row.text
 
 
 class TestScanner:
@@ -1202,108 +1327,195 @@ class TestBaseline:
         new, stale = compare_baseline(reworded, [BaselineLine(*LISTED.split("\t"))])
         assert (new, stale) == ([], [])
 
+    def test_a_line_is_matched_in_the_form_the_command_prints(self) -> None:
+        raw = "/$defs/A/properties/caf" + chr(0xE9)
+        findings = {"alpha-scanner": [Problem("P8", raw, "text")]}
+        printed = BaselineLine("alpha-scanner", "P8", ascii(raw)[1:-1], "fix")
+        assert compare_baseline(findings, [printed]) == ([], [])
+        as_typed = BaselineLine("alpha-scanner", "P8", raw, "fix")
+        new, stale = compare_baseline(findings, [as_typed])
+        assert [row.path for _, row in new] == [raw]
+        assert stale == [as_typed]
+
 
 class TestCommand:
     pytestmark = pytest.mark.unit
 
     @pytest.fixture
     def fixed_registry(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(checker, "check_registry", lambda: FINDINGS)
+        monkeypatch.setattr(command, "check_registry", lambda: FINDINGS)
+
+    @staticmethod
+    def _registry_of(
+        monkeypatch: pytest.MonkeyPatch, problem: Problem, scanner: str = "s"
+    ) -> None:
+        monkeypatch.setattr(command, "check_registry", lambda: {scanner: [problem]})
 
     def test_with_no_baseline_every_problem_is_printed_and_the_exit_is_one(
         self, fixed_registry: None, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        out = io.StringIO()
-        assert main([], out=out) == 1
-        assert out.getvalue() == (
+        assert main([]) == 1
+        printed = capsys.readouterr()
+        assert printed.out == (
             "alpha-scanner\tP5\t/$defs/A/properties/limit\thas no description\n"
         )
-        summary = capsys.readouterr().err
-        assert "checked 2 scanner(s) or root surface(s): 1 problem(s)" in summary
+        assert "checked 2 scanner(s) or root surface(s): 1 problem(s)" in printed.err
 
     def test_with_nothing_to_print_the_exit_is_zero(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        monkeypatch.setattr(checker, "check_registry", lambda: {"a-scanner": []})
-        out = io.StringIO()
-        assert main([], out=out) == 0
-        assert out.getvalue() == ""
+        monkeypatch.setattr(command, "check_registry", lambda: {"a-scanner": []})
+        assert main([]) == 0
+        assert capsys.readouterr().out == ""
 
     def test_a_problem_the_baseline_lists_is_not_printed(
-        self, fixed_registry: None, tmp_path: Path
+        self,
+        fixed_registry: None,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         baseline = _write_baseline(tmp_path / "baseline.tsv", LISTED)
-        out = io.StringIO()
-        assert main(["--baseline", str(baseline)], out=out) == 0
-        assert out.getvalue() == ""
+        assert main(["--baseline", str(baseline)]) == 0
+        assert capsys.readouterr().out == ""
 
     def test_a_problem_the_baseline_does_not_list_is_printed_as_new(
-        self, fixed_registry: None, tmp_path: Path
+        self,
+        fixed_registry: None,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         other = "alpha-scanner\tP5\t/$defs/A/properties/other\tfix-other"
         baseline = _write_baseline(tmp_path / "baseline.tsv", other)
-        out = io.StringIO()
-        assert main(["--baseline", str(baseline)], out=out) == 1
-        lines = out.getvalue().splitlines()
+        assert main(["--baseline", str(baseline)]) == 1
+        lines = capsys.readouterr().out.splitlines()
         assert lines[0] == (
             "new\talpha-scanner\tP5\t/$defs/A/properties/limit\thas no description"
         )
         assert lines[1:] == ["stale\t" + other]
 
     def test_a_line_that_no_longer_occurs_is_printed_as_stale(
-        self, fixed_registry: None, tmp_path: Path
+        self,
+        fixed_registry: None,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         gone = "beta-scanner\tP1\t/config\tfix-config"
         baseline = _write_baseline(tmp_path / "baseline.tsv", LISTED, gone)
-        out = io.StringIO()
-        assert main(["--baseline", str(baseline)], out=out) == 1
-        assert out.getvalue() == "stale\t" + gone + "\n"
+        assert main(["--baseline", str(baseline)]) == 1
+        assert capsys.readouterr().out == "stale\t" + gone + "\n"
 
     def test_a_baseline_that_cannot_be_read_is_an_error_not_a_pass(
         self, fixed_registry: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         malformed = _write_baseline(tmp_path / "bad.tsv", "alpha-scanner\tP5")
-        out = io.StringIO()
-        assert main(["--baseline", str(malformed)], out=out) == 2
-        assert out.getvalue() == ""
-        assert "expected scanner, rule, JSON pointer and fix id" in (
-            capsys.readouterr().err
-        )
+        assert main(["--baseline", str(malformed)]) == 2
+        printed = capsys.readouterr()
+        assert printed.out == ""
+        assert "expected scanner, rule, JSON pointer and fix id" in printed.err
         absent = tmp_path / "absent.tsv"
-        assert main(["--baseline", str(absent)], out=io.StringIO()) == 2
+        assert main(["--baseline", str(absent)]) == 2
         assert capsys.readouterr().err.startswith("error:")
 
-    def test_output_is_ascii(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_output_is_ascii(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         text = "caf" + chr(0xE9)
-        monkeypatch.setattr(
-            checker, "check_registry", lambda: {"s": [Problem("P5", "/p", text)]}
-        )
-        out = io.StringIO()
-        assert main([], out=out) == 1
-        assert out.getvalue().isascii()
-        assert ascii(text)[1:-1] in out.getvalue()
+        self._registry_of(monkeypatch, Problem("P5", "/p", text))
+        assert main([]) == 1
+        printed = capsys.readouterr().out
+        assert printed.isascii()
+        assert ascii(text)[1:-1] in printed
 
     def test_a_control_character_is_shown_as_an_escape(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """An escape sequence for the terminal, a bell and a line break in the
         text of a problem come out as escapes, and one problem stays one line."""
         text = "a" + chr(0x1B) + "]52;c;x" + chr(0x07) + "b" + chr(0x0A) + "c"
-        monkeypatch.setattr(
-            checker, "check_registry", lambda: {"s": [Problem("P5", "/p", text)]}
-        )
-        out = io.StringIO()
-        assert main([], out=out) == 1
-        assert out.getvalue() == "s\tP5\t/p\ta\\x1b]52;c;x\\x07b\\nc\n"
+        self._registry_of(monkeypatch, Problem("P5", "/p", text))
+        assert main([]) == 1
+        assert capsys.readouterr().out == "s\tP5\t/p\ta\\x1b]52;c;x\\x07b\\x0ac\n"
+
+    def test_a_tab_in_a_field_stays_in_its_field(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The tabs between the fields are the only tabs of a line: one inside a
+        pointer or a text is written as an escape, so a line has four fields."""
+        pointer = "/$defs/A/properties/a\tb"
+        self._registry_of(monkeypatch, Problem("P8", pointer, "one\ttwo"))
+        assert main([]) == 1
+        (line,) = capsys.readouterr().out.splitlines()
+        assert line.split("\t") == [
+            "s",
+            "P8",
+            "/$defs/A/properties/a\\x09b",
+            "one\\x09two",
+        ]
+
+    @pytest.mark.parametrize(
+        "key",
+        [
+            pytest.param("caf" + chr(0xE9), id="a letter with an accent"),
+            pytest.param("x" + chr(0x2192) + "y", id="a character outside Latin-1"),
+            pytest.param("a\tb", id="a tab"),
+            pytest.param("a" + chr(0x1B) + "b", id="an escape"),
+        ],
+    )
+    def test_a_line_copied_from_the_output_into_a_baseline_lists_its_problem(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        key: str,
+    ) -> None:
+        problem = Problem("P8", f"/$defs/A/properties/{key}", "has no description")
+        self._registry_of(monkeypatch, problem)
+        assert main([]) == 1
+        (line,) = capsys.readouterr().out.splitlines()
+        scanner, rule, pointer, _text = line.split("\t")
+        assert pointer.isascii()
+        copied = f"{scanner}\t{rule}\t{pointer}\tfix-key"
+        baseline = _write_baseline(tmp_path / "baseline.tsv", copied)
+        assert main(["--baseline", str(baseline)]) == 0
+        assert capsys.readouterr().out == ""
+
+    def test_a_stale_line_is_shown_as_the_other_lines_are(
+        self,
+        fixed_registry: None,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        gone = "beta-scanner\tP1\t/config\tfix" + chr(0x1B)
+        baseline = _write_baseline(tmp_path / "baseline.tsv", LISTED, gone)
+        assert main(["--baseline", str(baseline)]) == 1
+        assert capsys.readouterr().out == "stale\t" + gone[:-1] + "\\x1b\n"
+
+    def test_an_error_is_shown_on_one_line(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def refuse(path: Path) -> list[BaselineLine]:
+            raise ValueError("bad" + chr(0x1B) + chr(0x0A) + "line")
+
+        monkeypatch.setattr(command, "read_baseline", refuse)
+        assert main(["--baseline", "any.tsv"]) == 2
+        assert capsys.readouterr().err == "error: bad\\x1b\\x0aline\n"
+
+    def test_the_streams_are_left_as_they_were(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setattr(command, "check_registry", lambda: {"a-scanner": []})
+        streams = (sys.stdout, sys.stderr)
+        before = [(stream.encoding, stream.errors) for stream in streams]
+        assert main([]) == 0
+        assert [(stream.encoding, stream.errors) for stream in streams] == before
 
     def test_a_directory_that_is_no_package_is_one_problem_without_importing_it(
-        self, tmp_path: Path
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         empty = tmp_path / "ash_check_fixture_no_package"
         empty.mkdir()
-        out = io.StringIO()
-        assert main(["--path", str(empty)], out=out) == 1
-        (line,) = out.getvalue().splitlines()
+        assert main(["--path", str(empty)]) == 1
+        (line,) = capsys.readouterr().out.splitlines()
         scanner, rule, pointer, text = line.split("\t")
         assert (scanner, rule, pointer) == ("ash_check_fixture_no_package", "P1", "")
         assert "not a plugin package" in text
@@ -1326,6 +1538,27 @@ class TestCommand:
             main(["--no-such-option"])
         assert stopped.value.code == 2
         assert "--no-such-option" in capsys.readouterr().err
+
+    def test_run_as_a_script_it_goes_through_the_entry_point(self) -> None:
+        """``python -m`` hands the command to ``run_module_app``, so an exception
+        that escapes it is reported shown, not obeyed, as for every module of the
+        CLI. The check over those modules accepts any call named ``main``, and this
+        module defines one, so the route is pinned here by its name."""
+        tree = ast.parse(Path(command.__file__).read_text(encoding="utf-8"))
+        blocks = [
+            node
+            for node in tree.body
+            if isinstance(node, ast.If)
+            and "__name__" in ast.unparse(node.test)
+            and "__main__" in ast.unparse(node.test)
+        ]
+        assert len(blocks) == 1
+        called = {
+            call.func.id
+            for call in ast.walk(blocks[0])
+            if isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+        }
+        assert "run_module_app" in called
 
 
 #: A plugin package with one scanner: ``{description}`` is the description of the
@@ -1381,7 +1614,7 @@ def _author_command(*arguments: str) -> subprocess.CompletedProcess[str]:
             sys.executable,
             "-B",
             "-m",
-            "automated_security_helper.schemas.config_schema_check",
+            "automated_security_helper.cli.config_schema_check",
             *arguments,
         ],
         capture_output=True,
@@ -1472,3 +1705,22 @@ class TestPathInAChildProcess:
         done = _author_command("--path", str(package), "--baseline", str(baseline))
         assert done.returncode == 1, done.stderr
         assert done.stdout.splitlines() == ["stale\t" + gone]
+
+    def test_a_key_outside_ascii_is_written_as_an_escape_and_a_copied_line_lists_it(
+        self, tmp_path: Path
+    ) -> None:
+        key = "caf" + chr(0xE9)
+        described = DESCRIBED + f', alias="{key}"'
+        source = PLUGIN_PACKAGE.format(description=described)
+        package = _plugin_package(tmp_path, "ash_check_fixture_pkg_h", source)
+        first = _author_command("--path", str(package))
+        assert first.returncode == 1, first.stderr
+        assert first.stdout.isascii()
+        rows = [line.split("\t") for line in first.stdout.splitlines()]
+        pointer = "/$defs/FixtureOptions/properties/caf\\xe9"
+        assert ["pkg-scanner", "P8", pointer] in [row[:3] for row in rows]
+        copied = ["\t".join([*row[:3], "fix-key"]) for row in rows]
+        baseline = _write_baseline(tmp_path / "baseline.tsv", *copied)
+        second = _author_command("--path", str(package), "--baseline", str(baseline))
+        assert second.returncode == 0, second.stdout + second.stderr
+        assert second.stdout == ""
