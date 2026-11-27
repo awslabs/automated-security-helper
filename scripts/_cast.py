@@ -413,6 +413,7 @@ READ_ONLY_COMMANDS = ("cat", "ls")
 #: that imply it. A user or group name in such a column is not one the scrub scan can
 #: recognize, because it finds a user name only after a slash.
 LS_OWNER_FLAGS = "lgon"
+_LS_OWNER_FLAG_LIST = ", ".join("-" + flag for flag in LS_OWNER_FLAGS)
 PLAYBACK_MODES = ("once", "loop")
 MIN_COLS, MAX_COLS = 20, 300
 MIN_ROWS, MAX_ROWS = 5, 100
@@ -510,30 +511,11 @@ def caption_problems(caption: str, duration_ms: int) -> list[str]:
     return problems
 
 
-def _long_option_lists_owners(option: str) -> bool:
-    """Whether ``option`` is an ``ls`` long option that prints the owner and group of
-    each file, or an abbreviation of one that ``ls`` accepts: ``--format=long``,
-    ``--format=verbose``, ``--full-time`` and ``--numeric-uid-gid``."""
-    if not option.startswith("--"):
-        return False
-    name, _, value = option[2:].partition("=")
-    if not name:
-        return False
-    if "full-time".startswith(name) or "numeric-uid-gid".startswith(name):
-        return True
-    return (
-        "format".startswith(name)
-        and bool(value)
-        and ("long".startswith(value) or "verbose".startswith(value))
-    )
-
-
 def _ls_owner_problem(argument: str) -> str:
     return (
         f"argument {argument!r} prints the owner and group of each file, which the "
         "scrub scan cannot recognize; ls is admitted without a long listing (the "
-        f"{', '.join('-' + flag for flag in LS_OWNER_FLAGS)} flags and the options "
-        "that do the same)"
+        f"{_LS_OWNER_FLAG_LIST} flags and the options that do the same)"
     )
 
 
@@ -543,10 +525,12 @@ def command_problem(command: str) -> str | None:
     Admitted: ``cat`` or ``ls`` (by that bare name), short flags such as ``-1`` or
     ``-a``, and relative paths of plain characters that stay inside the project. An
     ``ls`` flag that prints the owner and group of each file (``-l``, ``-g``, ``-o``
-    and ``-n``, alone or in a bundle such as ``-la``, and the long options that do the
-    same) is refused: the scrub scan cannot recognize a user or group name in that
-    column. The check reads the text only; the recorder runs the command in the
-    project directory.
+    and ``-n``, alone or in a bundle such as ``-la``) is refused: the scrub scan
+    cannot recognize a user or group name in that column. A long option is refused as
+    an option, whatever it prints, and for ``ls`` the refusal names those four flags
+    too. ``ls`` has long options that print the same columns and accepts abbreviations
+    of them, so the check does not try to tell the options apart. The check reads the
+    text only; the recorder runs the command in the project directory.
     """
     if not isinstance(command, str) or not command.strip():
         return "the command is empty"
@@ -564,9 +548,13 @@ def command_problem(command: str) -> str | None:
                 return _ls_owner_problem(argument)
             continue
         if argument.startswith("-"):
-            if program == "ls" and _long_option_lists_owners(argument):
-                return _ls_owner_problem(argument)
-            return f"argument {argument!r} is an option other than a short flag"
+            problem = f"argument {argument!r} is an option other than a short flag"
+            if program == "ls":
+                problem += (
+                    "; ls is admitted with short flags only, and without "
+                    f"{_LS_OWNER_FLAG_LIST}, which print owners and groups"
+                )
+            return problem
         if _COMMAND_PATH.fullmatch(argument) is None:
             return f"argument {argument!r} is not a plain relative path or a short flag"
         if argument.startswith("/"):
