@@ -490,8 +490,8 @@ def test_a_projects_retired_section_is_folded_once_under_the_operators(
 
     assert config.scanners.bandit.enabled is False
     fold_line = (
-        "scanners.oldname is an alias of the bandit plugin; "
-        "applying its section to scanners.bandit"
+        "A scanners section under a retired name of the bandit plugin is applied "
+        "to scanners.bandit"
     )
     folds = [
         record.getMessage()

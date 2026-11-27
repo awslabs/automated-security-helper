@@ -104,10 +104,7 @@ def test_the_config_fold_applies_a_retired_section_to_the_serving_plugin(
     # third-party scanner, and its name literal does not reach the fold target.
     assert "oldname" not in (segment.__pydantic_extra__ or {})
     assert str(segment.bandit.name) == "bandit"
-    assert any(
-        "scanners.oldname is an alias of the bandit plugin" in record.getMessage()
-        for record in caplog.records
-    )
+    assert any(_FOLD_LINE in record.getMessage() for record in caplog.records)
 
 
 def test_the_fold_drops_options_the_serving_plugin_does_not_declare(
@@ -734,8 +731,8 @@ def test_the_document_fold_logs_only_when_asked_to(retired_oldname, caplog):
 # document it folds, and the model finds nothing left to fold.
 
 _FOLD_LINE = (
-    "scanners.oldname is an alias of the bandit plugin; "
-    "applying its section to scanners.bandit"
+    "A scanners section under a retired name of the bandit plugin is applied to "
+    "scanners.bandit"
 )
 
 
@@ -806,25 +803,44 @@ _UNDECLARED_KEY_VALUE = "retired-fold-key-5b2d"
 
 
 @pytest.mark.parametrize(
-    "beside, counted",
+    "read, value, beside, counted",
     [
-        pytest.param("", "1 option with no bandit counterpart was dropped", id="one"),
         pytest.param(
+            "an-option-key",
+            _UNDECLARED_KEY_VALUE,
+            "",
+            "1 option with no bandit counterpart was dropped",
+            id="one",
+        ),
+        pytest.param(
+            "an-option-key",
+            _UNDECLARED_KEY_VALUE,
             "      retired_only_knob: 2\n",
             "2 options with no bandit counterpart were dropped",
             id="two",
         ),
+        pytest.param(
+            "the-section-key",
+            "Old-Name",
+            "",
+            "1 option with no bandit counterpart was dropped",
+            id="the-section-key",
+        ),
     ],
 )
-def test_the_fold_s_warning_counts_an_option_key_read_from_the_environment(
-    retired_oldname, tmp_path, monkeypatch, caplog, beside, counted
+def test_the_fold_s_lines_name_no_key_read_from_the_environment(
+    retired_oldname, tmp_path, monkeypatch, caplog, read, value, beside, counted
 ):
-    """The file writes, under oldname, an option whose key it reads from the
-    environment, ${KEY}, and the variable holds a name bandit does not
-    declare; the second row writes retired_only_knob beside it. The fold
-    drops the options as the file is read, and its warning counts them
-    without naming them: a key read from the environment is the value it
-    read. Naming each dropped key printed the variable's value in the log."""
+    """The file reads a key from the environment, ${KEY}. In the first two
+    rows it is the key of an option under oldname, and the variable holds a
+    name bandit does not declare; the second row writes retired_only_knob
+    beside it. In the third it is the section's own key, and the variable
+    holds Old-Name, a spelling of oldname, with retired_only_knob under it.
+    The fold drops the options as the file is read. Its lines name the
+    section by the plugin it serves, and its warning counts the options, so
+    no line names a key the file read: a key read from the environment is
+    the value it read. Naming each dropped key, or the section by its key,
+    printed the variable's value in the log."""
     from automated_security_helper.config.ash_config import (
         config_env_var_is_interpolatable,
     )
@@ -836,10 +852,15 @@ def test_the_fold_s_warning_counts_an_option_key_read_from_the_environment(
     assert config_env_var_is_interpolatable(_FOLD_KEY_VAR)
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
-    monkeypatch.setenv(_FOLD_KEY_VAR, _UNDECLARED_KEY_VALUE)
+    monkeypatch.setenv(_FOLD_KEY_VAR, value)
+    reference = f"${{{_FOLD_KEY_VAR}}}"
+    if read == "the-section-key":
+        section, option = reference, "retired_only_knob"
+    else:
+        section, option = "oldname", reference
     path = tmp_path / "keyed.yaml"
     path.write_text(
-        f"scanners:\n  oldname:\n    options:\n      ${{{_FOLD_KEY_VAR}}}: 1\n{beside}",
+        f"scanners:\n  {section}:\n    options:\n      {option}: 1\n{beside}",
         encoding="utf-8",
     )
 
@@ -847,10 +868,33 @@ def test_the_fold_s_warning_counts_an_option_key_read_from_the_environment(
         resolve_config_document(path)
 
     messages = [record.getMessage() for record in caplog.records]
+    assert not [m for m in messages if value in m], messages
     assert len(_fold_lines(caplog)) == 1, messages
-    assert not [m for m in messages if _UNDECLARED_KEY_VALUE in m], messages
     [warning] = [m for m in messages if "counterpart" in m]
     assert counted in warning, warning
+
+
+def test_the_fold_s_line_for_a_section_that_is_not_a_mapping_names_the_plugin(
+    retired_oldname, caplog
+):
+    """A section under Old-Name, a spelling of oldname, that is not a
+    mapping. The fold lays nothing of it, and its lines say so by the plugin
+    the name serves, never by the key: a file can read the key from the
+    environment, and a key read from the environment is the value it read."""
+    from automated_security_helper.config.ash_config import fold_scanner_name_aliases
+
+    with caplog.at_level(logging.INFO, logger="ash"):
+        folded = fold_scanner_name_aliases({"Old-Name": "disabled"})
+
+    assert folded == {}, folded
+    messages = [record.getMessage() for record in caplog.records]
+    assert not [m for m in messages if "Old-Name" in m], messages
+    assert len(_fold_lines(caplog)) == 1, messages
+    warned = (
+        "A scanners section under a retired name of the bandit plugin is not a "
+        "mapping; nothing of it can be applied to scanners.bandit"
+    )
+    assert [m for m in messages if "is not a mapping" in m] == [warned], messages
 
 
 # A value a file reads from the environment under the retired name. The loader
@@ -1164,31 +1208,50 @@ def test_an_op_on_an_option_bandit_does_not_declare_under_bandit_applies(
 
 
 @pytest.mark.parametrize(
-    "named, clause",
+    "options, op, clause",
     [
-        pytest.param("confidence_level", False, id="the-declared-spelling"),
-        pytest.param("confidence-level", True, id="the-dropped-spelling"),
+        pytest.param(
+            {"confidence-level": "high"},
+            {"op": "remove", "path": "/scanners/oldname/options/confidence_level"},
+            True,
+            id="the-declared-spelling",
+        ),
+        pytest.param(
+            {"confidence-level": "high"},
+            {"op": "remove", "path": "/scanners/oldname/options/confidence-level"},
+            True,
+            id="the-dropped-spelling",
+        ),
+        pytest.param(
+            {"confidence-level": "high", "confidence_level": "low"},
+            {
+                "op": "test",
+                "path": "/scanners/oldname/options/confidence_level",
+                "value": "high",
+            },
+            False,
+            id="a-declared-option-the-section-holds",
+        ),
     ],
 )
-def test_a_refusal_names_the_dropped_cause_only_for_the_dropped_spelling(
-    retired_oldname, tmp_path, monkeypatch, named, clause
+def test_a_refusal_names_the_dropped_cause_where_the_option_is_not_there(
+    retired_oldname, tmp_path, monkeypatch, options, op, clause
 ):
     """The file writes confidence-level under oldname, a spelling of bandit's
     confidence_level that bandit's options do not declare, so the fold drops
-    it as the file is read. The file's patch then removes *named*, which no
-    file wrote under that spelling, and the load is refused either way. The
-    refusal says the option was dropped only where the pointer names the
-    dropped spelling: bandit declares confidence_level, no fold drops it, and
-    the dropped twin is not why the remove found nothing. Read as one
-    spelling, the two gave the declared option a cause it does not have."""
+    it as the file is read. In the first two rows the patch removes the
+    option in either spelling, which finds nothing, and the refusal says the
+    option was dropped: the dropped twin is why the remove found nothing,
+    whichever spelling the pointer uses. The third row writes
+    confidence_level: low beside it, which the fold keeps, and its patch
+    tests that option for high: the test fails on the value the section
+    holds, so the refusal gives no dropped cause. The declared spelling got
+    no sentence, though its twin was dropped and nothing else held it."""
     from automated_security_helper.core.exceptions import ASHConfigSourceError
 
     path = _write(
         tmp_path / "twin.yaml",
-        {
-            "scanners": {"oldname": {"options": {"confidence-level": "high"}}},
-            "patch": [{"op": "remove", "path": f"/scanners/oldname/options/{named}"}],
-        },
+        {"scanners": {"oldname": {"options": options}}, "patch": [op]},
     )
 
     with pytest.raises(ASHConfigSourceError) as refused:
@@ -1384,9 +1447,7 @@ def test_a_patched_section_name_under_the_retired_name_writes_nothing(
     "value, drop_lines",
     [
         pytest.param(None, 0, id="null"),
-        pytest.param({}, 0, id="empty"),
         pytest.param({"name": "oldname"}, 0, id="only-the-name"),
-        pytest.param({"options": {}}, 0, id="only-empty-options"),
         pytest.param(
             {"options": {"retired_only_knob": 1}}, 1, id="only-an-undeclared-option"
         ),
@@ -1397,12 +1458,12 @@ def test_a_patched_section_under_the_retired_name_that_the_fold_empties_writes_n
 ):
     """The file writes enabled: false and confidence_level: high under
     oldname, and its patch adds or replaces the whole section under oldname
-    with a value that holds nothing the fold keeps: null, an empty section,
-    only the name, empty options, or only an option bandit does not declare.
-    The fold lays nothing of such a value, so the operation writes nothing:
-    bandit keeps enabled false and confidence_level high, and only a dropped
-    option is warned of. Written as it stood or emptied, the value replaced
-    bandit's section, so bandit ran enabled with its default options."""
+    with null or with a value that held only what the fold drops: only the
+    name, or only an option bandit does not declare. The fold lays nothing of
+    such a value, so the operation writes nothing: bandit keeps enabled false
+    and confidence_level high, and only a dropped option is warned of.
+    Written as it stood or emptied, the value replaced bandit's section, so
+    bandit ran enabled with its default options."""
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     path = _write(
         tmp_path / "patched.yaml",
@@ -1426,27 +1487,23 @@ def test_a_patched_section_under_the_retired_name_that_the_fold_empties_writes_n
 
 
 @pytest.mark.parametrize("op", ["add", "replace"])
-@pytest.mark.parametrize(
-    "value, drop_lines",
-    [
-        pytest.param({"retired_only_knob": 1}, 1, id="only-an-undeclared-option"),
-        pytest.param({}, 0, id="empty"),
-    ],
-)
 def test_patched_options_under_the_retired_name_that_the_fold_empties_write_nothing(
-    retired_oldname, tmp_path, monkeypatch, caplog, op, value, drop_lines
+    retired_oldname, tmp_path, monkeypatch, caplog, op
 ):
     """The patch adds or replaces oldname's options with only
-    retired_only_knob, an option bandit does not declare, or with no option
-    at all. The fold lays nothing of such a value, so the operation writes
-    nothing: bandit keeps the file's confidence_level, and only a dropped
-    option is warned of. Written as it stood or emptied, the value replaced
-    bandit's options."""
+    retired_only_knob, an option bandit does not declare. The fold lays
+    nothing of such a value, so the operation writes nothing: bandit keeps
+    the file's confidence_level, and one warning counts the drop. Written
+    emptied, the value replaced bandit's options."""
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     path = _patched_file(
         tmp_path,
         "oldname",
-        {"op": op, "path": "/scanners/oldname/options", "value": value},
+        {
+            "op": op,
+            "path": "/scanners/oldname/options",
+            "value": {"retired_only_knob": 1},
+        },
     )
 
     document, lines, config = _loaded(path, caplog)
@@ -1454,36 +1511,53 @@ def test_patched_options_under_the_retired_name_that_the_fold_empties_write_noth
     options = document.data["scanners"]["bandit"]["options"]
     assert options == {"confidence_level": "high"}, options
     assert config.scanners.bandit.options.confidence_level == "high"
-    assert len(lines) == drop_lines, lines
-    assert all("dropped" in line for line in lines), lines
+    assert len(lines) == 1 and "dropped" in lines[0], lines
 
 
 @pytest.mark.parametrize("op", ["add", "replace"])
+@pytest.mark.parametrize("section", ["oldname", "bandit"], ids=_SECTION_IDS)
 @pytest.mark.parametrize(
-    "pointer, expected",
+    "pointer, value, expected",
     [
-        pytest.param("/scanners/bandit", {}, id="the-section"),
+        pytest.param("", {}, {}, id="an-empty-section"),
         pytest.param(
-            "/scanners/bandit/options",
-            {"enabled": False, "options": {}},
-            id="its-options",
+            "", {"options": {}}, {"options": {}}, id="a-section-with-empty-options"
+        ),
+        pytest.param(
+            "/options", {}, {"enabled": False, "options": {}}, id="empty-options"
         ),
     ],
 )
-def test_an_empty_patched_value_under_the_current_name_still_replaces(
-    retired_oldname, tmp_path, monkeypatch, caplog, op, pointer, expected
+def test_an_explicitly_empty_patched_value_replaces_under_either_name(
+    retired_oldname,
+    tmp_path,
+    monkeypatch,
+    caplog,
+    op,
+    section,
+    pointer,
+    value,
+    expected,
 ):
-    """The control: under bandit no pointer is redirected and no fold rule
-    applies, so an empty value replaces bandit's section or its options, as
-    any add or replace does, and nothing is warned of."""
+    """The file writes enabled: false and confidence_level: high under
+    *section*, and its patch adds or replaces, under the same name, the whole
+    section with an empty mapping or with a section whose options are empty,
+    or the section's options with an empty mapping. Such a value holds
+    nothing the fold drops, so under oldname it replaces what the pointer
+    names as it does under bandit, the canonical control, as any add or
+    replace does, and nothing is warned of. Under oldname it wrote nothing,
+    so a patch that reset bandit's section or its options under the retired
+    name left them as the file wrote them."""
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     path = _write(
         tmp_path / "patched.yaml",
         {
             "scanners": {
-                "bandit": {"enabled": False, "options": {"confidence_level": "high"}}
+                section: {"enabled": False, "options": {"confidence_level": "high"}}
             },
-            "patch": [{"op": op, "path": pointer, "value": {}}],
+            "patch": [
+                {"op": op, "path": f"/scanners/{section}{pointer}", "value": value}
+            ],
         },
     )
 
