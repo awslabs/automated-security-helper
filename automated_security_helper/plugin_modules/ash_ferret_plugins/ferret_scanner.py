@@ -1462,12 +1462,26 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             if not ferret_binary:
                 return None
 
+            # ferret-scan loads a config from its working directory before it
+            # handles --version, so the probe runs outside the scanned tree
+            # and is given a config, as the scan run is (_subprocess_cwd).
+            source_dir = getattr(getattr(self, "context", None), "source_dir", None)
+            version_args = [ferret_binary]
+            if source_dir is not None:
+                version_args += ["--config", self._empty_config_file().as_posix()]
+                probe_cwd = self._subprocess_cwd(
+                    getattr(self.context, "output_dir", None) or source_dir
+                )
+            else:
+                probe_cwd = Path(Path(os.path.abspath(os.sep)).anchor)
+            version_args.append("--version")
             result = spawn_run(  # nosec B603 B607 — list args, executable from shutil.which()
-                [ferret_binary, "--version"],
+                version_args,
                 capture_output=True,
                 text=True,
                 timeout=10,
                 env=snapshot_environ(),
+                cwd=probe_cwd,
             )
 
             if result.returncode == 0:

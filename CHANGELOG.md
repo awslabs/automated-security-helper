@@ -168,6 +168,16 @@
 
 ### Fixes
 
+- **gitleaks and betterleaks read no configuration from the scanned tree through
+  `[extend]`, and the ferret-scan version check reads none from the working
+  directory.** A gitleaks or betterleaks config whose `[extend] path` is relative
+  (from `config_file`, `GITLEAKS_CONFIG`, `BETTERLEAKS_CONFIG` or a `*_CONFIG_TOML`
+  variable) is refused with an error naming `extend` and the file, because the tools
+  open a relative path from the scanned tree; use an absolute path. A config from the
+  environment is now passed to gitleaks as `--config`, so gitleaks no longer looks
+  for `.gitleaks.toml` in the tree. ferret-scan's `--version` check now runs outside
+  the tree with an empty config.
+
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or
   `fold` through an object value at the section or at `global_settings`, with a
