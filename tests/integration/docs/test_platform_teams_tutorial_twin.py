@@ -71,8 +71,10 @@ pytestmark = [
 ]
 
 PAGE = "docs/content/getting-started/platform-teams.md"
-SCAN = 'ash scan --config "$OPERATOR_CONFIG" --scanners detect-secrets'
-PLAIN_SCAN = "ash scan --scanners detect-secrets"
+#: The scans the twin adds itself are spelled as ASH 3.9 reads them (``ash scan fs``,
+#: ``--only-scanners``); the page's own blocks run as the page spells them.
+SCAN = 'ash scan fs --config "$OPERATOR_CONFIG" --only-scanners detect-secrets'
+PLAIN_SCAN = "ash scan fs --only-scanners detect-secrets"
 FAILS = "Exiting due to 1 actionable findings found in ASH scan"
 
 
@@ -112,7 +114,7 @@ def test_the_operator_config_holds_the_gate_a_repository_cannot_move(tmp_path, r
     )
     twin.run(
         'ASH_CONFIG="$HOME/ash-operator/no-such-file.yaml" '
-        "ash scan --scanners detect-secrets",
+        "ash scan fs --only-scanners detect-secrets",
         code=3,
         absent=("actionable findings",),
     )
