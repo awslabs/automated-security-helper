@@ -17984,24 +17984,40 @@ def test_the_extras_table_lists_each_extra_and_what_it_adds() -> None:
     assert "tree-sitter" in extras["symbols"], sorted(extras["symbols"])
 
 
+def _ci_matrix_reader() -> Any:
+    """scripts/_ci_matrix.py, the one expansion of a workflow's matrices, loaded by path."""
+    import importlib.util
+
+    name = "_ash_ci_matrix"
+    module = sys.modules.get(name)
+    if module is None:
+        spec = importlib.util.spec_from_file_location(
+            name, REPO_ROOT / "scripts" / "_ci_matrix.py"
+        )
+        assert spec and spec.loader, "cannot load scripts/_ci_matrix.py"
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return module
+
+
 def _install_matrix(workflow: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Every job of ``workflow`` that a matrix with a ``method`` key expands to."""
+    """Every job of ``workflow`` that a matrix with a ``method`` key expands to.
+
+    The workflow's full matrix: its manual run, where the pull-request overlay of the
+    ``exclude`` entries is void. The expansion is the shared reader's.
+    """
+    reader = _ci_matrix_reader()
     rows: List[Dict[str, Any]] = []
     for job in workflow["jobs"].values():
         matrix = (job.get("strategy") or {}).get("matrix")
         if not isinstance(matrix, dict) or "method" not in matrix:
             continue
-        assert "include" not in matrix, "expand matrix include entries here first"
-        keys = [k for k in matrix if k != "exclude"]
-        combos = [
-            dict(zip(keys, v)) for v in itertools.product(*(matrix[k] for k in keys))
-        ]
-        excluded = matrix.get("exclude") or []
-        rows += [
-            c
-            for c in combos
-            if not any(all(c.get(k) == v for k, v in e.items()) for e in excluded)
-        ]
+        assert "include" not in matrix, (
+            "an include entry changes the rows this claim reads; check the claim "
+            "against them first"
+        )
+        rows += reader.cells(job, "workflow_dispatch")
     return rows
 
 
