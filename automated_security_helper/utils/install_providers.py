@@ -1174,11 +1174,16 @@ def in_tree_path_refusal(
     A path is inside when its real path is the tree's real path or below it,
     compared as text, or when the tree is that real path or one of its parents
     by device and inode (``scanned_tree._has_ancestor_file``, the identity test a
-    scan applies to the real path of a path it finds). So the tree named in
-    another letter case on a case-insensitive volume, or reached through a bind
-    mount, is inside. A filesystem that reports no inode numbers is judged by the
-    text compare alone, and a path that does not exist yet by its nearest parent
-    that does. A path written inside the tree through a link whose target is
+    scan applies to the real path of a path it finds). So, where the filesystem
+    reports inode numbers, the tree named in another letter case on a
+    case-insensitive volume, or reached through a bind mount of the tree or of a
+    directory above it, is inside; where it reports none, the text compare alone
+    decides. A path that does not exist yet is judged by its nearest parent that
+    does. A path through either of two mounts at a place outside the tree is
+    still outside, here as for a scan: a mount of a directory below the tree (a
+    bind mount of one of its subdirectories), and a mount of the tree or of a
+    directory above it that reports its own device number (a network or FUSE
+    mount). A path written inside the tree through a link whose target is
     outside it is judged by that target, while a scan (``is_inside_tree``) also
     judges it as written.
     """
@@ -1197,12 +1202,13 @@ def in_tree_path_refusal(
     except ValueError:
         inside = False
     if not inside:
-        # Another spelling of the tree: a real path keeps the letter case of every
-        # component that is not a link, so the tree named in another case on a
-        # case-insensitive volume, or reached through a bind mount, has a real path
-        # that is not under the tree's as text. A scan also asks whether the tree is
-        # the path or one of its parents by device and inode, and so does this. A
-        # path no operating system call takes (a NUL character) is outside.
+        # Another spelling of the tree: on POSIX a real path keeps the letter case
+        # of every component that is not a link, so the tree named in another case
+        # on a case-insensitive volume, or reached through a bind mount of the tree
+        # or of a directory above it, has a real path that is not under the tree's
+        # as text. A scan also asks whether the tree is the path or one of its
+        # parents by device and inode, and so does this. Here a path no operating
+        # system call takes (a NUL character) reads as outside.
         try:
             inside = _has_ancestor_file(Path(os.path.realpath(path)), source_dir)
         except ValueError:

@@ -1,4 +1,4 @@
-"""``--virtualenv-path`` refuses a virtualenv inside the scanned tree under any spelling.
+"""``--virtualenv-path`` refuses an in-tree virtualenv found by device and inode.
 
 The command treats its working directory as the scanned source tree and refuses a
 virtualenv inside it (its interpreter is a program the tree can supply and the install

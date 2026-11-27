@@ -168,14 +168,19 @@
 
 ### Fixes
 
-- **`ash dependencies install` refuses a path inside the scanned tree whichever way the
-  tree is named.** A `--virtualenv-path` or `--binary-path` inside the scanned source
-  tree is refused unless `ASH_ALLOW_IN_TREE_TOOLS` admits it. Besides comparing real
-  paths as text, the check asks by device and inode whether the tree is the path or
-  one of its parents, as a scan does, so the tree named in another letter case on a
-  case-insensitive volume, or reached through a bind mount, counts as the tree. A path
-  that does not exist yet is judged by its nearest parent that does, and a filesystem
-  that reports no inode numbers is judged by the real path alone.
+- **`ash dependencies install` also asks by device and inode whether a path is inside
+  the scanned tree.** A `--virtualenv-path` or `--binary-path` that the check finds
+  inside the scanned source tree is refused unless `ASH_ALLOW_IN_TREE_TOOLS` admits it.
+  Besides comparing real paths as text, the check now asks whether the tree is the
+  path's real path or one of its parents by device and inode, as a scan does. So, where
+  the filesystem reports inode numbers, a path that names the tree in another letter
+  case on a case-insensitive volume, or through a bind mount of the tree or of a
+  directory above it, is refused; where it reports none, the real path alone decides. A
+  path that does not exist yet is judged by its nearest parent that does. A path
+  through either of two mounts at a place outside the tree still reads as outside, for
+  this check as for a scan: a mount of a directory below the tree, such as a bind mount
+  of one of its subdirectories, and a mount of the tree, or of a directory above it,
+  that reports its own device number, such as a network or FUSE mount.
 
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or
