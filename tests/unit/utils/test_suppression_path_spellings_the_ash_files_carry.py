@@ -40,6 +40,8 @@ FILES = (".ash.yaml", ".ash/.ash_alpha_plugins.yaml")
         ("tests/pytest-temp", "tests/pytest-temp/b.py", True),
         ("tests/pytest-temp", "tests/pytest-temp-other/b.py", False),
         ("docs/**", "docs/content/x.md", True),
+        ("docs/content/**", "docs/content/reference/x.md", True),
+        ("docs/content/**", "docs/ui-tests/specs/x.spec.cjs", False),
         ("tests/**/__snapshots__/**", "tests/unit/__snapshots__/a.json", True),
         ("tests/**/__snapshots__/**/*", "tests/unit/__snapshots__/a.json", True),
         ("tests/**/__snapshots__/**", "src/unit/__snapshots__/a.json", False),
