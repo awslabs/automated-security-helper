@@ -87,7 +87,10 @@
   subject. `ash config` still reads `ASH_SOURCE_DIR`. A directory scan that `./ash` or
   `Invoke-ASH` starts passes the scan inside the container `/src` as its path argument
   in place of the variable, so it prints no line for it; a scan of a clone, an image or
-  a `--cli-json-input` document still sets the variable.
+  a `--cli-json-input` document still sets the variable. A scan that names a
+  `--cli-json-input` document prints no line for the variable either, because `./ash`
+  and `Invoke-ASH` cannot add a path beside a document, which may name a clone or an
+  image; `ash scan fs` with only the variable and no document still prints the line.
 - **A 3.8 `ash` cannot drive a 3.9 image, or the reverse.** The command ASH runs inside
   its container (container mode) and inside a Nix shell (nix mode) is now `ash scan fs`
   (`ash scan workspace` for a workspace scan), which a 3.8 `ash` does not parse, so
