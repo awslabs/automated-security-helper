@@ -1443,14 +1443,15 @@ def mark_operator_only_options(
     touches is shown as JSON on one line, the repository's own text.
 
     The rest of an off-host reporter's section (``aws_region`` and the other
-    aws-security-hub options) is not marked: it is not an operator-only
-    option. The load confines an off-host reporter's whole section to the
-    operator's configuration (``record_operator_reporters``; a scan reads it
-    through ``reporter_section``), so what a repository's file wrote there is
-    left out of the answer. The record this marking reads
+    destination options) is not marked: it is not an operator-only option. The
+    load gives those options the operator's values
+    (``confine_reporter_destinations`` replaces or fills each one from the
+    operator's configuration), so the answer shows the operator's value there,
+    as the reference the operator's file wrote where it read the value from the
+    environment (``_take_confined_references``), and never a value a
+    repository's file wrote. The record this marking reads
     (``RepositorySettings``) holds only the operator-only places, so it has
-    nothing to show for the rest of the section, and the option is absent from
-    the answer.
+    nothing to mark for the rest of the section.
     """
     needles = environment_strings(environment_values)
     marked = copy.deepcopy(data)

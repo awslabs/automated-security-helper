@@ -3231,7 +3231,24 @@ def _take_confined_references(
     value was left out of the configuration as the chain was read
     (RepositorySettings). A reference names its file (``origin``); a rewrite
     does not, so one is dropped there when only such a reference matches it.
+
+    The destination options of the built-in off-host reporters
+    (``reporter_trust.REPORTER_DESTINATION_OPTIONS``: ``aws_region``,
+    ``findings_scope``, ``bucket_name`` and the rest) are handled too.
+    confine_reporter_destinations copies the trusted base's values into every
+    section of such a reporter, an option the in-tree file never wrote
+    included, so a reference the in-tree file wrote at one of them (a file of
+    *repository_files*) describes a value ``config`` no longer holds and is
+    dropped, and a reference the trusted base holds there is taken. The
+    section key may be spelled differently in ``config`` (an alias, or the
+    plugin-named key a fill creates), so the trusted reference is rebased onto
+    each of ``config``'s keys for that reporter and kept only where
+    ``_still_describes`` finds the copied value still in ``config``, so a
+    value an override or the operator's chain changed is not described by it.
+    The record half (``_written_references``) is not changed here.
     """
+    from automated_security_helper.config import reporter_trust
+    from automated_security_helper.config.config_sources import _still_describes
     from automated_security_helper.config.config_validator import dumped_path
     from automated_security_helper.config.operator_only_options import (
         operator_only_locations,
@@ -3264,28 +3281,68 @@ def _take_confined_references(
         normal(location) for location in settled_locations(trusted, settled)
     }
 
+    # The destination options of the built-in off-host reporters, which the
+    # reporter confinement replaced or filled from the trusted base: for each
+    # section key of a reporter, the folded place of each option.
+    def destination_places(source: AshConfig) -> Dict[Tuple[Any, ...], str]:
+        places: Dict[Tuple[Any, ...], str] = {}
+        for plugin, names in reporter_trust.REPORTER_DESTINATION_OPTIONS.items():
+            for key in reporter_trust._sections_of(source, plugin):
+                for name in names:
+                    places[normal(("reporters", key, "options", name))] = plugin
+        return places
+
+    mine_destinations = destination_places(config)
+    theirs_destinations = destination_places(trusted)
+    config_keys: Dict[str, List[str]] = {
+        plugin: list(reporter_trust._sections_of(config, plugin))
+        for plugin in reporter_trust.REPORTER_DESTINATION_OPTIONS
+    }
+    config_dump = config.model_dump()
+
     def left_out(reference: Any) -> bool:
         # One of config's own that no longer describes its value there.
         where = place(reference)
         if where[:2] in sandbox or where[:4] in mine_settled:
             return True
         return (
-            where[:4] in mine_kept
+            (where[:4] in mine_kept or where[:4] in mine_destinations)
             and reference.origin is not None
             and Path(reference.origin[0]) in repository
         )
 
-    def taken_from_trusted(reference: Any) -> bool:
+    def taken_from_trusted(reference: Any) -> Tuple[Any, ...]:
+        # The references to take for one of the trusted base's: itself at a
+        # sandbox setting or a settled option; at a destination option, one
+        # rebased onto each of config's section keys of that reporter, where
+        # the copied value is still what the reference resolved to.
         where = place(reference)
-        return where[:2] in sandbox or where[:4] in theirs_settled
+        if where[:2] in sandbox or where[:4] in theirs_settled:
+            return (reference,)
+        plugin = theirs_destinations.get(where[:4])
+        if plugin is None:
+            return ()
+        rebased = (
+            reference.rebase(2, ("reporters", key)) for key in config_keys[plugin]
+        )
+        return tuple(moved for moved in rebased if _still_describes(config_dump, moved))
 
     own_places = tuple(getattr(config, "_environment_references", ()) or ())
     their_places = tuple(getattr(trusted, "_environment_references", ()) or ())
     dropped = [reference for reference in own_places if left_out(reference)]
     kept = [reference for reference in own_places if not left_out(reference)]
     if own_places or their_places:
-        config._environment_references = tuple(kept) + tuple(
-            reference for reference in their_places if taken_from_trusted(reference)
+        config._environment_references = tuple(
+            dict.fromkeys(
+                (
+                    *kept,
+                    *(
+                        taken
+                        for reference in their_places
+                        for taken in taken_from_trusted(reference)
+                    ),
+                )
+            )
         )
         # The displayed view (what `ash config get` and the MCP get_config tool
         # write back) swaps the same way: the trusted base's values are in
@@ -3297,9 +3354,16 @@ def _take_confined_references(
             getattr(trusted, "_displayed_environment_references", ()) or ()
         )
         config._displayed_environment_references = tuple(
-            reference for reference in own_shown if not left_out(reference)
-        ) + tuple(
-            reference for reference in their_shown if taken_from_trusted(reference)
+            dict.fromkeys(
+                (
+                    *(reference for reference in own_shown if not left_out(reference)),
+                    *(
+                        taken
+                        for reference in their_shown
+                        for taken in taken_from_trusted(reference)
+                    ),
+                )
+            )
         )
 
     def left_out_where_kept(rewrite: Any) -> bool:
