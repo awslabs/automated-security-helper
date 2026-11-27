@@ -695,12 +695,31 @@ def _caller(with_text: str = "") -> dict[str, Any]:
     )
 
 
-def _called(workflow: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """The reusable workflows of this repository that ``workflow`` calls, by ``uses:``."""
+def _called(
+    workflow: dict[str, Any], root: Path = REPO_ROOT
+) -> dict[str, dict[str, Any]]:
+    """The reusable workflows of the checkout at ``root`` that ``workflow`` calls, by
+    ``uses:``."""
     return {
-        job["uses"]: ci.load_workflow(REPO_ROOT / job["uses"])
+        job["uses"]: ci.load_workflow(root / job["uses"])
         for job in workflow["jobs"].values()
         if str(job.get("uses", "")).startswith("./")
+    }
+
+
+def _check_file(path: Path, root: Path = REPO_ROOT) -> set[str]:
+    """The check of one workflow file as the test of the real workflows runs it: the
+    labels the file names, read with the workflows it calls."""
+    workflow = ci.load_workflow(path)
+    return ci.check_runner_labels(workflow, called=_called(workflow, root))
+
+
+def _check_repository(root: Path) -> dict[str, set[str]]:
+    """The labels each workflow file of the checkout at ``root`` names, by file name,
+    from _check_file run on each file in turn."""
+    return {
+        path.name: _check_file(path, root)
+        for path in _workflow_files(root / ".github" / "workflows")
     }
 
 
@@ -980,17 +999,14 @@ class TestRunnerLabels:
 
     @pytest.mark.parametrize("path", WORKFLOW_FILES, ids=lambda path: path.name)
     def test_every_label_a_workflow_names_is_in_the_table(self, path):
-        workflow = ci.load_workflow(path)
-        labels = ci.check_runner_labels(workflow, called=_called(workflow))
-        assert labels <= set(ci.RUNNER_LABELS)
+        assert _check_file(path) <= set(ci.RUNNER_LABELS)
 
     def test_the_workflows_were_actually_read(self):
         """The denominator for the test above: it read many workflows and many labels."""
         assert len(WORKFLOW_FILES) >= 20, WORKFLOW_FILES
         seen: set[str] = set()
         for path in WORKFLOW_FILES:
-            workflow = ci.load_workflow(path)
-            seen |= ci.check_runner_labels(workflow, called=_called(workflow))
+            seen |= _check_file(path)
         assert {
             "ubuntu-latest",
             "ubuntu-24.04-arm",
@@ -1153,6 +1169,157 @@ class TestACallToAReusableWorkflow:
                 ci.UnknownRunnerLabel, match=rf"{job_id} \(with runner\): windows-2019"
             ):
                 ci.check_runner_labels(planted, called=called)
+
+
+PLAIN_WORKFLOW = "on: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n"
+NOTE_ONLY = "    with:\n      note: plain text\n"
+PASSES_A_LABEL = "    with:\n      runner: macos-15\n"
+PASSES_ANOTHER_LABEL = "    with:\n      runner: ubuntu-latest\n"
+PASSES_AN_UNKNOWN_LABEL = "    with:\n      runner: plan9\n"
+
+
+def _calling(*blocks: str, uses: str = CALLEE_USES) -> str:
+    """A workflow whose jobs ``call``, ``call_2`` and so on each call ``uses``. Each job
+    has the ``with:`` block at its place in ``blocks`` ("" for none)."""
+    jobs = ""
+    for number, block in enumerate(blocks, start=1):
+        job_id = "call" if number == 1 else f"call_{number}"
+        jobs += f"  {job_id}:\n    uses: {uses}\n{block}"
+    return f"on: push\njobs:\n{jobs}"
+
+
+def _repository(
+    root: Path, callers: dict[str, str], callee: str = CALLEE_REQUIRING_A_RUNNER
+) -> None:
+    """The workflows of a checkout at ``root``: the callee, and the workflows of
+    ``callers`` (file name to text)."""
+    workflows = {"callee.yml": callee, **callers}
+    _plant(
+        root, {f".github/workflows/{name}": text for name, text in workflows.items()}
+    )
+
+
+NO_WITH = _calling("")
+PASSES_THE_RUNNER = _calling(PASSES_A_LABEL)
+
+
+class TestARequiredRunnerInputIsTheCallers:
+    """A runs-on that reads an input its workflow declares required, with no default,
+    has the label each call of the workflow passes. The workflow is accepted when every
+    call in the repository passes it, and refused when one call leaves the input out
+    and when no call reaches the workflow. Each case builds a repository in a temporary
+    tree and runs the check of each of its workflow files, as the check of this
+    repository's own workflows does."""
+
+    @pytest.mark.parametrize(
+        "callers, first, absent",
+        [
+            pytest.param(
+                {"a.yml": NO_WITH},
+                "a.yml job call",
+                None,
+                id="a_call_with_no_with",
+            ),
+            pytest.param(
+                {"a.yml": _calling("    with: {}\n")},
+                "a.yml job call",
+                None,
+                id="a_call_with_an_empty_with",
+            ),
+            pytest.param(
+                {"a.yml": _calling(NOTE_ONLY)},
+                "a.yml job call",
+                None,
+                id="a_call_whose_with_names_only_another_input",
+            ),
+            pytest.param(
+                {"a.yml": PASSES_THE_RUNNER, "b.yml": NO_WITH},
+                "b.yml job call",
+                "a.yml",
+                id="one_call_passes_and_one_leaves_it_out",
+            ),
+            pytest.param(
+                {"a.yml": _calling(PASSES_A_LABEL, "")},
+                "a.yml job call_2",
+                None,
+                id="the_second_job_of_a_workflow_leaves_it_out",
+            ),
+            pytest.param(
+                {"a.yml": NO_WITH, "b.yml": NO_WITH},
+                "a.yml job call",
+                "b.yml",
+                id="the_first_of_two_calls_that_leave_it_out_is_named",
+            ),
+            pytest.param(
+                {
+                    "a.yml": _calling(
+                        "", uses="./.github/workflows/../workflows/callee.yml"
+                    )
+                },
+                "a.yml job call",
+                None,
+                id="a_call_spelled_with_a_dot_dot",
+            ),
+        ],
+    )
+    def test_a_call_that_leaves_the_input_out_is_refused_by_name(
+        self, tmp_path, callers, first, absent
+    ):
+        _repository(tmp_path, callers)
+        with pytest.raises(ci.UnsupportedExpression) as caught:
+            _check_repository(tmp_path)
+        message = str(caught.value)
+        assert caught.value.shape == "a required runs-on input that a call leaves out"
+        assert CALLEE_USES in message
+        assert "inputs.runner" in message
+        assert f"./.github/workflows/{first}" in message
+        if absent is not None:
+            assert absent not in message
+
+    @pytest.mark.parametrize(
+        "callers",
+        [{}, {"plain.yml": PLAIN_WORKFLOW}],
+        ids=["no_other_workflow", "a_workflow_that_calls_nothing"],
+    )
+    def test_a_workflow_no_call_reaches_is_refused(self, tmp_path, callers):
+        _repository(tmp_path, callers)
+        with pytest.raises(ci.UnsupportedExpression) as caught:
+            _check_repository(tmp_path)
+        shape = "a required runs-on input in a workflow that no call reaches"
+        assert caught.value.shape == shape
+        assert CALLEE_USES in str(caught.value)
+        assert "inputs.runner" in str(caught.value)
+
+    def test_every_call_passing_a_known_label_is_accepted(self, tmp_path):
+        callers = {
+            "a.yml": PASSES_THE_RUNNER,
+            "b.yml": _calling(PASSES_ANOTHER_LABEL, PASSES_A_LABEL),
+        }
+        _repository(tmp_path, callers)
+        assert _check_repository(tmp_path) == {
+            "a.yml": {"macos-15"},
+            "b.yml": {"macos-15", "ubuntu-latest"},
+            "callee.yml": set(),
+        }
+
+    def test_a_call_that_passes_an_unknown_label_is_still_refused(self, tmp_path):
+        callers = {
+            "a.yml": PASSES_THE_RUNNER,
+            "b.yml": _calling(PASSES_AN_UNKNOWN_LABEL),
+        }
+        _repository(tmp_path, callers)
+        with pytest.raises(ci.UnknownRunnerLabel, match=r"call \(with runner\): plan9"):
+            _check_repository(tmp_path)
+
+    def test_a_required_input_no_runs_on_reads_is_not_held_to_the_calls(self, tmp_path):
+        """Only an input that a runs-on reads is the callers' label. A workflow that
+        requires another input, and has no call at all, is read as it was."""
+        callee = CALLEE.replace(
+            "        default: plain text\n", "        required: true\n"
+        )
+        assert "required: true" in callee
+        _repository(tmp_path, {}, callee=callee)
+        assert _check_repository(tmp_path) == {"callee.yml": {"ubuntu-latest"}}
 
 
 CONSUMERS = [
