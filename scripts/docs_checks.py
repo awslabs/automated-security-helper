@@ -7898,8 +7898,15 @@ def _marked_table_problems(
                     problems.append(
                         (number, f"'{key}' {headers[enabled_column]} {problem}")
                     )
-            if loads_column is not None and loads_column < len(cells):
-                problem = loads_problem(cells[loads_column], key)
+            if (
+                loads_column is not None
+                and loads_column < len(cells)
+                and spec.plugin is not None
+            ):
+                # Read through the plugin, as the enabled column is: a row may name a
+                # scanner by its field name (cdk_nag for cdk-nag), which has no
+                # manifest of its own, and a key no plugin backs has none to compare.
+                problem = loads_problem(cells[loads_column], spec.plugin)
                 if problem:
                     problems.append(
                         (number, f"'{key}' {headers[loads_column]} {problem}")
@@ -7923,11 +7930,14 @@ def _marked_table_problems(
     return problems
 
 
-def loads_problem(cell: str, scanner: str) -> str | None:
-    """Why a loads-by-default cell (yes or no) does not state the scanner manifest's
-    ``default_enabled``, or None. A scanner with no manifest has nothing to state."""
+def loads_problem(cell: str, config_cls: type) -> str | None:
+    """Why a loads-by-default cell (yes or no) does not state ``default_enabled`` of
+    the manifest of the plugin ``config_cls`` configures, or None. The manifest is the
+    one its ``name`` default gives, whatever spelling a row used for the scanner. A
+    plugin with no manifest has nothing for the cell to state."""
     from automated_security_helper.plugin_manifests import manifest_for
 
+    scanner = config_cls.model_fields["name"].default
     manifest = manifest_for(scanner)
     if manifest is None:
         return f"says {cell.strip()}, but no scanner manifest is named {scanner}"
