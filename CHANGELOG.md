@@ -197,7 +197,8 @@
   and credentials directories (`UV_PYTHON_CACHE_DIR`, `UV_CREDENTIALS_DIR`), the
   interpreter search path (`UV_PYTHON_SEARCH_PATH`), and the project and working
   directories (`UV_PROJECT`, `UV_WORKING_DIR`). A scanner's own runs, and the notebook
-  converter's, also leave out such a value when it lies inside the output directory.
+  converter's, also leave out such a value when it lies inside the output directory or
+  the directory the run starts in.
   A value of a variable that takes only a path (`UV_CONFIG_FILE`, `UV_ENV_FILE`,
   `UV_PROJECT`, `UV_WORKING_DIR`, `UV_PYTHON_CACHE_DIR`, `UV_CREDENTIALS_DIR` and
   `UV_PYTHON_SEARCH_PATH`) is read as a path even when it is spelled as a URL, as uv
