@@ -784,11 +784,17 @@ def test_the_windows_lookup_finds_a_name_with_an_extension_and_not_a_bare_one(tm
     assert _windows_which("missing", path=str(directory)) is None
 
 
-def _bin(tmp_path, *names):
+def _bin(tmp_path, *names, windows=False):
+    """A directory holding one executable per name.
+
+    Windows finds a program only by a PATHEXT extension, so for its lookup, and on
+    Windows itself, each file carries ``.exe``; on other systems the name is bare.
+    """
+    suffix = ".exe" if windows or os.name == "nt" else ""
     directory = tmp_path / "bin"
     directory.mkdir(exist_ok=True)
     for name in names:
-        path = directory / name
+        path = directory / f"{name}{suffix}"
         path.write_text("#!/bin/sh\n", encoding="utf-8")
         path.chmod(0o755)
     return directory
@@ -811,7 +817,7 @@ def _probes(
     distributions = {"ferret-scan": "2.5.3", **(distributions or {})}
     return script.Probes(
         which=_windows_which if windows else shutil.which,
-        version_text=lambda executable: versions.get(Path(executable).name, ""),
+        version_text=lambda executable: versions.get(Path(executable).stem, ""),
         uv_tool_list=lambda: uv,
         distribution_version=distributions.get,
     )
@@ -821,7 +827,7 @@ _ALL_TOOLS = ("betterleaks", "ferret-scan", "guarddog", "hadolint", "trivy")
 
 
 def test_verify_accepts_what_the_plan_says_is_installed(script, tmp_path, windows):
-    directory = _bin(tmp_path, *_ALL_TOOLS)
+    directory = _bin(tmp_path, *_ALL_TOOLS, windows=windows)
 
     problems = script.verify(
         script.plan(), path=str(directory), probes=_probes(script, windows=windows)
@@ -831,7 +837,9 @@ def test_verify_accepts_what_the_plan_says_is_installed(script, tmp_path, window
 
 
 def test_verify_names_a_tool_that_is_not_on_the_path(script, tmp_path, windows):
-    directory = _bin(tmp_path, *(t for t in _ALL_TOOLS if t != "hadolint"))
+    directory = _bin(
+        tmp_path, *(t for t in _ALL_TOOLS if t != "hadolint"), windows=windows
+    )
 
     problems = script.verify(
         script.plan(), path=str(directory), probes=_probes(script, windows=windows)
@@ -842,7 +850,7 @@ def test_verify_names_a_tool_that_is_not_on_the_path(script, tmp_path, windows):
 
 
 def test_verify_names_a_binary_that_reports_another_version(script, tmp_path, windows):
-    directory = _bin(tmp_path, *_ALL_TOOLS)
+    directory = _bin(tmp_path, *_ALL_TOOLS, windows=windows)
 
     problems = script.verify(
         script.plan(),
@@ -863,7 +871,7 @@ def test_verify_names_a_binary_that_reports_another_version(script, tmp_path, wi
 def test_a_version_found_inside_another_is_not_the_pin(
     script, tmp_path, windows, reported
 ):
-    directory = _bin(tmp_path, *_ALL_TOOLS)
+    directory = _bin(tmp_path, *_ALL_TOOLS, windows=windows)
 
     problems = script.verify(
         script.plan(),
@@ -877,7 +885,7 @@ def test_a_version_found_inside_another_is_not_the_pin(
 def test_verify_names_a_uv_tool_the_tool_list_does_not_show_at_the_pin(
     script, tmp_path, windows
 ):
-    directory = _bin(tmp_path, *_ALL_TOOLS)
+    directory = _bin(tmp_path, *_ALL_TOOLS, windows=windows)
 
     for listing in ("", "guarddog v3.1.0\n- guarddog\n", "other-tool v3.2.0\n"):
         problems = script.verify(
@@ -892,7 +900,7 @@ def test_verify_names_a_uv_tool_the_tool_list_does_not_show_at_the_pin(
 def test_verify_names_a_python_package_at_another_version_or_not_installed(
     script, tmp_path, windows
 ):
-    directory = _bin(tmp_path, *_ALL_TOOLS)
+    directory = _bin(tmp_path, *_ALL_TOOLS, windows=windows)
 
     for distributions in ({"ferret-scan": "2.5.2"}, {"ferret-scan": None}):
         problems = script.verify(
@@ -907,7 +915,9 @@ def test_verify_names_a_python_package_at_another_version_or_not_installed(
 
 
 def test_verify_checks_only_what_the_plan_installs(script, tmp_path, windows):
-    directory = _bin(tmp_path, *(t for t in _ALL_TOOLS if t != "hadolint"))
+    directory = _bin(
+        tmp_path, *(t for t in _ALL_TOOLS if t != "hadolint"), windows=windows
+    )
     rows = script.plan(held={"hadolint": "held"})
 
     problems = script.verify(
@@ -956,7 +966,7 @@ def test_verify_exits_1_on_a_problem_and_prints_it_on_stderr_only(
 def test_verify_prints_what_it_found_and_exits_0_when_everything_resolves(
     script, tmp_path, monkeypatch, capsys, windows
 ):
-    directory = _bin(tmp_path, *_ALL_TOOLS)
+    directory = _bin(tmp_path, *_ALL_TOOLS, windows=windows)
     monkeypatch.setattr(script, "session_path", lambda: str(directory))
     monkeypatch.setattr(
         script, "default_probes", lambda: _probes(script, windows=windows)
