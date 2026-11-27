@@ -494,7 +494,11 @@ def _version_1_lock(repo, scopes=(("B602", "risky"),)) -> bytes:
         )
         + "\n"
     )
-    (repo / LOCK_RELATIVE_PATH).write_text(text, encoding="utf-8")
+    # Bytes, so the file holds LF on Windows too: write_text would translate
+    # the line ends, and the callers compare what is on disk with what this
+    # returns.
+    written = text.encode("utf-8")
+    (repo / LOCK_RELATIVE_PATH).write_bytes(written)
     config = repo / ".ash.yaml"
     config.write_text(
         CONFIG
@@ -505,7 +509,7 @@ def _version_1_lock(repo, scopes=(("B602", "risky"),)) -> bytes:
         ),
         encoding="utf-8",
     )
-    return text.encode("utf-8")
+    return written
 
 
 def _without_the_extra(monkeypatch) -> None:
