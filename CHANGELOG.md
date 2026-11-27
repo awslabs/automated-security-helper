@@ -265,6 +265,12 @@
   must be on `ASH_MCP_IMAGE_ALLOWED_REGISTRIES` where it was read as Docker Hub;
   `index.docker.io` counts as `docker.io` in the list and in a reference; and grype's
   `purl:` and `cpe:` input prefixes are refused like the other source schemes.
+- **trivy's image findings keep their package, and its layer pass needs a digest.** An
+  image scan now writes `package_name`, `package_version` and `fix_available` on each
+  trivy vulnerability, as grype's does, without reading a lockfile of the scanned
+  directory. The second run that fills `layer_digest` needs a saved archive or layout,
+  or a reference that carries its digest, even when an engine is detected, and a time
+  budget it cannot work out no longer fails the scan.
 
 ### Features
 
