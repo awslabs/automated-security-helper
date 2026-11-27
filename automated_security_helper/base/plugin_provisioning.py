@@ -702,33 +702,33 @@ def check_registry(
                     f"for {scanner!r}"
                 )
             variables[row.variable] = (scanner, row.value)
-        for pin in block.pypi_pins:
-            key = normalize_distribution(pin.distribution)
+        for pypi_pin in block.pypi_pins:
+            key = normalize_distribution(pypi_pin.distribution)
             if key in distributions:
                 raise ProvisioningRegistryError(
-                    f"distribution {pin.distribution!r} is pinned twice, by "
+                    f"distribution {pypi_pin.distribution!r} is pinned twice, by "
                     f"{distributions[key]!r} and by {scanner!r}"
                 )
             distributions[key] = scanner
-            if pin.extra and pin.excluded is not None:
+            if pypi_pin.extra and pypi_pin.excluded is not None:
                 raise ProvisioningRegistryError(
-                    f"{scanner!r} pins {pin.distribution!r} as a member of the "
-                    f"{pin.extra!r} extra and also excludes it; a pin is one or the "
-                    "other"
+                    f"{scanner!r} pins {pypi_pin.distribution!r} as a member of the "
+                    f"{pypi_pin.extra!r} extra and also excludes it; a pin is one "
+                    "or the other"
                 )
-            if not pin.specifier.strip() or ";" in pin.specifier:
+            if not pypi_pin.specifier.strip() or ";" in pypi_pin.specifier:
                 raise ProvisioningRegistryError(
-                    f"{scanner!r} pins {pin.distribution!r} with the specifier "
-                    f"{pin.specifier!r}, which must be non-empty and hold no ';' (a "
-                    "marker has its own field)"
+                    f"{scanner!r} pins {pypi_pin.distribution!r} with the specifier "
+                    f"{pypi_pin.specifier!r}, which must be non-empty and hold no "
+                    "';' (a marker has its own field)"
                 )
             if (
-                pin.excluded is not None
-                and pin.excluded.reason is ExclusionReason.COOLDOWN
-                and not pin.excluded.until.strip()
+                pypi_pin.excluded is not None
+                and pypi_pin.excluded.reason is ExclusionReason.COOLDOWN
+                and not pypi_pin.excluded.until.strip()
             ):
                 raise ProvisioningRegistryError(
-                    f"{scanner!r}: the cooldown exclusion of {pin.distribution!r} "
+                    f"{scanner!r}: the cooldown exclusion of {pypi_pin.distribution!r} "
                     "carries no 'until' date"
                 )
 
