@@ -25,7 +25,9 @@ A scan reaches a virtualenv's scripts directory only as a PATH entry, and on Win
 ``shutil.which`` reads a name there through PATHEXT: a file with no extension is not
 found, and ``<tool>.com`` is. The sweep reads that directory the same way. The tests
 that put those files there emulate the Windows names and that rule where they are not
-native, and two run the real lookup.
+native, and two run the real lookup. Python applies PATHEXT to a command with a
+directory part, as the scan's PATH entries are read, from 3.12; before it such a path
+is checked as written, so those two tests run from 3.12.
 
 The run says which copy it counted (the "Resolved to" cell) and which it set aside as
 a system tool (an "Ignoring" line). One file is never both, however each lookup spells
@@ -180,10 +182,19 @@ def _working_directory_first(monkeypatch) -> None:
 #: The suffixes CPython's Windows ``shutil.which`` adds to a name, in order.
 _WINDOWS_PATHEXT = (".com", ".exe", ".bat", ".cmd")
 
+#: The two tests that run the real Windows lookup: from Python 3.12 ``shutil.which``
+#: applies PATHEXT to a command with a directory part, as a PATH entry is read; before
+#: it, that path is checked as written, so a file with no extension is found there.
+_REAL_PATHEXT_LOOKUP = pytest.mark.skipif(
+    sys.platform != "win32" or sys.version_info < (3, 12),
+    reason="Windows reads a command with a directory part through PATHEXT from 3.12",
+)
+
 
 def _windows_which(cmd, mode=os.F_OK | os.X_OK, path=None):
-    """CPython's Windows ``shutil.which``, on whatever platform runs this: a name is
-    read with each suffix of PATHEXT, and as it is only when it already ends in one.
+    """CPython's Windows ``shutil.which`` (3.12 and later), on whatever platform runs
+    this: a name is read with each suffix of PATHEXT, and as it is only when it
+    already ends in one.
 
     So a file with no extension is not found, and ``<tool>.com`` is. A command with a
     directory part is looked up in that directory alone; a bare name is looked up in
@@ -473,9 +484,7 @@ def test_pathext_finds_a_com_file_in_the_scripts_directory(tmp_path, monkeypatch
     assert _ignored_files(scene.text) == [], scene.text
 
 
-@pytest.mark.skipif(
-    sys.platform != "win32", reason="only Windows reads names through PATHEXT"
-)
+@_REAL_PATHEXT_LOOKUP
 @MODES
 def test_on_windows_a_file_with_no_extension_in_the_scripts_directory_is_absent(
     tmp_path, monkeypatch, mode
@@ -494,9 +503,7 @@ def test_on_windows_a_file_with_no_extension_in_the_scripts_directory_is_absent(
     assert "still absent after install" in " ".join(scene.text.split()), scene.text
 
 
-@pytest.mark.skipif(
-    sys.platform != "win32", reason="only Windows reads names through PATHEXT"
-)
+@_REAL_PATHEXT_LOOKUP
 @MODES
 def test_on_windows_a_com_file_in_the_scripts_directory_is_present(
     tmp_path, monkeypatch, mode

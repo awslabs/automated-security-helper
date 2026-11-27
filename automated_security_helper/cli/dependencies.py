@@ -2218,14 +2218,18 @@ def install_dependencies(
         elif outcome.needs_external_tool and not inherit_system_tools:
             # Only what ASH or its providers manage counts; a copy on PATH or in a
             # system directory is named and set aside, so the operator sees what
-            # the flag excluded. The plugin's own check is not asked either: its
-            # base answer is the same PATH probe.
+            # the flag excluded. The copy that was counted is not one of them,
+            # however the scan spells its path, so the two are compared as files.
+            # The plugin's own check is not asked either: its base answer is the
+            # same PATH probe.
             outcome.executable = _managed_executable(
                 outcome, virtualenv_target, absolute_bin_path, source_dir
             )
             if outcome.command is not None:
                 system_copy = find_executable_for_scan(outcome.command, source_dir)
-                if system_copy and system_copy != outcome.executable:
+                if system_copy and not _names_the_same_file(
+                    system_copy, outcome.executable
+                ):
                     print(
                         f"Ignoring {escape(system_copy)}: --no-inherit-system-tools "
                         "(a system tool does not satisfy this dependency)"
@@ -2850,6 +2854,31 @@ def _on_search_path(directory: Path) -> bool:
     )
 
 
+def _names_the_same_file(first: str, second: Optional[str]) -> bool:
+    """Whether two paths name one file, however each is spelled.
+
+    The sweep and a scan reach a file by different routes and spell it differently:
+    the sweep as the virtualenv or the bin directory names it, a scan as PATH names the
+    directory (through a link, in another case) or, for the bin directory and ASH's
+    own environment, with forward slashes. One file then has two strings, which is no
+    reason to say a run set aside the copy it counted.
+
+    The same file when the real paths agree once case is folded where the platform
+    folds it, or, when both can be read, when ``os.path.samefile`` says so. A path that
+    cannot be read is not the same file as another: an ``OSError`` is no answer.
+    """
+    if second is None:
+        return False
+    if os.path.normcase(os.path.realpath(first)) == os.path.normcase(
+        os.path.realpath(second)
+    ):
+        return True
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return False
+
+
 def _managed_executable(
     outcome: "PluginInstallOutcome",
     virtualenv: Optional[Path],
@@ -2867,21 +2896,29 @@ def _managed_executable(
     A tool counts where a scan of ``source_dir`` would find it. A copy inside that
     tree is passed over, as a scan passes over one it refuses, unless the operator
     allowed in-tree tools (``in_tree_path_refusal``), and the search goes on to the
-    next directory. The virtualenv's scripts directory is searched only when PATH
-    names it, which is the one way a scan reaches it; ASH's own environment
-    directories are searched anyway.
+    next directory. Each directory is read as a scan reads it:
 
-    Each directory is probed as a scan probes ASH's own directories
-    (``_executable_candidates``): the file names a scan tries for the command, joined
-    onto the directory and checked as files. ``shutil.which(command, path=directory)``
-    is not used, because on Windows it searches the working directory first whatever
-    ``path`` says. The working directory is the scanned tree, and a same-named file at
-    its root, which is refused here, would answer for every directory in turn and hide
-    the managed copy.
+    * The virtualenv's scripts directory is searched only when PATH names it, which is
+      the one way a scan reaches it, and as a PATH entry (``_which_in_path_entry``,
+      which the scan's own PATH search calls): each file name a scan tries for the
+      command, read through ``shutil.which``. On Windows with Python 3.12 or later that
+      reads a name with each suffix of PATHEXT, and the bare name only when it already
+      ends in one, so a file with no extension there is not the tool and ``<tool>.com``
+      is. ``which`` is given a command with a directory part, so it looks in that
+      directory alone and never in the working directory, which is the scanned tree.
+      That is why ``shutil.which(command, path=directory)`` is not used: on Windows it
+      searches the working directory first whatever ``path`` says, so a same-named
+      file at the root of the tree, which is refused here, would answer for every
+      directory in turn and hide the managed copy.
+    * ASH's own environment directories and the bin directory are probed as a scan
+      probes them (``_executable_candidates``): each file name a scan tries, joined
+      onto the directory and checked as a file. A scan searches them whether or not
+      PATH names them.
     """
     from automated_security_helper.utils.subprocess_utils import (
         _executable_candidate_names,
         _is_executable_file,
+        _which_in_path_entry,
         own_environment_dirs,
     )
 
@@ -2893,22 +2930,27 @@ def _managed_executable(
         listed = _uv_tool_executable(outcome.command)
         if listed is not None:
             return listed
-    directories: List[Path] = []
-    if virtualenv is not None and _on_search_path(venv_scripts_dir(virtualenv)):
-        directories.append(venv_scripts_dir(virtualenv))
-    directories.extend(own_environment_dirs())
-    directories.append(bin_dir)
     names = _executable_candidate_names(outcome.command)
-    for directory in directories:
-        for name in names:
-            candidate = directory / name
-            if not _is_executable_file(str(candidate)):
-                continue
-            refusal = in_tree_path_refusal(
-                f"{outcome.command} at {candidate}", candidate, source_dir
-            )
-            if refusal is None:
-                return str(candidate)
+
+    def candidates() -> Iterable[str]:
+        if virtualenv is not None and _on_search_path(venv_scripts_dir(virtualenv)):
+            scripts = str(venv_scripts_dir(virtualenv))
+            for name in names:
+                found = _which_in_path_entry(scripts, name)
+                if found:
+                    yield found
+        for directory in [*own_environment_dirs(), bin_dir]:
+            for name in names:
+                candidate = str(directory / name)
+                if _is_executable_file(candidate):
+                    yield candidate
+
+    for candidate in candidates():
+        refusal = in_tree_path_refusal(
+            f"{outcome.command} at {candidate}", Path(candidate), source_dir
+        )
+        if refusal is None:
+            return candidate
     return None
 
 
