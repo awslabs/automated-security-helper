@@ -18,7 +18,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-SCAN = ["scan", "--no-progress", "--scanners", "bandit"]
+SCAN = ["scan", "fs", "--no-progress", "--add-scanners", "bandit"]
 TAG = "[/bold]"
 
 
@@ -65,7 +65,7 @@ def test_a_bracketed_key_in_the_repository_config(run_cli, in_tmp):
         "      reason: probe\n"
         f'      "{TAG}": 1\n',
     )
-    seen = run_cli([*SCAN, "--source-dir", "src", "--output-dir", "out"])
+    seen = run_cli([*SCAN, "src", "--output-dir", "out"])
     _assert_printed_as_text(seen, 3)
     assert TAG in _logged(in_tmp)
 
@@ -83,7 +83,7 @@ def test_an_error_quoting_a_closing_tag_at_the_generic_exit(
         raise_it,
     )
     _source(in_tmp)
-    seen = run_cli([*SCAN, "--source-dir", "src", "--output-dir", "out"])
+    seen = run_cli([*SCAN, "src", "--output-dir", "out"])
     _assert_printed_as_text(seen, 1)
     assert f"could not read /x{TAG}" in _logged(in_tmp)
 
@@ -118,6 +118,6 @@ def test_a_validation_error_naming_a_bracketed_key_at_the_generic_exit(
         raise_it,
     )
     _source(in_tmp)
-    seen = run_cli([*SCAN, "--source-dir", "src", "--output-dir", "out"])
+    seen = run_cli([*SCAN, "src", "--output-dir", "out"])
     _assert_printed_as_text(seen, 1)
     assert TAG in _logged(in_tmp)
