@@ -931,16 +931,16 @@ class TestAppendOntoAnUntypedPluginOption:
             assert [leaf for leaf in _scalars(written) if leaf in defaults] == []
 
     def test_a_typed_section_keeps_its_default_as_before(self):
-        default = list(AshConfig().scanners.checkov.options.frameworks)
+        default = list(AshConfig().scanners.checkov.options.additional_formats)
         assert default, "control: the typed option has a default to keep"
 
         config = apply_config_overrides(
-            AshConfig(), ['scanners.checkov.options.frameworks+=["terraform"]']
+            AshConfig(), ['scanners.checkov.options.additional_formats+=["sarif"]']
         )
 
-        assert list(config.scanners.checkov.options.frameworks) == [
+        assert list(config.scanners.checkov.options.additional_formats) == [
             *default,
-            "terraform",
+            "sarif",
         ]
 
     def test_the_defaults_table_the_cases_are_built_from_has_rows(self):

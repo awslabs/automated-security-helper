@@ -91,12 +91,14 @@ class TestFindConfigFile:
 
 class TestApplyConfigOverride:
     def test_an_append_starts_a_list_the_document_lacks(self):
+        from automated_security_helper.utils.override_key import APPEND
+
         document: dict = {}
-        keys, value, appended = _apply_config_override(
+        keys, value, operator = _apply_config_override(
             document, "ash_plugin_modules+", "x"
         )
         assert document == {"ash_plugin_modules": ["x"]}
-        assert appended is True
+        assert operator == APPEND
 
     def test_an_append_onto_none_starts_the_list(self):
         document = {"ash_plugin_modules": None}
