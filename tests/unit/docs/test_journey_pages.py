@@ -24,6 +24,12 @@ fail is worse. This file pins both halves for the journey generator:
   render that does not parse back to the journey's blocks) is reported with an exit
   status of 1 and the command that fixes it, and a refused journey writes nothing.
 
+A block may carry an ``id:``, a kebab-case name that is unique in its journey and is
+never rendered, so that another file can name the block. The tests plant good and bad
+ids, compare the render with and without ids byte for byte, and read the storyboard
+beside the local journey (``getting-started-local.cast.yaml``), which names journey
+blocks by id: every id it names must exist, and a planted unknown id must be refused.
+
 ``test_the_gate_check_can_fail`` is the non-vacuity proof for the docs freshness gate's
 ``Journey pages match their journey files`` check, which calls the same function.
 """
@@ -37,12 +43,15 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts" / "generate_journey_pages.py"
 GATE_SCRIPT = REPO_ROOT / "scripts" / "verify_docs_freshness.py"
 JOURNEY = REPO_ROOT / "docs" / "journeys" / "getting-started-local.journey.yaml"
 TEMPLATE = REPO_ROOT / "docs" / "content" / "getting-started" / "local.md.template"
+CAST_MODULE = REPO_ROOT / "scripts" / "_cast.py"
+STORYBOARD = REPO_ROOT / "docs" / "journeys" / "getting-started-local.cast.yaml"
 REGENERATE = "uv run python scripts/generate_journey_pages.py"
 RUN_TIMEOUT_S = 120
 #: How every render opens: the comment block scripts/_reference_docs.py writes on a
@@ -561,3 +570,236 @@ def test_the_gate_check_can_fail(tmp_path: Path, monkeypatch) -> None:
     path.write_text(GOOD_JOURNEY.replace(old, new, 1), encoding="utf-8")
     refused = gate.check_doc_journeys()
     assert len(refused) == 1 and "is refused" in refused[0] and said in refused[0]
+
+
+# ---------------------------------------------------------------------------
+# Block ids
+# ---------------------------------------------------------------------------
+
+#: The first key line of three blocks of GOOD_JOURNEY: an ``id:`` line goes above it.
+ID_SITES = {
+    "project": "      twin: {kind: project}\n",
+    "scan": '      twin: {kind: scan, exit: "2", actionable: 1}\n',
+    "run": '      marker: {mode: run, expect-exit: "2", env: "ASH_OFFLINE=YES"}\n',
+}
+KEBAB = "id must be kebab-case"
+#: name -> (the sites to plant an id on, with the raw YAML of each id; what the refusal
+#: says). GOOD_JOURNEY's body[1] is its project block and body[2] its scan block.
+REFUSED_BLOCK_IDS = {
+    "an id that two blocks share": (
+        {"project": "same", "scan": "same"},
+        ("id 'same' is already the id of body[1]",),
+    ),
+    "an id with an uppercase letter": (
+        {"project": "Scan-Two"},
+        (KEBAB, "got 'Scan-Two'"),
+    ),
+    "an id with an underscore": (
+        {"project": "scan_two"},
+        (KEBAB, "got 'scan_two'"),
+    ),
+    "an id with a dot": (
+        {"project": "scan.two"},
+        (KEBAB, "got 'scan.two'"),
+    ),
+    "an id with a space": (
+        {"project": '"scan two"'},
+        (KEBAB, "got 'scan two'"),
+    ),
+    "an id that starts with a digit": (
+        {"project": "2fast"},
+        (KEBAB, "got '2fast'"),
+    ),
+    "an id that starts with a hyphen": (
+        {"project": '"-scan"'},
+        (KEBAB, "got '-scan'"),
+    ),
+    "an id that ends with a hyphen": (
+        {"project": "scan-"},
+        (KEBAB, "got 'scan-'"),
+    ),
+    "an id with a doubled hyphen": (
+        {"project": "scan--two"},
+        (KEBAB, "got 'scan--two'"),
+    ),
+    "an empty id": (
+        {"project": '""'},
+        (KEBAB, "got ''"),
+    ),
+    "an id that is a number": (
+        {"project": "5"},
+        (KEBAB, "got 5"),
+    ),
+    "an id that is a boolean": (
+        {"project": "true"},
+        (KEBAB, "got True"),
+    ),
+    "an id with no value": (
+        {"project": ""},
+        (KEBAB, "got None"),
+    ),
+    "an id that is a list": (
+        {"project": "[scan]"},
+        (KEBAB, "got ['scan']"),
+    ),
+    "an id that is a mapping": (
+        {"project": "{a: b}"},
+        (KEBAB, "got {'a': 'b'}"),
+    ),
+}
+
+
+def _with_ids(**ids: str) -> str:
+    """GOOD_JOURNEY with an ``id:`` line above each named site. A value is raw YAML."""
+    text = GOOD_JOURNEY
+    for site, value in ids.items():
+        line = ID_SITES[site]
+        assert text.count(line) == 1, f"{site!r} is not one site of GOOD_JOURNEY"
+        text = text.replace(line, f"      id: {value}\n{line}")
+    return text
+
+
+def _committed_block_ids(generator) -> set[str]:
+    """The ids the committed local journey gives its blocks."""
+    journey = generator.load_journey(JOURNEY)
+    return {
+        segment["block"]["id"]
+        for segment in journey["body"]
+        if "id" in segment.get("block", {})
+    }
+
+
+def _committed_storyboard():
+    """The cast module, and the committed storyboard loaded with the journey's ids."""
+    generator = _module("_ash_journey_pages", SCRIPT)
+    cast = _module("_ash_cast", CAST_MODULE)
+    return cast, cast.load_storyboard(STORYBOARD, _committed_block_ids(generator))
+
+
+@pytest.mark.unit
+def test_a_block_id_is_accepted_and_never_rendered(tmp_path: Path) -> None:
+    """Three ids on three blocks change nothing in the render, byte for byte."""
+    planted = _with_ids(project="make-project", scan="scan-offline", run="scan-two")
+    assert planted != GOOD_JOURNEY
+    renders = {}
+    for name, journey in (("with", planted), ("without", GOOD_JOURNEY)):
+        root = tmp_path / name
+        _plant(root, journey)
+        result = _run("--docs-root", str(root))
+        assert result.returncode == 0, (name, result.stderr)
+        renders[name] = _template(root).read_bytes()
+    assert renders["with"] == renders["without"]
+    for block_id in ("make-project", "scan-offline", "scan-two"):
+        assert block_id.encode() not in renders["with"]
+    checked = _run("--docs-root", str(tmp_path / "with"), "--check")
+    assert checked.returncode == 0, checked.stderr
+
+
+@pytest.mark.unit
+def test_the_loader_keeps_the_ids_other_files_name_blocks_by(tmp_path: Path) -> None:
+    generator = _module("_ash_journey_pages", SCRIPT)
+    text = _with_ids(project="make-project", scan="scan-offline", run="scan-two")
+    journey = generator.load_journey(_plant(tmp_path, text))
+    ids = [s["block"]["id"] for s in journey["body"] if "id" in s.get("block", {})]
+    assert ids == ["make-project", "scan-offline", "scan-two"]
+
+
+@pytest.mark.unit
+def test_an_id_only_has_to_be_unique_within_its_journey(tmp_path: Path) -> None:
+    generator = _module("_ash_journey_pages", SCRIPT)
+    for name in ("one", "two"):
+        generator.load_journey(_plant(tmp_path / name, _with_ids(project="shared")))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "block_id", ["a", "scan", "scan-two", "step-2", "a1-b2-c3", "v1-2-3"]
+)
+def test_a_kebab_case_block_id_is_accepted(tmp_path: Path, block_id: str) -> None:
+    """Must-not-flag: the ids the shape rule has to let through."""
+    _plant(tmp_path, _with_ids(project=block_id))
+    result = _run("--docs-root", str(tmp_path))
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", sorted(REFUSED_BLOCK_IDS))
+def test_the_renderer_refuses_a_block_id_that_is_not_one(
+    tmp_path: Path, name: str
+) -> None:
+    sites, said = REFUSED_BLOCK_IDS[name]
+    _plant(tmp_path, _with_ids(**sites))
+    for args in (("--check",), ()):
+        result = _run("--docs-root", str(tmp_path), *args)
+        assert result.returncode == 1, (name, args, result.stderr)
+        assert "x.journey.yaml is refused" in result.stderr, result.stderr
+        for text in said:
+            assert text in result.stderr, (name, text, result.stderr)
+    assert not _template(tmp_path).exists(), f"{name}: a refused journey wrote a page"
+
+
+@pytest.mark.unit
+def test_the_committed_journey_names_the_blocks_the_storyboard_runs() -> None:
+    """Each id sits on the block it stands for, so a moved or renamed id fails here."""
+    generator = _module("_ash_journey_pages", SCRIPT)
+    journey = generator.load_journey(JOURNEY)
+    blocks = {
+        segment["block"]["id"]: segment["block"]
+        for segment in journey["body"]
+        if "id" in segment.get("block", {})
+    }
+    assert {"version", "project", "scan-two", "report"} <= set(blocks)
+    assert blocks["version"]["body"] == "ash --version\n"
+    assert blocks["project"]["twin"] == {"kind": "project"}
+    assert blocks["scan-two"]["body"] == "ash --scanners bandit,detect-secrets\n"
+    assert blocks["report"]["body"] == "ash report\n"
+    assert blocks["report"]["twin"]["kind"] == "report"
+
+
+@pytest.mark.unit
+def test_the_storyboard_names_only_blocks_the_journey_has() -> None:
+    """Every id the storyboard names is an id of the journey it names. The loader that
+    checks it is the recording's own, given the ids the journey file holds."""
+    _cast, board = _committed_storyboard()
+    assert REPO_ROOT / board.journey == JOURNEY
+    named = {scene.block for scene in board.scenes if scene.block}
+    named |= {block for scene in board.scenes for block in scene.hidden_blocks}
+    assert named == {"version", "project", "scan-two", "report"}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("field", ["block", "hidden_blocks"])
+def test_a_storyboard_naming_a_block_the_journey_lacks_is_refused(
+    tmp_path: Path, field: str
+) -> None:
+    """Control for the test above: plant an id the journey does not have in each field
+    that names blocks, and the loader refuses the file."""
+    generator = _module("_ash_journey_pages", SCRIPT)
+    cast = _module("_ash_cast", CAST_MODULE)
+    data = yaml.safe_load(STORYBOARD.read_text(encoding="utf-8"))
+    scene = next(scene for scene in data["scenes"] if field in scene)
+    scene[field] = "no-such-block" if field == "block" else ["no-such-block"]
+    planted = tmp_path / "planted.cast.yaml"
+    planted.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    with pytest.raises(
+        cast.StoryboardError, match="'no-such-block' is not a journey block id"
+    ):
+        cast.load_storyboard(planted, _committed_block_ids(generator))
+
+
+@pytest.mark.unit
+def test_the_storyboard_keeps_the_designed_shape() -> None:
+    """Six scenes of 6, 4, 5, 16, 12 and 5 s, typed at 30 characters a second and
+    played once, whose install scene is a comment taken from the README and never run.
+    A change to any of it is a decision to record again, so it is pinned."""
+    cast, board = _committed_storyboard()
+    seconds = [scene.duration_ms // 1000 for scene in board.scenes]
+    assert seconds == [6, 4, 5, 16, 12, 5]
+    assert board.total_s == 48.0
+    assert board.typing.chars_per_second == 30
+    assert board.playback == "once"
+    install = board.scene("install")
+    assert install.comment_from == "README.md#quick-start-install"
+    assert install.block is None and install.command is None
+    typed = {scene.command.split()[0] for scene in board.scenes if scene.command}
+    assert typed <= set(cast.READ_ONLY_COMMANDS)
