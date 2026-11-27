@@ -150,7 +150,8 @@ OLDER_HELP = (
     "\n Usage: ash scan [OPTIONS]\n\n"
     " Scan code, infrastructure, secrets, dependencies.\n"
 )
-#: What an ASH that is strict about the extra word prints, and exits 2 with: a usage error.
+#: What an ASH older than 3.9 prints when it refuses the extra word: a usage error. ASH
+#: 3.8 exits 5 with it, as with every usage error, and an ASH before 3.8 exits 2.
 OLDER_REFUSAL = (
     "Usage: ash scan [OPTIONS]\n"
     "Try 'ash scan --help' for help.\n\n"
@@ -525,8 +526,13 @@ def test_the_help_is_asked_outside_the_checkout(tmp_path):
 @posix_only
 @pytest.mark.parametrize(
     ("help_text", "help_exit"),
-    [(OLDER_HELP, 0), ("", 0), (OLDER_REFUSAL, 2)],
-    ids=["an-older-ash", "no-help", "an-older-ash-refuses-fs"],
+    [(OLDER_HELP, 0), ("", 0), (OLDER_REFUSAL, 5), (OLDER_REFUSAL, 2)],
+    ids=[
+        "an-older-ash",
+        "no-help",
+        "an-ash-3.8-refuses-fs",
+        "an-ash-before-3.8-refuses-fs",
+    ],
 )
 def test_an_ash_without_the_fs_subject_gets_the_command_line_it_always_got(
     tmp_path, help_text, help_exit
