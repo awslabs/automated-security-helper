@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for the workspace-mode CLI surface of ``ash scan``.
+"""Unit tests for the workspace-mode CLI surface of ``ash scan workspace``.
 
 Resolution failures never reach the scan, and these tests assert that from the
 outside -- by checking that the scan entry point is not reached and that no
@@ -101,7 +101,7 @@ def test_a_workspace_error_is_not_the_findings_exit_code(tmp_path, no_scan):
     workspace = tmp_path / "dev.code-workspace"
     workspace.write_text(json.dumps({"folders": []}), encoding="utf-8")
 
-    result = _invoke("--workspace", str(workspace), "--dry-run")
+    result = _invoke("workspace", str(workspace), "--dry-run")
 
     assert result.exit_code == 4
     assert result.exit_code != WorkspaceExitCode.ACTIONABLE_FINDINGS
@@ -150,7 +150,7 @@ def test_auto_discovery_uses_the_single_candidate(tmp_path, no_scan, monkeypatch
     _workspace(tmp_path, ["api"])
     monkeypatch.chdir(tmp_path)
 
-    result = _invoke("--workspace", "auto", "--dry-run")
+    result = _invoke("workspace", "auto", "--dry-run")
 
     assert result.exit_code == WorkspaceExitCode.SUCCESS, result.output
     assert "api" in result.output
@@ -163,7 +163,7 @@ def test_auto_discovery_with_two_candidates_lists_both(tmp_path, no_scan, monkey
     _workspace(tmp_path, ["api"], name="beta.code-workspace")
     monkeypatch.chdir(tmp_path)
 
-    result = _invoke("--workspace", "auto", "--dry-run")
+    result = _invoke("workspace", "auto", "--dry-run")
 
     assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
     assert "alpha.code-workspace" in result.output
@@ -174,7 +174,7 @@ def test_auto_discovery_with_two_candidates_lists_both(tmp_path, no_scan, monkey
 def test_auto_discovery_with_no_candidate_is_an_error(tmp_path, no_scan, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
-    result = _invoke("--workspace", "auto", "--dry-run")
+    result = _invoke("workspace", "auto", "--dry-run")
 
     assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
     assert "code-workspace" in result.output
@@ -189,7 +189,7 @@ def test_a_file_literally_named_auto_is_still_treated_as_discovery(
     (tmp_path / "auto").write_text("{}", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    result = _invoke("--workspace", "auto", "--dry-run")
+    result = _invoke("workspace", "auto", "--dry-run")
 
     assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
     assert "code-workspace" in result.output
@@ -204,7 +204,7 @@ def test_missing_project_is_a_workspace_error_and_names_the_path(tmp_path, no_sc
     _project(tmp_path, "api")
     workspace = _workspace(tmp_path, ["api", "not-cloned-yet"])
 
-    result = _invoke("--workspace", str(workspace), "--dry-run")
+    result = _invoke("workspace", str(workspace), "--dry-run")
 
     assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
     assert "not-cloned-yet" in result.output
@@ -216,7 +216,7 @@ def test_allow_missing_projects_opts_out_and_discloses_the_skip(tmp_path, no_sca
     workspace = _workspace(tmp_path, ["api", "not-cloned-yet"])
 
     result = _invoke(
-        "--workspace", str(workspace), "--allow-missing-projects", "--dry-run"
+        "workspace", str(workspace), "--allow-missing-projects", "--dry-run"
     )
 
     assert result.exit_code == WorkspaceExitCode.SUCCESS, result.output
@@ -229,7 +229,7 @@ def test_empty_folders_list_is_a_workspace_error(tmp_path, no_scan):
     workspace = tmp_path / "dev.code-workspace"
     workspace.write_text(json.dumps({"folders": []}), encoding="utf-8")
 
-    result = _invoke("--workspace", str(workspace), "--dry-run")
+    result = _invoke("workspace", str(workspace), "--dry-run")
 
     assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
     assert not no_scan
@@ -239,7 +239,7 @@ def test_malformed_workspace_file_is_a_workspace_error(tmp_path, no_scan):
     workspace = tmp_path / "dev.code-workspace"
     workspace.write_text("{not json", encoding="utf-8")
 
-    result = _invoke("--workspace", str(workspace), "--dry-run")
+    result = _invoke("workspace", str(workspace), "--dry-run")
 
     assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
     assert not no_scan
@@ -250,14 +250,14 @@ def test_a_null_character_folder_entry_is_a_workspace_error(tmp_path, no_scan):
     _project(tmp_path, "api")
     workspace = _workspace(tmp_path, ["api", "bad\x00entry"])
 
-    result = _invoke("--workspace", str(workspace), "--dry-run")
+    result = _invoke("workspace", str(workspace), "--dry-run")
 
     assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
     assert not no_scan
 
 
 def test_absent_workspace_file_is_a_workspace_error(tmp_path, no_scan):
-    result = _invoke("--workspace", str(tmp_path / "gone.code-workspace"), "--dry-run")
+    result = _invoke("workspace", str(tmp_path / "gone.code-workspace"), "--dry-run")
 
     assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
     assert not no_scan
@@ -281,7 +281,7 @@ def test_project_pins_are_ignored_rather_than_a_workspace_error(tmp_path, no_sca
     )
     workspace = _workspace(tmp_path, ["api", "web"])
 
-    result = _invoke("--workspace", str(workspace), "--dry-run")
+    result = _invoke("workspace", str(workspace), "--dry-run")
 
     assert result.exit_code == WorkspaceExitCode.SUCCESS, result.output
     assert ">=2.0.0" not in result.stdout
@@ -303,7 +303,7 @@ def test_an_invalid_project_config_is_an_invalid_config_error(tmp_path, no_scan)
     _project(tmp_path, "api", "project_name: api\nglobal_settings: 7\n")
     workspace = _workspace(tmp_path, ["api"])
 
-    result = _invoke("--workspace", str(workspace), "--dry-run")
+    result = _invoke("workspace", str(workspace), "--dry-run")
 
     assert result.exit_code == WorkspaceExitCode.INVALID_PROJECT_CONFIG
     assert result.exit_code == 3
@@ -324,7 +324,7 @@ def test_dry_run_prints_the_plan_and_exits_zero(tmp_path, no_scan):
     _project(tmp_path, "shared-infra")
     workspace = _workspace(tmp_path, ["services/api", "shared-infra"])
 
-    result = _invoke("--workspace", str(workspace), "--dry-run")
+    result = _invoke("workspace", str(workspace), "--dry-run")
 
     assert result.exit_code == WorkspaceExitCode.SUCCESS, result.output
     assert "services-api" in result.output
@@ -339,7 +339,7 @@ def test_dry_run_invokes_no_scanner(tmp_path, no_scan):
     workspace = _workspace(tmp_path, ["api"])
     before = sorted(p.name for p in tmp_path.rglob("*"))
 
-    result = _invoke("--workspace", str(workspace), "--dry-run")
+    result = _invoke("workspace", str(workspace), "--dry-run")
 
     assert result.exit_code == WorkspaceExitCode.SUCCESS, result.output
     assert no_scan == []
@@ -373,7 +373,7 @@ def test_workspace_without_dry_run_reaches_the_scan_entry_point(tmp_path, no_sca
     _project(tmp_path, "api")
     workspace = _workspace(tmp_path, ["api"])
 
-    result = _invoke("--workspace", str(workspace))
+    result = _invoke("workspace", str(workspace))
 
     assert result.exit_code == WorkspaceExitCode.SUCCESS, result.output
     assert len(no_scan) == 1
@@ -387,7 +387,7 @@ def test_the_scan_root_is_the_workspace_root_not_a_project(tmp_path, no_scan):
     _project(tmp_path, "web")
     workspace = _workspace(tmp_path, ["api", "web"])
 
-    _invoke("--workspace", str(workspace))
+    _invoke("workspace", str(workspace))
 
     assert Path(no_scan[0]["source_dir"]).resolve() == tmp_path.resolve()
 
@@ -399,7 +399,7 @@ def test_the_plan_handed_to_the_scan_is_the_one_dry_run_would_print(tmp_path, no
     _project(tmp_path, "shared-infra")
     workspace = _workspace(tmp_path, ["services/api", "shared-infra"])
 
-    _invoke("--workspace", str(workspace))
+    _invoke("workspace", str(workspace))
 
     plan = no_scan[0]["workspace_plan"]
     assert [p.key for p in plan.projects] == ["services-api", "shared-infra"]
@@ -410,7 +410,7 @@ def test_allow_missing_projects_reaches_the_scan_entry_point(tmp_path, no_scan):
     _project(tmp_path, "api")
     workspace = _workspace(tmp_path, ["api", "not-cloned-yet"])
 
-    result = _invoke("--workspace", str(workspace), "--allow-missing-projects")
+    result = _invoke("workspace", str(workspace), "--allow-missing-projects")
 
     assert result.exit_code == WorkspaceExitCode.SUCCESS, result.output
     assert no_scan[0]["allow_missing_projects"] is True
@@ -423,7 +423,7 @@ def test_a_definition_error_still_refuses_before_scanning(tmp_path, no_scan):
     _project(tmp_path, "api")
     workspace = _workspace(tmp_path, ["api", "not-cloned-yet"])
 
-    result = _invoke("--workspace", str(workspace))
+    result = _invoke("workspace", str(workspace))
 
     assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
     assert not no_scan
@@ -435,7 +435,7 @@ def test_no_source_dir_is_passed_alongside_the_workspace_plan(tmp_path, no_scan)
     _project(tmp_path, "api")
     workspace = _workspace(tmp_path, ["api"])
 
-    _invoke("--workspace", str(workspace))
+    _invoke("workspace", str(workspace))
 
     call = no_scan[0]
     assert call["source_dir"] == call["workspace_plan"].workspace_root
@@ -468,7 +468,7 @@ def test_a_scan_without_workspace_flags_still_reaches_the_scan_entry_point(
 ):
     _project(tmp_path, "api")
 
-    result = _invoke("--source-dir", str(tmp_path / "api"))
+    result = _invoke("fs", str(tmp_path / "api"))
 
     assert result.exit_code == 0, result.output
     assert len(no_scan) == 1

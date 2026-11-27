@@ -541,7 +541,7 @@ def test_parity_a_source_dir_that_is_not_a_directory(
 
     monkeypatch.chdir(layout["scan"])
     source = layout["scan"] / name
-    cli = CliRunner().invoke(app, ["scan", "--source-dir", str(source)])
+    cli = CliRunner().invoke(app, ["scan", "fs", str(source)])
     mcp = _scan_directory(directory_path=str(source))
 
     assert cli.exit_code == mcp["exit_code"] == USAGE, (cli.output, mcp)

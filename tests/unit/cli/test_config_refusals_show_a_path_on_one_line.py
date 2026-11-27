@@ -443,7 +443,7 @@ def _scan_args(tmp_path) -> list:
     source.mkdir()
     return [
         "scan",
-        "--source-dir",
+        "fs",
         str(source),
         "--output-dir",
         str(tmp_path / "out"),
@@ -497,7 +497,7 @@ def test_a_workspace_scan_names_a_refused_config_on_one_line(
 
     result = CliRunner().invoke(
         app,
-        ["scan", "--workspace", str(workspace), "--config", str(refused), "--dry-run"],
+        ["scan", "workspace", str(workspace), "--config", str(refused), "--dry-run"],
     )
 
     assert result.exit_code == WorkspaceExitCode.INVALID_PROJECT_CONFIG, result.output
@@ -524,9 +524,7 @@ def test_a_workspace_root_config_that_does_not_parse_is_refused_on_one_line(
     workspace.write_text(json.dumps({"folders": [{"path": "api"}]}), encoding="utf-8")
     (root / ".ash.yaml").write_text(UNPARSED, encoding="utf-8")
 
-    result = CliRunner().invoke(
-        app, ["scan", "--workspace", str(workspace), "--dry-run"]
-    )
+    result = CliRunner().invoke(app, ["scan", "workspace", str(workspace), "--dry-run"])
 
     assert result.exit_code == WorkspaceExitCode.INVALID_PROJECT_CONFIG, result.output
     assert "could not be parsed (" in result.output, result.output
@@ -691,9 +689,7 @@ def test_a_workspace_dry_run_refuses_an_ash_config_it_cannot_read_on_one_line(
     _unreadable(config)
     monkeypatch.setenv("ASH_CONFIG", str(config))
 
-    result = CliRunner().invoke(
-        app, ["scan", "--workspace", str(workspace), "--dry-run"]
-    )
+    result = CliRunner().invoke(app, ["scan", "workspace", str(workspace), "--dry-run"])
 
     assert result.exit_code == WorkspaceExitCode.INVALID_PROJECT_CONFIG, result.output
     assert "could not be read" in result.output, result.output
@@ -964,7 +960,7 @@ def test_the_scan_s_unexpected_error_names_a_path_on_one_line(
 
 
 def test_the_scan_s_scanner_selection_refusal_is_one_line(tmp_path, monkeypatch, _wide):
-    """A refused --scanners names the names as the caller typed them: one line.
+    """A refused --add-scanners names the names as the caller typed them: one line.
     The run stops at the orchestrator's first call after the selection is
     checked, so no scanner starts if it is not refused."""
     from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
@@ -978,7 +974,7 @@ def test_the_scan_s_scanner_selection_refusal_is_one_line(tmp_path, monkeypatch,
     monkeypatch.chdir(tmp_path)
 
     result = CliRunner().invoke(
-        app, [*_scan_args(tmp_path), "--scanners", "no\nsuch-scanner"]
+        app, [*_scan_args(tmp_path), "--add-scanners", "no\nsuch-scanner"]
     )
 
     assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output

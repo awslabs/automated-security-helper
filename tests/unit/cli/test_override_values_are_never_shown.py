@@ -92,7 +92,7 @@ def _command(name: str, project: dict) -> List[str]:
     return {
         "scan": [
             "scan",
-            "--source-dir",
+            "fs",
             str(project["source"]),
             "--output-dir",
             str(project["output"]),

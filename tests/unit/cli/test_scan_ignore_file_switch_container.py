@@ -77,10 +77,10 @@ def _container_scan(tmp_path, *args: str):
         app,
         [
             "scan",
+            "fs",
             "--mode",
             "container",
             "--no-build",
-            "--source-dir",
             str(tmp_path / "src"),
             "--output-dir",
             str(tmp_path / "out"),

@@ -84,13 +84,13 @@ def _scan_args(tmp_path: Path) -> tuple[list[str], Path]:
     output = tmp_path / "out"
     args = [
         "scan",
+        "fs",
         "--mode",
         "local",
-        "--source-dir",
         str(source),
         "--output-dir",
         str(output),
-        "--scanners",
+        "--add-scanners",
         "detect-secrets",
     ]
     return args, output

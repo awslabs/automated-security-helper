@@ -88,7 +88,7 @@ def test_scan_refuses_it_in_ash_config_s_words(tmp_path, directory, monkeypatch,
             app,
             [
                 "scan",
-                "--source-dir",
+                "fs",
                 str(source),
                 "--output-dir",
                 str(tmp_path / "out"),

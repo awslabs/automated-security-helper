@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ash --workspace ... --config <file>``: the plan is resolved with the operator's file.
+"""``ash scan workspace ... --config <file>``: the plan is resolved with the operator's file.
 
 ``--dry-run`` prints the plan the scan runs, so ``--config`` has to reach
 resolution as well as the scan: a field it sets is final for every project, and
@@ -63,7 +63,7 @@ def test_the_plan_handed_to_the_scan_was_resolved_with_the_config(tmp_path, no_s
     workspace, operator = _layout(tmp_path)
 
     result = runner.invoke(
-        app, ["scan", "--workspace", str(workspace), "--config", str(operator)]
+        app, ["scan", "workspace", str(workspace), "--config", str(operator)]
     )
 
     assert result.exit_code == WorkspaceExitCode.SUCCESS, result.output
@@ -80,7 +80,7 @@ def test_the_dry_run_prints_the_operators_threshold(tmp_path, no_scan):
 
     result = runner.invoke(
         app,
-        ["scan", "--workspace", str(workspace), "--config", str(operator), "--dry-run"],
+        ["scan", "workspace", str(workspace), "--config", str(operator), "--dry-run"],
     )
 
     assert result.exit_code == WorkspaceExitCode.SUCCESS, result.output

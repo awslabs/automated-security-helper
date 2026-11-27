@@ -334,7 +334,7 @@ class TestEnvironmentVariables:
         ) as mock_run_ash_scan:
             result = CliRunner().invoke(
                 app,
-                ["scan", "--source-dir", str(source), "--output-dir", str(output)],
+                ["scan", "fs", str(source), "--output-dir", str(output)],
             )
 
         assert result.exit_code == 0, result.output
@@ -358,7 +358,7 @@ class TestEnvironmentVariables:
         ) as mock_run_ash_scan:
             result = CliRunner().invoke(
                 app,
-                ["scan", "--source-dir", str(source), "--output-dir", str(output)],
+                ["scan", "fs", str(source), "--output-dir", str(output)],
             )
 
         assert result.exit_code == ASH_EXIT_USAGE_ERROR

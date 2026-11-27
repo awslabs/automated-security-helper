@@ -78,7 +78,7 @@ def test_scan_refuses_it_as_a_file_that_does_not_parse(tmp_path, latin1, logged)
         app,
         [
             "scan",
-            "--source-dir",
+            "fs",
             str(source),
             "--output-dir",
             str(tmp_path / "out"),
@@ -106,7 +106,7 @@ def test_a_workspace_scan_s_config_check_says_it_does_not_parse(tmp_path, latin1
 
     result = CliRunner().invoke(
         app,
-        ["scan", "--workspace", str(workspace), "--config", str(latin1), "--dry-run"],
+        ["scan", "workspace", str(workspace), "--config", str(latin1), "--dry-run"],
     )
 
     assert result.exit_code == 3, result.output
@@ -149,7 +149,7 @@ def test_a_workspace_config_with_a_non_parser_value_error_says_parsed(
 
     result = CliRunner().invoke(
         app,
-        ["scan", "--workspace", str(workspace), "--config", str(config), "--dry-run"],
+        ["scan", "workspace", str(workspace), "--config", str(config), "--dry-run"],
     )
 
     assert result.exit_code == 3, result.output
@@ -181,7 +181,7 @@ def test_a_workspace_config_the_process_cannot_read_says_read(tmp_path, monkeypa
             app,
             [
                 "scan",
-                "--workspace",
+                "workspace",
                 str(workspace),
                 "--config",
                 str(config),
@@ -252,7 +252,7 @@ def test_the_scan_refuses_a_toml_config_that_is_not_utf8_without_the_decoder(
         app,
         [
             "scan",
-            "--source-dir",
+            "fs",
             str(source),
             "--output-dir",
             str(tmp_path / "out"),
@@ -644,7 +644,7 @@ def test_a_scan_prints_a_parse_refusal_once(
     where = (src / ".ash" / name) if discovered else (tmp_path / name)
     where.write_text(content, encoding="utf-8")
     out = tmp_path / "out"
-    args = ["scan", "--source-dir", str(src), "--output-dir", str(out)]
+    args = ["scan", "fs", str(src), "--output-dir", str(out)]
     if not discovered:
         args += ["--config", str(where)]
     if debug:

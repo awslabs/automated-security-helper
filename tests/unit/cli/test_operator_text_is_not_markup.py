@@ -97,7 +97,14 @@ def test_merge_writes_its_reports_to_a_bracketed_output_dir(in_tmp):
 
     shard_paths = write_shards(in_tmp / "artifacts", build_shards(3))
     output_dir = in_tmp / "merged[/x]"
-    args = ["merge", "--output-dir", str(output_dir), "--output-formats", "sarif,csv"]
+    args = [
+        "results",
+        "merge",
+        "--output-dir",
+        str(output_dir),
+        "--output-formats",
+        "sarif,csv",
+    ]
     for path in shard_paths:
         args += ["--results", path]
     manager = MagicMock()
@@ -123,12 +130,12 @@ def test_scan_refuses_a_bracketed_scanner_name_as_a_usage_error(in_tmp):
             app,
             [
                 "scan",
+                "fs",
                 "--no-progress",
-                "--source-dir",
                 "src",
                 "--output-dir",
                 "out",
-                "--scanners",
+                "--add-scanners",
                 "x[/y]",
                 "--phases",
                 "scan",
@@ -160,8 +167,8 @@ def test_an_adjusted_output_dir_is_printed_as_given(in_tmp):
             app,
             [
                 "scan",
+                "fs",
                 "--no-progress",
-                "--source-dir",
                 "src-[/x]",
                 "--output-dir",
                 "src-[/x]",
@@ -191,9 +198,9 @@ def test_a_bracketed_config_path_gets_the_config_checks_exit(in_tmp):
             app,
             [
                 "scan",
+                "fs",
                 "--no-progress",
                 "--debug",
-                "--source-dir",
                 "src",
                 "--output-dir",
                 "out",
@@ -247,7 +254,7 @@ def test_an_exception_holding_markup_is_logged_and_printed_as_given(
     ):
         result = CliRunner().invoke(
             app,
-            ["scan", "--no-progress", "--source-dir", "src", "--output-dir", "out"],
+            ["scan", "fs", "--no-progress", "src", "--output-dir", "out"],
         )
 
     assert result.exit_code == code, result.output
@@ -309,8 +316,8 @@ def test_a_workspace_project_whose_name_and_error_read_as_markup_is_reported(
             app,
             [
                 "scan",
+                "workspace",
                 "--no-progress",
-                "--workspace",
                 "dev.code-workspace",
                 "--output-dir",
                 "out",
@@ -347,7 +354,13 @@ def test_an_exempted_orphan_under_a_bracketed_directory_is_named_as_given(in_tmp
         None, build_shards(3), "ERROR"
     )
     shard_paths = write_shards(in_tmp / "art[" / "x]", shards)
-    args = ["merge", "--output-dir", "merged", "--no-fail-on-incomplete-scanners"]
+    args = [
+        "results",
+        "merge",
+        "--output-dir",
+        "merged",
+        "--no-fail-on-incomplete-scanners",
+    ]
     for path in shard_paths:
         args += ["--results", path]
     manager = MagicMock()
@@ -452,7 +465,9 @@ class TestAshReportPrintsWhatItWasGiven:
         return out
 
     def _report(self, *args):
-        return CliRunner().invoke(app, ["report", *args], env={"FORCE_COLOR": "1"})
+        return CliRunner().invoke(
+            app, ["results", "report", *args], env={"FORCE_COLOR": "1"}
+        )
 
     def test_an_invalid_config_whose_path_reads_as_markup_exits_3(
         self, in_tmp, results
@@ -679,7 +694,7 @@ class TestRepositoryTextIsShownNotObeyed:
         ):
             result = CliRunner().invoke(
                 app,
-                ["scan", "--no-progress", "--source-dir", "src", "--output-dir", "out"],
+                ["scan", "fs", "--no-progress", "src", "--output-dir", "out"],
             )
 
         shown = result.stdout + result.stderr
@@ -707,6 +722,7 @@ class TestRepositoryTextIsShownNotObeyed:
         result = CliRunner().invoke(
             app,
             [
+                "results",
                 "report",
                 "--config",
                 "cfg.yaml",

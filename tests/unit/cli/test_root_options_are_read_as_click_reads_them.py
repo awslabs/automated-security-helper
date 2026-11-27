@@ -145,12 +145,12 @@ def test_the_scans_environment_variables_are_not_parsed_for_a_subcommand(
     assert "Usage:" in result.output
 
 
-def test_the_control_a_bare_scan_still_reads_them(monkeypatch, tmp_path):
+def test_the_control_a_scan_still_reads_them(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ASH_MODE", "bogus")
 
     with patch(ORCHESTRATOR_CREATE):
-        result = CliRunner().invoke(app, ["--source-dir", str(tmp_path)])
+        result = CliRunner().invoke(app, ["scan", "fs", str(tmp_path)])
 
     assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
     # The usage error is the environment value's: click refuses "bogus" as a

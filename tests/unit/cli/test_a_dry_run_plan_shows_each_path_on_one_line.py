@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The plan ``ash scan --workspace ... --dry-run`` prints keeps each path on one line.
+"""The plan ``ash scan workspace ... --dry-run`` prints keeps each path on one line.
 
 The plan's lines name the workspace file, its root, its policy file, each
 project's folder and the config file each project is scanned with. Each is the
@@ -61,7 +61,7 @@ def test_a_config_with_a_newline_in_its_name_is_named_on_one_line(tmp_path):
         app,
         [
             "scan",
-            "--workspace",
+            "workspace",
             _workspace(tmp_path / "ws"),
             "--config",
             str(shared),
@@ -90,7 +90,7 @@ def test_a_root_with_a_newline_in_its_name_is_named_on_one_line(tmp_path):
         "workspace:\n  max_severity_threshold: HIGH\n", encoding="utf-8"
     )
 
-    result = CliRunner().invoke(app, ["scan", "--workspace", workspace, "--dry-run"])
+    result = CliRunner().invoke(app, ["scan", "workspace", workspace, "--dry-run"])
 
     assert result.exit_code == 0, result.output
     _assert_kept_whole(result.output, ["root"])

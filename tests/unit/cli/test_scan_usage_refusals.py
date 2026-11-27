@@ -60,7 +60,7 @@ class TestNonexistentSourceDir:
                 app,
                 [
                     "scan",
-                    "--source-dir",
+                    "fs",
                     str(missing),
                     "--output-dir",
                     str(tmp_path / "o"),
@@ -87,7 +87,7 @@ class TestNonexistentSourceDir:
                 app,
                 [
                     "scan",
-                    "--source-dir",
+                    "fs",
                     str(a_file),
                     "--output-dir",
                     str(tmp_path / "o"),
@@ -104,7 +104,7 @@ class TestNonexistentSourceDir:
                 app,
                 [
                     "scan",
-                    "--source-dir",
+                    "fs",
                     str(source),
                     "--output-dir",
                     str(tmp_path / "o"),
@@ -124,7 +124,7 @@ class TestUseExistingWithoutResults:
                 app,
                 [
                     "scan",
-                    "--source-dir",
+                    "fs",
                     str(source),
                     "--output-dir",
                     str(output),
@@ -151,7 +151,7 @@ class TestUseExistingWithoutResults:
                 app,
                 [
                     "scan",
-                    "--source-dir",
+                    "fs",
                     str(source),
                     "--output-dir",
                     str(output),
@@ -180,7 +180,7 @@ class TestIgnoreSuppressionsWithUseExisting:
                 app,
                 [
                     "scan",
-                    "--source-dir",
+                    "fs",
                     str(source),
                     "--output-dir",
                     str(output),
@@ -212,7 +212,7 @@ class TestBaseRef:
                 app,
                 [
                     "scan",
-                    "--source-dir",
+                    "fs",
                     str(source),
                     "--output-dir",
                     str(tmp_path / "o"),

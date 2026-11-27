@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ash scan --workspace ... --dry-run`` refuses the command lines the real run
+"""``ash scan workspace ... --dry-run`` refuses the command lines the real run
 refuses, with the run's code and text.
 
 The dry run exited 0, its plan printed, for an invalid --format, an --output-dir
@@ -41,16 +41,21 @@ def _workspace(root) -> str:
     return str(workspace)
 
 
-def _dry_run(workspace: str, *options: str):
-    return CliRunner().invoke(
-        app, ["scan", "--workspace", workspace, "--dry-run", *options]
-    )
+#: The words before the workspace file: the subject, or the flag of the form with no
+#: subject. --use-existing is no option of the subject, so the row that gives it runs
+#: the form with no subject, where the engine still takes both.
+_SUBJECT = ("scan", "workspace")
+_NO_SUBJECT = ("scan", "--workspace")
 
 
-def _real_run_code(workspace: str, *options: str) -> int:
+def _dry_run(workspace: str, *options: str, form: tuple[str, ...] = _SUBJECT):
+    return CliRunner().invoke(app, [*form, workspace, "--dry-run", *options])
+
+
+def _real_run_code(workspace: str, *options: str, form: tuple[str, ...] = _SUBJECT):
     """The exit code of the same command without --dry-run, its scan replaced."""
     with patch("automated_security_helper.cli.scan.run_ash_scan"):
-        return CliRunner().invoke(app, ["scan", "--workspace", workspace, *options])
+        return CliRunner().invoke(app, [*form, workspace, *options])
 
 
 def test_a_plain_dry_run_still_prints_its_plan(tmp_path):
@@ -105,8 +110,11 @@ def test_an_output_dir_the_scan_would_clear_is_refused_as_the_run_refuses_it(tmp
 def test_use_existing_with_no_results_is_refused_as_the_run_refuses_it(tmp_path):
     workspace = _workspace(tmp_path / "ws")
 
-    result = _dry_run(workspace, "--use-existing")
+    result = _dry_run(workspace, "--use-existing", form=_NO_SUBJECT)
 
     assert result.exit_code == 1, result.output
     assert "--use-existing was given" in result.output, result.output
-    assert _real_run_code(workspace, "--use-existing").exit_code == result.exit_code
+    assert (
+        _real_run_code(workspace, "--use-existing", form=_NO_SUBJECT).exit_code
+        == result.exit_code
+    )

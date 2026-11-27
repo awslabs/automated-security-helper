@@ -479,13 +479,14 @@ def _scan(child: _Child, config: Path, extra_env: Optional[Dict[str, str]] = Non
     return child.run(
         "scan",
         [
-            "--source-dir",
+            "scan",
+            "fs",
             str(tree),
             "--output-dir",
             str(child.root / "scanned"),
             "--mode",
             "local",
-            "--scanners",
+            "--add-scanners",
             "detect-secrets",
             "--phases",
             "scan",
