@@ -344,12 +344,13 @@ def test_aws_region_read_from_the_environment_is_left_out_and_not_marked(
     tmp_path, monkeypatch
 ):
     """aws_region is not an operator-only option, so it is never marked. The
-    load confines the whole aws-security-hub section to the operator's
-    configuration (``record_operator_reporters``; a scan reads it through
-    ``reporter_section``), so what a repository's file wrote for aws_region is
-    left out of the answer, and the record the marking reads
-    (``RepositorySettings``) holds only the operator-only places. The answer
-    holds the section without it, neither as applied nor as ignored, and no
+    load gives it the operator's value (``confine_reporter_destinations``
+    replaces or fills each destination option from the operator's
+    configuration), so what a repository's file wrote for aws_region is left
+    out of the answer, and the record the marking reads
+    (``RepositorySettings``) holds only the operator-only places. With
+    ASH_CONFIG unset the operator's configuration is the defaults, which set no
+    aws_region, so the option is absent: neither applied nor ignored, and no
     value."""
     body = _section(
         "findings_scope: a-literal-scope\naws_region: ${ASH_TEST_GETCFG_VALUE}\n"
@@ -762,3 +763,176 @@ def test_an_empty_environment_value_marks_nothing():
     assert _mark("a-literal-scope", environment_values=[""]) == (
         _IGNORED + '"a-literal-scope">'
     )
+
+
+# The operator's own file sets a destination option of the off-host reporter
+# (findings_scope, aws_region) by reference, and the named file in another
+# checkout writes none of it, or a value of its own. The load gives the option
+# the operator's value (confine_reporter_destinations), so the answer must show
+# the operator's reference there, never the server's value, and never the
+# position of a value the checkout's own reference read.
+#
+# What each cell reads on the tip's bytes, without the fix to
+# _take_confined_references (the load carries no reference for a destination
+# value it copied in):
+#   1. findings_scope prints the operator's variable value in clear.
+#   2. aws_region prints the operator's variable value in clear. (aws_region is
+#      a plain optional string whose blank is unset: no shape check at load, so
+#      "xx-test-9" loads.)
+#   3. the same as 1, through the fill branch (the checkout's file has no
+#      aws-security-hub section, so the confinement creates one holding the
+#      operator's options); the cell is written for what the fix does on that
+#      route, and the fill branch is not confirmed by a run here.
+#   4. aws_region reads "eu-<from ${ASH_TEST_REPO_REGION}>-7": the checkout's
+#      reference, still displayed at the place, replaces its value ("test")
+#      inside the operator's literal "eu-test-7".
+#   5. passes on both: a literal is shown as written either way.
+_OPERATOR_SCOPE_VAR = "ASH_TEST_OPERATOR_SCOPE"
+_OPERATOR_SCOPE_VALUE = "operator-scope-env-3b7d"
+_OPERATOR_SCOPE_REFERENCE = "<from ${ASH_TEST_OPERATOR_SCOPE}>"
+_OPERATOR_REGION_VAR = "ASH_TEST_OPERATOR_REGION"
+_OPERATOR_REGION_VALUE = "xx-test-9"
+_OPERATOR_REGION_REFERENCE = "<from ${ASH_TEST_OPERATOR_REGION}>"
+_REPO_REGION_VAR = "ASH_TEST_REPO_REGION"
+_REPO_REGION_REFERENCE = "<from ${ASH_TEST_REPO_REGION}>"
+
+
+def _named_beside_an_operators_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operators_body: str,
+    body: str,
+) -> Dict[str, Any]:
+    """get_config of ``checkout/.ash.yaml``, which holds *body*, named from a
+    working directory elsewhere, while ASH_CONFIG names the operator's own file,
+    which holds *operators_body*, in a plain directory outside every checkout.
+
+    The same route as ``_named_beside_the_operators_file``, with the operator's
+    file given by the caller instead of its archive flag. The caller sets the
+    variables the files read."""
+    operator = tmp_path / "operator"
+    operator.mkdir()
+    operators_file = operator / "ash.yaml"
+    operators_file.write_text(operators_body, encoding="utf-8")
+    checkout = tmp_path / "checkout"
+    mark_git_checkout(checkout)
+    named = checkout / ".ash.yaml"
+    named.write_text(body, encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setenv("ASH_CONFIG", str(operators_file))
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
+    return mcp_get_config(config_path=str(named))
+
+
+def test_a_destination_the_operator_reads_from_the_environment_is_shown_by_reference(
+    tmp_path, monkeypatch
+):
+    """The operator's file reads findings_scope from a variable; the file in
+    another checkout writes only the archive flag. The load gives the section
+    the operator's findings_scope, and the answer shows the operator's reference
+    there, not the server's value. The flag the checkout wrote is the ignored
+    option it always was."""
+    monkeypatch.setenv(_OPERATOR_SCOPE_VAR, _OPERATOR_SCOPE_VALUE)
+
+    result = _named_beside_an_operators_file(
+        tmp_path,
+        monkeypatch,
+        _section("findings_scope: ${ASH_TEST_OPERATOR_SCOPE}\n"),
+        _section("archive_resolved_findings: true\n"),
+    )
+
+    assert _OPERATOR_SCOPE_VALUE not in json.dumps(result, default=str), result
+    assert _options(result).get("findings_scope", _ABSENT) == (
+        _OPERATOR_SCOPE_REFERENCE
+    ), result
+    assert _options(result).get("archive_resolved_findings", _ABSENT) == (
+        _IGNORED + "true>"
+    ), result
+
+
+def test_an_aws_region_the_operator_reads_from_the_environment_is_shown_by_reference(
+    tmp_path, monkeypatch
+):
+    """The operator's file reads aws_region from a variable; the file in another
+    checkout writes a literal aws_region of its own and nothing operator-only.
+    The load replaces the checkout's region with the operator's, and the answer
+    shows the operator's reference, not the server's value."""
+    monkeypatch.setenv(_OPERATOR_REGION_VAR, _OPERATOR_REGION_VALUE)
+
+    result = _named_beside_an_operators_file(
+        tmp_path,
+        monkeypatch,
+        _section("aws_region: ${ASH_TEST_OPERATOR_REGION}\n"),
+        _section("aws_region: checkout-region-1\n"),
+    )
+
+    assert _OPERATOR_REGION_VALUE not in json.dumps(result, default=str), result
+    assert "checkout-region-1" not in json.dumps(result, default=str), result
+    assert _options(result).get("aws_region", _ABSENT) == (
+        _OPERATOR_REGION_REFERENCE
+    ), result
+
+
+def test_a_destination_filled_into_a_file_with_no_reporter_section_is_shown_by_reference(
+    tmp_path, monkeypatch
+):
+    """The file in another checkout has no aws-security-hub section at all. The
+    load creates the section holding the operator's options (the fill branch of
+    ``confine_reporter_destinations``), and the answer shows the operator's
+    findings_scope as the reference the operator's file wrote, not the server's
+    value."""
+    monkeypatch.setenv(_OPERATOR_SCOPE_VAR, _OPERATOR_SCOPE_VALUE)
+
+    result = _named_beside_an_operators_file(
+        tmp_path,
+        monkeypatch,
+        _section("findings_scope: ${ASH_TEST_OPERATOR_SCOPE}\n"),
+        "project_name: harmless-checkout-name\n",
+    )
+
+    assert _OPERATOR_SCOPE_VALUE not in json.dumps(result, default=str), result
+    assert _options(result).get("findings_scope", _ABSENT) == (
+        _OPERATOR_SCOPE_REFERENCE
+    ), result
+
+
+def test_the_checkouts_reference_at_a_replaced_destination_is_not_shown(
+    tmp_path, monkeypatch
+):
+    """The operator's file holds a literal aws_region, and the file in another
+    checkout reads its own from a variable whose value ("test") is inside the
+    operator's text. The load replaces the checkout's region with the operator's
+    literal, so the checkout's reference describes a value the configuration no
+    longer holds: the answer reads the operator's literal whole, with nothing of
+    the checkout's variable inside it."""
+    monkeypatch.setenv(_REPO_REGION_VAR, "test")
+
+    result = _named_beside_an_operators_file(
+        tmp_path,
+        monkeypatch,
+        _section("aws_region: eu-test-7\n"),
+        _section("aws_region: ${ASH_TEST_REPO_REGION}\n"),
+    )
+
+    assert _options(result).get("aws_region", _ABSENT) == "eu-test-7", result
+    assert _REPO_REGION_REFERENCE not in json.dumps(result, default=str), result
+
+
+def test_a_literal_destination_the_operator_wrote_is_shown_as_written(
+    tmp_path, monkeypatch
+):
+    """The control: the operator's file holds a literal findings_scope and the
+    file in another checkout writes only the archive flag. The operator's
+    literal is shown as written."""
+    result = _named_beside_an_operators_file(
+        tmp_path,
+        monkeypatch,
+        _section("findings_scope: operator-literal-scope\n"),
+        _section("archive_resolved_findings: true\n"),
+    )
+
+    assert _options(result).get("findings_scope", _ABSENT) == (
+        "operator-literal-scope"
+    ), result
