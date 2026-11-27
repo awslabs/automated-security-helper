@@ -1030,8 +1030,10 @@ class TestTheRendering:
         )
 
         assert sandbox.script.requirement_lines([pin]) == [
-            "t==1; python_version < '3.14' and "
-            "(sys_platform == 'linux' or sys_platform == 'darwin')"
+            (
+                "t==1; python_version < '3.14' and "
+                "(sys_platform == 'linux' or sys_platform == 'darwin')"
+            )
         ]
 
     def test_a_with_requirement_sits_under_its_members_marker(self, sandbox):

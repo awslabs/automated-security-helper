@@ -474,10 +474,13 @@ def _advice(drifted: list[Change]) -> str:
     lines = [f"To repair, run `{FIX_COMMAND}` and commit the result."]
     if any(change.path == PYPROJECT for change in drifted):
         lines += [
-            "If a dependency bump edited pyproject.toml, the register still holds the "
-            "old pin and --fix would write it back over the bump: change the pin in "
-            "automated_security_helper/base/plugin_provisioning.py first, check the "
-            "scanner against the new release, then run --fix.",
+            (
+                "If a dependency bump edited pyproject.toml, the register still "
+                "holds the old pin and --fix would write it back over the bump: "
+                "change the pin in "
+                "automated_security_helper/base/plugin_provisioning.py first, "
+                "check the scanner against the new release, then run --fix."
+            ),
             "Run `uv lock` afterwards so uv.lock follows the extra.",
         ]
     return "\n".join(lines)

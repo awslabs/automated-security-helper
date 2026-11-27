@@ -147,8 +147,10 @@ def _python_scanner_problems(facts: Facts) -> list[str]:
     name = facts.name
     if len(facts.pins) != 1:
         return [
-            f"{name}: a {facts.runtime.value} scanner declares exactly one PyPI pin, "
-            f"and this one declares {len(facts.pins)}"
+            (
+                f"{name}: a {facts.runtime.value} scanner declares exactly one PyPI "
+                f"pin, and this one declares {len(facts.pins)}"
+            )
         ]
     (pin,) = facts.pins
     found: list[str] = []
