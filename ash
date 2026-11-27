@@ -414,6 +414,71 @@ detect_subcommand() {
   done
 }
 
+# Whether a run of the command that reads stdin named $1 reads it. $1 is the command's
+# entry in ASH_READS_STDIN (`config:lint`) and $2 the index in ASH_ARG_WORDS of the
+# first word after the command's own words. A command with no entry in
+# ASH_STDIN_CONDITIONS reads it in every run. An entry reads `command=asks/spares/
+# values`, each of the three a list of options joined with ",": the run reads stdin
+# when one of the options in asks is among the words after the command's own and none
+# of the options in spares is, as `config lint` asks only under --fix or --fix-unused
+# and not when --non-interactive (--yes, -y) is given. The words are read as the CLI's
+# parser reads them, which is how detect_subcommand reads the root's: the word after an
+# option in values is that option's value and is passed over (`--config --fix` names a
+# config file, it is not --fix), `--opt=value` carries its value in the same word, and
+# a cluster of short options is read letter by letter, the first letter that takes a
+# value taking the rest of the word or, when it is last, the next word. Status 0 when
+# the run reads stdin.
+run_reads_stdin() {
+  local entry fields asks spares values word at letter skip="NO" asked="NO" spared="NO"
+  # Set to empty first, so the environment variable reference does not read this array,
+  # which `read -a` fills, as a variable ASH takes from the environment.
+  STDIN_CONDITION_ENTRIES=()
+  read -r -d '' -a STDIN_CONDITION_ENTRIES <<< "${ASH_STDIN_CONDITIONS}"
+  for entry in "${STDIN_CONDITION_ENTRIES[@]}"; do
+    if [[ "${entry%%=*}" != "$1" ]]; then
+      continue
+    fi
+    fields="${entry#*=}"
+    asks="${fields%%/*}"
+    fields="${fields#*/}"
+    spares="${fields%%/*}"
+    values="${fields#*/}"
+    asks="${asks//,/ }"
+    spares="${spares//,/ }"
+    values="${values//,/ }"
+    for ((at = $2; at < ${#ASH_ARG_WORDS[@]}; at++)); do
+      word="${ASH_ARG_WORDS[at]}"
+      if [[ "${skip}" = "YES" ]]; then
+        skip="NO"
+      elif [[ " ${values} " == *" ${word} "* ]]; then
+        skip="YES"
+      elif [[ " ${asks} " == *" ${word} "* ]]; then
+        asked="YES"
+      elif [[ " ${spares} " == *" ${word} "* ]]; then
+        spared="YES"
+      elif [[ "${word}" == -[!-]?* ]]; then
+        for ((letter = 1; letter < ${#word}; letter++)); do
+          if [[ " ${values} " == *" -${word:letter:1} "* ]]; then
+            if ((letter + 1 == ${#word})); then
+              skip="YES"
+            fi
+            break
+          elif [[ " ${asks} " == *" -${word:letter:1} "* ]]; then
+            asked="YES"
+          elif [[ " ${spares} " == *" -${word:letter:1} "* ]]; then
+            spared="YES"
+          fi
+        done
+      fi
+    done
+    if [[ "${asked}" = "YES" && "${spared}" = "NO" ]]; then
+      return 0
+    fi
+    return 1
+  done
+  return 0
+}
+
 # The output of a command, in OUTPUT_KEPT, with a trailing line feed of its own
 # kept: command substitution drops one, and the output here is a path, which
 # can end in one. Read with a "." after it, as resolve_dir reads a path.
@@ -1957,13 +2022,17 @@ else
       # are the commands in ASH_READS_STDIN, each written as the words that name it
       # joined with ":": mcp, whose default stdio transport is driven by the client
       # over stdin; inspect findings and results inspect findings, the Textual app,
-      # which reads keys; and config lint and config wizard, which ask before they
-      # change a file. The list names commands, not the groups they sit in. The rest
-      # of config and of results reads nothing, and -i on a run that reads nothing
-      # makes the container consume the caller's input: `while read d; do ./ash
-      # --source-dir "$d"; done < dirs.txt` ended after one directory, a job script
-      # fed to bash on stdin lost the commands after ./ash, and `./ash scan &` from an
-      # interactive shell had the runner read the terminal and stopped on SIGTTIN.
+      # which reads keys; config wizard, which asks before it changes a file; and
+      # config lint, which asks only under --fix or --fix-unused and not when
+      # --non-interactive (--yes, -y) is given: ASH_STDIN_CONDITIONS gives it those
+      # options, and run_reads_stdin (above) judges the words after its own. The list
+      # names commands, not the groups they sit in. The rest of config and of results
+      # reads nothing, and -i on a run that reads nothing makes the container consume
+      # the caller's input: `while read d; do ./ash --source-dir "$d"; done < dirs.txt`
+      # ended after one directory, a job script fed to bash on stdin lost the commands
+      # after ./ash, and `./ash scan &` from an interactive shell had the runner read
+      # the terminal and stopped on SIGTTIN; so did a plain `./ash config lint` in
+      # such a loop, which asks nothing.
       # Any command reads stdin when given `--cli-json-input -`, which takes its
       # parameters as a JSON document from stdin. Without -i none of them got any
       # input. A run reads stdin when the words from SUBCOMMAND on (the first of ash's
@@ -1976,6 +2045,7 @@ else
       # not.
       # BEGIN generated: sh-reads-stdin (scripts/generate_wrapper_tables.py)
       ASH_READS_STDIN="config:lint config:wizard inspect:findings mcp results:inspect:findings"
+      ASH_STDIN_CONDITIONS="config:lint=--fix,--fix-unused/--non-interactive,--yes,-y/--config,--output-dir,--source-dir,-c,-o"
       # END generated: sh-reads-stdin
       # Run again rather than reused, as below: SUBCOMMAND_AT must index the words as
       # they stand now.
@@ -1997,7 +2067,11 @@ else
             fi
           done
           if [[ "${STDIN_NAMED}" = "YES" ]]; then
-            KEEP_STDIN="YES"
+            # A command with a condition reads stdin in some runs only
+            # (ASH_STDIN_CONDITIONS), judged by the words after its own.
+            if run_reads_stdin "${STDIN_COMMAND}" $((SUBCOMMAND_AT + ${#STDIN_COMMAND_WORDS[@]})); then
+              KEEP_STDIN="YES"
+            fi
           fi
         done
       fi
