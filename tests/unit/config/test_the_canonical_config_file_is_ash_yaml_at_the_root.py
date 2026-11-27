@@ -83,9 +83,17 @@ TAB_CAVEAT = (
     "tab's line and column)."
 )
 ENV_CAVEAT = (
-    "In the YAML, put !ENV in front of each value from this file that starts "
-    "with ${ and keep its quotes: a quoted value without the tag is read as "
-    "literal text, not from the environment."
+    "In the YAML, put !ENV and a space before the opening quote of each string "
+    "from this file whose text starts with ${, and keep its quotes if it has one "
+    "quote mark on each side: a quoted value without the tag is read as literal "
+    "text, not from the environment. Write such a string that has three quote "
+    "marks on each side as a one-line double-quoted string with the text TOML "
+    "reads: leave out a line break that directly follows the opening marks and "
+    "write each other line break as \\n; from three single quote marks, also "
+    'write each backslash as \\\\ and each double quote as \\"; from three '
+    "double quote marks, keep each escape, write each unescaped double quote "
+    'as \\", and leave out a backslash that ends a line, with the spaces, tabs '
+    "and line breaks after it."
 )
 
 # The ashrc names include TOML and JSON files, so each location is written in
@@ -455,11 +463,14 @@ ENV_PAIRS = [
 
 
 class TestATomlReferenceToTheEnvironmentInYaml:
-    """Why the TOML advice says to put `!ENV` in front of a `${...}` value and keep
-    its quotes: TOML resolves every string that starts with a reference; YAML
-    resolves a quoted value only when it is tagged `!ENV`; and without quotes it
-    cuts the value short at a space and a hash, and refuses one that holds a colon
-    and a space or sits inside brackets or braces."""
+    """Why the TOML advice says to put `!ENV` before the opening quote of a `${...}`
+    value, to keep its quotes when it has one quote mark on each side, and to rewrite
+    it as a one-line double-quoted string when it has three: TOML resolves every
+    string that starts with a reference; YAML resolves a quoted value only when it is
+    tagged `!ENV`; without quotes it cuts the value short at a space and a hash, and
+    refuses one that holds a colon and a space or sits inside brackets or braces; and
+    with three quote marks kept, it reads three single ones as literal text and
+    refuses three double ones."""
 
     REFERENCE = "${ASH_SERVICE_NAME:payments-api}"
 
@@ -491,6 +502,52 @@ class TestATomlReferenceToTheEnvironmentInYaml:
             f'project_name: "{self.REFERENCE}"\n', encoding="utf-8"
         )
         assert resolve_config(source_dir=tmp_path).project_name == self.REFERENCE
+
+    def test_the_rewrite_that_keeps_three_single_quotes_reads_literal_text_with_quotes(
+        self, tmp_path, ash_warnings
+    ):
+        """TOML reads the text between three single quote marks as the reference.
+        YAML reads the same marks as a single-quoted value with a quote mark at each
+        end, which is no reference, so the tag changes nothing and nothing is said."""
+        triple = f"'''{self.REFERENCE}'''"
+        toml_root = tmp_path / "toml"
+        yaml_root = tmp_path / "yaml"
+        toml_root.mkdir()
+        yaml_root.mkdir()
+        (toml_root / ".ashrc.toml").write_text(
+            f"project_name = {triple}\n", encoding="utf-8"
+        )
+        (yaml_root / ".ash.yaml").write_text(
+            f"project_name: !ENV {triple}\n", encoding="utf-8"
+        )
+        literal = f"'{self.REFERENCE}'"
+        # The YAML read comes first: reading `.ashrc.toml` logs its deprecation
+        # warning into the same list.
+        assert resolve_config(source_dir=yaml_root).project_name == literal
+        assert ash_warnings() == []
+        assert resolve_config(source_dir=toml_root).project_name == "from-env"
+
+    def test_the_rewrite_that_keeps_three_double_quotes_does_not_parse(self, tmp_path):
+        """TOML reads the text between three double quote marks as the reference.
+        YAML reads the first two marks as an empty value and the third as the start of
+        a second value, which the mapping refuses: the file does not parse, and the
+        refusal is the kind a scan reports with exit 3."""
+        triple = f'"""{self.REFERENCE}"""'
+        toml_root = tmp_path / "toml"
+        yaml_root = tmp_path / "yaml"
+        toml_root.mkdir()
+        yaml_root.mkdir()
+        (toml_root / ".ashrc.toml").write_text(
+            f"project_name = {triple}\n", encoding="utf-8"
+        )
+        (yaml_root / ".ash.yaml").write_text(
+            f"project_name: !ENV {triple}\n", encoding="utf-8"
+        )
+        assert resolve_config(source_dir=toml_root).project_name == "from-env"
+        with pytest.raises(
+            ASHConfigSourceError, match=r"could not be parsed \(ParserError"
+        ):
+            resolve_config(source_dir=yaml_root)
 
     @pytest.mark.parametrize(("value", "state"), ENV_PAIRS)
     def test_the_rewrite_with_env_in_front_and_its_toml_quotes_reads_what_toml_reads(
