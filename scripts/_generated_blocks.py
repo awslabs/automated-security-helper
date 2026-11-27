@@ -28,11 +28,15 @@ before it writes anything:
   a begin whose end names another block. The whole file is read, so a broken block that
   belongs to another generator refuses a write of a healthy one too;
 - a begin marker that names a different generator than the caller;
+- when writing, an orphan block: one whose begin marker names the caller but that the
+  call gives no body for (see ``partial`` below);
 - a line that starts like a marker and is not one (a missing generator, a lower-case
   word, an indented marker): a typo is an error, never a block that quietly goes
   missing;
 - CRLF or any carriage return, in the file or in a body. Files are written with LF only
   and never converted;
+- a body that is not a string or a sequence of strings. A generator or any other
+  iterator is used up by its first read, so it is refused and never half written;
 - a body that holds ``{{VERSION}}`` or ``{{RELEASE}}``, a marker of its own, or a code
   fence it leaves open.
 
@@ -45,6 +49,18 @@ A page that is rendered from a template (README.md from README.md.template, by
 manager renders the two placeholders and nothing else, so a body free of them keeps
 ``render(template) == page`` true. Both files are checked before either is written.
 
+A file is replaced in one step, written to a temporary file beside it and swapped over
+it, so a write that fails or is cut off leaves the page as it was, never cut short. The
+two files of a pair are written one after the other: if the second write fails, the
+first stays, ``check_blocks`` reports the second, and the next run finishes the pair.
+
+A generator owns every block whose begin marker names it. One it renders no body for
+(its name is not in ``bodies``) is an orphan block: it would keep its last body for
+good, so ``check_blocks`` reports it as drift (``Drift.orphan`` is true) and
+``write_blocks`` refuses to write around it. A generator that renders only some of its
+blocks in one call says so with ``partial=True``, and the others are then left alone
+and never reported.
+
 ``check_blocks`` returns one ``Drift`` per block that differs from its body, with a
 unified diff that names the block, and writes nothing. A second ``write_blocks`` reports
 ``unchanged`` and does not touch the file.
@@ -52,8 +68,12 @@ unified diff that names the block, and writes nothing. A second ``write_blocks``
 
 from __future__ import annotations
 
+import contextlib
 import difflib
+import os
 import re
+import shutil
+import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -146,11 +166,16 @@ class GeneratedBlock:
 
 @dataclass(frozen=True)
 class Drift:
-    """A block whose lines differ from what the generator renders, with the diff."""
+    """A block whose lines differ from what the generator renders, with the diff.
+
+    ``orphan`` is true for a block the generator owns but renders nothing for; its
+    diff shows the committed lines against none.
+    """
 
     file: str
     block: str
     diff: str
+    orphan: bool = False
 
 
 @dataclass(frozen=True)
@@ -377,14 +402,31 @@ def parse_blocks(text: str, file: str) -> list[GeneratedBlock]:
 def _body_lines(file: str, name: str, body: Body) -> list[str]:
     """``body`` as lines, or a MarkerError when it is not fit to be written.
 
-    A string is its lines joined with ``\\n``, with one trailing ``\\n`` ignored.
+    A string is its lines joined with ``\\n``, with one trailing ``\\n`` ignored. Any
+    other body must be a sequence of strings, one per line. An iterator is not one: its
+    first read uses it up, and a second read finds it empty.
     """
     if isinstance(body, str):
         text = body.removesuffix("\n")
         lines = text.split("\n") if body else []
-    else:
+    elif isinstance(body, Sequence):
         lines = list(body)
+    else:
+        raise MarkerError(
+            file,
+            name,
+            f"the body is a `{type(body).__name__}`, not a string or a sequence of "
+            "strings; pass one string, or a list or tuple of lines (an iterator is "
+            "used up by its first read)",
+        )
     for number, line in enumerate(lines, start=1):
+        if not isinstance(line, str):
+            raise MarkerError(
+                file,
+                name,
+                f"body line {number} is not a string (it is "
+                f"`{type(line).__name__}`); pass one string per line",
+            )
         if "\n" in line:
             raise MarkerError(
                 file,
@@ -441,9 +483,20 @@ def _wanted(
 
 
 def _choose(
-    scan: _Scan, file: str, wanted: Mapping[str, list[str]], generator: str
-) -> list[GeneratedBlock]:
-    """The file's blocks that ``wanted`` names, in file order; refuse a missing one."""
+    scan: _Scan,
+    file: str,
+    wanted: Mapping[str, list[str]],
+    generator: str,
+    partial: bool,
+) -> tuple[list[GeneratedBlock], list[GeneratedBlock]]:
+    """The file's blocks that ``wanted`` names, and its orphans, each in file order.
+
+    An orphan is a block whose begin marker names ``generator`` and that ``wanted``
+    leaves out: the generator owns it but renders nothing for it, so its last body
+    would stay for good. ``partial`` says the caller renders only some of its blocks,
+    so there are none. Refuse a named block that is missing or owned by another
+    generator.
+    """
     by_name = {block.name: block for block in scan.blocks}
     for name in wanted:
         block = by_name.get(name)
@@ -462,52 +515,96 @@ def _choose(
                 "its begin marker says it is generated by "
                 f"`{block.generator}`, not `{generator}`",
             )
-    return [block for block in scan.blocks if block.name in wanted]
+    named = [block for block in scan.blocks if block.name in wanted]
+    orphans: list[GeneratedBlock] = []
+    if not partial:
+        orphans = [
+            block
+            for block in scan.blocks
+            if block.generator == generator and block.name not in wanted
+        ]
+    return named, orphans
+
+
+def _unified(
+    file: str, block: GeneratedBlock, lines: Sequence[str], generated: str
+) -> str:
+    """The unified diff of ``block``'s committed lines against ``lines``, naming it."""
+    fromfile = f"{file} ({block.name}, committed)"
+    tofile = f"{file} ({block.name}, {generated})"
+    diff = difflib.unified_diff(
+        block.body, lines, fromfile=fromfile, tofile=tofile, lineterm=""
+    )
+    hunks = list(diff)
+    # A block with no lines, against none, has no hunk to show; the report names it.
+    return "\n".join(hunks or [f"--- {fromfile}", f"+++ {tofile}"])
 
 
 # --- rewriting and checking text --------------------------------------------------
 
 
 def replace_blocks(
-    text: str, file: str, bodies: Mapping[str, Body], generator: str
+    text: str,
+    file: str,
+    bodies: Mapping[str, Body],
+    generator: str,
+    *,
+    partial: bool = False,
 ) -> str:
     """``text`` with each named block's lines replaced; every other byte as it was.
 
     ``bodies`` maps block names to their lines (or to the text of them); ``generator``
-    is the script that owns the blocks. Raises MarkerError, naming ``file`` and the
-    block, for anything the module docstring lists, and returns nothing then.
+    is the script that owns the blocks. A block that names ``generator`` and has no body
+    in ``bodies`` is refused, unless ``partial`` says the caller renders only some of
+    its blocks and the others are to be left as they are. Raises MarkerError, naming
+    ``file`` and the block, for anything the module docstring lists, and returns
+    nothing then.
     """
     wanted = _wanted(file, bodies, generator)
     scan = _scan(text, file, tuple(wanted))
+    named, orphans = _choose(scan, file, wanted, generator, partial)
+    if orphans:
+        first = orphans[0]
+        raise MarkerError(
+            file,
+            first.name,
+            f"the begin marker at line {first.begin + 1} says `{generator}` generates "
+            "it, but no body was given for it; give it a body, delete its markers, or "
+            "pass partial=True when only some of the generator's blocks are rendered",
+        )
     lines = list(scan.lines)
-    for block in reversed(_choose(scan, file, wanted, generator)):
+    for block in reversed(named):
         lines[block.begin + 1 : block.end] = wanted[block.name]
     return "\n".join(lines)
 
 
 def diff_blocks(
-    text: str, file: str, bodies: Mapping[str, Body], generator: str
+    text: str,
+    file: str,
+    bodies: Mapping[str, Body],
+    generator: str,
+    *,
+    partial: bool = False,
 ) -> list[Drift]:
-    """The named blocks of ``text`` that differ from ``bodies``, in file order.
+    """The blocks of ``text`` that differ from ``bodies``, in file order.
 
     Each ``Drift`` carries a unified diff, committed text against generated text, that
-    names the block. The same refusals as ``replace_blocks``.
+    names the block. A block that names ``generator`` and has no body in ``bodies`` is
+    an orphan, reported too (``Drift.orphan``) unless ``partial`` is true. The same
+    refusals as ``replace_blocks``, except that an orphan is a drift, not a refusal.
     """
     wanted = _wanted(file, bodies, generator)
     scan = _scan(text, file, tuple(wanted))
+    _, orphans = _choose(scan, file, wanted, generator, partial)
+    orphaned = {block.name for block in orphans}
     drifts: list[Drift] = []
-    for block in _choose(scan, file, wanted, generator):
-        want = wanted[block.name]
-        if list(block.body) == want:
-            continue
-        diff = difflib.unified_diff(
-            block.body,
-            want,
-            fromfile=f"{file} ({block.name}, committed)",
-            tofile=f"{file} ({block.name}, generated)",
-            lineterm="",
-        )
-        drifts.append(Drift(file, block.name, "\n".join(diff)))
+    for block in scan.blocks:
+        if block.name in orphaned:
+            diff = _unified(file, block, (), f"not rendered by {generator}")
+            drifts.append(Drift(file, block.name, diff, orphan=True))
+        elif block.name in wanted and list(block.body) != wanted[block.name]:
+            diff = _unified(file, block, wanted[block.name], "generated")
+            drifts.append(Drift(file, block.name, diff))
     return drifts
 
 
@@ -544,40 +641,92 @@ def _read(root: Path, file: str, names: Sequence[str]) -> str:
         ) from None
 
 
+def _replace_file(path: Path, data: bytes) -> None:
+    """Make ``path`` hold ``data`` in one step, through a temporary file beside it.
+
+    A write that fails or is cut off partway leaves ``path`` as it was, never cut short,
+    and removes the temporary file. The new file keeps the permission bits of the old
+    one, and a symlink is written through: the file it points at is replaced and the
+    link stays. The directory must be writable, and a process killed outright can leave
+    its temporary file (a dot file ending in ``.tmp``) behind.
+    """
+    target = Path(os.path.realpath(path))
+    descriptor, name = tempfile.mkstemp(
+        dir=target.parent, prefix=f".{target.name}.", suffix=".tmp"
+    )
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        shutil.copymode(target, temporary)
+        os.replace(temporary, target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            temporary.unlink()
+        raise
+
+
 def write_blocks(
-    root: Path, file: str, bodies: Mapping[str, Body], generator: str
+    root: Path,
+    file: str,
+    bodies: Mapping[str, Body],
+    generator: str,
+    *,
+    partial: bool = False,
 ) -> list[WriteResult]:
     """Rewrite the named blocks of ``root / file`` and of its template or page twin.
 
-    Returns one ``WriteResult`` per file, the template first. Every file is read and
+    Returns one ``WriteResult`` per file, the template first. Each body is read once,
+    before any file is, so both files get the same lines. Every file is read and
     checked before the first is written, so a refusal leaves both as they were, and a
-    file whose blocks are already current is not touched. The two writes are not one
-    atomic step: if the second fails (a full disk, a permission error), the first stays
-    written and the next run finishes the pair.
+    file whose blocks are already current is not touched. Each file is replaced in one
+    step (see ``_replace_file``), so a write that fails or is cut off leaves that file
+    as it was. The two writes are not one atomic step: if the second fails (a full
+    disk, a permission error), the first stays written, ``check_blocks`` reports the
+    second, and the next run finishes the pair.
+
+    A block that names ``generator`` and has no body in ``bodies`` is refused, in either
+    file, unless ``partial`` says the caller renders only some of its blocks; the others
+    are then left as they are.
     """
-    names = sorted(bodies)
+    wanted = _wanted(file, bodies, generator)
+    names = tuple(wanted)
     plan = []
     for member in twin_files(root, file):
         text = _read(root, member, names)
-        plan.append((member, text, replace_blocks(text, member, bodies, generator)))
+        new = replace_blocks(text, member, wanted, generator, partial=partial)
+        plan.append((member, text, new))
     results = []
     for member, text, new in plan:
         if new == text:
             results.append(WriteResult(member, UNCHANGED, ()))
             continue
-        changed = [d.block for d in diff_blocks(text, member, bodies, generator)]
-        (root / member).write_bytes(new.encode("utf-8"))
-        results.append(WriteResult(member, WRITTEN, tuple(changed)))
+        drifts = diff_blocks(text, member, wanted, generator, partial=partial)
+        _replace_file(root / member, new.encode("utf-8"))
+        results.append(WriteResult(member, WRITTEN, tuple(d.block for d in drifts)))
     return results
 
 
 def check_blocks(
-    root: Path, file: str, bodies: Mapping[str, Body], generator: str
+    root: Path,
+    file: str,
+    bodies: Mapping[str, Body],
+    generator: str,
+    *,
+    partial: bool = False,
 ) -> list[Drift]:
-    """The drift of the named blocks in ``root / file`` and its twin; writes nothing."""
-    names = sorted(bodies)
+    """The drift of the named blocks in ``root / file`` and its twin; writes nothing.
+
+    Each body is read once, before any file is, so both files get the same lines. A
+    block that names ``generator`` and has no body in ``bodies`` is drift too (an
+    orphan), unless ``partial`` says the caller renders only some of its blocks.
+    """
+    wanted = _wanted(file, bodies, generator)
+    names = tuple(wanted)
     drifts: list[Drift] = []
     for member in twin_files(root, file):
         text = _read(root, member, names)
-        drifts += diff_blocks(text, member, bodies, generator)
+        drifts += diff_blocks(text, member, wanted, generator, partial=partial)
     return drifts
