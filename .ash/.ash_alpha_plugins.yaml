@@ -624,24 +624,6 @@ global_settings:
         entries above do pin lines, which suits a generator script that does not
         change; this list grows, and a pinned suppression would silently stop matching
         the moment an entry is added above the JWT one.
-    - path: tests/**/*.py
-      rule_id: B101
-      reason: Assert usage expected with Pytest
-    - path: tests/utils/*.py
-      rule_id: B311
-      reason: Test facilities and tooling used to generate randomness during testing.
-    - path: tests/unit/utils/*.py
-      rule_id: B108
-      reason: Temp file path as string, not actual temp dir usage.
-    - path: tests/**/*.py
-      rule_id: B404
-      reason: Subprocess module used across test suite due to the nature of ASH itself being a tool orchestrator. These instances are in test suites and not in the code used at runtime.
-    - path: tests/**/*.py
-      rule_id: B603
-      reason: Subprocess module used across test suite due to the nature of ASH itself being a tool orchestrator. These instances are in test suites and not in the code used at runtime.
-    - path: tests/**/*.py
-      rule_id: B607
-      reason: Mocking and other test mechanisms. These instances are in test suites and not in the code used at runtime.
     - rule_id: "B108"
       path: "tests/unit/converters/test_converters.py"
       reason: "Test validates path traversal protection"
@@ -660,12 +642,6 @@ global_settings:
     - rule_id: "B404"
       path: "tests/unit/utils/test_subprocess_utils_regression.py"
       reason: "Test file must import subprocess"
-    - rule_id: B110
-      path: automated_security_helper/**/*.py
-      reason: "try/except/pass for graceful degradation in tool orchestrator"
-    - rule_id: B311
-      path: automated_security_helper/**/*.py
-      reason: "Standard random for non-security purposes"
     # B404 in the product: five import lines, measured with bandit 1.9.4 over the tree
     # as the alpha self-scan runs it (the repository's bandit config, nosec comments
     # honored). Each file imports the subprocess module for a type, a constant or a
@@ -699,27 +675,132 @@ global_settings:
       line_start: 90
       line_end: 90
       reason: "The import is for the DEVNULL constant and the TimeoutExpired type; the process starts through ASH's spawn_run helper."
-    - rule_id: B108
-      path: tests/**/*.py
-      reason: "Test fixtures use hardcoded temp paths"
-    - rule_id: B110
-      path: tests/**/*.py
-      reason: "Tests use try/except/pass for expected exceptions"
-    - rule_id: B311
-      path: tests/**/*.py
-      reason: "Test factories use seeded random"
-    - rule_id: B105
-      path: tests/**/*.py
-      reason: "Test fixtures with dummy credentials"
     - rule_id: B110
       path: hatch_build.py
       reason: "Build hook graceful degradation"
+    # === bandit in tests and scripts: the per-file entries .ash.yaml holds ===
+    # Each entry in this block is the .ash.yaml entry for the same rule id and the same
+    # path, ported for a finding this mode reports, so both modes decide that finding
+    # the same way. One rule and one file per entry, never a directory or a glob, so a
+    # new file that trips a rule is reported here as it is in the default mode. A test
+    # or script finding that .ash.yaml leaves unsuppressed gets no entry here: bandit
+    # rates B101, B105, B110, B311, B404, B603 and B607 LOW, below the MEDIUM threshold,
+    # so such a finding is reported without failing the leg. B108 is rated MEDIUM, so a
+    # B108 finding with no entry fails the leg. The reasons describe the value rather
+    # than quote it; the full argument stays in .ash.yaml, and
+    # tests/unit/config/test_the_two_suppression_files_agree_on_shared_entries.py holds
+    # each entry to its twin there. Sorted by rule, then path.
+    - rule_id: B105
+      path: tests/unit/deploy/test_deploy_mcp_entrypoint_secrets_moto_server.py
+      reason: "Two matches, and neither is a credential. One is an API operation name the test looks for in a generated entrypoint; the other is a fixture built from shell metacharacters to prove the entrypoint's quoting. Same entry as in .ash.yaml."
+    - rule_id: B105
+      path: tests/unit/interactions/test_gha_layer_cache_args.py
+      reason: "A one-word placeholder for a runtime variable in a fixture environment; the cache gate under test only needs a non-empty value. Same entry as in .ash.yaml."
+    - rule_id: B105
+      path: tests/unit/plugin_modules/ash_builtin/test_bandit_scanner_behavior.py
+      reason: "A made-up fixture fed into a synthesized B105 message, to prove that the SARIF post-processing masks it. Same entry as in .ash.yaml."
+    - rule_id: B105
+      path: tests/unit/test_release_workflow_token.py
+      reason: "The flagged string names a GitHub Action the release workflow uses; bandit reads the variable name, and the test asserts the workflow pins that action. Same entry as in .ash.yaml."
+    - rule_id: B108
+      path: tests/integration/docs/ci_runners/fixture.py
+      reason: "A named constant for the host's shared temporary directory, whose pruning the docs-CI fixture accounts for; the harness creates its own files under pytest's temporary directories. Same entry as in .ash.yaml."
+    - rule_id: B108
+      path: tests/snapshot/test_snapshot_normalizer.py
+      reason: "The tests check that the snapshot normalizer masks the system temporary directory, so temporary-path strings are the inputs being masked; no file is created under them. Same entry as in .ash.yaml."
+    - rule_id: B108
+      path: tests/unit/characterization/_harness.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback. Same entry as in .ash.yaml."
+    - rule_id: B108
+      path: tests/unit/cli/test_mcp_errors_show_controls.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback. Same entry as in .ash.yaml."
+    - rule_id: B108
+      path: tests/unit/deploy/buildspec_extraction.py
+      reason: "The constant names where the buildspec writes its helper inside the CodeBuild container, so it must match the template; tests rewrite it to a per-test temporary path. Same entry as in .ash.yaml."
+    - rule_id: B108
+      path: tests/unit/express/test_image_options_classify_as_scans.py
+      reason: "Test code. Fixed temporary paths are command-line argument fixtures the classifier under test parses; no file is created under them. Same entry as in .ash.yaml."
+    - rule_id: B108
+      path: tests/unit/interactions/test_container_image_revision.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback. Same entry as in .ash.yaml."
+    - rule_id: B108
+      path: tests/unit/models/test_flat_vulnerability_ids_are_per_location.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback. Same entry as in .ash.yaml."
+    - rule_id: B108
+      path: tests/unit/schemas/test_filter_results_by_files_uri_forms.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback. Same entry as in .ash.yaml."
+    - rule_id: B108
+      path: tests/unit/test_docs_ci_runner_fixture.py
+      reason: "Matches about the fixture's handling of the shared temporary directory: skip guards, a symlink pointed at it, and path shapes under test. The paths the test writes are its own and are removed. Same entry as in .ash.yaml."
+    - rule_id: B108
+      path: tests/unit/test_docs_ci_runner_provenance.py
+      reason: "A URL-encoding parametrization pair; the temporary path exists only as a string being percent-encoded. Same entry as in .ash.yaml."
+    - rule_id: B108
+      path: tests/unit/test_failure_reports_redact_environment_values.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback. Same entry as in .ash.yaml."
+    - rule_id: B108
+      path: tests/unit/utils/test_content_db_refresh_resolves_caches_and_locks_as_the_tools_do.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback. Same entry as in .ash.yaml."
     - rule_id: B404
-      path: scripts/*.py
-      reason: "Build scripts invoke subprocesses"
+      path: scripts/verify_moto_server_suite.py
+      reason: "Starts a moto server subprocess for the suite it verifies. Same entry as in .ash.yaml."
+    - rule_id: B404
+      path: tests/integration/cli/test_mcp_stdio_server.py
+      reason: "Launches the MCP server as a real child and speaks JSON-RPC over its pipes; what the file asserts is only observable from outside the process. Same entry as in .ash.yaml."
+    - rule_id: B404
+      path: tests/unit/assets/test_install_pinned_tool.py
+      reason: "Runs the asset install script under an isolated interpreter, which is the assertion: the property under test is what a bare interpreter can import. Same entry as in .ash.yaml."
+    - rule_id: B404
+      path: tests/unit/assets/test_with_retry.py
+      reason: "Exercises a retry wrapper around a real subprocess call. Same entry as in .ash.yaml."
+    - rule_id: B404
+      path: tests/unit/cli/test_startup_failure_diagnosability.py
+      reason: "Spawns a real child interpreter that has no standard error stream, which is the assertion; the behavior belongs to the interpreter's shutdown path. Same entry as in .ash.yaml."
+    - rule_id: B404
+      path: tests/unit/deploy/test_deploy_buildspec_ssm_moto_server.py
+      reason: "Runs a moto server and the buildspec's own shell line under test. Same entry as in .ash.yaml."
+    - rule_id: B404
+      path: tests/unit/deploy/test_deploy_mcp_entrypoint_secrets_moto_server.py
+      reason: "Executes the generated POSIX entrypoint to prove its quoting holds. Same entry as in .ash.yaml."
+    - rule_id: B404
+      path: tests/unit/deploy/test_deploy_s3_sync_moto_server.py
+      reason: "Runs a moto server and the generated sync helper under test. Same entry as in .ash.yaml."
+    - rule_id: B404
+      path: tests/unit/interactions/test_run_ash_container_entrypoint_coverage.py
+      reason: "Imports subprocess.CalledProcessError to drive the entrypoint's error-handling coverage; no subprocess is spawned. Same entry as in .ash.yaml."
+    - rule_id: B404
+      path: tests/unit/interactions/test_run_ash_container_helpers_coverage.py
+      reason: "Imports subprocess.CalledProcessError to drive the helpers' error-handling coverage; no subprocess is spawned. Same entry as in .ash.yaml."
+    - rule_id: B404
+      path: tests/unit/interactions/test_run_ash_nix.py
+      reason: "Imports subprocess to build CompletedProcess fixtures for a patched call in the nix run path; nothing is executed. Same entry as in .ash.yaml."
+    - rule_id: B404
+      path: tests/unit/plugin_modules/ash_builtin/converters/test_jupyter_converter.py
+      reason: "Imports subprocess to build CompletedProcess fixtures standing in for a patched converter call; nothing is executed. Same entry as in .ash.yaml."
+    - rule_id: B404
+      path: tests/unit/test_ash_bash_entrypoint_build_failure.py
+      reason: "Runs the bash entrypoint to assert it fails as intended. Same entry as in .ash.yaml."
+    - rule_id: B404
+      path: tests/unit/utils/test_get_scan_set_coverage.py
+      reason: "Imports subprocess to build CompletedProcess fixtures and a timeout against a patched git call; nothing is executed. Same entry as in .ash.yaml."
     - rule_id: B603
-      path: scripts/*.py
-      reason: "Build scripts use list-form subprocess"
+      path: scripts/verify_moto_server_suite.py
+      reason: "List argv, shell=False, which-resolved argv[0]. Same entry as in .ash.yaml."
+    - rule_id: B603
+      path: tests/integration/cli/test_mcp_stdio_server.py
+      reason: "List argv with shell left at False, and argv[0] is the interpreter running the suite, so there is no PATH lookup to influence. Same entry as in .ash.yaml."
+    - rule_id: B603
+      path: tests/unit/cli/test_startup_failure_diagnosability.py
+      reason: "List argv, shell=False, and argv[0] is the interpreter running the suite; argv[1] is a script the test wrote into its own temporary directory. Same entry as in .ash.yaml."
+    - rule_id: B603
+      path: tests/unit/deploy/test_deploy_buildspec_ssm_moto_server.py
+      reason: "List argv, shell=False; the shell path comes from a helper that resolves it against the child's PATH and raises if it is absent. Same entry as in .ash.yaml."
+    - rule_id: B603
+      path: tests/unit/deploy/test_deploy_mcp_entrypoint_secrets_moto_server.py
+      reason: "List argv, shell=False; the shell path comes from a helper that raises if it is absent. Same entry as in .ash.yaml."
+    - rule_id: B603
+      path: tests/unit/deploy/test_deploy_s3_sync_moto_server.py
+      reason: "List argv, shell=False; the shell path comes from a helper that raises if it is absent. Same entry as in .ash.yaml."
     # === Approved license findings (trivy license scanner) ===
     - rule_id: "*:MIT"
       path: "**"
@@ -803,12 +884,17 @@ global_settings:
     #
     # === bandit: ported from .ash.yaml, not re-derived ===
     #
-    # Every bandit finding active in this mode already has a decision in
-    # .ash.yaml against the same rule id and the same path. A suppression list
-    # is not inherited across config files, so those decisions are restated here in
-    # short form; the full argument stays in the other file. The paths were checked
-    # against what this mode actually reports rather than copied wholesale, so the
-    # entries there for files this mode does not flag are deliberately absent.
+    # Each bandit entry in this block, and each one in the block headed "bandit in
+    # tests and scripts" earlier in this file, restates a decision .ash.yaml makes for
+    # the same rule id and the same path. A suppression list is not inherited across
+    # config files, so those decisions are restated here in short form; the full
+    # argument stays in the other file. The paths were checked against what this mode
+    # actually reports rather than copied wholesale, so the entries there for files
+    # this mode does not flag are deliberately absent. The B404 pins on the product's
+    # own subprocess imports, also earlier in this file, are this file's decision
+    # alone: .ash.yaml has no entry for those import lines and the product files carry
+    # no inline marker on them, so the default mode reports each one at LOW, below its
+    # MEDIUM threshold.
     #
     # B404 fires on `import subprocess` itself, before any call is examined, and
     # ASH's whole function is running other tools, so no code change satisfies it.
